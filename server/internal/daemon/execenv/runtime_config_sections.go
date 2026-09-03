@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -392,16 +393,32 @@ func writeCommentFormatting(b *strings.Builder) {
 	b.WriteString("For issue comments, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`**. Never use inline `--content` for agent-authored comments (MUL-2904); never use `--content-stdin` HEREDOCs alongside other flags (#4182). Write the file inside your working directory, never `/tmp` or shared paths (MUL-4252). Keep the same `--parent` value from the trigger comment when replying; delete the temp file (`rm ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
 }
 
-// writeRepositories emits the Repositories section when at least one repo
-// is configured. The closing paragraph from the legacy version is dropped
-// (it re-stated the opening); intro is tightened into one line.
+// writeRepositories emits the Repositories section for the workspace repos
+// this task does not already see through its project.
+//
+// A repo that is also a github_repo project resource is rendered by
+// writeProjectContext, with its ref, default-branch hint and label. Listing
+// the bare URL again here spends tokens on a line that says strictly less
+// than the one above it, and leaves the agent to work out that the two are
+// the same repository. Everything unmatched still belongs here — a workspace
+// repo is reachable whether or not a project points at it. Only the prompt
+// changes: the runtime repo list used for checkout authorization is
+// untouched.
 func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
-	if len(ctx.Repos) == 0 {
+	inProject := projectRepoURLs(ctx.ProjectResources)
+	repos := make([]RepoContextForEnv, 0, len(ctx.Repos))
+	for _, repo := range ctx.Repos {
+		if _, ok := inProject[normalizeRepoURL(repo.URL)]; ok {
+			continue
+		}
+		repos = append(repos, repo)
+	}
+	if len(repos) == 0 {
 		return
 	}
 	b.WriteString("## Repositories\n\n")
 	b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
-	for _, repo := range ctx.Repos {
+	for _, repo := range repos {
 		if repo.Description != "" {
 			fmt.Fprintf(b, "- %s — %s\n", repo.URL, repo.Description)
 		} else {
@@ -409,6 +426,39 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		}
 	}
 	b.WriteString("\n")
+}
+
+// projectRepoURLs indexes the github_repo resources by normalized URL.
+func projectRepoURLs(resources []ProjectResourceForEnv) map[string]struct{} {
+	out := make(map[string]struct{}, len(resources))
+	for _, r := range resources {
+		if r.ResourceType != "github_repo" {
+			continue
+		}
+		var payload struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(r.ResourceRef, &payload); err != nil {
+			continue
+		}
+		if key := normalizeRepoURL(payload.URL); key != "" {
+			out[key] = struct{}{}
+		}
+	}
+	return out
+}
+
+// normalizeRepoURL is the identity two prompt sections agree on. The same
+// repository is written both ways in practice — a project resource stored
+// with the `.git` suffix and a workspace repo without it are one repo, and
+// deduping only exact strings would leave the pair that motivated this.
+// Deliberately narrow: it never rewrites the host or path, so two genuinely
+// different URLs cannot collapse into one.
+func normalizeRepoURL(raw string) string {
+	u := strings.TrimSpace(raw)
+	u = strings.TrimSuffix(u, "/")
+	u = strings.TrimSuffix(u, ".git")
+	return strings.ToLower(strings.TrimSuffix(u, "/"))
 }
 
 // writeProjectContext emits the Project Context section when the task carries
@@ -563,30 +613,21 @@ func writeWorkflowQuickCreate(b *strings.Builder) {
 const AutopilotIssueCommandsGuard = "Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue"
 
 // writeWorkflowAutopilot emits the autopilot run-only workflow.
-func writeWorkflowAutopilot(b *strings.Builder, ctx TaskContextForEnv) {
+//
+// Stable text only. The run's own identifiers and instructions (run ID,
+// autopilot ID, title, source, trigger payload, description, and the
+// `autopilot get` lookup line) live in the per-turn prompt that
+// daemon.buildAutopilotPrompt builds, which is where per-run data belongs:
+// this section lands in messages[0], so a field that changes between runs
+// changes the cached prefix and throws away the prompt cache for the whole
+// resumed history — the same reason writeWorkflowIssue carries no per-run
+// identifier (MUL-5377). Carrying them here also spent the tokens twice.
+//
+// The issue-command guard stays: the brief is its single emission point
+// (see AutopilotIssueCommandsGuard), and it is the same text on every run.
+func writeWorkflowAutopilot(b *strings.Builder) {
 	b.WriteString("**This task was triggered by an Autopilot in run-only mode.** There is no assigned Multica issue for this run.\n\n")
-	fmt.Fprintf(b, "- Autopilot run ID: `%s`\n", ctx.AutopilotRunID)
-	if ctx.AutopilotID != "" {
-		fmt.Fprintf(b, "- Autopilot ID: `%s`\n", ctx.AutopilotID)
-	}
-	if ctx.AutopilotTitle != "" {
-		fmt.Fprintf(b, "- Autopilot title: %s\n", ctx.AutopilotTitle)
-	}
-	if ctx.AutopilotSource != "" {
-		fmt.Fprintf(b, "- Trigger source: %s\n", ctx.AutopilotSource)
-	}
-	if ctx.AutopilotTriggerPayload != "" {
-		fmt.Fprintf(b, "- Trigger payload:\n\n```json\n%s\n```\n", ctx.AutopilotTriggerPayload)
-	}
-	if strings.TrimSpace(ctx.AutopilotDescription) != "" {
-		b.WriteString("\nAutopilot instructions:\n\n")
-		b.WriteString(ctx.AutopilotDescription)
-		b.WriteString("\n\n")
-	}
-	if ctx.AutopilotID != "" {
-		fmt.Fprintf(b, "- Run `multica autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
-	}
-	b.WriteString("- Complete the autopilot instructions directly\n")
+	b.WriteString("- Complete the autopilot instructions in the task prompt directly\n")
 	b.WriteString("- " + AutopilotIssueCommandsGuard + "\n\n")
 }
 
@@ -953,7 +994,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	case kindQuickCreate:
 		writeWorkflowQuickCreate(&b)
 	case kindAutopilotRunOnly:
-		writeWorkflowAutopilot(&b, ctx)
+		writeWorkflowAutopilot(&b)
 	case kindIssue:
 		writeWorkflowIssue(&b, ctx)
 	}

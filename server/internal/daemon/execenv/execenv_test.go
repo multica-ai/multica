@@ -2619,9 +2619,6 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 
 	for _, want := range []string{
 		"Autopilot in run-only mode",
-		"Autopilot run ID: `run-1`",
-		"Check dependencies and report outdated packages.",
-		"multica autopilot get autopilot-1 --output json",
 		"Your final assistant output is captured automatically as the autopilot run result",
 	} {
 		if !strings.Contains(s, want) {
@@ -2632,6 +2629,14 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 	for _, absent := range []string{
 		"Run `multica issue get",
 		"Final results MUST be delivered via `multica issue comment add`",
+		// Per-run autopilot data moved to the per-turn prompt
+		// (daemon.buildAutopilotPrompt), which carries all of it. Rendering it
+		// here too spent the tokens twice and, because this file is
+		// messages[0], made the cached prefix differ on every run (MUL-5377).
+		// See TestAutopilotBriefIsIdenticalAcrossRuns.
+		"run-1",
+		"Check dependencies and report outdated packages.",
+		"multica autopilot get autopilot-1 --output json",
 	} {
 		if strings.Contains(s, absent) {
 			t.Errorf("autopilot runtime config should not contain %q\n---\n%s", absent, s)
