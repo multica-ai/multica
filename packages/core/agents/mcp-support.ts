@@ -26,6 +26,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "mcode",
   "traecli",
   "dim",
+  "pi",
   "omp",
 ]);
 

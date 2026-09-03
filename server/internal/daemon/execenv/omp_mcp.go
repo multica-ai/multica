@@ -8,7 +8,7 @@ import (
 )
 
 func prepareOmpMcpConfig(workDir, provider string, raw json.RawMessage, manifest *sidecarManifest) error {
-	if provider != "omp" {
+	if provider != "omp" && provider != "pi" {
 		return nil
 	}
 	trimmed := bytes.TrimSpace(raw)
