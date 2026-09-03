@@ -162,11 +162,7 @@ describe("installContextMenu — link items", () => {
     expect(menuItemRoles()).toContain("copy");
   });
 
-  it("uses zh-Hans labels when the OS preferred language is Chinese", () => {
-    // Locale fallback is intentionally permissive: every zh-* variant
-    // routes to zh-Hans so users on zh-CN / zh-TW / zh-HK still see
-    // Chinese rather than dropping to English. The renderer ships only
-    // zh-Hans translations, so this matches the rest of the app.
+  it("uses zh-Hans labels for a Simplified Chinese OS preference", () => {
     ctx.preferredLanguagesRef.current = ["zh-CN"];
     const wc = makeWebContents();
     installContextMenu(wc as never);
@@ -174,6 +170,18 @@ describe("installContextMenu — link items", () => {
     expect(lastMenuLabels()).toContain("在浏览器中打开链接");
     expect(lastMenuLabels()).toContain("复制链接地址");
   });
+
+  it.each(["zh-Hant-TW", "zh-TW", "zh-HK", "zh-MO"])(
+    "uses zh-Hant labels for %s",
+    (language) => {
+      ctx.preferredLanguagesRef.current = [language];
+      const wc = makeWebContents();
+      installContextMenu(wc as never);
+      wc.fire(baseSelection({ linkURL: "https://multica.ai" }));
+      expect(lastMenuLabels()).toContain("在瀏覽器中開啟連結");
+      expect(lastMenuLabels()).toContain("複製連結位址");
+    },
+  );
 
   it("falls back to English when the OS preferred language is something we don't ship", () => {
     ctx.preferredLanguagesRef.current = ["fr-FR"];

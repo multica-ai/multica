@@ -1,0 +1,108 @@
+{
+  "title": "統計",
+  "tab_usage": "用量",
+  "header": {
+    "timezone_and_updated": "{{tz}} · 更新於 {{time}}",
+    "refresh": "重新整理"
+  },
+  "filter": {
+    "project_label": "專案",
+    "all_projects": "全部專案",
+    "period_label": "時間範圍"
+  },
+  "kpi": {
+    "cost_label": "費用 · {{days}}天",
+    "tokens_label": "Token · {{days}}天",
+    "tokens_hint": "輸入 {{input}} · 輸出 {{output}}",
+    "run_time_label": "執行環境長 · {{days}}天",
+    "run_time_hint": "共 {{tasks}} 個 task",
+    "tasks_label": "task 數 · {{days}}天",
+    "tasks_hint": "失敗 {{failed}} 個"
+  },
+  "dim": {
+    "label": "維度",
+    "daily": "按天",
+    "weekly": "按周"
+  },
+  "daily": {
+    "title_cost": "每日費用",
+    "title_tokens": "每日 Token",
+    "title_time": "每日執行環境長",
+    "title_tasks": "每日 task 數",
+    "title_errors": "每日錯誤",
+    "metric_cost": "費用",
+    "metric_tokens": "Token",
+    "metric_time": "執行環境長",
+    "metric_tasks": "task 數",
+    "no_data": "所選時間範圍內暫無消耗。",
+    "metric_label": "指標"
+  },
+  "weekly": {
+    "title_cost": "每週費用",
+    "title_tokens": "每週 Token",
+    "title_time": "每週執行環境長",
+    "title_tasks": "每週 task 數",
+    "title_errors": "每週錯誤",
+    "partial_label": "{{range}}（未滿 · 已過 {{covered}} / 7 天）"
+  },
+  "errors": {
+    "kpi_failed_label": "失敗 task · {{days}}天",
+    "kpi_failed_hint": "共 {{total}} 次執行",
+    "kpi_rate_label": "失敗率 · {{days}}天",
+    "kpi_agents_label": "受影響智慧體 · {{days}}天",
+    "kpi_agents_hint": "最多 {{name}} · {{count}} 次",
+    "tooltip_rate": "錯誤率",
+    "class": {
+      "auth": "認證",
+      "rate_limit": "限流",
+      "timeout": "逾時",
+      "provider": "模型服務",
+      "runtime": "執行環境",
+      "agent": "智慧體",
+      "other": "其他"
+    },
+    "title": "錯誤",
+    "summary": "{{total}} 次執行中有 {{failed}} 次失敗 · {{rate}}",
+    "mix_title": "失敗構成 · {{failed}}",
+    "mix_label": "失敗構成",
+    "codes_label": "錯誤碼",
+    "by_agent": "問題最多的智慧體",
+    "sort_label": "錯誤榜排序依據",
+    "sort_failed": "失敗數",
+    "sort_rate": "失敗率",
+    "header_agent": "智慧體",
+    "header_failed": "失敗數",
+    "header_runs": "執行數",
+    "header_rate": "失敗率",
+    "other_agents": "其他智慧體",
+    "low_sample": "所選時間範圍內執行不足 {{count}} 次，失敗率參考價值有限。",
+    "no_data": "所選時間範圍內沒有失敗的執行。",
+    "show_reasons": "展開錯誤碼",
+    "hide_reasons": "收起錯誤碼",
+    "show_all": "展開全部 {{count}} 個",
+    "show_less": "只看前 {{count}} 個"
+  },
+  "leaderboard": {
+    "title": "排行榜",
+    "caption": "{{count}} 個智慧體",
+    "caption_with_deleted": "{{count}} 個智慧體 · {{deleted}} 個已刪除",
+    "sort_label": "智慧體排序依據",
+    "deleted_agents": "已刪除的智慧體",
+    "other_agents": "其他智慧體",
+    "header_agent": "智慧體",
+    "header_tokens": "Token",
+    "header_cost": "費用",
+    "header_time": "執行環境長",
+    "header_tasks": "task 數",
+    "show_all": "展開全部",
+    "show_less": "只看前 {{count}} 個",
+    "no_data": "所選時間範圍內暫無智慧體活動。"
+  },
+  "empty": {
+    "title": "暫無消耗資料",
+    "body": "當智慧體在這裡開始執行 task 後，它們的 token 消耗和執行環境長將出現在此處。"
+  },
+  "duration": {
+    "less_than_minute": "<1分鐘"
+  }
+}

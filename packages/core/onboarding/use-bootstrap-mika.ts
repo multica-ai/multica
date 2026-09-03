@@ -4,7 +4,7 @@ import { chatKeys } from "../chat/queries";
 import type { ChatSession, MikaBootstrapResponse } from "../types";
 import { workspaceKeys } from "../workspace/queries";
 
-export type MikaOnboardingLanguage = "en" | "zh" | "ko" | "ja";
+export type MikaOnboardingLanguage = "en" | "zh" | "zh-Hant" | "ko" | "ja";
 
 export interface BootstrapMikaInput {
   /**

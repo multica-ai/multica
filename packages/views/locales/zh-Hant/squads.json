@@ -1,0 +1,99 @@
+{
+  "page": {
+    "title": "小隊",
+    "new_button": "新增小隊",
+    "empty_no_squads": "還沒有小隊，建立一個開始吧。",
+    "empty_no_match": "沒有相符篩選條件的小隊。",
+    "table": {
+      "name": "小隊",
+      "leader": "隊長",
+      "members": "成員",
+      "creator": "建立者",
+      "created": "建立時間"
+    },
+    "no_matches": "沒有相符的小隊",
+    "row_menu": "小隊操作",
+    "archive_action": "歸檔"
+  },
+  "inspector": {
+    "details_section": "詳情",
+    "archive_button": "歸檔"
+  },
+  "archive_dialog": {
+    "title": "歸檔這個小隊？",
+    "description": "“{{name}}” 將被歸檔，該小隊目前承接的任務會轉交給小隊負責人。此操作無法撤銷，如需恢復路由請新增小隊。",
+    "cancel": "取消",
+    "confirm": "歸檔",
+    "archiving": "歸檔中…",
+    "success": "已歸檔小隊"
+  },
+  "name_editor": {
+    "cancel": "取消"
+  },
+  "add_member_dialog": {
+    "title": "新增成員",
+    "description": "新增工作區成員或智慧體到這個小隊。",
+    "label_member": "成員",
+    "label_role": "角色",
+    "label_optional": "（可選）",
+    "placeholder_role_inline": "新增角色…",
+    "cancel": "取消"
+  },
+  "description_dialog": {
+    "title": "編輯描述",
+    "placeholder_empty": "新增描述",
+    "cancel": "取消"
+  },
+  "discard_changes_dialog": {
+    "title": "放棄未儲存的修改？",
+    "description": "目前標籤頁有未儲存的修改，切換標籤會丟棄這些修改。",
+    "keep_editing": "繼續編輯",
+    "discard_button": "放棄"
+  },
+  "members_tab": {
+    "section_title": "成員",
+    "section_count_other": "該小隊有 {{count}} 名成員",
+    "add_member_button": "新增成員",
+    "create_agent_button": "建立智慧體",
+    "leader_chip": "隊長",
+    "view_agent_tooltip": "開啟智慧體詳情",
+    "make_leader_tooltip": "設為小隊負責人",
+    "remove_member_tooltip": "從小隊移除",
+    "status_working": "工作中",
+    "status_idle": "空閒",
+    "status_offline": "離線",
+    "status_unstable": "不穩定",
+    "status_archived": "已歸檔",
+    "issue_status_blocked": "已阻塞",
+    "active_issue_more": "還有 {{count}} 個",
+    "last_active_label": "最近活動 {{time}}"
+  },
+  "profile_card": {
+    "unavailable": "小隊不可用",
+    "detail_link": "詳情 →",
+    "archived": "已歸檔",
+    "member_count_other": "{{count}} 名成員",
+    "members_section": "成員",
+    "more_members_other": "還有 {{count}} 人"
+  },
+  "instructions_tab": {
+    "description": "小隊指引會在 Leader 智慧體處理分配給該小隊的任務時注入到它的 prompt 中。可用來給 Leader 提供貫穿全隊的指導、協作規範，或每次 task 都應遵循的上下文。",
+    "unsaved_changes": "有未儲存的修改",
+    "save_button": "儲存"
+  },
+  "scope": {
+    "mine": "我的",
+    "all": "全部"
+  },
+  "toolbar": {
+    "display": "顯示",
+    "sort_by": "排序",
+    "direction_asc": "升序",
+    "direction_desc": "降序",
+    "section_columns": "列",
+    "result_count_title": "目前結果 / 全部小隊",
+    "filter_label": "篩選",
+    "filter_active_count_other": "{{count}} 項篩選",
+    "clear_filters": "清除篩選"
+  }
+}

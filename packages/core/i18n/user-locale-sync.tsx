@@ -28,6 +28,15 @@ export function UserLocaleSync() {
       return;
     }
     if (userLanguage === i18n.language) return;
+
+    // A desktop build can be installed before its hosted server has learned
+    // the new zh-Hant value. In that rollout window PATCH /api/me fails, but
+    // Settings has already persisted the member's explicit device choice.
+    // Do not immediately replace that choice with the server's older locale
+    // on reload. Once the server accepts zh-Hant, both values match and this
+    // compatibility guard becomes inert.
+    if (adapter.getUserChoice() === "zh-Hant") return;
+
     adapter.persist(userLanguage as SupportedLocale);
     if (typeof window !== "undefined") window.location.reload();
   }, [userLanguage, i18n.language, adapter]);

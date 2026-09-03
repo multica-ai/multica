@@ -33,6 +33,15 @@ export const useCaseText: Record<SupportedLocale, UseCaseText> = {
     cardReadMore: "阅读 →",
     tableOfContents: "目录",
   },
+  "zh-Hant": {
+    indexTitle: "使用案例",
+    indexSubtitle: "瞭解團隊如何透過 Multica 協調成員與 AI 智慧體。",
+    indexMetadataTitle: "使用案例",
+    indexMetadataDescription:
+      "瞭解團隊如何透過 Multica 讓成員與 AI 智慧體協同工作。",
+    cardReadMore: "閱讀 →",
+    tableOfContents: "本頁內容",
+  },
   ko: {
     indexTitle: "사용 사례",
     indexSubtitle:

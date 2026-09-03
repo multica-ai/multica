@@ -1,0 +1,63 @@
+{
+  "nav": {
+    "inbox": "收件箱",
+    "chat": "聊天",
+    "my_issues": "我的任務",
+    "issues": "任務",
+    "projects": "專案",
+    "autopilots": "自動化",
+    "agents": "智慧體",
+    "squads": "小隊",
+    "usage": "統計",
+    "runtimes": "執行環境",
+    "skills": "Skills",
+    "settings": "設定"
+  },
+  "tab": {
+    "issue": "任務",
+    "project": "專案",
+    "autopilot": "自動化",
+    "agent": "智慧體",
+    "member": "成員",
+    "squad": "小隊",
+    "skill": "Skill",
+    "machine": "機器",
+    "runtime": "執行環境",
+    "attachment": "附件",
+    "create_agent": "建立智慧體",
+    "unknown": "未知頁面"
+  },
+  "help": {
+    "trigger": "幫助",
+    "download_desktop": "桌面端",
+    "docs": "檔案",
+    "changelog": "更新日誌",
+    "discord": "Discord",
+    "feedback": "意見回饋",
+    "server_version": "伺服器版本 {{version}}"
+  },
+  "workspace_loader": {
+    "loading_workspace": "正在載入工作區...",
+    "loading_named_prefix": "正在載入"
+  },
+  "sidebar": {
+    "unpin_tooltip": "取消固定",
+    "workspaces_label": "工作區",
+    "create_workspace": "建立工作區",
+    "pending_invitations_label": "待處理的邀請",
+    "invitation_workspace_fallback": "工作區",
+    "invitation_join": "加入",
+    "invitation_decline": "拒絕",
+    "log_out": "退出登入",
+    "new_issue": "新增任務",
+    "new_issue_shortcut": "C",
+    "pinned_label": "固定",
+    "workspace_group": "工作區",
+    "configure_group": "設定",
+    "unread_overflow": "99+",
+    "discord_card": {
+      "title": "加入 Discord",
+      "dismiss": "關閉"
+    }
+  }
+}

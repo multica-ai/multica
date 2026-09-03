@@ -1,0 +1,271 @@
+{
+  "step_nav": {
+    "wordmark": "Multica",
+    "label": "引導步驟",
+    "about_you": {
+      "label": "關於你",
+      "description": "你的角色，和你想完成的事。"
+    },
+    "workspace": {
+      "label": "工作區",
+      "description": "起個名字，定個網址。"
+    },
+    "runtime": {
+      "label": "認識 Mika",
+      "description": "你的第一個智慧體隊友，以及它在哪執行。"
+    }
+  },
+  "welcome": {
+    "wordmark": "歡迎使用 Multica",
+    "headline_line1": "你的 AI 隊友，",
+    "headline_line2": "在",
+    "headline_emphasis": "同一個工作區。",
+    "lede": "像給同事派活一樣把任務交給它們——它們會接手、更新狀態，做完還會留下留言。",
+    "lede_web": "桌面端自帶執行環境，無需安裝。在 web 端繼續可以連線你自己的 CLI。",
+    "lede_desktop": "走完這幾步，就會有真實的智慧體來回復你的第一個任務。",
+    "download_desktop": "下載桌面端",
+    "continue_on_web": "在 web 端繼續",
+    "start_exploring": "開始探索",
+    "skip_existing": "我已經用過了",
+    "illustration_caption": "每個任務、每條對話、每個決策——團隊和智慧體共享同一份上下文。",
+    "illustration": {
+      "card1_actor_name": "你",
+      "card1_actor_initial": "N",
+      "card1_body_prefix": " 能不能起草一篇簡短的釋出文？參考 ",
+      "card1_body_suffix": " 的訪談結論。",
+      "card1_mention_content": "@內容智慧體",
+      "card1_mention_research": "@研究智慧體",
+      "card2_actor_name": "內容智慧體",
+      "card2_body": "好的，正在拉取研究智慧體的引述，圍繞\"節省的時間\"展開...",
+      "card3_actor_name": "研究智慧體",
+      "card3_body": "本週使用者訪談整理完成——12 場訪談、4 個反覆出現的主題、3 段可引用語。",
+      "card3_timestamp": "15 分鐘前",
+      "card4_actor_name": "審稿智慧體",
+      "card4_body": "已審完週一那版草稿——留了 4 條語氣批註。等新一版。",
+      "card5_actor_name": "編碼智慧體",
+      "card5_body_prefix": "已釋出 ",
+      "card5_body_suffix": " 標記的匯出功能，PR 裡附了預覽連結。",
+      "card5_mention_you": "@你",
+      "card5_timestamp": "剛剛"
+    }
+  },
+  "common": {
+    "back": "返回",
+    "continue": "繼續",
+    "skip": "跳過",
+    "cancel": "取消",
+    "close": "關閉",
+    "log_out": "退出登入"
+  },
+  "source_backfill": {
+    "eyebrow": "順便問一句",
+    "lede": "就一個小問題——幫我們瞭解都是哪些人在用 Multica。回答一次，馬上回到手上的事。",
+    "submit": "提交",
+    "hint_ready": "看起來不錯，準備好就點提交。"
+  },
+  "questions": {
+    "about_you": {
+      "question": "簡單介紹一下你自己。"
+    },
+    "source": {
+      "question": "你是從哪裡瞭解到 Multica 的？",
+      "friends_colleagues": "朋友或同事",
+      "search": "Google / 搜尋",
+      "social_x": "X / Twitter",
+      "social_linkedin": "LinkedIn",
+      "social_youtube": "YouTube",
+      "social_github": "GitHub",
+      "social_misc": "其他社交平台",
+      "blog_newsletter": "部落格 / Newsletter",
+      "ai_assistant": "ChatGPT / Claude / Cursor",
+      "from_work": "在工作中接觸到",
+      "event_conference": "線下活動 / Meetup",
+      "dont_remember": "想不起來了",
+      "other": "其他",
+      "other_placeholder": "例如：一檔播客"
+    },
+    "role": {
+      "question": "哪一項最符合你？",
+      "engineer": "工程師 / 開發者",
+      "product": "產品經理",
+      "designer": "設計師",
+      "founder": "創始人 / 高管",
+      "marketing": "市場 / 增長",
+      "writer": "寫作 / 內容",
+      "research": "研究員 / 分析師",
+      "ops": "運營 / 專案管理",
+      "student": "學生 / 個人使用",
+      "other": "其他",
+      "other_placeholder": "例如：教師、支援負責人"
+    },
+    "use_case": {
+      "question": "你打算用 Multica 做什麼？",
+      "ship_code": "讓 AI agent 幫我寫程式碼",
+      "manage_team": "給團隊做任務管理",
+      "personal_tasks": "管理我自己的任務",
+      "plan_research": "計劃、頭腦風暴、調研",
+      "write_publish": "寫作、編輯、釋出",
+      "automate_ops": "自動化日常運營",
+      "evaluate": "只是隨便看看",
+      "other": "其他",
+      "other_placeholder": "例如：協調學習小組"
+    }
+  },
+  "option_card": {
+    "other_label": "其他",
+    "other_aria": "描述其他選項"
+  },
+  "step_question": {
+    "hint_pick": "選一項繼續——不想說也可以跳過。",
+    "hint_continue": "可以了。準備好就點繼續。"
+  },
+  "cli_install": {
+    "copy_aria": "複製",
+    "intro": "這臺電腦上需要裝一個 agent 執行環境（Claude Code、Codex、Cursor 等）才能執行你的智慧體。也支援伺服器和遠端開發機。",
+    "step1_label": "安裝 Multica CLI",
+    "step2_label": "啟動守護程序"
+  },
+  "cloud_waitlist": {
+    "intro_main": "雲執行環境尚未上線。留下電子郵件，上線時透過電子郵件通知你。",
+    "intro_warning": "提示：沒有執行環境，智慧體無法執行 task——如果現在跳過，在你回來裝一個之前不會有任何 task 執行。",
+    "email_label": "電子郵件",
+    "email_placeholder": "you@work.com",
+    "reason_label": "為什麼選擇雲？",
+    "optional": "選填",
+    "reason_placeholder": "例如：希望智慧體 24/7 執行，或團隊在不同裝置協作。",
+    "join": "加入候補名單",
+    "on_list": "已在候補名單",
+    "success_toast": "已加入候補名單。雲執行環境上線時會透過電子郵件通知你。",
+    "failed_toast": "加入候補名單失敗"
+  },
+  "welcome_after_onboarding": {
+    "skip": {
+      "loading": "正在為你準備工作區...",
+      "title": "歡迎來到 Multica！",
+      "subtitle": "我們建了一個任務幫你連線執行環境。準備好後，在 \"執行環境\" 頁面就能開始使用 Mika。",
+      "got_it": "知道了",
+      "status_in_progress": "進行中",
+      "error_title": "沒能幫你準備好",
+      "error_body": "執行環境引導任務沒有建立成功。可以重試，也可以隨時在\"執行環境\"頁面自己連線。",
+      "retry": "重試",
+      "dismiss": "暫不",
+      "cards": {
+        "install_runtime": {
+          "title": "連線一個執行環境",
+          "subtitle": "安裝 Codex 或 Kimi，然後從 \"執行環境\" 頁面進入 Mika 的引導對話。"
+        }
+      }
+    }
+  },
+  "step_workspace": {
+    "eyebrow_first": "你的第一個工作區",
+    "eyebrow_resume": "繼續，或重新開始",
+    "headline_first": "給工作區起個名字。",
+    "headline_resume": "繼續 {{name}}，或新增一個。",
+    "lede_first": "工作區是任務、智慧體和專案所在的地方。之後可以邀請同事，或再開一個工作區。",
+    "lede_resume": "用已有的工作區繼續，或者另建一個新的——你可以同時屬於多個工作區。",
+    "name_label": "工作區名稱",
+    "name_placeholder": "Acme Inc、我的實驗室、個人專案...",
+    "random_name": "隨機",
+    "url_label": "URL",
+    "slug_placeholder": "acme",
+    "issue_prefix_label": "任務字首",
+    "issue_prefix_prefix": "任務編號會像這樣 ",
+    "issue_prefix_suffix": "。之後可以在設定裡修改。",
+    "issue_prefix_pending": "填好上面的 URL，任務編號會跟著它生成；也可以直接在這裡輸入字首。",
+    "create_new_title": "建立一個新工作區",
+    "create_new_subtitle": "另起一個——把另一類工作放進單獨的空間。",
+    "hint_opening": "正在開啟 {{name}}。",
+    "hint_creating": "正在建立 {{name}}。",
+    "hint_creating_pending": "正在建立 {{name}}...",
+    "hint_creating_fallback": "你的工作區",
+    "hint_name_first": "填好工作區名稱就能建立。",
+    "hint_pick": "選擇你的工作區或開一個新的。",
+    "cta_open": "開啟 {{name}}",
+    "cta_create_named": "建立 {{name}}",
+    "cta_create_workspace": "建立工作區",
+    "cta_creating": "建立中...",
+    "slug_format_error": "只能包含小寫字母、數字和連字元",
+    "slug_taken_error": "該工作區 URL 已被佔用。",
+    "slug_reserved_error": "該工作區 URL 是系統保留的，無法使用。",
+    "slug_conflict_toast": "請換一個工作區 URL",
+    "create_failed_toast": "建立工作區失敗",
+    "creation_disabled_eyebrow": "工作區建立已禁用",
+    "creation_disabled_headline": "請聯絡管理員邀請你加入工作區。",
+    "creation_disabled_lede": "該 Multica 例項不允許建立新的工作區。等管理員把你邀請到某個工作區後，接受邀請並重新整理即可繼續。",
+    "creation_disabled_logout": "退出登入",
+    "creation_disabled_eyebrow_resume": "你的工作區",
+    "creation_disabled_headline_resume": "繼續使用 {{name}}。",
+    "creation_disabled_lede_resume": "該例項已禁用建立工作區，繼續進入你已有的工作區即可。"
+  },
+  "step_runtime": {
+    "scanning_headline": "正在連線這臺電腦...",
+    "scanning_lede_prefix": "你的智慧體藉助本機已安裝的 AI 程式設計工具執行，例如 ",
+    "scanning_lede_suffix": " 等。我們正在檢測這臺電腦上裝了哪些。",
+    "found_headline": "讓 Mika 在哪臺電腦上執行？",
+    "found_lede": "以下是在這臺電腦上找到的 agent 執行環境。之後可以隨時切換，或新增更多。",
+    "runtime_count_other": "{{count}} 個 agent 執行環境",
+    "status_all_online": "全部線上",
+    "status_none_online": "全部離線",
+    "status_n_online": "{{count}} 個線上",
+    "online_label": "線上",
+    "offline_label": "離線",
+    "empty_headline": "這臺電腦上還沒有可用的 agent 執行環境。",
+    "empty_lede_prefix": "agent 執行環境就是我們要連線的 AI 程式設計工具，比如 ",
+    "empty_lede_suffix": "。裝好任意一個後點重新整理，或從下面選擇一種方式。",
+    "empty_skip_title": "暫時跳過",
+    "empty_skip_subtitle": "先進入工作區。在這臺電腦上連線 agent 執行環境之前，智慧體無法執行 task——但你仍可以瀏覽、規劃、邀請同事。",
+    "empty_skip_action": "跳過",
+    "empty_waitlist_title": "使用雲電腦",
+    "empty_waitlist_subtitle": "我們會在雲上為你執行一臺電腦。尚未上線。",
+    "empty_waitlist_action": "即將推出",
+    "skip": "暫時跳過",
+    "refresh": "重新整理",
+    "refreshing": "正在重新整理...",
+    "hint_selected": "已選擇：{{name}}",
+    "hint_pick": "在上方選一個 agent 執行環境，就可以開始使用 Mika。",
+    "hint_waiting": "等待第一個結果...",
+    "hint_skip_or_refresh": "裝好後點重新整理，或跳過進入工作區。",
+    "continue": "開始使用 Mika"
+  },
+  "step_platform": {
+    "eyebrow": "連線一臺電腦",
+    "headline": "連線一臺電腦來執行你的智慧體。",
+    "lede": "Mika 是這個工作區的參謀長，執行在你連線到 Multica 的一臺真實電腦上。選擇一種連線方式。",
+    "hint_default": "在上方選一種方式——或先跳過，之後再連線電腦。",
+    "download_title": "使用這臺電腦",
+    "download_subtitle": "安裝我們的桌面端來連線這臺電腦。會在新標籤頁開啟，在那裡選你的平台。",
+    "download_button": "下載",
+    "cli_title": "透過終端連線",
+    "cli_subtitle": "連線一臺伺服器、遠端開發機或任意無頭電腦。需要終端。",
+    "cli_action": "檢視步驟",
+    "cloud_title": "使用雲電腦",
+    "cloud_subtitle": "我們會在雲上為你執行一臺電腦。尚未上線。",
+    "cloud_action": "即將推出",
+    "cli_dialog_title": "透過終端連線",
+    "cli_dialog_description": "和桌面端相同的連線，透過終端設定。適用於伺服器、遠端開發機或任意無頭電腦。",
+    "cli_dialog_pick_hint": "在上方選一臺電腦。",
+    "cli_dialog_connect": "連線並繼續",
+    "runtimes_connected_other": "已連線 {{count}} 臺電腦",
+    "live_listening": "實時 · 正在等待你的電腦",
+    "stage_normal_prefix": "執行上面的命令。當 ",
+    "stage_normal_suffix": " 完成瀏覽器登入後，你的電腦會自動出現在這裡（通常 10–30 秒）。",
+    "stage_midway_prefix": "仍在監聽。請確保完成了 ",
+    "stage_midway_suffix": " 開啟的瀏覽器標籤頁——需要批准登入後，你的電腦才能連線。",
+    "stage_slow_prefix": "比平時慢一些。請檢查執行 ",
+    "stage_slow_suffix": " 的終端是否有錯誤。",
+    "stage_stalled_prefix": "目前還沒有收到連線。如果你不太習慣終端，",
+    "stage_stalled_term": "桌面端",
+    "stage_stalled_suffix": " 更順手——一鍵搞定，這臺電腦就連線好了。關閉這個對話方塊選擇桌面端，或點跳過繼續。"
+  },
+  "errors": {
+    "skip_failed": "完成上手引導失敗",
+    "mika_setup_failed": "無法啟動 Mika 工作區"
+  },
+  "mika_intro": {
+    "headline": "認識一下 Mika，你的第一個智慧體隊友。",
+    "name": "Mika",
+    "role": "參謀長",
+    "blurb": "把你想做的事告訴 Mika，它會變成一個任務，並交給合適的智慧體處理。"
+  }
+}

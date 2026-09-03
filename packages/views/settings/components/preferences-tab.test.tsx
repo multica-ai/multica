@@ -177,7 +177,7 @@ describe("PreferencesTab — Language switcher", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await pickLanguage(user, "中文");
+    await pickLanguage(user, "简体中文");
 
     expect(mockPersist).toHaveBeenCalledWith("zh-Hans");
     expect(mockUpdateMe).toHaveBeenCalledWith({ language: "zh-Hans" });
@@ -194,7 +194,7 @@ describe("PreferencesTab — Language switcher", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await pickLanguage(user, "中文");
+    await pickLanguage(user, "简体中文");
 
     // Local persist still happened so the reload below sees the new locale.
     expect(mockPersist).toHaveBeenCalledWith("zh-Hans");
@@ -207,6 +207,21 @@ describe("PreferencesTab — Language switcher", () => {
     act(() => {
       vi.advanceTimersByTime(2500);
     });
+    expect(mockReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists Traditional Chinese as a distinct locale", async () => {
+    userRef.current = { id: "user-1" };
+    mockUpdateMe.mockResolvedValueOnce({});
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await pickLanguage(user, "繁體中文");
+
+    expect(mockPersist).toHaveBeenCalledWith("zh-Hant");
+    expect(mockUpdateMe).toHaveBeenCalledWith({ language: "zh-Hant" });
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(900));
     expect(mockReload).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,0 +1,107 @@
+{
+  "page": {
+    "title": "收件箱",
+    "back": "收件箱"
+  },
+  "menu": {
+    "mark_all_read": "全部標為已讀",
+    "archive_all": "歸檔全部",
+    "archive_all_read": "歸檔全部已讀",
+    "archive_completed": "歸檔已完成"
+  },
+  "filters": {
+    "tooltip": "篩選收件箱",
+    "active_count_other": "{{count}} 個篩選條件",
+    "status": "狀態",
+    "priority": "優先順序",
+    "from": "來自",
+    "unread_only": "只看未讀",
+    "notification_count_other": "{{count}} 條通知",
+    "clear": "清除篩選",
+    "empty": "沒有符合篩選條件的通知"
+  },
+  "context_menu": {
+    "mark_read": "標為已讀",
+    "mark_unread": "標為未讀",
+    "archive": "歸檔",
+    "unarchive": "取消歸檔",
+    "open_in_new_tab": "在新標籤頁開啟"
+  },
+  "list": {
+    "empty": "暫無通知",
+    "mark_done_tooltip": "標為已完成",
+    "archive_tooltip": "歸檔",
+    "time": {
+      "just_now": "剛剛",
+      "minutes": "{{count}} 分鐘",
+      "hours": "{{count}} 小時",
+      "days": "{{count}} 天"
+    },
+    "archived_title": "已歸檔",
+    "archived_empty": "暫無已歸檔通知",
+    "unarchive_tooltip": "取消歸檔",
+    "actions_aria": "通知操作"
+  },
+  "detail": {
+    "select_prompt": "選擇一條通知檢視詳情",
+    "empty": "收件箱為空",
+    "original_input": "原始輸入",
+    "retry_with_context": "保留上下文重試",
+    "edit_advanced": "在完整表單中編輯",
+    "archive": "歸檔",
+    "unarchive": "取消歸檔"
+  },
+  "types": {
+    "issue_assigned": "已分配",
+    "issue_subscribed": "已訂閱",
+    "unassigned": "已取消分配",
+    "assignee_changed": "分配人已更改",
+    "status_changed": "狀態已更改",
+    "priority_changed": "優先順序已更改",
+    "start_date_changed": "開始日期已更改",
+    "due_date_changed": "截止日期已更改",
+    "new_comment": "新留言",
+    "mentioned": "提及了你",
+    "review_requested": "請求審閱",
+    "task_completed": "task 已完成",
+    "task_failed": "task 失敗",
+    "agent_blocked": "智慧體被阻塞",
+    "agent_completed": "智慧體已完成",
+    "reaction_added": "新增了表情反應",
+    "quick_create_done": "透過智慧體建立",
+    "quick_create_failed": "透過智慧體建立失敗",
+    "quick_create_unconfirmed": "透過智慧體建立結果未確認"
+  },
+  "labels": {
+    "set_status_to": "狀態設為",
+    "set_priority_to": "優先順序設為",
+    "assigned_to": "分配給 {{name}}",
+    "removed_assignee": "移除了分配人",
+    "set_start_date_to": "開始日期設為 {{date}}",
+    "removed_start_date": "移除了開始日期",
+    "set_due_date_to": "截止日期設為 {{date}}",
+    "removed_due_date": "移除了截止日期",
+    "reacted_to_comment": "用 {{emoji}} 回應了你的留言",
+    "created_with_agent": "透過智慧體建立：{{identifier}}",
+    "failed_with_detail": "失敗：{{detail}}"
+  },
+  "toasts": {
+    "source_context_retry_started": "已使用原始上下文開始重試",
+    "archived": "已歸檔通知",
+    "unarchived": "已恢復通知"
+  },
+  "errors": {
+    "source_context_retry_failed": "無法使用原始上下文重試",
+    "source_context_retry_unavailable": "該上下文已無法重試，請從派生起點重新發起。",
+    "mark_read_failed": "標為已讀失敗",
+    "mark_unread_failed": "標為未讀失敗",
+    "archive_failed": "歸檔失敗",
+    "mark_done_failed": "標為已完成失敗",
+    "mark_all_read_failed": "全部標為已讀失敗",
+    "archive_all_failed": "歸檔全部失敗",
+    "archive_all_read_failed": "歸檔已讀失敗",
+    "archive_completed_failed": "歸檔已完成失敗",
+    "unarchive_failed": "取消歸檔失敗",
+    "archived_load_failed": "無法載入已歸檔通知"
+  }
+}

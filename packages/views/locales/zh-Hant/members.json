@@ -1,0 +1,20 @@
+{
+  "role": {
+    "owner": "所有者",
+    "admin": "管理員",
+    "member": "成員"
+  },
+  "card": {
+    "unavailable": "成員資訊不可用",
+    "agents_section": "智慧體（{{count}}）",
+    "detail_link": "詳情 →",
+    "more_agents_other": "另有 {{count}} 個智慧體"
+  },
+  "detail": {
+    "workspace_fallback": "工作區",
+    "members_breadcrumb": "成員",
+    "breadcrumb_fallback": "成員",
+    "not_found_title": "未找到該成員",
+    "not_found_description": "該成員可能已經離開工作區。"
+  }
+}

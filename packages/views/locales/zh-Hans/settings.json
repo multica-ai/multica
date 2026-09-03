@@ -113,7 +113,8 @@
     "language": {
       "title": "语言",
       "english": "English",
-      "chinese": "中文",
+      "simplified_chinese": "简体中文",
+      "traditional_chinese": "繁體中文",
       "korean": "한국어",
       "japanese": "日本語",
       "sync_failed": "语言已在本设备保存，但同步到账号失败。其他设备可能仍显示旧语言。"

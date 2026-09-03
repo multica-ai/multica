@@ -24,6 +24,7 @@
 export const INSTALL_RUNTIME_ISSUE_TITLE = {
   en: "Connect a runtime to start with Mika",
   zh: "连接运行时，和 Mika 开始",
+  "zh-Hant": "連接執行環境，開始使用 Mika",
   ko: "runtime을 연결하고 Mika와 시작하기",
   ja: "runtime を接続して Mika と始める",
 } as const;
@@ -111,6 +112,46 @@ Kimi CLI 官方文档:https://moonshotai.github.io/kimi-cli/zh/guides/getting-st
 
 Mika 会把一个真实目标转化为任务，交给合适的智能体启动执行，并在工作流需要时建议添加可复用的 specialist。`;
 
+const zhHant = `歡迎使用 Multica。
+
+AI 智慧體必須先連接執行環境，才能開始執行工作。執行環境尚未準備完成時，你仍可先將 Multica 當作輕量的專案管理工作空間使用。
+
+## 先試用 Multica
+
+執行環境準備完成前，你可以：
+
+1. 為目前的工作建立一個專案。
+2. 建立幾項任務，並在 backlog、todo、in_progress 與 done 之間移動。
+3. 新增優先順序、標籤、留言與訂閱。
+4. 使用收件匣追蹤指派給你的事項與提及。
+
+這能讓你先熟悉專案管理功能。連接執行環境後，AI 智慧體便可直接從相同任務開始工作。
+
+## 安裝第一個 AI 智慧體執行環境
+
+完整說明：https://multica.ai/docs/install-agent-runtime
+
+建議繁體中文使用者先安裝 Codex：
+
+1. 確認已安裝 Node.js。
+2. 安裝 Codex：
+   npm i -g @openai/codex
+3. 登入：
+   codex
+4. 確認終端機能找到 Codex：
+   which codex
+   codex --version
+5. 等候 Multica 偵測。執行中的背景服務每隔幾分鐘會重新檢查新安裝的 CLI，通常無須重新啟動。
+   若要立即套用：
+   multica daemon restart
+   在桌面 App 中，開啟任一本機執行環境並點選 Restart。僅關閉並重新開啟 App 並不足夠，因為背景服務仍會持續執行。
+6. 返回「執行環境」並重新整理；此時應可看到線上的 Codex 執行環境。
+7. 開啟「執行環境」。頁面會顯示 **開始使用 Mika**；點選後即可建立 Mika，並進入引導式的首次對話。
+
+Codex 參考文件：https://developers.openai.com/codex/cli
+
+Mika 會將真實目標轉化為任務，交由合適的 AI 智慧體開始執行，並在工作流程需要時建議可重複使用的專門角色。`;
+
 const ko = `Multica에 오신 것을 환영합니다.
 
 agent가 작업을 실행하려면 먼저 runtime이 필요합니다. runtime을 설치하는 동안에도 Multica를 가벼운 프로젝트 관리 워크스페이스로 먼저 사용할 수 있습니다.
@@ -195,4 +236,10 @@ Codex のリファレンス: https://developers.openai.com/codex/cli
 
 Mika は実際の目標を 1 つのタスクにし、適切なエージェントで実行を開始し、ワークフローに必要なときは再利用可能な specialist を提案します。`;
 
-export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh, ko, ja } as const;
+export const INSTALL_RUNTIME_ISSUE_BODY = {
+  en,
+  zh,
+  "zh-Hant": zhHant,
+  ko,
+  ja,
+} as const;
