@@ -165,6 +165,22 @@ func TestReplicaPoolOverridesWritableValidation(t *testing.T) {
 	}
 }
 
+func TestReplicaPoolOverridesPreferStandbyValidation(t *testing.T) {
+	cfg := resolvedPoolConfig(
+		t,
+		"postgres://u:p@replica/db?sslmode=disable&target_session_attrs=prefer-standby",
+		"",
+		"",
+		replicaPoolSizing,
+	)
+	if !sameValidateConnect(
+		cfg.ConnConfig.Config.ValidateConnect,
+		pgconn.ValidateConnectTargetSessionAttrsReadOnly,
+	) {
+		t.Fatal("replica ValidateConnect accepted target_session_attrs=prefer-standby")
+	}
+}
+
 func TestReplicaPoolHonorsExplicitConnectionLifetime(t *testing.T) {
 	cfg := resolvedPoolConfig(
 		t,

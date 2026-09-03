@@ -20,11 +20,16 @@ import (
 // business read, not a background database query.
 const defaultReplicaCircuitCooldown = 2 * time.Second
 
-type Business string
+// Business is opaque so callers cannot create unbounded metric labels. Add a
+// package value for each opted-in business; the value itself is the only
+// registry that needs updating.
+type Business struct {
+	label string
+}
 
-const (
-	BusinessDashboard Business = "dashboard"
-	businessUnknown   Business = "unknown"
+var (
+	BusinessDashboard = Business{label: "dashboard"}
+	businessUnknown   = Business{label: "unknown"}
 )
 
 type Consistency string
@@ -197,12 +202,10 @@ func (s *Selector) recordRoute(business Business, role Role, reason Reason) {
 }
 
 func (b Business) metricLabel() string {
-	switch b {
-	case BusinessDashboard:
-		return string(b)
-	default:
-		return string(businessUnknown)
+	if b.label == "" {
+		return businessUnknown.label
 	}
+	return b.label
 }
 
 func fallbackFor(ctx context.Context, err error) fallbackDecision {

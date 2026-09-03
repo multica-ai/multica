@@ -157,6 +157,10 @@ func sameValidateConnect(got, want pgconn.ValidateConnectFunc) bool {
 	if got == nil || want == nil {
 		return got == nil && want == nil
 	}
+	// pgx exposes its parsed target_session_attrs choice only as this callback.
+	// Comparing the URL would miss PGTARGETSESSIONATTRS and service-file input.
+	// Value.Pointer is not a general unique function identity guarantee; use it
+	// narrowly for pgx's distinct package-level validator functions.
 	return reflect.ValueOf(got).Pointer() == reflect.ValueOf(want).Pointer()
 }
 

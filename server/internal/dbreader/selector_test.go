@@ -13,7 +13,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-const testBusiness = BusinessDashboard
+var testBusiness = BusinessDashboard
 
 type recorderStub struct {
 	routes []selection
@@ -91,14 +91,14 @@ func TestEventualConsistencyUsesConfiguredReplica(t *testing.T) {
 func TestUnknownBusinessUsesBoundedMetricLabel(t *testing.T) {
 	selector, _, _, recorder := testSelector()
 
-	_, err := Read(context.Background(), selector, Business("request-123"), EventualConsistency,
+	_, err := Read(context.Background(), selector, Business{}, EventualConsistency,
 		func(_ context.Context, _ *db.Queries) (string, error) {
 			return "replica result", nil
 		})
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if len(recorder.labels) != 1 || recorder.labels[0] != string(businessUnknown) {
+	if len(recorder.labels) != 1 || recorder.labels[0] != businessUnknown.label {
 		t.Fatalf("business labels = %#v, want bounded unknown label", recorder.labels)
 	}
 }
