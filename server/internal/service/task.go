@@ -4315,6 +4315,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	var fallbackCreated *db.CreateCommentRow
 	var fallbackIssue *db.Issue
 	var fallbackRoot *db.Comment
+	var fallbackAdmissionRejection error
 	var taskCompletionNoRows bool
 	// chatAssistantMsg is the single assistant outcome row written for a chat
 	// task inside the completion transaction below. It is broadcast (chat:done)
@@ -4341,7 +4342,17 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		task = t
 		fallback, err := s.prepareCompletionFallbackAdmission(ctx, qtx, taskID, result)
 		if err != nil {
-			return fmt.Errorf("reply admission: %w", err)
+			var missingRequesterMention *replyadmission.MissingRequesterMentionError
+			if !errors.As(err, &missingRequesterMention) {
+				return fmt.Errorf("reply admission: %w", err)
+			}
+			// The synthesized fallback is optional delivery. A policy rejection
+			// must not roll back the terminal task transition or leave a healthy
+			// daemon retrying the same deterministic output forever. The task
+			// result remains durable on the completed row and the rejection is
+			// logged after commit for operational follow-up.
+			fallbackAdmissionRejection = err
+			fallback = nil
 		}
 		if fallback != nil {
 			// Persist the synthesized substantive reply in this same transaction
@@ -4462,6 +4473,20 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	}
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
+	if fallbackAdmissionRejection != nil {
+		var missingRequesterMention *replyadmission.MissingRequesterMentionError
+		requesterID := ""
+		if errors.As(fallbackAdmissionRejection, &missingRequesterMention) {
+			requesterID = missingRequesterMention.RequesterID
+		}
+		slog.Warn("completion fallback comment rejected after task completion",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"agent_id", util.UUIDToString(task.AgentID),
+			"requester_id", requesterID,
+			"error", fallbackAdmissionRejection,
+		)
+	}
 	s.captureTaskCompleted(ctx, task)
 
 	// The fallback row was inserted before the transaction committed, so the
@@ -7264,6 +7289,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			AuthorType:  lockedParent.AuthorType,
 			AuthorID:    util.UUIDToString(lockedParent.AuthorID),
 			Content:     lockedParent.Content,
+			IsReply:     lockedParent.ParentID.Valid,
 		}, content)
 		s.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathTaskAgentComment, decision.Outcome(), decision.Reason, time.Since(started))
 		if !decision.Admitted {

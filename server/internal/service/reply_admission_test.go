@@ -11,7 +11,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-func TestCompleteTask_RejectsUnmentionedOpinionFallbackBeforeStatusFlip(t *testing.T) {
+func TestCompleteTask_CompletionFallbackAdmissionRejectionCompletesTask(t *testing.T) {
 	p := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	workspaceID, _, responderID, issueID := seedAttributionFixture(t, p)
@@ -23,16 +23,16 @@ func TestCompleteTask_RejectsUnmentionedOpinionFallbackBeforeStatusFlip(t *testi
 	result, _ := json.Marshal(map[string]string{
 		"output": "The review is sound and the cost constraint is binding.",
 	})
-	if _, err := svc.CompleteTask(ctx, util.MustParseUUID(taskID), result, "", "", "", false, "", ""); err == nil {
-		t.Fatal("expected completion to be rejected when fallback omits requester mention")
+	if _, err := svc.CompleteTask(ctx, util.MustParseUUID(taskID), result, "", "", "", false, "", ""); err != nil {
+		t.Fatalf("completion should not be blocked by fallback admission: %v", err)
 	}
 
 	var status string
 	if err := p.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
 		t.Fatalf("read task status: %v", err)
 	}
-	if status != "running" {
-		t.Fatalf("task status = %q, want running after admission rejection", status)
+	if status != "completed" {
+		t.Fatalf("task status = %q, want completed after fallback admission rejection", status)
 	}
 	var comments int
 	if err := p.QueryRow(ctx, `SELECT count(*) FROM comment WHERE issue_id = $1 AND author_id = $2`, issueID, responderID).Scan(&comments); err != nil {

@@ -134,7 +134,7 @@ func (h *Handler) reconcilePendingCommentIdempotencyRow(ctx context.Context, row
 		return false, fmt.Errorf("commit recovery read: %w", err)
 	}
 
-	_, _, complete := h.runCommentPostCommitSideEffects(
+	_, _, complete, terminal := h.runCommentPostCommitSideEffects(
 		ctx,
 		nil,
 		issue,
@@ -145,7 +145,7 @@ func (h *Handler) reconcilePendingCommentIdempotencyRow(ctx context.Context, row
 		stored.AttachmentIds,
 		stored.SuppressAgentIds,
 	)
-	if !complete {
+	if !complete && !terminal {
 		return false, nil
 	}
 	return h.markCommentIdempotencySideEffectsCompleted(ctx, row.WorkspaceID, row.IdempotencyKey, row.RequestHash), nil

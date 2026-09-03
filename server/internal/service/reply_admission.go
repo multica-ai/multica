@@ -99,6 +99,7 @@ func (s *TaskService) prepareCompletionFallbackAdmission(ctx context.Context, q 
 		AuthorType:  parent.AuthorType,
 		AuthorID:    util.UUIDToString(parent.AuthorID),
 		Content:     parent.Content,
+		IsReply:     parent.ParentID.Valid,
 	}, content)
 	s.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathTaskCompletion, decision.Outcome(), decision.Reason, time.Since(started))
 	if !decision.Admitted {

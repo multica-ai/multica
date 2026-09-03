@@ -85,6 +85,43 @@ func TestCheckAllowsMentionedSubstantiveOpinionReply(t *testing.T) {
 	}
 }
 
+func TestCheckAllowsMentionAfterInlineCode(t *testing.T) {
+	requesterID := "24242424-2424-4242-8242-242424242424"
+	err := Check(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Please give your opinion on this review.",
+	}, "CHANGES_REQUIRED. `server/internal/handler/comment.go:1894` persists before admission.\n\n[@Requester](mention://agent/"+requesterID+")")
+	if err != nil {
+		t.Fatalf("mention after balanced inline code rejected: %v", err)
+	}
+}
+
+func TestCheckTreatsUnbalancedInlineCodeAsLiteral(t *testing.T) {
+	requesterID := "25252525-2525-4252-8252-252525252525"
+	err := Check(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Please give your opinion on this review.",
+	}, "The `reference has no closing delimiter.\n\n[@Requester](mention://agent/"+requesterID+")")
+	if err != nil {
+		t.Fatalf("mention after unbalanced inline code rejected: %v", err)
+	}
+}
+
+func TestCheckNestedReplyDoesNotRequireTagBack(t *testing.T) {
+	requesterID := "26262626-2626-4262-8262-262626262626"
+	err := Check(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Could you review this implementation and tell me what you think?",
+		IsReply:    true,
+	}, "Understood, no further action needed")
+	if err != nil {
+		t.Fatalf("nested reply unexpectedly required a tag-back: %v", err)
+	}
+}
+
 func TestCheckKeepsAcknowledgementsAndNonOpinionParentsExempt(t *testing.T) {
 	tests := []struct {
 		name    string

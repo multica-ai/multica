@@ -85,8 +85,8 @@ func TestCreateComment_AgentOpinionReplyRequiresRequesterMention(t *testing.T) {
 }
 
 // TestCreateComment_AgentOpinionReplyWithRequesterMentionIsAccepted is the
-// positive control for the same boundary. Suppressing the target keeps this
-// handler test focused on admission rather than starting a second runtime.
+// positive control for the same boundary. Suppression cannot remove the
+// requester trigger that admission required.
 func TestCreateComment_AgentOpinionReplyWithRequesterMentionIsAccepted(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -104,7 +104,7 @@ func TestCreateComment_AgentOpinionReplyWithRequesterMentionIsAccepted(t *testin
 	w := httptest.NewRecorder()
 	r := newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{
 		"content": fmt.Sprintf(
-			"[@Requester](mention://agent/%s)\n\nThe review is sound and the cost constraint is the binding variable.",
+			"The review is sound and the cost constraint is the binding variable. `server/internal/handler/comment.go:1894`\n\n[@Requester](mention://agent/%s)",
 			requesterID,
 		),
 		"parent_id":          parentID,
@@ -117,6 +117,17 @@ func TestCreateComment_AgentOpinionReplyWithRequesterMentionIsAccepted(t *testin
 	testHandler.CreateComment(w, r)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateComment mentioned requester: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode mentioned requester response: %v", err)
+	}
+	outcome := findCommentOutcome(t, resp.TriggerOutcomes, requesterID)
+	if outcome.Status == DispatchBlocked {
+		t.Fatalf("required requester trigger was suppressed: %+v", outcome)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, requesterID); got != 1 {
+		t.Fatalf("required requester queued tasks = %d, want 1", got)
 	}
 }
 

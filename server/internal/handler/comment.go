@@ -1979,7 +1979,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if replayNeedsRecovery && replayClaimed {
-					resp, outcomes, complete := h.runCommentPostCommitSideEffects(
+					resp, outcomes, complete, terminal := h.runCommentPostCommitSideEffects(
 						r.Context(),
 						r,
 						issue,
@@ -1991,7 +1991,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 						stored.SuppressAgentIds,
 					)
 					resp.TriggerOutcomes = outcomes
-					if complete {
+					if complete || terminal {
 						h.markCommentIdempotencySideEffectsCompleted(r.Context(), issue.WorkspaceID, idempotencyKey, requestHash)
 					}
 					w.Header().Set("Idempotency-Replayed", "true")
@@ -2043,6 +2043,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 				AuthorType:  lockedParent.AuthorType,
 				AuthorID:    uuidToString(lockedParent.AuthorID),
 				Content:     lockedParent.Content,
+				IsReply:     lockedParent.ParentID.Valid,
 			}, req.Content)
 			h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathCreateComment, decision.Outcome(), decision.Reason, time.Since(started))
 			if !decision.Admitted {
@@ -2080,7 +2081,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	comment := created.Comment()
-	resp, outcomes, complete := h.runCommentPostCommitSideEffects(
+	resp, outcomes, complete, terminal := h.runCommentPostCommitSideEffects(
 		r.Context(),
 		r,
 		issue,
@@ -2092,7 +2093,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		suppressAgentIDs,
 	)
 	resp.TriggerOutcomes = outcomes
-	if idempotencyKey != "" && complete {
+	if idempotencyKey != "" && (complete || terminal) {
 		h.markCommentIdempotencySideEffectsCompleted(r.Context(), issue.WorkspaceID, idempotencyKey, requestHash)
 	}
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
@@ -2127,17 +2128,19 @@ func (h *Handler) runCommentPostCommitSideEffects(
 	issueRevision int64,
 	parentComment, rootComment *db.Comment,
 	attachmentIDs, suppressAgentIDs []pgtype.UUID,
-) (CommentResponse, []CommentTriggerOutcome, bool) {
+) (CommentResponse, []CommentTriggerOutcome, bool, bool) {
 	complete := true
+	nonAttachmentComplete := true
+	attachmentMismatch := false
 	if len(attachmentIDs) > 0 {
 		linked, err := h.linkAttachmentsByIDs(ctx, comment.ID, issue.ID, attachmentIDs)
 		if err != nil {
 			complete = false
 		} else if linked != int64(uniqueUUIDCount(attachmentIDs)) {
 			// Treat invalid, wrong-issue, already-bound-to-another-comment, and
-			// otherwise missing attachment IDs as an incomplete delivery. The
-			// idempotency row must not be marked complete while the requested
-			// attachment set is only partially linked.
+			// otherwise missing attachment IDs as a deterministic mismatch. The
+			// effect is dead-lettered below after the other effects finish, while
+			// query failures remain retryable.
 			slog.Warn("comment attachment link incomplete",
 				"comment_id", uuidToString(comment.ID),
 				"issue_id", uuidToString(issue.ID),
@@ -2145,6 +2148,7 @@ func (h *Handler) runCommentPostCommitSideEffects(
 				"linked", linked,
 			)
 			complete = false
+			attachmentMismatch = true
 		}
 	}
 	var groupedAtt map[string][]AttachmentResponse
@@ -2168,10 +2172,12 @@ func (h *Handler) runCommentPostCommitSideEffects(
 	// comment commit so the reply remains visible if the unresolve fails.
 	if err := h.TaskService.AutoUnresolveThreadOnReply(ctx, rootComment, uuidToString(issue.WorkspaceID), comment.AuthorType, uuidToString(comment.AuthorID)); err != nil {
 		complete = false
+		nonAttachmentComplete = false
 	}
 	if comment.AuthorType == "agent" {
 		if err := h.TaskService.CancelDeferredEscalationsForIssueAgent(ctx, issue.ID, comment.AuthorID); err != nil {
 			complete = false
+			nonAttachmentComplete = false
 		}
 	}
 
@@ -2180,10 +2186,24 @@ func (h *Handler) runCommentPostCommitSideEffects(
 	for _, outcome := range outcomes {
 		if outcome.Status == DispatchBlocked && outcome.ReasonCode == ReasonInternalError {
 			complete = false
+			nonAttachmentComplete = false
 			break
 		}
 	}
-	return resp, outcomes, complete
+	terminal := attachmentMismatch && nonAttachmentComplete
+	if terminal {
+		// A successful link query that deterministically linked fewer rows means
+		// at least one requested attachment is invalid or already owned by a
+		// different comment. Retrying the whole effect block would replay agent
+		// triggers forever, so treat this known-unrecoverable effect as a
+		// dead-letter while retaining the observable warning above.
+		slog.Error("comment idempotency side effects dead-lettered attachment mismatch",
+			"comment_id", uuidToString(comment.ID),
+			"issue_id", uuidToString(issue.ID),
+			"requested", uniqueUUIDCount(attachmentIDs),
+		)
+	}
+	return resp, outcomes, complete, terminal
 }
 
 func uniqueUUIDCount(ids []pgtype.UUID) int {
@@ -2253,10 +2273,41 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 		ExcludeTriggerCommentID: comment.ID,
 		OriginatorUserID:        originatorUserID,
 	})
+	suppressAgentIDs = preserveReplyAdmissionRequesterTrigger(comment, parentComment, suppressAgentIDs)
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 	return commentTriggerOutcomes(targets, enqueued)
+}
+
+// preserveReplyAdmissionRequesterTrigger makes the admission guarantee
+// durable through dispatch. The requester mention is required in the stored
+// reply, so a client cannot satisfy admission and then suppress the exact
+// trigger that the gate requires to be delivered.
+func preserveReplyAdmissionRequesterTrigger(comment db.Comment, parentComment *db.Comment, suppressAgentIDs []pgtype.UUID) []pgtype.UUID {
+	if comment.AuthorType != "agent" || parentComment == nil || parentComment.AuthorType != "agent" || len(suppressAgentIDs) == 0 {
+		return suppressAgentIDs
+	}
+	decision := replyadmission.Evaluate(replyadmission.Parent{
+		ID:          uuidToString(parentComment.ID),
+		IssueID:     uuidToString(parentComment.IssueID),
+		WorkspaceID: uuidToString(parentComment.WorkspaceID),
+		AuthorType:  parentComment.AuthorType,
+		AuthorID:    uuidToString(parentComment.AuthorID),
+		Content:     parentComment.Content,
+		IsReply:     parentComment.ParentID.Valid,
+	}, comment.Content)
+	if !decision.Admitted || decision.Requirement != replyadmission.RequirementRequesterMention || decision.RequesterID == "" {
+		return suppressAgentIDs
+	}
+	filtered := make([]pgtype.UUID, 0, len(suppressAgentIDs))
+	for _, id := range suppressAgentIDs {
+		if id.Valid && uuidToString(id) == decision.RequesterID {
+			continue
+		}
+		filtered = append(filtered, id)
+	}
+	return filtered
 }
 
 // noteBlockedRuntimeTargets leaves one system comment per agent refused for an
@@ -3730,6 +3781,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 					AuthorType:  lockedParent.AuthorType,
 					AuthorID:    uuidToString(lockedParent.AuthorID),
 					Content:     lockedParent.Content,
+					IsReply:     lockedParent.ParentID.Valid,
 				}, req.Content)
 				h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathUpdateComment, admissionDecision.Outcome(), admissionDecision.Reason, time.Since(started))
 				if !admissionDecision.Admitted {

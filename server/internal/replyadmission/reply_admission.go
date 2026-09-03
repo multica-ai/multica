@@ -52,6 +52,7 @@ type Parent struct {
 	AuthorType  string
 	AuthorID    string
 	Content     string
+	IsReply     bool
 }
 
 const (
@@ -129,9 +130,8 @@ var (
 //   - the response is a short acknowledgement; or
 //   - the response contains a canonical mention://agent/<requester-id> link.
 //
-// A reply-to-reply is not exempt merely because it is nested. The direct
-// parent is the request being answered, which prevents the observed nested
-// opinion handoff from silently dropping the next-agent mention.
+// A reply-to-reply is exempt. This gives nested conversations a terminating
+// move instead of turning every agent answer into another required handoff.
 func Check(parent Parent, response string) error {
 	decision := Evaluate(parent, response)
 	if decision.Admitted {
@@ -151,6 +151,9 @@ func Evaluate(parent Parent, response string) Decision {
 		Reason:         ReasonNotApplicable,
 		RequesterID:    parent.AuthorID,
 		PolicyVersion:  PolicyVersion,
+	}
+	if parent.IsReply {
+		return decision
 	}
 	if !isExplicitOpinionRequest(parent) {
 		return decision
@@ -175,10 +178,17 @@ func isExplicitOpinionRequest(parent Parent) bool {
 	if parent.AuthorType != "agent" || parent.AuthorID == "" || strings.TrimSpace(parent.Content) == "" {
 		return false
 	}
-	if reviewRequestRE.MatchString(parent.Content) || takeRequestRE.MatchString(parent.Content) || stanceRequestRE.MatchString(parent.Content) {
+	return isExplicitOpinionRequestContent(parent.Content)
+}
+
+func isExplicitOpinionRequestContent(content string) bool {
+	if strings.TrimSpace(content) == "" {
+		return false
+	}
+	if reviewRequestRE.MatchString(content) || takeRequestRE.MatchString(content) || stanceRequestRE.MatchString(content) {
 		return true
 	}
-	return opinionMarkerRE.MatchString(parent.Content) && requestMarkerRE.MatchString(parent.Content)
+	return opinionMarkerRE.MatchString(content) && requestMarkerRE.MatchString(content)
 }
 
 func hasRequesterMention(content, requesterID string) bool {
@@ -323,14 +333,21 @@ func stripCodeSpans(content string) string {
 			atLineStart = true
 			continue
 		}
-		if !inInline && content[i] == '`' {
-			inInline = !inInline
+		if inInline && content[i] == '`' {
+			inInline = false
 			b.WriteByte(' ')
 			i++
 			atLineStart = false
 			continue
 		}
-		if inFence || inInline {
+		if !inInline && content[i] == '`' && strings.IndexByte(content[i+1:], '`') >= 0 {
+			inInline = true
+			b.WriteByte(' ')
+			i++
+			atLineStart = false
+			continue
+		}
+		if inInline {
 			b.WriteByte(' ')
 			i++
 			atLineStart = false
