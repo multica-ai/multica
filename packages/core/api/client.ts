@@ -122,6 +122,9 @@ import type {
   IssueStatusEntry,
   CreateIssueStatusRequest,
   UpdateIssueStatusRequest,
+  IssueLifecycleResponse,
+  TransitionIssueStatusNodeRequest,
+  TransitionIssueStatusNodeResponse,
   IssueLabelsResponse,
   LabelResourceType,
   ResourceLabelsResponse,
@@ -383,6 +386,10 @@ import {
   ListLabelsResponseSchema,
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
+  IssueLifecycleResponseSchema,
+  EMPTY_ISSUE_LIFECYCLE_RESPONSE,
+  TransitionIssueStatusNodeResponseSchema,
+  EMPTY_TRANSITION_ISSUE_STATUS_NODE_RESPONSE,
   IssuePropertySchema,
   ListPropertiesResponseSchema,
   IssuePropertiesResponseSchema,
@@ -3711,6 +3718,49 @@ export class ApiClient {
     return parseWithFallback(raw, IssueStatusEntrySchema, EMPTY_ISSUE_STATUS_ENTRY, {
       endpoint: "DELETE /api/issue-statuses/{id}",
     });
+  }
+
+  async getEffectiveIssueLifecycle(
+    projectId?: string | null,
+    includeArchived = false,
+  ): Promise<IssueLifecycleResponse> {
+    const query = new URLSearchParams();
+    if (projectId) query.set("project_id", projectId);
+    if (includeArchived) query.set("include_archived", "true");
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/effective${suffix}`);
+    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "GET /api/issue-lifecycles/effective",
+    });
+  }
+
+  async updateProjectIssueLifecycle(
+    projectId: string,
+    mode: "default" | "custom",
+  ): Promise<IssueLifecycleResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/issue-lifecycle`, {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    });
+    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PUT /api/projects/{id}/issue-lifecycle",
+    });
+  }
+
+  async transitionIssueStatusNode(
+    issueId: string,
+    data: TransitionIssueStatusNodeRequest,
+  ): Promise<TransitionIssueStatusNodeResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/transitions`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      TransitionIssueStatusNodeResponseSchema,
+      EMPTY_TRANSITION_ISSUE_STATUS_NODE_RESPONSE,
+      { endpoint: "POST /api/issues/{id}/transitions" },
+    );
   }
 
   // Custom issue properties

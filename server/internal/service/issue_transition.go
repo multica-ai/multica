@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuelifecycle"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -24,6 +25,16 @@ type IssueTransitionParams struct {
 	IssueID              pgtype.UUID
 	WorkspaceID          pgtype.UUID
 	Status               string
+	Actor                issuelifecycle.TransitionActor
+	Cause                string
+	ExpectedRevision     pgtype.Int8
+	ExpectedTransitionID pgtype.UUID
+}
+
+type IssueStatusNodeTransitionParams struct {
+	IssueID              pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	LifecycleStatusID    pgtype.UUID
 	Actor                issuelifecycle.TransitionActor
 	Cause                string
 	ExpectedRevision     pgtype.Int8
@@ -98,8 +109,83 @@ func TransitionIssue(ctx context.Context, q *db.Queries, txStarter TxStarter, p 
 	}, nil
 }
 
+// TransitionIssueToStatusNode is the canonical lifecycle-native status write.
+// The stable node ID, not the legacy status key, selects the destination. The
+// legacy key is updated in the same transaction as a compatibility projection
+// for installed clients and rolling rollback.
+func TransitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter TxStarter, p IssueStatusNodeTransitionParams) (IssueTransitionResult, error) {
+	if txStarter == nil {
+		return IssueTransitionResult{}, errors.New("issue transition requires transaction starter")
+	}
+	tx, err := txStarter.Begin(ctx)
+	if err != nil {
+		return IssueTransitionResult{}, fmt.Errorf("begin issue transition: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := q.WithTx(tx)
+
+	previous, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
+		ID: p.IssueID, WorkspaceID: p.WorkspaceID,
+	})
+	if err != nil {
+		return IssueTransitionResult{}, err
+	}
+	if p.ExpectedRevision.Valid && previous.Revision != p.ExpectedRevision.Int64 {
+		return IssueTransitionResult{}, ErrIssueTransitionConflict
+	}
+	if p.ExpectedTransitionID.Valid && previous.LastTransitionID != p.ExpectedTransitionID {
+		return IssueTransitionResult{}, ErrIssueTransitionConflict
+	}
+	if !previous.LifecycleID.Valid {
+		return IssueTransitionResult{}, ErrIssueTransitionConflict
+	}
+	target, err := qtx.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
+		WorkspaceID: p.WorkspaceID,
+		LifecycleID: previous.LifecycleID,
+		ID:          p.LifecycleStatusID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return IssueTransitionResult{}, ErrIssueTransitionStatusUnavailable
+		}
+		return IssueTransitionResult{}, err
+	}
+	if target.ArchivedAt.Valid || !target.LegacyStatusKey.Valid {
+		return IssueTransitionResult{}, ErrIssueTransitionStatusUnavailable
+	}
+	if previous.LifecycleStatusID == target.ID {
+		return IssueTransitionResult{Previous: previous, Issue: previous}, nil
+	}
+
+	current, err := qtx.UpdateIssueLifecycleStatus(ctx, db.UpdateIssueLifecycleStatusParams{
+		IssueID: p.IssueID, WorkspaceID: p.WorkspaceID, LifecycleStatusID: target.ID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return IssueTransitionResult{}, ErrIssueTransitionStatusUnavailable
+		}
+		return IssueTransitionResult{}, err
+	}
+	current, transition, changed, err := issuelifecycle.RecordTransition(
+		ctx, qtx, &previous, current, p.Actor, p.Cause,
+	)
+	if err != nil {
+		return IssueTransitionResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return IssueTransitionResult{}, fmt.Errorf("commit issue transition: %w", err)
+	}
+	return IssueTransitionResult{
+		Previous: previous, Issue: current, Transition: transition, Changed: changed,
+	}, nil
+}
+
 func (s *IssueService) TransitionStatus(ctx context.Context, p IssueTransitionParams) (IssueTransitionResult, error) {
 	return TransitionIssue(ctx, s.Queries, s.TxStarter, p)
+}
+
+func (s *IssueService) TransitionStatusNode(ctx context.Context, p IssueStatusNodeTransitionParams) (IssueTransitionResult, error) {
+	return TransitionIssueToStatusNode(ctx, s.Queries, s.TxStarter, p)
 }
 
 func (s *TaskService) transitionIssueStatus(ctx context.Context, p IssueTransitionParams) (IssueTransitionResult, error) {

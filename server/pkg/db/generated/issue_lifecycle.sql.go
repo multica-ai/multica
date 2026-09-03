@@ -70,6 +70,66 @@ func (q *Queries) BindIssueToDefaultLifecycle(ctx context.Context, arg BindIssue
 	return i, err
 }
 
+const bindIssueToLifecycleStatus = `-- name: BindIssueToLifecycleStatus :one
+UPDATE issue
+SET lifecycle_id = $1::uuid,
+    lifecycle_status_id = $2::uuid
+WHERE id = $3::uuid
+  AND workspace_id = $4::uuid
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, lifecycle_id, lifecycle_status_id, last_transition_id
+`
+
+type BindIssueToLifecycleStatusParams struct {
+	LifecycleID       pgtype.UUID `json:"lifecycle_id"`
+	LifecycleStatusID pgtype.UUID `json:"lifecycle_status_id"`
+	IssueID           pgtype.UUID `json:"issue_id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) BindIssueToLifecycleStatus(ctx context.Context, arg BindIssueToLifecycleStatusParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, bindIssueToLifecycleStatus,
+		arg.LifecycleID,
+		arg.LifecycleStatusID,
+		arg.IssueID,
+		arg.WorkspaceID,
+	)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+		&i.Revision,
+		&i.LastActivityAt,
+		&i.LifecycleID,
+		&i.LifecycleStatusID,
+		&i.LastTransitionID,
+	)
+	return i, err
+}
+
 const bumpIssueLifecycleRevision = `-- name: BumpIssueLifecycleRevision :one
 UPDATE issue_lifecycle
 SET revision = revision + 1,
@@ -100,6 +160,104 @@ func (q *Queries) BumpIssueLifecycleRevision(ctx context.Context, arg BumpIssueL
 	return i, err
 }
 
+const clearProjectIssueLifecycle = `-- name: ClearProjectIssueLifecycle :one
+UPDATE project
+SET default_issue_lifecycle_id = NULL,
+    updated_at = now()
+WHERE id = $1::uuid
+  AND workspace_id = $2::uuid
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, default_issue_lifecycle_id
+`
+
+type ClearProjectIssueLifecycleParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) ClearProjectIssueLifecycle(ctx context.Context, arg ClearProjectIssueLifecycleParams) (Project, error) {
+	row := q.db.QueryRow(ctx, clearProjectIssueLifecycle, arg.ProjectID, arg.WorkspaceID)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Icon,
+		&i.Status,
+		&i.LeadType,
+		&i.LeadID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Priority,
+		&i.StartDate,
+		&i.DueDate,
+		&i.DefaultIssueLifecycleID,
+	)
+	return i, err
+}
+
+const cloneIssueLifecycleStatuses = `-- name: CloneIssueLifecycleStatuses :execrows
+INSERT INTO issue_lifecycle_status (
+    workspace_id, lifecycle_id, legacy_status_key, name, description, color,
+    position, phase, outcome, entry_policy, entry_policy_revision, archived_at,
+    created_at, updated_at
+)
+SELECT
+    $1::uuid,
+    $2::uuid,
+    source.legacy_status_key,
+    source.name,
+    source.description,
+    source.color,
+    source.position,
+    source.phase,
+    source.outcome,
+    source.entry_policy,
+    source.entry_policy_revision,
+    source.archived_at,
+    source.created_at,
+    source.updated_at
+FROM issue_lifecycle_status AS source
+WHERE source.workspace_id = $1::uuid
+  AND source.lifecycle_id = $3::uuid
+ON CONFLICT (lifecycle_id, legacy_status_key)
+    WHERE legacy_status_key IS NOT NULL
+DO NOTHING
+`
+
+type CloneIssueLifecycleStatusesParams struct {
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	TargetLifecycleID pgtype.UUID `json:"target_lifecycle_id"`
+	SourceLifecycleID pgtype.UUID `json:"source_lifecycle_id"`
+}
+
+func (q *Queries) CloneIssueLifecycleStatuses(ctx context.Context, arg CloneIssueLifecycleStatusesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, cloneIssueLifecycleStatuses, arg.WorkspaceID, arg.TargetLifecycleID, arg.SourceLifecycleID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const countIssueLifecycleStatuses = `-- name: CountIssueLifecycleStatuses :one
+SELECT count(*)::bigint
+FROM issue_lifecycle_status
+WHERE workspace_id = $1
+  AND lifecycle_id = $2
+`
+
+type CountIssueLifecycleStatusesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	LifecycleID pgtype.UUID `json:"lifecycle_id"`
+}
+
+func (q *Queries) CountIssueLifecycleStatuses(ctx context.Context, arg CountIssueLifecycleStatusesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countIssueLifecycleStatuses, arg.WorkspaceID, arg.LifecycleID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const ensureDefaultIssueLifecycle = `-- name: EnsureDefaultIssueLifecycle :one
 INSERT INTO issue_lifecycle (workspace_id, scope_type, scope_id, name)
 VALUES ($1, 'workspace', $1, 'Default')
@@ -124,6 +282,38 @@ func (q *Queries) EnsureDefaultIssueLifecycle(ctx context.Context, workspaceID p
 	return i, err
 }
 
+const ensureProjectIssueLifecycle = `-- name: EnsureProjectIssueLifecycle :one
+INSERT INTO issue_lifecycle (workspace_id, scope_type, scope_id, name)
+SELECT p.workspace_id, 'project', p.id, p.title
+FROM project AS p
+WHERE p.id = $1::uuid
+  AND p.workspace_id = $2::uuid
+ON CONFLICT (workspace_id, scope_type, scope_id)
+DO UPDATE SET name = issue_lifecycle.name
+RETURNING id, workspace_id, scope_type, scope_id, name, revision, created_at, updated_at
+`
+
+type EnsureProjectIssueLifecycleParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) EnsureProjectIssueLifecycle(ctx context.Context, arg EnsureProjectIssueLifecycleParams) (IssueLifecycle, error) {
+	row := q.db.QueryRow(ctx, ensureProjectIssueLifecycle, arg.ProjectID, arg.WorkspaceID)
+	var i IssueLifecycle
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.Name,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getDefaultIssueLifecycle = `-- name: GetDefaultIssueLifecycle :one
 SELECT l.id, l.workspace_id, l.scope_type, l.scope_id, l.name, l.revision, l.created_at, l.updated_at
 FROM workspace AS w
@@ -134,6 +324,40 @@ WHERE w.id = $1
 
 func (q *Queries) GetDefaultIssueLifecycle(ctx context.Context, id pgtype.UUID) (IssueLifecycle, error) {
 	row := q.db.QueryRow(ctx, getDefaultIssueLifecycle, id)
+	var i IssueLifecycle
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.Name,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEffectiveIssueLifecycle = `-- name: GetEffectiveIssueLifecycle :one
+SELECT l.id, l.workspace_id, l.scope_type, l.scope_id, l.name, l.revision, l.created_at, l.updated_at
+FROM workspace AS w
+LEFT JOIN project AS p
+  ON p.id = $1::uuid
+ AND p.workspace_id = w.id
+JOIN issue_lifecycle AS l
+  ON l.id = COALESCE(p.default_issue_lifecycle_id, w.default_issue_lifecycle_id)
+ AND l.workspace_id = w.id
+WHERE w.id = $2::uuid
+  AND ($1::uuid IS NULL OR p.id IS NOT NULL)
+`
+
+type GetEffectiveIssueLifecycleParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetEffectiveIssueLifecycle(ctx context.Context, arg GetEffectiveIssueLifecycleParams) (IssueLifecycle, error) {
+	row := q.db.QueryRow(ctx, getEffectiveIssueLifecycle, arg.ProjectID, arg.WorkspaceID)
 	var i IssueLifecycle
 	err := row.Scan(
 		&i.ID,
@@ -496,6 +720,57 @@ func (q *Queries) ListIssueLifecycleConsistency(ctx context.Context) ([]ListIssu
 	return items, nil
 }
 
+const listIssueLifecycleStatuses = `-- name: ListIssueLifecycleStatuses :many
+SELECT id, workspace_id, lifecycle_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at
+FROM issue_lifecycle_status
+WHERE workspace_id = $1::uuid
+  AND lifecycle_id = $2::uuid
+  AND ($3::boolean OR archived_at IS NULL)
+ORDER BY position ASC, created_at ASC, id ASC
+`
+
+type ListIssueLifecycleStatusesParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	LifecycleID     pgtype.UUID `json:"lifecycle_id"`
+	IncludeArchived bool        `json:"include_archived"`
+}
+
+func (q *Queries) ListIssueLifecycleStatuses(ctx context.Context, arg ListIssueLifecycleStatusesParams) ([]IssueLifecycleStatus, error) {
+	rows, err := q.db.Query(ctx, listIssueLifecycleStatuses, arg.WorkspaceID, arg.LifecycleID, arg.IncludeArchived)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueLifecycleStatus{}
+	for rows.Next() {
+		var i IssueLifecycleStatus
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.LifecycleID,
+			&i.LegacyStatusKey,
+			&i.Name,
+			&i.Description,
+			&i.Color,
+			&i.Position,
+			&i.Phase,
+			&i.Outcome,
+			&i.EntryPolicy,
+			&i.EntryPolicyRevision,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssueTransitions = `-- name: ListIssueTransitions :many
 SELECT id, workspace_id, issue_id, lifecycle_id, lifecycle_revision, from_status_id, to_status_id, actor_type, actor_id, cause, issue_revision_before, issue_revision_after, created_at FROM issue_transition
 WHERE issue_id = $1 AND workspace_id = $2
@@ -594,6 +869,48 @@ func (q *Queries) SetIssueLastTransition(ctx context.Context, arg SetIssueLastTr
 	return i, err
 }
 
+const setProjectIssueLifecycle = `-- name: SetProjectIssueLifecycle :one
+UPDATE project AS p
+SET default_issue_lifecycle_id = l.id,
+    updated_at = now()
+FROM issue_lifecycle AS l
+WHERE p.id = $1::uuid
+  AND p.workspace_id = $2::uuid
+  AND l.id = $3::uuid
+  AND l.workspace_id = p.workspace_id
+  AND l.scope_type = 'project'
+  AND l.scope_id = p.id
+RETURNING p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.start_date, p.due_date, p.default_issue_lifecycle_id
+`
+
+type SetProjectIssueLifecycleParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	LifecycleID pgtype.UUID `json:"lifecycle_id"`
+}
+
+func (q *Queries) SetProjectIssueLifecycle(ctx context.Context, arg SetProjectIssueLifecycleParams) (Project, error) {
+	row := q.db.QueryRow(ctx, setProjectIssueLifecycle, arg.ProjectID, arg.WorkspaceID, arg.LifecycleID)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Icon,
+		&i.Status,
+		&i.LeadType,
+		&i.LeadID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Priority,
+		&i.StartDate,
+		&i.DueDate,
+		&i.DefaultIssueLifecycleID,
+	)
+	return i, err
+}
+
 const setWorkspaceDefaultIssueLifecycle = `-- name: SetWorkspaceDefaultIssueLifecycle :exec
 UPDATE workspace
 SET default_issue_lifecycle_id = $2
@@ -661,4 +978,66 @@ type SyncDefaultIssueLifecycleStatusesParams struct {
 func (q *Queries) SyncDefaultIssueLifecycleStatuses(ctx context.Context, arg SyncDefaultIssueLifecycleStatusesParams) error {
 	_, err := q.db.Exec(ctx, syncDefaultIssueLifecycleStatuses, arg.LifecycleID, arg.WorkspaceID)
 	return err
+}
+
+const updateIssueLifecycleStatus = `-- name: UpdateIssueLifecycleStatus :one
+UPDATE issue AS i
+SET status = s.legacy_status_key,
+    lifecycle_status_id = s.id,
+    revision = i.revision + 1,
+    updated_at = now()
+FROM issue_lifecycle_status AS s
+WHERE i.id = $1::uuid
+  AND i.workspace_id = $2::uuid
+  AND s.id = $3::uuid
+  AND s.workspace_id = i.workspace_id
+  AND s.lifecycle_id = i.lifecycle_id
+  AND s.legacy_status_key IS NOT NULL
+  AND s.archived_at IS NULL
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.lifecycle_id, i.lifecycle_status_id, i.last_transition_id
+`
+
+type UpdateIssueLifecycleStatusParams struct {
+	IssueID           pgtype.UUID `json:"issue_id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	LifecycleStatusID pgtype.UUID `json:"lifecycle_status_id"`
+}
+
+func (q *Queries) UpdateIssueLifecycleStatus(ctx context.Context, arg UpdateIssueLifecycleStatusParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, updateIssueLifecycleStatus, arg.IssueID, arg.WorkspaceID, arg.LifecycleStatusID)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+		&i.Revision,
+		&i.LastActivityAt,
+		&i.LifecycleID,
+		&i.LifecycleStatusID,
+		&i.LastTransitionID,
+	)
+	return i, err
 }

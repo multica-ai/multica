@@ -59,6 +59,77 @@ JOIN issue_lifecycle AS l ON l.id = w.default_issue_lifecycle_id
 WHERE w.id = $1
   AND l.workspace_id = w.id;
 
+-- name: GetEffectiveIssueLifecycle :one
+SELECT l.*
+FROM workspace AS w
+LEFT JOIN project AS p
+  ON p.id = sqlc.narg('project_id')::uuid
+ AND p.workspace_id = w.id
+JOIN issue_lifecycle AS l
+  ON l.id = COALESCE(p.default_issue_lifecycle_id, w.default_issue_lifecycle_id)
+ AND l.workspace_id = w.id
+WHERE w.id = sqlc.arg('workspace_id')::uuid
+  AND (sqlc.narg('project_id')::uuid IS NULL OR p.id IS NOT NULL);
+
+-- name: EnsureProjectIssueLifecycle :one
+INSERT INTO issue_lifecycle (workspace_id, scope_type, scope_id, name)
+SELECT p.workspace_id, 'project', p.id, p.title
+FROM project AS p
+WHERE p.id = sqlc.arg('project_id')::uuid
+  AND p.workspace_id = sqlc.arg('workspace_id')::uuid
+ON CONFLICT (workspace_id, scope_type, scope_id)
+DO UPDATE SET name = issue_lifecycle.name
+RETURNING *;
+
+-- name: CloneIssueLifecycleStatuses :execrows
+INSERT INTO issue_lifecycle_status (
+    workspace_id, lifecycle_id, legacy_status_key, name, description, color,
+    position, phase, outcome, entry_policy, entry_policy_revision, archived_at,
+    created_at, updated_at
+)
+SELECT
+    sqlc.arg('workspace_id')::uuid,
+    sqlc.arg('target_lifecycle_id')::uuid,
+    source.legacy_status_key,
+    source.name,
+    source.description,
+    source.color,
+    source.position,
+    source.phase,
+    source.outcome,
+    source.entry_policy,
+    source.entry_policy_revision,
+    source.archived_at,
+    source.created_at,
+    source.updated_at
+FROM issue_lifecycle_status AS source
+WHERE source.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND source.lifecycle_id = sqlc.arg('source_lifecycle_id')::uuid
+ON CONFLICT (lifecycle_id, legacy_status_key)
+    WHERE legacy_status_key IS NOT NULL
+DO NOTHING;
+
+-- name: SetProjectIssueLifecycle :one
+UPDATE project AS p
+SET default_issue_lifecycle_id = l.id,
+    updated_at = now()
+FROM issue_lifecycle AS l
+WHERE p.id = sqlc.arg('project_id')::uuid
+  AND p.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND l.id = sqlc.arg('lifecycle_id')::uuid
+  AND l.workspace_id = p.workspace_id
+  AND l.scope_type = 'project'
+  AND l.scope_id = p.id
+RETURNING p.*;
+
+-- name: ClearProjectIssueLifecycle :one
+UPDATE project
+SET default_issue_lifecycle_id = NULL,
+    updated_at = now()
+WHERE id = sqlc.arg('project_id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+RETURNING *;
+
 -- name: GetIssueLifecycleByID :one
 SELECT *
 FROM issue_lifecycle
@@ -86,6 +157,20 @@ WHERE workspace_id = $1
   AND lifecycle_id = $2
   AND id = $3;
 
+-- name: ListIssueLifecycleStatuses :many
+SELECT *
+FROM issue_lifecycle_status
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND lifecycle_id = sqlc.arg('lifecycle_id')::uuid
+  AND (sqlc.arg('include_archived')::boolean OR archived_at IS NULL)
+ORDER BY position ASC, created_at ASC, id ASC;
+
+-- name: CountIssueLifecycleStatuses :one
+SELECT count(*)::bigint
+FROM issue_lifecycle_status
+WHERE workspace_id = $1
+  AND lifecycle_id = $2;
+
 -- name: BindIssueToDefaultLifecycle :one
 UPDATE issue AS i
 SET lifecycle_id = w.default_issue_lifecycle_id,
@@ -98,6 +183,30 @@ WHERE i.id = sqlc.arg('issue_id')::uuid
   AND w.id = i.workspace_id
   AND s.workspace_id = i.workspace_id
   AND s.legacy_status_key = i.status
+RETURNING i.*;
+
+-- name: BindIssueToLifecycleStatus :one
+UPDATE issue
+SET lifecycle_id = sqlc.arg('lifecycle_id')::uuid,
+    lifecycle_status_id = sqlc.arg('lifecycle_status_id')::uuid
+WHERE id = sqlc.arg('issue_id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+RETURNING *;
+
+-- name: UpdateIssueLifecycleStatus :one
+UPDATE issue AS i
+SET status = s.legacy_status_key,
+    lifecycle_status_id = s.id,
+    revision = i.revision + 1,
+    updated_at = now()
+FROM issue_lifecycle_status AS s
+WHERE i.id = sqlc.arg('issue_id')::uuid
+  AND i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND s.id = sqlc.arg('lifecycle_status_id')::uuid
+  AND s.workspace_id = i.workspace_id
+  AND s.lifecycle_id = i.lifecycle_id
+  AND s.legacy_status_key IS NOT NULL
+  AND s.archived_at IS NULL
 RETURNING i.*;
 
 -- name: InsertIssueTransition :execrows

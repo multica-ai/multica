@@ -208,6 +208,12 @@ export interface Issue {
   updated_at: string;
   /** Monotonic server revision; absent when connected to an older backend. */
   revision?: number;
+  /** Stable lifecycle definition pinned when the issue was created. */
+  lifecycle_id?: string | null;
+  /** Stable status-node identity inside lifecycle_id. */
+  lifecycle_status_id?: string | null;
+  /** Optimistic lifecycle cursor; send back as expected_transition_id. */
+  transition_id?: string | null;
   /**
    * Null until the server's historical activity backfill reaches this row.
    * This RFC3339 timestamp may include sub-second precision while legacy

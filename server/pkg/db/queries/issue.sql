@@ -8,7 +8,7 @@
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-       i.revision
+       i.revision, i.lifecycle_id, i.lifecycle_status_id, i.last_transition_id
 FROM issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -150,11 +150,16 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
-    (SELECT default_issue_lifecycle_id FROM workspace WHERE id = $1),
+    COALESCE(
+        (SELECT default_issue_lifecycle_id FROM project WHERE id = $15 AND workspace_id = $1),
+        (SELECT default_issue_lifecycle_id FROM workspace WHERE id = $1)
+    ),
     (
         SELECT s.id
         FROM workspace AS w
-        JOIN issue_lifecycle_status AS s ON s.lifecycle_id = w.default_issue_lifecycle_id
+        LEFT JOIN project AS p ON p.id = $15 AND p.workspace_id = w.id
+        JOIN issue_lifecycle_status AS s
+          ON s.lifecycle_id = COALESCE(p.default_issue_lifecycle_id, w.default_issue_lifecycle_id)
         WHERE w.id = $1
           AND s.workspace_id = $1
           AND s.legacy_status_key = $4
@@ -248,6 +253,7 @@ UPDATE issue AS i SET
     stage = changed.next_stage,
     lifecycle_id = COALESCE(
         i.lifecycle_id,
+        (SELECT default_issue_lifecycle_id FROM project WHERE id = changed.next_project_id AND workspace_id = i.workspace_id),
         (SELECT default_issue_lifecycle_id FROM workspace WHERE id = i.workspace_id)
     ),
     lifecycle_status_id = CASE
@@ -257,6 +263,7 @@ UPDATE issue AS i SET
             WHERE s.workspace_id = i.workspace_id
               AND s.lifecycle_id = COALESCE(
                   i.lifecycle_id,
+                  (SELECT default_issue_lifecycle_id FROM project WHERE id = changed.next_project_id AND workspace_id = i.workspace_id),
                   (SELECT default_issue_lifecycle_id FROM workspace WHERE id = i.workspace_id)
               )
               AND s.legacy_status_key = changed.next_status
@@ -289,6 +296,7 @@ UPDATE issue AS i SET
     status = $2,
     lifecycle_id = COALESCE(
         i.lifecycle_id,
+        (SELECT default_issue_lifecycle_id FROM project WHERE id = i.project_id AND workspace_id = i.workspace_id),
         (SELECT default_issue_lifecycle_id FROM workspace WHERE id = i.workspace_id)
     ),
     lifecycle_status_id = CASE
@@ -298,6 +306,7 @@ UPDATE issue AS i SET
             WHERE s.workspace_id = i.workspace_id
               AND s.lifecycle_id = COALESCE(
                   i.lifecycle_id,
+                  (SELECT default_issue_lifecycle_id FROM project WHERE id = i.project_id AND workspace_id = i.workspace_id),
                   (SELECT default_issue_lifecycle_id FROM workspace WHERE id = i.workspace_id)
               )
               AND s.legacy_status_key = $2
@@ -328,11 +337,16 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
-    (SELECT default_issue_lifecycle_id FROM workspace WHERE id = $1),
+    COALESCE(
+        (SELECT default_issue_lifecycle_id FROM project WHERE id = $15 AND workspace_id = $1),
+        (SELECT default_issue_lifecycle_id FROM workspace WHERE id = $1)
+    ),
     (
         SELECT s.id
         FROM workspace AS w
-        JOIN issue_lifecycle_status AS s ON s.lifecycle_id = w.default_issue_lifecycle_id
+        LEFT JOIN project AS p ON p.id = $15 AND p.workspace_id = w.id
+        JOIN issue_lifecycle_status AS s
+          ON s.lifecycle_id = COALESCE(p.default_issue_lifecycle_id, w.default_issue_lifecycle_id)
         WHERE w.id = $1
           AND s.workspace_id = $1
           AND s.legacy_status_key = $4
@@ -410,7 +424,7 @@ DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-       i.revision
+       i.revision, i.lifecycle_id, i.lifecycle_status_id, i.last_transition_id
 FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains visible.

@@ -224,11 +224,16 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, now(), COALESCE($17::uuid, gen_random_uuid()),
-    (SELECT default_issue_lifecycle_id FROM workspace WHERE id = $1),
+    COALESCE(
+        (SELECT default_issue_lifecycle_id FROM project WHERE id = $15 AND workspace_id = $1),
+        (SELECT default_issue_lifecycle_id FROM workspace WHERE id = $1)
+    ),
     (
         SELECT s.id
         FROM workspace AS w
-        JOIN issue_lifecycle_status AS s ON s.lifecycle_id = w.default_issue_lifecycle_id
+        LEFT JOIN project AS p ON p.id = $15 AND p.workspace_id = w.id
+        JOIN issue_lifecycle_status AS s
+          ON s.lifecycle_id = COALESCE(p.default_issue_lifecycle_id, w.default_issue_lifecycle_id)
         WHERE w.id = $1
           AND s.workspace_id = $1
           AND s.legacy_status_key = $4
@@ -322,11 +327,16 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17, $18, now(), COALESCE($19::uuid, gen_random_uuid()),
-    (SELECT default_issue_lifecycle_id FROM workspace WHERE id = $1),
+    COALESCE(
+        (SELECT default_issue_lifecycle_id FROM project WHERE id = $15 AND workspace_id = $1),
+        (SELECT default_issue_lifecycle_id FROM workspace WHERE id = $1)
+    ),
     (
         SELECT s.id
         FROM workspace AS w
-        JOIN issue_lifecycle_status AS s ON s.lifecycle_id = w.default_issue_lifecycle_id
+        LEFT JOIN project AS p ON p.id = $15 AND p.workspace_id = w.id
+        JOIN issue_lifecycle_status AS s
+          ON s.lifecycle_id = COALESCE(p.default_issue_lifecycle_id, w.default_issue_lifecycle_id)
         WHERE w.id = $1
           AND s.workspace_id = $1
           AND s.legacy_status_key = $4
@@ -1126,7 +1136,7 @@ const listIssues = `-- name: ListIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-       i.revision
+       i.revision, i.lifecycle_id, i.lifecycle_status_id, i.last_transition_id
 FROM issue i
 WHERE i.workspace_id = $1
   AND ($4::text IS NULL OR i.status = $4)
@@ -1197,29 +1207,32 @@ type ListIssuesParams struct {
 }
 
 type ListIssuesRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Title          string             `json:"title"`
-	Description    pgtype.Text        `json:"description"`
-	Status         string             `json:"status"`
-	Priority       string             `json:"priority"`
-	AssigneeType   pgtype.Text        `json:"assignee_type"`
-	AssigneeID     pgtype.UUID        `json:"assignee_id"`
-	CreatorType    string             `json:"creator_type"`
-	CreatorID      pgtype.UUID        `json:"creator_id"`
-	ParentIssueID  pgtype.UUID        `json:"parent_issue_id"`
-	Position       float64            `json:"position"`
-	StartDate      pgtype.Date        `json:"start_date"`
-	DueDate        pgtype.Date        `json:"due_date"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
-	Number         int32              `json:"number"`
-	ProjectID      pgtype.UUID        `json:"project_id"`
-	Metadata       []byte             `json:"metadata"`
-	Stage          pgtype.Int4        `json:"stage"`
-	Properties     []byte             `json:"properties"`
-	Revision       int64              `json:"revision"`
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	Title             string             `json:"title"`
+	Description       pgtype.Text        `json:"description"`
+	Status            string             `json:"status"`
+	Priority          string             `json:"priority"`
+	AssigneeType      pgtype.Text        `json:"assignee_type"`
+	AssigneeID        pgtype.UUID        `json:"assignee_id"`
+	CreatorType       string             `json:"creator_type"`
+	CreatorID         pgtype.UUID        `json:"creator_id"`
+	ParentIssueID     pgtype.UUID        `json:"parent_issue_id"`
+	Position          float64            `json:"position"`
+	StartDate         pgtype.Date        `json:"start_date"`
+	DueDate           pgtype.Date        `json:"due_date"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LastActivityAt    pgtype.Timestamptz `json:"last_activity_at"`
+	Number            int32              `json:"number"`
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	Metadata          []byte             `json:"metadata"`
+	Stage             pgtype.Int4        `json:"stage"`
+	Properties        []byte             `json:"properties"`
+	Revision          int64              `json:"revision"`
+	LifecycleID       pgtype.UUID        `json:"lifecycle_id"`
+	LifecycleStatusID pgtype.UUID        `json:"lifecycle_status_id"`
+	LastTransitionID  pgtype.UUID        `json:"last_transition_id"`
 }
 
 // involves_user_id widens the assignee filter to surface issues where the user
@@ -1274,6 +1287,9 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 			&i.Stage,
 			&i.Properties,
 			&i.Revision,
+			&i.LifecycleID,
+			&i.LifecycleStatusID,
+			&i.LastTransitionID,
 		); err != nil {
 			return nil, err
 		}
@@ -1289,7 +1305,7 @@ const listOpenIssues = `-- name: ListOpenIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-       i.revision
+       i.revision, i.lifecycle_id, i.lifecycle_status_id, i.last_transition_id
 FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains visible.
@@ -1406,29 +1422,32 @@ type ListOpenIssuesParams struct {
 }
 
 type ListOpenIssuesRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Title          string             `json:"title"`
-	Description    pgtype.Text        `json:"description"`
-	Status         string             `json:"status"`
-	Priority       string             `json:"priority"`
-	AssigneeType   pgtype.Text        `json:"assignee_type"`
-	AssigneeID     pgtype.UUID        `json:"assignee_id"`
-	CreatorType    string             `json:"creator_type"`
-	CreatorID      pgtype.UUID        `json:"creator_id"`
-	ParentIssueID  pgtype.UUID        `json:"parent_issue_id"`
-	Position       float64            `json:"position"`
-	StartDate      pgtype.Date        `json:"start_date"`
-	DueDate        pgtype.Date        `json:"due_date"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
-	Number         int32              `json:"number"`
-	ProjectID      pgtype.UUID        `json:"project_id"`
-	Metadata       []byte             `json:"metadata"`
-	Stage          pgtype.Int4        `json:"stage"`
-	Properties     []byte             `json:"properties"`
-	Revision       int64              `json:"revision"`
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	Title             string             `json:"title"`
+	Description       pgtype.Text        `json:"description"`
+	Status            string             `json:"status"`
+	Priority          string             `json:"priority"`
+	AssigneeType      pgtype.Text        `json:"assignee_type"`
+	AssigneeID        pgtype.UUID        `json:"assignee_id"`
+	CreatorType       string             `json:"creator_type"`
+	CreatorID         pgtype.UUID        `json:"creator_id"`
+	ParentIssueID     pgtype.UUID        `json:"parent_issue_id"`
+	Position          float64            `json:"position"`
+	StartDate         pgtype.Date        `json:"start_date"`
+	DueDate           pgtype.Date        `json:"due_date"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LastActivityAt    pgtype.Timestamptz `json:"last_activity_at"`
+	Number            int32              `json:"number"`
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	Metadata          []byte             `json:"metadata"`
+	Stage             pgtype.Int4        `json:"stage"`
+	Properties        []byte             `json:"properties"`
+	Revision          int64              `json:"revision"`
+	LifecycleID       pgtype.UUID        `json:"lifecycle_id"`
+	LifecycleStatusID pgtype.UUID        `json:"lifecycle_status_id"`
+	LastTransitionID  pgtype.UUID        `json:"last_transition_id"`
 }
 
 // See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
@@ -1477,6 +1496,9 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 			&i.Stage,
 			&i.Properties,
 			&i.Revision,
+			&i.LifecycleID,
+			&i.LifecycleStatusID,
+			&i.LastTransitionID,
 		); err != nil {
 			return nil, err
 		}
@@ -1855,6 +1877,7 @@ UPDATE issue AS i SET
     stage = changed.next_stage,
     lifecycle_id = COALESCE(
         i.lifecycle_id,
+        (SELECT default_issue_lifecycle_id FROM project WHERE id = changed.next_project_id AND workspace_id = i.workspace_id),
         (SELECT default_issue_lifecycle_id FROM workspace WHERE id = i.workspace_id)
     ),
     lifecycle_status_id = CASE
@@ -1864,6 +1887,7 @@ UPDATE issue AS i SET
             WHERE s.workspace_id = i.workspace_id
               AND s.lifecycle_id = COALESCE(
                   i.lifecycle_id,
+                  (SELECT default_issue_lifecycle_id FROM project WHERE id = changed.next_project_id AND workspace_id = i.workspace_id),
                   (SELECT default_issue_lifecycle_id FROM workspace WHERE id = i.workspace_id)
               )
               AND s.legacy_status_key = changed.next_status
@@ -1965,6 +1989,7 @@ UPDATE issue AS i SET
     status = $2,
     lifecycle_id = COALESCE(
         i.lifecycle_id,
+        (SELECT default_issue_lifecycle_id FROM project WHERE id = i.project_id AND workspace_id = i.workspace_id),
         (SELECT default_issue_lifecycle_id FROM workspace WHERE id = i.workspace_id)
     ),
     lifecycle_status_id = CASE
@@ -1974,6 +1999,7 @@ UPDATE issue AS i SET
             WHERE s.workspace_id = i.workspace_id
               AND s.lifecycle_id = COALESCE(
                   i.lifecycle_id,
+                  (SELECT default_issue_lifecycle_id FROM project WHERE id = i.project_id AND workspace_id = i.workspace_id),
                   (SELECT default_issue_lifecycle_id FROM workspace WHERE id = i.workspace_id)
               )
               AND s.legacy_status_key = $2

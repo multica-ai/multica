@@ -142,6 +142,47 @@ describe("ApiClient edit guards", () => {
   });
 });
 
+describe("ApiClient issue lifecycle routes", () => {
+  it("serializes effective lifecycle, mode, and stable-node transition requests", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response("{}", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await client.getEffectiveIssueLifecycle("project-1", true);
+    await client.updateProjectIssueLifecycle("project-1", "custom");
+    await client.transitionIssueStatusNode("issue-1", {
+      lifecycle_status_id: "status-2",
+      expected_revision: 9,
+      expected_transition_id: "transition-8",
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/issue-lifecycles/effective?project_id=project-1&include_archived=true",
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "https://api.example.test/api/projects/project-1/issue-lifecycle",
+    );
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("PUT");
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      mode: "custom",
+    });
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      "https://api.example.test/api/issues/issue-1/transitions",
+    );
+    expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+      lifecycle_status_id: "status-2",
+      expected_revision: 9,
+      expected_transition_id: "transition-8",
+    });
+  });
+});
+
 describe("ApiClient pull-request response schema", () => {
   const validPR = {
     id: "pr-1",

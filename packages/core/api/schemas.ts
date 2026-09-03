@@ -65,6 +65,8 @@ import type {
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
   IssueStatusEntry,
+  IssueLifecycleResponse,
+  TransitionIssueStatusNodeResponse,
   ListIssueStatusesResponse,
   NotificationPreferenceResponse,
   PluginInstallation,
@@ -518,6 +520,55 @@ export const EMPTY_LIST_ISSUE_STATUSES_RESPONSE: ListIssueStatusesResponse = {
   statuses: [],
   categories: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   total: 0,
+};
+
+export const IssueLifecycleDefinitionSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  scope_type: z.string(),
+  scope_id: z.string(),
+  name: z.string(),
+  revision: z.number().int().positive(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const IssueLifecycleStatusNodeSchema = z.object({
+  id: z.string(),
+  lifecycle_id: z.string(),
+  legacy_status_key: z.string().nullable().default(null),
+  name: z.string(),
+  description: z.string().default(""),
+  color: z.string().default("#6b7280"),
+  position: z.number().default(0),
+  phase: z.string(),
+  outcome: z.string().nullable().default(null),
+  entry_policy: z.record(z.string(), z.unknown()).default({}),
+  entry_policy_revision: z.number().int().positive().default(1),
+  archived_at: z.string().nullable().default(null),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const IssueLifecycleResponseSchema = z.object({
+  lifecycle: IssueLifecycleDefinitionSchema,
+  statuses: z.array(IssueLifecycleStatusNodeSchema).default([]),
+  mode: z.string(),
+}).loose();
+
+export const EMPTY_ISSUE_LIFECYCLE_RESPONSE: IssueLifecycleResponse = {
+  lifecycle: {
+    id: "",
+    workspace_id: "",
+    scope_type: "workspace",
+    scope_id: "",
+    name: "",
+    revision: 1,
+    created_at: "",
+    updated_at: "",
+  },
+  statuses: [],
+  mode: "default",
 };
 
 export const ResourceLabelsResponseSchema = z.object({
@@ -1241,6 +1292,11 @@ export const IssueSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   revision: z.number().int().positive().optional(),
+  // Additive lifecycle identity. Drop only a malformed field instead of
+  // degrading the entire issue/list response during a mixed-version rollout.
+  lifecycle_id: z.string().nullable().optional().catch(undefined),
+  lifecycle_status_id: z.string().nullable().optional().catch(undefined),
+  transition_id: z.string().nullable().optional().catch(undefined),
   // Optional for compatibility with older self-hosted backends; a current
   // backend emits null until its historical backfill reaches the issue.
   last_activity_at: z.string().nullable().optional(),
@@ -1248,6 +1304,51 @@ export const IssueSchema = z.object({
   // erase an otherwise usable issue returned by a mixed-version server.
   source_context: IssueSourceContextSchema.optional().catch(undefined),
 }).loose();
+
+export const IssueTransitionRecordSchema = z.object({
+  id: z.string(),
+  from_status_id: z.string().nullable(),
+  to_status_id: z.string(),
+  actor_type: z.string(),
+  actor_id: z.string().nullable(),
+  cause: z.string(),
+  issue_revision_before: z.number().int().positive(),
+  issue_revision_after: z.number().int().positive(),
+  created_at: z.string(),
+}).loose();
+
+export const TransitionIssueStatusNodeResponseSchema = z.object({
+  issue: IssueSchema,
+  transition: IssueTransitionRecordSchema.nullable(),
+}).loose();
+
+export const EMPTY_TRANSITION_ISSUE_STATUS_NODE_RESPONSE: TransitionIssueStatusNodeResponse = {
+  issue: {
+    id: "",
+    workspace_id: "",
+    number: 0,
+    identifier: "",
+    title: "",
+    description: null,
+    status: "todo",
+    priority: "none",
+    assignee_type: null,
+    assignee_id: null,
+    creator_type: "member",
+    creator_id: "",
+    parent_issue_id: null,
+    project_id: null,
+    position: 0,
+    stage: null,
+    start_date: null,
+    due_date: null,
+    metadata: {},
+    properties: {},
+    created_at: "",
+    updated_at: "",
+  },
+  transition: null,
+};
 
 export const ListIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),

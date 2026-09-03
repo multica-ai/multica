@@ -46,17 +46,85 @@ func LegacyCategoryPhase(category string) (phase string, outcome pgtype.Text, er
 // and transition recording.
 type Querier interface {
 	EnsureDefaultIssueLifecycle(context.Context, pgtype.UUID) (db.IssueLifecycle, error)
+	EnsureProjectIssueLifecycle(context.Context, db.EnsureProjectIssueLifecycleParams) (db.IssueLifecycle, error)
 	SeedIssueStatusEntries(context.Context, pgtype.UUID) error
 	SetWorkspaceDefaultIssueLifecycle(context.Context, db.SetWorkspaceDefaultIssueLifecycleParams) error
+	SetProjectIssueLifecycle(context.Context, db.SetProjectIssueLifecycleParams) (db.Project, error)
+	ClearProjectIssueLifecycle(context.Context, db.ClearProjectIssueLifecycleParams) (db.Project, error)
 	SyncDefaultIssueLifecycleStatuses(context.Context, db.SyncDefaultIssueLifecycleStatusesParams) error
 	GetDefaultIssueLifecycle(context.Context, pgtype.UUID) (db.IssueLifecycle, error)
+	GetEffectiveIssueLifecycle(context.Context, db.GetEffectiveIssueLifecycleParams) (db.IssueLifecycle, error)
 	GetIssueLifecycleByID(context.Context, db.GetIssueLifecycleByIDParams) (db.IssueLifecycle, error)
 	BumpIssueLifecycleRevision(context.Context, db.BumpIssueLifecycleRevisionParams) (db.IssueLifecycle, error)
+	CountIssueLifecycleStatuses(context.Context, db.CountIssueLifecycleStatusesParams) (int64, error)
+	CloneIssueLifecycleStatuses(context.Context, db.CloneIssueLifecycleStatusesParams) (int64, error)
 	GetIssueLifecycleStatusByLegacyKey(context.Context, db.GetIssueLifecycleStatusByLegacyKeyParams) (db.IssueLifecycleStatus, error)
 	BindIssueToDefaultLifecycle(context.Context, db.BindIssueToDefaultLifecycleParams) (db.Issue, error)
+	BindIssueToLifecycleStatus(context.Context, db.BindIssueToLifecycleStatusParams) (db.Issue, error)
 	InsertIssueTransition(context.Context, db.InsertIssueTransitionParams) (int64, error)
 	GetIssueTransitionByRevision(context.Context, db.GetIssueTransitionByRevisionParams) (db.IssueTransition, error)
 	SetIssueLastTransition(context.Context, db.SetIssueLastTransitionParams) (db.Issue, error)
+}
+
+// Effective resolves the lifecycle used by a newly created issue. A project
+// with no override inherits the workspace default; existing issues never call
+// this during ordinary reads, because their concrete lifecycle_id is pinned.
+func Effective(ctx context.Context, q Querier, workspaceID, projectID pgtype.UUID) (db.IssueLifecycle, error) {
+	lifecycle, err := q.GetEffectiveIssueLifecycle(ctx, db.GetEffectiveIssueLifecycleParams{
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		return db.IssueLifecycle{}, fmt.Errorf("get effective issue lifecycle: %w", err)
+	}
+	return lifecycle, nil
+}
+
+// CustomizeProject creates (or reuses) one lifecycle owned by the project.
+// The workspace default is cloned only for a brand-new, empty definition. A
+// project that switches back to Use Default can later re-enable its previous
+// custom definition without silently importing newer workspace nodes.
+func CustomizeProject(ctx context.Context, q Querier, workspaceID, projectID pgtype.UUID) (db.IssueLifecycle, error) {
+	workspaceDefault, err := q.GetDefaultIssueLifecycle(ctx, workspaceID)
+	if err != nil {
+		return db.IssueLifecycle{}, fmt.Errorf("get workspace default issue lifecycle: %w", err)
+	}
+	custom, err := q.EnsureProjectIssueLifecycle(ctx, db.EnsureProjectIssueLifecycleParams{
+		ProjectID: projectID, WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return db.IssueLifecycle{}, fmt.Errorf("ensure project issue lifecycle: %w", err)
+	}
+	count, err := q.CountIssueLifecycleStatuses(ctx, db.CountIssueLifecycleStatusesParams{
+		WorkspaceID: workspaceID, LifecycleID: custom.ID,
+	})
+	if err != nil {
+		return db.IssueLifecycle{}, fmt.Errorf("count project lifecycle statuses: %w", err)
+	}
+	if count == 0 {
+		if _, err := q.CloneIssueLifecycleStatuses(ctx, db.CloneIssueLifecycleStatusesParams{
+			WorkspaceID: workspaceID, SourceLifecycleID: workspaceDefault.ID, TargetLifecycleID: custom.ID,
+		}); err != nil {
+			return db.IssueLifecycle{}, fmt.Errorf("clone workspace lifecycle statuses: %w", err)
+		}
+	}
+	if _, err := q.SetProjectIssueLifecycle(ctx, db.SetProjectIssueLifecycleParams{
+		ProjectID: projectID, WorkspaceID: workspaceID, LifecycleID: custom.ID,
+	}); err != nil {
+		return db.IssueLifecycle{}, fmt.Errorf("set project issue lifecycle: %w", err)
+	}
+	return custom, nil
+}
+
+// UseWorkspaceDefault removes only the project's default pointer. Issues that
+// were already created remain pinned to their original lifecycle and status.
+func UseWorkspaceDefault(ctx context.Context, q Querier, workspaceID, projectID pgtype.UUID) error {
+	if _, err := q.ClearProjectIssueLifecycle(ctx, db.ClearProjectIssueLifecycleParams{
+		ProjectID: projectID, WorkspaceID: workspaceID,
+	}); err != nil {
+		return fmt.Errorf("clear project issue lifecycle: %w", err)
+	}
+	return nil
 }
 
 // EnsureDefault creates or repairs a workspace's shadow lifecycle projection.
@@ -122,7 +190,8 @@ func RecordTransition(
 	actor TransitionActor,
 	cause string,
 ) (db.Issue, db.IssueTransition, bool, error) {
-	if previous != nil && previous.Status == current.Status {
+	if previous != nil && previous.Status == current.Status &&
+		previous.LifecycleID == current.LifecycleID && previous.LifecycleStatusID == current.LifecycleStatusID {
 		return current, db.IssueTransition{}, false, nil
 	}
 	if actor.Type == "" {
@@ -134,16 +203,29 @@ func RecordTransition(
 
 	if !current.LifecycleID.Valid || !current.LifecycleStatusID.Valid {
 		// A workspace written by an older rolling-deploy binary may not have a
-		// default lifecycle yet. Bootstrap it lazily before binding the issue;
-		// both operations are idempotent and remain inside the caller's tx.
+		// default lifecycle yet. Bootstrap it lazily, then bind the issue to the
+		// lifecycle effective for its project. Both operations are idempotent and
+		// remain inside the caller's transaction.
 		if err := q.SeedIssueStatusEntries(ctx, current.WorkspaceID); err != nil {
 			return db.Issue{}, db.IssueTransition{}, false, fmt.Errorf("seed issue status catalog: %w", err)
 		}
 		if _, err := EnsureDefault(ctx, q, current.WorkspaceID); err != nil {
 			return db.Issue{}, db.IssueTransition{}, false, fmt.Errorf("ensure issue lifecycle: %w", err)
 		}
-		bound, err := q.BindIssueToDefaultLifecycle(ctx, db.BindIssueToDefaultLifecycleParams{
+		lifecycle, err := Effective(ctx, q, current.WorkspaceID, current.ProjectID)
+		if err != nil {
+			return db.Issue{}, db.IssueTransition{}, false, err
+		}
+		status, err := q.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
+			WorkspaceID: current.WorkspaceID, LifecycleID: lifecycle.ID,
+			LegacyStatusKey: pgtype.Text{String: current.Status, Valid: true},
+		})
+		if err != nil {
+			return db.Issue{}, db.IssueTransition{}, false, fmt.Errorf("resolve effective lifecycle status %q: %w", current.Status, err)
+		}
+		bound, err := q.BindIssueToLifecycleStatus(ctx, db.BindIssueToLifecycleStatusParams{
 			IssueID: current.ID, WorkspaceID: current.WorkspaceID,
+			LifecycleID: lifecycle.ID, LifecycleStatusID: status.ID,
 		})
 		if err != nil {
 			return db.Issue{}, db.IssueTransition{}, false, fmt.Errorf("bind issue lifecycle: %w", err)

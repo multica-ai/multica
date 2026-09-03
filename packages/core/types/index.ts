@@ -5,6 +5,13 @@ export type {
   ListIssueStatusesResponse,
   CreateIssueStatusRequest,
   UpdateIssueStatusRequest,
+  IssueLifecyclePhase,
+  IssueLifecycleDefinition,
+  IssueLifecycleStatusNode,
+  IssueLifecycleResponse,
+  IssueTransitionRecord,
+  TransitionIssueStatusNodeRequest,
+  TransitionIssueStatusNodeResponse,
 } from "./issue-status";
 export type {
   Agent,
