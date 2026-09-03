@@ -1114,8 +1114,16 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	authMs = time.Since(start).Milliseconds()
 
-	ack, m, err := h.processHeartbeat(r.Context(), rt, req.SupportsBatchImport)
-	updateMs = m.UpdateMs
+	updateStart := time.Now()
+	if err := h.recordHeartbeat(r.Context(), rt); err != nil {
+		updateMs = time.Since(updateStart).Milliseconds()
+		outcome = "error_update"
+		writeError(w, http.StatusInternalServerError, "heartbeat failed")
+		return
+	}
+	updateMs = time.Since(updateStart).Milliseconds()
+
+	ack, m, err := h.processHeartbeat(r.Context(), runtimeID, req.SupportsBatchImport)
 	probeModelMs = m.ProbeModelMs
 	popModelMs = m.PopModelMs
 	probeSkillsMs = m.ProbeSkillsMs
@@ -1154,41 +1162,39 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// HandleDaemonWSHeartbeat is the daemonws.HeartbeatHandler entry point: it
-// resolves the runtime, verifies the connection's workspace owns it, and
-// returns the ack payload. It is the WebSocket-side mirror of DaemonHeartbeat.
-//
-// Workspace authorization is re-checked on every heartbeat instead of trusted
-// from the upgrade-time check because runtime ownership can change (e.g. a
-// runtime is reassigned to another workspace mid-connection).
-//
-// When the runtime row is missing (pgx.ErrNoRows), the function returns a
-// successful ack with Status=HeartbeatStatusRuntimeGone and RuntimeGone=true
-// instead of an error. That keeps the hub from logging every beat at Warn,
-// and tells the daemon to drop the stale runtime and re-register. Other DB
-// errors still propagate as errors so they keep their existing Warn logging
-// and the daemon does not mistake a hiccup for a deletion.
+// HandleDaemonWSHeartbeat is the daemonws.HeartbeatHandler entry point. The
+// WebSocket upgrade already batch-authenticated the fixed runtime set and
+// captured each runtime's liveness state in a connection lease, so the hot
+// path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
+// fallback for a daemon that stops receiving WebSocket acknowledgements.
 func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
-	runtimeUUID, err := util.ParseUUID(runtimeID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid runtime_id: %w", err)
+	lease := identity.RuntimeLeases[runtimeID]
+	if lease == nil {
+		return nil, fmt.Errorf("runtime not in connection lease")
 	}
-	rt, err := h.getAgentRuntime(ctx, obsmetrics.RuntimeLookupSourceHeartbeatWS, runtimeUUID)
-	if err != nil {
-		if isNotFound(err) {
-			return &protocol.DaemonHeartbeatAckPayload{
-				RuntimeID:   runtimeID,
-				Status:      protocol.HeartbeatStatusRuntimeGone,
-				RuntimeGone: true,
-			}, nil
-		}
-		return nil, fmt.Errorf("get agent runtime: %w", err)
-	}
-	if !identity.AllowsWorkspace(uuidToString(rt.WorkspaceID)) {
+	if !identity.AllowsWorkspace(lease.Snapshot().WorkspaceID) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
-	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport)
+	if err := h.recordHeartbeatLease(ctx, runtimeID, lease); err != nil {
+		if isNotFound(err) {
+			if h.DaemonRuntimeGone != nil {
+				h.NotifyRuntimeGone(runtimeID)
+				return nil, nil
+			}
+			return runtimeGoneHeartbeatAck(runtimeID), nil
+		}
+		return nil, err
+	}
+	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
 	return ack, err
+}
+
+func runtimeGoneHeartbeatAck(runtimeID string) *protocol.DaemonHeartbeatAckPayload {
+	return &protocol.DaemonHeartbeatAckPayload{
+		RuntimeID:   runtimeID,
+		Status:      protocol.HeartbeatStatusRuntimeGone,
+		RuntimeGone: true,
+	}
 }
 
 // recordHeartbeat marks the runtime as alive. When LivenessStore is available
@@ -1205,24 +1211,57 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 // coalesce many runtimes' bumps into one bulk UPDATE per tick. See
 // heartbeat_scheduler.go for the two implementations.
 func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error {
+	return h.recordHeartbeatState(ctx, rt.ID, uuidToString(rt.ID), heartbeatLivenessState{
+		Status:          rt.Status,
+		LastSeenAt:      rt.LastSeenAt.Time,
+		LastSeenAtValid: rt.LastSeenAt.Valid,
+	}, nil)
+}
+
+func (h *Handler) recordHeartbeatLease(ctx context.Context, runtimeID string, lease *daemonws.RuntimeLease) error {
+	runtimeUUID, err := util.ParseUUID(runtimeID)
+	if err != nil {
+		return fmt.Errorf("invalid runtime_id: %w", err)
+	}
+	state := lease.Snapshot()
+	return h.recordHeartbeatState(ctx, runtimeUUID, runtimeID, heartbeatLivenessState{
+		Status:          state.Status,
+		LastSeenAt:      state.LastSeenAt,
+		LastSeenAtValid: state.LastSeenAtValid,
+	}, lease.MarkDBWriteScheduled)
+}
+
+type heartbeatLivenessState struct {
+	Status          string
+	LastSeenAt      time.Time
+	LastSeenAtValid bool
+}
+
+func (h *Handler) recordHeartbeatState(
+	ctx context.Context,
+	runtimeUUID pgtype.UUID,
+	runtimeID string,
+	state heartbeatLivenessState,
+	markDBWriteScheduled func(time.Time),
+) error {
 	now := time.Now()
 
 	// Decide whether the DB row needs a write *before* touching Redis, so a
 	// Touch failure can simply force needDBWrite=true without re-evaluating
 	// the structural reasons.
 	needDBWrite := !h.LivenessStore.Available() ||
-		rt.Status != "online" ||
-		!rt.LastSeenAt.Valid ||
-		now.Sub(rt.LastSeenAt.Time) >= runtimeHeartbeatDBFlushInterval
+		state.Status != "online" ||
+		!state.LastSeenAtValid ||
+		now.Sub(state.LastSeenAt) >= runtimeHeartbeatDBFlushInterval
 
 	if h.LivenessStore.Available() {
-		if err := h.LivenessStore.Touch(ctx, uuidToString(rt.ID), runtimeLivenessTTL); err != nil {
+		if err := h.LivenessStore.Touch(ctx, runtimeID, runtimeLivenessTTL); err != nil {
 			// Redis hiccup: degrade transparently to the DB-only path for
 			// this beat. The sweeper falls back to its DB threshold the
 			// same way when IsAliveBatch fails, so end-to-end correctness
 			// is preserved.
 			slog.Warn("liveness touch failed; falling back to DB heartbeat",
-				"runtime_id", uuidToString(rt.ID), "error", err)
+				"runtime_id", runtimeID, "error", err)
 			needDBWrite = true
 		}
 	}
@@ -1231,33 +1270,40 @@ func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error
 		return nil
 	}
 
-	// Either bumps last_seen_at on an already-online row (Touch + race
-	// fallback) or flips status from offline to online. The scheduler
-	// chooses sync vs batched per case; see HeartbeatScheduler doc.
-	return h.HeartbeatScheduler.Schedule(ctx, rt)
+	// Status transitions remain synchronous so the acknowledgement cannot race
+	// dependent work that expects an online row. The steady-state online bump
+	// is ID-only and may be coalesced by the production scheduler.
+	if state.Status != "online" || !state.LastSeenAtValid {
+		if _, err := h.Queries.MarkAgentRuntimeOnline(ctx, runtimeUUID); err != nil {
+			return err
+		}
+		if markDBWriteScheduled != nil {
+			markDBWriteScheduled(now)
+		}
+		return nil
+	}
+	if err := h.HeartbeatScheduler.Schedule(ctx, runtimeUUID); err != nil {
+		return err
+	}
+	if markDBWriteScheduled != nil {
+		markDBWriteScheduled(now)
+	}
+	return nil
 }
 
 // heartbeatMetrics carries per-stage timings out of processHeartbeat so the
 // HTTP slow-log can stay structured. The WS path discards them.
 type heartbeatMetrics struct {
-	UpdateMs, ProbeModelMs, PopModelMs, ProbeSkillsMs, PopSkillsMs, ProbeImportMs, PopImportMs int64
-	ProbeModelTimedOut, ProbeSkillsTimedOut, ProbeImportTimedOut                               bool
+	ProbeModelMs, PopModelMs, ProbeSkillsMs, PopSkillsMs, ProbeImportMs, PopImportMs int64
+	ProbeModelTimedOut, ProbeSkillsTimedOut, ProbeImportTimedOut                     bool
 }
 
-// processHeartbeat does the work shared by HTTP POST /api/daemon/heartbeat and
-// the WebSocket daemon:heartbeat path: records liveness and pulls any pending
-// actions queued for the runtime. Auth and request decoding live in the
-// caller because they differ between transports.
-func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
+// processHeartbeat pulls pending actions for both HTTP and WebSocket
+// heartbeats using only the runtime ID. Each transport records liveness first:
+// HTTP uses its stateless runtime row, while WebSocket uses the connection
+// lease. Auth and request decoding also remain transport-specific.
+func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
 	var m heartbeatMetrics
-	runtimeID := uuidToString(rt.ID)
-
-	updateStart := time.Now()
-	if err := h.recordHeartbeat(ctx, rt); err != nil {
-		m.UpdateMs = time.Since(updateStart).Milliseconds()
-		return nil, m, err
-	}
-	m.UpdateMs = time.Since(updateStart).Milliseconds()
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
 

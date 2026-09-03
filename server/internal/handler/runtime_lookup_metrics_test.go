@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	dto "github.com/prometheus/client_model/go"
@@ -14,17 +15,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
-// TestAgentRuntimeLookupSourcesAreDistinct drives the three entry points the
-// investigation in MUL-6884 could not tell apart — the WebSocket heartbeat, the
-// HTTP heartbeat fallback, and a browser poll — and asserts each lands on its
-// own source.
-//
-// This is the whole point of the metric. All three issue the same statement, so
-// pg_stat_statements sums them into one row; if they also shared a Prometheus
-// label the counter would answer no question the database could not already
-// answer, and the follow-up decision (raise the heartbeat interval, or back off
-// the 500ms polls) would still be a guess.
-func TestAgentRuntimeLookupSourcesAreDistinct(t *testing.T) {
+// TestAgentRuntimeLookupWSHotPathIsZeroRead drives 1,000 heartbeats through one
+// connection lease and proves they do not increment the GetAgentRuntime metric.
+// HTTP fallback and browser polling remain attributed as before.
+func TestAgentRuntimeLookupWSHotPathIsZeroRead(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -35,17 +29,27 @@ func TestAgentRuntimeLookupSourcesAreDistinct(t *testing.T) {
 		"workspace_id": testWorkspaceID,
 		"device_info":  "lookup source runtime",
 	})
+	fake := &fakeLivenessStore{available: true, aliveOK: true}
+	h := *testHandler
+	h.LivenessStore = fake
+	identity := daemonws.ClientIdentity{
+		WorkspaceID: testWorkspaceID,
+		RuntimeLeases: map[string]*daemonws.RuntimeLease{
+			runtimeID: daemonws.NewRuntimeLease(testWorkspaceID, "online", time.Now(), true),
+		},
+	}
 
 	before := lookupSnapshot(t, m)
 
-	if _, err := testHandler.HandleDaemonWSHeartbeat(ctx,
-		daemonws.ClientIdentity{WorkspaceID: testWorkspaceID}, runtimeID, false); err != nil {
-		t.Fatalf("HandleDaemonWSHeartbeat: %v", err)
+	for i := 0; i < 1000; i++ {
+		if _, err := h.HandleDaemonWSHeartbeat(ctx, identity, runtimeID, false); err != nil {
+			t.Fatalf("HandleDaemonWSHeartbeat %d: %v", i, err)
+		}
 	}
 
 	httpBeat := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat",
 		map[string]any{"runtime_id": runtimeID}, testWorkspaceID, "lookup-source-daemon")
-	testutil.Call(t, testHandler.DaemonHeartbeat, httpBeat).Want(http.StatusOK)
+	testutil.Call(t, h.DaemonHeartbeat, httpBeat).Want(http.StatusOK)
 
 	// A model poll for a runtime that no longer exists: the read-access gate
 	// runs the lookup before any auth check, so this exercises the poll's
@@ -58,7 +62,6 @@ func TestAgentRuntimeLookupSourcesAreDistinct(t *testing.T) {
 	for _, want := range []struct {
 		source, result string
 	}{
-		{obsmetrics.RuntimeLookupSourceHeartbeatWS, obsmetrics.RuntimeLookupResultOK},
 		{obsmetrics.RuntimeLookupSourceHeartbeatHTTP, obsmetrics.RuntimeLookupResultOK},
 		{obsmetrics.RuntimeLookupSourceRuntimeModelPoll, obsmetrics.RuntimeLookupResultNotFound},
 	} {
@@ -70,6 +73,7 @@ func TestAgentRuntimeLookupSourcesAreDistinct(t *testing.T) {
 	// The poll must not have been billed to the heartbeat, nor the heartbeats
 	// to each other.
 	for _, key := range []string{
+		obsmetrics.RuntimeLookupSourceHeartbeatWS + "/" + obsmetrics.RuntimeLookupResultOK,
 		obsmetrics.RuntimeLookupSourceHeartbeatWS + "/" + obsmetrics.RuntimeLookupResultNotFound,
 		obsmetrics.RuntimeLookupSourceHeartbeatHTTP + "/" + obsmetrics.RuntimeLookupResultNotFound,
 		obsmetrics.RuntimeLookupSourceRuntimeModelPoll + "/" + obsmetrics.RuntimeLookupResultOK,
@@ -78,6 +82,9 @@ func TestAgentRuntimeLookupSourcesAreDistinct(t *testing.T) {
 		if got := after[key] - before[key]; got != 0 {
 			t.Errorf("%s delta = %v, want 0", key, got)
 		}
+	}
+	if got := fake.touchCount(); got != 1001 {
+		t.Errorf("liveness touches = %d, want 1001 (1,000 WS + 1 HTTP)", got)
 	}
 }
 

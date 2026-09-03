@@ -890,21 +890,24 @@ func TestDaemonHeartbeat_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	w = testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusNotFound)
 }
 
-// TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError pins the fix for
-// issue #2391: when GetAgentRuntime returns pgx.ErrNoRows (runtime row was
-// deleted server-side), the WS handler must return a successful ack with
-// RuntimeGone=true rather than an error. Returning an error makes the WS hub
-// log every beat at Warn — the flood the issue is about.
+// TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError pins the receipt
+// fallback for a deletion that missed active invalidation. The connection
+// lease schedules an ID-only write, whose missing row becomes RuntimeGone
+// instead of a handler error.
 func TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 
-	// A well-formed UUID that does NOT exist in agent_runtime. The handler
-	// must turn the resulting pgx.ErrNoRows into a RuntimeGone ack.
+	// A well-formed UUID that does NOT exist in agent_runtime.
 	missingRuntime := uuid.New().String()
 	ack, err := testHandler.HandleDaemonWSHeartbeat(context.Background(),
-		daemonws.ClientIdentity{WorkspaceID: testWorkspaceID},
+		daemonws.ClientIdentity{
+			WorkspaceID: testWorkspaceID,
+			RuntimeLeases: map[string]*daemonws.RuntimeLease{
+				missingRuntime: daemonws.NewRuntimeLease(testWorkspaceID, "online", time.Now().Add(-2*runtimeHeartbeatDBFlushInterval), true),
+			},
+		},
 		missingRuntime, false)
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
@@ -943,7 +946,12 @@ func TestHandleDaemonWSHeartbeat_AllowsAnyAuthorizedWorkspace(t *testing.T) {
 	})
 
 	ack, err := testHandler.HandleDaemonWSHeartbeat(ctx,
-		daemonws.ClientIdentity{WorkspaceIDs: []string{testWorkspaceID, workspaceID}},
+		daemonws.ClientIdentity{
+			WorkspaceIDs: []string{testWorkspaceID, workspaceID},
+			RuntimeLeases: map[string]*daemonws.RuntimeLease{
+				runtimeID: daemonws.NewRuntimeLease(workspaceID, "online", time.Now(), true),
+			},
+		},
 		runtimeID, false)
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
