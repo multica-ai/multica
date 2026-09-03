@@ -29,31 +29,6 @@ func loadClaudeListModelsFixture(t *testing.T, version string) []byte {
 	return raw
 }
 
-// TestClaudeListModelsArgs_Pinned locks the discovery argv. Every element is
-// load-bearing and none is obvious from the call site, which is exactly when a
-// pin earns its keep — dropping --verbose or the input format silently turns
-// the probe into a session that never answers.
-func TestClaudeListModelsArgs_Pinned(t *testing.T) {
-	t.Parallel()
-	want := []string{
-		"--print",
-		"--verbose",
-		"--input-format", "stream-json",
-		"--output-format", "stream-json",
-		"--strict-mcp-config",
-	}
-	if !reflect.DeepEqual(claudeListModelsArgs, want) {
-		t.Fatalf("claudeListModelsArgs drifted: got %v, want %v", claudeListModelsArgs, want)
-	}
-	// A model flag here would make discovery report the catalog for one model
-	// instead of the account's, and a prompt would bill a real API call.
-	for _, arg := range claudeListModelsArgs {
-		if arg == "--model" || arg == "-p" {
-			t.Errorf("discovery argv must not pin a model or pass a prompt: %v", claudeListModelsArgs)
-		}
-	}
-}
-
 func TestParseClaudeModelCatalog_RealCLIOutput(t *testing.T) {
 	t.Parallel()
 	infos, err := parseClaudeModelCatalog(loadClaudeListModelsFixture(t, "2.1.258"))

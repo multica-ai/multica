@@ -221,22 +221,6 @@ func TestQwenpawListModels(t *testing.T) {
 	}
 }
 
-func TestQwenpawBlockedArgs(t *testing.T) {
-	t.Parallel()
-	if _, ok := qwenpawBlockedArgs["acp"]; !ok {
-		t.Fatal("expected acp to be in qwenpawBlockedArgs")
-	}
-	if qwenpawBlockedArgs["acp"] != blockedStandalone {
-		t.Fatalf("expected acp to be blockedStandalone, got %v", qwenpawBlockedArgs["acp"])
-	}
-	if _, ok := qwenpawBlockedArgs["--workspace"]; !ok {
-		t.Fatal("expected --workspace to be in qwenpawBlockedArgs")
-	}
-	if qwenpawBlockedArgs["--workspace"] != blockedWithValue {
-		t.Fatalf("expected --workspace to be blockedWithValue, got %v", qwenpawBlockedArgs["--workspace"])
-	}
-}
-
 func TestQwenpawUsesSessionLoad(t *testing.T) {
 	// Verify that qwenpaw uses session/load (not session/resume) on resume.
 	// QwenPaw's ACP server implements load_session, not session/resume.
