@@ -271,6 +271,25 @@ describe("AuthInitializer recovery", () => {
     expect(getConfig).toHaveBeenCalledTimes(3);
   });
 
+  it("drops the query cache when a live session is rejected", async () => {
+    const api = makeApi();
+    const { queryClient } = renderInitializer({ api });
+
+    await waitFor(() => {
+      expect(useAuthStore.getState().status).toBe("authenticated");
+    });
+    queryClient.setQueryData(["issues", "ws-1"], [{ id: "i-1" }]);
+
+    act(() => {
+      useAuthStore.getState().sessionExpired();
+    });
+
+    await waitFor(() => {
+      expect(queryClient.getQueryData(["issues", "ws-1"])).toBeUndefined();
+    });
+    expect(useAuthStore.getState().expired).toBe(true);
+  });
+
   it("publishes a definitive logout for a genuine 401", async () => {
     const storage = makeStorage({ multica_token: "token-1" });
     const getMe = vi.fn().mockImplementation(() => {

@@ -9,13 +9,11 @@ import {
   captureSignupSource,
   identify as identifyAnalytics,
   initAnalytics,
-  resetAnalytics,
 } from "../analytics";
 import { configStore } from "../config";
 import { workspaceListOptions } from "../workspace/queries";
 import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
-import { setCurrentWorkspace } from "./workspace-storage";
 import type { ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 import type { User } from "../types";
@@ -205,6 +203,7 @@ export function AuthInitializer({
         user,
         isLoading: false,
         status: "authenticated",
+        expired: false,
       });
       identifyAnalytics(user.id, { email: user.email, name: user.name });
       if (authRecoveryPendingRef.current) {
@@ -215,24 +214,14 @@ export function AuthInitializer({
       }
     };
 
-    const onAuthFailure = () => {
-      onLogout?.();
-      resetAnalytics();
-      useAuthStore.setState({
-        user: null,
-        isLoading: false,
-        status: "unauthenticated",
-      });
-    };
-
     const rejectSession = () => {
       settled = true;
       window.removeEventListener("online", retryNow);
       if (retryTimer !== undefined) clearTimeout(retryTimer);
-      if (!cookieAuth) {
-        setCurrentWorkspace(null, null);
-      }
-      onAuthFailure();
+      // One teardown for every dead session, whether it died at boot or
+      // under a running shell. The api client's 401 hook has normally run
+      // this already by the time we get here; the action is idempotent.
+      useAuthStore.getState().sessionExpired();
     };
 
     const scheduleRetry = (attempt: () => Promise<void>) => {
@@ -348,6 +337,24 @@ export function AuthInitializer({
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retryGeneration]);
+
+  // An involuntary session end (401 → sessionExpired) leaves a fully warmed
+  // query cache behind, and every query in it has `staleTime: Infinity` — so
+  // whoever signs in next on this client, the same user or a colleague on a
+  // shared machine, would render the dead session's data and never refetch it
+  // away. Explicit logout already clears the cache (views/auth/use-logout);
+  // this covers the path the user did not choose. The effect runs after the
+  // commit that unmounted the shell on `user: null`, so nothing is left
+  // observing the queries it drops.
+  const authStatus = useAuthStore((state) => state.status);
+  const previousAuthStatus = useRef(authStatus);
+  useEffect(() => {
+    const previous = previousAuthStatus.current;
+    previousAuthStatus.current = authStatus;
+    if (previous === "authenticated" && authStatus === "unauthenticated") {
+      qc.clear();
+    }
+  }, [authStatus, qc]);
 
   return <>{children}</>;
 }

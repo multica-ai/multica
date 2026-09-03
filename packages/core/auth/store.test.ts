@@ -59,5 +59,80 @@ describe("authStore", () => {
     expect(onLogout).toHaveBeenCalledOnce();
     expect(store.getState().user).toBeNull();
     expect(store.getState().status).toBe("unauthenticated");
+    expect(store.getState().expired).toBe(false);
+  });
+
+  it("ends the session when the server rejects the credential", () => {
+    const storage = makeStorage({ multica_token: "t" });
+    const api = makeApi();
+    const onLogout = vi.fn();
+    const store = createAuthStore({ api, storage, onLogout });
+
+    store.setState({ user: fakeUser, status: "authenticated", isLoading: false });
+    store.getState().sessionExpired();
+
+    expect(storage.snapshot().multica_token).toBeUndefined();
+    expect(api.setToken).toHaveBeenCalledWith(null);
+    expect(onLogout).toHaveBeenCalledOnce();
+    expect(store.getState().user).toBeNull();
+    expect(store.getState().isLoading).toBe(false);
+    expect(store.getState().status).toBe("unauthenticated");
+    expect(store.getState().expired).toBe(true);
+  });
+
+  it("does not claim a session expired for a client that never had one", () => {
+    const storage = makeStorage();
+    const api = makeApi();
+    const store = createAuthStore({ api, storage, cookieAuth: true });
+
+    // Boot-time identity probe on a first visit: still "authenticating",
+    // no stored credential.
+    store.getState().sessionExpired();
+
+    expect(store.getState().status).toBe("unauthenticated");
+    expect(store.getState().expired).toBe(false);
+  });
+
+  it("flags expiry when a stored token is rejected at boot", () => {
+    const storage = makeStorage({ multica_token: "stale" });
+    const api = makeApi();
+    const store = createAuthStore({ api, storage });
+
+    store.getState().sessionExpired();
+
+    expect(store.getState().expired).toBe(true);
+    expect(storage.snapshot().multica_token).toBeUndefined();
+  });
+
+  it("treats a burst of parallel 401s as the one expiry it is", () => {
+    const storage = makeStorage({ multica_token: "t" });
+    const api = makeApi();
+    const onLogout = vi.fn();
+    const store = createAuthStore({ api, storage, onLogout });
+
+    store.setState({ user: fakeUser, status: "authenticated", isLoading: false });
+    store.getState().sessionExpired();
+    store.getState().sessionExpired();
+    store.getState().sessionExpired();
+
+    expect(onLogout).toHaveBeenCalledOnce();
+  });
+
+  it("clears the expired notice once the user signs back in", async () => {
+    const storage = makeStorage();
+    const api = {
+      setToken: vi.fn(),
+      getMe: vi.fn().mockResolvedValue(fakeUser),
+    } as unknown as ApiClient;
+    const store = createAuthStore({ api, storage });
+
+    store.setState({ user: fakeUser, status: "authenticated", isLoading: false });
+    store.getState().sessionExpired();
+    expect(store.getState().expired).toBe(true);
+
+    await store.getState().loginWithToken("fresh-token");
+
+    expect(store.getState().status).toBe("authenticated");
+    expect(store.getState().expired).toBe(false);
   });
 });

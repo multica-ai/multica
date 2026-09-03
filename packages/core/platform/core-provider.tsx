@@ -55,8 +55,17 @@ function initCore(
 
   const api = new ApiClient(apiBaseUrl, {
     logger: createLogger("api"),
+    // A 401 mid-session has to end the session, not just drop the token.
+    // Dropping it alone left the shell mounted with `user` still set, so no
+    // shell ever showed the login page and every following request went out
+    // unauthenticated — the user got a wall of "missing authorization"
+    // toasts with no way forward (MUL-7028). The store action is idempotent,
+    // so a screenful of parallel 401s is still one expiry.
+    //
+    // `authStore` is assigned a few lines below, synchronously, and this
+    // callback can only run from a request — never before boot finishes.
     onUnauthorized: () => {
-      storage.removeItem("multica_token");
+      authStore.getState().sessionExpired();
     },
     identity,
   });
