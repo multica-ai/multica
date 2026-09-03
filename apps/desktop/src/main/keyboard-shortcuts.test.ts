@@ -195,7 +195,7 @@ describe("handleAppShortcut — direct tab selection (Cmd/Ctrl+1..9)", () => {
     ).toBe(false);
   });
 
-  it("keeps Shift available as a distinct chord and rejects secondary modifiers", () => {
+  it("accepts layout-required Shift while rejecting secondary modifiers", () => {
     const wc = makeWc();
     expect(
       handleAppShortcut(
@@ -203,7 +203,7 @@ describe("handleAppShortcut — direct tab selection (Cmd/Ctrl+1..9)", () => {
         wc,
         "darwin",
       ),
-    ).toBe(false);
+    ).toEqual({ action: "select-tab", key: 1 });
     expect(
       handleAppShortcut(key("1", { meta: true, alt: true }), wc, "darwin"),
     ).toBe(false);
@@ -216,7 +216,7 @@ describe("handleAppShortcut — direct tab selection (Cmd/Ctrl+1..9)", () => {
     ).toBe(false);
   });
 
-  it("uses physical number-row codes on layouts whose logical keys are not digits", () => {
+  it("does not consume logical punctuation from a physical number-row key", () => {
     const wc = makeWc();
     expect(
       handleAppShortcut(
@@ -224,32 +224,25 @@ describe("handleAppShortcut — direct tab selection (Cmd/Ctrl+1..9)", () => {
         wc,
         "win32",
       ),
-    ).toEqual({ action: "select-tab", key: 1 });
+    ).toBe(false);
     expect(
       handleAppShortcut(
         key("ç", { control: true }, "Digit9"),
         wc,
         "win32",
       ),
-    ).toEqual({ action: "select-tab", key: 9 });
-    expect(
-      handleAppShortcut(
-        key("-", { control: true }, "Digit6"),
-        wc,
-        "win32",
-      ),
-    ).toEqual({ action: "select-tab", key: 6 });
+    ).toBe(false);
     expect(wc.setZoomLevel).not.toHaveBeenCalled();
   });
 
   it.each([1, 2, 3, 4, 5, 6, 7, 8, 9] as const)(
-    "maps physical Numpad%i regardless of its logical key",
+    "maps Numpad%i when its logical key is numeric",
     (shortcutKey) => {
       const wc = makeWc();
       expect(
         handleAppShortcut(
           key(
-            "Unidentified",
+            String(shortcutKey),
             { control: true },
             `Numpad${shortcutKey}`,
           ),
@@ -260,7 +253,18 @@ describe("handleAppShortcut — direct tab selection (Cmd/Ctrl+1..9)", () => {
     },
   );
 
-  it("does not trust a numeric logical key from a non-number physical code", () => {
+  it("does not consume a nonnumeric numpad key", () => {
+    const wc = makeWc();
+    expect(
+      handleAppShortcut(
+        key("End", { control: true }, "Numpad1"),
+        wc,
+        "win32",
+      ),
+    ).toBe(false);
+  });
+
+  it("uses a logical digit even when the physical key was remapped", () => {
     const wc = makeWc();
     expect(
       handleAppShortcut(
@@ -268,7 +272,7 @@ describe("handleAppShortcut — direct tab selection (Cmd/Ctrl+1..9)", () => {
         wc,
         "darwin",
       ),
-    ).toBe(false);
+    ).toEqual({ action: "select-tab", key: 1 });
   });
 
   it("swallows auto-repeat without issuing another selection", () => {

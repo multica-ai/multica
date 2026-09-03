@@ -21,7 +21,12 @@ import {
 
 function keyEvent(
   key: string,
-  modifiers: Partial<Pick<KeyboardEvent, "metaKey" | "ctrlKey" | "altKey" | "shiftKey">> = {},
+  fields: Partial<
+    Pick<
+      KeyboardEvent,
+      "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey"
+    >
+  > = {},
 ): KeyboardEvent {
   return {
     key,
@@ -29,7 +34,7 @@ function keyEvent(
     ctrlKey: false,
     altKey: false,
     shiftKey: false,
-    ...modifiers,
+    ...fields,
   } as KeyboardEvent;
 }
 
@@ -222,6 +227,30 @@ describe("keyboard shortcut definitions", () => {
     expect(
       isReservedShortcut(createShortcutChord("1"), "macos", "desktop"),
     ).toBe(false);
+  });
+
+  it("models layout-sensitive number-row chords by their logical key", () => {
+    const ampersand = shortcutFromEvent(
+      keyEvent("&", { code: "Digit1", ctrlKey: true }),
+      "windows",
+    );
+    expect(ampersand).toEqual(
+      createShortcutChord("&", { primary: true }),
+    );
+    expect(isReservedShortcut(ampersand!, "windows", "desktop")).toBe(
+      false,
+    );
+
+    const shiftedDigit = shortcutFromEvent(
+      keyEvent("1", { code: "Digit1", ctrlKey: true, shiftKey: true }),
+      "windows",
+    );
+    expect(shiftedDigit).toEqual(
+      createShortcutChord("1", { primary: true, shift: true }),
+    );
+    expect(isReservedShortcut(shiftedDigit!, "windows", "desktop")).toBe(
+      true,
+    );
   });
 
   it("reserves browser-owned accelerators on web but frees the bare chords on desktop", () => {

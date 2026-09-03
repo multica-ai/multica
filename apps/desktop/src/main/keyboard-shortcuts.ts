@@ -1,9 +1,9 @@
 import type { WebContents } from "electron";
 import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
 
-// Shape of the input subset we read from Electron's `before-input-event`.
-// Modeled as a structural type so the handler is unit-testable without a
-// real Electron Input instance.
+// Shape of the Electron `before-input-event` fields relevant to shortcut
+// policy. Modeled as a structural type so the handler is unit-testable
+// without a real Electron Input instance.
 export type ShortcutInput = {
   type: string;
   key: string;
@@ -77,16 +77,16 @@ export function handleAppShortcut(
   // 9 is interpreted by the renderer as "last tab" regardless of count.
   // Main owns the chord so it works while focus is inside any editor/control
   // and can prevent both renderer handlers and native accelerators from also
-  // acting. Match the physical code so number-row shortcuts work on layouts
-  // where the logical key is punctuation (for example, French AZERTY). Shift
-  // remains excluded so Cmd/Ctrl+Shift+digit stays available as a distinct
-  // chord. Holding the chord is swallowed without repeatedly changing MRU.
-  const tabSelectionMatch = /^(?:Digit|Numpad)([1-9])$/.exec(input.code);
-  if (!input.shift && tabSelectionMatch) {
+  // acting. Match the logical key, as Settings records and persists shortcuts
+  // using KeyboardEvent.key. This keeps an AZERTY Ctrl+& override reachable;
+  // pressing Shift on that layout produces the logical key "1" and selects
+  // tab 1. On QWERTY, Shift+Digit1 produces "!", so that chord stays distinct.
+  // Holding the chord is swallowed without repeatedly changing MRU.
+  if (/^[1-9]$/.test(input.key)) {
     if (input.isAutoRepeat) return true;
     return {
       action: "select-tab",
-      key: Number(tabSelectionMatch[1]) as TabSelectionShortcutKey,
+      key: Number(input.key) as TabSelectionShortcutKey,
     };
   }
 

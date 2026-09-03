@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import {
   createShortcutChord,
   configureShortcutPlatform,
+  configureShortcutRuntime,
   getShortcut,
   useShortcutStore,
 } from "@multica/core/shortcuts";
@@ -18,6 +19,7 @@ describe("KeyboardShortcutsTab", () => {
   afterEach(() => {
     cleanup();
     configureShortcutPlatform(null);
+    configureShortcutRuntime(null);
     useShortcutStore.getState().resetAll();
   });
 
@@ -63,6 +65,26 @@ describe("KeyboardShortcutsTab", () => {
     );
     expect(within(recorder).getByTitle("Ctrl")).toHaveTextContent("Ctrl");
     expect(within(recorder).getByTitle("E")).toHaveTextContent("E");
+  });
+
+  it("records logical punctuation from a physical number-row key", () => {
+    configureShortcutRuntime("desktop");
+    renderWithI18n(<KeyboardShortcutsTab />);
+    const recorder = screen.getByRole("button", {
+      name: "Change shortcut for Open search",
+    });
+
+    fireEvent.click(recorder);
+    fireEvent.keyDown(recorder, {
+      key: "&",
+      code: "Digit1",
+      ctrlKey: true,
+    });
+
+    expect(getShortcut("openSearch")).toEqual(
+      createShortcutChord("&", { primary: true }),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("only captures keys while the recorder is active", () => {
