@@ -8,6 +8,23 @@ SELECT * FROM agent
 WHERE workspace_id = $1 AND kind = 'user'
 ORDER BY created_at ASC;
 
+-- name: ListAgentsWithRuntimeCLI :many
+-- Quick Create needs only the bound runtime's CLI version, not the private
+-- machine resource. Project that one non-secret compatibility signal onto the
+-- visible agent in the same query so clients do not need runtime-list access.
+SELECT sqlc.embed(a),
+       CASE
+         WHEN jsonb_typeof(r.metadata->'cli_version') = 'string'
+           THEN r.metadata->>'cli_version'
+         ELSE ''
+       END::text AS runtime_cli_version
+FROM agent AS a
+LEFT JOIN agent_runtime AS r ON r.id = a.runtime_id
+WHERE a.workspace_id = @workspace_id
+  AND a.kind = 'user'
+  AND (@include_archived::boolean OR a.archived_at IS NULL)
+ORDER BY a.created_at ASC;
+
 -- name: ListAllAgentsAnyKind :many
 -- Every agent row in the workspace, INCLUDING `kind = 'system'` execution
 -- carriers (agent builder sessions) that ListAllAgents deliberately hides.

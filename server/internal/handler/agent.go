@@ -58,9 +58,15 @@ type AgentResponse struct {
 	// branch on this rather than on RuntimeID being falsy, and must not confuse
 	// it with a bound-but-offline runtime (a different user story: reconnect the
 	// machine vs. pick a new one).
-	RuntimeBound bool   `json:"runtime_bound"`
-	Name         string `json:"name"`
-	Description  string `json:"description"`
+	RuntimeBound bool `json:"runtime_bound"`
+	// RuntimeCLIVersion is the one non-secret runtime compatibility signal an
+	// invoker needs for Quick Create. ListAgents populates it even when the
+	// bound machine is private; other response paths omit it. This preserves
+	// runtime resource privacy while avoiding a second, permission-filtered
+	// runtime-list request that used to turn "not visible" into "CLI missing".
+	RuntimeCLIVersion *string `json:"runtime_cli_version,omitempty"`
+	Name              string  `json:"name"`
+	Description       string  `json:"description"`
 	// Instructions is what this agent's owner wrote. For a system agent it
 	// holds only the workspace's own notes — the product half lives in
 	// SystemInstructions and is never stored on the row.
@@ -969,12 +975,15 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := requestUserID(r)
 
-	var agents []db.Agent
-	var err error
-	if r.URL.Query().Get("include_archived") == "true" {
-		agents, err = h.Queries.ListAllAgents(r.Context(), parseUUID(workspaceID))
-	} else {
-		agents, err = h.Queries.ListAgents(r.Context(), parseUUID(workspaceID))
+	agents := []db.Agent{}
+	runtimeCLIVersions := map[string]string{}
+	rows, err := h.Queries.ListAgentsWithRuntimeCLI(r.Context(), db.ListAgentsWithRuntimeCLIParams{
+		WorkspaceID:     parseUUID(workspaceID),
+		IncludeArchived: r.URL.Query().Get("include_archived") == "true",
+	})
+	for _, row := range rows {
+		agents = append(agents, row.Agent)
+		runtimeCLIVersions[uuidToString(row.Agent.ID)] = row.RuntimeCliVersion
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agents")
@@ -1031,6 +1040,8 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		resp := h.agentToResponse(a)
+		cliVersion := runtimeCLIVersions[resp.ID]
+		resp.RuntimeCLIVersion = &cliVersion
 		applyInvocationTargetsToResponse(&resp, targets)
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
