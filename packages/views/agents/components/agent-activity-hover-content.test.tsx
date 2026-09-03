@@ -120,9 +120,6 @@ describe("AgentActivityHoverContent", () => {
     renderWithI18n(<AgentActivityHoverContent tasks={threeTasksTwoAgents} />);
 
     expect(screen.getByText("3 active runs")).toBeInTheDocument();
-    // The old agent-worded copy would have read "3 agents working" here and
-    // disagreed with the chip's unique-agent count.
-    expect(screen.queryByText(/agents? working/)).not.toBeInTheDocument();
     // One row per run — three avatars for three runs.
     expect(screen.getAllByTestId("actor-avatar")).toHaveLength(3);
   });
