@@ -66,8 +66,10 @@ func TestTaskWakeupURL(t *testing.T) {
 func TestRunTaskWakeupConnectionSignalsDisconnect(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	connected := make(chan struct{})
+	capabilities := make(chan string, 1)
 	closeConnection := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capabilities <- r.Header.Get("X-Client-Capabilities")
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
@@ -100,6 +102,9 @@ func TestRunTaskWakeupConnectionSignalsDisconnect(t *testing.T) {
 	case <-connected:
 	case <-time.After(time.Second):
 		t.Fatal("websocket did not connect")
+	}
+	if got := <-capabilities; !strings.Contains(got, protocol.DaemonCapabilityClaimPollHintsV1) {
+		t.Fatalf("WS capabilities = %q, missing %q", got, protocol.DaemonCapabilityClaimPollHintsV1)
 	}
 	select {
 	case <-taskWakeups: // initial catch-up claim

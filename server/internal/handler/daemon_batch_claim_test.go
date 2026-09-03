@@ -7,8 +7,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
@@ -46,14 +50,18 @@ func postBatchClaim(t *testing.T, workspaceID string, runtimeIDs []string, maxTa
 func postBatchClaimWithCapabilities(t *testing.T, workspaceID string, runtimeIDs []string, maxTasks int, capabilities string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/claim",
-		map[string]any{"daemon_id": batchClaimTestDaemonID, "runtime_ids": runtimeIDs, "max_tasks": maxTasks},
-		workspaceID, batchClaimTestDaemonID)
+	req := batchClaimRequest(workspaceID, runtimeIDs, maxTasks, capabilities)
+	testHandler.ClaimTasksByRuntime(w, req)
+	return w
+}
+
+func batchClaimRequest(workspaceID string, runtimeIDs []string, maxTasks int, capabilities string) *http.Request {
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/claim",
+		map[string]any{"daemon_id": batchClaimTestDaemonID, "runtime_ids": runtimeIDs, "max_tasks": maxTasks}, workspaceID, batchClaimTestDaemonID)
 	if capabilities != "" {
 		req.Header.Set("X-Client-Capabilities", capabilities)
 	}
-	testHandler.ClaimTasksByRuntime(w, req)
-	return w
+	return req
 }
 
 // batchClaimTestDaemonID is the daemon id used by both the mdt_ token context
@@ -75,28 +83,91 @@ func TestClaimTasksByRuntime_ClaimPollHintSchedulesNextDeferredTask(t *testing.T
 		"fire_at":    testutil.Raw("now() + interval '5 seconds'"),
 	})
 
-	w := postBatchClaimWithCapabilities(t, testWorkspaceID, []string{runtimeID}, 1, protocol.DaemonCapabilityClaimPollHintsV1)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var hinted batchClaimResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &hinted); err != nil {
-		t.Fatalf("decode hinted response: %v", err)
-	}
+	hinted := testutil.Decode[batchClaimResponse](t, testHandler.ClaimTasksByRuntime,
+		batchClaimRequest(testWorkspaceID, []string{runtimeID}, 1, protocol.DaemonCapabilityClaimPollHintsV1), http.StatusOK)
 	if !hinted.ClaimPollHintSupported {
-		t.Fatalf("response = %s, want claim poll hint support", w.Body.String())
+		t.Fatal("response did not confirm claim poll hint support")
 	}
 	if hinted.NextDeferredTaskAfterMillis <= 0 || hinted.NextDeferredTaskAfterMillis > 5000 {
 		t.Fatalf("next deferred delay = %dms, want 1..5000ms", hinted.NextDeferredTaskAfterMillis)
 	}
 
-	w = postBatchClaim(t, testWorkspaceID, []string{runtimeID}, 1)
-	var legacy batchClaimResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &legacy); err != nil {
-		t.Fatalf("decode legacy response: %v", err)
-	}
+	legacy := testutil.Decode[batchClaimResponse](t, testHandler.ClaimTasksByRuntime,
+		batchClaimRequest(testWorkspaceID, []string{runtimeID}, 1, ""), http.StatusOK)
 	if legacy.ClaimPollHintSupported || legacy.NextDeferredTaskAfterMillis != 0 {
-		t.Fatalf("legacy response unexpectedly exposed poll hints: %s", w.Body.String())
+		t.Fatalf("legacy response unexpectedly exposed poll hints: %+v", legacy)
+	}
+}
+
+func TestNextDeferredTaskFireAtForRuntimes_OmitsIneligibleOverdueTasks(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	tests := []struct {
+		name        string
+		runtimeCols testutil.Cols
+		occupied    bool
+		wantHint    bool
+	}{
+		{name: "eligible", wantHint: true},
+		{name: "occupied", occupied: true},
+		{name: "runtime offline", runtimeCols: testutil.Cols{"status": "offline"}},
+		{name: "runtime stale", runtimeCols: testutil.Cols{
+			"last_seen_at": testutil.Raw("now() - interval '10 minutes'"),
+			"updated_at":   testutil.Raw("now() - interval '10 minutes'"),
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtimeID := dbfx.Runtime(t, "deferred hint "+tt.name, tt.runtimeCols)
+			agentID := dbfx.Agent(t, "deferred hint "+tt.name, runtimeID)
+			issueID := dbfx.Issue(t, "deferred hint "+tt.name)
+			dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id": runtimeID,
+				"issue_id":   issueID,
+				"status":     "deferred",
+				"fire_at":    testutil.Raw("now() - interval '1 second'"),
+			})
+			if tt.occupied {
+				dbfx.Task(t, agentID, testutil.Cols{
+					"runtime_id": runtimeID,
+					"issue_id":   issueID,
+					"status":     "queued",
+				})
+			}
+
+			next, err := testHandler.Queries.NextDeferredTaskFireAtForRuntimes(t.Context(), db.NextDeferredTaskFireAtForRuntimesParams{
+				RuntimeIds:       []pgtype.UUID{parseUUID(runtimeID)},
+				RuntimeStaleSecs: service.RuntimeClaimFreshnessSeconds,
+			})
+			if err != nil {
+				t.Fatalf("NextDeferredTaskFireAtForRuntimes: %v", err)
+			}
+			if next.Valid != tt.wantHint {
+				t.Fatalf("hint validity = %v, want %v", next.Valid, tt.wantHint)
+			}
+		})
+	}
+}
+
+func TestClaimPollHintDelayHasOneSecondFloor(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	for _, tt := range []struct {
+		name   string
+		fireAt time.Time
+		want   time.Duration
+	}{
+		{name: "overdue", fireAt: now.Add(-time.Minute), want: time.Second},
+		{name: "sub-second", fireAt: now.Add(100 * time.Millisecond), want: time.Second},
+		{name: "future", fireAt: now.Add(5 * time.Second), want: 5 * time.Second},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := claimPollHintDelay(now, tt.fireAt); got != tt.want {
+				t.Fatalf("claimPollHintDelay() = %s, want %s", got, tt.want)
+			}
+		})
 	}
 }
 

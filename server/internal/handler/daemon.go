@@ -37,6 +37,13 @@ import (
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
+// claimPollHintMinDelay bounds a future mismatch between the hint query and
+// deferred-task promotion to at most one follow-up claim per second. Under the
+// shared eligibility fences an overdue task should normally be promoted by the
+// current request, so this is a defense-in-depth floor rather than the steady
+// state poll interval.
+const claimPollHintMinDelay = time.Second
+
 // ---------------------------------------------------------------------------
 // Daemon workspace ownership helpers
 // ---------------------------------------------------------------------------
@@ -1826,26 +1833,34 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{"tasks": out}
 	// Only opted-in daemons understand this additive response metadata. Query
 	// after the claim so a future fire_at can shorten the long healthy-WS safety
-	// poll; a task that crossed fire_at during this request yields a 1ms hint and
-	// is promoted on the next claim. If the lookup fails, omit the support bit so
-	// the daemon conservatively retains its ordinary PollInterval.
+	// poll; a task that crossed fire_at during this request yields a bounded
+	// follow-up hint and is promoted on the next claim. If the lookup fails,
+	// omit the support bit so the daemon conservatively retains its ordinary
+	// PollInterval.
 	if len(out) < maxTasks && requestHasClientCapability(r, protocol.DaemonCapabilityClaimPollHintsV1) {
-		nextDeferred, nextErr := h.Queries.NextDeferredTaskFireAtForRuntimes(r.Context(), authorized)
+		nextDeferred, nextErr := h.Queries.NextDeferredTaskFireAtForRuntimes(r.Context(), db.NextDeferredTaskFireAtForRuntimesParams{
+			RuntimeIds:       authorized,
+			RuntimeStaleSecs: service.RuntimeClaimFreshnessSeconds,
+		})
 		if nextErr != nil {
 			slog.Warn("batch claim: next deferred task lookup failed; retaining short client poll",
 				"error", nextErr)
 		} else {
 			response["claim_poll_hint_supported"] = true
 			if nextDeferred.Valid {
-				afterMillis := time.Until(nextDeferred.Time).Milliseconds()
-				if afterMillis < 1 {
-					afterMillis = 1
-				}
-				response["next_deferred_task_after_ms"] = afterMillis
+				response["next_deferred_task_after_ms"] = claimPollHintDelay(time.Now(), nextDeferred.Time).Milliseconds()
 			}
 		}
 	}
 	writeMeasuredJSON(w, http.StatusOK, response)
+}
+
+func claimPollHintDelay(now, fireAt time.Time) time.Duration {
+	delay := fireAt.Sub(now)
+	if delay < claimPollHintMinDelay {
+		return claimPollHintMinDelay
+	}
+	return delay
 }
 
 // claimBuildFailure captures a pre-response failure from

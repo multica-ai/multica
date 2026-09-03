@@ -49,8 +49,8 @@ func TestClient_ClaimTasks_PostsRuntimeSetAndParsesTasks(t *testing.T) {
 	if gotPath != "/api/daemon/tasks/claim" {
 		t.Errorf("path = %q, want /api/daemon/tasks/claim", gotPath)
 	}
-	if !strings.Contains(gotCapabilities, protocol.DaemonCapabilityClaimPollHintsV1) {
-		t.Errorf("capabilities = %q, missing %q", gotCapabilities, protocol.DaemonCapabilityClaimPollHintsV1)
+	if strings.Contains(gotCapabilities, protocol.DaemonCapabilityClaimPollHintsV1) {
+		t.Errorf("HTTP capabilities = %q, unexpectedly advertise WS-only %q", gotCapabilities, protocol.DaemonCapabilityClaimPollHintsV1)
 	}
 	if gotBody.DaemonID != "daemon-x" {
 		t.Errorf("posted daemon_id = %q, want daemon-x", gotBody.DaemonID)

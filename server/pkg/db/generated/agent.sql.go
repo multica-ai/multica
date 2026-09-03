@@ -7016,6 +7016,13 @@ SELECT MIN(fire_at)::timestamptz
 FROM agent_task_queue t
 WHERE t.runtime_id = ANY($1::uuid[])
   AND t.status = 'deferred'
+  AND EXISTS (
+    SELECT 1 FROM agent_runtime r
+    WHERE r.id = t.runtime_id
+      AND r.status = 'online'
+      AND COALESCE(r.last_seen_at, r.updated_at) >=
+          now() - make_interval(secs => $2::double precision)
+  )
   AND (
     t.fire_at > now()
     OR NOT EXISTS (
@@ -7031,13 +7038,21 @@ WHERE t.runtime_id = ANY($1::uuid[])
   )
 `
 
+type NextDeferredTaskFireAtForRuntimesParams struct {
+	RuntimeIds       []pgtype.UUID `json:"runtime_ids"`
+	RuntimeStaleSecs float64       `json:"runtime_stale_secs"`
+}
+
 // Returns the next future deferred task for a daemon's authorized runtime set,
 // or an eligible task that crossed fire_at during this claim. Overdue tasks
-// blocked by an existing issue+agent occupant are omitted so they cannot cause
-// a tight poll loop. The response converts the timestamp to a relative delay,
-// avoiding any dependency on daemon/server clock synchronization.
-func (q *Queries) NextDeferredTaskFireAtForRuntimes(ctx context.Context, runtimeIds []pgtype.UUID) (pgtype.Timestamptz, error) {
-	row := q.db.QueryRow(ctx, nextDeferredTaskFireAtForRuntimes, runtimeIds)
+// whose runtime is offline/stale or that are blocked by an existing issue+agent
+// occupant are omitted so they cannot cause a tight poll loop. Keep both fences
+// in sync with PromoteDueDeferredTasksForRuntimes: a task that cannot be
+// promoted must not advertise an immediate follow-up claim. The response
+// converts the timestamp to a relative delay, avoiding any dependency on
+// daemon/server clock synchronization.
+func (q *Queries) NextDeferredTaskFireAtForRuntimes(ctx context.Context, arg NextDeferredTaskFireAtForRuntimesParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, nextDeferredTaskFireAtForRuntimes, arg.RuntimeIds, arg.RuntimeStaleSecs)
 	var column_1 pgtype.Timestamptz
 	err := row.Scan(&column_1)
 	return column_1, err
