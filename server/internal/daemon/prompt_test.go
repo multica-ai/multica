@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -35,16 +36,6 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		// context section is conditional and must not be an apology log
 		"include ONLY when the input cited external resources",
 		"never use it as an apology log",
-		// output/reporting must be workspace-prefix agnostic. Workspaces can
-		// use custom issue prefixes, so a successful issue creation should
-		// not look failed merely because the identifier does not match one
-		// fixed prefix.
-		"multica issue create --output json",
-		"JSON response",
-		"identifier",
-		"Do not scrape human output",
-		"do not assume any workspace issue prefix",
-		"Created <identifier-or-id>: <title>",
 		// hard rules
 		"never invent requirements",
 		"never reduce multi-sentence input",
@@ -63,6 +54,92 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 
 	if strings.Contains(out, "do NOT pass `--attachment`") {
 		t.Errorf("buildQuickCreatePrompt carries the unconditional --attachment ban that conflicts with the quick-create ## Output delivery channel (MUL-5696)\n--- output ---\n%s", out)
+	}
+
+	// How to run the create, what to print, and how to pass a long
+	// description are RULES: true for every quick-create run, and required
+	// even on a turn whose user message never arrived. They are stated once
+	// in the brief (execenv.TestQuickCreateBriefOwnsRunAndOutputRules and
+	// TestSlimQuickCreateAvailableCommands pin them there). This function
+	// renders the modal's field VALUES; restating the rules alongside them
+	// put two hand-maintained copies in one context window (MUL-6984).
+	for _, moved := range []string{
+		"Output format:",
+		"Run exactly one `multica issue create --output json` invocation",
+		"Created <identifier-or-id>: <title>",
+		"Passing the description:",
+		"never `/tmp` or any machine-shared path",
+	} {
+		if strings.Contains(out, moved) {
+			t.Errorf("buildQuickCreatePrompt restates brief-owned rule %q\n--- output ---\n%s", moved, out)
+		}
+	}
+}
+
+// TestBuildAutopilotPromptCapsTriggerPayload covers the one unbounded value in
+// this prompt. A webhook body is written by whatever system fired the trigger,
+// so nothing in this workspace bounds its size, and the per-turn message is now
+// its only rendering (MUL-6984) — there is no second copy to fall back to and
+// no `autopilot runs` flag that fetches one run's payload. The cap therefore
+// has to truncate in place AND say so: a clipped JSON object read as a whole
+// one is worse than a short one, because the missing fields are invisible.
+func TestBuildAutopilotPromptCapsTriggerPayload(t *testing.T) {
+	t.Parallel()
+
+	oversized := `{"body":"` + strings.Repeat("x", autopilotTriggerPayloadCap*2) + `"}`
+	out := buildAutopilotPrompt(Task{
+		AutopilotRunID:          "run-1",
+		AutopilotID:             "autopilot-1",
+		AutopilotDescription:    "Check dependencies.",
+		AutopilotTriggerPayload: []byte(oversized),
+	})
+
+	if strings.Contains(out, oversized) {
+		t.Fatalf("oversized trigger payload rendered in full (%d bytes)", len(oversized))
+	}
+	if !strings.Contains(out, "trigger payload truncated") {
+		t.Errorf("truncated payload rendered without saying so\n---\n%s", out)
+	}
+	if !strings.Contains(out, "do not read it as a whole object") {
+		t.Errorf("truncation notice does not warn that the JSON is incomplete\n---\n%s", out)
+	}
+	// The instructions are the point of the run and must survive the cap.
+	if !strings.Contains(out, "Check dependencies.") {
+		t.Errorf("autopilot instructions lost alongside the capped payload\n---\n%s", out)
+	}
+
+	// A payload that fits is rendered verbatim — the cap must not touch the
+	// ordinary case, where the payload IS the trigger's meaning.
+	small := `{"action":"opened","number":7}`
+	out = buildAutopilotPrompt(Task{AutopilotRunID: "run-1", AutopilotTriggerPayload: []byte(small)})
+	if !strings.Contains(out, small) {
+		t.Errorf("payload under the cap was not rendered verbatim\n---\n%s", out)
+	}
+	if strings.Contains(out, "trigger payload truncated") {
+		t.Errorf("payload under the cap reported as truncated\n---\n%s", out)
+	}
+}
+
+// TestCapAutopilotTriggerPayloadCutsOnRuneBoundary keeps the truncation from
+// splitting a multi-byte character. A payload is arbitrary UTF-8 — issue
+// titles, chat messages, commit subjects — and a half rune renders as U+FFFD
+// in the middle of the text the agent is meant to read.
+func TestCapAutopilotTriggerPayloadCutsOnRuneBoundary(t *testing.T) {
+	t.Parallel()
+
+	// Three-byte runes so the cap lands mid-character for at least one offset.
+	payload := strings.Repeat("世", autopilotTriggerPayloadCap)
+	got := capAutopilotTriggerPayload(payload)
+	body := got[:strings.Index(got, "\n\n[trigger payload truncated")]
+
+	if !utf8.ValidString(body) {
+		t.Fatalf("truncated payload is not valid UTF-8 (%d bytes)", len(body))
+	}
+	if len(body) > autopilotTriggerPayloadCap {
+		t.Errorf("truncated body = %d bytes, want <= %d", len(body), autopilotTriggerPayloadCap)
+	}
+	if !strings.HasPrefix(payload, body) {
+		t.Error("truncated body is not a prefix of the original payload")
 	}
 }
 
@@ -282,84 +359,59 @@ func TestBuildQuickCreatePromptParentPinning(t *testing.T) {
 	}
 }
 
-// TestBuildPromptSquadLeaderNoActionFailureFallback locks the escape hatch added
-// in MUL-6622 / GH #7487. The comment prohibition is conditional on the
-// `squad activity` call succeeding — the server only rejects a leader comment
-// once the no_action activity exists — so a failed call must not end the turn in
-// silence. The fallback is capped at ONE comment so it cannot collide with the
-// one-comment-per-turn rule.
-func TestBuildPromptSquadLeaderNoActionFailureFallback(t *testing.T) {
-	out := BuildPrompt(Task{
-		IssueID:               "issue-123",
-		TriggerCommentID:      "comment-456",
-		TriggerCommentContent: "LGTM",
-		TriggerAuthorType:     "member",
-		TriggerAuthorName:     "Bohan",
-		IsLeaderTask:          true,
-		LeaderRoleResolved:    true,
-		Agent: &AgentData{
-			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
-		},
-	}, "claude")
+// TestBuildPromptSquadLeaderReplyCarveOutIgnoresTriggerAuthor is the MUL-2168
+// regression, retargeted at the surface that still branches on leadership.
+//
+// The bug was a leader posting "LGTM is a pure acknowledgment — no reply
+// needed. Exiting silently." — noise it produced because the per-turn
+// no_action rule only fired for AGENT-triggered comments, so a member's
+// comment bypassed it. That per-turn copy is gone (MUL-6984): the rule itself
+// now lives once, in the Squad Operating Protocol the server appends to
+// Instructions, and handler.TestSquadOperatingProtocolOwnsNoActionRule pins
+// its wording. What the per-turn message still owns is the reply imperative,
+// which must carry the carve-out so it cannot contradict the protocol — and,
+// as here, it must do so whoever wrote the triggering comment.
+func TestBuildPromptSquadLeaderReplyCarveOutIgnoresTriggerAuthor(t *testing.T) {
+	t.Parallel()
 
-	for _, want := range []string{
-		"conditional on that call SUCCEEDING",
-		"post exactly ONE short comment",
-		"does not license a second one",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("squad leader no_action rule must contain %q, got:\n%s", want, out)
+	for _, authorType := range []string{"member", "agent"} {
+		out := BuildPrompt(Task{
+			IssueID:               "issue-123",
+			TriggerCommentID:      "comment-456",
+			TriggerCommentContent: "LGTM",
+			TriggerAuthorType:     authorType,
+			TriggerAuthorName:     "Bohan",
+			IsLeaderTask:          true,
+			LeaderRoleResolved:    true,
+			Agent: &AgentData{
+				Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
+			},
+		}, "claude")
+
+		if !strings.Contains(out, "Unless your outcome is `no_action`, post your reply as a comment") {
+			t.Errorf("%s-triggered leader prompt lost the no_action carve-out\n---\n%s", authorType, out)
+		}
+		// The rule is stated by the protocol in Instructions, never restated
+		// here — a second hand-maintained copy in the same context window is
+		// what drifted before.
+		if strings.Contains(out, "Squad leader no_action rule") {
+			t.Errorf("%s-triggered leader prompt restates the no_action rule\n---\n%s", authorType, out)
 		}
 	}
-}
 
-// TestBuildPromptSquadLeaderNoActionForMemberTrigger verifies that the
-// squad leader no_action prohibition is injected in the per-turn prompt
-// regardless of whether the triggering comment was posted by an agent or
-// a member. This was the root cause of the "LGTM is a pure acknowledgment
-// — no reply needed. Exiting silently." noise comment: the prohibition
-// only fired for agent-triggered comments, so member-triggered ones
-// (like "LGTM") bypassed it.
-func TestBuildPromptSquadLeaderNoActionForMemberTrigger(t *testing.T) {
-	task := Task{
+	// A non-leader gets the unconditional imperative: the carve-out is a
+	// leader-only exception, and offering it to an ordinary agent would licence
+	// a silent exit no `squad activity` call ever records.
+	nonLeader := BuildPrompt(Task{
 		IssueID:               "issue-123",
 		TriggerCommentID:      "comment-456",
 		TriggerCommentContent: "LGTM",
-		TriggerAuthorType:     "member",
-		TriggerAuthorName:     "Bohan",
-		IsLeaderTask:          true,
-		LeaderRoleResolved:    true,
-		Agent: &AgentData{
-			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
-		},
-	}
-	out := BuildPrompt(task, "claude")
-	if !strings.Contains(out, "Squad leader no_action rule") {
-		t.Errorf("buildCommentPrompt must inject squad leader no_action rule for member-triggered comments, got:\n%s", out)
-	}
-	if !strings.Contains(out, "DO NOT post any comment") {
-		t.Errorf("buildCommentPrompt must contain DO NOT post prohibition for member-triggered squad leader, got:\n%s", out)
-	}
-}
-
-// TestBuildPromptSquadLeaderNoActionForAgentTrigger verifies the rule also
-// fires for agent-triggered comments (the original path that already worked).
-func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
-	task := Task{
-		IssueID:               "issue-123",
-		TriggerCommentID:      "comment-456",
-		TriggerCommentContent: "Deploy complete.",
 		TriggerAuthorType:     "agent",
-		TriggerAuthorName:     "deploy-boy",
-		IsLeaderTask:          true,
-		LeaderRoleResolved:    true,
-		Agent: &AgentData{
-			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
-		},
-	}
-	out := BuildPrompt(task, "claude")
-	if !strings.Contains(out, "Squad leader no_action rule") {
-		t.Errorf("buildCommentPrompt must inject squad leader no_action rule for agent-triggered comments, got:\n%s", out)
+		TriggerAuthorName:     "Worker",
+		Agent:                 &AgentData{Name: "Regular", Instructions: "You are a regular agent."},
+	}, "claude")
+	if strings.Contains(nonLeader, "Unless your outcome is `no_action`") {
+		t.Errorf("non-leader prompt carries the leader-only carve-out\n---\n%s", nonLeader)
 	}
 }
 
@@ -511,14 +563,8 @@ func TestBuildPromptLegacyServerKeepsBriefingBasedLeaderRole(t *testing.T) {
 		},
 	}, "claude")
 
-	for _, want := range []string{
-		"Squad leader no_action rule",
-		"multica squad activity",
-		"DO NOT post any comment",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("legacy-server leader prompt lost %q\n---\n%s", want, out)
-		}
+	if !strings.Contains(out, "Unless your outcome is `no_action`, post your reply as a comment") {
+		t.Fatalf("legacy-server leader prompt lost the leader-only reply carve-out\n---\n%s", out)
 	}
 }
 

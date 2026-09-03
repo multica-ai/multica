@@ -75,7 +75,17 @@ Your responsibilities, in order:
    activity and decide whether to delegate the next step, escalate to
    the human reporter, or close the loop. If no action is needed
    (e.g. a member posted a progress update that requires no response),
-   record ` + "`" + `no_action` + "`" + ` and exit silently.`
+   record ` + "`" + `no_action` + "`" + ` and exit silently. Exiting silently
+   means posting NO comment at all — not one announcing no_action, not
+   one acknowledging another agent, not one saying you are exiting. The
+   ` + "`" + `squad activity` + "`" + ` call IS the record; a comment on top of
+   it is noise. That prohibition holds only while the call succeeds — if
+   it errors, responsibility 3 applies and the turn leaves one short
+   comment instead.
+
+This section is the single statement of the no_action rule. The runtime
+brief and the per-turn message point back here rather than restating it;
+when the rule changes, it changes here.`
 
 // squadParentStatusOwned is responsibility 6 for the case where the issue this
 // leader was woken on is assigned to THIS squad. Only then does the leader own
