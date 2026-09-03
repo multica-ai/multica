@@ -23,11 +23,31 @@ const TaskContextMarkerRelPath = ".multica/daemon_task_context.json"
 // treating TaskContextMarkerRelPath as daemon-owned.
 const TaskContextMarkerManagedBy = "multica-daemon-task"
 
-type taskContextMarkerFile struct {
+type TaskContextMarker struct {
 	ManagedBy     string `json:"managed_by"`
 	AgentID       string `json:"agent_id,omitempty"`
 	IssueID       string `json:"issue_id,omitempty"`
 	ChatSessionID string `json:"chat_session_id,omitempty"`
+}
+
+// ReadTaskContextMarker reads a daemon-owned per-task context marker. Root
+// markers and malformed or foreign files are rejected so callers fail closed.
+func ReadTaskContextMarker(workDir string) (*TaskContextMarker, error) {
+	data, err := os.ReadFile(filepath.Join(workDir, TaskContextMarkerRelPath))
+	if err != nil {
+		return nil, err
+	}
+	var marker TaskContextMarker
+	if err := json.Unmarshal(data, &marker); err != nil {
+		return nil, err
+	}
+	marker.IssueID = strings.TrimSpace(marker.IssueID)
+	marker.ChatSessionID = strings.TrimSpace(marker.ChatSessionID)
+	marker.AgentID = strings.TrimSpace(marker.AgentID)
+	if marker.ManagedBy != TaskContextMarkerManagedBy || marker.AgentID == "" || (marker.IssueID == "") == (marker.ChatSessionID == "") {
+		return nil, errors.New("invalid daemon task context marker")
+	}
+	return &marker, nil
 }
 
 // EnsureWorkspacesRootMarker writes a persistent daemon-task marker at
@@ -57,7 +77,7 @@ func EnsureWorkspacesRootMarker(workspacesRoot string) error {
 	}
 	path := filepath.Join(workspacesRoot, TaskContextMarkerRelPath)
 	if existing, err := os.ReadFile(path); err == nil {
-		var marker taskContextMarkerFile
+		var marker TaskContextMarker
 		if json.Unmarshal(existing, &marker) == nil {
 			if marker.ManagedBy == TaskContextMarkerManagedBy {
 				return nil
@@ -72,7 +92,7 @@ func EnsureWorkspacesRootMarker(workspacesRoot string) error {
 		// can safely overwrite; surface it. Callers degrade non-fatally.
 		return fmt.Errorf("read workspaces root marker %s: %w", path, err)
 	}
-	payload := taskContextMarkerFile{ManagedBy: TaskContextMarkerManagedBy}
+	payload := TaskContextMarker{ManagedBy: TaskContextMarkerManagedBy}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal workspaces root marker: %w", err)
@@ -200,7 +220,7 @@ func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sid
 	// The sidecar manifest removes this marker on normal local_directory
 	// cleanup. If a crash leaves it behind, the CLI intentionally treats it
 	// as daemon context and fails closed instead of using a user PAT.
-	payload := taskContextMarkerFile{
+	payload := TaskContextMarker{
 		ManagedBy:     TaskContextMarkerManagedBy,
 		AgentID:       ctx.AgentID,
 		IssueID:       ctx.IssueID,
@@ -217,7 +237,7 @@ func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sid
 			if readErr != nil {
 				return fmt.Errorf("read existing task context marker: %w", readErr)
 			}
-			var marker taskContextMarkerFile
+			var marker TaskContextMarker
 			if json.Unmarshal(existing, &marker) != nil || marker.ManagedBy != TaskContextMarkerManagedBy {
 				return fmt.Errorf("write task context marker: %w", err)
 			}

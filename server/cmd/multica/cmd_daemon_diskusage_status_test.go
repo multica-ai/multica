@@ -118,6 +118,37 @@ func writeDiskUsageIssueTask(t *testing.T, root, wsID, taskShort, issueID string
 	}
 }
 
+func writeActiveDiskUsageIssueTask(t *testing.T, root, wsID, taskShort, issueID string) {
+	t.Helper()
+	taskDir := filepath.Join(root, wsID, taskShort, "workdir")
+	if err := os.MkdirAll(filepath.Join(taskDir, ".multica"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	provenance, err := json.Marshal(map[string]string{
+		"managed_by":   "multica-daemon-managed-env",
+		"workspace_id": wsID,
+		"agent_id":     "agent-1",
+		"issue_id":     issueID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(taskDir), ".managed_env.json"), provenance, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	marker, err := json.Marshal(map[string]string{
+		"managed_by": "multica-daemon-task",
+		"agent_id":   "agent-1",
+		"issue_id":   issueID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, ".multica", "daemon_task_context.json"), marker, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // setupDiskUsageProfile points a profile's CLI config at srv and seeds one
 // issue-kind task dir under that profile's workspaces root.
 func setupDiskUsageProfile(t *testing.T, home, profile, token, serverURL, wsID, taskShort, issueID string) {
@@ -224,6 +255,46 @@ func TestRunDaemonDiskUsageTaskTableResolvesStatus(t *testing.T) {
 	}
 	if !strings.Contains(out, "in_review") {
 		t.Errorf("STATUS column missing the resolved status, got:\n%s", out)
+	}
+}
+
+func TestRunDaemonDiskUsageActiveTaskContextResolvesStatus(t *testing.T) {
+	pinHumanCLIContext(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+	t.Setenv("MULTICA_SERVER_URL", "")
+
+	rec := &gcCheckRecorder{}
+	srv := newGCCheckServer(t, rec)
+	root := filepath.Join(home, "multica_workspaces")
+	writeActiveDiskUsageIssueTask(t, root,
+		"11111111-1111-1111-1111-111111111111", "aaaaaaaa", "issue-active")
+	if err := cli.SaveCLIConfig(cli.CLIConfig{ServerURL: srv.URL, Token: "token-default"}); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newDiskUsageTestCmd(t)
+	if err := cmd.Flags().Set("output", "json"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureStdout(t, func() error { return runDaemonDiskUsage(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runDaemonDiskUsage: %v", err)
+	}
+
+	var report daemon.DiskUsageReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, out)
+	}
+	if rec.callCount() != 1 {
+		t.Fatalf("gc-check calls = %d, want 1", rec.callCount())
+	}
+	if len(report.Tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(report.Tasks))
+	}
+	if got := report.Tasks[0]; got.Kind != "issue" || got.ParentID != "issue-active" || got.ParentStatus != "in_review" {
+		t.Fatalf("active task = %+v, want issue parent and current status", got)
 	}
 }
 

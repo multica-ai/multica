@@ -132,9 +132,8 @@ func ScanDiskUsageRoots(roots []DiskUsageRoot, artifactPatterns []string) (Aggre
 	return agg, nil
 }
 
-// DiskUsageKindUnknown is the kind reported for task directories whose
-// .gc_meta.json is missing or unreadable. Mirrors how the GC orphan path
-// treats them — present on disk, but no parent record we can lock onto.
+// DiskUsageKindUnknown is the kind reported for task directories whose GC and
+// active task-context metadata are missing or unreadable.
 const DiskUsageKindUnknown = "unknown"
 
 // ScanDiskUsage walks workspacesRoot and returns the disk-usage report. The
@@ -313,9 +312,10 @@ func buildTaskUsage(taskDir, wsID, taskShort string, matcher artifactMatcher) Ta
 		Kind:           DiskUsageKindUnknown,
 	}
 
-	metaPresent := false
-	if provenance, err := execenv.ReadManagedEnvProvenance(taskDir); err == nil && provenance != nil {
-		if workspaceID := strings.TrimSpace(provenance.WorkspaceID); workspaceID != "" {
+	var provenance *execenv.ManagedEnvProvenance
+	if p, err := execenv.ReadManagedEnvProvenance(taskDir); err == nil && p != nil {
+		provenance = p
+		if workspaceID := strings.TrimSpace(p.WorkspaceID); workspaceID != "" {
 			usage.WorkspaceID = workspaceID
 			usage.WorkspaceShort = ShortID(workspaceID)
 		}
@@ -326,24 +326,38 @@ func buildTaskUsage(taskDir, wsID, taskShort string, matcher artifactMatcher) Ta
 			usage.WorkspaceShort = ShortID(workspaceID)
 		}
 	}
-	if meta, err := execenv.ReadGCMeta(taskDir); err == nil && meta != nil {
-		metaPresent = true
+	meta, metaErr := execenv.ReadGCMeta(taskDir)
+	if metaErr == nil && meta != nil {
 		if workspaceID := strings.TrimSpace(meta.WorkspaceID); workspaceID != "" {
 			usage.WorkspaceID = workspaceID
 			usage.WorkspaceShort = ShortID(workspaceID)
 		}
-		usage.Kind = string(meta.Kind)
-		usage.ParentID = parentIDForMeta(meta)
+		if parentID := parentIDForMeta(meta); parentID != "" {
+			usage.Kind = string(meta.Kind)
+			usage.ParentID = parentID
+		}
 		if !meta.CompletedAt.IsZero() {
 			usage.AgeSeconds = int64(time.Since(meta.CompletedAt).Seconds())
 		} else if age, ok := gcMetaFileAge(taskDir); ok {
 			usage.AgeSeconds = int64(age.Seconds())
 		}
 	}
+	if os.IsNotExist(metaErr) && provenance != nil && provenance.ManagedBy == execenv.ManagedEnvProvenanceManagedBy {
+		if marker, err := execenv.ReadTaskContextMarker(filepath.Join(taskDir, "workdir")); err == nil && marker.AgentID == provenance.AgentID {
+			switch {
+			case marker.IssueID != "" && marker.IssueID == strings.TrimSpace(provenance.IssueID) && provenance.ChatSessionID == "":
+				usage.Kind = string(execenv.GCKindIssue)
+				usage.ParentID = marker.IssueID
+			case marker.ChatSessionID != "" && marker.ChatSessionID == strings.TrimSpace(provenance.ChatSessionID) && provenance.IssueID == "":
+				usage.Kind = string(execenv.GCKindChat)
+				usage.ParentID = marker.ChatSessionID
+			}
+		}
+	}
 	// With no readable metadata, use taskDir mtime just like orphanByMTime.
 	// Legacy readable metadata without completed_at uses its own file mtime,
 	// matching gcDecisionIssueResult's managed-only fallback.
-	if usage.AgeSeconds <= 0 && !metaPresent {
+	if usage.AgeSeconds <= 0 && metaErr != nil {
 		if info, err := os.Stat(taskDir); err == nil {
 			usage.AgeSeconds = int64(time.Since(info.ModTime()).Seconds())
 		}

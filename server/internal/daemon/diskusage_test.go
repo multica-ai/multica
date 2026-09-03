@@ -302,6 +302,132 @@ func TestScanDiskUsage_ReadableActiveRootUsesOwnerIdentityWithoutGCMeta(t *testi
 	}
 }
 
+func TestScanDiskUsage_ActiveIssueTaskContextClassification(t *testing.T) {
+	t.Parallel()
+
+	for _, trigger := range []string{"direct", "comment", "delegated-comment"} {
+		t.Run(trigger, func(t *testing.T) {
+			root := t.TempDir()
+			workspaceID := "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
+			issueID := "issue-" + trigger
+			taskDir := filepath.Join(root, workspaceID, trigger)
+			if err := os.MkdirAll(taskDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := execenv.WriteManagedEnvProvenance(taskDir, execenv.ManagedEnvProvenance{
+				WorkspaceID: workspaceID,
+				IssueID:     issueID,
+				AgentID:     "agent-1",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(taskDir, "workdir", execenv.TaskContextMarkerRelPath), 0)
+			marker, err := json.Marshal(map[string]string{
+				"managed_by": execenv.TaskContextMarkerManagedBy,
+				"agent_id":   "agent-1",
+				"issue_id":   issueID,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(taskDir, "workdir", execenv.TaskContextMarkerRelPath), marker, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			report, err := ScanDiskUsage(root, nil)
+			if err != nil {
+				t.Fatalf("ScanDiskUsage: %v", err)
+			}
+			if len(report.Tasks) != 1 {
+				t.Fatalf("tasks = %d, want 1", len(report.Tasks))
+			}
+			if report.Tasks[0].Kind != string(execenv.GCKindIssue) {
+				t.Errorf("kind = %q, want issue", report.Tasks[0].Kind)
+			}
+			if report.Tasks[0].ParentID != issueID {
+				t.Errorf("parent_id = %q, want %q", report.Tasks[0].ParentID, issueID)
+			}
+
+			if err := ResolveParentStatuses(context.Background(), &report, func(_ context.Context, gotWorkspaceID string, issueIDs []string) (map[string]string, error) {
+				if gotWorkspaceID != workspaceID || len(issueIDs) != 1 || issueIDs[0] != issueID {
+					t.Fatalf("status request = workspace %q, issues %v", gotWorkspaceID, issueIDs)
+				}
+				return map[string]string{issueID: "in_progress"}, nil
+			}); err != nil {
+				t.Fatalf("ResolveParentStatuses: %v", err)
+			}
+			if report.Tasks[0].ParentStatus != "in_progress" {
+				t.Errorf("parent_status = %q, want in_progress", report.Tasks[0].ParentStatus)
+			}
+		})
+	}
+}
+
+func TestScanDiskUsage_InvalidTaskContextStaysUnknown(t *testing.T) {
+	t.Parallel()
+
+	for name, marker := range map[string]string{
+		"incomplete":  `{"managed_by":"multica-daemon-task","agent_id":"agent-1"}`,
+		"corrupt":     `{`,
+		"foreign":     `{"managed_by":"other","issue_id":"issue-1"}`,
+		"wrong agent": `{"managed_by":"multica-daemon-task","agent_id":"agent-2","issue_id":"issue-1"}`,
+		"wrong issue": `{"managed_by":"multica-daemon-task","agent_id":"agent-1","issue_id":"issue-2"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			taskDir := filepath.Join(root, "workspace-1", name)
+			if err := os.MkdirAll(taskDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := execenv.WriteManagedEnvProvenance(taskDir, execenv.ManagedEnvProvenance{
+				WorkspaceID: "workspace-1", IssueID: "issue-1", AgentID: "agent-1",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(taskDir, "workdir", execenv.TaskContextMarkerRelPath), 0)
+			if err := os.WriteFile(filepath.Join(taskDir, "workdir", execenv.TaskContextMarkerRelPath), []byte(marker), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			report, err := ScanDiskUsage(root, nil)
+			if err != nil {
+				t.Fatalf("ScanDiskUsage: %v", err)
+			}
+			if got := report.Tasks[0]; got.Kind != DiskUsageKindUnknown || got.ParentID != "" {
+				t.Errorf("task = %+v, want unknown with no parent", got)
+			}
+		})
+	}
+
+	t.Run("corrupt gc metadata overrides valid active context", func(t *testing.T) {
+		root := t.TempDir()
+		taskDir := filepath.Join(root, "workspace-1", "corrupt-gc")
+		if err := os.MkdirAll(taskDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := execenv.WriteManagedEnvProvenance(taskDir, execenv.ManagedEnvProvenance{
+			WorkspaceID: "workspace-1", IssueID: "issue-1", AgentID: "agent-1",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(taskDir, "workdir", execenv.TaskContextMarkerRelPath), 0)
+		if err := os.WriteFile(filepath.Join(taskDir, "workdir", execenv.TaskContextMarkerRelPath), []byte(`{"managed_by":"multica-daemon-task","agent_id":"agent-1","issue_id":"issue-1"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(taskDir, ".gc_meta.json"), []byte(`{`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		report, err := ScanDiskUsage(root, nil)
+		if err != nil {
+			t.Fatalf("ScanDiskUsage: %v", err)
+		}
+		if got := report.Tasks[0]; got.Kind != DiskUsageKindUnknown || got.ParentID != "" {
+			t.Errorf("task = %+v, want corrupt GC metadata to stay unknown", got)
+		}
+	})
+}
+
 func TestScanDiskUsage_ManagedCodexSandboxIsExactAndDeduplicated(t *testing.T) {
 	t.Parallel()
 
