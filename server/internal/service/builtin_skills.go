@@ -5,8 +5,6 @@ import (
 	"io/fs"
 	"path"
 	"strings"
-
-	"github.com/multica-ai/multica/server/pkg/skillbundle"
 )
 
 //go:embed builtin_skills
@@ -53,13 +51,13 @@ var builtinSkillSystemKey = map[string]string{
 // intentionally leaves to skills.
 //
 // Layout: builtin_skills/<name>/SKILL.md plus optional supporting files. The
-// <name> directory carries a "multica-" prefix to namespace its on-disk slug
-// away from workspace skills a user authored. That reduces collisions; it does
-// not prevent them, because nothing server-side reserves the prefix at skill
-// create/import time. When a workspace skill does sanitize to the same slug,
-// writeSkillFiles gives the built-in a suffixed directory and the brief
-// resolves its pointers from the built-in's own entry rather than the bare
-// name.
+// <name> directory carries a "multica-" prefix: that is the platform
+// namespace, and the brief names built-ins by their bare name on the
+// assumption that no workspace skill shares one. Nothing server-side reserves
+// the prefix today, so a user could author a skill that sanitizes to the same
+// slug and take the bare directory. That is accepted, not handled — when it
+// becomes real, the fix is to reject the prefix at skill create/import rather
+// than to make every pointer defensive.
 // legacyRedirects asks for redirect stubs under the names this server has
 // stopped shipping. The runtime brief is assembled by the daemon, not the
 // server, so a backend deploy cannot rewrite an installed daemon's copy of it:
@@ -127,13 +125,7 @@ func loadBuiltinSkill(fsys embed.FS, root, name string) (AgentSkillData, bool) {
 		// than ship an empty skill.
 		return AgentSkillData{}, false
 	}
-	// Source is set here rather than inferred downstream. BuildAgentSkillBundles
-	// already derives it for the refs path, but the older inline claim path
-	// appends these straight onto the agent's skills, and the daemon needs to
-	// tell a built-in from a workspace skill that sanitizes to the same slug.
-	// Setting it changes no bundle hash: the bundle builder normalizes Source to
-	// this same value before hashing.
-	skill := AgentSkillData{Name: name, Source: skillbundle.SourceBuiltin, Content: string(content)}
+	skill := AgentSkillData{Name: name, Content: string(content)}
 	// Any other file in the directory becomes a supporting file, preserving
 	// its relative path so subdirectories (e.g. references/issues.md) survive.
 	_ = fs.WalkDir(fsys, dir, func(p string, d fs.DirEntry, walkErr error) error {

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
-	"github.com/multica-ai/multica/server/pkg/skillbundle"
 )
 
 // This file holds the runtime brief assembler — the post-MUL-3560 path
@@ -755,15 +754,18 @@ func issueContractsSkill(skills []SkillContextForEnv) (string, bool) {
 	return "", false
 }
 
-// builtinSlug finds a built-in by name and returns the slug the agent must
-// actually type. Matching is on the resolved slug AND the built-in source: a
-// workspace skill whose name sanitizes the same way is listed first and takes
-// the bare slug, leaving the built-in suffixed. Naming the bare slug there
-// would point at the wrong skill. A suffix can only extend the slug, never
-// shorten it, which is what makes the prefix test safe.
+// builtinSlug finds a built-in by name.
+//
+// Stated assumption: `multica-` is the platform namespace, and no workspace
+// skill in the batch shares a built-in's name. If one ever did, it would be
+// listed first, take the bare slug, and this pointer would name it instead of
+// the platform skill. That is accepted rather than handled — it needs a user to
+// author a skill that sanitizes to exactly `multica-platform`, and the fix when
+// it happens is to reject the prefix at skill create/import, not to make every
+// pointer defensive.
 func builtinSlug(skills []SkillContextForEnv, name string) (string, bool) {
 	for _, skill := range skills {
-		if skill.Source == skillbundle.SourceBuiltin && strings.HasPrefix(skill.Name, name) {
+		if skill.Name == name {
 			return skill.Name, true
 		}
 	}

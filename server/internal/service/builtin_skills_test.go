@@ -62,12 +62,11 @@ func TestBuiltinSkillsConformToTemplate(t *testing.T) {
 
 	for _, skill := range skills {
 		t.Run(skill.Name, func(t *testing.T) {
-			// The multica- prefix namespaces the on-disk slug away from
-			// user-authored workspace skills. It is a convention, not a
-			// reserved namespace — nothing rejects the prefix at skill
-			// create/import — so it reduces collisions rather than ruling
-			// them out, which is why the brief resolves its pointers from
-			// built-in source instead of trusting the bare name.
+			// The multica- prefix is the platform namespace. Pointers name
+			// built-ins by their bare name on the assumption that no
+			// workspace skill shares one; nothing reserves the prefix
+			// server-side yet, and that gap is accepted rather than handled
+			// (see builtinSlug).
 			if !strings.HasPrefix(skill.Name, "multica-") {
 				t.Errorf("skill name %q must carry the multica- prefix", skill.Name)
 			}

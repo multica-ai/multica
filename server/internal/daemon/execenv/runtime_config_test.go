@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
-	"github.com/multica-ai/multica/server/pkg/skillbundle"
 )
 
 // Sub-issue Creation section — after MUL-2538 the platform posts the
@@ -26,7 +25,6 @@ import (
 func platformSkillFixture() SkillContextForEnv {
 	return SkillContextForEnv{
 		Name:    "multica-platform",
-		Source:  skillbundle.SourceBuiltin,
 		Content: "---\nname: multica-platform\n---\n\nbody",
 	}
 }
@@ -2153,11 +2151,8 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 	t.Parallel()
 
-	builtin := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Source: skillbundle.SourceBuiltin, Content: "---\nname: " + name + "\n---\n\nbody"}
-	}
-	workspace := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Source: skillbundle.SourceWorkspace, Content: "---\nname: " + name + "\n---\n\nbody"}
+	skill := func(name string) SkillContextForEnv {
+		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
 	}
 
 	cases := []struct {
@@ -2167,32 +2162,25 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 	}{
 		{
 			name:   "current backend",
-			skills: []SkillContextForEnv{builtin("multica-platform")},
+			skills: []SkillContextForEnv{skill("multica-platform")},
 			want:   "`references/issues.md` in the `multica-platform` skill",
 		},
 		{
 			// New daemon against a backend that has not been deployed yet.
 			name:   "pre-merge backend",
-			skills: []SkillContextForEnv{builtin("multica-working-on-issues")},
+			skills: []SkillContextForEnv{skill("multica-working-on-issues")},
 			want:   "the `multica-working-on-issues` skill",
 		},
 		{
 			// Mid-transition: the redirect stub rides along with the merged
 			// skill. The merged skill wins — the stub is only a signpost.
 			name:   "merged skill wins over the redirect stub",
-			skills: []SkillContextForEnv{builtin("multica-working-on-issues"), builtin("multica-platform")},
+			skills: []SkillContextForEnv{skill("multica-working-on-issues"), skill("multica-platform")},
 			want:   "`references/issues.md` in the `multica-platform` skill",
 		},
 		{
 			name:   "neither installed",
-			skills: []SkillContextForEnv{workspace("pr-review")},
-			want:   "",
-		},
-		{
-			// A workspace skill that merely shares the name must never be
-			// advertised as the source of platform contracts.
-			name:   "lookalike workspace skill only",
-			skills: []SkillContextForEnv{workspace("multica-platform")},
+			skills: []SkillContextForEnv{skill("pr-review")},
 			want:   "",
 		},
 	}
@@ -2244,19 +2232,13 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 // that back, so it must appear whenever the skill does — an agent that cannot
 // find the platform contracts is strictly worse off than before the merge.
 //
-// It must also name the RIGHT skill. A workspace skill whose name sanitizes to
-// the same slug is listed first and takes the bare `multica-platform`, pushing
-// the built-in to a suffixed slug. Naming the bare slug there would hand the
-// agent a stranger's skill and lose the contracts entirely, so the pointer is
-// resolved from the built-in's own entry.
+// Naming is by bare name, on the stated assumption that no workspace skill
+// shares a built-in's name (see builtinSlug).
 func TestBriefPointsAtThePlatformSkill(t *testing.T) {
 	t.Parallel()
 
-	builtin := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Source: skillbundle.SourceBuiltin, Content: "---\nname: " + name + "\n---\n\nbody"}
-	}
-	workspace := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Source: skillbundle.SourceWorkspace, Content: "---\nname: " + name + "\n---\n\nbody"}
+	skill := func(name string) SkillContextForEnv {
+		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
 	}
 
 	cases := []struct {
@@ -2266,32 +2248,17 @@ func TestBriefPointsAtThePlatformSkill(t *testing.T) {
 	}{
 		{
 			name:   "platform skill present",
-			skills: []SkillContextForEnv{builtin("multica-platform")},
+			skills: []SkillContextForEnv{skill("multica-platform")},
 			want:   "multica-platform",
 		},
 		{
 			name:   "alongside workspace skills",
-			skills: []SkillContextForEnv{workspace("pr-review"), builtin("multica-platform")},
+			skills: []SkillContextForEnv{skill("pr-review"), skill("multica-platform")},
 			want:   "multica-platform",
 		},
 		{
 			name:   "platform skill absent",
-			skills: []SkillContextForEnv{workspace("pr-review")},
-			want:   "",
-		},
-		{
-			// The collision case. The workspace skill is listed first and wins
-			// the bare slug; the built-in is written to a suffixed directory,
-			// and the pointer must follow it there.
-			name:   "workspace skill takes the bare slug",
-			skills: []SkillContextForEnv{workspace("multica-platform"), builtin("multica-platform")},
-			want:   "multica-platform-multica",
-		},
-		{
-			// A workspace skill that merely looks like the platform skill must
-			// never be advertised as the source of platform contracts.
-			name:   "lookalike workspace skill without the built-in",
-			skills: []SkillContextForEnv{workspace("multica-platform")},
+			skills: []SkillContextForEnv{skill("pr-review")},
 			want:   "",
 		},
 	}
