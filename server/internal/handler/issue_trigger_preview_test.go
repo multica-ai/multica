@@ -220,49 +220,6 @@ func TestUpdateIssueSuppressRunSkipsEnqueue(t *testing.T) {
 	}
 }
 
-// TestUpdateIssueHandoffNotePersistsOnTask verifies an assign carrying a
-// handoff_note writes that note onto the enqueued task (the daemon then renders
-// it), while a suppressed assign with a note enqueues nothing at all.
-func TestUpdateIssueHandoffNotePersistsOnTask(t *testing.T) {
-	agentID := seededReadyAgentID(t)
-	note := "Only touch the login flow."
-
-	issue := createIssueForTest(t, map[string]any{"title": "handoff persist", "status": "todo"})
-	w := httptest.NewRecorder()
-	req := withURLParam(newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
-		"assignee_type": "agent", "assignee_id": agentID, "handoff_note": note,
-	}), "id", issue.ID)
-	testHandler.UpdateIssue(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateIssue with handoff: %d %s", w.Code, w.Body.String())
-	}
-
-	var stored string
-	if err := testPool.QueryRow(context.Background(), `
-		SELECT COALESCE(handoff_note, '') FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2 ORDER BY created_at DESC LIMIT 1
-	`, issue.ID, agentID).Scan(&stored); err != nil {
-		t.Fatalf("read task handoff_note: %v", err)
-	}
-	if stored != note {
-		t.Fatalf("expected task handoff_note %q, got %q", note, stored)
-	}
-
-	// Suppressed assign with a note: no task at all (no run to inject into).
-	suppressed := createIssueForTest(t, map[string]any{"title": "handoff suppressed", "status": "todo"})
-	w2 := httptest.NewRecorder()
-	req2 := withURLParam(newRequest("PUT", "/api/issues/"+suppressed.ID, map[string]any{
-		"assignee_type": "agent", "assignee_id": agentID, "handoff_note": note, "suppress_run": true,
-	}), "id", suppressed.ID)
-	testHandler.UpdateIssue(w2, req2)
-	if w2.Code != http.StatusOK {
-		t.Fatalf("UpdateIssue suppressed handoff: %d %s", w2.Code, w2.Body.String())
-	}
-	if got := taskCountFor(t, suppressed.ID, agentID); got != 0 {
-		t.Fatalf("suppressed handoff should enqueue no task, got %d", got)
-	}
-}
-
 // TestPreviewIssueTrigger_MalformedBody verifies the endpoint rejects a
 // malformed body with 400 rather than a 500 or a silent empty result.
 func TestPreviewIssueTrigger_MalformedBody(t *testing.T) {

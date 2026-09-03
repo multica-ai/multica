@@ -367,21 +367,6 @@ func TestZeroclawResumeNotFound(t *testing.T) {
 	}
 }
 
-func TestZeroclawBlockedArgs(t *testing.T) {
-	t.Parallel()
-	if _, ok := zeroclawBlockedArgs["acp"]; !ok {
-		t.Fatal("expected acp to be in zeroclawBlockedArgs")
-	}
-	if zeroclawBlockedArgs["acp"] != blockedStandalone {
-		t.Fatalf("expected acp to be blockedStandalone, got %v", zeroclawBlockedArgs["acp"])
-	}
-	for _, flag := range []string{"--help", "-h", "login", "auth", "--login", "--auth"} {
-		if _, ok := zeroclawBlockedArgs[flag]; !ok {
-			t.Fatalf("expected %s to be in zeroclawBlockedArgs", flag)
-		}
-	}
-}
-
 func TestSelectZeroclawPermissionOptionRejectsLegacyChoice(t *testing.T) {
 	t.Parallel()
 

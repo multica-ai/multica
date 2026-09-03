@@ -7,10 +7,8 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
-	agentver "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -79,18 +77,17 @@ func (h *Handler) shouldSuppressActiveSelfAssignment(ctx context.Context, actorT
 }
 
 // dispatchIssueRun executes the enqueue side effect for a decision produced by
-// WillEnqueueRun, carrying an optional handoff note into the run's opening
-// context. The squad path still flows through enqueueSquadLeaderTask so the
-// leader access gate and pending dedup stay in one place.
-func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) {
+// WillEnqueueRun. The squad path still flows through enqueueSquadLeaderTask so
+// the leader access gate and pending dedup stay in one place.
+func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID string) {
 	switch trigger.AssigneeType {
 	case "agent":
 		// The member who performed this assign/promote is the accountable human
 		// for the run (MUL-4302 §4). An agent actor is not a human, so only a
 		// member actor is threaded; otherwise attribution falls back to the chain.
-		_, _ = h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
+		_, _ = h.TaskService.EnqueueTaskForIssueByActor(ctx, issue, memberActorUserID(actorType, actorID))
 	case "squad":
-		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
+		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID)
 	}
 }
 
@@ -125,14 +122,10 @@ type IssueTriggerPreviewRequest struct {
 
 // IssueTriggerPreviewItem is one issue that WILL start a run under the
 // prospective write. AgentID is the runnable agent (squad leader for squads).
-// HandoffSupported is the soft-gate signal: false when the target runtime's
-// daemon is too old to render a handoff note, so the UI can gray out the note
-// box rather than silently drop the text. The assignment itself still works.
 type IssueTriggerPreviewItem struct {
-	IssueID          string `json:"issue_id"`
-	AgentID          string `json:"agent_id"`
-	Source           string `json:"source"`
-	HandoffSupported bool   `json:"handoff_supported"`
+	IssueID string `json:"issue_id"`
+	AgentID string `json:"agent_id"`
+	Source  string `json:"source"`
 }
 
 // IssueTriggerPreviewResponse lists every issue that will enqueue plus a total
@@ -193,10 +186,9 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 		probe := h.issueTriggerPreviewProbe(r, actorType, actorID, workspaceID, issue)
 		if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(), in, probe); ok {
 			resp.Triggers = append(resp.Triggers, IssueTriggerPreviewItem{
-				IssueID:          uuidToString(trigger.IssueID),
-				AgentID:          uuidToString(trigger.AgentID),
-				Source:           string(trigger.Source),
-				HandoffSupported: h.runtimeSupportsHandoff(r.Context(), trigger.AgentID),
+				IssueID: uuidToString(trigger.IssueID),
+				AgentID: uuidToString(trigger.AgentID),
+				Source:  string(trigger.Source),
 			})
 		}
 	}
@@ -254,19 +246,4 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 
 	resp.TotalCount = len(resp.Triggers)
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// runtimeSupportsHandoff reports whether the agent's bound runtime reports a
-// CLI version new enough to render handoff notes. Drives the preview's
-// handoff_supported soft-gate signal. Any resolution failure → false (degrade).
-func (h *Handler) runtimeSupportsHandoff(ctx context.Context, agentID pgtype.UUID) bool {
-	agent, err := h.Queries.GetAgent(ctx, agentID)
-	if err != nil || !agent.RuntimeID.Valid {
-		return false
-	}
-	rt, err := h.getAgentRuntime(ctx, obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID)
-	if err != nil {
-		return false
-	}
-	return agentver.HandoffSupported(readRuntimeCLIVersion(rt.Metadata))
 }

@@ -1664,7 +1664,6 @@ func TestTurnModeMarkersRetired(t *testing.T) {
 		{"comment-triggered with content", Task{IssueID: "issue-1", TriggerCommentID: "c-1", TriggerCommentContent: "please look"}},
 		{"comment-triggered with EMPTY content", Task{IssueID: "issue-1", TriggerCommentID: "c-1"}},
 		{"assignment-triggered", Task{IssueID: "issue-1"}},
-		{"assignment-triggered with handoff note", Task{IssueID: "issue-1", HandoffNote: "start with the API"}},
 		{"chat", Task{ChatSessionID: "chat-1"}},
 		{"quick-create", Task{QuickCreatePrompt: "make an issue"}},
 		{"autopilot", Task{AutopilotRunID: "run-1"}},

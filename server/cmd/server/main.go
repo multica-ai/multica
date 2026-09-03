@@ -371,7 +371,10 @@ func main() {
 	hub := realtime.NewHub()
 	go hub.Run()
 	daemonHub := daemonws.NewHub()
-	var daemonWakeup service.TaskWakeupNotifier = daemonHub
+	var daemonWakeup interface {
+		service.TaskWakeupNotifier
+		handler.RuntimeGoneNotifier
+	} = daemonHub
 	// Nil unless a Redis relay is running: without one there is only one
 	// replica, and it both publishes the completion and holds the socket.
 	var wecomRelay WecomRelay
@@ -585,7 +588,7 @@ func main() {
 	// be injected into the Handler. The Run goroutine starts below
 	// alongside the sweeper, and Stop is called explicitly during graceful
 	// shutdown so any pending bumps are flushed before we exit.
-	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
+	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval, daemonWakeup)
 
 	// Validate the LLM retry budget before the router exists: an operator who
 	// typed a value we cannot honor should see the boot stop, the same way a

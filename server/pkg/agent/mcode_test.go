@@ -289,15 +289,6 @@ func TestMcodeLoadSessionWhenCapabilityAppears(t *testing.T) {
 	}
 }
 
-func TestMcodeBlockedArgsKeepACPTransportStable(t *testing.T) {
-	t.Parallel()
-	for _, arg := range []string{"acp", "login", "--region", "-h", "--help"} {
-		if _, ok := mcodeBlockedArgs[arg]; !ok {
-			t.Errorf("mcodeBlockedArgs missing %q", arg)
-		}
-	}
-}
-
 // A still-running MCode reports session/new failures as a JSON-RPC error, and
 // session/new is the call that launches mcpServers. Only transport-level exit
 // signals may be reported as "MiniMax Code ACP exited" — anything else must

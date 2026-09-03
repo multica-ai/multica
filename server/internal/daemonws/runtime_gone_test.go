@@ -26,6 +26,12 @@ func TestNotifyRuntimeGone(t *testing.T) {
 	if payload.Status != protocol.HeartbeatStatusRuntimeGone || !payload.RuntimeGone {
 		t.Fatalf("payload = %+v, want runtime_gone acknowledgement", payload)
 	}
+	if client.allowsRuntime("runtime-1") {
+		t.Fatal("invalidated runtime remained in the connection heartbeat scope")
+	}
+	if got := hub.RuntimeConnectionCount("runtime-1"); got != 0 {
+		t.Fatalf("runtime connection count = %d, want 0 after invalidation", got)
+	}
 	if M.RuntimeGoneDeliveredHit.Load() != 1 {
 		t.Fatalf("runtime-gone delivered hit metric = %d, want 1", M.RuntimeGoneDeliveredHit.Load())
 	}
@@ -74,6 +80,9 @@ func TestRelayNotifierPublishesAndDeliversRuntimeGone(t *testing.T) {
 	payload := readRuntimeGoneFrame(t, remoteClient.send)
 	if payload.RuntimeID != "runtime-1" || payload.Status != protocol.HeartbeatStatusRuntimeGone || !payload.RuntimeGone {
 		t.Fatalf("payload = %+v, want relayed runtime_gone acknowledgement", payload)
+	}
+	if remoteClient.allowsRuntime("runtime-1") {
+		t.Fatal("relayed invalidation left runtime in the connection heartbeat scope")
 	}
 
 	remoteHub.DeliverDaemonRuntime(relay.scopeID, relay.frame, relay.eventID)
@@ -152,6 +161,34 @@ func TestRelayNotifierDedupsRuntimeGoneLoopback(t *testing.T) {
 	case duplicate := <-client.send:
 		t.Fatalf("expected Redis loopback to be deduped, got %s", duplicate)
 	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestRuntimeGoneReplayInvalidatesConnectionRegisteredAfterFirstDelivery(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	first := attachDaemonTestClient(hub, "runtime-1")
+	frame, err := runtimeGoneFrame("runtime-1")
+	if err != nil {
+		t.Fatalf("runtimeGoneFrame: %v", err)
+	}
+
+	hub.DeliverDaemonRuntime("runtime-1", frame, "event-1")
+	readRuntimeGoneFrame(t, first.send)
+
+	// Model a connection that passed its DB authorization before deletion but
+	// did not register with the Hub until after the first local delivery.
+	late := attachDaemonTestClient(hub, "runtime-1")
+	hub.DeliverDaemonRuntime("runtime-1", frame, "event-1")
+	readRuntimeGoneFrame(t, late.send)
+
+	if late.allowsRuntime("runtime-1") {
+		t.Fatal("relay replay left late connection in the heartbeat scope")
+	}
+	if got := hub.RuntimeConnectionCount("runtime-1"); got != 0 {
+		t.Fatalf("runtime connection count = %d, want 0", got)
 	}
 }
 

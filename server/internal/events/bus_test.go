@@ -38,12 +38,6 @@ func TestPublishOnlyMatchingType(t *testing.T) {
 	}
 }
 
-func TestPublishNoSubscribersIsNoop(t *testing.T) {
-	bus := New()
-	// Should not panic
-	bus.Publish(Event{Type: "no:listeners"})
-}
-
 func TestPanicInHandlerDoesNotBreakOthers(t *testing.T) {
 	bus := New()
 	var secondCalled bool

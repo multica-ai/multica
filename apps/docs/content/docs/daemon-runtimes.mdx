@@ -85,6 +85,32 @@ If your team uses an internal wrapper, a version-pinned executable, or needs fix
 
 A custom profile does not add a new communication protocol. You still pick one of the protocol families Multica already supports (the tool's integration protocol type; see [AI coding tools comparison](/providers)), and the command itself must be compatible with that family.
 
+### Task runtime environment
+
+When the daemon starts an agent task, it injects task context into the runtime process. These values are owned by the daemon: an agent's custom environment cannot override any `MULTICA_` variable or the task temporary-directory variables.
+
+The table lists the variables that custom runtimes can use today. It is intentionally not exhaustive and is not a versioned API surface. Build integrations only on the five variables marked **integration contract**; treat the rest as informational details that may change.
+
+| Variable | Value in a task | Stability |
+| --- | --- | --- |
+| `MULTICA_TOKEN` | Task-scoped `mat_` API credential | **Integration contract** |
+| `MULTICA_TASK_ID` | ID of the active task | **Integration contract** |
+| `MULTICA_AGENT_ID` | ID of the assigned agent | **Integration contract** |
+| `MULTICA_WORKSPACE_ID` | ID of the task's workspace | **Integration contract** |
+| `MULTICA_SERVER_URL` | Multica server URL selected by the daemon | **Integration contract** |
+| `MULTICA_TASK_CONFIG_ROOT` | Private task-local Multica CLI configuration root | Informational |
+| `MULTICA_TASK_WORKSPACES_ROOT` | Root of the daemon-managed task workspaces | Informational |
+| `MULTICA_AGENT_NAME` | Display name of the assigned agent | Informational |
+| `MULTICA_DAEMON_PORT` | Local daemon health/API port used by task-only commands such as `multica repo checkout` | Informational |
+| `MULTICA_TASK_SLOT` | Slot in the daemon-wide concurrency pool; useful for slot-indexed resources such as GPUs | Informational |
+| `TMPDIR` | Private temporary directory for the active task; also supplied as `TMP` and `TEMP` for cross-platform tools | Informational |
+
+The server determines authorship for requests made with `MULTICA_TOKEN`; writes such as issue comments are attributed to the assigned agent and active task. For the token's complete binding, permissions, attribution, 24-hour maximum lifetime, and cleanup behavior, see [Temporary tokens for agent runs](/auth-tokens#temporary-tokens-for-agent-runs).
+
+<Callout type="warning">
+These values live in the runtime process's real environment. Any child process the runtime starts inherits all of them by default, including `MULTICA_TOKEN`. If a child should not hold the credential, strip it explicitly; do not rely on process isolation that is not there. The exception runs the other way: tools that filter their own subprocess environment may require an explicit allow rule. For example, Codex's shell tool drops names containing `TOKEN`, `KEY`, or `SECRET`, so the daemon installs a managed shell policy that allows the required task variables. Keep the token in process environments only—never in a prompt, log, repository file, or persistent configuration. A child shares the parent task's identity and permissions; it does not receive a new, independently scoped identity.
+</Callout>
+
 ### Creating a profile
 
 Only workspace owners and admins can create, edit, or delete custom runtime profiles:

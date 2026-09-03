@@ -85,6 +85,32 @@ multica daemon start
 
 自定义配置不会增加新的通信协议。创建时仍需选择一种 Multica 已支持的协议族（工具的对接协议类型，见 [AI 编程工具对照](/providers)）；命令本身必须与该协议兼容。
 
+### Task 运行时环境
+
+守护进程启动智能体 task 时，会把 task 上下文注入运行时进程。这些值由守护进程管理；智能体的自定义环境无法覆盖任何 `MULTICA_` 变量或 task 临时目录变量。
+
+下表列出自定义运行时目前可以使用的变量。它不是完整清单，也不是有版本保证的 API。集成只能依赖标为**集成契约**的 5 个变量；其余变量仅供参考，后续可能变化。
+
+| 变量 | task 中的值 | 稳定性 |
+| --- | --- | --- |
+| `MULTICA_TOKEN` | task 级 `mat_` API 凭据 | **集成契约** |
+| `MULTICA_TASK_ID` | 当前 task 的 ID | **集成契约** |
+| `MULTICA_AGENT_ID` | 被指派智能体的 ID | **集成契约** |
+| `MULTICA_WORKSPACE_ID` | task 所属工作区的 ID | **集成契约** |
+| `MULTICA_SERVER_URL` | 守护进程选定的 Multica 服务地址 | **集成契约** |
+| `MULTICA_TASK_CONFIG_ROOT` | 私有的 task 本地 Multica CLI 配置根目录 | 仅供参考 |
+| `MULTICA_TASK_WORKSPACES_ROOT` | 守护进程管理的 task 工作区根目录 | 仅供参考 |
+| `MULTICA_AGENT_NAME` | 被指派智能体的显示名称 | 仅供参考 |
+| `MULTICA_DAEMON_PORT` | 本地守护进程的健康检查/API 端口，供 `multica repo checkout` 等仅限 task 的命令使用 | 仅供参考 |
+| `MULTICA_TASK_SLOT` | 守护进程全局并发池中的槽位，可用于 GPU 等按槽位编号的资源 | 仅供参考 |
+| `TMPDIR` | 当前 task 的私有临时目录；也会以 `TMP` 和 `TEMP` 提供给跨平台工具 | 仅供参考 |
+
+使用 `MULTICA_TOKEN` 发起请求时，作者身份由服务端决定；任务评论等写入操作会归属到被指派的智能体和当前 task。令牌的完整绑定关系、权限、归属方式、最长 24 小时的有效期和清理规则见[智能体执行的临时令牌](/auth-tokens#智能体执行的临时令牌)。
+
+<Callout type="warning">
+这些值存在于运行时进程的实际环境中。运行时启动的任何子进程默认都会继承全部变量，包括 `MULTICA_TOKEN`。如果子进程不应持有该凭据，必须显式移除；不要假定进程之间存在并没有的隔离。反过来，有些工具会过滤自己的子进程环境，因此可能需要显式放行变量。例如，Codex 的 shell 工具会丢弃名称中含有 `TOKEN`、`KEY` 或 `SECRET` 的变量，所以守护进程会安装托管的 shell 策略，放行所需的 task 变量。令牌只能存在于进程环境中，不得写入 prompt、日志、仓库文件或持久配置。子进程与父 task 共享身份和权限，不会获得新的独立作用域身份。
+</Callout>
+
 ### 创建配置
 
 只有工作区 owner 和 admin 可以创建、修改或删除自定义运行时配置：
