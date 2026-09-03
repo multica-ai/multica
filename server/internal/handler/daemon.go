@@ -1823,7 +1823,29 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			"runtimes", len(authorized), "requested_max", maxTasks, "claimed", len(out),
 			"total_ms", time.Since(start).Milliseconds())
 	}
-	writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": out})
+	response := map[string]any{"tasks": out}
+	// Only opted-in daemons understand this additive response metadata. Query
+	// after the claim so a future fire_at can shorten the long healthy-WS safety
+	// poll; a task that crossed fire_at during this request yields a 1ms hint and
+	// is promoted on the next claim. If the lookup fails, omit the support bit so
+	// the daemon conservatively retains its ordinary PollInterval.
+	if len(out) < maxTasks && requestHasClientCapability(r, protocol.DaemonCapabilityClaimPollHintsV1) {
+		nextDeferred, nextErr := h.Queries.NextDeferredTaskFireAtForRuntimes(r.Context(), authorized)
+		if nextErr != nil {
+			slog.Warn("batch claim: next deferred task lookup failed; retaining short client poll",
+				"error", nextErr)
+		} else {
+			response["claim_poll_hint_supported"] = true
+			if nextDeferred.Valid {
+				afterMillis := time.Until(nextDeferred.Time).Milliseconds()
+				if afterMillis < 1 {
+					afterMillis = 1
+				}
+				response["next_deferred_task_after_ms"] = afterMillis
+			}
+		}
+	}
+	writeMeasuredJSON(w, http.StatusOK, response)
 }
 
 // claimBuildFailure captures a pre-response failure from

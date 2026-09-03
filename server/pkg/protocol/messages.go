@@ -30,6 +30,11 @@ const (
 	// Gated so only daemons+servers that both support it route claim over WS;
 	// everyone else keeps using the HTTP claim endpoint.
 	DaemonCapabilityRPCV1 = "rpc-v1"
+	// DaemonCapabilityClaimPollHintsV1 advertises that the daemon understands
+	// the batch-claim response's safety-poll metadata. The server only performs
+	// the extra deferred-task lookup for clients that opt in, and an older
+	// server's missing fields make a newer daemon retain its short fallback.
+	DaemonCapabilityClaimPollHintsV1 = "claim-poll-hints-v1"
 
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:

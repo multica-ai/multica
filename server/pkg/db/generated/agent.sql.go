@@ -7011,6 +7011,38 @@ func (q *Queries) MergeDelegatedFailureCommentIntoPendingTask(ctx context.Contex
 	return i, err
 }
 
+const nextDeferredTaskFireAtForRuntimes = `-- name: NextDeferredTaskFireAtForRuntimes :one
+SELECT MIN(fire_at)::timestamptz
+FROM agent_task_queue t
+WHERE t.runtime_id = ANY($1::uuid[])
+  AND t.status = 'deferred'
+  AND (
+    t.fire_at > now()
+    OR NOT EXISTS (
+      SELECT 1 FROM agent_task_queue occupant
+      WHERE occupant.issue_id = t.issue_id
+        AND occupant.agent_id = t.agent_id
+        AND occupant.id <> t.id
+        AND (
+          occupant.status IN ('queued', 'dispatched')
+          OR (occupant.status = 'deferred' AND occupant.context->>'channel_issue_media_pending' = 'true')
+        )
+    )
+  )
+`
+
+// Returns the next future deferred task for a daemon's authorized runtime set,
+// or an eligible task that crossed fire_at during this claim. Overdue tasks
+// blocked by an existing issue+agent occupant are omitted so they cannot cause
+// a tight poll loop. The response converts the timestamp to a relative delay,
+// avoiding any dependency on daemon/server clock synchronization.
+func (q *Queries) NextDeferredTaskFireAtForRuntimes(ctx context.Context, runtimeIds []pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, nextDeferredTaskFireAtForRuntimes, runtimeIds)
+	var column_1 pgtype.Timestamptz
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const promoteDeferredChannelIssueTask = `-- name: PromoteDeferredChannelIssueTask :one
 UPDATE agent_task_queue
 SET status = 'queued', fire_at = NULL

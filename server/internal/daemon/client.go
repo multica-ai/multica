@@ -196,6 +196,7 @@ func daemonClientCapabilities() string {
 		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilitySourceContextQuickCreateV1,
 		protocol.DaemonCapabilityRPCV1,
+		protocol.DaemonCapabilityClaimPollHintsV1,
 	}, ",")
 }
 
@@ -255,6 +256,17 @@ func (c *Client) ResolveRemoteMCPCredential(ctx context.Context, daemonToken, ta
 // comfortably above p99 claim latency so recovery stays the exception.
 const batchClaimRequestTimeout = 5 * time.Second
 
+// claimTasksResult carries optional scheduling metadata understood only by
+// daemons advertising claim-poll-hints-v1. A zero-value result is deliberately
+// conservative: it makes the poller retain PollInterval, which protects new
+// daemons talking to old servers and claims whose WS outcome was uncertain.
+type claimTasksResult struct {
+	Tasks                       []*Task `json:"tasks"`
+	ClaimPollHintSupported      bool    `json:"claim_poll_hint_supported,omitempty"`
+	NextDeferredTaskAfterMillis int64   `json:"next_deferred_task_after_ms,omitempty"`
+	ClaimedOverWS               bool    `json:"-"`
+}
+
 // ClaimTasks is the machine-level (MUL-4257) batch counterpart of ClaimTask:
 // it asks the server, in a single request, to claim up to maxTasks tasks across
 // every runtime the daemon hosts. daemonID scopes the request to this machine —
@@ -266,19 +278,22 @@ const batchClaimRequestTimeout = 5 * time.Second
 // one slow claim cannot stall the whole batch; the deadline propagates to the
 // server and cancels the in-flight query there too.
 func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	result, err := c.claimTasksWithHints(ctx, daemonID, runtimeIDs, maxTasks)
+	return result.Tasks, err
+}
+
+func (c *Client) claimTasksWithHints(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) (claimTasksResult, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, batchClaimRequestTimeout)
 	defer cancel()
-	var resp struct {
-		Tasks []*Task `json:"tasks"`
-	}
+	var resp claimTasksResult
 	if err := c.postJSON(reqCtx, "/api/daemon/tasks/claim", map[string]any{
 		"daemon_id":   daemonID,
 		"runtime_ids": runtimeIDs,
 		"max_tasks":   maxTasks,
 	}, &resp); err != nil {
-		return nil, err
+		return claimTasksResult{}, err
 	}
-	return resp.Tasks, nil
+	return resp, nil
 }
 
 // isBatchClaimUnsupported reports whether err is a 404 from the batch claim

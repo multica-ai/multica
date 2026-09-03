@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -19,6 +21,8 @@ type batchClaimResponse struct {
 		RuntimeID string `json:"runtime_id"`
 		AuthToken string `json:"auth_token"`
 	} `json:"tasks"`
+	ClaimPollHintSupported      bool  `json:"claim_poll_hint_supported"`
+	NextDeferredTaskAfterMillis int64 `json:"next_deferred_task_after_ms"`
 }
 
 func seedQueuedIssueTask(t *testing.T, ctx context.Context, agentID, runtimeID, issueID string) string {
@@ -36,11 +40,18 @@ func seedQueuedIssueTask(t *testing.T, ctx context.Context, agentID, runtimeID, 
 }
 
 func postBatchClaim(t *testing.T, workspaceID string, runtimeIDs []string, maxTasks int) *httptest.ResponseRecorder {
+	return postBatchClaimWithCapabilities(t, workspaceID, runtimeIDs, maxTasks, "")
+}
+
+func postBatchClaimWithCapabilities(t *testing.T, workspaceID string, runtimeIDs []string, maxTasks int, capabilities string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/claim",
 		map[string]any{"daemon_id": batchClaimTestDaemonID, "runtime_ids": runtimeIDs, "max_tasks": maxTasks},
 		workspaceID, batchClaimTestDaemonID)
+	if capabilities != "" {
+		req.Header.Set("X-Client-Capabilities", capabilities)
+	}
 	testHandler.ClaimTasksByRuntime(w, req)
 	return w
 }
@@ -49,6 +60,45 @@ func postBatchClaim(t *testing.T, workspaceID string, runtimeIDs []string, maxTa
 // and the request body in batch-claim handler tests, so the daemon_id
 // consistency check passes on the happy path.
 const batchClaimTestDaemonID = "batch-claim-review"
+
+func TestClaimTasksByRuntime_ClaimPollHintSchedulesNextDeferredTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Batch claim deferred hint")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Batch claim deferred hint agent")
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"issue_id":   issueID,
+		"status":     "deferred",
+		"fire_at":    testutil.Raw("now() + interval '5 seconds'"),
+	})
+
+	w := postBatchClaimWithCapabilities(t, testWorkspaceID, []string{runtimeID}, 1, protocol.DaemonCapabilityClaimPollHintsV1)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var hinted batchClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &hinted); err != nil {
+		t.Fatalf("decode hinted response: %v", err)
+	}
+	if !hinted.ClaimPollHintSupported {
+		t.Fatalf("response = %s, want claim poll hint support", w.Body.String())
+	}
+	if hinted.NextDeferredTaskAfterMillis <= 0 || hinted.NextDeferredTaskAfterMillis > 5000 {
+		t.Fatalf("next deferred delay = %dms, want 1..5000ms", hinted.NextDeferredTaskAfterMillis)
+	}
+
+	w = postBatchClaim(t, testWorkspaceID, []string{runtimeID}, 1)
+	var legacy batchClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &legacy); err != nil {
+		t.Fatalf("decode legacy response: %v", err)
+	}
+	if legacy.ClaimPollHintSupported || legacy.NextDeferredTaskAfterMillis != 0 {
+		t.Fatalf("legacy response unexpectedly exposed poll hints: %s", w.Body.String())
+	}
+}
 
 // TestClaimTasksByRuntime_RoutesAcrossRuntimesAndMintsTokens covers the happy
 // path: one call claims across two runtimes on the same machine, returns one
