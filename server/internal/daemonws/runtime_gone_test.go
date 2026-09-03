@@ -2,6 +2,7 @@ package daemonws
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -60,6 +61,12 @@ func TestRelayNotifierPublishesAndDeliversRuntimeGone(t *testing.T) {
 	if relay.eventID == "" {
 		t.Fatal("expected event id")
 	}
+	if M.RuntimeGonePublishedTotal.Load() != 1 || M.RuntimeGonePublishErrors.Load() != 0 {
+		t.Fatalf("runtime-gone publish metrics: published=%d errors=%d, want 1/0", M.RuntimeGonePublishedTotal.Load(), M.RuntimeGonePublishErrors.Load())
+	}
+	if M.WakeupPublishedTotal.Load() != 0 || M.WakeupPublishErrors.Load() != 0 {
+		t.Fatalf("runtime-gone polluted wakeup publish metrics: published=%d errors=%d", M.WakeupPublishedTotal.Load(), M.WakeupPublishErrors.Load())
+	}
 
 	remoteHub := NewHub()
 	remoteClient := attachDaemonTestClient(remoteHub, "runtime-1")
@@ -78,8 +85,49 @@ func TestRelayNotifierPublishesAndDeliversRuntimeGone(t *testing.T) {
 	if M.RuntimeGoneDeliveredHit.Load() != 1 || M.RuntimeGoneDeliveredMiss.Load() != 0 {
 		t.Fatalf("runtime-gone delivery metrics after loopback: hit=%d miss=%d, want 1/0", M.RuntimeGoneDeliveredHit.Load(), M.RuntimeGoneDeliveredMiss.Load())
 	}
+	if M.RuntimeGoneReceivedTotal.Load() != 2 || M.WakeupReceivedTotal.Load() != 0 {
+		t.Fatalf("relay receive metrics: runtime-gone=%d wakeup=%d, want 2/0", M.RuntimeGoneReceivedTotal.Load(), M.WakeupReceivedTotal.Load())
+	}
 	if M.WakeupDeliveredHit.Load() != 0 || M.WakeupDeliveredMiss.Load() != 0 {
 		t.Fatalf("runtime-gone polluted wakeup delivery metrics: hit=%d miss=%d", M.WakeupDeliveredHit.Load(), M.WakeupDeliveredMiss.Load())
+	}
+}
+
+func TestRelayNotifierRuntimeGonePublishErrorDoesNotPolluteWakeupMetrics(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	NewRelayNotifier(nil, failingRelayPublisher{}).NotifyRuntimeGone("runtime-1")
+
+	if M.RuntimeGonePublishedTotal.Load() != 0 || M.RuntimeGonePublishErrors.Load() != 1 {
+		t.Fatalf("runtime-gone publish metrics: published=%d errors=%d, want 0/1", M.RuntimeGonePublishedTotal.Load(), M.RuntimeGonePublishErrors.Load())
+	}
+	if M.WakeupPublishedTotal.Load() != 0 || M.WakeupPublishErrors.Load() != 0 {
+		t.Fatalf("runtime-gone polluted wakeup publish metrics: published=%d errors=%d", M.WakeupPublishedTotal.Load(), M.WakeupPublishErrors.Load())
+	}
+}
+
+func TestDeliverDaemonRuntimeInvalidRuntimeGoneDoesNotPolluteWakeupMetrics(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	frame, err := json.Marshal(protocol.Message{
+		Type: protocol.EventDaemonHeartbeatAck,
+		Payload: mustMarshalRaw(protocol.DaemonHeartbeatAckPayload{
+			RuntimeID: "runtime-1",
+			Status:    "invalid",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("marshal invalid runtime-gone frame: %v", err)
+	}
+	NewHub().DeliverDaemonRuntime("runtime-1", frame, "event-1")
+
+	if M.RuntimeGoneReceivedTotal.Load() != 1 || M.RuntimeGoneDeliveredMiss.Load() != 1 {
+		t.Fatalf("invalid runtime-gone metrics: received=%d miss=%d, want 1/1", M.RuntimeGoneReceivedTotal.Load(), M.RuntimeGoneDeliveredMiss.Load())
+	}
+	if M.WakeupReceivedTotal.Load() != 0 || M.WakeupDeliveredMiss.Load() != 0 {
+		t.Fatalf("invalid runtime-gone polluted wakeup metrics: received=%d miss=%d", M.WakeupReceivedTotal.Load(), M.WakeupDeliveredMiss.Load())
 	}
 }
 
@@ -132,4 +180,10 @@ func decodeRuntimeGoneFrame(t *testing.T, raw []byte) protocol.DaemonHeartbeatAc
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	return payload
+}
+
+type failingRelayPublisher struct{}
+
+func (failingRelayPublisher) PublishWithID(string, string, string, []byte, string) error {
+	return errors.New("injected relay publish failure")
 }

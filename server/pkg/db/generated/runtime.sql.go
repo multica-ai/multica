@@ -561,6 +561,32 @@ func (q *Queries) IsAgentRuntimeEligibleForGC(ctx context.Context, arg IsAgentRu
 	return eligible, err
 }
 
+const listAgentRuntimeIDsByWorkspace = `-- name: ListAgentRuntimeIDsByWorkspace :many
+SELECT id FROM agent_runtime
+WHERE workspace_id = $1
+ORDER BY id ASC
+`
+
+func (q *Queries) ListAgentRuntimeIDsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAgentRuntimeIDsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentRuntimes = `-- name: ListAgentRuntimes :many
 SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
 WHERE workspace_id = $1

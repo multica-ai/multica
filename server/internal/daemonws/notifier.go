@@ -144,13 +144,13 @@ func (n *RelayNotifier) NotifyRuntimeGone(runtimeID string) {
 	}
 	frame, err := runtimeGoneFrame(runtimeID)
 	if err != nil {
-		M.WakeupPublishErrors.Add(1)
+		M.RuntimeGonePublishErrors.Add(1)
 		return
 	}
 	if err := n.relay.PublishWithID(realtime.ScopeDaemonRuntime, runtimeID, "", frame, eventID); err != nil {
-		M.WakeupPublishErrors.Add(1)
+		M.RuntimeGonePublishErrors.Add(1)
 		slog.Warn("daemon websocket runtime-gone publish failed", "error", err, "runtime_id", runtimeID)
 		return
 	}
-	M.WakeupPublishedTotal.Add(1)
+	M.RuntimeGonePublishedTotal.Add(1)
 }

@@ -3,6 +3,11 @@ SELECT * FROM agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListAgentRuntimeIDsByWorkspace :many
+SELECT id FROM agent_runtime
+WHERE workspace_id = $1
+ORDER BY id ASC;
+
 -- name: ListVisibleAgentRuntimes :many
 -- A private runtime is another member's machine and must not leak into their
 -- runtime list. The owner can always see their own runtime; everyone else

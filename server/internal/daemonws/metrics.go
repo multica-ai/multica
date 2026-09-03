@@ -14,8 +14,11 @@ type Metrics struct {
 	WakeupDeliveredHit   atomic.Int64
 	WakeupDeliveredMiss  atomic.Int64
 
-	RuntimeGoneDeliveredHit  atomic.Int64
-	RuntimeGoneDeliveredMiss atomic.Int64
+	RuntimeGoneDeliveredHit   atomic.Int64
+	RuntimeGoneDeliveredMiss  atomic.Int64
+	RuntimeGonePublishedTotal atomic.Int64
+	RuntimeGonePublishErrors  atomic.Int64
+	RuntimeGoneReceivedTotal  atomic.Int64
 }
 
 var M = &Metrics{}
@@ -33,6 +36,9 @@ func (m *Metrics) Snapshot() map[string]any {
 		"wakeup_delivered_miss_total":       m.WakeupDeliveredMiss.Load(),
 		"runtime_gone_delivered_hit_total":  m.RuntimeGoneDeliveredHit.Load(),
 		"runtime_gone_delivered_miss_total": m.RuntimeGoneDeliveredMiss.Load(),
+		"runtime_gone_published_total":      m.RuntimeGonePublishedTotal.Load(),
+		"runtime_gone_publish_errors":       m.RuntimeGonePublishErrors.Load(),
+		"runtime_gone_received_total":       m.RuntimeGoneReceivedTotal.Load(),
 	}
 }
 
@@ -48,4 +54,7 @@ func (m *Metrics) Reset() {
 	m.WakeupDeliveredMiss.Store(0)
 	m.RuntimeGoneDeliveredHit.Store(0)
 	m.RuntimeGoneDeliveredMiss.Store(0)
+	m.RuntimeGonePublishedTotal.Store(0)
+	m.RuntimeGonePublishErrors.Store(0)
+	m.RuntimeGoneReceivedTotal.Store(0)
 }

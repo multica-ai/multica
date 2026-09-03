@@ -1125,14 +1125,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	// registration does not participate in the workspace delete lock protocol,
 	// so PR1 retains the heartbeat lookup as the correctness fallback for a
 	// registration that races this snapshot.
-	runtimes, err := qtx.ListAgentRuntimes(r.Context(), requester.WorkspaceID)
+	runtimeIDs, err := qtx.ListAgentRuntimeIDsByWorkspace(r.Context(), requester.WorkspaceID)
 	if err != nil {
 		failWorkspaceDelete(w, r, workspaceID, "list runtimes", err)
 		return
-	}
-	runtimeIDs := make([]string, 0, len(runtimes))
-	for _, runtime := range runtimes {
-		runtimeIDs = append(runtimeIDs, uuidToString(runtime.ID))
 	}
 
 	if _, err := qtx.LockChatSessionsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
@@ -1328,7 +1324,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, runtimeID := range runtimeIDs {
-		h.NotifyRuntimeGone(runtimeID)
+		h.NotifyRuntimeGone(uuidToString(runtimeID))
 	}
 	h.deleteS3Objects(r.Context(), append(sourceContextAttachmentURLs, sourceContextIntentURLs...))
 

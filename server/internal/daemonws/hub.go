@@ -417,12 +417,17 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 	if h == nil {
 		return
 	}
-	M.WakeupReceivedTotal.Add(1)
 	var msg protocol.Message
 	if err := json.Unmarshal(frame, &msg); err != nil {
+		M.WakeupReceivedTotal.Add(1)
 		slog.Debug("daemon websocket relay: invalid frame", "error", err, "scope_id", scopeID, "event_id", eventID)
 		M.WakeupDeliveredMiss.Add(1)
 		return
+	}
+	if msg.Type == protocol.EventDaemonHeartbeatAck {
+		M.RuntimeGoneReceivedTotal.Add(1)
+	} else {
+		M.WakeupReceivedTotal.Add(1)
 	}
 	switch msg.Type {
 	case protocol.EventDaemonTaskAvailable:
@@ -475,7 +480,7 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 		var payload protocol.DaemonHeartbeatAckPayload
 		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" || payload.Status != protocol.HeartbeatStatusRuntimeGone || !payload.RuntimeGone {
 			slog.Debug("daemon websocket relay: invalid runtime_gone payload", "error", err, "scope_id", scopeID, "event_id", eventID)
-			M.WakeupDeliveredMiss.Add(1)
+			M.RuntimeGoneDeliveredMiss.Add(1)
 			return
 		}
 		delivered, deduped := h.notifyFrame(payload.RuntimeID, frame, eventID)
