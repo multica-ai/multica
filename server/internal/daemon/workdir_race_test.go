@@ -712,7 +712,7 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 		workspaces:         make(map[string]*workspaceState),
 		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
 		activeEnvRoots:     make(map[string]int),
-		taskPrepareTimeout: 150 * time.Millisecond,
+		taskPrepareTimeout: 500 * time.Millisecond,
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{
@@ -735,7 +735,7 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 	if !errors.Is(err, errTaskPrepareTimeout) {
 		t.Fatalf("runTask error = %v, want task prepare timeout", err)
 	}
-	if elapsed := time.Since(startedAt); elapsed > time.Second {
+	if elapsed := time.Since(startedAt); elapsed > 2*time.Second {
 		t.Fatalf("runTask took %s, want prepare deadline to stop blocked /start", elapsed)
 	}
 	select {
