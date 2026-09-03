@@ -88,7 +88,13 @@ func TestPublishAttachmentsChangedAlsoBroadcastsUpdatedDescription(t *testing.T)
 	bus := events.New()
 	svc := &IssueService{Bus: bus, Queries: q}
 	var updated events.Event
+	var ordered []events.Event
 	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) { updated = e })
+	bus.SubscribeAll(func(e events.Event) {
+		if e.Type == protocol.EventIssueUpdated || e.Type == protocol.EventIssueAttachmentsChanged {
+			ordered = append(ordered, e)
+		}
+	})
 
 	svc.PublishAttachmentsChanged(ctx, issue, actorID)
 
@@ -111,6 +117,13 @@ func TestPublishAttachmentsChangedAlsoBroadcastsUpdatedDescription(t *testing.T)
 		if changed, ok := payload[key].(bool); !ok || changed {
 			t.Fatalf("%s = %#v, want false", key, payload[key])
 		}
+	}
+	if len(ordered) != 2 || ordered[0].Type != protocol.EventIssueUpdated || ordered[1].Type != protocol.EventIssueAttachmentsChanged {
+		t.Fatalf("event order = %#v, want issue:updated then issue_attachments:changed", ordered)
+	}
+	attachmentPayload, ok := ordered[1].Payload.(map[string]any)
+	if !ok || attachmentPayload["issue_revision"] != issue.Revision {
+		t.Fatalf("attachment event payload = %#v, want revision %d", ordered[1].Payload, issue.Revision)
 	}
 }
 

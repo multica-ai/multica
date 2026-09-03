@@ -126,14 +126,18 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		return "", "", err
 	}
 
+	// Owned by the fixture user, like every runtime a real daemon registers
+	// with a member credential: a private runtime is bindable only by its
+	// owner, so an ownerless one could not host the agents these tests create
+	// through the API.
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
 		)
-		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
+		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, $5, now())
 		RETURNING id
-	`, workspaceID, "Integration Test Runtime", "integration_test_runtime", "Integration test runtime").Scan(&runtimeID); err != nil {
+	`, workspaceID, "Integration Test Runtime", "integration_test_runtime", "Integration test runtime", userID).Scan(&runtimeID); err != nil {
 		return "", "", err
 	}
 
@@ -775,6 +779,205 @@ func TestDeleteWorkspaceRequiresOwner(t *testing.T) {
 	}
 	if !exists {
 		t.Fatal("workspace was deleted despite non-owner request")
+	}
+}
+
+func TestDingTalkGroupsThroughRouterSupportsFilteredWorkspaceAndAgentScopes(t *testing.T) {
+	removedRouteResp := authRequest(t, http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/group-routes", nil)
+	removedRouteResp.Body.Close()
+	if removedRouteResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("removed DingTalk group-routes status = %d, want 404", removedRouteResp.StatusCode)
+	}
+
+	resp := authRequest(t, http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/groups", nil)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("member DingTalk groups status = %d, want 200", resp.StatusCode)
+	}
+	var result struct {
+		Groups []any `json:"groups"`
+	}
+	readJSON(t, resp, &result)
+	if result.Groups == nil || len(result.Groups) != 0 {
+		t.Fatalf("disabled DingTalk groups = %#v, want stable empty list", result.Groups)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at LIMIT 1
+`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+	resp = authRequest(t, http.MethodGet, "/api/agents/"+agentID+"/dingtalk/groups", nil)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("visible Agent DingTalk groups status = %d, want 200", resp.StatusCode)
+	}
+	readJSON(t, resp, &result)
+	if result.Groups == nil || len(result.Groups) != 0 {
+		t.Fatalf("disabled Agent DingTalk groups = %#v, want stable empty list", result.Groups)
+	}
+
+	var memberUserID string
+	if err := testPool.QueryRow(context.Background(), `
+INSERT INTO "user" (name, email) VALUES ('DingTalk group member', $1) RETURNING id
+`, "dingtalk-groups-member-"+time.Now().Format("150405.000000000")+"@example.test").Scan(&memberUserID); err != nil {
+		t.Fatalf("create member user: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
+`, testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("create workspace member: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, memberUserID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, memberUserID)
+	})
+	memberToken, err := generateTestJWT(memberUserID, "dingtalk-groups-member@example.test", "DingTalk group member")
+	if err != nil {
+		t.Fatalf("generate member token: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodGet, testServer.URL+"/api/workspaces/"+testWorkspaceID+"/dingtalk/groups", nil)
+	if err != nil {
+		t.Fatalf("build member request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("member request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("member filtered DingTalk groups status = %d, want 200", resp.StatusCode)
+	}
+
+	// Mutation routes admit workspace members to the handler, where the target
+	// agent's ownership is checked. Temporarily make this member the agent owner;
+	// a router-level admin gate would return 403 before the disabled/validation
+	// response below.
+	var originalOwnerID string
+	if err := testPool.QueryRow(context.Background(), `
+SELECT owner_id FROM agent WHERE id = $1
+`, agentID).Scan(&originalOwnerID); err != nil {
+		t.Fatalf("load fixture Agent owner: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+UPDATE agent SET owner_id = $2 WHERE id = $1
+`, agentID, memberUserID); err != nil {
+		t.Fatalf("assign fixture Agent owner: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `UPDATE agent SET owner_id = $2 WHERE id = $1`, agentID, originalOwnerID)
+	})
+	req, err = http.NewRequest(http.MethodPost,
+		testServer.URL+"/api/workspaces/"+testWorkspaceID+"/dingtalk/install/byo?agent_id="+agentID,
+		strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("build member DingTalk install request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("member DingTalk install request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("agent-owner DingTalk install status = %d, want 400 or 503", resp.StatusCode)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+UPDATE agent SET owner_id = $2 WHERE id = $1
+`, agentID, originalOwnerID); err != nil {
+		t.Fatalf("restore fixture Agent owner: %v", err)
+	}
+
+	var originalPermissionMode, originalVisibility string
+	if err := testPool.QueryRow(context.Background(), `
+SELECT permission_mode, visibility FROM agent WHERE id = $1
+`, agentID).Scan(&originalPermissionMode, &originalVisibility); err != nil {
+		t.Fatalf("load fixture Agent access mode: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+UPDATE agent SET permission_mode = 'public_to', visibility = 'workspace' WHERE id = $1
+`, agentID); err != nil {
+		t.Fatalf("make fixture Agent public_to: %v", err)
+	}
+	targetInsert, err := testPool.Exec(context.Background(), `
+INSERT INTO agent_invocation_target (agent_id, target_type, target_id)
+VALUES ($1, 'workspace', $2)
+ON CONFLICT (agent_id, target_type, target_id) DO NOTHING
+`, agentID, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("make fixture agent workspace-visible: %v", err)
+	}
+	insertedTarget := targetInsert.RowsAffected() == 1
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+UPDATE agent SET permission_mode = $2, visibility = $3 WHERE id = $1
+`, agentID, originalPermissionMode, originalVisibility)
+		if !insertedTarget {
+			return
+		}
+		_, _ = testPool.Exec(context.Background(), `
+DELETE FROM agent_invocation_target WHERE agent_id = $1 AND target_type = 'workspace' AND target_id = $2
+`, agentID, testWorkspaceID)
+	})
+	req, err = http.NewRequest(http.MethodGet, testServer.URL+"/api/agents/"+agentID+"/dingtalk/groups", nil)
+	if err != nil {
+		t.Fatalf("build member Agent request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("member Agent request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("member visible-Agent DingTalk groups status = %d, want 200", resp.StatusCode)
+	}
+
+	var runtimeID, privateAgentID string
+	if err := testPool.QueryRow(context.Background(), `
+SELECT runtime_id FROM agent WHERE id = $1
+`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load fixture runtime: %v", err)
+	}
+	if err := testPool.QueryRow(context.Background(), `
+INSERT INTO agent (
+  workspace_id, name, description, runtime_mode, runtime_config, runtime_id,
+  visibility, permission_mode, max_concurrent_tasks, owner_id
+) VALUES ($1, 'DingTalk private groups fixture', '', 'cloud', '{}'::jsonb, $2,
+          'private', 'private', 1, $3)
+RETURNING id
+`, testWorkspaceID, runtimeID, testUserID).Scan(&privateAgentID); err != nil {
+		t.Fatalf("create private Agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, privateAgentID)
+	})
+	req, err = http.NewRequest(http.MethodGet, testServer.URL+"/api/agents/"+privateAgentID+"/dingtalk/groups", nil)
+	if err != nil {
+		t.Fatalf("build private Agent request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("private Agent request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("member private-Agent DingTalk groups status = %d, want 403", resp.StatusCode)
+	}
+
+	const outsideWorkspaceID = "d1474000-0000-4000-8000-000000000001"
+	resp = authRequest(t, http.MethodGet, "/api/workspaces/"+outsideWorkspaceID+"/dingtalk/groups", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("non-member DingTalk groups status = %d, want 404", resp.StatusCode)
 	}
 }
 

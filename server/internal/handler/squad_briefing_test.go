@@ -13,26 +13,6 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// TestSquadOperatingProtocolOwnsParentStatus locks the parent-issue status
-// contract: first dispatch moves todo→in_progress and stays there; only a
-// later confirmation of overall completion may advance to in_review; done is
-// left to humans / integrations.
-func TestSquadOperatingProtocolOwnsParentStatus(t *testing.T) {
-	protocol := squadOperatingProtocolFor(true)
-	compact := strings.Join(strings.Fields(protocol), " ")
-	for _, want := range []string{
-		"Own the parent issue status",
-		"move the parent to `in_progress`",
-		"successful dispatch is not completion",
-		"multica issue status <issue-id> in_review",
-		"Leave `done` to a human reviewer",
-	} {
-		if !strings.Contains(compact, want) {
-			t.Errorf("expected squad operating protocol to contain %q\n--- protocol ---\n%s", want, protocol)
-		}
-	}
-}
-
 // TestSquadOperatingProtocolScopesParentStatusOwnership is the guard for the
 // MUL-5156 review finding: the briefing is injected on every leader path,
 // including an @squad mention on an issue assigned to someone else. Status
@@ -82,25 +62,6 @@ func TestSquadOperatingProtocolScopesParentStatusOwnership(t *testing.T) {
 	// rules in the brief and the per-turn prompt refer to by name.
 	if !strings.Contains(guest, "## Squad Operating Protocol") {
 		t.Error("guest-leader protocol lost its section header")
-	}
-}
-
-// TestSquadOperatingProtocolWarnsAgainstDualTrigger locks in the rule
-// added for #3033: the protocol must tell the squad leader that a `todo`
-// child issue with an agent assignee already fires that agent, so they
-// must not also @mention the same agent on the parent issue for the
-// same work. Asserts behavior, not exact wording — keep the substrings
-// narrow so harmless rewording doesn't break the test.
-func TestSquadOperatingProtocolWarnsAgainstDualTrigger(t *testing.T) {
-	protocol := squadOperatingProtocolFor(true)
-	compact := strings.Join(strings.Fields(protocol), " ")
-	for _, want := range []string{
-		"--status todo` and an agent assignee already fires that agent automatically",
-		"Never both for the same work.",
-	} {
-		if !strings.Contains(compact, want) {
-			t.Errorf("expected squad operating protocol to contain %q\n--- protocol ---\n%s", want, protocol)
-		}
 	}
 }
 

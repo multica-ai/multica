@@ -20,9 +20,9 @@ import type {
 } from "./types";
 
 // AgentAvailability mirrors RuntimeHealth's reachability buckets but folds
-// `about_to_gc` into `offline` — both mean "long unreachable" from the
-// user's standpoint; the GC-warning copy belongs to the runtime card, not
-// the agent dot.
+// `long_offline` into `offline` — both mean "unreachable" from the agent
+// availability standpoint; the duration detail belongs to the runtime card,
+// not the agent dot.
 export function deriveAgentAvailability(
   runtime: AgentRuntime | null,
   now: number,
@@ -31,7 +31,7 @@ export function deriveAgentAvailability(
   const health = deriveRuntimeHealth(runtime, now);
   if (health === "online") return "online";
   if (health === "recently_lost") return "unstable";
-  return "offline"; // offline | about_to_gc collapse here
+  return "offline"; // offline | long_offline collapse here
 }
 
 // Atomic workload derivation: pure 3-way classification of running/queued

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -26,13 +27,14 @@ func newGCTestDaemon(t *testing.T, handler http.Handler) *Daemon {
 
 	root := t.TempDir()
 	cfg := Config{
-		WorkspacesRoot:     root,
-		GCEnabled:          true,
-		GCInterval:         1 * time.Hour,
-		GCTTL:              5 * 24 * time.Hour,
-		GCOrphanTTL:        30 * 24 * time.Hour,
-		GCArtifactTTL:      12 * time.Hour,
-		GCArtifactPatterns: []string{"node_modules", ".next", ".turbo"},
+		WorkspacesRoot:           root,
+		GCEnabled:                true,
+		GCInterval:               1 * time.Hour,
+		GCTTL:                    5 * 24 * time.Hour,
+		GCOrphanTTL:              30 * 24 * time.Hour,
+		GCArtifactTTL:            12 * time.Hour,
+		GCArtifactPatterns:       []string{"node_modules", ".next", ".turbo"},
+		GCRepoMaintenanceEnabled: true,
 	}
 	d := New(cfg, slog.Default())
 	d.client = NewClient(srv.URL)
@@ -47,6 +49,20 @@ func createTaskDir(t *testing.T, root, wsID, dirName string, meta *execenv.GCMet
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Production task directories end in the task key rather than the full
+	// task ID. Keep human-readable fixture names while making the owner marker
+	// obey the same path/identity contract enforced by GC.
+	taskID := dirName
+	if i := strings.LastIndex(dirName, "-"); i >= 0 && i+1 < len(dirName) {
+		taskID = dirName[i+1:]
+	}
+	owner, err := json.Marshal(execenv.EnvRootOwner{WorkspaceID: wsID, TaskID: taskID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, ".task_owner"), owner, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if meta != nil {
 		data, _ := json.Marshal(meta)
 		if err := os.WriteFile(filepath.Join(taskDir, ".gc_meta.json"), data, 0o644); err != nil {
@@ -54,6 +70,245 @@ func createTaskDir(t *testing.T, root, wsID, dirName string, meta *execenv.GCMet
 		}
 	}
 	return taskDir
+}
+
+// TestRunGC_StrandedTaskRootRecordsFollowTaskStatus guards the wiring AND the
+// invariant that makes the sweep safe.
+//
+// A record whose env root never materialised has no other remover: cleanTaskDir
+// only fires on a root it reclaims, and nothing else walks .task_roots. But
+// absence of the root cannot authorise removal on its own — ResolveRootDir
+// publishes the record BEFORE Prepare creates the directory, so a record that
+// an aged-out re-dispatch is in the middle of reusing looks identical to a
+// leftover. Deleting there hands the same task a second physical root, which is
+// the orphaning the index exists to prevent.
+//
+// The age gate alone does not separate those two: an old record IS the state a
+// stalled re-dispatch reads. Only the task's own status does, so the sweep asks
+// the server and keeps anything non-terminal.
+func TestRunGC_StrandedTaskRootRecordsFollowTaskStatus(t *testing.T) {
+	root := t.TempDir()
+	const workspaceID = "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
+	params := func(taskID string) execenv.RootDirParams {
+		return execenv.RootDirParams{
+			WorkspacesRoot: root, WorkspaceID: workspaceID,
+			WorkspaceSlug: "Asset Feed", TaskID: taskID, IssueIdentifier: "MUL-6063",
+		}
+	}
+	const (
+		runningTask  = "5c57b65b-ee7a-4603-a72d-c760d45b2ed4"
+		terminalTask = "5c57b65b-ee7a-4603-a72d-d871e56c3fe5"
+		liveRootTask = "5c57b65b-ee7a-4603-a72d-b659c34a1dc3"
+	)
+	statuses := map[string]string{
+		runningTask:  "running",
+		terminalTask: "completed",
+		// liveRootTask is terminal too: only its surviving root protects it.
+		liveRootTask: "completed",
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/tasks/", func(w http.ResponseWriter, r *http.Request) {
+		taskID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/daemon/tasks/"), "/gc-check")
+		status, ok := statuses[taskID]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"status": status})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.WorkspacesRoot = root
+
+	frozen := map[string]string{}
+	for _, taskID := range []string{runningTask, terminalTask, liveRootTask} {
+		resolved, err := execenv.ResolveRootDir(params(taskID))
+		if err != nil {
+			t.Fatalf("resolve root for %s: %v", taskID, err)
+		}
+		frozen[taskID] = resolved
+	}
+	// Only this one ever reached ClaimEnvRoot.
+	if err := os.MkdirAll(frozen[liveRootTask], 0o755); err != nil {
+		t.Fatalf("create live root: %v", err)
+	}
+
+	past := time.Now().Add(-31 * 24 * time.Hour)
+	if err := filepath.WalkDir(filepath.Join(root, ".task_roots"), func(path string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(path, past, past)
+	}); err != nil {
+		t.Fatalf("backdate task root index: %v", err)
+	}
+
+	d.runGC(context.Background())
+
+	// Renaming is how we observe survival: a frozen record ignores the new
+	// labels, a reclaimed one re-proposes from them.
+	for _, tc := range []struct {
+		taskID string
+		want   bool
+		why    string
+	}{
+		{runningTask, true, "a non-terminal task's frozen identity was swept; a re-dispatch would now get a second root"},
+		{liveRootTask, true, "a record was swept while its env root still exists"},
+		{terminalTask, false, "a terminal task's stranded record survived the sweep"},
+	} {
+		renamed := params(tc.taskID)
+		renamed.WorkspaceSlug = "Renamed Workspace"
+		renamed.IssueIdentifier = "NEW-6063"
+		resolved, err := execenv.ResolveRootDir(renamed)
+		if err != nil {
+			t.Fatalf("resolve %s after GC: %v", tc.taskID, err)
+		}
+		if kept := resolved == frozen[tc.taskID]; kept != tc.want {
+			t.Errorf("task %s: record kept = %v, want %v — %s", tc.taskID, kept, tc.want, tc.why)
+		}
+	}
+}
+
+func TestRunGC_MixedLayoutsUseMetadataWorkspaceIdentity(t *testing.T) {
+	workspaceID := "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
+	legacyIssueID := "11111111-1111-1111-1111-111111111111"
+	readableIssueID := "22222222-2222-2222-2222-222222222222"
+	var batchRequests int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/"+workspaceID+"/issues/gc-check", func(w http.ResponseWriter, r *http.Request) {
+		batchRequests++
+		var body struct {
+			IssueIDs []string `json:"issue_ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode batch request: %v", err)
+		}
+		issues := make([]map[string]any, 0, len(body.IssueIDs))
+		for _, issueID := range body.IssueIDs {
+			issues = append(issues, map[string]any{
+				"id": issueID, "found": true, "status": "done",
+				"updated_at": time.Now().Add(-10 * 24 * time.Hour),
+			})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"issues": issues})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	legacyDir := createTaskDir(t, d.cfg.WorkspacesRoot, workspaceID, "11111111", &execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: legacyIssueID, WorkspaceID: workspaceID,
+		CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+	readableDir := createTaskDir(t, d.cfg.WorkspacesRoot, "asset-feed-a548b2390cb2", "mul-6063-b659c34a1dc3", &execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: readableIssueID, WorkspaceID: workspaceID,
+		TaskID: "22222222-ee7a-4603-a72d-b659c34a1dc3", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+
+	d.runGC(context.Background())
+
+	if batchRequests != 2 {
+		t.Fatalf("batch requests = %d, want one per physical layout", batchRequests)
+	}
+	for _, taskDir := range []string{legacyDir, readableDir} {
+		if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+			t.Fatalf("task dir %s was not reclaimed", taskDir)
+		}
+	}
+}
+
+func TestRunGC_PrunesOnlyTerminalAbandonedTaskRootRecords(t *testing.T) {
+	t.Parallel()
+
+	const (
+		workspaceID     = "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
+		terminalTask    = "5c57b65b-ee7a-4603-a72d-b659c34a1dc3"
+		runningTask     = "6d68c76c-ff8b-5704-b83e-c76ad45b2ed4"
+		unavailableTask = "7e79d87d-008c-6805-c94f-d87be56c3fe5"
+	)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/tasks/", func(w http.ResponseWriter, r *http.Request) {
+		status := "running"
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) >= 2 && parts[len(parts)-2] == unavailableTask {
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if len(parts) >= 2 && parts[len(parts)-2] == terminalTask {
+			status = "failed"
+		}
+		json.NewEncoder(w).Encode(map[string]any{"status": status})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCOrphanTTL = time.Hour
+	terminalParams := execenv.RootDirParams{
+		WorkspacesRoot: d.cfg.WorkspacesRoot,
+		WorkspaceID:    workspaceID,
+		TaskID:         terminalTask,
+	}
+	runningParams := terminalParams
+	runningParams.TaskID = runningTask
+	unavailableParams := terminalParams
+	unavailableParams.TaskID = unavailableTask
+	terminalRoot, err := execenv.ResolveRootDir(terminalParams)
+	if err != nil {
+		t.Fatalf("resolve terminal root: %v", err)
+	}
+	runningRoot, err := execenv.ResolveRootDir(runningParams)
+	if err != nil {
+		t.Fatalf("resolve running root: %v", err)
+	}
+	unavailableRoot, err := execenv.ResolveRootDir(unavailableParams)
+	if err != nil {
+		t.Fatalf("resolve unavailable root: %v", err)
+	}
+
+	indexDir := filepath.Join(d.cfg.WorkspacesRoot, ".task_roots")
+	entries, err := os.ReadDir(indexDir)
+	if err != nil {
+		t.Fatalf("read task root index: %v", err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	for _, entry := range entries {
+		recordPath := filepath.Join(indexDir, entry.Name(), "root.json")
+		if err := os.Chtimes(recordPath, old, old); err != nil {
+			t.Fatalf("age task root record: %v", err)
+		}
+	}
+
+	d.runGC(t.Context())
+
+	terminalRenamed := terminalParams
+	terminalRenamed.WorkspaceSlug = "Renamed Workspace"
+	terminalRenamed.IssueIdentifier = "NEW-6063"
+	terminalAfterGC, err := execenv.ResolveRootDir(terminalRenamed)
+	if err != nil {
+		t.Fatalf("resolve terminal root after GC: %v", err)
+	}
+	if terminalAfterGC == terminalRoot {
+		t.Fatalf("terminal abandoned record still froze root %q", terminalAfterGC)
+	}
+	runningRenamed := runningParams
+	runningRenamed.WorkspaceSlug = "Renamed Workspace"
+	runningRenamed.IssueIdentifier = "NEW-6064"
+	runningAfterGC, err := execenv.ResolveRootDir(runningRenamed)
+	if err != nil {
+		t.Fatalf("resolve running root after GC: %v", err)
+	}
+	if runningAfterGC != runningRoot {
+		t.Fatalf("GC changed non-terminal task root from %q to %q", runningRoot, runningAfterGC)
+	}
+	unavailableRenamed := unavailableParams
+	unavailableRenamed.WorkspaceSlug = "Renamed Workspace"
+	unavailableRenamed.IssueIdentifier = "NEW-6065"
+	unavailableAfterGC, err := execenv.ResolveRootDir(unavailableRenamed)
+	if err != nil {
+		t.Fatalf("resolve unavailable root after GC: %v", err)
+	}
+	if unavailableAfterGC != unavailableRoot {
+		t.Fatalf("GC changed task root after an inconclusive status check from %q to %q", unavailableRoot, unavailableAfterGC)
+	}
 }
 
 func TestShouldCleanTaskDir_DoneIssueOverTTL(t *testing.T) {
@@ -196,15 +451,16 @@ func TestShouldCleanTaskDir_APIErrorSkipped(t *testing.T) {
 	})
 
 	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "task7", &execenv.GCMeta{
 		IssueID:     issueID,
 		WorkspaceID: "ws1",
-		CompletedAt: time.Now(),
+		CompletedAt: time.Now().Add(-2 * time.Hour),
 	})
 
 	action := d.shouldCleanTaskDir(context.Background(), taskDir)
 	if action != gcActionSkip {
-		t.Fatalf("expected gcActionSkip on API error, got %d", action)
+		t.Fatalf("expected gcActionSkip on API error despite completed-task TTL, got %d", action)
 	}
 }
 
@@ -264,15 +520,191 @@ func TestCleanTaskDir_RemovesDirectory(t *testing.T) {
 	t.Parallel()
 	d := newGCTestDaemon(t, http.NewServeMux())
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "doomed", nil)
+	writeFile(t, filepath.Join(taskDir, "workdir", "payload.bin"), 64)
 
 	if _, err := os.Stat(taskDir); err != nil {
 		t.Fatal("task dir should exist before cleanup")
 	}
 
-	d.cleanTaskDir(taskDir)
+	if bytes, removed := d.cleanTaskDir(taskDir); !removed || bytes < 64 {
+		t.Fatalf("reclaimed bytes = %d, want at least payload size", bytes)
+	}
 
 	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
 		t.Fatal("task dir should be removed after cleanup")
+	}
+}
+
+func TestRunGC_SharedRootPreservesForeignDirectories(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.GCOrphanTTL = 0
+	projectDir := filepath.Join(d.cfg.WorkspacesRoot, "analyze-serenity-event-study-20260827")
+	dataDir := filepath.Join(projectDir, "data")
+	database := filepath.Join(dataDir, "research.sqlite")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(database, []byte("do not delete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d.runGC(context.Background())
+
+	if got, err := os.ReadFile(database); err != nil || string(got) != "do not delete" {
+		t.Fatalf("GC mutated non-Multica data under a shared root: data=%q err=%v", got, err)
+	}
+}
+
+// The incident regression above only proves the no-meta orphan path returns
+// early. applyGCAction is the single gate every mutating action passes
+// through, so pin all four: an unowned directory must survive full cleanup,
+// orphan removal, pattern artifact cleanup and managed artifact cleanup alike.
+func TestApplyGCAction_RefusesEveryMutationWithoutOwner(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		action gcAction
+	}{
+		{"clean", gcActionClean},
+		{"orphan", gcActionOrphan},
+		{"artifacts", gcActionCleanArtifacts},
+		{"managed artifacts", gcActionCleanManagedArtifacts},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newGCTestDaemon(t, http.NewServeMux())
+			taskDir := filepath.Join(d.cfg.WorkspacesRoot, "source-repository", "data")
+			// Give both artifact actions something they would delete if the
+			// ownership gate were absent, so a passing test means refusal
+			// rather than an empty fixture.
+			artifactDir := filepath.Join(taskDir, d.cfg.GCArtifactPatterns[0])
+			managedDir := filepath.Join(taskDir, execenv.ManagedReclaimableArtifactSubpaths()[0])
+			for _, dir := range []string{artifactDir, managedDir} {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "payload"), []byte("keep"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			database := filepath.Join(taskDir, "research.sqlite")
+			if err := os.WriteFile(database, []byte("do not delete"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			stats := &gcStats{byPattern: map[string]int{}}
+			if removed := d.applyGCAction(taskDir, tc.action, stats); removed != 0 {
+				t.Fatalf("applyGCAction reported %d removals on an unowned directory", removed)
+			}
+			if stats.cleaned != 0 || stats.orphaned != 0 || stats.artifactDirs != 0 || stats.bytesReclaimed != 0 {
+				t.Fatalf("unowned mutation was counted: cleaned=%d orphaned=%d artifactDirs=%d bytes=%d",
+					stats.cleaned, stats.orphaned, stats.artifactDirs, stats.bytesReclaimed)
+			}
+			for _, path := range []string{database, filepath.Join(artifactDir, "payload"), filepath.Join(managedDir, "payload")} {
+				if _, err := os.Stat(path); err != nil {
+					t.Fatalf("unowned content was mutated: %s: %v", path, err)
+				}
+			}
+		})
+	}
+}
+
+func TestCleanTaskDir_RefusesOwnerPathMismatch(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := filepath.Join(d.cfg.WorkspacesRoot, "source-repository", "data")
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := json.Marshal(execenv.EnvRootOwner{WorkspaceID: "workspace-id", TaskID: "task-id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, ".task_owner"), owner, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	survivor := filepath.Join(taskDir, "research.sqlite")
+	if err := os.WriteFile(survivor, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if bytes, removed := d.cleanTaskDir(taskDir); removed || bytes != 0 {
+		t.Fatalf("cleanTaskDir removed owner/path mismatch: removed=%v bytes=%d", removed, bytes)
+	}
+	if _, err := os.Stat(survivor); err != nil {
+		t.Fatalf("owner/path mismatch data was not preserved: %v", err)
+	}
+}
+
+func TestCleanTaskDir_AcceptsLegacyOwnerWithGCWorkspaceIdentity(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := filepath.Join(d.cfg.WorkspacesRoot, "ws1", "task1")
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, ".task_owner"), []byte("task1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := json.Marshal(execenv.GCMeta{Kind: execenv.GCKindIssue, WorkspaceID: "ws1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, ".gc_meta.json"), meta, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "payload"), []byte("owned"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, removed := d.cleanTaskDir(taskDir); !removed {
+		t.Fatal("legacy task owner with matching GC workspace identity was not removed")
+	}
+	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+		t.Fatalf("legacy owned task directory still exists: %v", err)
+	}
+}
+
+func TestCleanTaskDir_RemovesStableRootRecord(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	params := execenv.PrepareParams{
+		WorkspacesRoot:  root,
+		WorkspaceID:     "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+		WorkspaceSlug:   "Asset Feed",
+		TaskID:          "5c57b65b-ee7a-4603-a72d-b659c34a1dc3",
+		IssueIdentifier: "MUL-6063",
+		AgentName:       "GC Identity",
+	}
+	env, err := execenv.Prepare(params, slog.Default())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	original := env.RootDir
+	d := &Daemon{cfg: Config{WorkspacesRoot: root}, logger: slog.Default()}
+	if bytes, removed := d.cleanTaskDir(original); !removed || bytes <= 0 {
+		t.Fatalf("reclaimed bytes = %d, want owner metadata bytes", bytes)
+	}
+
+	resolved, err := execenv.ResolveRootDir(execenv.RootDirParams{
+		WorkspacesRoot:  root,
+		WorkspaceID:     params.WorkspaceID,
+		WorkspaceSlug:   "Renamed Workspace",
+		TaskID:          params.TaskID,
+		IssueIdentifier: "NEW-6063",
+	})
+	if err != nil {
+		t.Fatalf("ResolveRootDir after terminal GC: %v", err)
+	}
+	if resolved == original {
+		t.Fatalf("terminal GC left stale root record %q", resolved)
 	}
 }
 
@@ -365,6 +797,40 @@ func TestGCWorkspace_BatchesAndDeduplicatesIssueChecks(t *testing.T) {
 	}
 }
 
+func TestGCWorkspace_CompletedTaskTTLRemovesOpenIssue(t *testing.T) {
+	t.Parallel()
+	issueID := "77777777-7777-7777-7777-777777777770"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/ws-completed/issues/gc-check", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []map[string]any{
+			{"id": issueID, "found": true, "status": "in_review", "updated_at": time.Now()},
+		}})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = 24 * time.Hour
+	d.cfg.GCArtifactTTL = 0
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-completed")
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-completed", "completed-open", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws-completed",
+		CompletedAt: time.Now().Add(-25 * time.Hour),
+	})
+	writeFile(t, filepath.Join(taskDir, "workdir", "checkout.bin"), 128)
+
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+		t.Fatalf("completed open-issue task dir should be removed, stat error = %v", err)
+	}
+	if stats.cleaned != 1 || stats.skipped != 0 || stats.bytesReclaimed < 128 {
+		t.Fatalf("unexpected stats after completed-task cleanup: %+v", stats)
+	}
+}
+
 func TestGCWorkspace_OldServerFallbackIsCached(t *testing.T) {
 	issueA := "77777777-7777-7777-7777-777777777773"
 	issueB := "77777777-7777-7777-7777-777777777774"
@@ -422,6 +888,7 @@ func TestGCWorkspace_BatchFailureDoesNotFanOutOrClean(t *testing.T) {
 	})
 
 	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
 	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-fail")
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-fail", "task", &execenv.GCMeta{
 		IssueID: issueID, WorkspaceID: "ws-fail", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
@@ -529,6 +996,154 @@ func TestShouldCleanTaskDir_OpenIssueArtifactCleanup(t *testing.T) {
 	action := d.shouldCleanTaskDir(context.Background(), taskDir)
 	if action != gcActionCleanArtifacts {
 		t.Fatalf("expected gcActionCleanArtifacts for old completed task on open issue, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_CompletedTaskTTLRemovesOpenIssue(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888880"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":     "in_review",
+			"updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = 24 * time.Hour
+	d.cfg.GCArtifactTTL = 0
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "completed-open", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-25 * time.Hour),
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionClean {
+		t.Fatalf("expected completed-task TTL to clean open issue env, got %d", action)
+	}
+
+	recentTaskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "recently-completed-open", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-23 * time.Hour),
+	})
+	if action := d.shouldCleanTaskDir(context.Background(), recentTaskDir); action != gcActionSkip {
+		t.Fatalf("expected completed-task TTL to preserve a recent open-issue env, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_CompletedTaskTTLUnknownIssueStatusFailsClosed(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888884"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "future_or_malformed_status", "updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
+	d.cfg.GCArtifactTTL = 0
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "completed-unknown-status", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-2 * time.Hour),
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected unknown issue status to fail closed, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_CompletedTaskTTLRequiresCompletionTime(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888881"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "blocked", "updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "missing-completion", &execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1",
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected task without completed_at to remain, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_CompletedTaskTTLKeepsLocalDirectoryArtifactTTLSeparate(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888882"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "in_progress", "updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "local-directory-recent", &execenv.GCMeta{
+		Kind:           execenv.GCKindIssue,
+		IssueID:        issueID,
+		WorkspaceID:    "ws1",
+		CompletedAt:    time.Now().Add(-2 * time.Hour),
+		LocalDirectory: true,
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected completed-task TTL not to accelerate local_directory artifact cleanup, got %d", action)
+	}
+
+	artifactEligibleDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "local-directory-artifact-eligible", &execenv.GCMeta{
+		Kind:           execenv.GCKindIssue,
+		IssueID:        issueID,
+		WorkspaceID:    "ws1",
+		CompletedAt:    time.Now().Add(-13 * time.Hour),
+		LocalDirectory: true,
+	})
+	if action := d.shouldCleanTaskDir(context.Background(), artifactEligibleDir); action != gcActionCleanArtifacts {
+		t.Fatalf("expected existing artifact TTL to remain effective for local_directory env, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_CompletedTaskTTLPreservesActiveEnv(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888883"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "todo", "updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "active-completed", &execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-2 * time.Hour),
+	})
+	d.markActiveEnvRoot(taskDir)
+	defer d.unmarkActiveEnvRoot(taskDir)
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected active env to remain despite completed-task TTL, got %d", action)
 	}
 }
 
@@ -1053,6 +1668,28 @@ func TestPruneWorktree_RemovesOnlyStaleAgentBranches(t *testing.T) {
 	}
 }
 
+func TestMaintainRepoCacheRunsLightCleanupWhileTaskActive(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+	const staleBranch = "agent/stale/87654321"
+	runGitForGC(t, "", "-C", barePath, "branch", staleBranch, "HEAD")
+
+	d.activeTasks.Add(1)
+	defer d.activeTasks.Add(-1)
+	d.maintainRepoCache(context.Background(), barePath, &gcStats{})
+
+	if gitRefExists(t, barePath, "refs/heads/"+staleBranch) {
+		t.Fatalf("expected stale branch %q to be deleted while a task is active", staleBranch)
+	}
+	if _, err := os.Stat(filepath.Join(barePath, repoMaintenanceMarker)); err != nil {
+		t.Fatalf("heavy maintenance should remain pending while a task is active: %v", err)
+	}
+}
+
 // TestPruneWorktree_IgnoresLiteralAgentBranch ensures the GC pattern is scoped
 // to the `agent/` namespace. A repo whose only `agent`-shaped ref is the
 // literal `refs/heads/agent` (no slash) must be left untouched — the
@@ -1111,6 +1748,29 @@ func TestPruneWorktree_SkipsMaintenanceWhenNothingDeleted(t *testing.T) {
 	}
 }
 
+func TestPruneWorktree_RetriesPendingMaintenanceWithoutAnotherBranchDeletion(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+
+	sentinelPath := writeOldLooseBlob(t, barePath, "pending-maintenance", 60*24*time.Hour)
+	markerPath := filepath.Join(barePath, repoMaintenanceMarker)
+	if err := os.WriteFile(markerPath, []byte("pending\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	d.pruneWorktree(barePath)
+	if _, err := os.Stat(sentinelPath); !os.IsNotExist(err) {
+		t.Fatalf("expected pending maintenance to prune sentinel, stat err=%v", err)
+	}
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("expected completed maintenance to clear pending marker, stat err=%v", err)
+	}
+}
+
 // writeOldLooseBlob writes a dangling loose-object blob to the bare repo and
 // backdates its mtime so `git gc --prune=30.days` will consider it prunable.
 // Returns the absolute path to the loose object on disk.
@@ -1137,7 +1797,7 @@ func writeOldLooseBlob(t *testing.T, barePath, content string, age time.Duration
 	return loose
 }
 
-func TestPruneWorktree_SerializesWithCreateWorktree(t *testing.T) {
+func TestPruneWorktree_LegacyCacheFallbackSerializesWithCreateWorktree(t *testing.T) {
 	t.Parallel()
 
 	d := newGCTestDaemon(t, http.NewServeMux())
@@ -1206,6 +1866,131 @@ func TestPruneWorktree_SerializesWithCreateWorktree(t *testing.T) {
 	case <-pruneDone:
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for pruneWorktree to finish")
+	}
+}
+
+func TestCleanupNewRepoMaintenanceLocksPreservesPreexistingFiles(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	barePath := t.TempDir()
+	preexisting := filepath.Join(barePath, "logs", "refs", "heads", "main.lock")
+	if err := os.MkdirAll(filepath.Dir(preexisting), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(preexisting, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotRepoMaintenanceLocks(barePath)
+
+	created := []string{
+		filepath.Join(barePath, "refs", "remotes", "origin", "main.lock"),
+		filepath.Join(barePath, "objects", "pack", "multi-pack-index.lock"),
+		filepath.Join(barePath, "packed-refs.lock"),
+		filepath.Join(barePath, "gc.pid"),
+	}
+	for _, path := range created {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("new"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outsideWhitelist := filepath.Join(barePath, "hooks", "user.lock")
+	if err := os.MkdirAll(filepath.Dir(outsideWhitelist), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outsideWhitelist, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d.cleanupNewRepoMaintenanceLocks(barePath, before)
+	for _, path := range created {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("new maintenance lock %s survived, stat error = %v", path, err)
+		}
+	}
+	for _, path := range []string{preexisting, outsideWhitelist} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("unowned lock %s was removed: %v", path, err)
+		}
+	}
+}
+
+func TestPruneWorktreePreemptionCleansLocksBeforeTaskStarts(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skipf("requires a POSIX shell: %v", err)
+	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skipf("git not found: %v", err)
+	}
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	cache := repocache.New(filepath.Join(d.cfg.WorkspacesRoot, ".repos"), slog.Default())
+	if err := cache.Sync("ws1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("cache sync failed: %v", err)
+	}
+	d.repoCache = cache
+	barePath := cache.Lookup("ws1", sourceRepo)
+	runGitForGC(t, "", "-C", barePath, "branch", "agent/stale/87654321", "HEAD")
+
+	lockPath := filepath.Join(barePath, "refs", "remotes", "origin", "main.lock")
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	startedPath := filepath.Join(t.TempDir(), "maintenance-started")
+	binDir := t.TempDir()
+	fakeGit := filepath.Join(binDir, "git")
+	script := `#!/bin/sh
+if [ "$3" = "reflog" ] && [ "$4" = "expire" ]; then
+  : > "$2/refs/remotes/origin/main.lock"
+  : > "$MULTICA_TEST_MAINTENANCE_STARTED"
+  trap 'exit 143' TERM INT
+  while :; do sleep 1; done
+fi
+exec "$MULTICA_TEST_REAL_GIT" "$@"
+`
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MULTICA_TEST_REAL_GIT", realGit)
+	t.Setenv("MULTICA_TEST_MAINTENANCE_STARTED", startedPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	pruneDone := make(chan struct{})
+	go func() {
+		d.pruneWorktree(barePath)
+		close(pruneDone)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(startedPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for heavy maintenance to start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Match production task dispatch order: mark the task active, then cancel
+	// maintenance and wait for its cleanup barrier before agent code starts.
+	d.activeTasks.Add(1)
+	defer d.activeTasks.Add(-1)
+	cache.CancelMaintenance()
+	select {
+	case <-pruneDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pruneWorktree did not finish after preemption")
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("maintenance lock survived real task preemption, stat error = %v", err)
+	}
+	if err := cache.Fetch(barePath); err != nil {
+		t.Fatalf("fetch did not recover after preempted maintenance cleanup: %v", err)
 	}
 }
 
@@ -1595,6 +2380,13 @@ func TestShouldCleanTaskDir_ChatHardDeletedFreshMtime(t *testing.T) {
 // criterion #2: an active chat session whose workdir is older than
 // GCOrphanTTL must NOT be reclaimed. The only path to clean an active
 // session's workdir is for the user to archive or hard-delete the session.
+//
+// #6782 narrowed this from "the GC does nothing" to "the GC never removes the
+// directory": a session idle past GCArtifactTTL now gives back the regenerable
+// codex-home/.sandbox-bin cache, which the next message re-provisions. The
+// acceptance criterion is unchanged — the session's own data survives — so
+// this asserts the surviving contents rather than the bare action value.
+// TestManagedArtifact_IdleActiveChatReclaimsSandboxBin covers the carve-out.
 func TestShouldCleanTaskDir_ChatActiveResistsOldMtime(t *testing.T) {
 	t.Parallel()
 	chatID := "ffffffff-ffff-ffff-ffff-ffffffffff01"
@@ -1617,12 +2409,22 @@ func TestShouldCleanTaskDir_ChatActiveResistsOldMtime(t *testing.T) {
 		CompletedAt:   time.Now().Add(-200 * 24 * time.Hour),
 	}
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "active-chat", meta)
+	writeFile(t, filepath.Join(taskDir, "logs/run.log"), 32)
+	writeFile(t, filepath.Join(taskDir, "output/result.md"), 32)
 	if err := os.Chtimes(taskDir, time.Now().Add(-200*24*time.Hour), time.Now().Add(-200*24*time.Hour)); err != nil {
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
-		t.Fatalf("active chat session must not be reclaimed even with stale mtime, got %d", got)
+	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	if action == gcActionClean || action == gcActionOrphan {
+		t.Fatalf("active chat session's directory must never be removed, got action %d", action)
+	}
+	d.applyGCAction(taskDir, action, &gcStats{byPattern: map[string]int{}})
+
+	for _, rel := range []string{".", "logs/run.log", "output/result.md", ".gc_meta.json"} {
+		if _, err := os.Stat(filepath.Join(taskDir, rel)); err != nil {
+			t.Fatalf("active chat session must keep %s: %v", rel, err)
+		}
 	}
 }
 
@@ -1683,6 +2485,9 @@ func TestGCMetaForTask(t *testing.T) {
 			}
 			if meta.WorkspaceID != "ws" {
 				t.Fatalf("workspace_id: want %q, got %q", "ws", meta.WorkspaceID)
+			}
+			if meta.TaskID != tc.task.ID {
+				t.Fatalf("task_id: want %q, got %q", tc.task.ID, meta.TaskID)
 			}
 		})
 	}

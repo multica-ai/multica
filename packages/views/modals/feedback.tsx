@@ -22,12 +22,14 @@ import {
   useCreateFeedback,
   useFeedbackDraftStore,
   FEEDBACK_KINDS,
+  isFeedbackContext,
   type FeedbackKind,
 } from "@multica/core/feedback";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useT } from "../i18n";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
+import { currentPath, useOptionalNavigation } from "../navigation";
 
 const MAX_MESSAGE_LEN = 10000;
 
@@ -59,6 +61,7 @@ export function FeedbackModal({
   const { t } = useT("modals");
   const { t: tEditor } = useT("editor");
   const workspace = useCurrentWorkspace();
+  const navigation = useOptionalNavigation();
   const draft = useFeedbackDraftStore((s) => s.draft);
   const setDraft = useFeedbackDraftStore((s) => s.setDraft);
   const clearDraft = useFeedbackDraftStore((s) => s.clearDraft);
@@ -69,6 +72,7 @@ export function FeedbackModal({
   const kind = typeof data?.kind === "string" && FEEDBACK_KIND_SET.has(data.kind as FeedbackKind)
     ? (data.kind as FeedbackKind)
     : undefined;
+  const context = isFeedbackContext(data?.context) ? data.context : undefined;
   const seededMessage = composeFeedbackInitialMessage(draft.message, incomingInitialMessage);
   const [message, setMessage] = useState(seededMessage);
   const { isDragOver, dropZoneProps } = useFileDropZone({
@@ -107,11 +111,21 @@ export function FeedbackModal({
       return;
     }
     try {
+      const browserUrl =
+        typeof window !== "undefined" &&
+        (window.location.protocol === "http:" ||
+          window.location.protocol === "https:")
+          ? window.location.href
+          : undefined;
+      const currentUrl = navigation
+        ? navigation.getShareableUrl(currentPath(navigation))
+        : browserUrl;
       await mutation.mutateAsync({
         message: latest,
-        url: typeof window !== "undefined" ? window.location.href : undefined,
+        url: currentUrl,
         workspace_id: workspace?.id,
         kind,
+        context,
       });
       clearDraft();
       toast.success(t(($) => $.feedback.toast_sent));

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 func TestGetConfigReportsCdnSignedMode(t *testing.T) {
@@ -59,6 +60,7 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
 	t.Setenv("POSTHOG_API_KEY", "phc_test")
 	t.Setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
+	t.Setenv("MULTICA_DAEMON_SERVER_URL", "")
 	t.Setenv("MULTICA_PUBLIC_URL", "https://api.example.com/")
 	t.Setenv("MULTICA_APP_URL", "https://app.example.com/")
 
@@ -104,6 +106,22 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 }
 
+func TestGetConfigUsesDaemonServerURLOverride(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_SERVER_URL", " https://api.internal.example/// ")
+	t.Setenv("MULTICA_PUBLIC_URL", "https://hooks.example.com/")
+	t.Setenv("MULTICA_APP_URL", "https://app.example.com/")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	var cfg AppConfig
+	testutil.Call(t, testHandler.GetConfig, req).Want(http.StatusOK).JSON(&cfg)
+	if cfg.DaemonServerURL != "https://api.internal.example" {
+		t.Fatalf("daemon_server_url: want override URL, got %q", cfg.DaemonServerURL)
+	}
+	if cfg.DaemonAppURL != "https://app.example.com" {
+		t.Fatalf("daemon_app_url: want app URL, got %q", cfg.DaemonAppURL)
+	}
+}
+
 func TestGetConfigHonorsVCSIntegrationSwitch(t *testing.T) {
 	origCfg := testHandler.cfg
 	t.Cleanup(func() { testHandler.cfg = origCfg })
@@ -139,6 +157,7 @@ func TestGetConfigHonorsVCSIntegrationSwitch(t *testing.T) {
 }
 
 func TestGetConfigUsesAppURLForSameOriginDaemonSetup(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_SERVER_URL", "")
 	t.Setenv("MULTICA_PUBLIC_URL", "")
 	t.Setenv("MULTICA_APP_URL", "https://multica.internal.example/")
 
@@ -163,6 +182,7 @@ func TestGetConfigUsesAppURLForSameOriginDaemonSetup(t *testing.T) {
 }
 
 func TestGetConfigUsesFrontendOriginForSameOriginDaemonSetup(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_SERVER_URL", "")
 	t.Setenv("MULTICA_PUBLIC_URL", "")
 	t.Setenv("MULTICA_APP_URL", "")
 	t.Setenv("FRONTEND_ORIGIN", "https://multica.internal.example/")
@@ -412,11 +432,39 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if cfg.FeatureFlags["composio_mcp_apps"] {
 		t.Fatalf("composio_mcp_apps: want false by default, got true")
 	}
+	if cfg.FeatureFlags["billing_workspace_subscriptions"] {
+		t.Fatalf("billing_workspace_subscriptions: want false by default, got true")
+	}
+	if cfg.FeatureFlags["plugins_v1"] {
+		t.Fatalf("plugins_v1: want false by default, got true")
+	}
+	for _, retired := range []string{"private_plugins_v1", "remote_mcp_plugins_v1"} {
+		if _, published := cfg.FeatureFlags[retired]; published {
+			t.Fatalf("retired Plugin sub-flag %q must not be published", retired)
+		}
+	}
 	if !cfg.FeatureFlags["agents_skill_toggles"] {
 		t.Fatalf("agents_skill_toggles: want true for installed v0.4.0 clients, got false")
 	}
 	if !cfg.FeatureFlags["settings_resource_labels"] {
 		t.Fatalf("settings_resource_labels: want true for installed clients, got false")
+	}
+	if !cfg.FeatureFlags["agents_agent_builder"] {
+		t.Fatalf("agents_agent_builder: want true for installed clients, got false")
+	}
+	// MUL-5345: hang stack capture is gone from this build, but v0.4.13–v0.4.18 are
+	// installed and still hold a debugger channel open on every renderer whenever
+	// this key arrives as `true`. Those clients are fail-closed on absence, so NOT
+	// publishing the key is what disarms them — re-adding it would put a flag flip
+	// back within reach of a fleet that can no longer produce a usable stack.
+	if _, published := cfg.FeatureFlags["desktop_hang_stack_capture"]; published {
+		t.Fatalf("desktop_hang_stack_capture: must stay unpublished so installed clients keep their debugger channels closed")
+	}
+	// Deliberately unpublished: pre-v0.4.33 clients gate their "New status"
+	// button on this key and fail closed, which is how a client that predates
+	// the v0.4.31 rendering fixes is kept from creating one.
+	if _, published := cfg.FeatureFlags["custom_issue_statuses"]; published {
+		t.Fatalf("custom_issue_statuses: want unpublished, got %v", cfg.FeatureFlags["custom_issue_statuses"])
 	}
 
 	withComposioMCPAppsFlag(t, h, true)
@@ -430,5 +478,82 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	}
 	if !cfg.FeatureFlags["composio_mcp_apps"] {
 		t.Fatalf("composio_mcp_apps: want true with flag enabled, got false")
+	}
+}
+
+func TestGetConfigExposesEnabledPluginsV1Flag(t *testing.T) {
+	h := &Handler{}
+	withPluginsV1Flag(t, h, true)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	h.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig enabled plugins_v1: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode enabled config: %v", err)
+	}
+	if !cfg.FeatureFlags["plugins_v1"] {
+		t.Fatal("plugins_v1: want true with flag enabled, got false")
+	}
+}
+
+// Clients fail closed on this flag: absent covers every server that predates
+// the signal, including the ones that accept a worktree resource, silently drop
+// execution_mode and run the task in the user's working copy (#7113). A build
+// that HAS the save gate therefore has to say so,
+// unconditionally — not behind a deployment check, an env var or a feature
+// flag, all of which would disable worktree mode for the users who can run it.
+func TestGetConfigDeclaresLocalWorktreeSupport(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.LocalWorktreeSupported {
+		t.Fatal("this build runs the worktree save gate but does not advertise it; clients will hide the mode")
+	}
+	// Serialised as a real key, not omitted when false-by-accident: the client
+	// distinguishes "absent" (old server) from an explicit answer.
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if _, ok := raw["local_worktree_supported"]; !ok {
+		t.Fatal("local_worktree_supported missing from the JSON body")
+	}
+}
+
+// Web/Desktop can run ahead of a manually deployed backend. Handlers that
+// predate conversation_starters ignore the unknown JSON field and still answer 200,
+// so clients must see an explicit declaration before sending either create or
+// update writes that contain it.
+func TestGetConfigDeclaresAgentConversationStartersSupport(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.AgentConversationStartersSupported {
+		t.Fatal("this build persists conversation_starters but does not advertise the contract")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if _, ok := raw["agent_conversation_starters_supported"]; !ok {
+		t.Fatal("agent_conversation_starters_supported missing from the JSON body")
 	}
 }

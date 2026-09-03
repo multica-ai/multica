@@ -22,17 +22,6 @@ func TestQwenpawModelSelectionUnsupported(t *testing.T) {
 	}
 }
 
-func TestNewReturnsQwenpawBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("qwenpaw", Config{ExecutablePath: "/nonexistent/qwenpaw"})
-	if err != nil {
-		t.Fatalf("New(qwenpaw) error: %v", err)
-	}
-	if _, ok := b.(*qwenpawBackend); !ok {
-		t.Fatalf("expected *qwenpawBackend, got %T", b)
-	}
-}
-
 // fakeQwenpawACPScript impersonates `qwenpaw acp` for unit tests.
 // Wire format mirrors other Multica ACP fakes (grok/kimi):
 // session/new returns sessionId, session/load accepts an existing session,
@@ -220,7 +209,7 @@ func TestQwenpawListModels(t *testing.T) {
 	marker := filepath.Join(dir, "invoked")
 	bin := writeFakeQwenpawScript(t, "#!/bin/sh\ntouch '"+marker+"'\nexit 0\n")
 
-	cat, err := ListModels(context.Background(), "qwenpaw", bin)
+	cat, err := ListModels(context.Background(), "qwenpaw", Command{Path: bin})
 	if err != nil {
 		t.Fatalf("qwenpaw ListModels should not error, got: %v", err)
 	}
@@ -800,18 +789,5 @@ done
 	// Daemon-injected --workspace must be present
 	if !strings.Contains(args, "/tmp/correct-workspace") {
 		t.Fatalf("expected daemon-injected workspace path in command args, got:\n%s", args)
-	}
-}
-
-func TestQwenpawBackendJSON(t *testing.T) {
-	// Verify that the qwenpawBackend type is registered in the
-	// backend constructor map.
-	t.Parallel()
-	b, err := New("qwenpaw", Config{ExecutablePath: "/test/qwenpaw"})
-	if err != nil {
-		t.Fatalf("New(qwenpaw) error: %v", err)
-	}
-	if _, ok := b.(*qwenpawBackend); !ok {
-		t.Fatalf("expected *qwenpawBackend, got %T", b)
 	}
 }

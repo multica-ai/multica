@@ -64,16 +64,23 @@ func (s *RedisModelListStore) Create(ctx context.Context, runtimeID string) (*Mo
 		return nil, err
 	}
 
-	pipe := s.rdb.TxPipeline()
-	pipe.Set(ctx, modelListKey(req.ID), data, modelListStoreRetention)
-	pipe.ZAdd(ctx, modelListPendingKey(runtimeID), redis.Z{
+	requestKey := modelListKey(req.ID)
+	pendingKey := modelListPendingKey(runtimeID)
+	// Creation does not require a Redis transaction: the request is not
+	// observable by dispatchers until it is added to the pending set. A plain
+	// pipeline also works on managed Redis deployments that deny MULTI.
+	pipe := s.rdb.Pipeline()
+	pipe.Set(ctx, requestKey, data, modelListStoreRetention)
+	pipe.ZAdd(ctx, pendingKey, redis.Z{
 		Score:  float64(now.UnixNano()),
 		Member: req.ID,
 	})
 	// Keep the pending zset alive past the per-record retention so stale
 	// members can be lazily swept on PopPending.
-	pipe.Expire(ctx, modelListPendingKey(runtimeID), modelListStoreRetention*2)
+	pipe.Expire(ctx, pendingKey, modelListStoreRetention*2)
 	if _, err := pipe.Exec(ctx); err != nil {
+		_ = s.rdb.Del(ctx, requestKey).Err()
+		_ = s.rdb.ZRem(ctx, pendingKey, req.ID).Err()
 		return nil, fmt.Errorf("persist model list request: %w", err)
 	}
 	return req, nil
@@ -220,7 +227,7 @@ func (s *RedisModelListStore) PopPending(ctx context.Context, runtimeID string) 
 	return nil, nil
 }
 
-func (s *RedisModelListStore) Complete(ctx context.Context, id string, models []ModelEntry, supported bool) error {
+func (s *RedisModelListStore) Complete(ctx context.Context, id string, models []ModelEntry, unavailable []UnavailableModelEntry, supported bool) error {
 	req, err := s.loadRequest(ctx, id)
 	if err != nil {
 		return err
@@ -230,6 +237,7 @@ func (s *RedisModelListStore) Complete(ctx context.Context, id string, models []
 	}
 	req.Status = ModelListCompleted
 	req.Models = models
+	req.UnavailableModels = unavailable
 	req.Supported = supported
 	req.UpdatedAt = time.Now()
 	return s.persistRequest(ctx, req)

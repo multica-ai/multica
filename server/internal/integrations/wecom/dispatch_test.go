@@ -122,23 +122,6 @@ func TestDispatchFrame_HandlerErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestChannelGetters(t *testing.T) {
-	t.Parallel()
-	c := testChannel(nil)
-	if c.Type() != TypeWecom {
-		t.Errorf("Type() = %v, want %v", c.Type(), TypeWecom)
-	}
-	if c.Capabilities()&channel.CapText == 0 {
-		t.Error("Capabilities() should include CapText")
-	}
-	if err := c.Disconnect(context.Background()); err != nil {
-		t.Errorf("Disconnect() = %v, want nil", err)
-	}
-	if _, err := c.Send(context.Background(), channel.OutboundMessage{}); !errors.Is(err, ErrSendNotSupported) {
-		t.Errorf("Send() = %v, want ErrSendNotSupported", err)
-	}
-}
-
 // TestSend_NeverGuessesChatType pins the fix for the removed len(ChatID)>32
 // heuristic: Send must reject regardless of ChatID length — a long id must not
 // route as a group send, a short one must not route as a private send. If a

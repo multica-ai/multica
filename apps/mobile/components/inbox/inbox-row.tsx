@@ -17,6 +17,7 @@ import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { InboxDetailLabel } from "@/components/inbox/detail-label";
 import { getInboxDisplayTitle } from "@/lib/inbox-display";
+import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { timeAgo } from "@/lib/time-ago";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +28,7 @@ interface Props {
 
 export function InboxRow({ item, onPress }: Props) {
   const isUnread = !item.read;
+  const { categoryOf, colorOf } = useIssueStatuses();
   const displayTitle = getInboxDisplayTitle(item);
   const actorType = item.actor_type ?? item.recipient_type;
   const actorId = item.actor_id ?? item.recipient_id;
@@ -54,8 +56,19 @@ export function InboxRow({ item, onPress }: Props) {
                 {displayTitle}
               </Text>
             </View>
+            {/* The glyph is per category, so it alone cannot tell "In Review"
+                from a custom "Human Review" — a move between two statuses of
+                one category would leave this row pixel-identical and read as
+                "the inbox never updated" (MUL-6395). Colour is what carries a
+                custom status's identity; `colorOf` is null for a built-in,
+                which keeps it on its category token. */}
             {item.issue_status ? (
-              <StatusIcon status={item.issue_status} size={14} />
+              <StatusIcon
+                status={item.issue_status}
+                category={categoryOf(item.issue_status)}
+                color={colorOf(item.issue_status)}
+                size={14}
+              />
             ) : null}
           </View>
           {/* Bottom row: [type-aware detail label] (left) | [time] (right).

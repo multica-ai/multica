@@ -951,26 +951,6 @@ func TestWebhookHandler_AbsoluteIPRateLimitRetainsEmergencyCeiling(t *testing.T)
 	}
 }
 
-func TestWebhookHandler_DBErrorOnTokenLookupReturns500(t *testing.T) {
-	// Inject a fake Queries-like wrapper via a shadow type isn't simple
-	// here because Handler.Queries is a *db.Queries struct, not an
-	// interface. Instead, simulate the path by deleting the trigger row
-	// out from under a known-valid token AND swapping in a stub limiter
-	// that always allows. The handler will then call
-	// GetWebhookTriggerByToken with a non-existent value → pgx.ErrNoRows
-	// → 404. So this test alone can't drive the 500 branch without
-	// breaking the DB connection. The 500 branch is exercised via the
-	// unit tests in this package's TestRedactWebhookPath /
-	// TestRequestLogger_*; we leave a regression marker here so a future
-	// refactor that collapses ErrNoRows into 500 (or vice versa) is
-	// caught by a code review rather than a missing test.
-	//
-	// The real verification for this branch is: the file diff for
-	// autopilot_webhook.go must show `errors.Is(err, pgx.ErrNoRows)` —
-	// see PR #2348 review item Blocking #2.
-	t.Skip("500-branch requires injecting a stub Queries; left as a code-review-protected invariant")
-}
-
 func TestCreateAutopilotTrigger_RejectsAPIKind(t *testing.T) {
 	agentID := createWebhookTestAgent(t, "WebhookAPIKind Agent")
 	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")

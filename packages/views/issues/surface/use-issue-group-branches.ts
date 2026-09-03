@@ -18,6 +18,7 @@ import {
   issueTableGroupsOptions,
   issueTableRowPageOptions,
 } from "@multica/core/issues/queries";
+import { issueStatusCategory } from "@multica/core/issues";
 import type {
   Issue,
   IssueTableGroupDescriptor,
@@ -90,10 +91,23 @@ function branchDescriptors(
 function issueMatchesDescriptor(
   issue: Issue,
   descriptor: IssueTableGroupDescriptor,
-  primary?: IssueTableGroupDescriptor,
+  primary: IssueTableGroupDescriptor | undefined,
+  /**
+   * Whether the secondary axis is the CATEGORY a status behaves as rather than
+   * the status key itself. A category cell holds every custom status in it, so
+   * matching on the raw key would drop exactly the cards the category contract
+   * exists to deliver — `qa !== "in_review"` threw the QA card away after the
+   * server correctly returned it. (MUL-6243)
+   */
+  secondaryIsCategory: boolean,
 ) {
   const value = descriptor.value;
-  if (value.kind === "status" && issue.status !== value.status) return false;
+  if (value.kind === "status") {
+    const resolved = secondaryIsCategory
+      ? issueStatusCategory(issue)
+      : issue.status;
+    if (resolved !== value.status) return false;
+  }
   const owner = primary?.value ?? value;
   switch (owner.kind) {
     case "assignee":
@@ -144,6 +158,8 @@ export function useIssueGroupBranches({
   enabled: boolean;
 }): IssueGroupBranches {
   const queryClient = useQueryClient();
+  const secondaryIsCategory =
+    group.kind === "compound" && group.secondary === "status_category";
   const identity = useMemo(
     () => JSON.stringify({ query, group }),
     [group, query],
@@ -291,6 +307,7 @@ export function useIssueGroupBranches({
               row.issue,
               descriptor,
               primaryByBranch.get(target.key),
+              secondaryIsCategory,
             ) ||
             seen.has(row.issue.id)
           ) {

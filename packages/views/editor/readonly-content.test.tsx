@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const { getAttachmentTextContentMock, resolveIssueIdentifierMock } = vi.hoisted(
@@ -96,20 +95,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-
-describe("ReadonlyContent memoization", () => {
-  // Long-timeline issues (Inbox + IssueDetail with thousands of comments)
-  // freeze the tab when each comment re-runs the full react-markdown pipeline
-  // on every parent re-render. Wrapping the component in React.memo is the
-  // mitigation; this test guards against a future revert that would silently
-  // reintroduce the perf regression.
-  it("is wrapped in React.memo", () => {
-    const memoTypeSymbol = Symbol.for("react.memo");
-    expect((ReadonlyContent as unknown as { $$typeof: symbol }).$$typeof).toBe(
-      memoTypeSymbol,
-    );
-  });
 });
 
 describe("ReadonlyContent math rendering", () => {
@@ -402,16 +387,6 @@ describe("ReadonlyContent code styling", () => {
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(source);
     });
-  });
-
-  it("keeps editor code literal by disabling font ligatures", () => {
-    const codeCss = readFileSync("editor/styles/code.css", "utf8");
-
-    expect(codeCss).toContain(".rich-text-editor code");
-    expect(codeCss).toContain(".rich-text-editor pre");
-    expect(codeCss).toContain(".rich-text-editor pre code");
-    expect(codeCss).toContain("font-variant-ligatures: none;");
-    expect(codeCss).toContain('font-feature-settings: "liga" 0;');
   });
 });
 

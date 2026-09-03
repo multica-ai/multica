@@ -73,6 +73,15 @@ interface ChatInputProps {
      */
     sessionId?: string;
   } | null;
+  /** Explicit replacement requested by a conversation-starter button. Unlike a
+   * synchronized draft write, this may intentionally replace dirty editor
+   * content, so ChatInput adopts it after cancelling any pending debounce. */
+  conversationStarterRequest?: {
+    id: number;
+    content: string;
+  } | null;
+  /** Fired after the request has replaced both the stored and live draft. */
+  onConversationStarterApplied?: () => void;
   /**
    * Fired when — and only when — the restore's content/attachments were written
    * into the draft. A restore the composer cannot apply yet (the user has work
@@ -99,6 +108,13 @@ interface ChatInputProps {
    *  as opposed to the session itself being archived — swaps the placeholder
    *  copy so the read-only reason reads accurately. */
   agentArchived?: boolean;
+  /** True when `disabled` is because the caller may no longer INVOKE the bound
+   *  agent (flipped to personal, ownership moved, dropped from the allow-list).
+   *  Distinct from `noAgent`: an agent IS bound and its transcript is readable,
+   *  the caller just cannot run it (MUL-6380). Takes precedence over `noAgent`
+   *  in the placeholder — when the only agent in the workspace is the revoked
+   *  one, both are true and "create an agent" would be the wrong instruction. */
+  agentAccessRevoked?: boolean;
   agentRuntimeRequired?: boolean;
   /** Name of the currently selected agent, used in the placeholder. */
   agentName?: string;
@@ -133,6 +149,8 @@ interface ChatInputProps {
 export function ChatInput({
   onSend,
   restoreDraftRequest,
+  conversationStarterRequest,
+  onConversationStarterApplied,
   onRestoreDraftApplied,
   uploadEnabled: uploadAllowed,
   onStop,
@@ -141,6 +159,7 @@ export function ChatInput({
   disabled,
   noAgent,
   agentArchived,
+  agentAccessRevoked,
   agentRuntimeRequired,
   agentName,
   leftAdornment,
@@ -209,6 +228,7 @@ export function ChatInput({
   // reads the live editor and bails when it is empty.
   const hasNothingToSend = isEmpty && !inputDraft.trim();
   const appliedRestoreIdRef = useRef<string | null>(null);
+  const appliedConversationStarterIdRef = useRef<number | null>(null);
   const editorKey = editorKeyOverride ?? CHAT_COMPOSER_EDITOR_KEY;
 
   // The draft whose document the editor instance is currently HOLDING.
@@ -356,6 +376,32 @@ export function ChatInput({
     if (!focusRequest) return;
     editorRef.current?.focus();
   }, [focusRequest]);
+
+  // A conversation-starter click is an explicit replacement, not an ordinary
+  // external store sync. ContentEditor deliberately rejects external values
+  // while it has dirty local text, so adopting here prevents the old text's
+  // pending debounce from winning the race and overwriting the chosen prompt.
+  // Wait out active uploads: adopting content while an upload node is present
+  // would strand its completion callback.
+  useLayoutEffect(() => {
+    if (!conversationStarterRequest) return;
+    if (appliedConversationStarterIdRef.current === conversationStarterRequest.id) return;
+    if (editorDraftKeyRef.current !== draftKey) return;
+    if (editorRef.current?.hasActiveUploads() === true) return;
+
+    editorRef.current?.flushPendingUpdate();
+    appliedConversationStarterIdRef.current = conversationStarterRequest.id;
+    commitDraft(draftKey, conversationStarterRequest.content);
+    editorRef.current?.adoptContent(conversationStarterRequest.content);
+    setIsEmpty(!conversationStarterRequest.content.trim());
+    onConversationStarterApplied?.();
+  }, [
+    commitDraft,
+    draftKey,
+    onConversationStarterApplied,
+    conversationStarterRequest,
+    uploadGate.uploading,
+  ]);
 
   useEffect(() => {
     if (!restoreDraftRequest) {
@@ -532,7 +578,9 @@ export function ChatInput({
     },
   });
 
-  const placeholder = noAgent
+  const placeholder = agentAccessRevoked
+    ? t(($) => $.input.placeholder_access_revoked)
+    : noAgent
     ? t(($) => $.input.placeholder_no_agent)
     : disabled
       ? agentArchived

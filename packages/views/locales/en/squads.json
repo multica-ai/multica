@@ -19,6 +19,10 @@
     "details_section": "Details",
     "archive_button": "Archive"
   },
+  "member_type": {
+    "agent": "Agent",
+    "member": "Member"
+  },
   "archive_dialog": {
     "title": "Archive this squad?",
     "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
@@ -28,7 +32,13 @@
     "success": "Squad archived"
   },
   "name_editor": {
-    "cancel": "Cancel"
+    "title": "Rename squad",
+    "placeholder": "Squad name",
+    "required": "Name is required",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saved": "Saved",
+    "save_failed": "Failed to save"
   },
   "add_member_dialog": {
     "title": "Add Member",
@@ -36,13 +46,24 @@
     "label_member": "Member",
     "label_role": "Role",
     "label_optional": "(optional)",
-    "placeholder_role_inline": "Add role…",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "select_target": "Select a member or agent",
+    "search_placeholder": "Search members or agents...",
+    "members_section": "Members",
+    "agents_section": "Agents",
+    "role_placeholder": "e.g. Reviewer, Frontend Lead",
+    "add": "Add"
+  },
+  "role_editor": {
+    "empty": "Add role…",
+    "placeholder": "Role (e.g. Reviewer)"
   },
   "description_dialog": {
     "title": "Edit description",
     "placeholder_empty": "Add a description",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "responsibility_placeholder": "What is this squad responsible for?",
+    "save": "Save"
   },
   "discard_changes_dialog": {
     "title": "Discard unsaved changes?",
@@ -69,6 +90,29 @@
     "active_issue_more": "and {{count}} more",
     "last_active_label": "last active {{time}}"
   },
+  "detail_tabs": {
+    "members": "Members",
+    "instructions": "Instructions"
+  },
+  "details": {
+    "leader": "Leader",
+    "members": "Members",
+    "created_by": "Created by",
+    "created": "Created",
+    "updated": "Updated"
+  },
+  "toasts": {
+    "member_added": "Member added",
+    "member_add_failed": "Failed to add member",
+    "member_removed": "Member removed",
+    "member_remove_failed": "Failed to remove member",
+    "role_updated": "Role updated",
+    "role_update_failed": "Failed to update role",
+    "leader_updated": "Leader updated",
+    "leader_update_failed": "Failed to update leader",
+    "archive_failed": "Failed to archive squad",
+    "instructions_saved": "Instructions saved"
+  },
   "profile_card": {
     "unavailable": "Squad unavailable",
     "detail_link": "Detail →",
@@ -82,7 +126,8 @@
   "instructions_tab": {
     "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
     "unsaved_changes": "Unsaved changes",
-    "save_button": "Save"
+    "save_button": "Save",
+    "placeholder": "e.g. Always start by writing a failing test. Prefer small, atomic commits."
   },
   "scope": {
     "mine": "Mine",

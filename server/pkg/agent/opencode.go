@@ -106,24 +106,21 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// (8,191 when a .cmd shim routes the call through cmd.exe), and a prompt
 	// carrying the workspace's models and skills clears that on its own — the
 	// process then never starts and Go surfaces the misleading "The filename or
-	// extension is too long" (#6538). Keeping the prompt off argv also stops it
-	// from being echoed into the "agent command" log line below.
+	// extension is too long" (#6538). Keeping the prompt off argv also keeps it
+	// out of OS process listings; the shared command logger separately redacts
+	// argv values.
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	// Run opencode in its own process group so cancellation can reach the
-	// whole tree (opencode plus any tool subprocess it spawns), not just the
-	// direct child — otherwise a cancelled or restarted run can orphan a
-	// descendant that keeps spinning (#4533).
-	configureProcessGroup(cmd)
-	// Take over context cancellation. The default CommandContext behaviour
-	// SIGKILLs only the leader the instant runCtx is done; we instead drive a
-	// graceful, group-wide SIGTERM→SIGKILL from the cancellation goroutine
-	// below and close the stdout read end only after the tree has been
-	// signalled. Returning nil here keeps os/exec from racing us with its own
-	// kill; WaitDelay remains the hard backstop.
+	// Take over context cancellation. The default kills the whole group the
+	// instant runCtx is done; we instead drive a graceful, group-wide
+	// SIGTERM→SIGKILL from the cancellation goroutine below and close the
+	// stdout read end only after the tree has been signalled — otherwise a
+	// cancelled run can orphan a descendant that keeps spinning (#4533).
+	// Returning nil here keeps os/exec from racing us with its own kill;
+	// WaitDelay remains the hard backstop.
 	cmd.Cancel = func() error { return nil }
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args, "prompt_bytes", len(prompt))
+	b.cfg.logAgentCommandWithPrompt(cmd, newAgentCommandLogArgs(args, trustAgentCommandPositional(0, "run")), len(prompt))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -183,7 +180,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[opencode:stderr] ")
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start opencode: %w", err)
@@ -232,11 +229,11 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		// strand that goroutine for the lifetime of the daemon.
 		closeStdin()
 		if cmd.Process != nil {
-			signalProcessGroup(cmd.Process, syscall.SIGTERM)
+			signalProcessGroup(cmd, syscall.SIGTERM)
 			select {
 			case <-procDone: // exited within the grace window
 			case <-time.After(opencodeTerminateGrace()):
-				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				signalProcessGroup(cmd, syscall.SIGKILL)
 			}
 		}
 		_ = stdout.Close()
@@ -253,6 +250,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
 		close(procDone)
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
 		// Wait closes the process pipes, so a prompt write still blocked when

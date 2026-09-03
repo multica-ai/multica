@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ApiError } from "@multica/core/api";
 import { configStore } from "@multica/core/config";
@@ -56,6 +57,10 @@ vi.mock("./wecom-tab", () => ({
   WecomTab: () => <div data-testid="wecom-tab" />,
 }));
 
+vi.mock("./telegram-tab", () => ({
+  TelegramTab: () => <div data-testid="telegram-tab" />,
+}));
+
 import { IntegrationsTab } from "./integrations-tab";
 
 afterEach(cleanup);
@@ -93,6 +98,20 @@ describe("Settings IntegrationsTab", () => {
 
     expect(screen.getByTestId("composio-tab")).toBeInTheDocument();
     expect(queryCallsRef.current[0]?.enabled).toBe(true);
+  });
+
+  // Reaching for a generic lucide glyph is how Slack and WeCom ended up sharing
+  // one speech bubble, with nothing on the row saying which platform it was
+  // (#6585). Requiring five distinct shapes is the cheap guard against a
+  // regression to that.
+  it("gives every channel its own brand mark", () => {
+    renderTab();
+
+    const shapes = ["lark", "slack", "dingtalk", "wecom", "telegram"].map(
+      (channel) => screen.getByTestId(`integration-channel-icon-${channel}`).innerHTML,
+    );
+
+    expect(new Set(shapes).size).toBe(shapes.length);
   });
 
   it("hides Composio when the feature flag is on but the server reports 503", () => {

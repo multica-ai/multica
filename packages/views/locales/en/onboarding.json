@@ -61,7 +61,8 @@
     "eyebrow": "Quick question",
     "lede": "One quick question — it helps us understand who finds Multica useful. Answer once and you're back to your work.",
     "submit": "Submit",
-    "hint_ready": "Looks good. Hit Submit when you're ready."
+    "hint_ready": "Looks good. Hit Submit when you're ready.",
+    "save_failed_toast": "Failed to save"
   },
   "questions": {
     "about_you": {
@@ -172,6 +173,7 @@
     "issue_prefix_label": "Issue prefix",
     "issue_prefix_prefix": "Issues will look like ",
     "issue_prefix_suffix": ". You can change this later in settings.",
+    "issue_prefix_pending": "Set the URL above and issue numbers will follow it — or type a prefix here.",
     "create_new_title": "Create a new workspace",
     "create_new_subtitle": "Start fresh — a separate space for a different side of your work.",
     "hint_opening": "Opening {{name}}.",

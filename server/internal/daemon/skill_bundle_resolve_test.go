@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -232,6 +235,71 @@ func TestEnsureTaskSkillBundles_AcceptsServerSideSkillUpdate(t *testing.T) {
 	}
 }
 
+func TestEnsureTaskSkillBundles_CacheRemovalFailureDoesNotDiscardDownloadedBundle(t *testing.T) {
+	bundle := makeResolvableSkillBundle("skill-1")
+	ref := skillRefFromBundle(bundle)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"bundles": []SkillData{bundle}})
+	}))
+	defer server.Close()
+
+	cache := NewSkillBundleCache(t.TempDir())
+	cache.removeAll = func(string) error { return fs.ErrPermission }
+	daemon := &Daemon{client: NewClient(server.URL), skillCache: cache}
+	task := &Task{
+		ID:          "task-1",
+		RuntimeID:   "rt-1",
+		WorkspaceID: "ws-1",
+		Agent:       &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{ref}},
+	}
+
+	if err := daemon.ensureTaskSkillBundles(context.Background(), task); err != nil {
+		t.Fatalf("cache removal failure must not discard a downloaded bundle: %v", err)
+	}
+	if len(task.Agent.Skills) != 1 || task.Agent.Skills[0].Hash != bundle.Hash {
+		t.Fatalf("downloaded bundle was not attached to the task: %+v", task.Agent.Skills)
+	}
+	if _, ok := cache.Load(task.WorkspaceID, ref); ok {
+		t.Fatal("bundle must not appear cached after the removal failure")
+	}
+}
+
+func TestEnsureTaskSkillBundles_RejectsPluginHashDrift(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	makePluginBundle := func(content string) SkillData {
+		bundle := SkillData{ID: "plugin:review-readiness", Source: skillbundle.SourcePlugin, Name: "review-readiness", Content: content}
+		ref := skillRefFromBundle(bundle)
+		bundle.Hash = ref.Hash
+		bundle.SizeBytes = ref.SizeBytes
+		return bundle
+	}
+	pinned := makePluginBundle("pinned-content")
+	mutated := makePluginBundle("mutated-content")
+	pinnedRef := skillRefFromBundle(pinned)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"bundles": []SkillData{mutated}})
+	}))
+	defer server.Close()
+
+	daemon := &Daemon{client: NewClient(server.URL), skillCache: NewSkillBundleCache(t.TempDir())}
+	task := &Task{
+		ID:          "task-plugin-pin",
+		RuntimeID:   "rt-1",
+		WorkspaceID: "ws-1",
+		Agent:       &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{pinnedRef}},
+	}
+	if err := daemon.ensureTaskSkillBundles(context.Background(), task); err == nil {
+		t.Fatal("expected plugin bundle hash drift to fail closed")
+	}
+	if _, ok := daemon.skillCache.Load(task.WorkspaceID, pinnedRef); ok {
+		t.Fatal("mutated plugin bundle must not be cached under the pinned ref")
+	}
+}
+
 // TestEnsureTaskSkillBundles_DeadlineIsLabelledStructurally is the MUL-5370
 // regression. A stalled bundle download used to surface as the bare string
 // "resolve skill bundles: context deadline exceeded", which taskfailure.Classify
@@ -288,5 +356,283 @@ func TestEnsureTaskSkillBundles_DeadlineIsLabelledStructurally(t *testing.T) {
 	want := taskfailure.ReasonSkillBundleUnavailable.String()
 	if got := taskRunFailureReason(err); got != want {
 		t.Errorf("taskRunFailureReason = %q, want %q (retryable platform-side reason)", got, want)
+	}
+}
+
+// clearProxyEnv unsets every variable proxyEnvSummary consults, so a developer
+// machine that happens to run behind a proxy does not flip these assertions.
+func clearProxyEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
+		t.Setenv(key, "")
+	}
+}
+
+// TestDescribeSkillBundleFailure is the GitHub #7386 regression. The reporter
+// spent a day re-importing xlsx because the message named the skill and said
+// nothing about the wire; the whole point of this text is that a reader can
+// tell, without a packet capture, whether the link was dead or merely slow.
+func TestDescribeSkillBundleFailure(t *testing.T) {
+	clearProxyEnv(t)
+	ref := SkillRefData{Name: "xlsx", ID: "c5034ed6", SizeBytes: 1101426}
+
+	t.Run("dead link reports no response and separates declared content size", func(t *testing.T) {
+		got := describeSkillBundleFailure(ref, TransferStats{}, 30*time.Second)
+		for _, want := range []string{
+			"network error downloading skill \"xlsx\"",
+			"no successful response from server after 30s overall",
+			"declared skill content size 1.05 MB",
+			"no proxy configured",
+			"the skill content is not at fault",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("missing %q in:\n%s", want, got)
+			}
+		}
+	})
+
+	t.Run("partial response reports response bytes without an inferred rate", func(t *testing.T) {
+		stats := TransferStats{ResponseStarted: true, BytesRead: 552960}
+		got := describeSkillBundleFailure(ref, stats, 30*time.Second)
+		for _, want := range []string{
+			"received up to 540 KB of response body data in one attempt",
+			"failed after 30s overall",
+			"declared skill content size 1.05 MB",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("missing %q in:\n%s", want, got)
+			}
+		}
+		if strings.Contains(got, "KB/s") || strings.Contains(got, "MB/s") {
+			t.Errorf("cross-retry elapsed time must not be presented as a transfer rate:\n%s", got)
+		}
+		if strings.Contains(got, "no response from server") {
+			t.Errorf("a link that delivered bytes must not read as no-response:\n%s", got)
+		}
+	})
+
+	t.Run("wire bytes may exceed declared content size", func(t *testing.T) {
+		stats := TransferStats{ResponseStarted: true, BytesRead: 1388598}
+		got := describeSkillBundleFailure(ref, stats, 30*time.Second)
+		for _, want := range []string{
+			"received up to 1.32 MB of response body data",
+			"declared skill content size 1.05 MB",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("missing %q in:\n%s", want, got)
+			}
+		}
+		if strings.Contains(got, "1.32 MB of 1.05 MB") {
+			t.Errorf("wire and decoded content sizes must not be shown as one progress ratio:\n%s", got)
+		}
+	})
+
+	t.Run("configured proxy is named but never valued", func(t *testing.T) {
+		clearProxyEnv(t)
+		t.Setenv("HTTPS_PROXY", "http://user:secret@127.0.0.1:7890")
+		got := describeSkillBundleFailure(ref, TransferStats{}, time.Second)
+		if !strings.Contains(got, "proxy configured (HTTPS_PROXY)") {
+			t.Errorf("expected the proxy to be reported as configured:\n%s", got)
+		}
+		// Proxy URLs routinely carry credentials and this string is shown to
+		// the whole workspace.
+		if strings.Contains(got, "secret") || strings.Contains(got, "7890") {
+			t.Errorf("proxy value must never be echoed into failure text:\n%s", got)
+		}
+	})
+}
+
+func TestFormatBytes(t *testing.T) {
+	cases := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0 B"},
+		{512, "512 B"},
+		{1024, "1 KB"},
+		{552960, "540 KB"},
+		{1101426, "1.05 MB"},
+	}
+	for _, tc := range cases {
+		if got := formatBytes(tc.n); got != tc.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+}
+
+func TestEnsureTaskSkillBundles_ServerErrorsKeepServerSemantics(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	for _, status := range []int{
+		http.StatusMultipleChoices,
+		http.StatusUnauthorized,
+		http.StatusNotFound,
+		http.StatusConflict,
+		http.StatusInternalServerError,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				_, _ = io.WriteString(w, `{"error":"task is not preparing"}`)
+			}))
+			defer srv.Close()
+
+			ref := skillRefFromBundle(makeResolvableSkillBundle("frontend-review"))
+			d := &Daemon{client: NewClient(srv.URL), skillCache: NewSkillBundleCache(t.TempDir())}
+			task := &Task{
+				ID: "task-1", RuntimeID: "rt-1", WorkspaceID: "ws-1",
+				Agent: &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{ref}},
+			}
+
+			err := d.ensureTaskSkillBundles(context.Background(), task)
+			if err == nil {
+				t.Fatal("expected server error")
+			}
+			if !errors.Is(err, errSkillBundleUnavailable) {
+				t.Errorf("sentinel must survive, got %v", err)
+			}
+			var reqErr *requestError
+			if !errors.As(err, &reqErr) || reqErr.StatusCode != status {
+				t.Errorf("requestError status = %v, want %d; err=%v", reqErr, status, err)
+			}
+			if got := err.Error(); strings.Contains(got, "network error") || strings.Contains(got, "skill content is not at fault") {
+				t.Errorf("HTTP %d must keep server semantics instead of being relabelled as a network failure:\n%s", status, got)
+			}
+		})
+	}
+}
+
+func TestResolveSkillBundle_ServerErrorBodyIsNotCountedAsBundleData(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	for _, status := range []int{http.StatusMultipleChoices, http.StatusConflict, http.StatusInternalServerError} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+				_, _ = io.WriteString(w, `{"error":"task is not preparing"}`)
+			}))
+			defer srv.Close()
+
+			client := NewClient(srv.URL)
+			_, stats, err := client.ResolveSkillBundle(context.Background(), "rt-1", "task-1", SkillRefData{ID: "skill-1"})
+			if err == nil {
+				t.Fatal("expected server error")
+			}
+			if stats.ResponseStarted || stats.BytesRead != 0 {
+				t.Errorf("HTTP %d error body was counted as bundle data: %+v", status, stats)
+			}
+		})
+	}
+}
+
+func TestEnsureTaskSkillBundles_MalformedSuccessfulResponseIsNotNetworkError(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	for _, tc := range []struct {
+		name              string
+		body              string
+		wantUnexpectedEOF bool
+	}{
+		{name: "invalid token", body: `{"bundles": definitely-not-json}`},
+		{name: "clean EOF after truncated JSON", body: `{"bundles":`, wantUnexpectedEOF: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+
+			ref := skillRefFromBundle(makeResolvableSkillBundle("frontend-review"))
+			d := &Daemon{client: NewClient(srv.URL), skillCache: NewSkillBundleCache(t.TempDir())}
+			task := &Task{
+				ID: "task-1", RuntimeID: "rt-1", WorkspaceID: "ws-1",
+				Agent: &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{ref}},
+			}
+
+			err := d.ensureTaskSkillBundles(context.Background(), task)
+			if err == nil {
+				t.Fatal("expected malformed response error")
+			}
+			if tc.wantUnexpectedEOF && !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("truncated JSON must exercise json.Decoder's io.ErrUnexpectedEOF path, got %v", err)
+			}
+			if got := err.Error(); strings.Contains(got, "network error") || strings.Contains(got, "skill content is not at fault") {
+				t.Errorf("malformed JSON ending at a clean EOF is a server payload error, not a network failure:\n%s", got)
+			}
+		})
+	}
+}
+
+// TestTransferStatsKeepsHighWaterMark pins the across-retries semantics: the
+// question the counter answers is "did this link ever get anywhere", so an
+// attempt that reached the body must not be erased by a later one that died
+// during connect.
+func TestTransferStatsKeepsHighWaterMark(t *testing.T) {
+	var stats TransferStats
+	first := stats.wrap(strings.NewReader("0123456789"))
+	if _, err := io.ReadAll(first); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if stats.BytesRead != 10 {
+		t.Fatalf("BytesRead = %d, want 10", stats.BytesRead)
+	}
+	// A second, shorter attempt must not lower the mark.
+	second := stats.wrap(strings.NewReader("abc"))
+	if _, err := io.ReadAll(second); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if stats.BytesRead != 10 {
+		t.Errorf("a shorter retry lowered the high-water mark to %d, want 10", stats.BytesRead)
+	}
+	// nil must stay usable so callers can opt out of the accounting.
+	var nilStats *TransferStats
+	if got := nilStats.wrap(strings.NewReader("x")); got == nil {
+		t.Error("nil TransferStats must still return a usable reader")
+	}
+	nilStats.observeResponseStarted()
+}
+
+// TestEnsureTaskSkillBundles_SlowLinkReportsPartialTransfer is the other half
+// of #7386. A link that accepts the connection and then trickles must be
+// reported as a partial transfer, not as "no response" — that is exactly the
+// distinction that decides whether raising the deadline would have helped.
+func TestEnsureTaskSkillBundles_SlowLinkReportsPartialTransfer(t *testing.T) {
+	defer noSleepRetry(t)()
+	clearProxyEnv(t)
+
+	block := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Emit a valid prefix of the response, flush it so it really lands on
+		// the wire, then stall — a body that started but cannot finish.
+		io.WriteString(w, `{"bundles":[{"id":"x","content":"`+strings.Repeat("a", 4096))
+		w.(http.Flusher).Flush()
+		<-block
+	}))
+	defer srv.Close()
+	defer close(block)
+
+	ref := skillRefFromBundle(makeResolvableSkillBundle("frontend-review"))
+	d := &Daemon{client: NewClient(srv.URL), skillCache: NewSkillBundleCache(t.TempDir())}
+	task := &Task{
+		ID: "task-1", RuntimeID: "rt-1", WorkspaceID: "ws-1",
+		Agent: &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{ref}},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	err := d.ensureTaskSkillBundles(ctx, task)
+	if err == nil {
+		t.Fatal("expected an error when the body never completes")
+	}
+	if !errors.Is(err, errSkillBundleUnavailable) {
+		t.Errorf("sentinel must survive, got %v", err)
+	}
+	if got := err.Error(); !strings.Contains(got, "received") || strings.Contains(got, "no response from server") {
+		t.Errorf("a stalled body must report a partial transfer, got:\n%s", got)
 	}
 }

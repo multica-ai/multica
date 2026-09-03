@@ -3,9 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	agentver "github.com/multica-ai/multica/server/pkg/agent"
@@ -21,11 +23,21 @@ const maxPreviewTriggerIssues = 500
 // boundary (validateAssigneePair on assign) and inside enqueueSquadLeaderTask
 // (canEnqueueSquadLeader), so a write must NOT re-run or sink it — it passes
 // allow-all. The self-loop check needs the request's X-Task-ID header.
-func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType string, issue db.Issue) service.IssueTriggerProbe {
+func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType, actorID string, issue db.Issue) service.IssueTriggerProbe {
 	return service.IssueTriggerProbe{
 		CanAccessAgent: nil, // allow-all; gate lives at the write boundary
 		IsSelfLoop: func() bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue)
+		},
+		SuppressActiveSelfAssignment: func(agentID pgtype.UUID) bool {
+			suppress := h.shouldSuppressActiveSelfAssignment(r.Context(), actorType, actorID, issue.ID, agentID)
+			if suppress {
+				slog.Info("suppressing duplicate self-assignment enqueue",
+					"issue_id", uuidToString(issue.ID),
+					"agent_id", uuidToString(agentID),
+				)
+			}
+			return suppress
 		},
 	}
 }
@@ -43,7 +55,27 @@ func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, 
 		IsSelfLoop: func() bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue)
 		},
+		SuppressActiveSelfAssignment: func(agentID pgtype.UUID) bool {
+			return h.shouldSuppressActiveSelfAssignment(r.Context(), actorType, actorID, issue.ID, agentID)
+		},
 	}
+}
+
+// shouldSuppressActiveSelfAssignment prevents a trusted task-scoped agent
+// actor from creating another run for the target pair merely to claim issue
+// ownership. It intentionally checks the TARGET pair, not whether the actor is
+// busy anywhere: cross-issue self handoffs are a supported workflow and must
+// still enqueue when the target has no active run. Query errors fail closed
+// against the external enqueue side effect while leaving the ownership write
+// itself intact. The API still returns success for that ownership write; only
+// the server log exposes the failed advisory lookup, because enqueue is the
+// optional side effect and suppressing it is safer than risking duplicate work.
+func (h *Handler) shouldSuppressActiveSelfAssignment(ctx context.Context, actorType, actorID string, issueID, targetAgentID pgtype.UUID) bool {
+	if actorType != "agent" || actorID == "" || actorID != uuidToString(targetAgentID) {
+		return false
+	}
+	active, err := h.hasActiveTaskForIssueAndAgent(ctx, issueID, targetAgentID)
+	return active || err != nil
 }
 
 // dispatchIssueRun executes the enqueue side effect for a decision produced by
@@ -232,7 +264,7 @@ func (h *Handler) runtimeSupportsHandoff(ctx context.Context, agentID pgtype.UUI
 	if err != nil || !agent.RuntimeID.Valid {
 		return false
 	}
-	rt, err := h.Queries.GetAgentRuntime(ctx, agent.RuntimeID)
+	rt, err := h.getAgentRuntime(ctx, obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID)
 	if err != nil {
 		return false
 	}

@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
@@ -25,12 +27,11 @@ func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
 
 	for _, slug := range reserved {
 		t.Run(slug, func(t *testing.T) {
-			w := httptest.NewRecorder()
 			req := newRequest("POST", "/api/workspaces", map[string]any{
 				"name": fmt.Sprintf("Test %s", slug),
 				"slug": slug,
 			})
-			testHandler.CreateWorkspace(w, req)
+			w := testutil.Call(t, testHandler.CreateWorkspace, req)
 
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("slug %q: expected 400, got %d: %s", slug, w.Code, w.Body.String())
@@ -65,20 +66,14 @@ func TestCreateWorkspace_DoesNotMarkOnboarded(t *testing.T) {
 		_, _ = testPool.Exec(context.Background(), `UPDATE "user" SET onboarded_at = NULL WHERE id = $1`, testUserID)
 	})
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/workspaces", map[string]any{
 		"name": "Onboarding Invariant Probe",
 		"slug": slug,
 	})
-	testHandler.CreateWorkspace(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateWorkspace: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateWorkspace, req).Want(http.StatusCreated)
 
 	var onboardedAt *string
-	if err := testPool.QueryRow(ctx, `SELECT onboarded_at FROM "user" WHERE id = $1`, testUserID).Scan(&onboardedAt); err != nil {
-		t.Fatalf("lookup user: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT onboarded_at FROM "user" WHERE id = $1`, testUserID).Scan(&onboardedAt)
 	if onboardedAt != nil {
 		t.Fatalf("CreateWorkspace marked user as onboarded; expected NULL, got %q. The workspace layout hard gate relies on this staying NULL until Step 3 CompleteOnboarding fires.", *onboardedAt)
 	}
@@ -96,9 +91,7 @@ func TestCreateWorkspace_DisabledByConfig(t *testing.T) {
 	const slug = "handler-tests-disabled-create"
 	ctx := context.Background()
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
-	})
+	dbfx.Cleanup(t, `DELETE FROM workspace WHERE slug = $1`, slug)
 
 	prev := testHandler.cfg
 	testHandler.cfg = Config{
@@ -107,20 +100,14 @@ func TestCreateWorkspace_DisabledByConfig(t *testing.T) {
 	}
 	t.Cleanup(func() { testHandler.cfg = prev })
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/workspaces", map[string]any{
 		"name": "Disabled Create",
 		"slug": slug,
 	})
-	testHandler.CreateWorkspace(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("CreateWorkspace: expected 403 with flag on, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateWorkspace, req).Want(http.StatusForbidden)
 
 	var count int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM workspace WHERE slug = $1`, slug).Scan(&count); err != nil {
-		t.Fatalf("count workspaces: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT count(*) FROM workspace WHERE slug = $1`, slug).Scan(&count)
 	if count != 0 {
 		t.Fatalf("expected no workspace row to be written when gate fires, found %d", count)
 	}
@@ -138,38 +125,23 @@ func TestDeleteWorkspace_RequiresOwner(t *testing.T) {
 	const slug = "handler-tests-delete-403"
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
 
-	var wsID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO workspace (name, slug, description)
-VALUES ($1, $2, $3)
-RETURNING id
-`, "Handler Test Delete 403", slug, "DeleteWorkspace handler permission test").Scan(&wsID); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":        "Handler Test Delete 403",
+		"slug":        slug,
+		"description": "DeleteWorkspace handler permission test",
 	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, 'admin')
-`, wsID, testUserID); err != nil {
-		t.Fatalf("create admin member: %v", err)
-	}
+`, wsID, testUserID)
 
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
 	req = withURLParam(req, "id", wsID)
-	testHandler.DeleteWorkspace(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 from DeleteWorkspace handler for admin (non-owner), got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.DeleteWorkspace, req).Want(http.StatusForbidden)
 
 	var exists bool
-	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM workspace WHERE id = $1)`, wsID).Scan(&exists); err != nil {
-		t.Fatalf("verify workspace: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT EXISTS (SELECT 1 FROM workspace WHERE id = $1)`, wsID).Scan(&exists)
 	if !exists {
 		t.Fatal("workspace was deleted despite non-owner request — handler-level check did not fire")
 	}
@@ -184,196 +156,153 @@ func TestDeleteWorkspace_OwnerSucceeds(t *testing.T) {
 	const slug = "handler-tests-delete-ok"
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
 
-	var wsID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO workspace (name, slug, description)
-VALUES ($1, $2, $3)
-RETURNING id
-`, "Handler Test Delete OK", slug, "DeleteWorkspace handler owner test").Scan(&wsID); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":        "Handler Test Delete OK",
+		"slug":        slug,
+		"description": "DeleteWorkspace handler owner test",
 	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, 'owner')
-`, wsID, testUserID); err != nil {
-		t.Fatalf("create owner member: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+`, wsID, testUserID)
+	dbfx.Exec(t, `
 INSERT INTO github_pending_check_suite (
 	workspace_id, installation_id, repo_owner, repo_name, pr_number,
 	suite_id, head_sha, app_id, status, suite_updated_at
 )
 VALUES ($1, 123456789, 'multica-ai', 'multica', 3366, 987654321, 'abc123', 15368, 'completed', now())
-`, wsID); err != nil {
-		t.Fatalf("create pending check suite: %v", err)
-	}
-	var githubPRID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO github_pull_request (
-	workspace_id, installation_id, repo_owner, repo_name, pr_number,
-	title, state, html_url, pr_created_at, pr_updated_at, head_sha
-)
-VALUES ($1, 123456789, 'multica-ai', 'multica', 5265,
-	'Workspace cleanup snapshot', 'open', 'https://github.com/multica-ai/multica/pull/5265',
-	now(), now(), 'head-a')
-RETURNING id
-`, wsID).Scan(&githubPRID); err != nil {
-		t.Fatalf("create github PR snapshot parent: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+`, wsID)
+	githubPRID := dbfx.Insert(t, "github_pull_request", testutil.Cols{
+		"workspace_id":    wsID,
+		"installation_id": 123456789,
+		"repo_owner":      "multica-ai",
+		"repo_name":       "multica",
+		"pr_number":       5265,
+		"title":           "Workspace cleanup snapshot",
+		"state":           "open",
+		"html_url":        "https://github.com/multica-ai/multica/pull/5265",
+		"pr_created_at":   testutil.Raw("now()"),
+		"pr_updated_at":   testutil.Raw("now()"),
+		"head_sha":        "head-a",
+	})
+	dbfx.Exec(t, `
 INSERT INTO github_pull_request_check_run (
 	pr_id, head_sha, ordinal, name, status, conclusion, is_status_context
 )
 VALUES ($1, 'head-a', 0, 'backend', 'completed', 'success', false)
-`, githubPRID); err != nil {
-		t.Fatalf("create github PR check run: %v", err)
-	}
+`, githubPRID)
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM github_pull_request_check_run WHERE pr_id = $1`, githubPRID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, githubPRID)
 	})
-	var propertyID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO issue_property (workspace_id, name, type)
-VALUES ($1, 'Delete cleanup property', 'text')
-RETURNING id
-`, wsID).Scan(&propertyID); err != nil {
-		t.Fatalf("create issue property: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue_property WHERE id = $1`, propertyID)
+	propertyID := dbfx.Insert(t, "issue_property", testutil.Cols{
+		"workspace_id": wsID,
+		"name":         "Delete cleanup property",
+		"type":         "text",
 	})
 
-	var runtimeID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent_runtime (
-	workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
-)
-VALUES ($1, 'Workspace delete runtime', 'cloud', 'delete-test', 'offline', '', '{}'::jsonb, $2)
-RETURNING id
-`, wsID, testUserID).Scan(&runtimeID); err != nil {
-		t.Fatalf("create workspace runtime: %v", err)
-	}
+	runtimeID := dbfx.Insert(t, "agent_runtime", testutil.Cols{
+		"workspace_id": wsID,
+		"name":         "Workspace delete runtime",
+		"runtime_mode": "cloud",
+		"provider":     "delete-test",
+		"status":       "offline",
+		"device_info":  "",
+		"metadata":     testutil.Raw("'{}'::jsonb"),
+		"owner_id":     testUserID,
+	})
 
-	var agentID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent (
-	workspace_id, name, runtime_mode, runtime_config, runtime_id, owner_id
-)
-VALUES ($1, 'Workspace delete agent', 'cloud', '{}'::jsonb, $2, $3)
-RETURNING id
-`, wsID, runtimeID, testUserID).Scan(&agentID); err != nil {
-		t.Fatalf("create workspace agent: %v", err)
-	}
+	agentID := dbfx.Insert(t, "agent", testutil.Cols{
+		"workspace_id":   wsID,
+		"name":           "Workspace delete agent",
+		"runtime_mode":   "cloud",
+		"runtime_config": testutil.Raw("'{}'::jsonb"),
+		"runtime_id":     runtimeID,
+		"owner_id":       testUserID,
+	})
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO issue (workspace_id, title, creator_type, creator_id)
-VALUES ($1, 'Workspace delete issue', 'member', $2)
-RETURNING id
-`, wsID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("create workspace issue: %v", err)
-	}
+	issueID := dbfx.Insert(t, "issue", testutil.Cols{
+		"workspace_id": wsID,
+		"title":        "Workspace delete issue",
+		"creator_type": "member",
+		"creator_id":   testUserID,
+	})
 
-	var autopilotID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO autopilot (
-	workspace_id, title, assignee_id, created_by_type, created_by_id
-)
-VALUES ($1, 'Workspace delete autopilot', $2, 'member', $3)
-RETURNING id
-`, wsID, agentID, testUserID).Scan(&autopilotID); err != nil {
-		t.Fatalf("create workspace autopilot: %v", err)
-	}
+	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":    wsID,
+		"title":           "Workspace delete autopilot",
+		"assignee_id":     agentID,
+		"created_by_type": "member",
+		"created_by_id":   testUserID,
+	})
 
-	var autopilotRunID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO autopilot_run (autopilot_id, source, status, issue_id)
-VALUES ($1, 'manual', 'completed', $2)
-RETURNING id
-`, autopilotID, issueID).Scan(&autopilotRunID); err != nil {
-		t.Fatalf("create workspace autopilot run: %v", err)
-	}
+	autopilotRunID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
+		"autopilot_id": autopilotID,
+		"source":       "manual",
+		"status":       "completed",
+		"issue_id":     issueID,
+	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent_task_queue (
-	agent_id, runtime_id, issue_id, status, priority, autopilot_run_id
-)
-VALUES ($1, $2, $3, 'completed', 0, $4)
-RETURNING id
-`, agentID, runtimeID, issueID, autopilotRunID).Scan(&taskID); err != nil {
-		t.Fatalf("create workspace task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":       runtimeID,
+		"issue_id":         issueID,
+		"status":           "completed",
+		"autopilot_run_id": autopilotRunID,
+	})
+	dbfx.Exec(t, `
 UPDATE autopilot_run SET task_id = $2 WHERE id = $1
-`, autopilotRunID, taskID); err != nil {
-		t.Fatalf("link workspace autopilot run to task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+`, autopilotRunID, taskID)
+	dbfx.Exec(t, `
 INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens)
 VALUES ($1, 'delete-test', 'workspace-delete', 10, 5)
-`, taskID); err != nil {
-		t.Fatalf("create workspace task usage: %v", err)
-	}
+`, taskID)
 
 	var rollupRuntimeID, rollupAgentID string
-	if err := testPool.QueryRow(ctx, `SELECT gen_random_uuid(), gen_random_uuid()`).Scan(&rollupRuntimeID, &rollupAgentID); err != nil {
-		t.Fatalf("create rollup fixture IDs: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	dbfx.QueryRow(t, `SELECT gen_random_uuid(), gen_random_uuid()`).Scan(&rollupRuntimeID, &rollupAgentID)
+	dbfx.Exec(t, `
 INSERT INTO task_usage_hourly (
 	bucket_hour, workspace_id, runtime_id, agent_id, provider, model,
 	input_tokens, output_tokens, task_count, event_count
 )
 VALUES (date_trunc('hour', now()), $1, $2, $3, 'delete-test', 'workspace-rollup', 10, 5, 1, 1)
-`, wsID, rollupRuntimeID, rollupAgentID); err != nil {
-		t.Fatalf("create workspace hourly usage: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+`, wsID, rollupRuntimeID, rollupAgentID)
+	dbfx.Exec(t, `
 INSERT INTO task_usage_hourly_dirty (
 	bucket_hour, workspace_id, runtime_id, agent_id, provider, model
 )
 VALUES (date_trunc('hour', now()), $1, $2, $3, 'delete-test', 'workspace-rollup')
-`, wsID, rollupRuntimeID, rollupAgentID); err != nil {
-		t.Fatalf("create workspace dirty usage: %v", err)
-	}
+`, wsID, rollupRuntimeID, rollupAgentID)
 
-	var runtimeProfileID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO runtime_profile (
-	workspace_id, display_name, protocol_family, command_name, created_by
-)
-VALUES ($1, 'Delete cleanup profile', 'codex', 'codex', $2)
-RETURNING id
-`, wsID, testUserID).Scan(&runtimeProfileID); err != nil {
-		t.Fatalf("create runtime profile: %v", err)
-	}
+	runtimeProfileID := dbfx.Insert(t, "runtime_profile", testutil.Cols{
+		"workspace_id":    wsID,
+		"display_name":    "Delete cleanup profile",
+		"protocol_family": "codex",
+		"command_name":    "codex",
+		"created_by":      testUserID,
+	})
 
-	var ruleVersionID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO autopilot_rule_version (
-	autopilot_id, workspace_id, published_by_type, published_by_id
-)
-VALUES (gen_random_uuid(), $1, 'member', $2)
-RETURNING id
-`, wsID, testUserID).Scan(&ruleVersionID); err != nil {
-		t.Fatalf("create autopilot rule version: %v", err)
-	}
+	ruleVersionID := dbfx.Insert(t, "autopilot_rule_version", testutil.Cols{
+		"autopilot_id":      testutil.Raw("gen_random_uuid()"),
+		"workspace_id":      wsID,
+		"published_by_type": "member",
+		"published_by_id":   testUserID,
+	})
 
 	const pendingObjectKey = "workspace-delete-pending-object"
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 INSERT INTO channel_media_pending_object (
 	storage_key, workspace_id, chat_message_id, storage_url
 )
 VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
-`, pendingObjectKey, wsID); err != nil {
-		t.Fatalf("create pending channel media object: %v", err)
-	}
+`, pendingObjectKey, wsID)
+	const sourceContextObjectKey = "workspace-delete-source-context-object"
+	dbfx.Exec(t, `
+INSERT INTO issue_source_context_object_intent (
+	storage_key, workspace_id, source_context_id, attachment_id, object_url
+)
+VALUES ($1, $2, gen_random_uuid(), gen_random_uuid(), 's3://workspace-delete/source-context-object')
+`, sourceContextObjectKey, wsID)
 
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1`, wsID)
@@ -381,45 +310,39 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, runtimeProfileID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot_rule_version WHERE id = $1`, ruleVersionID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_media_pending_object WHERE storage_key = $1`, pendingObjectKey)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue_source_context_object_intent WHERE storage_key = $1`, sourceContextObjectKey)
 	})
 
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
 	req = withURLParam(req, "id", wsID)
-	testHandler.DeleteWorkspace(w, req)
-
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("expected 204 from DeleteWorkspace handler for owner, got %d: %s", w.Code, w.Body.String())
-	}
+	notifier := &recordingRuntimeGoneNotifier{}
+	h := *testHandler
+	h.DaemonRuntimeGone = notifier
+	testutil.Call(t, h.DeleteWorkspace, req).Want(http.StatusNoContent)
 
 	var exists bool
-	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM workspace WHERE id = $1)`, wsID).Scan(&exists); err != nil {
-		t.Fatalf("verify workspace: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT EXISTS (SELECT 1 FROM workspace WHERE id = $1)`, wsID).Scan(&exists)
 	if exists {
 		t.Fatal("workspace still exists after owner DELETE")
 	}
+	if len(notifier.runtimeIDs) != 1 || notifier.runtimeIDs[0] != runtimeID {
+		t.Fatalf("runtime-gone notifications = %v, want [%s]", notifier.runtimeIDs, runtimeID)
+	}
 
 	var pendingCount int
-	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM github_pending_check_suite WHERE workspace_id = $1`, wsID).Scan(&pendingCount); err != nil {
-		t.Fatalf("verify pending check suites: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT COUNT(*) FROM github_pending_check_suite WHERE workspace_id = $1`, wsID).Scan(&pendingCount)
 	if pendingCount != 0 {
 		t.Fatalf("pending check suites were not cleaned up for deleted workspace: %d", pendingCount)
 	}
 
 	var checkRunCount int
-	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM github_pull_request_check_run WHERE pr_id = $1`, githubPRID).Scan(&checkRunCount); err != nil {
-		t.Fatalf("verify github PR check-run cleanup: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT COUNT(*) FROM github_pull_request_check_run WHERE pr_id = $1`, githubPRID).Scan(&checkRunCount)
 	if checkRunCount != 0 {
 		t.Fatalf("github PR check runs were not cleaned up for deleted workspace: %d", checkRunCount)
 	}
 
 	var propertyCount int
-	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM issue_property WHERE id = $1`, propertyID).Scan(&propertyCount); err != nil {
-		t.Fatalf("verify issue property cleanup: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT COUNT(*) FROM issue_property WHERE id = $1`, propertyID).Scan(&propertyCount)
 	if propertyCount != 0 {
 		t.Fatalf("issue properties were not cleaned up for deleted workspace: %d", propertyCount)
 	}
@@ -431,43 +354,46 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
 		"autopilot_rule_version",
 	} {
 		var count int
-		if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM `+table+` WHERE workspace_id = $1`, wsID).Scan(&count); err != nil {
-			t.Fatalf("verify %s cleanup: %v", table, err)
-		}
+		dbfx.QueryRow(t, `SELECT COUNT(*) FROM `+table+` WHERE workspace_id = $1`, wsID).Scan(&count)
 		if count != 0 {
 			t.Fatalf("%s rows survived workspace delete: %d", table, count)
 		}
 	}
 
 	var pendingObjectState string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 SELECT state
 FROM channel_media_pending_object
 WHERE storage_key = $1
-`, pendingObjectKey).Scan(&pendingObjectState); err != nil {
-		t.Fatalf("verify pending channel media object handoff: %v", err)
-	}
+`, pendingObjectKey).Scan(&pendingObjectState)
 	if pendingObjectState != "deleting" {
 		t.Fatalf("pending channel media object state = %q, want deleting", pendingObjectState)
+	}
+
+	var sourceContextIntentState string
+	dbfx.QueryRow(t, `
+SELECT state
+FROM issue_source_context_object_intent
+WHERE storage_key = $1
+`, sourceContextObjectKey).Scan(&sourceContextIntentState)
+	if sourceContextIntentState != "pending" {
+		t.Fatalf("source context object intent state = %q, want pending durable retry ledger", sourceContextIntentState)
 	}
 }
 
 func TestDeleteWorkspace_DirtyTriggersHaveTeardownGuard(t *testing.T) {
-	ctx := context.Background()
 	for _, triggerName := range []string{
 		"trg_atq_dirty_hourly",
 		"trg_issue_delete_dirty_hourly",
 		"trg_tu_dirty_hourly",
 	} {
 		var definition string
-		if err := testPool.QueryRow(ctx, `
+		dbfx.QueryRow(t, `
 SELECT pg_get_triggerdef(oid)
 FROM pg_trigger
 WHERE tgname = $1
   AND NOT tgisinternal
-`, triggerName).Scan(&definition); err != nil {
-			t.Fatalf("read trigger %s: %v", triggerName, err)
-		}
+`, triggerName).Scan(&definition)
 		if !strings.Contains(definition, "multica.workspace_teardown") {
 			t.Fatalf("trigger %s does not guard workspace teardown: %s", triggerName, definition)
 		}
@@ -598,20 +524,16 @@ func TestDeleteWorkspace_PreservesOtherWorkspaceData(t *testing.T) {
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug IN ($1, $2)`, targetSlug, neighborSlug)
 
 	var targetWorkspaceID, neighborWorkspaceID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 INSERT INTO workspace (name, slug)
 VALUES ('Workspace delete tenant target', $1)
 RETURNING id
-`, targetSlug).Scan(&targetWorkspaceID); err != nil {
-		t.Fatalf("create target workspace: %v", err)
-	}
-	if err := testPool.QueryRow(ctx, `
+`, targetSlug).Scan(&targetWorkspaceID)
+	dbfx.QueryRow(t, `
 INSERT INTO workspace (name, slug)
 VALUES ('Workspace delete tenant neighbor', $1)
 RETURNING id
-`, neighborSlug).Scan(&neighborWorkspaceID); err != nil {
-		t.Fatalf("create neighbor workspace: %v", err)
-	}
+`, neighborSlug).Scan(&neighborWorkspaceID)
 	t.Cleanup(func() {
 		for _, workspaceID := range []string{targetWorkspaceID, neighborWorkspaceID} {
 			_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
@@ -621,12 +543,10 @@ RETURNING id
 		}
 	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, 'owner')
-`, targetWorkspaceID, testUserID); err != nil {
-		t.Fatalf("create target owner: %v", err)
-	}
+`, targetWorkspaceID, testUserID)
 
 	type tenantFixture struct {
 		workspaceID string
@@ -638,60 +558,44 @@ VALUES ($1, $2, 'owner')
 		{workspaceID: neighborWorkspaceID, mediaKey: neighborMediaKey},
 	}
 	for _, fixture := range fixtures {
-		if err := testPool.QueryRow(ctx, `
+		dbfx.QueryRow(t, `
 INSERT INTO issue (workspace_id, title, creator_type, creator_id)
 VALUES ($1, 'Workspace delete tenant isolation', 'member', $2)
 RETURNING id
-`, fixture.workspaceID, testUserID).Scan(&fixture.issueID); err != nil {
-			t.Fatalf("create issue for workspace %s: %v", fixture.workspaceID, err)
-		}
-		if _, err := testPool.Exec(ctx, `
+`, fixture.workspaceID, testUserID).Scan(&fixture.issueID)
+		dbfx.Exec(t, `
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
 VALUES ($1, $2, 'member', $3, 'Workspace delete tenant isolation')
-`, fixture.issueID, fixture.workspaceID, testUserID); err != nil {
-			t.Fatalf("create comment for workspace %s: %v", fixture.workspaceID, err)
-		}
-		if _, err := testPool.Exec(ctx, `
+`, fixture.issueID, fixture.workspaceID, testUserID)
+		dbfx.Exec(t, `
 INSERT INTO inbox_item (
 	workspace_id, recipient_type, recipient_id, type, issue_id, title
 )
 VALUES ($1, 'member', $2, 'workspace-delete-test', $3, 'Workspace delete tenant isolation')
-`, fixture.workspaceID, testUserID, fixture.issueID); err != nil {
-			t.Fatalf("create inbox item for workspace %s: %v", fixture.workspaceID, err)
-		}
-		if _, err := testPool.Exec(ctx, `
+`, fixture.workspaceID, testUserID, fixture.issueID)
+		dbfx.Exec(t, `
 INSERT INTO runtime_profile (
 	workspace_id, display_name, protocol_family, command_name, created_by
 )
 VALUES ($1, 'Workspace delete tenant isolation', 'codex', 'codex', $2)
-`, fixture.workspaceID, testUserID); err != nil {
-			t.Fatalf("create runtime profile for workspace %s: %v", fixture.workspaceID, err)
-		}
-		if _, err := testPool.Exec(ctx, `
+`, fixture.workspaceID, testUserID)
+		dbfx.Exec(t, `
 INSERT INTO task_usage_hourly_dirty (
 	bucket_hour, workspace_id, runtime_id, agent_id, provider, model
 )
 VALUES (date_trunc('hour', now()), $1, gen_random_uuid(), gen_random_uuid(), 'workspace-delete-tenant', 'isolation')
-`, fixture.workspaceID); err != nil {
-			t.Fatalf("create dirty usage for workspace %s: %v", fixture.workspaceID, err)
-		}
-		if _, err := testPool.Exec(ctx, `
+`, fixture.workspaceID)
+		dbfx.Exec(t, `
 INSERT INTO channel_media_pending_object (
 	storage_key, workspace_id, chat_message_id, storage_url
 )
 VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/tenant-isolation')
-`, fixture.mediaKey, fixture.workspaceID); err != nil {
-			t.Fatalf("create media ledger for workspace %s: %v", fixture.workspaceID, err)
-		}
+`, fixture.mediaKey, fixture.workspaceID)
 	}
 
-	recorder := httptest.NewRecorder()
 	request := newRequest(http.MethodDelete, "/api/workspaces/"+targetWorkspaceID, nil)
 	request = withURLParam(request, "id", targetWorkspaceID)
-	testHandler.DeleteWorkspace(recorder, request)
-	if recorder.Code != http.StatusNoContent {
-		t.Fatalf("DeleteWorkspace returned %d: %s", recorder.Code, recorder.Body.String())
-	}
+	testutil.Call(t, testHandler.DeleteWorkspace, request).Want(http.StatusNoContent)
 
 	for table, predicate := range map[string]string{
 		"workspace":                    "id",
@@ -703,24 +607,20 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/tenant-isolation')
 		"channel_media_pending_object": "workspace_id",
 	} {
 		var count int
-		if err := testPool.QueryRow(ctx, `
+		dbfx.QueryRow(t, `
 SELECT COUNT(*) FROM `+table+` WHERE `+predicate+` = $1
-`, neighborWorkspaceID).Scan(&count); err != nil {
-			t.Fatalf("count neighbor %s rows: %v", table, err)
-		}
+`, neighborWorkspaceID).Scan(&count)
 		if count != 1 {
 			t.Fatalf("neighbor %s rows = %d, want 1", table, count)
 		}
 	}
 
 	var neighborMediaState string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 SELECT state
 FROM channel_media_pending_object
 WHERE storage_key = $1
-`, neighborMediaKey).Scan(&neighborMediaState); err != nil {
-		t.Fatalf("read neighbor media state: %v", err)
-	}
+`, neighborMediaKey).Scan(&neighborMediaState)
 	if neighborMediaState != "pending" {
 		t.Fatalf("neighbor media state = %q, want pending", neighborMediaState)
 	}
@@ -738,42 +638,27 @@ func TestUpdateWorkspace_AvatarURL(t *testing.T) {
 	const slug = "handler-tests-avatar-url"
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
 
-	var wsID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO workspace (name, slug, description)
-VALUES ($1, $2, $3)
-RETURNING id
-`, "Handler Test Avatar URL", slug, "UpdateWorkspace avatar_url test").Scan(&wsID); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":        "Handler Test Avatar URL",
+		"slug":        slug,
+		"description": "UpdateWorkspace avatar_url test",
 	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, 'owner')
-`, wsID, testUserID); err != nil {
-		t.Fatalf("create owner member: %v", err)
-	}
+`, wsID, testUserID)
 
 	const avatarURL = "https://cdn.example.com/workspaces/abc/logo.png"
 
-	w := httptest.NewRecorder()
 	req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
 		"avatar_url": avatarURL,
 	})
 	req = withURLParam(req, "id", wsID)
-	testHandler.UpdateWorkspace(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 from UpdateWorkspace, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.UpdateWorkspace, req).Want(http.StatusOK)
 
 	var resp WorkspaceResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.AvatarURL == nil || *resp.AvatarURL != avatarURL {
 		t.Fatalf("expected avatar_url %q in response, got %v", avatarURL, resp.AvatarURL)
 	}
@@ -782,31 +667,82 @@ VALUES ($1, $2, 'owner')
 	}
 
 	var dbAvatar *string
-	if err := testPool.QueryRow(ctx, `SELECT avatar_url FROM workspace WHERE id = $1`, wsID).Scan(&dbAvatar); err != nil {
-		t.Fatalf("read avatar_url back: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT avatar_url FROM workspace WHERE id = $1`, wsID).Scan(&dbAvatar)
 	if dbAvatar == nil || *dbAvatar != avatarURL {
 		t.Fatalf("expected avatar_url %q persisted, got %v", avatarURL, dbAvatar)
 	}
 
 	// A follow-up update that doesn't include avatar_url must leave it alone.
-	w2 := httptest.NewRecorder()
 	req2 := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
 		"description": "new description",
 	})
 	req2 = withURLParam(req2, "id", wsID)
-	testHandler.UpdateWorkspace(w2, req2)
-
-	if w2.Code != http.StatusOK {
-		t.Fatalf("expected 200 from second UpdateWorkspace, got %d: %s", w2.Code, w2.Body.String())
-	}
+	w2 := testutil.Call(t, testHandler.UpdateWorkspace, req2).Want(http.StatusOK)
 
 	var resp2 WorkspaceResponse
-	if err := json.Unmarshal(w2.Body.Bytes(), &resp2); err != nil {
-		t.Fatalf("decode second response: %v", err)
-	}
+	w2.JSON(&resp2)
 	if resp2.AvatarURL == nil || *resp2.AvatarURL != avatarURL {
 		t.Fatalf("avatar_url should be preserved by partial update, got %v", resp2.AvatarURL)
+	}
+}
+
+// recordingWorkspaceRefreshNotifier captures the daemon wakeups a workspace
+// write fans out to its members.
+type recordingWorkspaceRefreshNotifier struct {
+	userIDs []string
+}
+
+func (n *recordingWorkspaceRefreshNotifier) NotifyWorkspacesChanged(userID string) {
+	n.userIDs = append(n.userIDs, userID)
+}
+
+// Daemons cache workspace settings and read the GitHub master switch and the
+// Co-authored-by toggle from them. A settings edit that does not wake them
+// leaves the old verdict live until the workspace's next repo checkout, which
+// is how a disabled Co-authored-by trailer kept landing in commits (MUL-6921).
+func TestUpdateWorkspace_NotifiesDaemonsOnSettingsChange(t *testing.T) {
+	ctx := context.Background()
+
+	const slug = "handler-tests-settings-notify"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":        "Handler Test Settings Notify",
+		"slug":        slug,
+		"description": "UpdateWorkspace settings notification test",
+	})
+
+	dbfx.Exec(t, `
+INSERT INTO member (workspace_id, user_id, role)
+VALUES ($1, $2, 'owner')
+`, wsID, testUserID)
+
+	notifier := &recordingWorkspaceRefreshNotifier{}
+	previous := testHandler.DaemonWorkspaceRefresh
+	testHandler.DaemonWorkspaceRefresh = notifier
+	t.Cleanup(func() { testHandler.DaemonWorkspaceRefresh = previous })
+
+	req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"settings": map[string]any{"co_authored_by_enabled": false},
+	})
+	req = withURLParam(req, "id", wsID)
+	testutil.Call(t, testHandler.UpdateWorkspace, req).Want(http.StatusOK)
+
+	if len(notifier.userIDs) != 1 || notifier.userIDs[0] != testUserID {
+		t.Fatalf("settings update notified %v, want exactly the workspace member %s", notifier.userIDs, testUserID)
+	}
+
+	// An edit that touches neither the name nor the settings has nothing for
+	// daemons to re-read.
+	notifier.userIDs = nil
+	req2 := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"description": "new description",
+	})
+	req2 = withURLParam(req2, "id", wsID)
+	testutil.Call(t, testHandler.UpdateWorkspace, req2).Want(http.StatusOK)
+
+	if len(notifier.userIDs) != 0 {
+		t.Fatalf("description-only update notified %v, want no daemon wakeup", notifier.userIDs)
 	}
 }
 
@@ -816,50 +752,34 @@ func TestUpdateWorkspace_ReposValidation(t *testing.T) {
 	const slug = "handler-tests-repos-validation"
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
 
-	var wsID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO workspace (name, slug, description)
-VALUES ($1, $2, $3)
-RETURNING id
-`, "Handler Test Repos Validation", slug, "UpdateWorkspace repos validation test").Scan(&wsID); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":        "Handler Test Repos Validation",
+		"slug":        slug,
+		"description": "UpdateWorkspace repos validation test",
 	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, 'owner')
-`, wsID, testUserID); err != nil {
-		t.Fatalf("create owner member: %v", err)
-	}
+`, wsID, testUserID)
 
 	t.Run("rejects invalid repo URLs without persisting", func(t *testing.T) {
-		w := httptest.NewRecorder()
 		req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
 			"repos": []map[string]any{
 				{"url": "not-a-url"},
 			},
 		})
 		req = withURLParam(req, "id", wsID)
-		testHandler.UpdateWorkspace(w, req)
-
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("expected 400 from invalid repos update, got %d: %s", w.Code, w.Body.String())
-		}
+		testutil.Call(t, testHandler.UpdateWorkspace, req).Want(http.StatusBadRequest)
 
 		var raw []byte
-		if err := testPool.QueryRow(ctx, `SELECT repos FROM workspace WHERE id = $1`, wsID).Scan(&raw); err != nil {
-			t.Fatalf("read repos: %v", err)
-		}
+		dbfx.QueryRow(t, `SELECT repos FROM workspace WHERE id = $1`, wsID).Scan(&raw)
 		if string(raw) != "[]" {
 			t.Fatalf("invalid repos update should not persist, got %s", raw)
 		}
 	})
 
 	t.Run("normalizes valid repos", func(t *testing.T) {
-		w := httptest.NewRecorder()
 		req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
 			"repos": []map[string]any{
 				{
@@ -875,16 +795,10 @@ VALUES ($1, $2, 'owner')
 			},
 		})
 		req = withURLParam(req, "id", wsID)
-		testHandler.UpdateWorkspace(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Fatalf("expected 200 from valid repos update, got %d: %s", w.Code, w.Body.String())
-		}
+		testutil.Call(t, testHandler.UpdateWorkspace, req).Want(http.StatusOK)
 
 		var raw []byte
-		if err := testPool.QueryRow(ctx, `SELECT repos FROM workspace WHERE id = $1`, wsID).Scan(&raw); err != nil {
-			t.Fatalf("read repos: %v", err)
-		}
+		dbfx.QueryRow(t, `SELECT repos FROM workspace WHERE id = $1`, wsID).Scan(&raw)
 		var repos []workspaceRepoRef
 		if err := json.Unmarshal(raw, &repos); err != nil {
 			t.Fatalf("decode repos: %v", err)
@@ -922,31 +836,25 @@ func setupRevocationFixture(t *testing.T, slug, daemonID string) revocationFixtu
 
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
 
-	var wsID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO workspace (name, slug, description, issue_prefix)
-VALUES ($1, $2, $3, $4)
-RETURNING id
-`, "Revocation "+slug, slug, "revocation test", "REV").Scan(&wsID); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Revocation " + slug,
+		"slug":         slug,
+		"description":  "revocation test",
+		"issue_prefix": "REV",
+	})
 
 	// Requester (= testUserID) is always an owner so DeleteMember authorization
 	// passes. Two owners total so LeaveWorkspace doesn't trip the "must keep
 	// at least one owner" guard.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
-`, wsID, testUserID); err != nil {
-		t.Fatalf("create requester member: %v", err)
-	}
+`, wsID, testUserID)
 
 	targetEmail := fmt.Sprintf("revocation-%s@multica.ai", slug)
-	var targetUserID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
-`, "Revocation Target "+slug, targetEmail).Scan(&targetUserID); err != nil {
-		t.Fatalf("create target user: %v", err)
-	}
+	targetUserID := dbfx.Insert(t, "user", testutil.Cols{
+		"name":  "Revocation Target " + slug,
+		"email": targetEmail,
+	})
 
 	// Cleanup ordering: workspace first (cascade clears agent_runtime,
 	// agent, member, daemon_token), then user (whose deletion would
@@ -956,57 +864,40 @@ INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, targetUserID)
 	})
 
-	var memberID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner') RETURNING id
-`, wsID, targetUserID).Scan(&memberID); err != nil {
-		t.Fatalf("create target member: %v", err)
-	}
+	memberID := dbfx.Insert(t, "member", testutil.Cols{
+		"workspace_id": wsID,
+		"user_id":      targetUserID,
+		"role":         "owner",
+	})
 
-	var runtimeID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent_runtime (
-    workspace_id, daemon_id, name, runtime_mode, provider, status,
-    device_info, metadata, owner_id, last_seen_at
-)
-VALUES ($1, $2, 'Target Runtime', 'local', 'multica_daemon', 'online', '', '{}'::jsonb, $3, now())
-RETURNING id
-`, wsID, daemonID, targetUserID).Scan(&runtimeID); err != nil {
-		t.Fatalf("insert runtime: %v", err)
-	}
+	runtimeID := dbfx.Runtime(t, "Target Runtime", testutil.Cols{
+		"workspace_id": wsID,
+		"daemon_id":    daemonID,
+		"runtime_mode": "local",
+		"provider":     "multica_daemon",
+		"owner_id":     targetUserID,
+	})
 
-	var agentID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent (
-    workspace_id, name, description, runtime_mode, runtime_config,
-    runtime_id, visibility, max_concurrent_tasks, owner_id
-)
-VALUES ($1, 'Target Agent', '', 'local', '{}'::jsonb, $2, 'workspace', 1, $3)
-RETURNING id
-`, wsID, runtimeID, targetUserID).Scan(&agentID); err != nil {
-		t.Fatalf("insert agent: %v", err)
-	}
+	agentID := dbfx.Agent(t, "Target Agent", runtimeID, testutil.Cols{
+		"workspace_id": wsID,
+		"runtime_mode": "local",
+		"visibility":   "workspace",
+		"owner_id":     targetUserID,
+	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
-VALUES ($1, $2, 'queued', 0)
-RETURNING id
-`, agentID, runtimeID).Scan(&taskID); err != nil {
-		t.Fatalf("insert task: %v", err)
-	}
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+	})
 
 	// daemon_token row — paired with the runtime's daemon_id so the
 	// revocation should sweep its hash up via DeleteDaemonTokensByWorkspaceAndDaemons.
 	rawToken := "mdt_test_" + slug
 	sum := sha256.Sum256([]byte(rawToken))
 	tokenHash := hex.EncodeToString(sum[:])
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at)
 VALUES ($1, $2, $3, now() + interval '1 day')
-`, tokenHash, wsID, daemonID); err != nil {
-		t.Fatalf("insert daemon_token: %v", err)
-	}
+`, tokenHash, wsID, daemonID)
 
 	return revocationFixture{
 		WorkspaceID:  wsID,
@@ -1022,44 +913,33 @@ VALUES ($1, $2, $3, now() + interval '1 day')
 
 func assertRevoked(t *testing.T, fx revocationFixture) {
 	t.Helper()
-	ctx := context.Background()
 
 	var memberExists bool
-	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM member WHERE id = $1)`, fx.MemberID).Scan(&memberExists); err != nil {
-		t.Fatalf("query member: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT EXISTS (SELECT 1 FROM member WHERE id = $1)`, fx.MemberID).Scan(&memberExists)
 	if memberExists {
 		t.Fatal("member row was not deleted")
 	}
 
 	var runtimeStatus string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_runtime WHERE id = $1`, fx.RuntimeID).Scan(&runtimeStatus); err != nil {
-		t.Fatalf("query runtime: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT status FROM agent_runtime WHERE id = $1`, fx.RuntimeID).Scan(&runtimeStatus)
 	if runtimeStatus != "offline" {
 		t.Fatalf("expected runtime offline, got %q", runtimeStatus)
 	}
 
 	var archivedAt *string
-	if err := testPool.QueryRow(ctx, `SELECT archived_at::text FROM agent WHERE id = $1`, fx.AgentID).Scan(&archivedAt); err != nil {
-		t.Fatalf("query agent: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT archived_at::text FROM agent WHERE id = $1`, fx.AgentID).Scan(&archivedAt)
 	if archivedAt == nil {
 		t.Fatal("agent was not archived")
 	}
 
 	var taskStatus string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, fx.TaskID).Scan(&taskStatus); err != nil {
-		t.Fatalf("query task: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, fx.TaskID).Scan(&taskStatus)
 	if taskStatus != "cancelled" {
 		t.Fatalf("expected task cancelled, got %q", taskStatus)
 	}
 
 	var tokenExists bool
-	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM daemon_token WHERE token_hash = $1)`, fx.TokenHash).Scan(&tokenExists); err != nil {
-		t.Fatalf("query daemon_token: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT EXISTS (SELECT 1 FROM daemon_token WHERE token_hash = $1)`, fx.TokenHash).Scan(&tokenExists)
 	if tokenExists {
 		t.Fatal("daemon_token row was not deleted")
 	}
@@ -1073,15 +953,10 @@ func assertRevoked(t *testing.T, fx revocationFixture) {
 func TestDeleteMember_RevokesTargetRuntimes(t *testing.T) {
 	fx := setupRevocationFixture(t, "handler-tests-revoke-kick", "daemon-revoke-kick")
 
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
 	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
 	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
-	testHandler.DeleteMember(w, req)
-
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
 
 	assertRevoked(t, fx)
 }
@@ -1092,7 +967,6 @@ func TestDeleteMember_RevokesTargetRuntimes(t *testing.T) {
 // the member-row delete, while leaving a remaining member's binding intact.
 func TestDeleteMember_PrunesChannelUserBindings(t *testing.T) {
 	fx := setupRevocationFixture(t, "handler-tests-revoke-binding", "daemon-revoke-binding")
-	ctx := context.Background()
 
 	const appID = "cli_revoke_binding"
 	const removedOpenID = "ou_revoke_binding_removed"
@@ -1112,57 +986,138 @@ func TestDeleteMember_PrunesChannelUserBindings(t *testing.T) {
 	t.Cleanup(cleanChannel)
 
 	var installID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id)
 VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4)
 RETURNING id
-`, fx.WorkspaceID, fx.AgentID, appID, testUserID).Scan(&installID); err != nil {
-		t.Fatalf("insert channel_installation: %v", err)
-	}
+`, fx.WorkspaceID, fx.AgentID, appID, testUserID).Scan(&installID)
 
 	// Binding for the member being removed — must be pruned.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 INSERT INTO channel_user_binding (workspace_id, multica_user_id, installation_id, channel_type, channel_user_id)
 VALUES ($1, $2, $3, 'feishu', $4)
-`, fx.WorkspaceID, fx.TargetUserID, installID, removedOpenID); err != nil {
-		t.Fatalf("insert removed-member binding: %v", err)
-	}
+`, fx.WorkspaceID, fx.TargetUserID, installID, removedOpenID)
 
 	// Binding for the requester (an owner who stays) — must survive, proving
 	// the prune is scoped to the removed user, not the whole workspace.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 INSERT INTO channel_user_binding (workspace_id, multica_user_id, installation_id, channel_type, channel_user_id)
 VALUES ($1, $2, $3, 'feishu', $4)
-`, fx.WorkspaceID, testUserID, installID, keepOpenID); err != nil {
-		t.Fatalf("insert remaining-member binding: %v", err)
-	}
+`, fx.WorkspaceID, testUserID, installID, keepOpenID)
 
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
 	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
 	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
-	testHandler.DeleteMember(w, req)
-
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
 
 	var removedExists bool
-	if err := testPool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM channel_user_binding WHERE channel_user_id = $1)`, removedOpenID).Scan(&removedExists); err != nil {
-		t.Fatalf("query removed-member binding: %v", err)
-	}
+	dbfx.QueryRow(t,
+		`SELECT EXISTS (SELECT 1 FROM channel_user_binding WHERE channel_user_id = $1)`, removedOpenID).Scan(&removedExists)
 	if removedExists {
 		t.Fatal("removed member's channel_user_binding was not pruned")
 	}
 
 	var keepExists bool
-	if err := testPool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM channel_user_binding WHERE channel_user_id = $1)`, keepOpenID).Scan(&keepExists); err != nil {
-		t.Fatalf("query remaining-member binding: %v", err)
-	}
+	dbfx.QueryRow(t,
+		`SELECT EXISTS (SELECT 1 FROM channel_user_binding WHERE channel_user_id = $1)`, keepOpenID).Scan(&keepExists)
 	if !keepExists {
 		t.Fatal("remaining member's channel_user_binding was wrongly pruned")
+	}
+}
+
+// TestDeleteMember_PrunesAutopilotSubscribers verifies the application-layer
+// cleanup for the FK-free autopilot_subscriber table. DeleteMember and
+// LeaveWorkspace both use revokeAndRemoveMember, so this pins their shared
+// transaction while also proving the delete is scoped to the departed user.
+func TestDeleteMember_PrunesAutopilotSubscribers(t *testing.T) {
+	fx := setupRevocationFixture(t, "handler-tests-revoke-autopilot-subscriber", "daemon-revoke-autopilot-subscriber")
+
+	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":    fx.WorkspaceID,
+		"title":           "Revocation autopilot subscriber",
+		"assignee_type":   "agent",
+		"assignee_id":     fx.AgentID,
+		"status":          "active",
+		"execution_mode":  "run_only",
+		"created_by_type": "member",
+		"created_by_id":   testUserID,
+	})
+	dbfx.Exec(t, `
+INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
+VALUES ($1, 'member', $2), ($1, 'member', $3)
+`, autopilotID, fx.TargetUserID, testUserID)
+
+	// The same person belongs to another workspace and subscribes there too.
+	// Removing them from fx.WorkspaceID must not cross this tenant boundary.
+	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Revocation subscriber other workspace",
+		"slug":         fmt.Sprintf("handler-tests-revoke-autopilot-subscriber-other-%d", time.Now().UnixNano()),
+		"description":  "tenant-scope regression fixture",
+		"issue_prefix": "RAO",
+	})
+	dbfx.Insert(t, "member", testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+		"user_id":      fx.TargetUserID,
+		"role":         "owner",
+	})
+	otherRuntimeID := dbfx.Runtime(t, "Other workspace runtime", testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+		"daemon_id":    "daemon-revoke-autopilot-subscriber-other",
+		"runtime_mode": "local",
+		"provider":     "multica_daemon",
+		"owner_id":     fx.TargetUserID,
+	})
+	otherAgentID := dbfx.Agent(t, "Other workspace agent", otherRuntimeID, testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+		"runtime_mode": "local",
+		"visibility":   "workspace",
+		"owner_id":     fx.TargetUserID,
+	})
+	otherAutopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":    otherWorkspaceID,
+		"title":           "Other workspace autopilot subscriber",
+		"assignee_type":   "agent",
+		"assignee_id":     otherAgentID,
+		"status":          "active",
+		"execution_mode":  "run_only",
+		"created_by_type": "member",
+		"created_by_id":   fx.TargetUserID,
+	})
+	dbfx.Exec(t, `
+INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
+VALUES ($1, 'member', $2)
+`, otherAutopilotID, fx.TargetUserID)
+
+	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
+	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
+	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
+
+	var removedCount int
+	dbfx.QueryRow(t, `
+SELECT count(*) FROM autopilot_subscriber
+WHERE autopilot_id = $1 AND user_id = $2
+`, autopilotID, fx.TargetUserID).Scan(&removedCount)
+	if removedCount != 0 {
+		t.Fatalf("departed member autopilot subscribers = %d, want 0", removedCount)
+	}
+
+	var remainingCount int
+	dbfx.QueryRow(t, `
+SELECT count(*) FROM autopilot_subscriber
+WHERE autopilot_id = $1 AND user_id = $2
+`, autopilotID, testUserID).Scan(&remainingCount)
+	if remainingCount != 1 {
+		t.Fatalf("remaining member autopilot subscribers = %d, want 1", remainingCount)
+	}
+
+	var otherWorkspaceCount int
+	dbfx.QueryRow(t, `
+SELECT count(*) FROM autopilot_subscriber
+WHERE autopilot_id = $1 AND user_id = $2
+`, otherAutopilotID, fx.TargetUserID).Scan(&otherWorkspaceCount)
+	if otherWorkspaceCount != 1 {
+		t.Fatalf("other workspace autopilot subscribers = %d, want 1", otherWorkspaceCount)
 	}
 }
 
@@ -1174,16 +1129,11 @@ func TestLeaveWorkspace_RevokesOwnRuntimes(t *testing.T) {
 
 	// Re-target the request from the leaving member's perspective: the
 	// leaver is the request actor, not the workspace owner.
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/leave", nil)
 	req.Header.Set("X-User-ID", fx.TargetUserID)
 	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
 	req = withURLParam(req, "id", fx.WorkspaceID)
-	testHandler.LeaveWorkspace(w, req)
-
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("LeaveWorkspace: expected 204, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.LeaveWorkspace, req).Want(http.StatusNoContent)
 
 	assertRevoked(t, fx)
 }
@@ -1199,43 +1149,27 @@ func TestLeaveWorkspace_RevokesOwnRuntimes(t *testing.T) {
 // queued tasks would remain claimable.
 func TestDeleteMember_CancelsTasksFromAgentReassignment(t *testing.T) {
 	fx := setupRevocationFixture(t, "handler-tests-revoke-reassign", "daemon-revoke-reassign")
-	ctx := context.Background()
 
 	// Create a SECOND runtime in the workspace owned by the requester
 	// (not the leaving member). The agent originally lived here.
-	var otherRuntimeID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent_runtime (
-    workspace_id, daemon_id, name, runtime_mode, provider, status,
-    device_info, metadata, owner_id, last_seen_at
-)
-VALUES ($1, $2, 'Other Runtime', 'local', 'multica_daemon', 'online', '', '{}'::jsonb, $3, now())
-RETURNING id
-`, fx.WorkspaceID, "daemon-revoke-reassign-other", testUserID).Scan(&otherRuntimeID); err != nil {
-		t.Fatalf("insert other runtime: %v", err)
-	}
+	otherRuntimeID := dbfx.Runtime(t, "Other Runtime", testutil.Cols{
+		"workspace_id": fx.WorkspaceID,
+		"daemon_id":    "daemon-revoke-reassign-other",
+		"runtime_mode": "local",
+		"provider":     "multica_daemon",
+	})
 
 	// Queue a task on the agent while it was still pinned to the OTHER
 	// runtime (simulating a task created before the agent was reassigned
 	// to the leaving member's runtime).
-	var orphanTaskID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
-VALUES ($1, $2, 'queued', 0)
-RETURNING id
-`, fx.AgentID, otherRuntimeID).Scan(&orphanTaskID); err != nil {
-		t.Fatalf("insert orphan task: %v", err)
-	}
+	orphanTaskID := dbfx.Task(t, fx.AgentID, testutil.Cols{
+		"runtime_id": otherRuntimeID,
+	})
 
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
 	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
 	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
-	testHandler.DeleteMember(w, req)
-
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
 
 	assertRevoked(t, fx)
 
@@ -1243,9 +1177,7 @@ RETURNING id
 	// cancelled. Without the by-agent leg in CancelAgentTasksByRuntimeOrAgent
 	// this stays 'queued' and would be picked up by the other runtime.
 	var orphanStatus string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, orphanTaskID).Scan(&orphanStatus); err != nil {
-		t.Fatalf("query orphan task: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, orphanTaskID).Scan(&orphanStatus)
 	if orphanStatus != "cancelled" {
 		t.Fatalf("expected orphan task cancelled (archived agent leftover on other runtime), got %q", orphanStatus)
 	}
@@ -1253,9 +1185,7 @@ RETURNING id
 	// And the OTHER runtime — owned by an active member — must still be
 	// online: revocation is scoped to the leaving member's owned runtimes.
 	var otherStatus string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_runtime WHERE id = $1`, otherRuntimeID).Scan(&otherStatus); err != nil {
-		t.Fatalf("query other runtime: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT status FROM agent_runtime WHERE id = $1`, otherRuntimeID).Scan(&otherStatus)
 	if otherStatus != "online" {
 		t.Fatalf("expected other-member runtime to stay online, got %q", otherStatus)
 	}
@@ -1267,37 +1197,26 @@ RETURNING id
 // after its owner and runtime access have been removed.
 func TestDeleteMember_CancelsDeferredTasks(t *testing.T) {
 	fx := setupRevocationFixture(t, "handler-tests-revoke-deferred", "daemon-revoke-deferred")
-	ctx := context.Background()
 
-	var deferredTaskID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, fire_at)
-VALUES ($1, $2, 'deferred', 0, now() + interval '1 hour')
-RETURNING id
-`, fx.AgentID, fx.RuntimeID).Scan(&deferredTaskID); err != nil {
-		t.Fatalf("insert deferred task: %v", err)
-	}
+	deferredTaskID := dbfx.Task(t, fx.AgentID, testutil.Cols{
+		"runtime_id": fx.RuntimeID,
+		"status":     "deferred",
+		"fire_at":    testutil.Raw("now() + interval '1 hour'"),
+	})
 
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
 	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
 	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
-	testHandler.DeleteMember(w, req)
-
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
 
 	assertRevoked(t, fx)
 
 	var status string
 	var completedAt *time.Time
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT status, completed_at FROM agent_task_queue WHERE id = $1`,
 		deferredTaskID,
-	).Scan(&status, &completedAt); err != nil {
-		t.Fatalf("query deferred task: %v", err)
-	}
+	).Scan(&status, &completedAt)
 	if status != "cancelled" || completedAt == nil {
 		t.Fatalf("deferred task = (%q, %v), want cancelled with completed_at", status, completedAt)
 	}
@@ -1312,54 +1231,285 @@ func TestDeleteMember_NoRuntimes_DeletesMember(t *testing.T) {
 	const slug = "handler-tests-revoke-no-runtimes"
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
 
-	var wsID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO workspace (name, slug, description, issue_prefix)
-VALUES ($1, $2, $3, $4)
-RETURNING id
-`, "Revocation no runtimes", slug, "revocation no-runtimes test", "REV").Scan(&wsID); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Revocation no runtimes",
+		"slug":         slug,
+		"description":  "revocation no-runtimes test",
+		"issue_prefix": "REV",
+	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
-`, wsID, testUserID); err != nil {
-		t.Fatalf("create requester member: %v", err)
-	}
+`, wsID, testUserID)
 
-	var targetUserID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
-`, "Revocation No Runtimes Target", "revocation-no-runtimes@multica.ai").Scan(&targetUserID); err != nil {
-		t.Fatalf("create target user: %v", err)
-	}
+	targetUserID := dbfx.Insert(t, "user", testutil.Cols{
+		"name":  "Revocation No Runtimes Target",
+		"email": "revocation-no-runtimes@multica.ai",
+	})
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, targetUserID)
 	})
 
-	var memberID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin') RETURNING id
-`, wsID, targetUserID).Scan(&memberID); err != nil {
-		t.Fatalf("create target member: %v", err)
-	}
+	memberID := dbfx.Insert(t, "member", testutil.Cols{
+		"workspace_id": wsID,
+		"user_id":      targetUserID,
+		"role":         "admin",
+	})
 
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID+"/members/"+memberID, nil)
 	req.Header.Set("X-Workspace-ID", wsID)
 	req = withURLParams(req, "id", wsID, "memberId", memberID)
-	testHandler.DeleteMember(w, req)
-
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
 
 	var memberExists bool
-	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM member WHERE id = $1)`, memberID).Scan(&memberExists); err != nil {
-		t.Fatalf("query member: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT EXISTS (SELECT 1 FROM member WHERE id = $1)`, memberID).Scan(&memberExists)
 	if memberExists {
 		t.Fatal("member row was not deleted")
+	}
+}
+
+// TestDefaultIssuePrefixFromSlug pins the derivation new workspaces get
+// (MUL-6050): alphanumerics of the slug, first 4, uppercased. The Chinese
+// cases are the point of the change — under the old name-based derivation
+// every one of them collapsed to "WS".
+//
+// Keep this table in sync with the client-side preview
+// (packages/views/onboarding/steps/step-workspace.tsx). If the two ever
+// disagree, the create screen lies about the identifier the user will get.
+func TestDefaultIssuePrefixFromSlug(t *testing.T) {
+	cases := []struct {
+		slug string
+		want string
+	}{
+		{"acme", "ACME"},
+		{"front-end", "FRON"},
+		{"growth", "GROW"},
+		{"team-2", "TEAM"},
+		{"a1b2c3", "A1B2"},
+		{"ab", "AB"},
+		{"x", "X"},
+		// Slugs the create handler would have rejected anyway; the function
+		// stays total so no caller can persist an empty prefix.
+		{"", "WS"},
+		{"--", "WS"},
+	}
+
+	for _, tc := range cases {
+		if got := defaultIssuePrefixFromSlug(tc.slug); got != tc.want {
+			t.Errorf("defaultIssuePrefixFromSlug(%q) = %q, want %q", tc.slug, got, tc.want)
+		}
+	}
+}
+
+// TestLegacyIssuePrefixFromName_Frozen guards the read-time fallback for
+// workspaces whose stored prefix is empty. Issue identifiers are computed
+// from the current prefix on every read, so changing what this returns would
+// silently rewrite the identifier of every historical issue in those
+// workspaces. The product decision on MUL-6050 was explicit: no backfill,
+// existing workspaces are left exactly as they are — which means this
+// function must keep returning what it always did, including "WS" for
+// non-ASCII names.
+func TestLegacyIssuePrefixFromName_Frozen(t *testing.T) {
+	cases := []struct {
+		name string
+		want string
+	}{
+		{"Jiayuan's Workspace", "JIA"},
+		{"My Team", "MYT"},
+		{"AB", "AB"},
+		{"Team 2", "TEA"},
+		{"前端团队", "WS"},
+		{"", "WS"},
+	}
+
+	for _, tc := range cases {
+		if got := legacyIssuePrefixFromName(tc.name); got != tc.want {
+			t.Errorf("legacyIssuePrefixFromName(%q) = %q, want %q — this function is frozen; changing it rewrites existing issue identifiers", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestIssuePrefixForWorkspace_LegacyFallbackFrozen guards the resolution rule
+// itself, at the seam every read-time caller goes through (getIssuePrefix and
+// the GitHub close-intent scan, which holds the row already).
+//
+// A stored prefix always wins; only an empty one falls back, and that fallback
+// must stay on the old name-based derivation. Pointing it at
+// defaultIssuePrefixFromSlug would rewrite the identifier of every issue in
+// those legacy workspaces on the next read — the exact outcome the "no
+// backfill, leave existing workspaces alone" decision on MUL-6050 rules out.
+func TestIssuePrefixForWorkspace_LegacyFallbackFrozen(t *testing.T) {
+	cases := []struct {
+		label string
+		ws    db.Workspace
+		want  string
+	}{
+		{"stored prefix wins", db.Workspace{Name: "前端团队", Slug: "frontend", IssuePrefix: "FE"}, "FE"},
+		{"empty prefix, CJK name", db.Workspace{Name: "前端团队", Slug: "frontend"}, "WS"},
+		{"empty prefix, ASCII name", db.Workspace{Name: "My Team", Slug: "my-team"}, "MYT"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			if got := issuePrefixForWorkspace(tc.ws); got != tc.want {
+				t.Fatalf("issuePrefixForWorkspace(%+v) = %q, want %q — legacy workspaces must keep the identifiers they already have", tc.ws, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeIssuePrefix(t *testing.T) {
+	cases := []struct {
+		raw   string
+		want  string
+		valid bool
+	}{
+		{"acme", "ACME", true},
+		{"  acme  ", "ACME", true},
+		{"AB12", "AB12", true},
+		{"ABCDEFGHIJ", "ABCDEFGHIJ", true},
+		// Absent / blank means "use the default", not "invalid".
+		{"", "", true},
+		{"   ", "", true},
+		// Rejections the API accepted before MUL-6050.
+		{"ABCDEFGHIJK", "", false},
+		{"前端", "", false},
+		{"AB-CD", "", false},
+		{"AB CD", "", false},
+		{"AB_CD", "", false},
+	}
+
+	for _, tc := range cases {
+		got, ok := normalizeIssuePrefix(tc.raw)
+		if ok != tc.valid {
+			t.Errorf("normalizeIssuePrefix(%q) valid = %v, want %v", tc.raw, ok, tc.valid)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("normalizeIssuePrefix(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}
+
+// TestCreateWorkspace_ChineseNameDerivesPrefixFromSlug is the end-to-end
+// regression for MUL-6050: a workspace whose name has no ASCII letters used
+// to be created with prefix "WS" — deterministically, for every Chinese team
+// on the instance. It must now take its prefix from the slug, which the same
+// form already forced the user to choose in ASCII.
+func TestCreateWorkspace_ChineseNameDerivesPrefixFromSlug(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const slug = "handler-tests-frontend-team"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	dbfx.Cleanup(t, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	req := newRequest("POST", "/api/workspaces", map[string]any{
+		"name": "前端团队",
+		"slug": slug,
+	})
+	w := testutil.Call(t, testHandler.CreateWorkspace, req).Want(http.StatusCreated)
+
+	var resp WorkspaceResponse
+	w.JSON(&resp)
+	if resp.IssuePrefix != "HAND" {
+		t.Fatalf("issue_prefix = %q, want %q (derived from the slug, not the name)", resp.IssuePrefix, "HAND")
+	}
+	if resp.IssuePrefix == "WS" {
+		t.Fatal("issue_prefix fell back to WS — the MUL-6050 regression is back")
+	}
+}
+
+// TestCreateWorkspace_HonorsExplicitIssuePrefix covers the create screen's new
+// editable prefix field: whatever the user typed is what gets persisted.
+func TestCreateWorkspace_HonorsExplicitIssuePrefix(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const slug = "handler-tests-explicit-prefix"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	dbfx.Cleanup(t, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	req := newRequest("POST", "/api/workspaces", map[string]any{
+		"name":         "前端团队",
+		"slug":         slug,
+		"issue_prefix": "fe",
+	})
+	w := testutil.Call(t, testHandler.CreateWorkspace, req).Want(http.StatusCreated)
+
+	var resp WorkspaceResponse
+	w.JSON(&resp)
+	if resp.IssuePrefix != "FE" {
+		t.Fatalf("issue_prefix = %q, want %q", resp.IssuePrefix, "FE")
+	}
+}
+
+// TestCreateWorkspace_RejectsInvalidIssuePrefix closes the API-side hole the
+// settings UI already guarded: before MUL-6050 the create and update handlers
+// only trimmed and uppercased the caller-supplied prefix, so a direct API call
+// could persist CJK text or a 100-character string as an issue prefix.
+func TestCreateWorkspace_RejectsInvalidIssuePrefix(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	invalid := map[string]string{
+		"non-ascii":  "前端",
+		"too-long":   "ABCDEFGHIJK",
+		"hyphenated": "AB-CD",
+		"spaced":     "AB CD",
+	}
+
+	for label, prefix := range invalid {
+		t.Run(label, func(t *testing.T) {
+			slug := "handler-tests-bad-prefix-" + label
+			ctx := context.Background()
+			_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+			dbfx.Cleanup(t, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+			req := newRequest("POST", "/api/workspaces", map[string]any{
+				"name":         "Prefix Validation Probe",
+				"slug":         slug,
+				"issue_prefix": prefix,
+			})
+			w := testutil.Call(t, testHandler.CreateWorkspace, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("issue_prefix %q: expected 400, got %d: %s", prefix, w.Code, w.Body.String())
+			}
+
+			var count int
+			dbfx.QueryRow(t, `SELECT count(*) FROM workspace WHERE slug = $1`, slug).Scan(&count)
+			if count != 0 {
+				t.Fatalf("expected no workspace row for a rejected prefix, found %d", count)
+			}
+		})
+	}
+}
+
+// TestUpdateWorkspace_RejectsInvalidIssuePrefix is the PATCH half of the same
+// hole: settings normalizes client-side, but the endpoint took anything.
+func TestUpdateWorkspace_RejectsInvalidIssuePrefix(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var before string
+	dbfx.QueryRow(t, `SELECT issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&before)
+
+	req := withURLParam(
+		newRequest("PATCH", "/api/workspaces/"+testWorkspaceID, map[string]any{"issue_prefix": "前端团队前端团队前端"}),
+		"id", testWorkspaceID,
+	)
+	testutil.Call(t, testHandler.UpdateWorkspace, req).Want(http.StatusBadRequest)
+
+	var after string
+	dbfx.QueryRow(t, `SELECT issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&after)
+	if after != before {
+		t.Fatalf("issue_prefix changed on a rejected update: %q → %q", before, after)
 	}
 }

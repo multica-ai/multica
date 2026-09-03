@@ -21,7 +21,12 @@ import {
 
 function keyEvent(
   key: string,
-  modifiers: Partial<Pick<KeyboardEvent, "metaKey" | "ctrlKey" | "altKey" | "shiftKey">> = {},
+  fields: Partial<
+    Pick<
+      KeyboardEvent,
+      "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey"
+    >
+  > = {},
 ): KeyboardEvent {
   return {
     key,
@@ -29,7 +34,7 @@ function keyEvent(
     ctrlKey: false,
     altKey: false,
     shiftKey: false,
-    ...modifiers,
+    ...fields,
   } as KeyboardEvent;
 }
 
@@ -91,6 +96,10 @@ describe("keyboard shortcut definitions", () => {
     }
     // Dismissing chat has to work with the caret inside its own composer.
     expect(action.allowInEditable).toBe(true);
+  });
+
+  it("keeps the plain inbox archive key out of editable controls", () => {
+    expect(SHORTCUT_ACTION_BY_ID.archiveInboxItem.allowInEditable).toBe(false);
   });
 
   it("strictly distinguishes Command and Control on macOS", () => {
@@ -176,6 +185,60 @@ describe("keyboard shortcut definitions", () => {
     expect(
       isReservedShortcut(createShortcutChord("K", { primary: true }), "windows"),
     ).toBe(false);
+  });
+
+  it("reserves the preferences chord on every runtime", () => {
+    // Desktop opens Settings from the main process (before-input-event) and
+    // browsers open their own settings, so Mod+, can never be recorded for a
+    // product action.
+    const chord = createShortcutChord(",", { primary: true });
+    expect(isReservedShortcut(chord, "macos", "desktop")).toBe(true);
+    expect(isReservedShortcut(chord, "macos", "web")).toBe(true);
+    expect(isReservedShortcut(chord, "windows", "desktop")).toBe(true);
+    expect(isShortcutAllowedForAction("goSettings", chord, "macos", "desktop")).toBe(false);
+    // Only with the primary modifier — a bare comma stays typeable.
+    expect(isReservedShortcut(createShortcutChord(","), "macos", "desktop")).toBe(false);
+  });
+
+  it("reserves browser-style tab selection on every platform and runtime", () => {
+    for (const key of ["1", "2", "3", "4", "5", "6", "7", "8", "9"]) {
+      const chord = createShortcutChord(key, { primary: true });
+      for (const platform of ["macos", "windows", "linux"] as const) {
+        for (const runtime of ["web", "desktop"] as const) {
+          expect(isReservedShortcut(chord, platform, runtime)).toBe(true);
+          expect(
+            isShortcutAllowedForAction("openSearch", chord, platform, runtime),
+          ).toBe(false);
+        }
+      }
+    }
+    expect(
+      isReservedShortcut(createShortcutChord("1"), "macos", "desktop"),
+    ).toBe(false);
+  });
+
+  it("models layout-sensitive number-row chords by their logical key", () => {
+    const ampersand = shortcutFromEvent(
+      keyEvent("&", { code: "Digit1", ctrlKey: true }),
+      "windows",
+    );
+    expect(ampersand).toEqual(
+      createShortcutChord("&", { primary: true }),
+    );
+    expect(isReservedShortcut(ampersand!, "windows", "desktop")).toBe(
+      false,
+    );
+
+    const shiftedDigit = shortcutFromEvent(
+      keyEvent("1", { code: "Digit1", ctrlKey: true, shiftKey: true }),
+      "windows",
+    );
+    expect(shiftedDigit).toEqual(
+      createShortcutChord("1", { primary: true, shift: true }),
+    );
+    expect(isReservedShortcut(shiftedDigit!, "windows", "desktop")).toBe(
+      true,
+    );
   });
 
   it("reserves browser-owned accelerators on web but frees the bare chords on desktop", () => {

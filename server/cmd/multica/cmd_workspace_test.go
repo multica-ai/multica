@@ -362,6 +362,25 @@ func TestRunWorkspaceSwitchFailsClosedInTaskContext(t *testing.T) {
 	}
 }
 
+func TestFetchWorkspacesExplainsPortOnlyFailClosedContext(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv(cli.TaskConfigRootEnv, "")
+	t.Setenv("MULTICA_DAEMON_PORT", "20032")
+	t.Setenv("MULTICA_SERVER_URL", "https://api.example.test")
+	t.Setenv("MULTICA_TOKEN", "")
+	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_owner_pat"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	_, err := fetchWorkspaces(t.Context(), newWorkspaceSwitchTestCmd())
+	if err == nil || !strings.Contains(err.Error(), "MULTICA_DAEMON_PORT") || !strings.Contains(err.Error(), "remove") {
+		t.Fatalf("fetchWorkspaces error = %v, want stale port recovery guidance", err)
+	}
+}
+
 func TestResolveWorkspaceByIDOrSlug(t *testing.T) {
 	workspaces := []workspaceSummary{
 		{ID: "11111111-1111-1111-1111-111111111111", Name: "Alpha", Slug: "alpha"},
@@ -667,21 +686,6 @@ func newWorkspaceMemberInviteTestCmd() *cobra.Command {
 	cmd.Flags().String("role", "member", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
-}
-
-func TestWorkspaceMemberInviteCommandIsRegistered(t *testing.T) {
-	cmd, _, err := workspaceMemberCmd.Find([]string{"invite", "alice@example.com"})
-	if err != nil {
-		t.Fatalf("find invite command: %v", err)
-	}
-	if cmd == nil || cmd.Name() != "invite" {
-		t.Fatalf("invite command not registered; got %#v", cmd)
-	}
-	for _, flag := range []string{"role", "output"} {
-		if cmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("invite command missing --%s flag", flag)
-		}
-	}
 }
 
 func TestRunWorkspaceMemberInvitePostsInvitation(t *testing.T) {

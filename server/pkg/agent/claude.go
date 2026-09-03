@@ -3,12 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -72,24 +74,15 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	// Run claude in its own process group so cancellation can reach the whole
-	// tree — the claude CLI plus the MCP servers and tool subprocesses it
-	// spawns — not just the direct child. The default CommandContext behaviour
-	// SIGKILLs only the leader, which orphans those descendants; on a resumed
-	// stream-json session with no wall-clock timeout they then keep running and
-	// burning model budget long after the task was cancelled, and under
-	// --max-concurrent-tasks 1 starve every queued task (#5918). This mirrors
-	// the fix already made for codex (#4520) and opencode (#4533).
-	configureProcessGroup(cmd)
-	// Take over context cancellation: the default would SIGKILL only the leader
-	// the instant runCtx is done. We instead drive a graceful group-wide
+	// Take over context cancellation: the default kills the whole group the
+	// instant runCtx is done. We instead drive a graceful group-wide
 	// SIGTERM→SIGKILL from the cancellation goroutine below and close stdout
 	// only after the tree has been signalled. Returning nil keeps os/exec from
 	// racing us with its own kill; WaitDelay remains the hard backstop.
 	cmd.Cancel = func() error { return nil }
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -120,7 +113,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start claude: %w", err)
@@ -128,7 +121,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
-	// cmd.Start() succeeded — transfer temp file ownership to the goroutine.
+	// The process started — transfer temp file ownership to the goroutine.
 	mcpFileCleanup = nil
 
 	msgCh := make(chan Message, 256)
@@ -200,7 +193,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			}
 			closeStdin()
 			if cmd.Process != nil {
-				signalProcessGroup(cmd.Process, syscall.SIGTERM)
+				signalProcessGroup(cmd, syscall.SIGTERM)
 				// Escalate to a group SIGKILL unless the WHOLE process group has
 				// exited within the grace window. This must key off the process
 				// group, not procDone: procDone only means cmd.Wait() returned
@@ -209,8 +202,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				// and skip the SIGKILL — leaking exactly the orphan this fix
 				// targets. waitProcessGroupGone returns as soon as the group is
 				// empty, so the graceful case adds no latency.
-				if !waitProcessGroupGone(cmd.Process, claudeTerminateGrace()) {
-					signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				if !waitProcessGroupGone(cmd, claudeTerminateGrace()) {
+					signalProcessGroup(cmd, syscall.SIGKILL)
 				}
 			}
 			_ = stdout.Close()
@@ -284,6 +277,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
 		close(procDone)
+		// The leader is reaped; drop ownership. On Windows that closes the Job
+		// Object, which kills anything still inside it — precisely what should
+		// happen to a descendant that outlived the CLI (GH #7522).
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 		// writeDone is buffered (cap 1) and the writer always sends — by the
 		// time cmd has exited, the prompt write has either succeeded, hit a
@@ -1106,23 +1103,106 @@ func cleanupMcpConfigTemp(path string) {
 // tests can shrink it without waiting out the real bound.
 var detectVersionTimeout = 10 * time.Second
 
-func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
+func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
-
-	cmd := exec.CommandContext(ctx, execPath, "--version")
-	hideAgentWindow(cmd)
-	// exec.CommandContext only kills the direct child on timeout. A broken CLI
-	// (node/bun shim) can leave grandchildren that inherited and still hold our
-	// stdout pipe open, and cmd.Output() blocks in Wait() until that pipe
-	// closes — defeating the timeout above. WaitDelay forces the pipes shut and
-	// reaps shortly after the context fires so this call always returns.
-	cmd.WaitDelay = 2 * time.Second
-	data, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("detect version for %s: %w", execPath, err)
+	if runtime.GOOS == "windows" {
+		if native := resolveCodeArtsNativeFromShim(runtimeCmd.Path, os.Stat); native != "" {
+			runtimeCmd.Path = native
+		}
 	}
-	return extractVersionLine(string(data)), nil
+
+	// outputOwned, not the collector in run_collect_quiet.go, and the difference
+	// is which signal means "the answer is in". A broken CLI (node/bun shim) can
+	// leave grandchildren that inherited and still hold our stdout pipe open, and
+	// os/exec's Wait blocks until those pipes reach EOF — which is why this call
+	// carries a WaitDelay backstop, and why the deadline above needs one at all.
+	//
+	// An earlier revision of this branch used the collector here, so that Wait
+	// returned on the *direct child's* exit whatever a descendant was holding.
+	// That is wrong on this path: a wrapper may exit successfully while the real
+	// CLI, its descendant, still owes us the version. Review measured it — the
+	// wrapper exits 0, its child prints the version 500ms later, and treating
+	// leader exit as completion killed the child and returned an empty version
+	// with a nil error, where outputOwned returns the version. Pipe EOF is the
+	// only signal that means "no more output is coming"; leader exit does not.
+	//
+	// What this branch still fixes here is the *reporting*: a lingering
+	// descendant makes Wait hit WaitDelay and report exec.ErrWaitDelay even
+	// though the version arrived, and a failed --version probe skips runtime
+	// registration entirely (#6084 reverted a WaitDelay backstop over exactly
+	// that). So the error is dropped when — and only when — the answer itself is
+	// present. See salvageProbeAnswer.
+	//
+	// Built through runtimeCmd.exec so a custom runtime's fixed_args prefix is
+	// still applied (MUL-6260).
+	cmd := runtimeCmd.exec(ctx, "--version")
+	hideAgentWindow(cmd)
+	cmd.WaitDelay = 2 * time.Second
+	data, err := outputOwned(cmd, runtimeCmd.logger)
+	version, recognised := extractVersionLine(string(data))
+	if err != nil {
+		// recognised, not `version != ""`. The two differ exactly where it
+		// matters: extractVersionLine falls back to the trimmed raw output when
+		// no line carries a semver token, so non-empty means "the CLI printed
+		// something", which on this path may be a banner its wrapper emitted
+		// before the real version existed. Review measured that — a stub
+		// printing "initializing plugins", exiting 0, with the version arriving
+		// after WaitDelay — registering `initializing plugins` as the version
+		// with a nil error. A salvage decision needs the stronger question, so
+		// it asks whether a version was actually recognised.
+		//
+		// The fallback still stands on the success path: a CLI that exits 0 with
+		// an unusual version format is reporting its version, and dropping that
+		// to empty would be a regression (#2516). It is only unusable as
+		// evidence that a *bounded, incomplete* read already contains the
+		// answer.
+		if salvaged := salvageProbeAnswer(runtimeCmd, "--version", recognised, err); salvaged {
+			return version, nil
+		}
+		// One provider-agnostic boundary for probes: DetectVersion routes every
+		// provider through here, so an ENOEXEC diagnosis added at this point
+		// reaches the reason the daemon reports for a skipped runtime
+		// (MUL-6164).
+		return "", fmt.Errorf("detect version for %s: %w", runtimeCmd, ExplainExecError(err))
+	}
+	return version, nil
+}
+
+// salvageProbeAnswer decides whether a one-shot probe that produced its answer
+// may ignore the error os/exec reported, and logs the decision.
+//
+// It exists for one shape: the CLI printed what we asked for, and then something
+// about its *lifecycle* failed — a descendant held the output pipes past
+// cmd.WaitDelay (exec.ErrWaitDelay), so Wait reports failure over an answer that
+// is already in the buffer. OpenClaw does this on every invocation: it forks an
+// `openclaw-config` helper that inherits stdout. #6084 measured that shape,
+// tried a WaitDelay backstop, and reverted it on review precisely because the
+// call then fails; MUL-5467 is the follow-up.
+//
+// Deliberately narrow, because "we have output" must never be confused with "we
+// have the answer":
+//
+//   - answered is the caller's own *recognition* of the answer, not a length
+//     check and not a parse that falls back to accepting anything. A version is
+//     salvaged only if extractVersionLine matched a version-shaped line — its
+//     trimmed-raw fallback does not qualify, since a wrapper's banner satisfies
+//     it — and a catalog only if it parsed.
+//   - Only ErrWaitDelay qualifies. A non-zero exit still fails: a CLI that
+//     printed something and then exited 1 is reporting a problem, and its stderr
+//     is the diagnosis. Cancellation and deadlines still fail too — reaching the
+//     deadline means the CLI never finished, and this is not the layer that
+//     decides a timeout was acceptable.
+func salvageProbeAnswer(runtimeCmd Command, probe string, answered bool, err error) bool {
+	if !answered || !errors.Is(err, exec.ErrWaitDelay) {
+		return false
+	}
+	if runtimeCmd.logger != nil {
+		runtimeCmd.logger.Warn("agent: CLI answered but left its output pipes open; "+
+			"using the answer and reaping the tree",
+			"command", runtimeCmd.String(), "probe", probe, "err", err)
+	}
+	return true
 }
 
 // extractVersionLine pulls the version line out of a `<cli> --version` capture,
@@ -1136,17 +1216,24 @@ func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 // or "codex-cli 0.118.0" survive unchanged because the whole matching line is
 // returned. If no line carries a semver token, fall back to the trimmed raw
 // output so unusual version formats aren't silently dropped to empty.
-func extractVersionLine(raw string) string {
+//
+// The second return reports whether that scan actually matched, i.e. whether the
+// first return is a recognised version or only the fallback. It exists because
+// the fallback accepts *any* non-empty text, which is fine when the CLI exited
+// cleanly (it said what it says) and unusable as evidence when a caller has to
+// decide whether an incomplete read already holds the answer — see
+// salvageProbeAnswer.
+func extractVersionLine(raw string) (string, bool) {
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
 		if versionRe.MatchString(line) {
-			return line
+			return line, true
 		}
 	}
-	return strings.TrimSpace(raw)
+	return strings.TrimSpace(raw), false
 }
 
 // logWriter adapts a *slog.Logger to an io.Writer for capturing stderr.

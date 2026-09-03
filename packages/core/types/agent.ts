@@ -49,10 +49,11 @@ export interface AgentInvocationTargetInput {
 
 // Runtime visibility is a separate axis from agent visibility — different
 // vocabulary because it gates a different action. "private" (default) means
-// only the runtime owner and workspace admins can bind agents to it;
-// "public" opens binding to any workspace member. Older backends that
-// haven't shipped MUL-2062 omit the field; the consumer must default to
-// "private" so the strictest behavior is the fallback.
+// only the runtime owner can bind agents to it — workspace admins included,
+// and only the owner may flip the flag (MUL-6126); "public" opens binding to
+// any workspace member. Older backends that haven't shipped MUL-2062 omit the
+// field; the consumer must default to "private" so the strictest behavior is
+// the fallback.
 export type RuntimeVisibility = "private" | "public";
 
 export interface RuntimeDevice {
@@ -111,6 +112,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "codex",
   "copilot",
   "opencode",
+  "codearts",
   "deveco",
   "openclaw",
   "hermes",
@@ -118,6 +120,8 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "cursor",
   "kimi",
   "reasonix",
+  "dsh",
+  "dim",
   "kiro",
   "antigravity",
   "qoder",
@@ -126,6 +130,8 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "grok",
   "qwen",
   "qwenpaw",
+  "mcode",
+  "zeroclaw",
 ] as const;
 
 export type RuntimeProtocolFamily =
@@ -182,6 +188,7 @@ export type TaskFailureReason =
   | "timeout"
   | "codex_semantic_inactivity"
   | "runtime_offline"
+  | "runtime_reconnect_timeout"
   | "runtime_recovery"
   | "manual";
 
@@ -297,7 +304,14 @@ export interface AgentTask {
   error: string | null;
   // Empty string when the task is not in a failed state (the backend uses
   // `omitempty`, so the field may also be missing on non-failed tasks).
-  failure_reason?: TaskFailureReason | "";
+  // Open string on the wire, not a closed enum: the backend's classifier
+  // taxonomy has grown far past TaskFailureReason (21+ refined
+  // `agent_error.*` reasons since MUL-1949, `local_directory_error`, …) and
+  // keeps growing — an installed client will meet reasons its build
+  // predates. TaskFailureReason stays in the union for autocomplete on the
+  // coarse values; `string & {}` admits the rest without collapsing the
+  // hints.
+  failure_reason?: TaskFailureReason | (string & {}) | "";
   created_at: string;
   /** Non-empty when the task was spawned from a chat session. */
   chat_session_id?: string;
@@ -366,6 +380,32 @@ export interface AgentTask {
    * shares and screenshots also stay safe).
    */
   relative_work_dir?: string;
+  /**
+   * Durable directory that replaces `work_dir` after the daemon confirms a
+   * disposable local worktree was finalized and removed. Terminal tasks may
+   * use this for explicit clipboard actions; its absence means `work_dir`
+   * remains authoritative (including preserved-worktree failures and older
+   * daemon/server combinations). This is a point-in-time delivery snapshot;
+   * later resource renames or detachments do not rewrite historical tasks.
+   */
+  durable_work_dir?: string;
+  /**
+   * Privacy-safe display form of `durable_work_dir`. Never render the absolute
+   * durable path directly; older backends omit both fields.
+   */
+  relative_durable_work_dir?: string;
+  /**
+   * Git branch this run delivered its work on. Set only by worktree-mode
+   * local_directory tasks, where the agent never touches the user's working
+   * copy — the branch is the only pointer to what it produced.
+   *
+   * Present on failed runs too: worktree mode commits whatever the agent left
+   * before tearing the worktree down, so a run that died partway still has
+   * something worth finding. Unlike `work_dir` this is safe to render
+   * verbatim; it is a ref inside the user's own repo, not a filesystem path.
+   * Older backends omit it — render conditionally.
+   */
+  branch_name?: string;
   /**
    * Resolved accountable-human provenance of this run (MUL-4302 §9): who it ran
    * "on behalf of", how that was resolved, and the evidence/lineage. Present on
@@ -438,6 +478,8 @@ export interface Agent {
   /** What this agent's owner wrote. For a system agent this holds only the
    *  workspace's own notes — the product half is `system_instructions`. */
   instructions: string;
+  /** Up to three agent-authored first-turn suggestions. Older servers omit it. */
+  conversation_starters?: AgentConversationStarter[];
   /** Set for product-defined agents (e.g. "mika"). Absent for user- and
    *  template-created agents. Identity for "maintained by Multica" checks —
    *  never the display name, which owners may change. */
@@ -549,6 +591,13 @@ export interface Agent {
   archived_by: string | null;
 }
 
+export interface AgentConversationStarter {
+  /** Short chip label shown in the empty state. */
+  label: string;
+  /** Full editable text copied into the composer when selected. */
+  prompt: string;
+}
+
 export interface DisabledRuntimeSkill {
   runtime_id: string;
   provider: string;
@@ -586,6 +635,7 @@ export interface CreateAgentRequest {
   name: string;
   description?: string;
   instructions?: string;
+  conversation_starters?: AgentConversationStarter[];
   avatar_url?: string;
   runtime_id: string;
   runtime_config?: Record<string, unknown>;
@@ -608,8 +658,8 @@ export interface CreateAgentRequest {
   thinking_level?: string;
   /** Optional Codex service-tier catalog ID. See `Agent.service_tier`. */
   service_tier?: string;
-  /** Optional template slug used by the onboarding agent picker. Surfaced
-   *  as the `template` property on the `agent_created` PostHog event. */
+  /** Optional creation-source attribution. Surfaced as the `template`
+   *  property on the `agent_created` PostHog event. */
   template?: string;
   /** Workspace skill IDs attached atomically with the agent row. */
   skill_ids?: string[];
@@ -638,6 +688,7 @@ export interface StoredAgentDraft {
   name: string;
   description: string;
   instructions: string;
+  conversation_starters: AgentConversationStarter[];
   avatar_url: string | null;
   model: string;
   thinking_level: string;
@@ -676,90 +727,11 @@ export interface AgentBuilderRuntimeSwitch {
   runtime_id: string;
 }
 
-/** Agent template summary — fields needed by the picker grid. Does NOT
- *  include `instructions` to keep the list payload small; the detail
- *  endpoint or the create flow returns the full template body. */
-export interface AgentTemplateSummary {
-  slug: string;
-  name: string;
-  description: string;
-  /** Optional grouping for the picker UI ("Engineering" / "Writing" / …). */
-  category?: string;
-  /** Optional lucide-react icon name (e.g. "Search"). Frontend falls back
-   *  to a generic icon when empty. */
-  icon?: string;
-  /** Optional semantic color token for the icon badge — one of "info" /
-   *  "success" / "warning" / "primary" / "secondary". Frontend has a
-   *  static class map so Tailwind can JIT-scan all variants. */
-  accent?: string;
-  skills: AgentTemplateSkillRef[];
-}
-
-/** Full agent template — same as `AgentTemplateSummary` plus the
- *  instructions block. Returned by `GET /api/agent-templates/:slug`. */
-export interface AgentTemplate extends AgentTemplateSummary {
-  instructions: string;
-}
-
-/** Skill reference inside an agent template. `source_url` is the upstream
- *  GitHub / skills.sh URL fetched on create; `cached_*` mirror the upstream
- *  frontmatter at template-author time and let the picker render without
- *  HTTP fetches. */
-export interface AgentTemplateSkillRef {
-  source_url: string;
-  cached_name: string;
-  cached_description: string;
-}
-
-export interface CreateAgentFromTemplateRequest {
-  template_slug: string;
-  name: string;
-  runtime_id: string;
-  model?: string;
-  visibility?: AgentVisibility;
-  /**
-   * Invocation permission mode (MUL-3963). When present it is authoritative;
-   * when absent the backend maps the legacy `visibility` field
-   * (private -> private, workspace -> public_to + workspace target). On
-   * UPDATE, permission changes are OWNER-ONLY (the backend silently ignores
-   * these fields from non-owner admins).
-   */
-  permission_mode?: AgentPermissionMode;
-  /** Invocation grants — see `AgentInvocationTargetInput`. */
-  invocation_targets?: AgentInvocationTargetInput[];
-  max_concurrent_tasks?: number;
-  /** Optional overrides applied to the template before creation. nil/omit
-   *  uses the template's own value. */
-  description?: string;
-  instructions?: string;
-  avatar_url?: string;
-  /** Workspace skill IDs attached **in addition to** the template's
-   *  skills. Server dedupes against template skills automatically. */
-  extra_skill_ids?: string[];
-}
-
-export interface CreateAgentFromTemplateResponse {
-  agent: Agent;
-  /** Skill IDs that were newly created in the workspace from upstream URLs. */
-  imported_skill_ids: string[];
-  /** Skill IDs that already existed in the workspace (same name) and were
-   *  reused rather than re-imported. The UI can surface this as a toast so
-   *  the user knows their pre-existing skill wasn't overwritten. */
-  reused_skill_ids: string[];
-}
-
-/** 422 body returned by `POST /api/agents/from-template` when one or more
- *  template skill URLs cannot be reached. The transaction is rolled back —
- *  no partial workspace state. */
-export interface CreateAgentFromTemplateFailure {
-  error: string;
-  failed_urls: string[];
-}
-
 export interface UpdateAgentRequest {
   name?: string;
   description?: string;
   instructions?: string;
+  conversation_starters?: AgentConversationStarter[];
   avatar_url?: string;
   runtime_id?: string;
   runtime_config?: Record<string, unknown>;
@@ -890,6 +862,19 @@ export interface CreateSkillRequest {
   content?: string;
   config?: Record<string, unknown>;
   files?: { path: string; content: string }[];
+}
+
+/** Structured body of POST /api/skills/import when uploading an archive. */
+export interface SkillImportResult {
+  status: "created" | "updated" | "conflict" | "skipped" | "failed";
+  reason?: string;
+  skill?: Skill;
+  existing_skill?: {
+    id: string;
+    name: string;
+    created_by?: string;
+    can_overwrite?: boolean;
+  };
 }
 
 export interface UpdateSkillRequest {
@@ -1118,6 +1103,28 @@ export interface RuntimeModel {
   thinking?: RuntimeModelThinking;
   /** Runtime-native execution tiers advertised for this exact model. */
   service_tiers?: RuntimeModelServiceTier[];
+  /**
+   * Whether this runtime's installed Codex CLI accepts the request-only
+   * `default` sentinel for explicit standard routing. Missing means false so
+   * a new client stays safe when connected to an older daemon.
+   */
+  supports_explicit_standard_service_tier?: boolean;
+}
+
+/**
+ * A model the runtime named but will not run on that host — today only Claude
+ * Code, reporting one that needs a newer CLI than the installed one.
+ *
+ * These arrive in their own list and never inside `models`, which is what keeps
+ * an older client from offering one: it reads `models`, and they are not there.
+ * The picker shows them greyed out with `reason` so the gap reads as "your CLI
+ * is behind" rather than "Multica does not support this model" (MUL-6961).
+ */
+export interface RuntimeUnavailableModel {
+  id: string;
+  label: string;
+  /** The runtime's own remedy, e.g. "Update to 2.1.255+ to use Fable 5.1". */
+  reason?: string;
 }
 
 export interface RuntimeModelServiceTier {
@@ -1162,6 +1169,8 @@ export interface RuntimeModelListRequest {
   runtime_id: string;
   status: RuntimeModelListStatus;
   models?: RuntimeModel[];
+  /** Advisory rows the runtime cannot run; never selectable. */
+  unavailable_models?: RuntimeUnavailableModel[];
   supported: boolean;
   error?: string;
   created_at: string;
@@ -1182,6 +1191,13 @@ export interface RuntimeModelListRequest {
 // from "provider does not honour per-agent model selection".
 export interface RuntimeModelsResult {
   models: RuntimeModel[];
+  /**
+   * Rows the runtime named but cannot run. Kept out of `models` on purpose —
+   * see RuntimeUnavailableModel. Optional like `cached` beside it: the resolver
+   * always sets it, but a backend older than the field contributes nothing, so
+   * consumers read it defensively.
+   */
+  unavailableModels?: RuntimeUnavailableModel[];
   supported: boolean;
   /**
    * True when the server answered from its catalog cache rather than a live

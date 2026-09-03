@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica는 프로세스를 시작할 때 환경 변수를 읽습니다. 수정 후에는 보통 해당 API, Web 또는 데몬을 다시 시작해야 합니다. Docker Compose의 `docker compose restart`는 `.env`를 다시 읽지 않으므로 `up -d`로 컨테이너를 다시 만들어야 적용됩니다.
 
-이 페이지에는 배포자를 위한 설정만 나열하며 테스트 변수와 내부 태스크 변수는 다루지 않습니다. 여기서는 그룹별 참조를 제공하고 전체 배포 단계는 [자체 호스팅 빠른 시작](/self-host-quickstart)을 참고하세요.
+이 페이지에는 배포자를 위한 설정만 나열하며 테스트 변수와 내부 작업 변수는 다루지 않습니다. 여기서는 그룹별 참조를 제공하고 전체 배포 단계는 [자체 호스팅 빠른 시작](/self-host-quickstart)을 참고하세요.
 
 ## 프로덕션 최소 설정
 
@@ -23,7 +23,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 이메일 서비스도 하나 선택해야 합니다. 설정하지 않으면 인증 코드와 초대가 서버 로그에만 기록됩니다.
 
 <Callout type="warning">
-프로덕션 환경에서 기본 `JWT_SECRET`을 사용하거나 `MULTICA_DEV_VERIFICATION_CODE`를 설정하지 마세요.
+`JWT_SECRET`은 프로덕션에서 필수입니다. `APP_ENV=production`일 때 비어 있거나 알려진 자리표시자 값이면 백엔드가 부팅을 거부합니다(`openssl rand -hex 32`로 생성). `MULTICA_DEV_VERIFICATION_CODE`도 설정하지 마세요.
 </Callout>
 
 ## API와 데이터베이스
@@ -33,12 +33,15 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | 로컬 `multica` 데이터베이스 | PostgreSQL 연결 주소 |
 | `DATABASE_MAX_CONNS` | `25` | API 프로세스 하나의 최대 데이터베이스 연결 수 |
 | `DATABASE_MIN_CONNS` | `5` | API 프로세스 하나가 유지하는 최소 연결 수 |
+| `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | 컨테이너 시작 중 migration과 API가 공유하는 일시적인 데이터베이스 장애 재시도 시간. `0`으로 설정하면 각 단계에서 한 번만 시도 |
+| `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | 시작 중 각 연결 시도의 폴백 제한 시간. pgx 기본 `connect_timeout`, `PGCONNECT_TIMEOUT` 또는 service 설정이 우선 적용됨 |
 | `PORT` | `8080` | API listen port |
-| `JWT_SECRET` | 개발용 고정값 | 로그인 JWT와 일부 서명 절차에서 사용하는 키 |
+| `JWT_SECRET` | 프로덕션에서 필수 | 로그인 JWT와 일부 서명 절차에서 사용하는 키. 프로덕션에서는 비어 있거나 알려진 자리표시자 값으로 부팅 거부 |
 | `APP_ENV` | 비어 있음 | 프로덕션 환경에서는 `production`으로 설정 |
 | `AUTH_TOKEN_TTL` | `720h`(30일) | 브라우저 JWT와 cookie 유효 기간. Go duration 또는 양의 정수 초 허용 |
 | `LOG_LEVEL` | 앱 기본값 | 로그 수준 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 종료 신호를 받은 뒤 graceful shutdown을 시작하기 전 대기 시간 |
+| `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 오프라인 런타임이 진행 중인 작업을 실패시키지 않고 재연결할 수 있는 유예 시간. `150s` 미만은 `150s`로 조정됨 |
 
 Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`가 hold와 실제 종료에 필요한 시간의 합보다 커야 합니다.
 
@@ -49,9 +52,14 @@ Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`�
 | `FRONTEND_ORIGIN` | 비어 있음 | 사용자가 접근하는 프런트엔드 origin. CORS, cookie, 초대 링크에 사용 |
 | `MULTICA_APP_URL` | `FRONTEND_ORIGIN`으로 fallback | 사용자가 접근할 수 있는 Web 주소. CLI 로그인과 계정 연결 링크에 사용 |
 | `MULTICA_PUBLIC_URL` | 비어 있음 | 공개 API 주소. webhook URL과 런타임 연결 안내에 사용 |
+| `MULTICA_DAEMON_SERVER_URL` | `MULTICA_PUBLIC_URL`, 그다음 `MULTICA_APP_URL` / `FRONTEND_ORIGIN`으로 fallback | API 프로세스가 `multica setup self-host` 명령에 넣는 서버 URL. 데몬이 접근하는 API URL이 공개 webhook URL과 다를 때 설정 |
 | `CORS_ALLOWED_ORIGINS` | 비어 있음 | 추가로 허용할 HTTP origin, 쉼표로 구분 |
 | `ALLOWED_ORIGINS` | CORS 또는 프런트엔드 주소로 fallback | WebSocket origin allowlist, 쉼표로 구분 |
 | `COOKIE_DOMAIN` | 비어 있음 | 프런트엔드와 backend의 host가 다르고 브라우저가 API 도메인에 직접 접근할 때 필수. 단일 도메인 배포에서는 비워 둠 |
+
+<Callout type="warning">
+`MULTICA_DAEMON_SERVER_URL`은 인증이 필요 없는 `/api/config` 엔드포인트에서 반환되며 클라이언트가 읽을 수 있습니다. 공개 설정으로 취급하고 자격 증명, 토큰 또는 기타 비밀을 절대 포함하지 마세요.
+</Callout>
 
 프런트엔드와 API가 서로 다른 host를 사용하고 브라우저가 API 도메인에 직접 접근한다면 `COOKIE_DOMAIN`을 설정해야 합니다. 설정하지 않으면 브라우저가 CSRF cookie를 읽지 못해 모든 쓰기 요청이 `403 CSRF validation failed`를 반환하고 읽기 요청만 정상 작동합니다. 두 host를 모두 포함하는 가장 좁은 상위 도메인을 사용하세요(`.example.com`보다 `.agent.example.com`이 더 적합). 이 설정은 로그인 세션 cookie를 해당 도메인의 모든 host로 확장하므로 모든 host를 같은 신뢰 주체가 운영할 때만 사용할 수 있습니다. 수정 후 두 host에서 이전 cookie를 삭제하고 다시 로그인해야 합니다. [자체 호스팅 빠른 시작](/self-host-quickstart#3-접근-방식-선택)의 same-origin 구성을 사용해 브라우저가 app 도메인에만 접근한다면 비워 두세요. IP 주소는 입력하지 마세요. 브라우저가 IP Domain이 포함된 cookie를 무시합니다.
 
@@ -142,16 +150,19 @@ allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `REDIS_URL` | 비어 있음 | 인증 rate limit, 실시간 이벤트, token cache에 사용. 설정하지 않으면 실시간 이벤트는 프로세스 메모리로 fallback하고 인증 rate limit은 비활성화 |
+| `REDIS_URL` | 비어 있음 | 공유 rate limit, 실시간 이벤트, token cache에 사용. 설정하지 않으면 실시간 이벤트와 초대 제한은 프로세스 메모리로 fallback하고 인증 rate limit은 비활성화 |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 관리형 Redis가 `CLIENT SETNAME`을 금지하면 `true`로 설정 |
 | `RATE_LIMIT_AUTH` | `5` | IP당 1분에 인증 코드 전송 또는 Google 로그인 시작 허용 횟수 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | IP당 1분에 인증 코드 검증 허용 횟수 |
+| `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | 초대자별 10분 슬라이딩 윈도 내 워크스페이스 초대 생성 횟수. `0`이면 이 제한을 비활성화 |
+| `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | 워크스페이스의 모든 관리자가 24시간 슬라이딩 윈도 내 생성할 수 있는 총 초대 수. `0`이면 이 제한을 비활성화 |
+| `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | 정규화된 동일 수신 이메일이 워크스페이스 전체에서 24시간 슬라이딩 윈도 내 받을 수 있는 초대 수. `0`이면 이 제한을 비활성화 |
 | `RATE_LIMIT_TRUSTED_PROXIES` | 비어 있음 | `X-Forwarded-For`를 제공하도록 허용할 proxy CIDR, 쉼표로 구분 |
 | `MULTICA_TRUSTED_PROXIES` | 비어 있음 | 자동화 webhook과 실시간 연결에서 사용할 신뢰 proxy CIDR |
 
 reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 합니다. 모든 출처를 그대로 신뢰하지 마세요. 클라이언트가 전달 IP를 위조할 수 있습니다.
 
-위 `RATE_LIMIT_*` 변수는 `REDIS_URL`을 설정한 경우에만 작동합니다. 설정하지 않으면 시작 로그에 rate limiting disabled가 표시됩니다. Redis를 일시적으로 사용할 수 없을 때는 rate limit이 요청을 허용하는 쪽으로 동작해 정상 로그인을 차단하지 않습니다.
+인증 rate limit에는 `REDIS_URL`이 필요하며, 설정하지 않으면 시작 로그에 인증 rate limit이 비활성화되었다고 표시됩니다. 초대 제한은 Redis 없이도 프로세스 메모리에서 동작하고, Redis를 설정하면 여러 replica가 할당량을 공유합니다. 설정된 Redis를 일시적으로 사용할 수 없으면 인증 rate limit은 fail-open하지만, 초대 생성은 보호 없이 이메일을 보내지 않고 재시도 가능한 `503`을 반환합니다.
 
 ## 외부 연동
 
@@ -163,27 +174,44 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | App ID와 짝을 이루는 전체 PEM private key. 용도는 위와 같음 |
 | Feishu | `MULTICA_LARK_SECRET_KEY` | base64로 인코딩한 32바이트 자격 증명 암호화 키 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64로 인코딩한 32바이트 token 암호화 키 |
+| Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64로 인코딩한 32바이트 Bot token 암호화 키 |
 | Composio | `COMPOSIO_API_KEY` | Composio 도구 연결 활성화 |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | callback API 주소. `MULTICA_PUBLIC_URL`로 fallback 가능 |
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 서명 키. `JWT_SECRET`에서 파생 가능 |
 | 자체 호스팅 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 연동 스위치. compose에서는 기본 활성화 |
 | 자체 호스팅 Git | `MULTICA_VCS_SECRET_KEY` | base64로 인코딩한 32바이트 암호화 키(`openssl rand -base64 32`). 없으면 전체 기능을 사용할 수 없음 |
+| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | 저장된 secret과 surface 실행 URL을 암호화하는 base64 인코딩 32바이트 키 |
+| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 백엔드로 라우팅되는 쿠키 없는 전용 origin. app/API origin과 달라야 하며 `Host`를 보존해야 함 |
+| Plugins | `MULTICA_PLUGIN_API_URL` | 버전을 포함한 Plugin Public API의 전체 Base URL(예: `https://plugin-api.example.com/v1`). 설정하지 않으면 `MULTICA_PUBLIC_URL` + `/v1` 사용 |
+| Plugins | `MULTICA_PLUGIN_DIR` | 개발 중 로컬 plugin bundle을 게시하는 선택적 절대 디렉터리 |
 
 `GITHUB_APP_ID`와 private key를 설정하지 않아도 PR 연결, 미러링, merge 시 done 전환은 정상적으로 작동합니다. 다만 카드에 CI와 merge 가능 상태가 표시되지 않고 "GitHub에서 선택" 저장소 메뉴도 비활성화됩니다.
 
-설정 단계는 [GitHub 연동](/github-integration#자체-호스팅-설정), [Feishu Bot](/lark-bot-integration#자체-호스팅-설정), [Slack Bot](/slack-bot-integration#자체-호스팅-설정)을 참고하세요.
+설정 단계는 [GitHub 연동](/github-integration#자체-호스팅-설정), [Feishu Bot](/lark-bot-integration#자체-호스팅-설정), [Slack Bot](/slack-bot-integration#자체-호스팅-설정), [Telegram Bot](/telegram-bot-integration#관리-및-자체-호스팅)을 참고하세요.
 
 ## 서버 측 LLM
 
-이 설정 그룹은 대화 제목 같은 서버 측 보조 생성 기능에 사용됩니다. 에이전트가 태스크를 실행할 때 사용하는 AI 코딩 도구의 자격 증명이 아닙니다.
+이 설정 그룹은 대화 제목 같은 서버 측 보조 생성 기능에 사용됩니다. 에이전트가 작업을 실행할 때 사용하는 AI 코딩 도구의 자격 증명이 아닙니다.
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `MULTICA_LLM_API_KEY` | 비어 있음 | OpenAI 호환 API key |
 | `MULTICA_LLM_BASE_URL` | 비어 있음 | OpenAI 호환 endpoint |
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | 요청에 모델이 지정되지 않았을 때 사용 |
+| `MULTICA_LLM_MAX_RETRIES` | `2` | 호출당 재시도 상한. `0`은 재시도 비활성화, `1`–`5`는 최대 N회 |
 
-API key와 base URL이 모두 비어 있으면 서버 측 LLM 생성이 꺼지고 호출자가 로컬 fallback 로직을 사용합니다.
+`MULTICA_LLM_MAX_RETRIES`는 재시도 정책의 유일한 설정 소스입니다. 설정하지 않으면 기본값 2회, `0`이면 호출당 요청을 정확히 한 번만 보내고, 1–5면 재시도를 최대 그 횟수까지만 합니다. 할당량이 아니라 상한입니다. 재시도 대상 실패만 이를 소모하며, 성공하거나 호출자 자신의 데드라인에 걸리면 더 일찍 끝납니다. 그 밖의 값(음수, 숫자가 아닌 값, 5 초과)은 조용히 보정되지 않고 시작에 실패합니다. 상한은 지연 예산입니다. 백오프는 0.5초에서 시작해 8초 상한까지 두 배씩 늘어나므로, 더 큰 예산은 호출자 자신의 타임아웃을 넘겨 재시도 가능한 실패를 타임아웃으로 바꿉니다. 재시도는 연결 실패와 HTTP 408, 409, 429, 5xx를 대상으로 하며 그 외 4xx는 그대로 반환됩니다. 서버는 시작 시 유효한 정책을 `llm retry policy`로 기록하며 해당 줄에는 자격 증명이 포함되지 않습니다.
+
+이 레이어를 사용하는 기능은 두 가지이며, 둘 다 설정한 endpoint로 채팅 내용을 전송합니다.
+
+- **대화 제목 자동 생성** — 새 채팅 세션에서 사용자가 보낸 첫 메시지를 그대로 전송합니다. 첨부 파일은 포함되지 않습니다.
+- **후속 질문**(에이전트 답변 아래의 버튼) — 대화의 마지막 부분을 전송합니다. 최대 6개 메시지이며, 대상 답변은 3000자, 그보다 오래된 메시지는 각각 800자로 제한됩니다.
+
+API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스트림 요청을 전혀 보내지 않습니다. 위 두 기능 모두 아무것도 전송하지 않습니다. 이 레이어가 채팅 내용을 배포 환경 밖으로 보내면 안 되는 정책이라면 이것이 지원되는 구성입니다. 세션은 클라이언트가 첫 메시지에서 만든 제목을 그대로 사용하고, 후속 질문 버튼은 표시되지 않으며, 나머지 기능은 영향을 받지 않습니다.
+
+<Callout type="info">
+이는 보조 생성 레이어에만 해당합니다. 에이전트 실행은 별도의 데이터 경로입니다. 에이전트가 채팅에 답변할 때 데몬은 해당 에이전트의 AI 코딩 도구를 그 도구 자체의 자격 증명으로 실행하며, 위의 `MULTICA_LLM_*` 설정을 도구에 전달하지 않습니다. (에이전트 자체에 필요한 작업 범위의 Multica 연결 변수는 데몬이 별도로 주입합니다.) 위 변수를 비워 두어도 이 경로에는 영향이 없으므로, 에이전트의 런타임 설정에서 관리하세요.
+</Callout>
 
 ## 데몬 설정
 
@@ -194,22 +222,24 @@ API key와 base URL이 모두 비어 있으면 서버 측 LLM 생성이 꺼지�
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Multica API / WebSocket 주소. `http(s)`도 허용 |
 | `MULTICA_DAEMON_DEVICE_NAME` | host 이름 | 런타임 목록의 기기 이름 |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | 런타임 표시 이름 |
-| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | wakeup 이벤트가 없을 때 실행 태스크 polling 간격 |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | wakeup 이벤트가 없을 때 작업 polling 간격 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | heartbeat 간격 |
-| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 데몬 하나의 동시 실행 태스크 상한 |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 데몬 하나의 동시 작업 상한 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 단일 실행의 절대 시간 제한. `0`은 제한 없음 |
-| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 출력과 도구 실행이 모두 없을 때의 무응답 상한 |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 단일 도구 호출이 계속 무응답인 시간 상한 |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 출력과 도구 실행이 모두 없을 때의 무응답 상한. `0`이면 watchdog 전체가 비활성화됩니다 |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG`와 동일 | 단일 도구 호출이 계속 무응답인 시간 상한. 모델보다 도구에 더 여유를 주고 싶을 때만 따로 설정하며, `0`이면 도구 실행 중에는 강제 종료하지 않습니다 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 전용 무응답 기준값 |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex 의미 활동 없음 기준값 |
-| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server 시작 handshake 상한 |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `MULTICA_AGENT_IDLE_WATCHDOG`와 동일 | Codex 의미 활동 없음 기준값. Codex 자체 타이머는 도구 실행 중인지 알 수 없으므로 별도의 짧은 상한 대신 idle / tool 예산 중 큰 값을 따릅니다 |
+| `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Codex 첫 턴 무진행 상한의 명시적 재정의; `0` 은 기본값 유지. 실제 첫 턴 대기는 여전히 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 및 전체 실행 타임아웃으로 제한됨 — `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 을 이 값보다 엄격히 크게(여유를 두고) 설정해야 하며, 그렇지 않으면 대기가 그 값으로 잘리고 모델 카탈로그 시작 재시도가 건너뛰어짐. 값이 같으면 충분하지 않음: 의미 타이머가 먼저 시작되므로 값이 같을 때도 재시도가 손실될 수 있음 |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`, `thread/start`·`thread/resume`: `60s` | Codex app-server 시작 handshake 상한. 명시적으로 설정한 값은 두 예산을 모두 일괄 재정의합니다 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`, 자체 호스팅 `false` | CLI 자동 확인 및 업데이트 여부 |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 업데이트 확인 간격 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 외부에서 교체된 `multica` 바이너리(`brew upgrade`, 재다운로드, 로컬 빌드)로 재시작할지 여부. `MULTICA_DAEMON_AUTO_UPDATE`와 독립적 |
-| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 실행 태스크 작업 디렉터리의 루트 |
-| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 디버깅을 위해 실행 태스크 디렉터리 유지 |
+| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 작업 작업 디렉터리의 루트 |
+| `MULTICA_AGENT_TEMP_BASE` | `/tmp`(Linux/macOS) | Linux/macOS 전용. 작업별 비공개 임시 디렉터리의 상위 디렉터리입니다. 기존의 쓰기 가능한 절대 경로여야 하며, 값이 잘못되면 `/tmp`로 대체하지 않고 작업 시작에 실패합니다. 짧은 경로를 선택하세요. 하위 도구가 그 아래에 AF_UNIX 소켓을 만들 수 있으며 `sun_path` 제한은 Linux에서 108바이트, macOS에서 104바이트입니다 |
+| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 디버깅을 위해 작업 디렉터리 유지 |
 
-각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`와 `MULTICA_<PROVIDER>_MODEL`로 명령 경로와 기본 모델을 덮어쓸 수 있습니다. QwenPaw만 예외로, Multica가 모델을 전달하지 않기 때문에 `MULTICA_QWENPAW_MODEL`이 없습니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
+각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`로 명령 경로를 덮어쓸 수 있으며 모델 재정의를 지원하는 도구는 `MULTICA_<PROVIDER>_MODEL`도 사용할 수 있습니다. QwenPaw와 MiniMax Code에는 모델 변수가 없고 MiniMax Code의 경로 변수는 `MULTICA_MCODE_PATH`입니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness는 `MULTICA_DSH_PATH`와 `MULTICA_DSH_MODEL`을 지원합니다(값은 dsh 모델 카탈로그의 모델 ID, 예: `deepseek-official/deepseek-chat`). ZeroClaw는 `MULTICA_ZEROCLAW_PATH`를 지원하지만 모델 변수는 없습니다. 모델은 ZeroClaw의 에이전트 설정에서 관리합니다. 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -236,12 +266,13 @@ multica config show
 | `workspace_id` | 비어 있음 | 기본 워크스페이스 |
 | `device_name` | host 이름 | 런타임 목록의 기기 이름 |
 | `runtime_name` | `Local Agent` | 런타임 표시 이름 |
-| `max_concurrent_tasks` | `20` | 동시 실행 태스크 상한. `0` 또는 빈 값은 설정되지 않음을 의미 |
-| `poll_interval` | `30s` | 실행 태스크 polling 간격 |
+| `workspaces_root` | `~` 아래 profile별 경로 | 작업 작업 디렉터리의 루트 |
+| `max_concurrent_tasks` | `20` | 동시 작업 상한. `0` 또는 빈 값은 설정되지 않음을 의미 |
+| `poll_interval` | `30s` | 작업 polling 간격 |
 | `heartbeat_interval` | `15s` | heartbeat 간격 |
 | `agent_timeout` | 제한 없음 | 단일 실행의 절대 시간 제한 |
-| `codex_semantic_inactivity_timeout` | `10m` | Codex 의미 활동 없음 기준값 |
-| `codex_handshake_timeout` | `30s` | Codex app-server handshake 상한 |
+| `codex_semantic_inactivity_timeout` | 파생 | Codex 의미 활동 없음 기준값. 설정하지 않으면 idle과 tool watchdog 예산 중 큰 값을 따르고, tool 예산이 `0`이면 idle 예산으로 되돌아갑니다. Codex 자체의 `10m`은 watchdog 전체를 비활성화했을 때만 유지됩니다 |
+| `codex_handshake_timeout` | `30s`, `thread/start`·`thread/resume`: `60s` | Codex app-server 시작 handshake 상한. 명시적으로 설정한 값은 두 예산을 모두 일괄 재정의합니다 |
 | `disable_auto_update` | 환경을 따름 | `true`는 자동 업데이트를 끔. `false`는 로컬 덮어쓰기를 지우고 환경 변수 또는 기본값으로 복귀 |
 | `auto_update_check_interval` | `6h` | 업데이트 확인 간격 |
 | `disable_auto_reload` | 환경을 따름 | `true`는 디스크에서 교체된 바이너리 추적을 끔. `false`는 로컬 덮어쓰기를 지움. `disable_auto_update`와 별도로 해석됨 |
@@ -251,6 +282,7 @@ multica config show
 - duration key는 양의 Go duration(예: `10s`, `2h`)을 허용하며 `0s`와 음수는 거부합니다. 유일한 예외는 `agent_timeout`입니다. `0s`가 유효하며 실행 시간 제한을 명시적으로 끕니다.
 - 빈 문자열을 전달하면 저장된 값을 지우고 환경 변수 또는 내장 기본값으로 돌아갑니다. 예: `multica config set poll_interval ""`
 - `max_concurrent_tasks`는 0 이상의 정수여야 합니다.
+- 상대 `workspaces_root` 값은 저장할 때 절대 경로로 변환됩니다.
 
 ## 관측과 통계
 

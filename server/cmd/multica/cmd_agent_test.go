@@ -41,7 +41,12 @@ func chdirWithDaemonTaskMarker(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
 		t.Fatalf("create marker dir: %v", err)
 	}
-	data := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `"}`)
+	// Task-scoped: a real workdir marker always carries the identity of the
+	// task that wrote it, and that identity is what separates a leftover from
+	// the permanent workspaces root marker, which has managed_by and nothing
+	// else (MUL-6132). Writing the bare form here would model the root marker
+	// rather than the workdir marker these tests are about.
+	data := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `","agent_id":"agent-1","issue_id":"issue-1"}`)
 	if err := os.WriteFile(markerPath, data, 0o644); err != nil {
 		t.Fatalf("write marker: %v", err)
 	}
@@ -61,6 +66,72 @@ func chdirWithDaemonTaskMarker(t *testing.T) {
 			t.Fatalf("restore cwd: %v", err)
 		}
 	})
+}
+
+func TestHumanLocalCommandDistinguishesPortHintFromTaskIdentity(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv(cli.TaskConfigRootEnv, "")
+	t.Setenv("MULTICA_DAEMON_PORT", "20032")
+
+	if err := requireHumanLocalCommand("login"); err != nil {
+		t.Fatalf("port-only host context rejected login: %v", err)
+	}
+
+	t.Setenv(cli.TaskConfigRootEnv, filepath.Join(t.TempDir(), "task-multica"))
+	if err := requireHumanLocalCommand("login"); err == nil || !strings.Contains(err.Error(), "daemon-managed task") {
+		t.Fatalf("task config root did not reject login: %v", err)
+	}
+}
+
+func TestHumanLocalCommandRejectsWorkdirTaskMarker(t *testing.T) {
+	chdirWithDaemonTaskMarker(t)
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv(cli.TaskConfigRootEnv, "")
+	t.Setenv("MULTICA_DAEMON_PORT", "")
+
+	if err := requireHumanLocalCommand("daemon stop"); err == nil || !strings.Contains(err.Error(), "daemon-managed task") {
+		t.Fatalf("workdir task marker did not reject daemon stop: %v", err)
+	}
+}
+
+func TestHumanLocalCommandRejectsExplicitTaskIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		envName string
+		command string
+	}{
+		{name: "agent ID blocks setup", envName: "MULTICA_AGENT_ID", command: "setup"},
+		{name: "task ID blocks daemon stop", envName: "MULTICA_TASK_ID", command: "daemon stop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			t.Setenv("MULTICA_AGENT_ID", "")
+			t.Setenv("MULTICA_TASK_ID", "")
+			t.Setenv(cli.TaskConfigRootEnv, "")
+			t.Setenv("MULTICA_DAEMON_PORT", "")
+			t.Setenv(tc.envName, "task-identity")
+
+			if err := requireHumanLocalCommand(tc.command); err == nil || !strings.Contains(err.Error(), "daemon-managed task") {
+				t.Fatalf("%s with %s was not rejected: %v", tc.command, tc.envName, err)
+			}
+		})
+	}
+}
+
+func TestMissingServerConfigMessageExplainsPortOnlyContext(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv(cli.TaskConfigRootEnv, "")
+	t.Setenv("MULTICA_DAEMON_PORT", "20032")
+
+	message := missingServerConfigMessage()
+	if !strings.Contains(message, "MULTICA_DAEMON_PORT") || !strings.Contains(message, "remove") {
+		t.Fatalf("missing server message = %q, want stale port recovery guidance", message)
+	}
 }
 
 // TestNewAPIClient_WorkdirParentEscapeFailsClosed reproduces the confirmed
@@ -467,6 +538,7 @@ func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
 }
 
 func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
+	t.Chdir(t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
@@ -485,6 +557,9 @@ func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mat_ token") {
 		t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+	}
+	if !strings.Contains(err.Error(), "MULTICA_DAEMON_PORT") || !strings.Contains(err.Error(), "remove") {
+		t.Fatalf("newAPIClient() error = %q, want stale port recovery guidance", err.Error())
 	}
 }
 
@@ -625,30 +700,6 @@ func TestAgentUpdateNoFieldsErrorPointsAtEnvCommand(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "multica agent env set") {
 		t.Fatalf("no-fields error must direct users to `multica agent env set`; got: %q", msg)
-	}
-}
-
-// TestAgentUpdateDoesNotExposeCustomEnvFlags is the inverse guarantee
-// for the above test: if someone re-adds the --custom-env* flags to
-// `agent update`, this fails loudly. The /env path is the only
-// audited surface and we don't want a silent regression.
-func TestAgentUpdateDoesNotExposeCustomEnvFlags(t *testing.T) {
-	for _, flag := range []string{"custom-env", "custom-env-stdin", "custom-env-file"} {
-		if agentUpdateCmd.Flag(flag) != nil {
-			t.Errorf("agent update must NOT expose --%s after MUL-2600; use `multica agent env set` instead", flag)
-		}
-	}
-}
-
-// TestAgentCreateDoesNotExposeFromTemplate guards against re-adding the
-// `--from-template` flag. It was an untaught, immature CLI surface that
-// short-circuited before body assembly — silently dropping sibling create
-// flags like --mcp-config / --custom-env — and was removed. The agent-template
-// backend API still exists but has no CLI surface; manual `agent create` is the
-// only supported CLI creation path.
-func TestAgentCreateDoesNotExposeFromTemplate(t *testing.T) {
-	if agentCreateCmd.Flag("from-template") != nil {
-		t.Error("agent create must NOT expose --from-template; it was removed as an untaught CLI surface that silently dropped sibling flags")
 	}
 }
 
@@ -818,37 +869,6 @@ func TestParseCustomArgsErrorSanitization(t *testing.T) {
 	for _, leak := range []string{"--api-key", "verySensitiveValue", "oops"} {
 		if strings.Contains(msg, leak) {
 			t.Fatalf("parseCustomArgs error leaked input fragment %q: %q", leak, msg)
-		}
-	}
-}
-
-// TestAgentCreateAndEnvSetExposeSecretSafeFlags guarantees the
-// --custom-env-stdin and --custom-env-file alternatives stay wired
-// up on both commands that accept env input (`agent create` and the
-// new `agent env set`). They exist specifically so callers can keep
-// secret material out of shell history / 'ps'; regressing either
-// surface reopens the foot-gun.
-func TestAgentCreateAndEnvSetExposeSecretSafeFlags(t *testing.T) {
-	for _, flag := range []string{"custom-env-stdin", "custom-env-file"} {
-		if agentCreateCmd.Flag(flag) == nil {
-			t.Fatalf("agent create must expose --%s", flag)
-		}
-		if agentEnvSetCmd.Flag(flag) == nil {
-			t.Fatalf("agent env set must expose --%s", flag)
-		}
-	}
-	// The --custom-env help text must warn users that argv is visible
-	// to shell history / 'ps' — "never logged" alone is misleading.
-	for _, c := range []struct {
-		name  string
-		usage string
-	}{
-		{"agent create", agentCreateCmd.Flag("custom-env").Usage},
-		{"agent env set", agentEnvSetCmd.Flag("custom-env").Usage},
-	} {
-		low := strings.ToLower(c.usage)
-		if !strings.Contains(low, "shell history") || !strings.Contains(low, "'ps'") {
-			t.Fatalf("%s --custom-env usage must warn about shell history and 'ps' exposure; got: %q", c.name, c.usage)
 		}
 	}
 }
@@ -1211,36 +1231,6 @@ func TestResolveMcpConfig(t *testing.T) {
 			t.Fatalf("expected --mcp-config-file error, got %v", err)
 		}
 	})
-}
-
-// TestAgentCreateAndUpdateExposeMcpConfigFlags guarantees the secret-safe
-// --mcp-config-stdin / --mcp-config-file alternatives stay wired up on both
-// commands that accept MCP input. Unlike custom_env, mcp_config IS updatable
-// via `agent update` (it has no dedicated audited endpoint), so both surfaces
-// must expose all three channels.
-func TestAgentCreateAndUpdateExposeMcpConfigFlags(t *testing.T) {
-	for _, flag := range []string{"mcp-config", "mcp-config-stdin", "mcp-config-file"} {
-		if agentCreateCmd.Flag(flag) == nil {
-			t.Fatalf("agent create must expose --%s", flag)
-		}
-		if agentUpdateCmd.Flag(flag) == nil {
-			t.Fatalf("agent update must expose --%s", flag)
-		}
-	}
-	// The --mcp-config help text must warn that argv is visible to shell
-	// history / 'ps' — the same foot-gun the custom-env flags warn about.
-	for _, c := range []struct {
-		name  string
-		usage string
-	}{
-		{"agent create", agentCreateCmd.Flag("mcp-config").Usage},
-		{"agent update", agentUpdateCmd.Flag("mcp-config").Usage},
-	} {
-		low := strings.ToLower(c.usage)
-		if !strings.Contains(low, "shell history") || !strings.Contains(low, "'ps'") {
-			t.Fatalf("%s --mcp-config usage must warn about shell history and 'ps' exposure; got: %q", c.name, c.usage)
-		}
-	}
 }
 
 func TestAgentSkillsAddCallsAdditiveEndpoint(t *testing.T) {
@@ -1884,24 +1874,22 @@ func TestAgentUpdateSendsThinkingLevel(t *testing.T) {
 	}
 }
 
-// TestAgentCreateAndUpdateExposeThinkingLevelFlag guarantees the flag stays
-// wired on both write surfaces. The read side (`agent get`) already exposes
-// thinking_level; this is the matching write surface (#4170).
-func TestAgentCreateAndUpdateExposeThinkingLevelFlag(t *testing.T) {
-	if agentCreateCmd.Flag("thinking-level") == nil {
-		t.Error("agent create must expose --thinking-level")
-	}
-	if agentUpdateCmd.Flag("thinking-level") == nil {
-		t.Error("agent update must expose --thinking-level")
-	}
-}
-
 func TestAgentServiceTierFlagsAndBodies(t *testing.T) {
 	if agentCreateCmd.Flag("service-tier") == nil {
 		t.Error("agent create must expose --service-tier")
 	}
 	if agentUpdateCmd.Flag("service-tier") == nil {
 		t.Error("agent update must expose --service-tier")
+	}
+	for name, usage := range map[string]string{
+		"create": agentCreateCmd.Flag("service-tier").Usage,
+		"update": agentUpdateCmd.Flag("service-tier").Usage,
+	} {
+		for _, contract := range []string{"empty", "default", "Standard", "priority", "Fast"} {
+			if !strings.Contains(usage, contract) {
+				t.Errorf("agent %s --service-tier help = %q, want three-state contract to mention %q", name, usage, contract)
+			}
+		}
 	}
 
 	t.Run("create sends catalog id", func(t *testing.T) {

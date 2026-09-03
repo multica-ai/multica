@@ -26,11 +26,10 @@ func HeartbeatKey(nodeID string) string {
 }
 
 const (
-	streamMaxLen        int64 = 10000
-	heartbeatTTL              = 90 * time.Second
-	heartbeatPeriod           = 30 * time.Second
-	consumerIdleGrace         = 10 * time.Minute
-	consumerSweepPeriod       = 5 * time.Minute
+	heartbeatTTL          = 90 * time.Second
+	heartbeatPeriod       = 30 * time.Second
+	consumerIdleGrace     = 10 * time.Minute
+	legacyStreamScanCount = 128
 )
 
 // envelope is what we serialise into each XADD message. It is opaque to the
@@ -106,7 +105,7 @@ func redisString(v any) string {
 	}
 }
 
-func deliverEnvelope(hub *Hub, daemonRuntime DaemonRuntimeDeliverer, ev envelope) {
+func deliverEnvelope(hub *Hub, daemonRuntime DaemonRuntimeDeliverer, wecomOutbound WecomOutboundDeliverer, ev envelope) {
 	if ev.PayloadJSON == "" {
 		return
 	}
@@ -115,6 +114,10 @@ func deliverEnvelope(hub *Hub, daemonRuntime DaemonRuntimeDeliverer, ev envelope
 	case ScopeDaemonRuntime:
 		if daemonRuntime != nil {
 			daemonRuntime.DeliverDaemonRuntime(ev.ScopeID, frame, ev.EventID)
+		}
+	case ScopeWecomOutbound:
+		if wecomOutbound != nil {
+			wecomOutbound.DeliverWecomOutbound(ev.ScopeID, frame, ev.EventID)
 		}
 	case "global":
 		hub.fanoutAllDedup(frame, "", ev.EventID)
@@ -129,17 +132,26 @@ func deliverEnvelope(hub *Hub, daemonRuntime DaemonRuntimeDeliverer, ev envelope
 // per-scope Redis Stream and consumes streams for which there are local
 // subscribers. Local fanout is delegated to the wrapped *Hub.
 type RedisRelay struct {
-	hub      *Hub
-	writeRDB *redis.Client
-	readRDB  *redis.Client
-	nodeID   string
+	hub       *Hub
+	writeRDB  *redis.Client
+	readRDB   *redis.Client
+	nodeID    string
+	retention StreamRetentionConfig
+	ttl       *streamTTLRefresher
+	now       func() time.Time
 
 	mu        sync.Mutex
 	consumers map[scopeKey]*scopeConsumer
 	stopping  bool
 	wg        sync.WaitGroup
 
+	legacyScanCursor  uint64
+	ttlStatusMu       sync.Mutex
+	streamsWithoutTTL map[string]struct{}
+	ttlScanSeen       map[string]struct{}
+
 	daemonRuntime DaemonRuntimeDeliverer
+	wecomOutbound WecomOutboundDeliverer
 }
 
 type scopeConsumer struct {
@@ -158,20 +170,36 @@ func NewRedisRelay(hub *Hub, rdb *redis.Client) *RedisRelay {
 // calls so long-polling stream consumers cannot exhaust the pool used by XADD,
 // heartbeats, acks, and other request-path Redis operations.
 func NewRedisRelayWithClients(hub *Hub, writeRDB, readRDB *redis.Client) *RedisRelay {
+	return NewRedisRelayWithClientsAndConfig(hub, writeRDB, readRDB, DefaultStreamRetentionConfig())
+}
+
+// NewRedisRelayWithClientsAndConfig applies the same stream retention controls
+// used by sharded mode so legacy and dual-mode rollouts cannot silently diverge.
+func NewRedisRelayWithClientsAndConfig(hub *Hub, writeRDB, readRDB *redis.Client, retention StreamRetentionConfig) *RedisRelay {
 	if readRDB == nil {
 		readRDB = writeRDB
 	}
+	retention = retention.withDefaults()
 	return &RedisRelay{
-		hub:       hub,
-		writeRDB:  writeRDB,
-		readRDB:   readRDB,
-		nodeID:    ulid.Make().String(),
-		consumers: make(map[scopeKey]*scopeConsumer),
+		hub:               hub,
+		writeRDB:          writeRDB,
+		readRDB:           readRDB,
+		nodeID:            ulid.Make().String(),
+		retention:         retention,
+		ttl:               newStreamTTLRefresher(retention.StreamTTL, retention.TTLRefreshInterval),
+		now:               time.Now,
+		consumers:         make(map[scopeKey]*scopeConsumer),
+		streamsWithoutTTL: make(map[string]struct{}),
+		ttlScanSeen:       make(map[string]struct{}),
 	}
 }
 
 // NodeID returns this relay's randomly-assigned node identifier.
 func (r *RedisRelay) NodeID() string { return r.nodeID }
+
+func (r *RedisRelay) SetWecomOutboundDeliverer(d WecomOutboundDeliverer) {
+	r.wecomOutbound = d
+}
 
 func (r *RedisRelay) SetDaemonRuntimeDeliverer(d DaemonRuntimeDeliverer) {
 	r.daemonRuntime = d
@@ -266,11 +294,15 @@ func (r *RedisRelay) Broadcast(message []byte) {
 }
 
 func (r *RedisRelay) publish(scopeType, scopeID, exclude string, frame []byte) {
-	ev := newEnvelope(r.nodeID, scopeType, scopeID, exclude, frame, ulid.Make().String())
+	_ = r.publishWithID(scopeType, scopeID, exclude, frame, ulid.Make().String())
+}
 
+func (r *RedisRelay) publishWithID(scopeType, scopeID, exclude string, frame []byte, id string) error {
+	ev := newEnvelope(r.nodeID, scopeType, scopeID, exclude, frame, id)
+	stream := StreamKey(scopeType, scopeID)
 	args := &redis.XAddArgs{
-		Stream: StreamKey(scopeType, scopeID),
-		MaxLen: streamMaxLen,
+		Stream: stream,
+		MaxLen: r.retention.StreamMaxLen,
 		Approx: true,
 		Values: envelopeRedisValues(ev),
 	}
@@ -281,10 +313,16 @@ func (r *RedisRelay) publish(scopeType, scopeID, exclude string, frame []byte) {
 		M.RedisXAddErrors.Add(1)
 		M.SetRedisLastError(err.Error())
 		slog.Warn("realtime/redis: XADD failed", "error", err, "scope", scopeType, "scope_id", scopeID)
-		return
+		return err
 	}
 	M.RedisXAddTotal.Add(1)
 	M.RedisLastXAddLagMicros.Store(time.Since(start).Microseconds())
+	if r.retention.StreamTTLEnabled {
+		if err := r.ttl.refreshIfDue(ctx, r.writeRDB, stream); err != nil {
+			r.recordRetentionError("PEXPIRE failed", err, "stream", stream)
+		}
+	}
+	return nil
 }
 
 // startConsumer kicks off a single per-scope XREADGROUP loop if not already
@@ -335,8 +373,13 @@ func (r *RedisRelay) runConsumer(ctx context.Context, c *scopeConsumer, scopeTyp
 
 	// MKSTREAM ensures the stream exists. Ignore BUSYGROUP.
 	createCtx, createCancel := context.WithTimeout(ctx, 2*time.Second)
-	if err := r.writeRDB.XGroupCreateMkStream(createCtx, stream, group, "$").Err(); err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+	if err := r.ensureConsumerGroup(createCtx, stream, group, "$"); err != nil {
 		slog.Warn("realtime/redis: XGROUP CREATE failed", "error", err, "scope", scopeType, "scope_id", scopeID)
+	}
+	if r.retention.StreamTTLEnabled {
+		if err := r.ttl.refreshIfDue(createCtx, r.writeRDB, stream); err != nil {
+			r.recordRetentionError("consumer stream PEXPIRE failed", err, "stream", stream)
+		}
 	}
 	createCancel()
 
@@ -362,6 +405,20 @@ func (r *RedisRelay) runConsumer(ctx context.Context, c *scopeConsumer, scopeTyp
 			continue
 		}
 		if err != nil {
+			if strings.Contains(err.Error(), "NOGROUP") {
+				repairCtx, repairCancel := context.WithTimeout(ctx, 2*time.Second)
+				r.ttl.forget(stream)
+				repairErr := r.ensureConsumerGroup(repairCtx, stream, group, "0-0")
+				if repairErr == nil && r.retention.StreamTTLEnabled {
+					repairErr = r.ttl.refreshIfDue(repairCtx, r.writeRDB, stream)
+				}
+				repairCancel()
+				if repairErr == nil {
+					M.RedisRelayStreamMissingTotal.Add(1)
+					continue
+				}
+				r.recordRetentionError("consumer group recovery failed", repairErr, "stream", stream)
+			}
 			M.RedisXReadErrors.Add(1)
 			M.SetRedisLastError(err.Error())
 			// Brief backoff to avoid busy-looping on a flapping connection.
@@ -393,6 +450,14 @@ func (r *RedisRelay) runConsumer(ctx context.Context, c *scopeConsumer, scopeTyp
 	cleanCancel()
 }
 
+func (r *RedisRelay) ensureConsumerGroup(ctx context.Context, stream, group, startID string) error {
+	err := r.writeRDB.XGroupCreateMkStream(ctx, stream, group, startID).Err()
+	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+		return err
+	}
+	return nil
+}
+
 func (r *RedisRelay) deliverMessage(scopeType, scopeID string, msg redis.XMessage) {
 	ev, ok := envelopeFromXMessage(msg)
 	if !ok {
@@ -404,7 +469,7 @@ func (r *RedisRelay) deliverMessage(scopeType, scopeID string, msg redis.XMessag
 	if ev.ScopeID == "" {
 		ev.ScopeID = scopeID
 	}
-	deliverEnvelope(r.hub, r.daemonRuntime, ev)
+	deliverEnvelope(r.hub, r.daemonRuntime, r.wecomOutbound, ev)
 }
 
 // fanoutUser is implemented in hub.go.
@@ -437,26 +502,109 @@ func (r *RedisRelay) heartbeatOnce(ctx context.Context) {
 	}
 }
 
-// consumerSweeper periodically drops stale ZSET entries (nodes whose TTL
-// expired). Best-effort: we only sweep the scopes this node currently has
-// local subscribers for, since they're the only ones we can reason about
-// without scanning all keys.
+// consumerSweeper periodically drops stale ZSET entries and advances a
+// bounded SCAN over legacy per-scope streams. The scan repairs keys created by
+// older pods before TTL retention was introduced without blocking Redis.
 func (r *RedisRelay) consumerSweeper(ctx context.Context) {
-	t := time.NewTicker(consumerSweepPeriod)
+	t := time.NewTicker(r.retention.MaintenanceInterval)
 	defer t.Stop()
 	for {
+		r.sweepLegacyStreams(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
-		now := float64(time.Now().Unix())
-		for _, key := range r.hub.LocalScopes() {
-			swCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			r.writeRDB.ZRemRangeByScore(swCtx, NodesKey(key.Type, key.ID), "-inf", fmt.Sprintf("%f", now))
-			cancel()
+	}
+}
+
+func (r *RedisRelay) sweepLegacyStreams(ctx context.Context) {
+	sweepCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	now := r.now()
+	minID := streamMinID(now, r.retention.TrimHorizon)
+	localStreams := make(map[string]struct{})
+
+	for _, key := range r.hub.LocalScopes() {
+		stream := StreamKey(key.Type, key.ID)
+		localStreams[stream] = struct{}{}
+		r.observeLegacyScanKey(stream)
+		r.maintainLegacyStream(sweepCtx, stream, minID)
+		r.writeRDB.ZRemRangeByScore(sweepCtx, NodesKey(key.Type, key.ID), "-inf", fmt.Sprintf("%f", float64(now.Unix())))
+	}
+
+	keys, nextCursor, err := r.writeRDB.Scan(sweepCtx, r.legacyScanCursor, "ws:scope:*:stream", legacyStreamScanCount).Result()
+	if err != nil {
+		r.recordRetentionError("legacy stream SCAN failed", err, "cursor", r.legacyScanCursor)
+	} else {
+		for _, stream := range keys {
+			r.observeLegacyScanKey(stream)
+			if _, alreadyMaintained := localStreams[stream]; alreadyMaintained {
+				continue
+			}
+			r.maintainLegacyStream(sweepCtx, stream, minID)
+		}
+		if sweepCtx.Err() == nil {
+			r.legacyScanCursor = nextCursor
+			if nextCursor == 0 {
+				r.completeLegacyTTLScan()
+			}
 		}
 	}
+	r.ttl.forgetStale(now.Add(-r.retention.StreamTTL))
+}
+
+func (r *RedisRelay) maintainLegacyStream(ctx context.Context, stream, minID string) {
+	if trimmed, err := r.writeRDB.XTrimMinID(ctx, stream, minID).Result(); err != nil && !errors.Is(err, redis.Nil) {
+		r.recordRetentionError("XTRIM MINID failed", err, "stream", stream, "min_id", minID)
+	} else if trimmed > 0 {
+		M.RedisRelayStreamTrimmedTotal.Add(trimmed)
+	}
+	ttl, err := r.ttl.reconcileTTL(ctx, r.writeRDB, stream, r.retention.StreamTTLEnabled)
+	if err == nil || ttl == -1 || ttl == -2 {
+		r.observeLegacyTTL(stream, ttl)
+	}
+	if err != nil {
+		r.recordRetentionError("stream TTL repair failed", err, "stream", stream)
+	}
+}
+
+func (r *RedisRelay) observeLegacyTTL(stream string, ttl time.Duration) {
+	r.ttlStatusMu.Lock()
+	if r.retention.StreamTTLEnabled && ttl == -1 {
+		r.streamsWithoutTTL[stream] = struct{}{}
+	} else {
+		delete(r.streamsWithoutTTL, stream)
+	}
+	count := int64(len(r.streamsWithoutTTL))
+	r.ttlStatusMu.Unlock()
+	M.SetRedisStreamsWithoutTTL("legacy", count)
+}
+
+func (r *RedisRelay) observeLegacyScanKey(stream string) {
+	r.ttlStatusMu.Lock()
+	r.ttlScanSeen[stream] = struct{}{}
+	r.ttlStatusMu.Unlock()
+}
+
+func (r *RedisRelay) completeLegacyTTLScan() {
+	r.ttlStatusMu.Lock()
+	for stream := range r.streamsWithoutTTL {
+		if _, exists := r.ttlScanSeen[stream]; !exists {
+			delete(r.streamsWithoutTTL, stream)
+		}
+	}
+	r.ttlScanSeen = make(map[string]struct{})
+	count := int64(len(r.streamsWithoutTTL))
+	r.ttlStatusMu.Unlock()
+	M.SetRedisStreamsWithoutTTL("legacy", count)
+}
+
+func (r *RedisRelay) recordRetentionError(message string, err error, attrs ...any) {
+	M.RedisRelayRetentionErrors.Add(1)
+	M.SetRedisLastError(err.Error())
+	attrs = append([]any{"error", err}, attrs...)
+	slog.Warn("realtime/redis: "+message, attrs...)
 }
 
 // peekTypeActor parses the WS frame just enough to lift event_type / actor_id
@@ -552,25 +700,7 @@ func (d *DualWriteBroadcaster) Broadcast(message []byte) {
 // PublishWithID is like publish but uses a caller-supplied event id so the
 // dual-write path can dedup.
 func (r *RedisRelay) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) error {
-	ev := newEnvelope(r.nodeID, scopeType, scopeID, exclude, frame, id)
-	args := &redis.XAddArgs{
-		Stream: StreamKey(scopeType, scopeID),
-		MaxLen: streamMaxLen,
-		Approx: true,
-		Values: envelopeRedisValues(ev),
-	}
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := r.writeRDB.XAdd(ctx, args).Err(); err != nil {
-		M.RedisXAddErrors.Add(1)
-		M.SetRedisLastError(err.Error())
-		slog.Warn("realtime/redis: XADD failed", "error", err, "scope", scopeType, "scope_id", scopeID)
-		return err
-	}
-	M.RedisXAddTotal.Add(1)
-	M.RedisLastXAddLagMicros.Store(time.Since(start).Microseconds())
-	return nil
+	return r.publishWithID(scopeType, scopeID, exclude, frame, id)
 }
 
 var _ Broadcaster = (*RedisRelay)(nil)

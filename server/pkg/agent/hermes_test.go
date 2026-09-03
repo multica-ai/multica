@@ -16,17 +16,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsHermesBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("hermes", Config{ExecutablePath: "/nonexistent/hermes"})
-	if err != nil {
-		t.Fatalf("New(hermes) error: %v", err)
-	}
-	if _, ok := b.(*hermesBackend); !ok {
-		t.Fatalf("expected *hermesBackend, got %T", b)
-	}
-}
-
 // ── extractACPSessionID ──
 
 func TestExtractACPSessionID(t *testing.T) {
@@ -90,6 +79,171 @@ func TestExtractACPCurrentModelIDMissing(t *testing.T) {
 	t.Parallel()
 	if got := extractACPCurrentModelID(json.RawMessage(`{"sessionId":"ses_123"}`)); got != "" {
 		t.Errorf("got %q, want empty", got)
+	}
+}
+
+// ── acpModelIDsEquivalent ──
+
+func TestACPModelIDsEquivalent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		configured string
+		current    string
+		want       bool
+	}{
+		{
+			// The regression this helper exists for: agent.model is stored
+			// bare, Hermes reports the provider-encoded form. A raw string
+			// compare missed, so the MUL-5029 skip-gate never fired and every
+			// turn re-sent set_model — rebuilding the runtime-side agent and
+			// re-running the provider auto-detection the gate exists to avoid.
+			name:       "bare configured vs provider-encoded current",
+			configured: "claude-sonnet-4-5",
+			current:    "custom:claude-sonnet-4-5",
+			want:       true,
+		},
+		{
+			name:       "both provider-encoded and identical",
+			configured: "custom:claude-sonnet-4-5",
+			current:    "custom:claude-sonnet-4-5",
+			want:       true,
+		},
+		{
+			name:       "second bare model vs encoded",
+			configured: "claude-haiku-4-5",
+			current:    "custom:claude-haiku-4-5",
+			want:       true,
+		},
+		{
+			// A real provider switch must still send set_model.
+			name:       "same model, different explicit providers",
+			configured: "openrouter:claude-sonnet-4-5",
+			current:    "custom:claude-sonnet-4-5",
+			want:       false,
+		},
+		{
+			name:       "different models under same provider",
+			configured: "custom:claude-sonnet-4-5",
+			current:    "custom:claude-haiku-4-5",
+			want:       false,
+		},
+		{
+			name:       "different bare models",
+			configured: "claude-sonnet-4-5",
+			current:    "custom:claude-opus-4-5",
+			want:       false,
+		},
+		{
+			// Hermes lowercases the provider when encoding; a config written
+			// with different casing must still match.
+			name:       "provider casing differs",
+			configured: "Custom:Claude-Sonnet-4-5",
+			current:    "custom:claude-sonnet-4-5",
+			want:       true,
+		},
+		{
+			// Older runtime / unparsable state: fall through and send
+			// set_model, preserving prior behaviour.
+			name:       "empty current",
+			configured: "claude-sonnet-4-5",
+			current:    "",
+			want:       false,
+		},
+		{
+			name:       "empty configured",
+			configured: "",
+			current:    "custom:claude-sonnet-4-5",
+			want:       false,
+		},
+		{
+			name:       "both empty",
+			configured: "",
+			current:    "",
+			want:       false,
+		},
+		{
+			name:       "surrounding whitespace is ignored",
+			configured: "  claude-sonnet-4-5 ",
+			current:    "custom:claude-sonnet-4-5",
+			want:       true,
+		},
+		{
+			// Model names carrying a slash (OpenRouter-style) must not be
+			// confused with the provider prefix.
+			name:       "slash-bearing model name, bare vs encoded",
+			configured: "moonshotai/kimi-k2.6",
+			current:    "nous:moonshotai/kimi-k2.6",
+			want:       true,
+		},
+		{
+			// The asymmetric case. A bare *configured* id expresses no
+			// provider preference, but an explicit one does, and a bare
+			// *current* id cannot confirm it was honoured. Treating this as
+			// equivalent would silently swallow the switch the member asked
+			// for, so it must fall through and send set_model.
+			//
+			// Bare current ids are not hypothetical: acp_effort_test.go
+			// captures an unprefixed `gpt-5.6-sol` from jcode, which routes
+			// through this same backend. Hermes Agent's encoder has a bare
+			// branch too, though a normally-configured install resolves a
+			// provider and reports the prefixed form.
+			name:       "explicit configured provider vs bare current",
+			configured: "openrouter:hermes-4",
+			current:    "hermes-4",
+			want:       false,
+		},
+		{
+			// Both sides bare and identical: nothing to switch to, and the
+			// runtimes above really do answer this way.
+			name:       "both bare and identical",
+			configured: "hermes-4",
+			current:    "hermes-4",
+			want:       true,
+		},
+		{
+			name:       "both bare, different models",
+			configured: "hermes-4",
+			current:    "gpt-5.6-sol",
+			want:       false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := acpModelIDsEquivalent(tc.configured, tc.current); got != tc.want {
+				t.Errorf("acpModelIDsEquivalent(%q, %q) = %v, want %v",
+					tc.configured, tc.current, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSplitACPModelID(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		in           string
+		wantProvider string
+		wantModel    string
+	}{
+		{"custom:claude-sonnet-4-5", "custom", "claude-sonnet-4-5"},
+		{"claude-sonnet-4-5", "", "claude-sonnet-4-5"},
+		{"nous:moonshotai/kimi-k2.6", "nous", "moonshotai/kimi-k2.6"},
+		{"", "", ""},
+		// Leading colon carries no provider — index 0 is not a separator.
+		{":weird", "", ":weird"},
+		// Only the first colon separates; the rest belongs to the model.
+		{"custom:vendor:model", "custom", "vendor:model"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			t.Parallel()
+			gotProvider, gotModel := splitACPModelID(tc.in)
+			if gotProvider != tc.wantProvider || gotModel != tc.wantModel {
+				t.Errorf("splitACPModelID(%q) = (%q, %q), want (%q, %q)",
+					tc.in, gotProvider, gotModel, tc.wantProvider, tc.wantModel)
+			}
+		})
 	}
 }
 
@@ -2434,6 +2588,290 @@ func TestHermesProviderErrorSnifferTerminalNonRetryable(t *testing.T) {
 	}
 }
 
+// TestACPProviderErrorSnifferKimiApiError covers the kimi-specific error
+// format that was previously invisible to the sniffer, causing tasks to
+// silently complete instead of failing (GitHub multica#5760):
+//
+//	error: failed to run prompt: provider.api_error: 400 the message at
+//	position 43 with role 'assistant' must not be empty
+//
+// The line has no emoji prefix and uses lowercase "error:", so the original
+// acpErrorHeaderRe / acpErrorDetailRe did not capture it. The fix adds
+// provider.api_error as an additional header match, recognises 4xx codes as
+// terminal, and extracts the error message after "provider.api_error: NNN ".
+func TestACPProviderErrorSnifferKimiApiError(t *testing.T) {
+	t.Parallel()
+
+	stderr := "error: failed to run prompt: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty\n"
+	s := newACPProviderErrorSniffer("kimi")
+	if _, err := s.Write([]byte(stderr)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	msg := s.terminalMessage()
+	if msg == "" {
+		t.Fatal("expected a non-empty terminal message; sniffer did not recognise provider.api_error line")
+	}
+	if !strings.Contains(msg, "must not be empty") {
+		t.Errorf("expected error detail about empty assistant message, got %q", msg)
+	}
+	if !strings.Contains(msg, "kimi") {
+		t.Errorf("expected provider prefix 'kimi' in message, got %q", msg)
+	}
+
+	// promoteACPResultOnProviderError must flip completed→failed so resumed
+	// sessions with a permanently broken history surface as task failures.
+	finalStatus, finalError := promoteACPResultOnProviderError("completed", "", "", s)
+	if finalStatus != "failed" {
+		t.Errorf("status = %q, want %q", finalStatus, "failed")
+	}
+	if !strings.Contains(finalError, "must not be empty") {
+		t.Errorf("error = %q, want it to mention the empty assistant message", finalError)
+	}
+}
+
+// TestACPProviderErrorSnifferKimiApiError5xx verifies that a 5xx
+// provider.api_error (potentially transient) is captured but not classified
+// as terminal, so it only promotes to failed when output is also empty.
+func TestACPProviderErrorSnifferKimiApiError5xx(t *testing.T) {
+	t.Parallel()
+
+	stderr := "error: provider.api_error: 503 upstream temporarily unavailable\n"
+	s := newACPProviderErrorSniffer("kimi")
+	s.Write([]byte(stderr))
+
+	if s.terminalMessage() != "" {
+		t.Error("5xx provider.api_error should not be classified as terminal")
+	}
+	if s.message() == "" {
+		t.Error("5xx provider.api_error should still be captured as a non-terminal error")
+	}
+}
+
+// TestACPProviderErrorSnifferKimiRateLimitNotTerminal verifies that a
+// kimi-style 429 is captured for diagnostic purposes but is NOT marked
+// as terminal. The kimi adapter retries rate-limit errors internally;
+// a run that ultimately succeeds must stay status=completed regardless
+// of how many 429 warnings appeared on stderr during retries.
+func TestACPProviderErrorSnifferKimiRateLimitNotTerminal(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("kimi")
+	s.Write([]byte("error: failed to run prompt: provider.api_error: 429 rate limit exceeded\n"))
+
+	if msg := s.terminalMessage(); msg != "" {
+		t.Errorf("429 should not be terminal, got %q", msg)
+	}
+	if msg := s.message(); msg == "" {
+		t.Error("429 should still be captured for diagnostics (message() must be non-empty)")
+	}
+
+	// promoteACPResultOnProviderError must leave status=completed when the
+	// adapter ultimately produced a real answer after internal retries.
+	finalStatus, _ := promoteACPResultOnProviderError("completed", "", "here is the answer", s)
+	if finalStatus != "completed" {
+		t.Errorf("status = %q, want completed: 429 + non-empty output must not be promoted to failed", finalStatus)
+	}
+}
+
+// TestACPProviderErrorSnifferPoisonedHistory verifies that the
+// "provider.api_error: 400 … must not be empty" pattern is detected as a
+// poisoned session so the backend can set ResumeRejected=true and the daemon
+// drops the broken session pointer instead of replaying the same bad history.
+func TestACPProviderErrorSnifferPoisonedHistory(t *testing.T) {
+	t.Parallel()
+
+	// Single-line format: 400 + role 'assistant' + must not be empty on the
+	// same line. This is the format emitted by some kimi-cli versions.
+	s := newACPProviderErrorSniffer("kimi")
+	s.Write([]byte("error: failed to run prompt: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty\n"))
+	if !s.isPoisonedHistory() {
+		t.Fatal("single-line: expected isPoisonedHistory()=true for 400 assistant-empty error")
+	}
+
+	// Two-line format: kimi emits the status on the error header and the
+	// human-readable detail on a separate "detail:" line. isPoisonedHistory
+	// must detect this across lines, not only when both markers are on the
+	// same line.
+	s4 := newACPProviderErrorSniffer("kimi")
+	s4.Write([]byte("error: failed to run prompt: provider.api_error: 400\n"))
+	s4.Write([]byte("detail: messages[43].content: content must not be empty\n"))
+	if !s4.isPoisonedHistory() {
+		t.Fatal("two-line: expected isPoisonedHistory()=true when 400 and must-not-be-empty are on separate lines")
+	}
+
+	// A plain 400 with a different error message is terminal but not a
+	// poisoned history — the session may still be healthy.
+	s2 := newACPProviderErrorSniffer("kimi")
+	s2.Write([]byte("error: failed to run prompt: provider.api_error: 400 invalid model specified\n"))
+	if s2.isPoisonedHistory() {
+		t.Error("plain 400 without must-not-be-empty should not be classified as poisoned history")
+	}
+
+	// "must not be empty" on a detail line paired with a 429 header must
+	// not match — 429 is transient and not provider.api_error: 400.
+	s5 := newACPProviderErrorSniffer("kimi")
+	s5.Write([]byte("⚠️ API call failed after 3 retries: RateLimitError [HTTP 429]\n"))
+	s5.Write([]byte("detail: field must not be empty\n"))
+	if s5.isPoisonedHistory() {
+		t.Error("429 RateLimitError with must-not-be-empty detail should not be classified as poisoned history")
+	}
+}
+
+// TestACPProviderErrorSnifferMessageLockedPreservesAPIErrorStatus verifies
+// that messageLocked forwards the "provider.api_error: NNN" prefix into the
+// formatted output even when the human-readable detail arrives on a separate
+// stderr line. This is the contract classifyPoisonedError relies on.
+func TestACPProviderErrorSnifferMessageLockedPreservesAPIErrorStatus(t *testing.T) {
+	t.Parallel()
+
+	// Two-line format: status on header, detail on next line.
+	s := newACPProviderErrorSniffer("kimi")
+	s.Write([]byte("error: failed to run prompt: provider.api_error: 400\n"))
+	s.Write([]byte("detail: messages[43].content: content must not be empty\n"))
+	msg := s.terminalMessage()
+	if !strings.Contains(msg, "provider.api_error: 400") {
+		t.Errorf("two-line: terminalMessage() should include provider.api_error: 400, got %q", msg)
+	}
+	if !strings.Contains(msg, "must not be empty") {
+		t.Errorf("two-line: terminalMessage() should include the detail text, got %q", msg)
+	}
+
+	// Single-line format: status and detail on the same line.
+	s2 := newACPProviderErrorSniffer("kimi")
+	s2.Write([]byte("error: failed to run prompt: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty\n"))
+	msg2 := s2.terminalMessage()
+	if !strings.Contains(msg2, "provider.api_error: 400") {
+		t.Errorf("single-line: terminalMessage() should include provider.api_error: 400, got %q", msg2)
+	}
+	if !strings.Contains(msg2, "must not be empty") {
+		t.Errorf("single-line: terminalMessage() should include the detail text, got %q", msg2)
+	}
+}
+
+// TestACPProviderErrorSnifferMixedRetry429Then400 verifies that when a kimi
+// adapter emits a transient 429 (internally retried) followed by a terminal
+// 400 (poisoned history), messageLocked pairs the 400 status tag with the
+// 400's own detail — not with the 429's "rate limit" text. This ensures that
+// taskfailure.UnresumableHistory can see the history locator in the final
+// surfaced error string (GitHub multica#5785 P1 from Aug 10 review).
+func TestACPProviderErrorSnifferMixedRetry429Then400(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		stderrSeq []string
+		wantIn    string
+		wantNotIn string
+	}{
+		{
+			name: "single-line 400 after 429",
+			stderrSeq: []string{
+				"error: provider.api_error: 429 rate limit exceeded\n",
+				"error: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty\n",
+			},
+			wantIn:    "must not be empty",
+			wantNotIn: "rate limit",
+		},
+		{
+			name: "two-line 400 after 429",
+			stderrSeq: []string{
+				"error: provider.api_error: 429 rate limit exceeded\n",
+				"error: provider.api_error: 400\n",
+				"detail: messages[43].content: content must not be empty\n",
+			},
+			wantIn:    "must not be empty",
+			wantNotIn: "rate limit",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newACPProviderErrorSniffer("kimi")
+			for _, line := range tt.stderrSeq {
+				if _, err := s.Write([]byte(line)); err != nil {
+					t.Fatalf("Write: %v", err)
+				}
+			}
+			msg := s.terminalMessage()
+			if !strings.Contains(msg, "provider.api_error: 400") {
+				t.Errorf("expected provider.api_error: 400 in message, got %q", msg)
+			}
+			if !strings.Contains(msg, tt.wantIn) {
+				t.Errorf("expected %q in message, got %q", tt.wantIn, msg)
+			}
+			if strings.Contains(msg, tt.wantNotIn) {
+				t.Errorf("must not include %q (from 429) in message, got %q", tt.wantNotIn, msg)
+			}
+			if !s.isPoisonedHistory() {
+				t.Error("mixed 429→400 with assistant-empty detail must be classified as poisoned history")
+			}
+		})
+	}
+}
+
+// TestACPProviderErrorSnifferFinalizeFlushesPartialLine verifies that a
+// terminal error written to stderr WITHOUT a trailing newline is still detected
+// after Finalize() is called. Without Finalize(), a process that exits after
+// writing its last line without '\n' leaves the partial line in s.remains and
+// the sniffer reports no error, causing the task to land as completed/empty.
+func TestACPProviderErrorSnifferFinalizeFlushesPartialLine(t *testing.T) {
+	t.Parallel()
+
+	const line = "error: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty"
+
+	s := newACPProviderErrorSniffer("kimi")
+	// Write without trailing newline — simulates a process that exits without '\n'.
+	if _, err := s.Write([]byte(line)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if msg := s.terminalMessage(); msg != "" {
+		t.Errorf("before Finalize: expected empty terminalMessage (partial line still buffered), got %q", msg)
+	}
+
+	s.Finalize()
+
+	msg := s.terminalMessage()
+	if msg == "" {
+		t.Fatal("after Finalize: expected non-empty terminalMessage for error written without trailing newline")
+	}
+	if !strings.Contains(msg, "must not be empty") {
+		t.Errorf("after Finalize: expected 'must not be empty' in message, got %q", msg)
+	}
+	if !strings.Contains(msg, "provider.api_error: 400") {
+		t.Errorf("after Finalize: expected 'provider.api_error: 400' in message, got %q", msg)
+	}
+}
+
+// TestACPProviderErrorSnifferNonKimiIgnoresProviderApiError verifies that the
+// kimi-specific provider.api_error patterns are scoped to kimi only. Other ACP
+// backends (hermes, grok, kiro, qoder, qwenpaw, reasonix, traecli) must not
+// classify a provider.api_error line as terminal — tool output can legitimately
+// echo such lines when calling an underlying Kimi API, and a run with real
+// output must stay completed (GitHub multica#5785 P1 from Aug 10 review).
+func TestACPProviderErrorSnifferNonKimiIgnoresProviderApiError(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{"hermes", "grok", "kiro", "qoder", "qwenpaw", "reasonix", "traecli"} {
+		t.Run(provider, func(t *testing.T) {
+			s := newACPProviderErrorSniffer(provider)
+			s.Write([]byte("provider.api_error: 400 assistant must not be empty\n"))
+
+			if msg := s.terminalMessage(); msg != "" {
+				t.Errorf("provider %q: provider.api_error in tool output must not be terminal, got %q", provider, msg)
+			}
+
+			// With real output the run must stay completed even if the sniffer
+			// captured the line via a non-terminal path.
+			status, _ := promoteACPResultOnProviderError("completed", "", "successful output", s)
+			if status != "completed" {
+				t.Errorf("provider %q: run with real output must stay completed, got %q", provider, status)
+			}
+		})
+	}
+}
+
 // TestHermesBackendPromotesProviderErrorWithNonEmptyOutput pins the
 // fix for GitHub multica#1952: a hermes run that hits a 429 (or any
 // upstream provider error) must surface as Status=failed even though
@@ -2793,6 +3231,83 @@ func TestHermesBackendDoesNotPromoteOnTransientRetry(t *testing.T) {
 	}
 }
 
+// fakeHermesACPPoisonedHistoryScript mimics a hermes-style adapter that emits
+// the "assistant message must not be empty" error in the Python [ERROR] log
+// format when asked to resume a session whose history is corrupted. This uses
+// the hermes-native stderr format (emoji-prefixed, after-N-retries), NOT the
+// bare kimi provider.api_error format — the kimi patterns are scoped to kimi.
+func fakeHermesACPPoisonedHistoryScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_poison"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' "2026-01-01 00:00:01 [ERROR] root: ❌ API call failed after 3 retries: BadRequestError the message at position 43 with role 'assistant' must not be empty" >&2
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestHermesBackendPoisonedHistorySetsResumeRejected verifies the fix
+// for the kimi "assistant message must not be empty" scenario: when
+// the sniffer detects a 400 with the poisoned-history signal the
+// backend must set ResumeRejected=true so the daemon drops the broken
+// session and tries fresh (via the tools==0 gate) instead of
+// resuming the same corrupt history on every subsequent task.
+func TestHermesBackendPoisonedHistorySetsResumeRejected(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPPoisonedHistoryScript()))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_poison",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed for poisoned history, got %q", result.Status)
+		}
+		if !result.ResumeRejected {
+			t.Error("expected ResumeRejected=true so the daemon clears the broken session")
+		}
+		if !strings.Contains(result.Error, "must not be empty") {
+			t.Errorf("expected error to mention the poisoned history detail, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 // ── extractACPMcpCapabilities ──
 
 func TestExtractACPMcpCapabilities(t *testing.T) {
@@ -2996,7 +3511,7 @@ func TestFilterACPMcpServersByCapabilityOmittedForwardsOnListedRuntime(t *testin
 func TestFilterACPMcpServersByCapabilityOmittedStillDropsOnUnlistedRuntimes(t *testing.T) {
 	t.Parallel()
 	caps := acpMcpTransportCapabilities{Declaration: acpMcpCapabilitiesOmitted}
-	for _, backend := range []string{"kimi", "kiro", "grok", "qoder", "reasonix", "traecli", "qwenpaw"} {
+	for _, backend := range []string{"kimi", "kiro", "grok", "qoder", "reasonix", "traecli", "qwenpaw", "mcode"} {
 		assertOnlyStdioSurvives(t, backend,
 			filterACPMcpServersByCapability(mixedTransportACPServers(), caps, backend, builtinACPConfig()))
 	}
@@ -3388,6 +3903,99 @@ func TestHermesSendsSetModelWhenModelDiffersFromCurrent(t *testing.T) {
 	}
 	if params["modelId"] != "custom:deepseek-v4-pro" {
 		t.Errorf("session/set_model.modelId = %v, want custom:deepseek-v4-pro", params["modelId"])
+	}
+}
+
+// TestHermesSkipsRedundantSetModelForBareConfiguredModel pins the defect this
+// change exists for, at the level it actually lives at. agent.model is stored
+// bare (the spelling the CLI documents) while the session reports the
+// provider-encoded form, so the raw == in the MUL-5029 gate missed and
+// set_model went out every turn. Asserting on acpModelIDsEquivalent alone
+// would not have caught that the gate never fired.
+func TestHermesSkipsRedundantSetModelForBareConfiguredModel(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScriptWithCurrentModel(recordPath, "ses_new", "custom:deepseek-v4-pro")))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		Model:   "deepseek-v4-pro",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	assertNoRecordedFrame(t, recordPath, "session/set_model")
+}
+
+// TestHermesSendsSetModelWhenExplicitProviderAndBareCurrent guards the
+// asymmetry of the equivalence rules. A caller that names a provider
+// explicitly must get the switch even when the runtime reports a bare current
+// id, because a bare id cannot confirm which provider is actually in use.
+// Runtimes really do answer this way — acp_effort_test.go captures an
+// unprefixed `gpt-5.6-sol` from jcode, which routes through this backend.
+func TestHermesSendsSetModelWhenExplicitProviderAndBareCurrent(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScriptWithCurrentModel(recordPath, "ses_new", "hermes-4")))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		Model:   "openrouter:hermes-4",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/set_model")
+	params, ok := frame["params"].(map[string]any)
+	if !ok {
+		t.Fatalf("session/set_model params: got %T, want map", frame["params"])
+	}
+	if params["modelId"] != "openrouter:hermes-4" {
+		t.Errorf("session/set_model.modelId = %v, want openrouter:hermes-4", params["modelId"])
 	}
 }
 
@@ -3983,5 +4591,269 @@ func TestHermesBackendIgnoresRefusalOnFreshSession(t *testing.T) {
 	}
 	if result.ResumeRejected {
 		t.Error("ResumeRejected = true, want false on a fresh session")
+	}
+}
+
+// TestHermesClientEmitsToolUseWhenStartFrameCarriesCommand pins GH#6583.
+//
+// The tool_call line is a verbatim capture from `hermes acp` (Hermes Agent
+// v0.20.0) driven with this client's own handshake: it carries the full
+// invocation in `content` but no rawInput. Before the fix that combination hit
+// the kimi deferral path, so nothing was emitted until the call completed —
+// an in-flight Hermes tool was invisible in run-messages, and the daemon's
+// in-flight tool counter (which only advances on MessageToolUse) never saw it.
+func TestHermesClientEmitsToolUseWhenStartFrameCarriesCommand(t *testing.T) {
+	t.Parallel()
+
+	var got []Message
+	c := &hermesClient{
+		pending:                    make(map[int]*pendingRPC),
+		toolStartCarriesFinalInput: true,
+		onMessage:                  func(msg Message) { got = append(got, msg) },
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"content":[{"content":{"text":"$ multica issue get 7473e16c --output json","type":"text"},"type":"content"}],"kind":"execute","locations":[],"title":"terminal: multica issue get 7473e16c --output json","toolCallId":"tc-305462f5d67d","sessionUpdate":"tool_call"}}}`)
+
+	if len(got) != 1 {
+		t.Fatalf("expected MessageToolUse on the start frame, got %d: %+v", len(got), got)
+	}
+	if got[0].Type != MessageToolUse {
+		t.Fatalf("type: got %v, want MessageToolUse", got[0].Type)
+	}
+	if got[0].Tool != "terminal" {
+		t.Errorf("tool: got %q, want %q", got[0].Tool, "terminal")
+	}
+	if got[0].CallID != "tc-305462f5d67d" {
+		t.Errorf("callID: got %q", got[0].CallID)
+	}
+	if text, _ := got[0].Input["text"].(string); text != "$ multica issue get 7473e16c --output json" {
+		t.Errorf("input.text: got %v", got[0].Input["text"])
+	}
+
+	// Completion must add only the result — never a second MessageToolUse.
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"content":[{"content":{"text":"terminal result\n- **exit_code:** 0","type":"text"},"type":"content"}],"kind":"execute","status":"completed","toolCallId":"tc-305462f5d67d","sessionUpdate":"tool_call_update"}}}`)
+
+	if len(got) != 2 {
+		t.Fatalf("expected [ToolUse, ToolResult], got %d: %+v", len(got), got)
+	}
+	if got[1].Type != MessageToolResult {
+		t.Errorf("second message: got %v, want MessageToolResult", got[1].Type)
+	}
+	if got[1].Status != "completed" {
+		t.Errorf("result status: got %q", got[1].Status)
+	}
+}
+
+// TestHermesClientDefersToolUseForPartialStreamedArgs guards the kimi path the
+// fix above must not regress: a start frame carrying an unterminated JSON
+// fragment is still buffered, so the UI never sees a half-streamed command.
+func TestHermesClientDefersToolUseForPartialStreamedArgs(t *testing.T) {
+	t.Parallel()
+
+	var got []Message
+	c := &hermesClient{
+		pending:   make(map[int]*pendingRPC),
+		onMessage: func(msg Message) { got = append(got, msg) },
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call","toolCallId":"tc-kimi","title":"Shell","status":"in_progress","content":[{"type":"content","content":{"type":"text","text":"{\"comm"}}]}}}`)
+
+	if len(got) != 0 {
+		t.Fatalf("expected partial args to stay deferred, got %+v", got)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-kimi","status":"in_progress","content":[{"type":"content","content":{"type":"text","text":"{\"command\":\"echo hi\"}"}}]}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-kimi","status":"completed","content":[{"type":"content","content":{"type":"text","text":"hi\n"}}]}}}`)
+
+	if len(got) != 2 || got[0].Type != MessageToolUse || got[1].Type != MessageToolResult {
+		t.Fatalf("expected [ToolUse, ToolResult], got %+v", got)
+	}
+	if cmd, _ := got[0].Input["command"].(string); cmd != "echo hi" {
+		t.Errorf("streamed args should be parsed at completion: got %v", got[0].Input)
+	}
+}
+
+func TestACPToolCallStartCarriesInvocation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		toolName string
+		argsText string
+		want     bool
+	}{
+		{"hermes terminal command", "terminal", "$ ls -la", true},
+		{"hermes terminal with leading space", "terminal", "  $ go build ./...", true},
+		{"terminal but not a command line", "terminal", "Running the command...", false},
+		{"write_file prose", "write_file", "Preparing write to /tmp/a.txt. Approval prompt shows the diff.", false},
+		{"patch prose", "patch", "Preparing replace edit for /tmp/a.txt. Approval prompt shows the diff.", false},
+		{"web_search summary", "web_search", "Searching the web for golang acp", false},
+		{"kimi streamed json", "Shell", `{"command":"echo hi"}`, false},
+		{"kimi partial json", "Shell", `{"comm`, false},
+		{"empty", "terminal", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := acpToolCallStartCarriesInvocation(tt.toolName, tt.argsText); got != tt.want {
+				t.Errorf("acpToolCallStartCarriesInvocation(%q, %q) = %v, want %v",
+					tt.toolName, tt.argsText, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHermesClientDoesNotFreezeDisplayTextAsInput is the protocol-level guard.
+//
+// ACP defines `content` as display output produced by the tool call and
+// `rawInput` as the input, and a later update may still supply the real
+// rawInput. Hermes itself does this: write_file's start frame renders
+// "Preparing write to <path>..." with no rawInput. That text must never be
+// recorded as the invocation, and a rawInput arriving later must win.
+func TestHermesClientDoesNotFreezeDisplayTextAsInput(t *testing.T) {
+	t.Parallel()
+
+	var got []Message
+	c := &hermesClient{
+		pending:   make(map[int]*pendingRPC),
+		onMessage: func(msg Message) { got = append(got, msg) },
+	}
+
+	// Start frame: display prose only, no rawInput (verbatim Hermes shape).
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"content":[{"content":{"text":"Preparing write to /tmp/hello.txt. Approval prompt shows the diff.","type":"text"},"type":"content"}],"kind":"edit","locations":[{"path":"/tmp/hello.txt"}],"title":"write: /tmp/hello.txt","toolCallId":"tc-w1","sessionUpdate":"tool_call"}}}`)
+
+	if len(got) != 0 {
+		t.Fatalf("display-only start frame must not emit a tool use, got %+v", got)
+	}
+
+	// Completion carries the real input.
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-w1","status":"completed","title":"write: /tmp/hello.txt","kind":"edit","rawInput":{"path":"/tmp/hello.txt","content":"hi"},"content":[{"type":"content","content":{"type":"text","text":"wrote 2 bytes"}}]}}}`)
+
+	if len(got) != 2 || got[0].Type != MessageToolUse || got[1].Type != MessageToolResult {
+		t.Fatalf("expected [ToolUse, ToolResult], got %+v", got)
+	}
+	if path, _ := got[0].Input["path"].(string); path != "/tmp/hello.txt" {
+		t.Errorf("real rawInput must win over display text; Input = %v", got[0].Input)
+	}
+	if text, ok := got[0].Input["text"].(string); ok && strings.Contains(text, "Preparing write") {
+		t.Errorf("display text was frozen as the invocation: %q", text)
+	}
+}
+
+// TestHermesClientDefersNonCommandStartContent: a start frame whose content is
+// not a `$ <command>` line stays deferred even when the text is complete and
+// non-JSON, so a backend that renders a status line cannot have it mistaken for
+// the invocation.
+func TestHermesClientDefersNonCommandStartContent(t *testing.T) {
+	t.Parallel()
+
+	var got []Message
+	c := &hermesClient{
+		pending:   make(map[int]*pendingRPC),
+		onMessage: func(msg Message) { got = append(got, msg) },
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call","toolCallId":"tc","title":"Shell","status":"in_progress","content":[{"type":"content","content":{"type":"text","text":"not-json"}}]}}}`)
+
+	if len(got) != 0 {
+		t.Fatalf("non-command start content must stay deferred, got %+v", got)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc","status":"completed","content":[{"type":"content","content":{"type":"text","text":"output"}}]}}}`)
+
+	if len(got) != 2 || got[0].Type != MessageToolUse {
+		t.Fatalf("expected [ToolUse, ToolResult], got %+v", got)
+	}
+	if text, _ := got[0].Input["text"].(string); text != "not-json" {
+		t.Errorf("deferred fallback Input.text: got %v", got[0].Input)
+	}
+}
+
+// TestHermesClientEmitsToolUseForPolishedToolWithoutInput covers the rest of
+// GH#6583's defect: Hermes omits rawInput for its whole polished tool set, so
+// write / patch / web / browser / execute_code calls were invisible while
+// running and never advanced the daemon's in-flight tool counter, leaving them
+// on the short idle budget instead of the tool budget.
+//
+// They must now surface at the start frame like terminal does — but with no
+// Input, because their content is a rendering ("Preparing write to <path>"),
+// not the call's arguments.
+func TestHermesClientEmitsToolUseForPolishedToolWithoutInput(t *testing.T) {
+	t.Parallel()
+
+	var got []Message
+	c := &hermesClient{
+		pending:                    make(map[int]*pendingRPC),
+		toolStartCarriesFinalInput: true,
+		onMessage:                  func(msg Message) { got = append(got, msg) },
+	}
+
+	// Verbatim Hermes write_file start frame: prose content, no rawInput.
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"content":[{"content":{"text":"Preparing write to /tmp/hello.txt. Approval prompt shows the diff.","type":"text"},"type":"content"}],"kind":"edit","locations":[{"path":"/tmp/hello.txt"}],"title":"write: /tmp/hello.txt","toolCallId":"tc-w9","sessionUpdate":"tool_call"}}}`)
+
+	if len(got) != 1 || got[0].Type != MessageToolUse {
+		t.Fatalf("expected MessageToolUse at the start frame, got %+v", got)
+	}
+	if got[0].Tool != "write_file" {
+		t.Errorf("tool: got %q, want %q", got[0].Tool, "write_file")
+	}
+	if got[0].CallID != "tc-w9" {
+		t.Errorf("callID: got %q", got[0].CallID)
+	}
+	if got[0].Input != nil {
+		t.Errorf("display prose must not be reported as input, got Input = %v", got[0].Input)
+	}
+
+	// Completion adds only the result — no second MessageToolUse.
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-w9","status":"completed","kind":"edit","content":[{"type":"content","content":{"type":"text","text":"wrote 2 bytes"}}]}}}`)
+
+	if len(got) != 2 || got[1].Type != MessageToolResult {
+		t.Fatalf("expected [ToolUse, ToolResult], got %+v", got)
+	}
+	if got[1].Output != "wrote 2 bytes" {
+		t.Errorf("result output: got %q", got[1].Output)
+	}
+}
+
+// TestHermesClientReadFileStartWithNoContentStillVisible: read_file sends a
+// start frame with no content at all. It must still register as an in-flight
+// tool so the run shows it and the daemon counts it.
+func TestHermesClientReadFileStartWithNoContentStillVisible(t *testing.T) {
+	t.Parallel()
+
+	var got []Message
+	c := &hermesClient{
+		pending:                    make(map[int]*pendingRPC),
+		toolStartCarriesFinalInput: true,
+		onMessage:                  func(msg Message) { got = append(got, msg) },
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"kind":"read","locations":[{"path":"/tmp/a.go"}],"title":"read: /tmp/a.go","toolCallId":"tc-r1","sessionUpdate":"tool_call"}}}`)
+
+	if len(got) != 1 || got[0].Type != MessageToolUse || got[0].Tool != "read_file" {
+		t.Fatalf("expected a read_file MessageToolUse at start, got %+v", got)
+	}
+	if got[0].Input != nil {
+		t.Errorf("expected no fabricated input, got %v", got[0].Input)
+	}
+}
+
+// TestHermesClientOtherDialectsStillDefer: the flag is opt-in, so a backend
+// that has not set it (kimi, kiro, qoder, grok, mcode, qwenpaw, reasonix,
+// traecli) keeps the previous deferred behaviour even for a terminal-shaped
+// frame.
+func TestHermesClientOtherDialectsStillDefer(t *testing.T) {
+	t.Parallel()
+
+	var got []Message
+	c := &hermesClient{
+		pending:   make(map[int]*pendingRPC),
+		onMessage: func(msg Message) { got = append(got, msg) },
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"content":[{"content":{"text":"$ ls -la","type":"text"},"type":"content"}],"kind":"execute","title":"terminal: ls -la","toolCallId":"tc-x","sessionUpdate":"tool_call"}}}`)
+
+	if len(got) != 0 {
+		t.Fatalf("dialects without toolStartCarriesFinalInput must still defer, got %+v", got)
 	}
 }

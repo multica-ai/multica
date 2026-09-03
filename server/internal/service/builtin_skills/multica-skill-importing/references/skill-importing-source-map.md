@@ -120,6 +120,24 @@ that omit `on_conflict` still receive a bare `SkillWithFilesResponse`.
 | `runAgentSkillsSet` → `PUT .../skills` | `server/cmd/multica/cmd_agent.go:772`; PUT `:790` |
 | CLI `agent skills list` | `server/cmd/multica/cmd_agent.go:740`; GET `:750` |
 
+## Updating an imported skill (`POST /api/skills/{id}/refresh`)
+
+| Behavior | File:line |
+|---|---|
+| `RefreshSkill` handler | `server/internal/handler/skill_refresh.go:120` |
+| Route `r.Post("/refresh", h.RefreshSkill)` | `server/cmd/server/router.go:1594` |
+| Reads stored provenance `config.origin.{type,source_url}` | `parseSkillOrigin`, `server/internal/handler/skill_refresh.go:32` |
+| Refreshable origins are `github` / `skills_sh` / `clawhub` only | `refreshableOriginSource`, `server/internal/handler/skill_refresh.go:57` |
+| Re-runs the matching import fetcher from the stored `source_url` | `fetchImportedSkillFromOrigin`, `server/internal/handler/skill_refresh.go:75` |
+| Non-refreshable origin → 422 | `errSkillNotRefreshable`, `server/internal/handler/skill_refresh.go:22` |
+| Permission: creator or workspace owner/admin, checked before the fetch | `server/internal/handler/skill_refresh.go:120` (body) — broader than import-overwrite's creator-only rule |
+| Merges only `config.origin`, preserving other config keys | `mergeSkillConfigOrigin`, `server/internal/handler/skill_refresh.go:99` |
+| In-place overwrite preserving id/creator/bindings, adopting upstream rename | `overwriteSkillWithFiles` with `NewName` + `AllowOverwrite`, `server/internal/handler/skill_create.go:119-122`, tx helper `:133` |
+| Upstream rename colliding with another skill → 409 | `errSkillOverwriteNameConflict`, `server/internal/handler/skill_create.go:104` |
+| Fetch failures map like import (413/502/503/504) | `importFetchErrorResponse` (grep in `server/internal/handler/skill.go`) |
+| CLI `skill refresh <id>` def / runner | `server/cmd/multica/cmd_skill.go:66`, `runSkillRefresh` at `:425` |
+| Handler tests | `server/internal/handler/skill_refresh_test.go` |
+
 ## Reserved primary-content filename (`SKILL.md`)
 
 | Behavior | File:line |
@@ -138,3 +156,17 @@ Behavior is path-shape-dependent. On **import or create** a manifest's `SKILL.md
 supporting file is dropped (it will not appear in the returned `files`), so the
 import still succeeds — it does not 400. The hard 400 rejection fires only on the
 dedicated single-file endpoint `PUT /api/skills/{id}/files`.
+
+## Reading a skill back (`?include=`)
+
+| Behavior | File:line |
+|---|---|
+| `resolveSkillInclude` parses `?include=content\|metadata`, 400 on anything else | `server/internal/handler/skill.go`, grep `func resolveSkillInclude` |
+| Both endpoints default to `content` when `?include=` is absent — installed desktop builds and older CLIs cannot be asked to send it | `resolveSkillInclude`, `server/internal/handler/skill.go` |
+| Compatibility test for that default | `TestSkillEndpointsWithoutIncludeStillReturnContent`, `server/internal/handler/skill_metadata_test.go` |
+| Metadata shapes (`size`, `content_hash`, `content_size`) | `SkillFileMetadataResponse` / `SkillWithFileMetadataResponse` in `server/internal/handler/skill.go` |
+| Size + hash of file bodies computed in Postgres, so those bodies never leave it | `ListSkillFileMetadata`, `server/pkg/db/queries/skill.sql` |
+| Hash is over raw UTF-8 (`convert_to`, never `content::bytea` — the cast reads backslash escapes and rejects a bare `\`) | `server/pkg/db/queries/skill.sql`, test `TestSkillFileHashCoversRawUTF8Bytes` |
+| CLI sends `include=metadata` unless `--with-content` | `skillIncludeQuery`, `server/cmd/multica/cmd_skill.go` |
+| Handler tests | `server/internal/handler/skill_metadata_test.go` |
+| CLI tests | `server/cmd/multica/cmd_skill_test.go`, grep `AsksForMetadataUnlessContentRequested` |

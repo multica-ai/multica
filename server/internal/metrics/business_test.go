@@ -4,6 +4,7 @@ import (
 	"math"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -66,6 +67,29 @@ func TestBusinessMetricsFailureReasonUsesCanonicalClassifier(t *testing.T) {
 	}
 }
 
+func TestBusinessMetricsChatClaimResumeObservations(t *testing.T) {
+	m := NewBusinessMetrics()
+
+	m.RecordChatClaimSessionFallbackNeeded()
+	m.RecordChatClaimSessionFallbackHit()
+	m.RecordChatClaimSessionFallbackMiss()
+	m.RecordChatClaimSessionFallbackError()
+	m.ObserveChatClaimLastSessionQuery(0.01)
+	m.ObserveChatClaimRolloutMissingQuery(0.02)
+
+	if got := testutil.ToFloat64(m.chatClaimSessionFallbackNeeded); got != 1 {
+		t.Errorf("chat claim fallback needed = %v, want 1", got)
+	}
+	for _, result := range []string{"hit", "miss", "error"} {
+		if got := testutil.ToFloat64(m.chatClaimSessionFallbackResult.WithLabelValues(result)); got != 1 {
+			t.Errorf("chat claim fallback %s = %v, want 1", result, got)
+		}
+	}
+	if got := testutil.CollectAndCount(m.chatClaimResumeQueryDuration); got != 2 {
+		t.Fatalf("chat claim resume query series = %d, want 2", got)
+	}
+}
+
 func TestBusinessMetricsLLMPricingAndUnpricedTokens(t *testing.T) {
 	m := NewBusinessMetrics()
 
@@ -108,6 +132,10 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordTaskFailed("issue", "local", taskfailure.ReasonTimeout.String())
 	m.RecordTaskQueuedExpired("issue", "local")
 	m.RecordTaskLeaseExpired("issue")
+	m.RecordChatClaimSessionFallbackNeeded()
+	m.RecordChatClaimSessionFallbackHit()
+	m.ObserveChatClaimLastSessionQuery(0.01)
+	m.ObserveChatClaimRolloutMissingQuery(0.01)
 	m.RecordLLMUsage("issue", "local", "codex", "gpt-5.4", 1, 1, 1, 1, 0)
 	m.RecordLLMUsage("issue", "local", "custom-provider", "custom-model", 1, 0, 0, 0, 0)
 
@@ -142,12 +170,20 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordAutopilotRunSkipped("manual", "throttled")
 	m.RecordWebhookDelivery("github", "dispatched")
 	m.RecordWebhookRateLimited("absolute_ip")
+	m.RecordEmailRateLimited("workspace_invitation", "recipient")
 	m.RecordGithubEventReceived("pull_request", "opened")
 	m.RecordGithubPRReview("approved")
 	m.ObserveGithubPRMergeSeconds(120)
 	m.RecordCloudRuntimeRequest("provision", "ok", 0.5)
 	m.RecordDaemonWSMessageReceived("heartbeat")
 	m.RecordChatOutputLocalPath("file_url")
+	m.RecordEntitlementConfigError()
+	m.RecordEntitlementCache("hit")
+	m.RecordEntitlementRefresh("success", 0.01)
+	m.RecordEntitlementDecision("autopilot_runs", "observe", "cache_fresh")
+	m.RecordEntitlementVersionRegression()
+	m.RecordAutopilotQuotaDecision("observe", "manual", "admitted")
+	m.ObserveRuntimeSweepStage(RuntimeSweepStageLiveness, time.Second, 2, 1)
 
 	families, err := registry.Gather()
 	if err != nil {
@@ -161,6 +197,45 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 		if !seen[metric] {
 			t.Fatalf("registry did not expose metric family %s", metric)
 		}
+	}
+	if !seen["multica_entitlement_config_error_total"] {
+		t.Fatal("registry did not expose metric family multica_entitlement_config_error_total")
+	}
+}
+
+func TestBusinessMetricsRuntimeGC(t *testing.T) {
+	m := NewBusinessMetrics()
+	m.RecordRuntimeGCDeleted()
+	m.RecordRuntimeGCFailed()
+	m.RecordRuntimeGCSkipped(RuntimeGCSkipNonTerminalTask)
+
+	if got := testutil.ToFloat64(m.runtimeGCDeleted); got != 1 {
+		t.Fatalf("runtime GC deleted = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.runtimeGCFailed); got != 1 {
+		t.Fatalf("runtime GC failed = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.runtimeGCSkipped.WithLabelValues(RuntimeGCSkipNonTerminalTask)); got != 1 {
+		t.Fatalf("runtime GC skipped = %v, want 1", got)
+	}
+}
+
+func TestBusinessMetricsRuntimeSweepStage(t *testing.T) {
+	m := NewBusinessMetrics()
+	m.ObserveRuntimeSweepStage(RuntimeSweepStageLiveness, 250*time.Millisecond, 3, 1)
+	m.ObserveRuntimeSweepStage("unbounded-user-value", time.Second, -1, -1)
+
+	if got := testutil.ToFloat64(m.runtimeSweepCandidateRows.WithLabelValues(RuntimeSweepStageLiveness)); got != 3 {
+		t.Fatalf("runtime liveness candidate rows = %v, want 3", got)
+	}
+	if got := testutil.ToFloat64(m.runtimeSweepRowsChanged.WithLabelValues(RuntimeSweepStageLiveness)); got != 1 {
+		t.Fatalf("runtime liveness changed rows = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.runtimeSweepCandidateRows.WithLabelValues("other")); got != 0 {
+		t.Fatalf("normalized other candidate rows = %v, want 0", got)
+	}
+	if got := testutil.CollectAndCount(m.runtimeSweepStageDuration); got != 2 {
+		t.Fatalf("runtime sweep duration series = %d, want 2", got)
 	}
 }
 

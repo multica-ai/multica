@@ -274,6 +274,7 @@ function DashboardHarness({ initialSearch = "" }: { initialSearch?: string }) {
       back: vi.fn(),
       pathname: "/acme/usage",
       searchParams: new URLSearchParams(search),
+      hash: "",
       getShareableUrl: (path: string) => `https://example.test${path}`,
     }),
     [search],
@@ -741,13 +742,12 @@ describe("DashboardPage — leaderboard density", () => {
     const user = userEvent.setup();
     renderDashboard();
 
-    // Scoped to the leaderboard card — the trend chart's metric toggle owns
-    // a "Time" button too.
-    const card = screen.getByRole("list", { name: "Leaderboard" })
-      .parentElement as HTMLElement;
     // Re-ranking must not quietly reveal the tail: the cap belongs to the
     // list, not to one metric.
-    await user.click(within(card).getByRole("button", { name: "Time" }));
+    const sortControls = within(
+      screen.getByRole("group", { name: "Rank agents by" }),
+    );
+    await user.click(sortControls.getByRole("button", { name: "Time" }));
 
     const list = within(screen.getByRole("list", { name: "Leaderboard" }));
     expect(list.getAllByRole("listitem")).toHaveLength(10);
@@ -761,5 +761,27 @@ describe("DashboardPage — leaderboard density", () => {
     expect(
       screen.queryByRole("button", { name: "Show all" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("exposes wide columns through a named keyboard-focusable local scroller", () => {
+    renderDashboard();
+
+    const scroller = screen.getByRole("region", { name: "Leaderboard" });
+    const list = within(scroller).getByRole("list", { name: "Leaderboard" });
+    const row = within(list).getByRole("listitem");
+
+    expect(scroller).toHaveAttribute("tabindex", "0");
+    scroller.focus();
+    expect(scroller).toHaveFocus();
+    expect(scroller).toHaveClass(
+      "overflow-x-auto",
+      "overscroll-x-contain",
+      "[-webkit-overflow-scrolling:touch]",
+    );
+    expect(row).toHaveStyle({
+      minWidth: "fit-content",
+      gridTemplateColumns:
+        "minmax(10rem, 1.6fr) minmax(6rem, 1fr) 5rem 5rem 5rem 4rem",
+    });
   });
 });

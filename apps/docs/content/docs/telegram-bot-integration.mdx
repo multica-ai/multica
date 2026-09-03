@@ -1,0 +1,97 @@
+---
+title: Telegram Bot
+description: Connect a Multica agent to your own Telegram Bot for private chats, group mentions, topics, and /issue.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica uses a Bot that you create with Telegram's official [@BotFather](https://t.me/BotFather). One Bot maps to one Multica agent. Create a separate Bot for each agent that needs its own Telegram identity.
+
+Telegram support is [community-maintained](/community-maintained): it ships in every release, but it carries no official support SLA. Report problems in [GitHub issues](https://github.com/multica-ai/multica/issues).
+
+## Before you start
+
+- A Multica workspace owner or admin must connect the Bot.
+- The API server must be able to reach `https://api.telegram.org`.
+- You need the Bot token issued by @BotFather. Treat it as a password.
+
+## 1. Create the Bot
+
+1. Open [@BotFather](https://t.me/BotFather) and send `/newbot`.
+2. Choose a display name and a username ending in `bot`.
+3. Copy the HTTP API token.
+4. Keep **Group Privacy** enabled. Multica only needs commands, explicit @-mentions, and replies to the Bot in groups.
+
+<Callout type="warning">
+Never paste the token into an issue, chat message, log, or source repository. If it is exposed, use @BotFather to revoke it, then reconnect the Bot with the replacement token.
+</Callout>
+
+## 2. Connect it to an agent
+
+1. In Multica, open **Agents**, select an agent, and open **Integrations**.
+2. Click **Connect Telegram**.
+3. Paste the Bot token and click **Connect**.
+
+Multica calls Telegram to verify the Bot, checks that no outgoing webhook conflicts with long polling, encrypts the token, and starts one supervised `getUpdates` connection. A Bot already connected to another agent or workspace must be disconnected there first.
+
+## First use and account binding
+
+The first time a member messages the Bot, it sends a single-use Multica account-binding link. Open it, sign in to the same Multica workspace, then return to Telegram and send the message again. The link expires after 15 minutes; message the Bot again to get a new link.
+
+In a group, the Bot never posts the bearer link publicly. It asks the sender to start a private chat first.
+
+Only current workspace members can use the Bot. Membership is checked again for every message.
+
+## Use the Bot
+
+### Private chats
+
+Open the Bot and send text directly. No @-mention is required.
+
+### Groups and forum topics
+
+Add the Bot to a group, then either @-mention it or reply directly to one of its messages. Accepted messages remain in the continued Multica conversation; unaddressed group chatter is not collected. When replying to another person's message, explicitly @-mention the Bot: only then are that quoted sender and text (or caption) included with your instruction. Replying to a human message without mentioning the Bot does not trigger it. Each ordinary group has its own continued Multica chat; forum topics are isolated into separate chats.
+
+### Commands
+
+- `/new` creates a new empty Multica Chat and routes later messages in the Telegram conversation to it. `/new <message>` creates the Chat with that message as its first turn. In an explicitly mentioned reply to another person, the selected quote remains attached to that first turn.
+- `/clear` keeps the current Multica Chat and applies a fresh agent-visible context to the next non-empty message. `/clear <message>` uses that message as the first turn after the context boundary; an explicitly selected reply quote remains attached.
+- `/issue <title>` creates a Multica issue; following lines are used as its optional description. `/issue` without a title returns usage guidance.
+- Telegram command suffixes such as `/issue@your_bot` are supported in groups.
+
+### Replies and supported content
+
+The Bot streams text by posting and editing a Telegram message, quotes the triggering message, preserves forum topics, and splits long replies under Telegram's message limit. Final replies are delivered asynchronously by an in-process queue. Normally, one chat's backoff does not occupy a worker; if cache pressure compacts exact backoff state, other chats under the same Bot installation may be conservatively delayed. The terminal queue has fixed capacity: overflow is rejected and logged, and queued replies are not recovered after a service restart.
+
+This version accepts text only. Photos, files, video, voice, stickers, and other non-text messages receive a clear unsupported-message response in private chats; addressed group media receives the same response, while unaddressed group media remains silent.
+
+## Manage connections
+
+Open **Settings → Integrations → Telegram** to view connected Bots. Owners and admins can disconnect one. Disconnecting stops long polling and outbound replies but preserves Multica conversations and audit records.
+
+## Self-hosting setup
+
+Set a stable 32-byte encryption key before starting the API server:
+
+```dotenv
+MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+Generate one with `openssl rand -base64 32`. Keep it long-term: losing or rotating it makes existing Bot tokens unreadable and requires reconnecting each Bot.
+
+Binding links use `MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN`. The resulting address must be reachable by members. The server's network or proxy must allow HTTPS access to `api.telegram.org`; Go honors standard `HTTPS_PROXY` and `NO_PROXY` environment variables.
+
+## Troubleshooting
+
+- **Bot cannot be verified**: first check server connectivity and proxy settings. Generate a new token only when Telegram itself rejects the current one.
+- **Webhook conflict**: remove the Bot's existing webhook before connecting it. Telegram does not allow `getUpdates` while a webhook is active.
+- **409 polling conflict**: another Multica instance or process is polling the same Bot. Stop the other consumer or use a separate Bot per environment.
+- **No group reply**: confirm the Bot is in the group and the message @-mentions it or replies to its message.
+- **Binding link expired**: send the Bot another private message and use the newest link.
+- **Bot does not run**: check whether the agent is archived and whether its [runtime](/daemon-runtimes) is online.
+
+## Next steps
+
+- [Chat integrations](/channels) — compare platforms and understand session and identity handling.
+- [Chat](/chat) — how Bot messages become agent runs.
+- [Issues](/issues) — the work created by `/issue`.

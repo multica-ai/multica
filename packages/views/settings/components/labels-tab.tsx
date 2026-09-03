@@ -42,7 +42,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { ColorPicker, COLOR_PICKER_PRESETS } from "../../common/color-picker";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 
 /**
@@ -68,6 +68,7 @@ const EMPTY_DRAFT: LabelDraft = {
 
 export function LabelsTab() {
   const { t } = useT("settings");
+  const locale = useLocale();
   const wsId = useWorkspaceId();
 
   const [resourceType, setResourceType] = useState<LabelScope>("issue");
@@ -181,7 +182,7 @@ export function LabelsTab() {
                     {t(($) => $.labels.usage_count, { count: label.usage_count ?? 0 })}
                   </span>
                   <span className="text-caption text-muted-foreground">
-                    {new Date(label.updated_at).toLocaleDateString()}
+                    {new Date(label.updated_at).toLocaleDateString(locale)}
                   </span>
                   <DropdownMenu>
                     <DropdownMenuTrigger

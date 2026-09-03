@@ -11,12 +11,22 @@ import {
   Trash2,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import type { Agent, AgentRuntime } from "@multica/core/types";
+import type { Agent, AgentRuntime, WorkspaceMcpServer } from "@multica/core/types";
 import { ApiError } from "@multica/core/api";
 import {
+  isRuntimeUsableForUser,
   runtimeCapabilitiesOptions,
   runtimeDisplayLabel,
 } from "@multica/core/runtimes";
+import {
+  agentMcpServersOptions,
+  workspaceMcpServersOptions,
+} from "@multica/core/workspace/queries";
+import {
+  useAddAgentMcpServer,
+  useRemoveAgentMcpServer,
+  useSetAgentMcpServerEnabled,
+} from "@multica/core/workspace/mutations";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,6 +39,13 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
 import {
@@ -42,20 +59,44 @@ import { McpServerDialog } from "./mcp-server-dialog";
 export function McpConfigTab({
   agent,
   runtime,
+  currentUserId,
+  canEdit = true,
   onSave,
   onDirtyChange,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
+  currentUserId?: string | null;
+  /**
+   * Whether this viewer may change the agent. A member without it can still
+   * read the inventory — it carries no credential material — but every write
+   * affordance is hidden rather than left to 403 on click.
+   */
+  canEdit?: boolean;
   onSave: (updates: { mcp_config: unknown | null }) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useT("agents");
+  const canReadRuntime =
+    runtime != null && isRuntimeUsableForUser(runtime, currentUserId ?? null);
   const runtimeId =
-    runtime?.runtime_mode === "local" && runtime.status === "online"
+    runtime?.runtime_mode === "local" &&
+    runtime.status === "online" &&
+    canReadRuntime
       ? runtime.id
       : null;
   const runtimeQuery = useQuery(runtimeCapabilitiesOptions(runtimeId));
+  // The workspace MCP servers ASSIGNED to this agent, plus the library to pick
+  // from (GH #6062). A library entry does nothing until it is added here, and
+  // each assignment carries its own toggle. The API returns names and
+  // transports only — never the stored credentials.
+  const assignedQuery = useQuery(agentMcpServersOptions(agent.id));
+  const libraryQuery = useQuery(
+    workspaceMcpServersOptions(agent.workspace_id ?? ""),
+  );
+  const addServer = useAddAgentMcpServer(agent.id);
+  const setServerEnabled = useSetAgentMcpServerEnabled(agent.id);
+  const removeServer = useRemoveAgentMcpServer(agent.id);
   const redacted = agent.mcp_config_redacted === true;
   const managedServers = useMemo(
     () => listManagedMcpServers(agent.mcp_config),
@@ -65,6 +106,28 @@ export function McpConfigTab({
     () => new Set(managedServers.map((server) => server.name)),
     [managedServers],
   );
+  const assignedServers = assignedQuery.data ?? [];
+  const assignedIds = useMemo(
+    () => new Set(assignedServers.map((server) => server.id)),
+    [assignedServers],
+  );
+  // What is still available to assign. An entry the agent already has is not
+  // offered again.
+  const availableServers = (libraryQuery.data ?? []).filter(
+    (server) => !assignedIds.has(server.id),
+  );
+  // Names that shadow a runtime server in the effective set. The daemon merges
+  // runtime < (assigned workspace servers + the agent's own), so an assigned
+  // server hides a same-named runtime one too — marking only the agent's own
+  // names would under-report it. A disabled assignment shadows nothing.
+  const effectiveNames = useMemo(() => {
+    const names = new Set(managedNames);
+    for (const server of assignedServers) {
+      if (server.enabled !== false) names.add(server.name);
+    }
+    return names;
+  }, [managedNames, assignedServers]);
+
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<ManagedMcpServer | null>(
     null,
@@ -112,6 +175,35 @@ export function McpConfigTab({
     }
   };
 
+  // Assignment writes return the agent's resulting list, so failures surface
+  // as a toast and the cache re-syncs from the server rather than a guess.
+  const runAssignmentAction = async (action: () => Promise<unknown>) => {
+    try {
+      await action();
+    } catch (error) {
+      toast.error(
+        error instanceof Error && error.message
+          ? error.message
+          : t(($) => $.tab_body.mcp_config.workspace_action_failed),
+      );
+    }
+  };
+
+  const handleAddWorkspaceServer = (serverId: string) =>
+    runAssignmentAction(async () => {
+      await addServer.mutateAsync(serverId);
+      toast.success(t(($) => $.tab_body.mcp_config.workspace_added_toast));
+    });
+
+  const handleToggleWorkspaceServer = (serverId: string, enabled: boolean) =>
+    runAssignmentAction(() => setServerEnabled.mutateAsync({ serverId, enabled }));
+
+  const handleRemoveWorkspaceServer = (serverId: string) =>
+    runAssignmentAction(async () => {
+      await removeServer.mutateAsync(serverId);
+      toast.success(t(($) => $.tab_body.mcp_config.workspace_removed_toast));
+    });
+
   const handleDelete = async () => {
     if (!deletingServer) return;
     setDeleting(true);
@@ -133,21 +225,15 @@ export function McpConfigTab({
   };
 
   return (
-    <div className="space-y-8">
-      <p className="max-w-2xl break-words text-pretty text-body leading-6 text-muted-foreground">
-        {t(($) => $.tab_body.mcp_config.intro)}
-      </p>
-
+    // Three sources, one heading each. The prose that used to sit under every
+    // heading is gone: precedence is already shown where it applies (the
+    // Overridden badges) and nobody reads a paragraph to press a button.
+    <div className="space-y-6">
       <section className="space-y-3">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-body font-medium">
-              {t(($) => $.tab_body.mcp_config.managed_title)}
-            </h3>
-            <p className="mt-1 max-w-2xl text-caption leading-5 text-muted-foreground">
-              {t(($) => $.tab_body.mcp_config.managed_hint)}
-            </p>
-          </div>
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="text-body font-medium">
+            {t(($) => $.tab_body.mcp_config.managed_title)}
+          </h3>
           {!redacted && (
             <Button size="sm" variant="outline" onClick={openAddDialog}>
               <Plus aria-hidden="true" />
@@ -186,17 +272,59 @@ export function McpConfigTab({
       </section>
 
       <section className="space-y-3">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-body font-medium">
-              {t(($) => $.tab_body.mcp_config.runtime_title)}
-            </h3>
-            <p className="mt-1 max-w-2xl text-caption leading-5 text-muted-foreground">
-              {t(($) => $.tab_body.mcp_config.runtime_hint, {
-                runtime: runtime ? runtimeDisplayLabel(runtime) : "Runtime",
-              })}
-            </p>
-          </div>
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="text-body font-medium">
+            {t(($) => $.tab_body.mcp_config.workspace_title)}
+          </h3>
+          {canEdit && availableServers.length > 0 && (
+            <McpWorkspaceServerPicker
+              servers={availableServers}
+              disabled={addServer.isPending}
+              onSelect={(serverId) => void handleAddWorkspaceServer(serverId)}
+            />
+          )}
+        </div>
+        {assignedQuery.isLoading ? (
+          <McpNotice
+            loading
+            text={t(($) => $.tab_body.mcp_config.workspace_loading)}
+          />
+        ) : assignedServers.length > 0 ? (
+          <ul className="divide-y rounded-lg border bg-surface-raised/40">
+            {assignedServers.map((server) => (
+              <McpWorkspaceServerRow
+                key={server.id}
+                server={server}
+                overridden={managedNames.has(server.name)}
+                canEdit={canEdit}
+                busy={setServerEnabled.isPending || removeServer.isPending}
+                onToggle={(enabled) => void handleToggleWorkspaceServer(server.id, enabled)}
+                onRemove={() => void handleRemoveWorkspaceServer(server.id)}
+              />
+            ))}
+          </ul>
+        ) : (
+          <McpNotice
+            text={
+              (libraryQuery.data ?? []).length === 0
+                ? t(($) => $.tab_body.mcp_config.workspace_library_empty)
+                : t(($) => $.tab_body.mcp_config.workspace_none_assigned)
+            }
+          />
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          {/* The machine name moves into the heading — it is the only part of
+              the old description that told the reader anything. */}
+          <h3 className="min-w-0 truncate text-body font-medium">
+            {runtime
+              ? t(($) => $.tab_body.mcp_config.runtime_title_named, {
+                  runtime: runtimeDisplayLabel(runtime),
+                })
+              : t(($) => $.tab_body.mcp_config.runtime_title)}
+          </h3>
           {runtimeId && (
             <Button
               variant="ghost"
@@ -218,6 +346,8 @@ export function McpConfigTab({
         </div>
         {!runtime ? (
           <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_missing)} />
+        ) : !canReadRuntime ? (
+          <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_forbidden)} />
         ) : runtime.status !== "online" ? (
           <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_offline)} />
         ) : runtimeQuery.isLoading ? (
@@ -247,7 +377,7 @@ export function McpConfigTab({
               transport: server.transport || "unknown",
               enabled: server.enabled,
               source: server.source,
-              overridden: managedNames.has(server.name),
+              overridden: effectiveNames.has(server.name),
             }))}
             disabledLabel={t(($) => $.tab_body.mcp_config.runtime_disabled_badge)}
             overriddenLabel={t(($) => $.tab_body.mcp_config.runtime_overridden_badge)}
@@ -311,6 +441,125 @@ type McpServerView = {
   source?: string;
   overridden?: boolean;
 };
+
+/**
+ * One workspace server assigned to this agent: the per-agent toggle plus the
+ * affordance to take it away. The entry itself is never shown — it is
+ * write-only and lives in workspace Settings.
+ */
+function McpWorkspaceServerRow({
+  server,
+  overridden,
+  canEdit,
+  busy,
+  onToggle,
+  onRemove,
+}: {
+  server: WorkspaceMcpServer;
+  overridden: boolean;
+  canEdit: boolean;
+  busy: boolean;
+  onToggle: (enabled: boolean) => void;
+  onRemove: () => void;
+}) {
+  const { t } = useT("agents");
+  const enabled = server.enabled !== false;
+  return (
+    // Same row shape as the other two lists on this tab — icon chip, name,
+    // transport — so the three sources read as one inventory.
+    <li className="flex items-center gap-3 p-3">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+        <Server className="h-4 w-4" aria-hidden="true" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-body font-medium">{server.name}</span>
+          {overridden && (
+            <Badge variant="secondary">
+              {t(($) => $.tab_body.mcp_config.workspace_overridden_badge)}
+            </Badge>
+          )}
+        </div>
+        <p className="text-caption uppercase text-muted-foreground">
+          {server.transport || "unknown"}
+        </p>
+      </div>
+      {canEdit && (
+        <>
+          <Switch
+            checked={enabled}
+            disabled={busy}
+            onCheckedChange={onToggle}
+            aria-label={t(($) => $.tab_body.mcp_config.workspace_toggle_aria, {
+              name: server.name,
+            })}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={busy}
+            onClick={onRemove}
+            aria-label={t(($) => $.tab_body.mcp_config.workspace_remove_aria, {
+              name: server.name,
+            })}
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </>
+      )}
+      {!canEdit && !enabled && (
+        <Badge variant="secondary">
+          {t(($) => $.tab_body.mcp_config.workspace_disabled_badge)}
+        </Badge>
+      )}
+    </li>
+  );
+}
+
+/** Picks an unassigned workspace server to give to this agent. */
+function McpWorkspaceServerPicker({
+  servers,
+  disabled,
+  onSelect,
+}: {
+  servers: WorkspaceMcpServer[];
+  disabled: boolean;
+  onSelect: (serverId: string) => void;
+}) {
+  const { t } = useT("agents");
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button size="sm" variant="outline" disabled={disabled}>
+            <Plus aria-hidden="true" />
+            {t(($) => $.tab_body.mcp_config.workspace_add_action)}
+          </Button>
+        }
+      />
+      {/* Flush with the trigger's edges (`--anchor-width` is the trigger's own
+          width), free to grow for a long name, and capped so a workspace with
+          many servers scrolls instead of running off the viewport. */}
+      <DropdownMenuContent
+        align="end"
+        className="max-h-72 min-w-(--anchor-width) max-w-[min(20rem,var(--available-width))]"
+      >
+        {servers.map((server) => (
+          <DropdownMenuItem
+            key={server.id}
+            className="gap-3"
+            onClick={() => onSelect(server.id)}
+          >
+            <span className="min-w-0 flex-1 truncate">{server.name}</span>
+            <span className="shrink-0 text-caption uppercase text-muted-foreground">
+              {server.transport || "unknown"}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 function McpServerList({
   servers,

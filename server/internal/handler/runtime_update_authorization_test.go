@@ -38,8 +38,8 @@ func TestInitiateUpdateRequiresRuntimeManager(t *testing.T) {
 		wantStatus int
 	}{
 		{name: "runtime owner", actor: "runtime_owner", wantStatus: http.StatusOK},
-		{name: "workspace admin", actor: "workspace_admin", wantStatus: http.StatusOK},
-		{name: "plain member", actor: "plain_member", wantStatus: http.StatusForbidden},
+		{name: "workspace admin on another private runtime", actor: "workspace_admin", wantStatus: http.StatusNotFound},
+		{name: "plain member on another private runtime", actor: "plain_member", wantStatus: http.StatusNotFound},
 	}
 
 	for _, tc := range tests {
@@ -91,8 +91,8 @@ func TestGetUpdateRequiresRuntimeManager(t *testing.T) {
 		wantStatus int
 	}{
 		{name: "runtime owner", actor: "runtime_owner", wantStatus: http.StatusOK},
-		{name: "workspace admin", actor: "workspace_admin", wantStatus: http.StatusOK},
-		{name: "plain member", actor: "plain_member", wantStatus: http.StatusForbidden},
+		{name: "workspace admin on another private runtime", actor: "workspace_admin", wantStatus: http.StatusNotFound},
+		{name: "plain member on another private runtime", actor: "plain_member", wantStatus: http.StatusNotFound},
 	}
 
 	for _, tc := range tests {
@@ -127,12 +127,19 @@ func TestGetUpdateRequiresRuntimeManager(t *testing.T) {
 	}
 }
 
-func TestGetUpdateAllowsInitiatorAfterAdminDemotion(t *testing.T) {
+func TestGetUpdateAllowsInitiatorAfterAdminDemotionOnPublicRuntime(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 
 	runtimeID, _, adminID := runtimeVisibilityFixture(t)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE agent_runtime
+		SET visibility = 'public'
+		WHERE id = $1
+	`, runtimeID); err != nil {
+		t.Fatalf("make runtime public: %v", err)
+	}
 	promoteRuntimeTestMemberToAdmin(t, adminID)
 
 	initRecorder := httptest.NewRecorder()
