@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,6 +76,7 @@ var configSetCmd = &cobra.Command{
 }
 
 func init() {
+	configShowCmd.Flags().String("output", "text", "Output format: text or json")
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configSetCmd)
 }
@@ -90,6 +92,33 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	}
 
 	path, _ := cli.CLIConfigPathForProfile(profile)
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return writeConfigShowJSON(configShowJSON{
+			Source: configSourceJSON{
+				Path:      path,
+				Profile:   profile,
+				TaskLocal: strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) != "",
+			},
+			Config: safeConfigJSON{
+				ServerURL:                      cfg.ServerURL,
+				AppURL:                         cfg.AppURL,
+				WorkspaceID:                    cfg.WorkspaceID,
+				DeviceName:                     cfg.DeviceName,
+				RuntimeName:                    cfg.RuntimeName,
+				WorkspacesRoot:                 cfg.WorkspacesRoot,
+				MaxConcurrentTasks:             cfg.MaxConcurrentTasks,
+				PollInterval:                   cfg.PollInterval,
+				HeartbeatInterval:              cfg.HeartbeatInterval,
+				AgentTimeout:                   cfg.AgentTimeout,
+				CodexSemanticInactivityTimeout: cfg.CodexSemanticInactivityTimeout,
+				CodexHandshakeTimeout:          cfg.CodexHandshakeTimeout,
+				DisableAutoUpdate:              cfg.DisableAutoUpdate,
+				AutoUpdateCheckInterval:        cfg.AutoUpdateCheckInterval,
+				DisableAutoReload:              cfg.DisableAutoReload,
+			},
+		})
+	}
 	fmt.Fprintf(os.Stdout, "Config file: %s\n", path)
 	if profile != "" {
 		fmt.Fprintf(os.Stdout, "Profile:      %s\n", profile)
@@ -110,6 +139,41 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "auto_update_check_interval:", valueOrDefault(cfg.AutoUpdateCheckInterval, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_reload:", cfg.DisableAutoReload)
 	return nil
+}
+
+type configSourceJSON struct {
+	Path      string `json:"path"`
+	Profile   string `json:"profile"`
+	TaskLocal bool   `json:"task_local"`
+}
+
+type safeConfigJSON struct {
+	ServerURL                      string  `json:"server_url"`
+	AppURL                         string  `json:"app_url"`
+	WorkspaceID                    string  `json:"workspace_id"`
+	DeviceName                     string  `json:"device_name"`
+	RuntimeName                    string  `json:"runtime_name"`
+	WorkspacesRoot                 string  `json:"workspaces_root"`
+	MaxConcurrentTasks             int     `json:"max_concurrent_tasks"`
+	PollInterval                   string  `json:"poll_interval"`
+	HeartbeatInterval              string  `json:"heartbeat_interval"`
+	AgentTimeout                   *string `json:"agent_timeout"`
+	CodexSemanticInactivityTimeout string  `json:"codex_semantic_inactivity_timeout"`
+	CodexHandshakeTimeout          string  `json:"codex_handshake_timeout"`
+	DisableAutoUpdate              bool    `json:"disable_auto_update"`
+	AutoUpdateCheckInterval        string  `json:"auto_update_check_interval"`
+	DisableAutoReload              bool    `json:"disable_auto_reload"`
+}
+
+type configShowJSON struct {
+	Source configSourceJSON `json:"source"`
+	Config safeConfigJSON   `json:"config"`
+}
+
+func writeConfigShowJSON(config configShowJSON) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(config)
 }
 
 func runConfigSet(cmd *cobra.Command, args []string) error {

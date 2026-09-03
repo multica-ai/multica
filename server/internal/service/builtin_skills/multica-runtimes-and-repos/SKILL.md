@@ -54,8 +54,8 @@ multica repo checkout <url> --ref <branch-or-sha>
 The daemon injects a task-scoped `mat_` credential for Multica API commands and a private task-local Multica configuration root. Inside that managed task context:
 
 - API commands such as `issue list`, `issue get`, and `issue runs` use the injected task identity and never fall back to the daemon Owner's saved Multica profile.
-- `config show` and `config set` operate only on task-local Multica state. A missing task config root fails closed.
-- `auth status` may verify the task identity but omits all token material from its output.
+- `config show` and `config set` operate only on task-local Multica state. A missing task config root fails closed. `config show --output json` reports its config path, profile, and `task_local` provenance alongside an allowlisted config object that never contains credentials.
+- `auth status` may verify the task identity but omits all token material from its output. Use `auth status --output json` for a stable status, server, task scope, and identity object.
 - `daemon status` and `daemon disk-usage` report on the runtime hosting this task: `status` probes the daemon-injected health port, and `disk-usage` scans the daemon-injected workspaces root. Both refuse `--profile`, `disk-usage` also refuses `--all-profiles` and `--workspaces-root`, and its STATUS column stays blank because filling it would spend the Owner's credential.
 - Human/local profile and daemon commands — including `login`, `logout`, `setup`, `workspace switch`, local runtime profile path mutation, `daemon start` / `stop` / `restart`, `daemon logs`, and `daemon probe-runtimes` — are unavailable. `daemon stop` in particular would terminate the daemon running this task and every sibling task on it.
 

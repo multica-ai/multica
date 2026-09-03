@@ -36,6 +36,15 @@ func testCmd() *cobra.Command {
 	return cmd
 }
 
+func authStatusTestCmd(output string) *cobra.Command {
+	cmd := testCmd()
+	cmd.Flags().String("output", "text", "")
+	if err := cmd.Flags().Set("output", output); err != nil {
+		panic(err)
+	}
+	return cmd
+}
+
 func TestResolveAppURL(t *testing.T) {
 	cmd := testCmd()
 
@@ -367,6 +376,138 @@ func TestRunAuthStatusTaskContextDoesNotPrintCredential(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("auth status output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestAuthStatusAcceptsJSONOutput(t *testing.T) {
+	flag := authStatusCmd.Flags().Lookup("output")
+	if flag == nil {
+		t.Fatal("auth status is missing the --output flag")
+	}
+	if flag.DefValue != "text" {
+		t.Fatalf("auth status --output default = %q, want text", flag.DefValue)
+	}
+}
+
+func TestRunAuthStatusJSONReportsTaskIdentityWithoutCredentialMaterial(t *testing.T) {
+	const fakeTaskToken = "mat_task_json_secret_sentinel"
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TOKEN", fakeTaskToken)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/me" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"name": "Task Agent", "email": "task@example.test"})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	out, err := captureStdout(t, func() error { return runAuthStatus(authStatusTestCmd("json"), nil) })
+	if err != nil {
+		t.Fatalf("runAuthStatus: %v", err)
+	}
+	var got struct {
+		Status        string `json:"status"`
+		Authenticated bool   `json:"authenticated"`
+		ServerURL     string `json:"server_url"`
+		TaskScoped    bool   `json:"task_scoped"`
+		Identity      *struct {
+			Name  string `json:"name"`
+			Email string `json:"email"`
+		} `json:"identity"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("auth status output is not JSON: %v\n%s", err, out)
+	}
+	if got.Status != "authenticated" || !got.Authenticated || got.ServerURL != srv.URL || !got.TaskScoped || got.Identity == nil || got.Identity.Name != "Task Agent" || got.Identity.Email != "task@example.test" {
+		t.Fatalf("auth status JSON = %+v, want authenticated task identity", got)
+	}
+	for _, forbidden := range []string{fakeTaskToken, "token", "secret", "authorization"} {
+		if strings.Contains(strings.ToLower(out), strings.ToLower(forbidden)) {
+			t.Fatalf("auth status JSON exposed credential material %q:\n%s", forbidden, out)
+		}
+	}
+}
+
+func TestRunAuthStatusJSONReportsUnauthenticatedAsObject(t *testing.T) {
+	home := t.TempDir()
+	t.Chdir(home)
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_SERVER_URL", "https://api.example.test")
+
+	out, err := captureStdout(t, func() error { return runAuthStatus(authStatusTestCmd("json"), nil) })
+	if err != nil {
+		t.Fatalf("runAuthStatus: %v", err)
+	}
+	var got struct {
+		Status        string          `json:"status"`
+		Authenticated bool            `json:"authenticated"`
+		ServerURL     string          `json:"server_url"`
+		TaskScoped    bool            `json:"task_scoped"`
+		Identity      json.RawMessage `json:"identity"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("auth status output is not JSON: %v\n%s", err, out)
+	}
+	if got.Status != "not_authenticated" || got.Authenticated || got.ServerURL != "https://api.example.test" || got.TaskScoped || string(got.Identity) != "null" {
+		t.Fatalf("auth status JSON = %+v, want unauthenticated user context", got)
+	}
+}
+
+func TestRunAuthStatusJSONReportsInvalidCredentialWithoutErrorDetails(t *testing.T) {
+	const fakeToken = "mul_invalid_json_secret_sentinel"
+	home := t.TempDir()
+	t.Chdir(home)
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_TOKEN", fakeToken)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":"authorization failed for secret backend"}`, http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	out, err := captureStdout(t, func() error { return runAuthStatus(authStatusTestCmd("json"), nil) })
+	if err != nil {
+		t.Fatalf("runAuthStatus: %v", err)
+	}
+	var got struct {
+		Status        string          `json:"status"`
+		Authenticated bool            `json:"authenticated"`
+		ServerURL     string          `json:"server_url"`
+		Identity      json.RawMessage `json:"identity"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("auth status output is not JSON: %v\n%s", err, out)
+	}
+	if got.Status != "invalid" || got.Authenticated || got.ServerURL != srv.URL || string(got.Identity) != "null" {
+		t.Fatalf("auth status JSON = %+v, want invalid credential status", got)
+	}
+	for _, forbidden := range []string{fakeToken, "token", "secret", "authorization", "backend"} {
+		if strings.Contains(strings.ToLower(out), strings.ToLower(forbidden)) {
+			t.Fatalf("auth status JSON exposed error or credential material %q:\n%s", forbidden, out)
+		}
+	}
+}
+
+func TestRunAuthStatusJSONFailsClosedWithoutTaskRoot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TOKEN", "mat_task_json_secret_sentinel")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+
+	out, err := captureStdout(t, func() error { return runAuthStatus(authStatusTestCmd("json"), nil) })
+	if err == nil || !strings.Contains(err.Error(), "task-local") {
+		t.Fatalf("runAuthStatus error = %v, want missing task-local config root", err)
+	}
+	if out != "" {
+		t.Fatalf("runAuthStatus wrote JSON before rejecting missing task config: %q", out)
 	}
 }
 

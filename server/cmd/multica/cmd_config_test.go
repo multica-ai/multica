@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 func newConfigTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "config"}
 	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("output", "text", "")
 	return cmd
 }
 
@@ -91,6 +93,139 @@ func TestRunConfigShowIncludesProfileAndDefaults(t *testing.T) {
 	}
 	if !strings.Contains(out, "Profile:      empty") {
 		t.Fatalf("runConfigShow missing profile header:\n%s", out)
+	}
+}
+
+func TestConfigShowAcceptsJSONOutput(t *testing.T) {
+	flag := configShowCmd.Flags().Lookup("output")
+	if flag == nil {
+		t.Fatal("config show is missing the --output flag")
+	}
+	if flag.DefValue != "text" {
+		t.Fatalf("config show --output default = %q, want text", flag.DefValue)
+	}
+}
+
+func TestRunConfigShowJSONUsesExplicitTaskProvenanceAndSafeFields(t *testing.T) {
+	taskRoot := filepath.Join(t.TempDir(), "task-multica")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", taskRoot)
+
+	const secretToken = "mat_config_json_secret_sentinel"
+	configPath := filepath.Join(taskRoot, "profiles", "worker", "config.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{
+  "server_url": "https://task.example.test",
+  "workspace_id": "workspace-task",
+  "token": "` + secretToken + `",
+  "max_concurrent_tasks": 3,
+  "disable_auto_update": true
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newConfigTestCmd()
+	_ = cmd.Flags().Set("profile", "worker")
+	_ = cmd.Flags().Set("output", "json")
+	out, err := captureStdout(t, func() error { return runConfigShow(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runConfigShow: %v", err)
+	}
+	var got struct {
+		Source struct {
+			Path      string `json:"path"`
+			Profile   string `json:"profile"`
+			TaskLocal bool   `json:"task_local"`
+		} `json:"source"`
+		Config struct {
+			ServerURL          string `json:"server_url"`
+			WorkspaceID        string `json:"workspace_id"`
+			MaxConcurrentTasks int    `json:"max_concurrent_tasks"`
+			DisableAutoUpdate  bool   `json:"disable_auto_update"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("config show output is not JSON: %v\n%s", err, out)
+	}
+	if got.Source.Path != configPath || got.Source.Profile != "worker" || !got.Source.TaskLocal {
+		t.Fatalf("config source = %+v, want explicit task-local provenance", got.Source)
+	}
+	if got.Config.ServerURL != "https://task.example.test" || got.Config.WorkspaceID != "workspace-task" || got.Config.MaxConcurrentTasks != 3 || !got.Config.DisableAutoUpdate {
+		t.Fatalf("config JSON = %+v, want stored safe fields", got.Config)
+	}
+	var contract map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &contract); err != nil {
+		t.Fatal(err)
+	}
+	if len(contract) != 2 || contract["source"] == nil || contract["config"] == nil {
+		t.Fatalf("config JSON top-level keys = %v, want source and config", contract)
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(contract["config"], &settings); err != nil {
+		t.Fatal(err)
+	}
+	wantKeys := []string{
+		"server_url", "app_url", "workspace_id", "device_name", "runtime_name",
+		"workspaces_root", "max_concurrent_tasks", "poll_interval", "heartbeat_interval",
+		"agent_timeout", "codex_semantic_inactivity_timeout", "codex_handshake_timeout",
+		"disable_auto_update", "auto_update_check_interval", "disable_auto_reload",
+	}
+	if len(settings) != len(wantKeys) {
+		t.Fatalf("config JSON has %d settings, want %d: %v", len(settings), len(wantKeys), settings)
+	}
+	for _, key := range wantKeys {
+		if settings[key] == nil {
+			t.Errorf("config JSON missing stable setting key %q", key)
+		}
+	}
+	for _, forbidden := range []string{secretToken, "token", "secret", "authorization"} {
+		if strings.Contains(strings.ToLower(out), strings.ToLower(forbidden)) {
+			t.Fatalf("config JSON exposed credential material %q:\n%s", forbidden, out)
+		}
+	}
+}
+
+func TestRunConfigShowJSONFailsClosedWithoutTaskRoot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+
+	cmd := newConfigTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	out, err := captureStdout(t, func() error { return runConfigShow(cmd, nil) })
+	if err == nil || !strings.Contains(err.Error(), "task-local") {
+		t.Fatalf("runConfigShow error = %v, want missing task-local config root", err)
+	}
+	if out != "" {
+		t.Fatalf("runConfigShow wrote JSON before rejecting missing task config: %q", out)
+	}
+}
+
+func TestRunConfigShowPlainOutputRemainsCompatible(t *testing.T) {
+	home := t.TempDir()
+	t.Chdir(home)
+	t.Setenv("HOME", home)
+	if err := cli.SaveCLIConfig(cli.CLIConfig{ServerURL: "https://plain.example.test", WorkspaceID: "plain-workspace"}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := captureStdout(t, func() error { return runConfigShow(newConfigTestCmd(), nil) })
+	if err != nil {
+		t.Fatalf("runConfigShow: %v", err)
+	}
+	for _, want := range []string{"Config file: ", "server_url:", "https://plain.example.test", "workspace_id:", "plain-workspace", "agent_timeout:", "(not set)"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("plain config output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.HasPrefix(strings.TrimSpace(out), "{") {
+		t.Fatalf("plain config output unexpectedly changed to JSON:\n%s", out)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -66,6 +67,7 @@ const callbackHostFlag = "callback-host"
 const callbackHostFlagHelp = "Host/IP the OAuth callback URL points at when the browser can reach this CLI directly. For SSH-only machines, use the printed tunnel hint instead."
 
 func init() {
+	authStatusCmd.Flags().String("output", "text", "Output format: text or json")
 	authCmd.AddCommand(authStatusCmd)
 	authCmd.AddCommand(authLogoutCmd)
 }
@@ -467,6 +469,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	if err := requireTaskLocalConfigRoot(); err != nil {
 		return err
 	}
+	output, _ := cmd.Flags().GetString("output")
 	taskContext := inDaemonManagedExecutionContext()
 	token := resolveToken(cmd)
 	if taskContext && !strings.HasPrefix(token, "mat_") {
@@ -475,6 +478,13 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	serverURL := resolveServerURL(cmd)
 
 	if token == "" {
+		if output == "json" {
+			return writeAuthStatusJSON(authStatusJSON{
+				Status:     "not_authenticated",
+				ServerURL:  serverURL,
+				TaskScoped: taskContext,
+			})
+		}
 		fmt.Fprintln(os.Stderr, "Not authenticated. Run 'multica login' to authenticate.")
 		return nil
 	}
@@ -489,8 +499,27 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		Email string `json:"email"`
 	}
 	if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
+		if output == "json" {
+			return writeAuthStatusJSON(authStatusJSON{
+				Status:     "invalid",
+				ServerURL:  serverURL,
+				TaskScoped: taskContext,
+			})
+		}
 		fmt.Fprintf(os.Stderr, "Token is invalid or expired: %v\nRun 'multica login' to re-authenticate.\n", err)
 		return nil
+	}
+	if output == "json" {
+		return writeAuthStatusJSON(authStatusJSON{
+			Status:        "authenticated",
+			Authenticated: true,
+			ServerURL:     serverURL,
+			TaskScoped:    taskContext,
+			Identity: &authStatusIdentity{
+				Name:  me.Name,
+				Email: me.Email,
+			},
+		})
 	}
 
 	if taskContext {
@@ -504,6 +533,25 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	}
 	fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\nToken:   %s\n", serverURL, me.Name, me.Email, prefix)
 	return nil
+}
+
+type authStatusIdentity struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+type authStatusJSON struct {
+	Status        string              `json:"status"`
+	Authenticated bool                `json:"authenticated"`
+	ServerURL     string              `json:"server_url"`
+	TaskScoped    bool                `json:"task_scoped"`
+	Identity      *authStatusIdentity `json:"identity"`
+}
+
+func writeAuthStatusJSON(status authStatusJSON) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(status)
 }
 
 const callbackSuccessHTML = `<!DOCTYPE html>
