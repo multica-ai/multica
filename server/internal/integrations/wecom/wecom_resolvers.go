@@ -91,11 +91,13 @@ type engineSessionBinder interface {
 }
 
 func (r *sessionBinder) StartSession(ctx context.Context, p engine.StartSessionParams) (engine.StartSessionResult, error) {
+	bindingKey, config := wecomSessionRouting(p.Message)
 	result, err := r.session.StartSession(ctx, engine.StartSessionInput{
 		EnsureSessionInput: engine.EnsureSessionInput{
 			WorkspaceID: p.Installation.WorkspaceID, AgentID: p.Installation.AgentID,
 			InstallationID: p.Installation.ID, Sender: p.Creator,
-			BindingKey: p.Message.Source.ChatID, ChatType: p.Message.Source.ChatType,
+			BindingKey: bindingKey, BindingConfig: config,
+			ChatType: p.Message.Source.ChatType,
 		},
 		Initiator: p.Sender,
 		Body:      p.Message.Text, MessageID: p.Message.MessageID,
@@ -229,17 +231,69 @@ func (d *deduper) Release(ctx context.Context, installationID pgtype.UUID, messa
 
 type sessionBinder struct{ session engineSessionBinder }
 
-// EnsureSession picks the wecom session-isolation key. For single (p2p)
-// chats the wecom ChatID already IS the userid, one session per user;
-// for group chats we key on the chatid so all group traffic lands in one
-// session — the aibot API does not have a first-class thread concept.
+// wecomBindingConfig is the outbound routing config persisted on a chat
+// binding whose channel_chat_id is composite. It carries the real chatid the
+// aibot send API has to be addressed with, which the key alone no longer is.
+type wecomBindingConfig struct {
+	ChatID string `json:"chat_id"`
+}
+
+// wecomSessionRouting derives the session-isolation key (stored as
+// channel_chat_id) and the outbound routing config from one inbound message.
+//
+// A single (p2p) chat is one continuous session per user — the wecom ChatID
+// already IS the userid there — so the key is the chat id and it alone routes
+// outbound. A GROUP message is isolated by SENDER: key = "chatid:senderid",
+// so two people talking to the bot in one room hold two sessions.
+//
+// Why sender and not thread, unlike Slack (channel:threadRoot) and Lark
+// (chat:topic): an aibot_msg_callback carries msgid / chatid / chattype /
+// from.userid and nothing else — the API has no thread or topic id to key on
+// (see aibotMsgCallback in ws_frame.go). Keying the whole room on the chatid,
+// which is what this did before, put every member's turns into one context:
+// the agent read a transcript in which several people were interleaved, and
+// the chat surfaced in Multica belonged to whoever had spoken first. Sender is
+// the only dimension the wire actually offers, and it is the one that matches
+// what a member expects — their own conversation with the bot.
+//
+// The bot's reply still goes to the room (aibot has no per-member visibility),
+// so it reads as an answer in a shared space; only the CONTEXT is private.
+//
+// Pure function so the isolation contract is unit-tested without a DB.
+func wecomSessionRouting(msg channel.InboundMessage) (bindingKey string, config []byte) {
+	chatID := msg.Source.ChatID
+	if msg.Source.ChatType != channel.ChatTypeGroup || msg.Source.SenderID == "" {
+		return chatID, nil
+	}
+	cfg, _ := json.Marshal(wecomBindingConfig{ChatID: chatID})
+	return chatID + ":" + msg.Source.SenderID, cfg
+}
+
+// wecomOutboundChatID recovers the chatid to address from a chat binding.
+// Composite keys carry the real id in the config; a 1:1 binding — and a group
+// binding written before this key existed — stores it directly in
+// channel_chat_id, which is the fallback that keeps those rows deliverable.
+func wecomOutboundChatID(b db.ChannelChatSessionBinding) string {
+	if len(b.Config) > 0 {
+		var cfg wecomBindingConfig
+		if err := json.Unmarshal(b.Config, &cfg); err == nil && cfg.ChatID != "" {
+			return cfg.ChatID
+		}
+	}
+	return b.ChannelChatID
+}
+
+// EnsureSession picks the wecom session-isolation key — see
+// wecomSessionRouting for the p2p / group split.
 func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessionParams) (pgtype.UUID, error) {
+	bindingKey, config := wecomSessionRouting(p.Message)
 	return r.session.EnsureSession(ctx, engine.EnsureSessionInput{
 		WorkspaceID:    p.Installation.WorkspaceID,
 		AgentID:        p.Installation.AgentID,
 		InstallationID: p.Installation.ID,
 		Sender:         p.Sender,
-		BindingKey:     p.Message.Source.ChatID,
+		BindingKey:     bindingKey,
+		BindingConfig:  config,
 		ChatType:       p.Message.Source.ChatType,
 	})
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -61,14 +62,21 @@ func TestSessionBinder_EnsureSessionMapsGroupKey(t *testing.T) {
 	_, err := b.EnsureSession(context.Background(), engine.EnsureSessionParams{
 		Installation: inst,
 		Sender:       mustTestUUID(t),
-		Message:      channel.InboundMessage{Source: channel.Source{ChatID: "GROUP_1", ChatType: channel.ChatTypeGroup}},
+		Message: channel.InboundMessage{Source: channel.Source{
+			ChatID: "GROUP_1", ChatType: channel.ChatTypeGroup, SenderID: "TUSER_A",
+		}},
 	})
 	if err != nil {
 		t.Fatalf("EnsureSession: %v", err)
 	}
-	// wecom keys the session on the chat id (no thread concept).
-	if fb.ensureIn.BindingKey != "GROUP_1" {
-		t.Errorf("BindingKey = %q, want the group chat id GROUP_1", fb.ensureIn.BindingKey)
+	// A group is keyed per sender — the aibot API has no thread to key on, so
+	// the sender is the only dimension that keeps two members' turns apart.
+	if fb.ensureIn.BindingKey != "GROUP_1:TUSER_A" {
+		t.Errorf("BindingKey = %q, want GROUP_1:TUSER_A", fb.ensureIn.BindingKey)
+	}
+	// The composite key is not an address, so the real chatid rides on config.
+	if string(fb.ensureIn.BindingConfig) != `{"chat_id":"GROUP_1"}` {
+		t.Errorf("BindingConfig = %q, want the real chat id", fb.ensureIn.BindingConfig)
 	}
 	if fb.ensureIn.ChatType != channel.ChatTypeGroup {
 		t.Errorf("ChatType = %v, want group", fb.ensureIn.ChatType)
@@ -90,7 +98,9 @@ func TestSessionBinder_StartSessionMapsWeComRouteAndFirstTurn(t *testing.T) {
 		ClaimToken:   claim,
 		Message: channel.InboundMessage{
 			MessageID: "m1", Text: "first turn",
-			Source: channel.Source{ChatID: "GROUP_1", ChatType: channel.ChatTypeGroup},
+			Source: channel.Source{
+				ChatID: "GROUP_1", ChatType: channel.ChatTypeGroup, SenderID: "TUSER_A",
+			},
 		},
 		MediaPendingSeconds: 45,
 		PersistMessage:      true,
@@ -102,7 +112,7 @@ func TestSessionBinder_StartSessionMapsWeComRouteAndFirstTurn(t *testing.T) {
 		t.Fatal("StartSession lost shared-session result")
 	}
 	got := fb.startIn
-	if got.BindingKey != "GROUP_1" || got.Body != "first turn" || got.MessageID != "m1" || got.ClaimToken != claim || got.MediaPendingSeconds != 45 || !got.PersistMessage {
+	if got.BindingKey != "GROUP_1:TUSER_A" || got.Body != "first turn" || got.MessageID != "m1" || got.ClaimToken != claim || got.MediaPendingSeconds != 45 || !got.PersistMessage {
 		t.Fatalf("start mapping wrong: %+v", got)
 	}
 	if got.Sender != creator || got.Initiator != sender {
@@ -285,4 +295,101 @@ func TestOutbound_RegisterAndHandleEventNoopOnNonWecom(t *testing.T) {
 	o.Register(bus)
 	// Publishing must not panic; the handler runs synchronously on the bus.
 	bus.Publish(events.Event{Type: protocol.EventChatDone, ChatSessionID: "55555555-5555-5555-5555-555555555555", Payload: protocol.ChatDonePayload{Content: "x"}})
+}
+
+// TestWecomSessionRouting pins the session-isolation contract: a 1:1 is one
+// continuous session per user, a group is one session PER SENDER, and the
+// composite key never leaks into an outbound address.
+func TestWecomSessionRouting(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		msg        channel.InboundMessage
+		wantKey    string
+		wantConfig string
+	}{
+		{
+			name: "p2p keys on the chat id, which already is the userid",
+			msg: channel.InboundMessage{Source: channel.Source{
+				ChatID: "TUSER_A", ChatType: channel.ChatTypeP2P, SenderID: "TUSER_A",
+			}},
+			wantKey: "TUSER_A",
+		},
+		{
+			name: "group keys on chat id and sender",
+			msg: channel.InboundMessage{Source: channel.Source{
+				ChatID: "GROUP_1", ChatType: channel.ChatTypeGroup, SenderID: "TUSER_A",
+			}},
+			wantKey:    "GROUP_1:TUSER_A",
+			wantConfig: `{"chat_id":"GROUP_1"}`,
+		},
+		{
+			name: "a second speaker in the same room gets a second session",
+			msg: channel.InboundMessage{Source: channel.Source{
+				ChatID: "GROUP_1", ChatType: channel.ChatTypeGroup, SenderID: "TUSER_B",
+			}},
+			wantKey:    "GROUP_1:TUSER_B",
+			wantConfig: `{"chat_id":"GROUP_1"}`,
+		},
+		{
+			name: "a group message with no sender falls back to the room key",
+			msg: channel.InboundMessage{Source: channel.Source{
+				ChatID: "GROUP_1", ChatType: channel.ChatTypeGroup,
+			}},
+			wantKey: "GROUP_1",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			key, config := wecomSessionRouting(tc.msg)
+			if key != tc.wantKey {
+				t.Errorf("bindingKey = %q, want %q", key, tc.wantKey)
+			}
+			if string(config) != tc.wantConfig {
+				t.Errorf("config = %q, want %q", config, tc.wantConfig)
+			}
+		})
+	}
+}
+
+// TestWecomOutboundChatID: the reply has to reach the room, never the
+// "chatid:senderid" key — and bindings written before the key was composite
+// (config empty or without chat_id) must stay deliverable.
+func TestWecomOutboundChatID(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		binding db.ChannelChatSessionBinding
+		want    string
+	}{
+		{
+			name:    "composite key: the real chat id comes off the config",
+			binding: db.ChannelChatSessionBinding{ChannelChatID: "GROUP_1:TUSER_A", Config: []byte(`{"chat_id":"GROUP_1"}`)},
+			want:    "GROUP_1",
+		},
+		{
+			name:    "1:1 binding has no config and addresses the column",
+			binding: db.ChannelChatSessionBinding{ChannelChatID: "TUSER_A"},
+			want:    "TUSER_A",
+		},
+		{
+			name:    "pre-split group binding: empty json object, column wins",
+			binding: db.ChannelChatSessionBinding{ChannelChatID: "GROUP_1", Config: []byte("{}")},
+			want:    "GROUP_1",
+		},
+		{
+			name:    "unparsable config does not strand the reply",
+			binding: db.ChannelChatSessionBinding{ChannelChatID: "GROUP_1", Config: []byte("not json")},
+			want:    "GROUP_1",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := wecomOutboundChatID(tc.binding); got != tc.want {
+				t.Errorf("wecomOutboundChatID = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
