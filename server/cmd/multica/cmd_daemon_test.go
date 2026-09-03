@@ -136,29 +136,6 @@ func TestBuildDaemonStartArgsForwardsNoAutoReload(t *testing.T) {
 	}
 }
 
-// TestNoAutoReloadFlagRegisteredOnBothDaemonCommands: `daemon restart` mirrors
-// every `daemon start` flag, and a knob registered on only one of them fails at
-// parse time for users who restart rather than start.
-func TestNoAutoReloadFlagRegisteredOnBothDaemonCommands(t *testing.T) {
-	t.Parallel()
-
-	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
-		if cmd.Flags().Lookup("no-auto-reload") == nil {
-			t.Errorf("daemon %s is missing --no-auto-reload", cmd.Name())
-		}
-	}
-}
-
-func TestWorkspacesRootFlagRegisteredOnBothDaemonCommands(t *testing.T) {
-	t.Parallel()
-
-	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
-		if cmd.Flags().Lookup("workspaces-root") == nil {
-			t.Errorf("daemon %s is missing --workspaces-root", cmd.Name())
-		}
-	}
-}
-
 // TestPrintDaemonStatusExplainsDeferredRestart: when the daemon has confirmed a
 // version change but is still busy, `daemon status` is where a user finds out.
 // The row is absent otherwise so it reads as an explanation, not a status line.

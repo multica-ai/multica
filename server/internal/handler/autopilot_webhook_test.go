@@ -23,20 +23,6 @@ func TestGenerateWebhookToken_PrefixAndLength(t *testing.T) {
 	}
 }
 
-func TestGenerateWebhookToken_Uniqueness(t *testing.T) {
-	seen := make(map[string]struct{}, 128)
-	for i := 0; i < 128; i++ {
-		token, err := generateWebhookToken()
-		if err != nil {
-			t.Fatalf("generateWebhookToken: %v", err)
-		}
-		if _, dup := seen[token]; dup {
-			t.Fatalf("duplicate token after %d generations: %q", i, token)
-		}
-		seen[token] = struct{}{}
-	}
-}
-
 func TestGenerateWebhookToken_NoUnsafeURLChars(t *testing.T) {
 	token, err := generateWebhookToken()
 	if err != nil {

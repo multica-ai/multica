@@ -371,7 +371,10 @@ func main() {
 	hub := realtime.NewHub()
 	go hub.Run()
 	daemonHub := daemonws.NewHub()
-	var daemonWakeup service.TaskWakeupNotifier = daemonHub
+	var daemonWakeup interface {
+		service.TaskWakeupNotifier
+		handler.RuntimeGoneNotifier
+	} = daemonHub
 	// Nil unless a Redis relay is running: without one there is only one
 	// replica, and it both publishes the completion and holds the socket.
 	var wecomRelay WecomRelay
@@ -585,7 +588,7 @@ func main() {
 	// be injected into the Handler. The Run goroutine starts below
 	// alongside the sweeper, and Stop is called explicitly during graceful
 	// shutdown so any pending bumps are flushed before we exit.
-	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
+	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval, daemonWakeup)
 
 	// Validate the LLM retry budget before the router exists: an operator who
 	// typed a value we cannot honor should see the boot stop, the same way a
@@ -647,6 +650,7 @@ func main() {
 	// work, so there is no separate queue TTL to tune: a busy runtime keeps its
 	// backlog, and a departed one retires everything it owned at once.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
+	go runDelegatedFailureRecoverySweeper(sweepCtx, taskSvc)
 	// Seven-day runtime retention does not share the 30-second liveness tick:
 	// its bounded transactions run independently once per hour, so a slow GC
 	// round cannot delay offline detection or task recovery.

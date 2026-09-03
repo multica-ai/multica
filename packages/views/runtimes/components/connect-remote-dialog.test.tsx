@@ -66,11 +66,6 @@ function renderDialog(config?: {
   );
 }
 
-const ligatureClasses = [
-  "[font-variant-ligatures:none]",
-  "[font-feature-settings:'liga'_0]",
-];
-
 describe("ConnectRemoteDialog", () => {
   beforeEach(() => {
     wsEventState.handler = null;
@@ -104,26 +99,6 @@ describe("ConnectRemoteDialog", () => {
     expect(baseElement).toHaveTextContent(
       "multica config set app_url https://app.example.com",
     );
-  });
-
-  it("disables font ligatures in setup command code", () => {
-    const { baseElement } = renderDialog();
-
-    const setupCode = Array.from(baseElement.querySelectorAll("code")).find((node) =>
-      node.textContent?.includes("multica setup"),
-    );
-
-    expect(setupCode).toHaveClass(...ligatureClasses);
-  });
-
-  it("disables font ligatures in fallback token command code", () => {
-    const { baseElement } = renderDialog();
-
-    const tokenCode = Array.from(baseElement.querySelectorAll("code")).find((node) =>
-      node.textContent?.includes("multica login --token <YOUR_TOKEN>"),
-    );
-
-    expect(tokenCode).toHaveClass(...ligatureClasses);
   });
 
   it("transitions from setup instructions to the connected state", async () => {

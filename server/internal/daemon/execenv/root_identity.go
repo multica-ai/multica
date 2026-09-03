@@ -167,6 +167,40 @@ func validTaskRootSegment(segment, id string, workspace bool) bool {
 	return strings.HasSuffix(segment, "-"+key)
 }
 
+// ValidateEnvRootOwnerPath proves that envRoot is the two-level task root
+// named by owner under workspacesRoot. GC callers use this before every
+// mutation: configuration may point WorkspacesRoot at an arbitrary user-owned
+// tree, and a directory's age or missing metadata is not proof that the daemon
+// created it.
+func ValidateEnvRootOwnerPath(workspacesRoot, envRoot string, owner EnvRootOwner) error {
+	if strings.TrimSpace(workspacesRoot) == "" || strings.TrimSpace(envRoot) == "" {
+		return errors.New("execenv: workspaces root and env root are required")
+	}
+	if owner.WorkspaceID == "" || owner.TaskID == "" {
+		return errors.New("execenv: env root owner must name both workspace and task")
+	}
+
+	relative, err := filepath.Rel(workspacesRoot, envRoot)
+	if err != nil {
+		return fmt.Errorf("execenv: make env root relative: %w", err)
+	}
+	relative = filepath.Clean(relative)
+	if relative == "." || filepath.IsAbs(relative) {
+		return fmt.Errorf("execenv: env root %s is not a task directory below %s", envRoot, workspacesRoot)
+	}
+	parts := strings.Split(relative, string(filepath.Separator))
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || parts[0] == ".." || parts[1] == ".." {
+		return fmt.Errorf("execenv: env root %s is not exactly two levels below %s", envRoot, workspacesRoot)
+	}
+	if !validTaskRootSegment(parts[0], owner.WorkspaceID, true) {
+		return fmt.Errorf("execenv: workspace directory %q does not match owner %s", parts[0], owner.WorkspaceID)
+	}
+	if !validTaskRootSegment(parts[1], owner.TaskID, false) {
+		return fmt.Errorf("execenv: task directory %q does not match owner %s", parts[1], owner.TaskID)
+	}
+	return nil
+}
+
 // RemoveRootDirRecord removes the stable index after GC has reclaimed a
 // terminal task root. It verifies that the record still points at envRoot so a
 // stale cleanup can never remove another task's identity.

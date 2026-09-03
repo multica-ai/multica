@@ -12,6 +12,14 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+type recordingRuntimeGoneNotifier struct {
+	runtimeIDs []string
+}
+
+func (n *recordingRuntimeGoneNotifier) NotifyRuntimeGone(runtimeID string) {
+	n.runtimeIDs = append(n.runtimeIDs, runtimeID)
+}
+
 // parseExpectedActiveAgentIDs is the cascade endpoint's input validator.
 // Empty list is a valid plan ("no active agents" — cascade just deletes the
 // runtime); malformed UUIDs must surface as 400 so a bug in the front-end
@@ -335,7 +343,10 @@ func TestDeleteAgentRuntime_OrphanedProfileAllowsDirectDelete(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.DeleteAgentRuntime(w, req)
+	notifier := &recordingRuntimeGoneNotifier{}
+	h := *testHandler
+	h.DaemonRuntimeGone = notifier
+	h.DeleteAgentRuntime(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -346,6 +357,9 @@ func TestDeleteAgentRuntime_OrphanedProfileAllowsDirectDelete(t *testing.T) {
 	}
 	if rtRows != 0 {
 		t.Fatalf("expected orphaned custom runtime instance to be deleted, count=%d", rtRows)
+	}
+	if len(notifier.runtimeIDs) != 1 || notifier.runtimeIDs[0] != runtimeID {
+		t.Fatalf("runtime-gone notifications = %v, want [%s]", notifier.runtimeIDs, runtimeID)
 	}
 }
 
@@ -366,7 +380,10 @@ func TestUnbindAgentsAndDeleteRuntime_HappyPath(t *testing.T) {
 	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete",
 		map[string]any{"expected_active_agent_ids": []string{agentID}})
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.UnbindAgentsAndDeleteRuntime(w, req)
+	notifier := &recordingRuntimeGoneNotifier{}
+	h := *testHandler
+	h.DaemonRuntimeGone = notifier
+	h.UnbindAgentsAndDeleteRuntime(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -420,6 +437,9 @@ func TestUnbindAgentsAndDeleteRuntime_HappyPath(t *testing.T) {
 	// archive-and-delete contract.
 	if body.AgentsArchived != 1 {
 		t.Fatalf("agents_archived mirror = %d, want 1", body.AgentsArchived)
+	}
+	if len(notifier.runtimeIDs) != 1 || notifier.runtimeIDs[0] != runtimeID {
+		t.Fatalf("runtime-gone notifications = %v, want [%s]", notifier.runtimeIDs, runtimeID)
 	}
 }
 

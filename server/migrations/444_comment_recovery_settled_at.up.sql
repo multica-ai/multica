@@ -1,0 +1,23 @@
+-- Durable "this delegated-failure recovery is finished" marker.
+--
+-- The recovery outbox scan (ListPendingDelegatedFailureRecoveries) had no
+-- indexable settled state: every recovery comment ever written stayed in the
+-- candidate partial index from migration 343 forever, and each sweeper tick
+-- re-proved through four joins and two NOT EXISTS subqueries that it was
+-- already handled. LIMIT bounded the rows RETURNED, never the rows CHECKED, so
+-- a tick that found nothing still grew more expensive as history accumulated.
+--
+-- This column is that missing state. It is written only inside the transaction
+-- that makes a task terminal, and only for recovery comments already present in
+-- that task's delivered_comment_ids receipt — the one condition in the scan
+-- that is monotonic. A NULL therefore means "not proven finished", which is the
+-- safe direction: an unmarked row is still scanned exactly as it is today and
+-- no recovery can be lost, while a marked row is provably settled.
+--
+-- Nullable with no default keeps this metadata-only and instant on a hot table,
+-- the same reason comment.quick_action_id (239) and comment.via_plugin_id (348)
+-- are shaped this way. No FK per repository policy.
+--
+-- The matching partial index is migration 445: PostgreSQL rejects CREATE INDEX
+-- CONCURRENTLY in a multi-command string, so the two cannot share a file.
+ALTER TABLE comment ADD COLUMN IF NOT EXISTS recovery_settled_at TIMESTAMPTZ;

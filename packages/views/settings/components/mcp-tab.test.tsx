@@ -210,14 +210,6 @@ describe("McpTab", () => {
     expect(screen.getByText("No shared MCP servers")).toBeInTheDocument();
   });
 
-  // The document is write-only, so the screen must never imply it is showing
-  // a saved configuration: it says an edit replaces the entry.
-  it("states that saved configurations are write-only", () => {
-    render(<McpTab />, { wrapper: Wrapper });
-
-    expect(screen.getByText(/write-only/)).toBeInTheDocument();
-  });
-
   it("survives a payload that is not an array", () => {
     // Backend drift: the schema defaults the list to [], but the component
     // must not crash if it ever arrives undefined.

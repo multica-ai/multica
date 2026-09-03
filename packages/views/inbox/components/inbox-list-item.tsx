@@ -9,8 +9,11 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { Archive, ArchiveRestore } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
-import { InboxDetailLabel } from "./inbox-detail-label";
-import { getInboxDisplayTitle } from "./inbox-display";
+import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";
+import {
+  getInboxDisplayTitle,
+  isAutopilotQuotaNotice,
+} from "./inbox-display";
 import { useInboxContextMenu } from "./inbox-context-menu";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { InboxRowMenu } from "./inbox-row-menu";
@@ -53,6 +56,7 @@ export function InboxListItem({
 }) {
   const { t } = useT("inbox");
   const timeAgo = useTimeAgo();
+  const typeLabels = useTypeLabels();
   // Inbox is a cross-workspace surface, so the catalog is read against the
   // item's OWN workspace rather than the route's. (MUL-6243)
   const { categoryOf: statusCategoryOf, colorOf: statusColorOf } =
@@ -68,7 +72,9 @@ export function InboxListItem({
       ? paths.workspace(slug).issueDetail(item.issue_id)
       : null;
   const intentNavigate = useIntentNavigate();
-  const displayTitle = getInboxDisplayTitle(item);
+  const displayTitle = isAutopilotQuotaNotice(item.type)
+    ? typeLabels[item.type]
+    : getInboxDisplayTitle(item);
   const isArchivedView = view === "archived";
   // Archiving deliberately leaves `read` untouched so unarchiving restores the
   // real unread state, so archived rows would otherwise keep an unread marker

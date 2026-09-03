@@ -96,6 +96,7 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 | `runtime_offline` | The runtime went offline during the run | Restore the runtime and retry; see [Daemon and runtimes](/daemon-runtimes) |
 | `queued_expired` | The runtime stopped heartbeating for longer than the reconnect grace, and the task had also been queued that long | Confirm the runtime is online, then retry |
 | `runtime_recovery` | The daemon reclaimed an interrupted run after restarting | Retry directly |
+| `environment_prepare_failed` | The daemon could not set up the execution environment for this run — its working directory, or the local runtime config written into it | Read the raw error to see which step failed, then check that machine: disk space, permissions, a directory still in use, or the AI coding tool's local config |
 | `cancelled` | Stopped manually, or cancelled along with an archive or delete | Nothing to do |
 | `timeout` | Exceeded the daemon's configured execution time limit | Narrow the issue scope, or adjust the daemon's `agent_timeout` |
 | `iteration_limit` | Hit the iteration cap for a run | Narrow the issue scope |

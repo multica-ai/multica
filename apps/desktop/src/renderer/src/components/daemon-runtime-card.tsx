@@ -23,16 +23,18 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { toast } from "sonner";
+import { useT } from "@multica/views/i18n";
 import { DaemonPanel } from "./daemon-panel";
 import { reauthenticateDaemon } from "../platform/daemon-reauth";
 import type { DaemonStatus } from "../../../shared/daemon-types";
-import { DAEMON_STATE_LABELS } from "../../../shared/daemon-types";
+import { daemonStateLabel } from "./daemon-i18n";
 
 /**
  * Desktop-only controls for the daemon embedded in this Electron app. The
  * shared runtimes page renders this inside the selected local machine header.
  */
 export function DaemonRuntimeActions() {
+  const { t } = useT("settings");
   const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
   const [panelOpen, setPanelOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -77,17 +79,21 @@ export function DaemonRuntimeActions() {
     const result = await window.daemonAPI.start();
     if (!result.success) {
       setActionLoading(false);
-      toast.error("Failed to start daemon", { description: result.error });
+      toast.error(t(($) => $.desktop.daemon.start_failed), {
+        description: result.error,
+      });
     }
-  }, []);
+  }, [t]);
 
   const performStop = useCallback(async () => {
     setActionLoading(true);
     const result = await window.daemonAPI.stop();
     if (!result.success) {
-      toast.error("Failed to stop daemon", { description: result.error });
+      toast.error(t(($) => $.desktop.daemon.stop_failed), {
+        description: result.error,
+      });
     }
-  }, []);
+  }, [t]);
 
   const handleStopClick = useCallback(() => {
     if (affectedTasks.length === 0) {
@@ -101,13 +107,15 @@ export function DaemonRuntimeActions() {
     setActionLoading(true);
     const result = await window.daemonAPI.restart();
     if (!result.success) {
-      toast.error("Failed to restart daemon", { description: result.error });
+      toast.error(t(($) => $.desktop.daemon.restart_failed), {
+        description: result.error,
+      });
       return;
     }
-    toast.success("Restarting daemon", {
-      description: "Runtimes will be back online in a few seconds.",
+    toast.success(t(($) => $.desktop.daemon.restarting), {
+      description: t(($) => $.desktop.daemon.restarting_description),
     });
-  }, []);
+  }, [t]);
 
   const handleRetryInstall = useCallback(async () => {
     setActionLoading(true);
@@ -120,11 +128,11 @@ export function DaemonRuntimeActions() {
 
   const handleReauth = useCallback(async () => {
     setActionLoading(true);
-    await reauthenticateDaemon();
+    await reauthenticateDaemon(t);
     // onStatusChange resets actionLoading on the next status push; reset here
     // too in case reauth logged out (unmount) or produced no status change.
     setActionLoading(false);
-  }, []);
+  }, [t]);
 
   const isRunning = status.state === "running";
   // The daemon runs somewhere the app can't drive (e.g. inside WSL2): the
@@ -148,12 +156,12 @@ export function DaemonRuntimeActions() {
           <>
             <Button size="sm" variant="ghost" onClick={() => setPanelOpen(true)}>
               <ScrollText className="size-3.5 mr-1.5" />
-              View logs
+              {t(($) => $.desktop.daemon.view_logs)}
             </Button>
             {externallyManaged ? (
               <span className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
                 <Info className="size-3.5 shrink-0" />
-                Managed outside the app
+                {t(($) => $.desktop.daemon.managed_externally)}
               </span>
             ) : (
               <>
@@ -164,7 +172,7 @@ export function DaemonRuntimeActions() {
                   disabled={actionLoading}
                 >
                   <RotateCw className="size-3.5 mr-1.5" />
-                  Restart
+                  {t(($) => $.desktop.daemon.restart)}
                 </Button>
                 <Button
                   size="sm"
@@ -173,7 +181,7 @@ export function DaemonRuntimeActions() {
                   disabled={actionLoading}
                 >
                   <Square className="size-3.5 mr-1.5" />
-                  Stop
+                  {t(($) => $.desktop.daemon.stop)}
                 </Button>
               </>
             )}
@@ -187,7 +195,7 @@ export function DaemonRuntimeActions() {
             ) : (
               <Play className="size-3.5 mr-1.5" />
             )}
-            Start
+            {t(($) => $.desktop.daemon.start)}
           </Button>
         )}
 
@@ -199,7 +207,7 @@ export function DaemonRuntimeActions() {
             disabled={actionLoading}
           >
             <RotateCw className="size-3.5 mr-1.5" />
-            Retry setup
+            {t(($) => $.desktop.daemon.retry_setup)}
           </Button>
         )}
 
@@ -207,7 +215,7 @@ export function DaemonRuntimeActions() {
           <>
             <span className="inline-flex items-center gap-1.5 text-caption text-destructive">
               <AlertCircle className="size-3.5 shrink-0" />
-              Sign-in expired
+              {t(($) => $.desktop.daemon.signin_expired)}
             </span>
             <Button size="sm" onClick={handleReauth} disabled={actionLoading}>
               {actionLoading ? (
@@ -215,7 +223,7 @@ export function DaemonRuntimeActions() {
               ) : (
                 <LogIn className="size-3.5 mr-1.5" />
               )}
-              Sign in again
+              {t(($) => $.desktop.daemon.signin_again)}
             </Button>
           </>
         )}
@@ -223,7 +231,7 @@ export function DaemonRuntimeActions() {
         {(isTransitioning || isInstalling) && (
           <Button size="sm" variant="outline" disabled>
             <Activity className="size-3.5 mr-1.5 animate-pulse" />
-            {DAEMON_STATE_LABELS[status.state]}
+            {daemonStateLabel(status.state, t)}
           </Button>
         )}
       </div>
@@ -261,8 +269,7 @@ function StopConfirmDialog({
   affectedCount: number;
   onConfirm: () => void;
 }) {
-  const plural = affectedCount === 1 ? "" : "s";
-  const verb = affectedCount === 1 ? "is" : "are";
+  const { t } = useT("settings");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -273,22 +280,23 @@ function StopConfirmDialog({
           </div>
           <DialogHeader className="flex-1 gap-1">
             <DialogTitle className="text-body font-semibold">
-              Stop daemon with {affectedCount} active task{plural}?
+              {t(($) => $.desktop.daemon.stop_confirm_title, {
+                count: affectedCount,
+              })}
             </DialogTitle>
             <DialogDescription className="text-caption leading-relaxed">
-              {affectedCount} task{plural} {verb} currently running on this
-              device. Stopping now will interrupt {affectedCount === 1 ? "it" : "them"}{" "}
-              — affected tasks get marked <strong>failed</strong> once the
-              timeout hits. The daemon won&apos;t auto-restart.
+              {t(($) => $.desktop.daemon.stop_confirm_description, {
+                count: affectedCount,
+              })}
             </DialogDescription>
           </DialogHeader>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t(($) => $.desktop.daemon.cancel)}
           </Button>
           <Button variant="destructive" onClick={onConfirm}>
-            Stop daemon
+            {t(($) => $.desktop.daemon.stop_daemon)}
           </Button>
         </DialogFooter>
       </DialogContent>

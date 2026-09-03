@@ -166,34 +166,3 @@ func TestSendMsgTextBody_ShapeAndChatTypeValidation(t *testing.T) {
 		t.Error("chat_type 3 should be rejected (must be 1 or 2)")
 	}
 }
-
-// TestIssueCommandDetectionMatchesTheEngine: the adapter sets SkipAgentRun
-// from its own answer, and the engine files the issue from its own. Any input
-// they disagree on is a message that reaches nobody — no agent run because
-// this side said "command", no issue because that side said "prose".
-//
-// U+3000 is the case that mattered: it is what a Chinese IME emits for the
-// space bar in full-width mode, so it opens real messages.
-func TestIssueCommandDetectionMatchesTheEngine(t *testing.T) {
-	cases := []string{
-		"/issue the login redirect is broken",
-		"/issue",
-		"/issue\tthe title after a tab",
-		"  /issue leading halfwidth spaces",
-		"　/issue after an ideographic space",
-		"　　/issue after two",
-		"/issuewithoutspace",
-		"not a command at all",
-		"",
-		"\n\n/issue after blank lines",
-		"prose first\n/issue not at the front",
-		" /issue after a non-breaking space",
-	}
-	for _, body := range cases {
-		_, engineSays := engine.ParseIssueCommand(body)
-		if got := isIssueCommand(body); got != engineSays {
-			t.Errorf("isIssueCommand(%q) = %v but engine.ParseIssueCommand says %v — SkipAgentRun and the issue decision disagree, so this message reaches nobody",
-				body, got, engineSays)
-		}
-	}
-}

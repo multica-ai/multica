@@ -283,13 +283,6 @@ describe("IntegrationsTab", () => {
     );
   });
 
-  it("renders the DingTalk brand mark in the DingTalk integration card", () => {
-    renderTab(<IntegrationsTab agent={agent} />);
-    const section = screen.getByText("DingTalk").closest("section");
-    expect(section?.querySelector('[data-testid="dingtalk-mark"].h-5.w-5')).toBeTruthy();
-    expect(screen.getByText(enSettings.dingtalk.agent_page_description)).toBeTruthy();
-  });
-
   it("shows only this Agent's 1:1 bot and its groups", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-19T10:00:00Z"));

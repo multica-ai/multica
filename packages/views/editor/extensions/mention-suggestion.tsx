@@ -14,6 +14,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { issueStatusCategory } from "@multica/core/issues";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
@@ -262,6 +263,7 @@ function demoteCancelledItems(items: MentionItem[], query: string): MentionItem[
 export const MentionList = forwardRef<MentionListRef, MentionListProps>(
   function MentionList({ items, query, command, includeProjectSearch = false }, ref) {
     const { t } = useT("editor");
+    const { colorOf: statusColorOf } = useIssueStatuses(getCurrentWsId() ?? "");
     // Selection is tracked by item identity, NOT by a positional index. The
     // list is re-bucketed by groupItems() and grows asynchronously (server
     // search results), so a slot index is not a stable target — the row under
@@ -469,6 +471,11 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
           <MentionRow
             key={`${item.type}-${item.id}`}
             item={item}
+            statusColor={
+              item.type === "issue" && item.status
+                ? statusColorOf(item.status)
+                : null
+            }
             selected={idx === selectedIndex}
             onSelect={() => selectItem(item)}
             buttonRef={(el) => { itemRefs.current[idx] = el; }}
@@ -517,11 +524,13 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
 
 function MentionRow({
   item,
+  statusColor,
   selected,
   onSelect,
   buttonRef,
 }: {
   item: MentionItem;
+  statusColor?: string | null;
   selected: boolean;
   onSelect: () => void;
   buttonRef: (el: HTMLButtonElement | null) => void;
@@ -547,6 +556,7 @@ function MentionRow({
             <StatusIcon
               status={item.status}
               category={item.statusCategory}
+              color={statusColor}
               className="h-3.5 w-3.5"
             />
           ) : (
