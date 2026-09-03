@@ -48,6 +48,8 @@
     "original_input": "원본 입력",
     "retry_with_context": "컨텍스트를 유지하여 재시도",
     "edit_advanced": "고급 양식으로 수정",
+    "autopilot_quota_exceeded_body": "이 워크스페이스는 현재 기간의 자동화 실행 한도 {{limit}}회에 도달했습니다. 한도가 {{resetAt}}에 초기화될 때까지 이후 자동화 실행은 시작되지 않습니다.",
+    "autopilot_quota_upgrade": "업그레이드 옵션 보기",
     "archive": "보관",
     "unarchive": "보관 해제"
   },
@@ -70,7 +72,9 @@
     "reaction_added": "반응 추가됨",
     "quick_create_done": "에이전트로 생성됨",
     "quick_create_failed": "에이전트 생성 실패",
-    "quick_create_unconfirmed": "에이전트 생성 결과 미확인"
+    "quick_create_unconfirmed": "에이전트 생성 결과 미확인",
+    "autopilot_paused": "자동화 일시 중지됨",
+    "autopilot_quota_exceeded": "자동화 실행 한도 도달"
   },
   "labels": {
     "set_status_to": "상태 변경:",
@@ -83,7 +87,8 @@
     "removed_due_date": "마감일 제거됨",
     "reacted_to_comment": "내 댓글에 {{emoji}} 반응을 남겼습니다",
     "created_with_agent": "에이전트가 생성: {{identifier}}",
-    "failed_with_detail": "실패: {{detail}}"
+    "failed_with_detail": "실패: {{detail}}",
+    "autopilot_quota_blocked": "한도에 도달하여 실행이 차단됨"
   },
   "toasts": {
     "source_context_retry_started": "원본 컨텍스트로 재시도를 시작했습니다",

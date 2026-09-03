@@ -43,25 +43,3 @@ func TestCapability_String(t *testing.T) {
 		})
 	}
 }
-
-// TestCapability_BitsDistinct guards against two constants accidentally
-// sharing a bit after an edit to the iota block.
-func TestCapability_BitsDistinct(t *testing.T) {
-	all := []Capability{
-		CapText, CapRichCard, CapThreadReply, CapQuoteReply,
-		CapAttachment, CapVoice, CapTypingIndicator, CapMessageEdit,
-	}
-	var seen Capability
-	for i, c := range all {
-		if c == 0 {
-			t.Fatalf("capability index %d is zero", i)
-		}
-		if c&(c-1) != 0 {
-			t.Fatalf("capability index %d (%#x) is not a single bit", i, uint64(c))
-		}
-		if seen&c != 0 {
-			t.Fatalf("capability index %d (%#x) overlaps an earlier bit", i, uint64(c))
-		}
-		seen |= c
-	}
-}

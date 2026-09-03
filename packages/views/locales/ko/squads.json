@@ -19,6 +19,10 @@
     "details_section": "세부 정보",
     "archive_button": "보관"
   },
+  "member_type": {
+    "agent": "에이전트",
+    "member": "멤버"
+  },
   "archive_dialog": {
     "title": "이 스쿼드를 보관할까요?",
     "description": "\"{{name}}\"이(가) 보관됩니다. 현재 이 스쿼드에 할당된 태스크는 리더에게 이전됩니다. 이 작업은 되돌릴 수 없습니다. 라우팅을 다시 쓰려면 새 스쿼드를 만드세요.",
@@ -28,7 +32,13 @@
     "success": "스쿼드를 보관했습니다"
   },
   "name_editor": {
-    "cancel": "취소"
+    "title": "스쿼드 이름 변경",
+    "placeholder": "스쿼드 이름",
+    "required": "이름을 입력하세요",
+    "cancel": "취소",
+    "save": "저장",
+    "saved": "저장했습니다",
+    "save_failed": "저장하지 못했습니다"
   },
   "add_member_dialog": {
     "title": "멤버 추가",
@@ -36,13 +46,24 @@
     "label_member": "멤버",
     "label_role": "역할",
     "label_optional": "(선택 사항)",
-    "placeholder_role_inline": "역할 추가...",
-    "cancel": "취소"
+    "cancel": "취소",
+    "select_target": "멤버 또는 에이전트 선택",
+    "search_placeholder": "멤버 또는 에이전트 검색...",
+    "members_section": "멤버",
+    "agents_section": "에이전트",
+    "role_placeholder": "예: 리뷰어, 프런트엔드 리드",
+    "add": "추가"
+  },
+  "role_editor": {
+    "empty": "역할 추가...",
+    "placeholder": "역할(예: 리뷰어)"
   },
   "description_dialog": {
     "title": "설명 수정",
     "placeholder_empty": "설명 추가",
-    "cancel": "취소"
+    "cancel": "취소",
+    "responsibility_placeholder": "이 스쿼드는 무엇을 담당하나요?",
+    "save": "저장"
   },
   "discard_changes_dialog": {
     "title": "저장하지 않은 변경사항을 버릴까요?",
@@ -68,6 +89,29 @@
     "active_issue_more": "외 {{count}}개",
     "last_active_label": "마지막 활동 {{time}}"
   },
+  "detail_tabs": {
+    "members": "멤버",
+    "instructions": "지침"
+  },
+  "details": {
+    "leader": "리더",
+    "members": "멤버",
+    "created_by": "생성자",
+    "created": "생성일",
+    "updated": "수정일"
+  },
+  "toasts": {
+    "member_added": "멤버를 추가했습니다",
+    "member_add_failed": "멤버를 추가하지 못했습니다",
+    "member_removed": "멤버를 제거했습니다",
+    "member_remove_failed": "멤버를 제거하지 못했습니다",
+    "role_updated": "역할을 업데이트했습니다",
+    "role_update_failed": "역할을 업데이트하지 못했습니다",
+    "leader_updated": "리더를 업데이트했습니다",
+    "leader_update_failed": "리더를 업데이트하지 못했습니다",
+    "archive_failed": "스쿼드를 보관하지 못했습니다",
+    "instructions_saved": "지침을 저장했습니다"
+  },
   "profile_card": {
     "unavailable": "스쿼드를 사용할 수 없습니다",
     "detail_link": "자세히 →",
@@ -79,7 +123,8 @@
   "instructions_tab": {
     "description": "스쿼드에 할당된 태스크를 리더 에이전트가 처리할 때마다 스쿼드 지침이 리더 프롬프트에 포함됩니다. 스쿼드 전체의 방향, 협업 규칙, 매 작업마다 따라야 할 맥락을 리더에게 전달할 때 사용하세요.",
     "unsaved_changes": "저장하지 않은 변경사항",
-    "save_button": "저장"
+    "save_button": "저장",
+    "placeholder": "예: 항상 실패하는 테스트부터 작성합니다. 커밋은 작고 독립적으로 유지합니다."
   },
   "scope": {
     "mine": "내 스쿼드",

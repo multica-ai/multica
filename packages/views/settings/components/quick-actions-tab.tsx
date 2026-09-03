@@ -61,7 +61,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { AgentPicker } from "../../autopilots/components/pickers/agent-picker";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 
 // Quick Actions catalog (MUL-5465).
@@ -187,6 +187,7 @@ function toFormState(action: QuickAction): FormState {
 
 export function QuickActionsTab() {
   const { t } = useT("settings");
+  const locale = useLocale();
   const wsId = useWorkspaceId();
   const { data: actions = [], isLoading } = useQuery(quickActionListOptions(wsId, true));
 
@@ -331,7 +332,7 @@ export function QuickActionsTab() {
                         : t(($) => $.quick_actions.used_count, { count: action.use_count })}
                     </span>
                     <span className="text-caption text-muted-foreground">
-                      {new Date(action.updated_at).toLocaleDateString()}
+                      {new Date(action.updated_at).toLocaleDateString(locale)}
                     </span>
                     <DropdownMenu>
                       <DropdownMenuTrigger

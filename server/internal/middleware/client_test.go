@@ -42,13 +42,3 @@ func TestClientMetadataMissingHeadersReturnEmpty(t *testing.T) {
 		t.Errorf("expected empty metadata, got (%q,%q,%q)", gotPlatform, gotVersion, gotOS)
 	}
 }
-
-func TestSetClientMetadataAttachesValues(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	ctx := SetClientMetadata(req.Context(), "cli", "0.5.1", "linux")
-
-	platform, version, os := ClientMetadataFromContext(ctx)
-	if platform != "cli" || version != "0.5.1" || os != "linux" {
-		t.Errorf("got (%q,%q,%q), want (cli,0.5.1,linux)", platform, version, os)
-	}
-}

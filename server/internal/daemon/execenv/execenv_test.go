@@ -510,17 +510,13 @@ func TestPrepareDirectoryMode(t *testing.T) {
 		t.Fatalf("MulticaConfigRoot mode = %o, want 700", got)
 	}
 
-	// Verify context file contains issue ID and CLI hints.
-	content, err := os.ReadFile(filepath.Join(env.WorkDir, ".agent_context", "issue_context.md"))
-	if err != nil {
-		t.Fatalf("failed to read issue_context.md: %v", err)
-	}
-	if !strings.Contains(string(content), "a1b2c3d4-e5f6-7890-abcd-ef1234567890") {
-		t.Fatalf("issue_context.md missing the issue id")
-	}
-	// The skill list lives in the runtime brief only (MUL-5529).
-	if strings.Contains(string(content), "code-review") {
-		t.Fatalf("issue_context.md should no longer carry a skill list:\n%s", content)
+	// No Markdown sidecar: the issue id, trigger and handoff facts reach the
+	// agent through the runtime brief and the per-turn message, and the file
+	// that used to repeat them had no reader (MUL-6984). The marker below is
+	// the one sidecar with a consumer — the CLI reads it to recognise a
+	// daemon task when a sandbox strips MULTICA_* from the environment.
+	if _, err := os.Stat(filepath.Join(env.WorkDir, ".agent_context", "issue_context.md")); !os.IsNotExist(err) {
+		t.Fatalf("Prepare wrote a sidecar brief; stat err = %v, want not-exist", err)
 	}
 
 	markerContent, err := os.ReadFile(filepath.Join(env.WorkDir, TaskContextMarkerRelPath))
@@ -830,24 +826,13 @@ func TestWriteContextFiles(t *testing.T) {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(dir, ".agent_context", "issue_context.md"))
-	if err != nil {
-		t.Fatalf("failed to read: %v", err)
-	}
-
-	s := string(content)
-	if !strings.Contains(s, "test-issue-id-1234") {
-		t.Errorf("content missing %q", "test-issue-id-1234")
-	}
-
-	// Issue details should NOT be in the context file (agent fetches via CLI).
-	//
-	// Nor the skill list: nothing ever read this copy, and the runtime brief
-	// carries the same names-only index (MUL-5529).
-	for _, absent := range []string{"## Description", "## Workspace Context", "## Agent Skills", "go-conventions"} {
-		if strings.Contains(s, absent) {
-			t.Errorf("content should NOT contain %q", absent)
-		}
+	// writeContextFiles hydrates skills; it writes no Markdown brief of its
+	// own. The sidecar it used to write, .agent_context/issue_context.md, was
+	// a third copy of the issue id / trigger / handoff facts that the runtime
+	// brief and the per-turn message already carry, and no provider ever read
+	// it (MUL-6984).
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); !os.IsNotExist(err) {
+		t.Fatalf("writeContextFiles wrote a sidecar brief; stat err = %v, want not-exist", err)
 	}
 
 	// Verify skill directory and files.
@@ -868,68 +853,27 @@ func TestWriteContextFiles(t *testing.T) {
 	}
 }
 
-func TestWriteContextFilesOmitsSkillsWhenEmpty(t *testing.T) {
+// TestWriteContextFilesLeavesNoAgentContextWhenNothingToWrite covers the task
+// with no skills and no project resources. Since the sidecar brief was removed
+// (MUL-6984) that task needs nothing under .agent_context at all, and the
+// directory must not be created speculatively: on a local_directory task this
+// is the USER's own checkout, where an empty managed directory is both noise
+// and something CleanupSidecars then has to reason about removing.
+func TestWriteContextFilesLeavesNoAgentContextWhenNothingToWrite(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	ctx := TaskContextForEnv{
-		IssueID: "minimal-issue-id",
-	}
-
-	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
+	if err := writeContextFiles(dir, "", TaskContextForEnv{IssueID: "minimal-issue-id"}, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(dir, ".agent_context", "issue_context.md"))
-	if err != nil {
-		t.Fatalf("failed to read: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
+		t.Fatalf(".agent_context created with nothing to put in it; stat err = %v, want not-exist", err)
 	}
-
-	s := string(content)
-	if !strings.Contains(s, "minimal-issue-id") {
-		t.Error("expected issue ID to be present")
-	}
-	if strings.Contains(s, "## Agent Skills") {
-		t.Error("expected skills section to be omitted when no skills")
-	}
-}
-
-func TestWriteContextFilesAutopilotRunOnly(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		AutopilotRunID:       "run-1",
-		AutopilotID:          "autopilot-1",
-		AutopilotTitle:       "Daily dependency check",
-		AutopilotDescription: "Check dependencies and report outdated packages.",
-		AutopilotSource:      "manual",
-	}
-
-	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	content, err := os.ReadFile(filepath.Join(dir, ".agent_context", "issue_context.md"))
-	if err != nil {
-		t.Fatalf("failed to read: %v", err)
-	}
-
-	s := string(content)
-	for _, want := range []string{
-		"# Autopilot Run",
-		"run-1",
-		"autopilot-1",
-		"Check dependencies and report outdated packages.",
-		"multica autopilot get autopilot-1 --output json",
-		"no assigned issue",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("autopilot context missing %q\n---\n%s", want, s)
-		}
-	}
-	if strings.Contains(s, "Run `multica issue get") {
-		t.Errorf("autopilot context should not contain issue get workflow\n---\n%s", s)
+	// The marker is a separate contract (the CLI's daemon-task fallback) and
+	// must still be there.
+	if _, err := os.Stat(filepath.Join(dir, TaskContextMarkerRelPath)); err != nil {
+		t.Fatalf("task context marker missing: %v", err)
 	}
 }
 
@@ -977,9 +921,12 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 		t.Error("expected .agent_context/skills/ to NOT exist for Claude provider")
 	}
 
-	// issue_context.md should still be in .agent_context/.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
-		t.Error("expected .agent_context/issue_context.md to exist")
+	// Nothing at all belongs under .agent_context for a native-skills
+	// provider now that the sidecar brief is gone (MUL-6984) — not even the
+	// directory. This runs in the user's own checkout on local_directory
+	// tasks, where an empty managed directory is noise.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
+		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
 	}
 }
 
@@ -1041,9 +988,12 @@ func TestWriteContextFilesCodebuddyNativeSkills(t *testing.T) {
 		t.Error("expected .agent_context/skills/ to NOT exist for codebuddy provider")
 	}
 
-	// issue_context.md should still be in .agent_context/.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
-		t.Error("expected .agent_context/issue_context.md to exist")
+	// Nothing at all belongs under .agent_context for a native-skills
+	// provider now that the sidecar brief is gone (MUL-6984) — not even the
+	// directory. This runs in the user's own checkout on local_directory
+	// tasks, where an empty managed directory is noise.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
+		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
 	}
 }
 
@@ -1365,6 +1315,7 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 		{"claude", "CLAUDE.md"},
 		{"codex", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
+		{"codearts", "AGENTS.md"},
 		{"hermes", "AGENTS.md"},
 	}
 
@@ -1416,6 +1367,10 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				"verify readiness",
 				"URL, logs, and stop instructions",
 				"survival as best-effort, not guaranteed",
+				"Never terminate `multica` or `multica.exe` by executable name",
+				"exact child PID you started",
+				"`multica daemon status --output json`",
+				"never kill it if it is the reported daemon PID",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing background task safety text %q\n---\n%s", tc.file, want, s)
@@ -1627,9 +1582,12 @@ func TestWriteContextFilesCopilotNativeSkills(t *testing.T) {
 		t.Error("expected .agent_context/skills/ to NOT exist for Copilot provider")
 	}
 
-	// issue_context.md should still be in .agent_context/.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
-		t.Error("expected .agent_context/issue_context.md to exist")
+	// Nothing at all belongs under .agent_context for a native-skills
+	// provider now that the sidecar brief is gone (MUL-6984) — not even the
+	// directory. This runs in the user's own checkout on local_directory
+	// tasks, where an empty managed directory is noise.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
+		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
 	}
 }
 
@@ -1696,9 +1654,12 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 		t.Error("expected .agent_context/skills/ to NOT exist for OpenCode provider")
 	}
 
-	// issue_context.md should still be in .agent_context/.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
-		t.Error("expected .agent_context/issue_context.md to exist")
+	// Nothing at all belongs under .agent_context for a native-skills
+	// provider now that the sidecar brief is gone (MUL-6984) — not even the
+	// directory. This runs in the user's own checkout on local_directory
+	// tasks, where an empty managed directory is noise.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
+		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
 	}
 }
 
@@ -2575,7 +2536,9 @@ func TestInjectRuntimeConfigQuickCreateOutputPrefixAgnostic(t *testing.T) {
 	for _, want := range []string{
 		"quick-create task",
 		"Created <identifier-or-id>: <title>",
-		"identifier` from JSON output",
+		// Rules moved into the Workflow section (MUL-6984); the identifier
+		// must still come from the JSON, not from scraped human output.
+		"`identifier` (preferred) or `id` (fallback) from the JSON response",
 		"never assume a workspace issue prefix",
 	} {
 		if !strings.Contains(s, want) {
@@ -2614,9 +2577,7 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 
 	for _, want := range []string{
 		"Autopilot in run-only mode",
-		"Autopilot run ID: `run-1`",
-		"Check dependencies and report outdated packages.",
-		"multica autopilot get autopilot-1 --output json",
+		AutopilotIssueCommandsGuard,
 		"Your final assistant output is captured automatically as the autopilot run result",
 	} {
 		if !strings.Contains(s, want) {
@@ -2627,6 +2588,15 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 	for _, absent := range []string{
 		"Run `multica issue get",
 		"Final results MUST be delivered via `multica issue comment add`",
+		// Per-run VALUES belong to the per-turn message, which renders them
+		// once (daemon.buildAutopilotPrompt). This file is the prompt-cache
+		// prefix, and its own contract is that no per-run identifier reaches
+		// it (MUL-5377); a second copy of the data here also gave MUL-5696's
+		// drift somewhere to happen (MUL-6984).
+		"run-1",
+		"autopilot-1",
+		"Daily dependency check",
+		"Check dependencies and report outdated packages.",
 	} {
 		if strings.Contains(s, absent) {
 			t.Errorf("autopilot runtime config should not contain %q\n---\n%s", absent, s)
@@ -2721,9 +2691,10 @@ func TestWriteContextFilesHermesSkipsWorkdirSkills(t *testing.T) {
 		t.Errorf("expected no .agent_context/skills/ for Hermes, got err=%v", err)
 	}
 
-	// issue_context.md should still be written under .agent_context/.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); err != nil {
-		t.Errorf("expected .agent_context/issue_context.md to exist: %v", err)
+	// And no .agent_context at all: the sidecar brief that used to justify
+	// the directory is gone (MUL-6984), so Hermes leaves the workdir clean.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
+		t.Errorf(".agent_context created for Hermes; stat err = %v, want not-exist", err)
 	}
 }
 
@@ -5528,14 +5499,15 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 	}
 	s := string(data)
 
-	// The no_action rule lives on the leader variant of workflow step 4 since
-	// MUL-6417 (the reply-mode block that used to duplicate it is gone): the
-	// delivery imperative itself carries the carve-out, so no later bullet
-	// can contradict it (MUL-5442 #6493 review).
+	// Both delivery imperatives — workflow step 4 and ## Output — must carry
+	// the carve-out, so that no later bullet can contradict the no_action exit
+	// (MUL-5442 #6493 review). They carry the EXCEPTION, not the rule: the
+	// rule itself is stated once, by the Squad Operating Protocol the server
+	// appends to Instructions, and both sites point there (MUL-6984).
 	for _, want := range []string{
 		"unless your outcome is `no_action`",
-		"multica squad activity",
-		"DO NOT post a comment announcing no_action",
+		"see the no_action rule in your Squad Operating Protocol",
+		"which your Squad Operating Protocol states in full",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("squad leader comment-triggered CLAUDE.md missing %q", want)
@@ -5546,10 +5518,15 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 	if strings.Contains(s, "**Post your final results as a comment — this step is mandatory**") {
 		t.Errorf("squad leader CLAUDE.md still carries the unconditional delivery step")
 	}
-
-	// The Output section must use strong prohibition language.
-	if !strings.Contains(s, "you MUST exit without posting any comment") {
-		t.Errorf("Output section missing strong prohibition for squad leader no_action")
+	// And neither site may restate the rule's mechanics — that is what drifted
+	// when four copies of it existed.
+	for _, banned := range []string{
+		"DO NOT post a comment announcing no_action",
+		"you MUST exit without posting any comment",
+	} {
+		if strings.Contains(s, banned) {
+			t.Errorf("squad leader CLAUDE.md restates the protocol-owned no_action rule: %q", banned)
+		}
 	}
 
 	// Non-squad-leader should NOT have the squad leader rule in comment-triggered path.
@@ -6430,11 +6407,14 @@ func TestPrepareLocalWorkDir(t *testing.T) {
 		t.Fatalf("expected envRoot/workdir to NOT exist for local_directory tasks; err=%v", err)
 	}
 
-	// Context files should still land in the user's directory so the
-	// agent can discover them.
-	contextPath := filepath.Join(userDir, ".agent_context", "issue_context.md")
-	if _, err := os.Stat(contextPath); err != nil {
-		t.Fatalf("expected context file in user dir: %v", err)
+	// Sidecars still land in the user's own directory, which is where the
+	// task runs. The marker is the one the CLI actually reads; the Markdown
+	// brief that used to sit beside it had no reader and is gone (MUL-6984).
+	if _, err := os.Stat(filepath.Join(userDir, TaskContextMarkerRelPath)); err != nil {
+		t.Fatalf("expected the task context marker in the user dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(userDir, ".agent_context")); !os.IsNotExist(err) {
+		t.Fatalf("Prepare left .agent_context in the user's own directory; stat err = %v, want not-exist", err)
 	}
 }
 

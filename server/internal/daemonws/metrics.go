@@ -13,21 +13,32 @@ type Metrics struct {
 	WakeupReceivedTotal  atomic.Int64
 	WakeupDeliveredHit   atomic.Int64
 	WakeupDeliveredMiss  atomic.Int64
+
+	RuntimeGoneDeliveredHit   atomic.Int64
+	RuntimeGoneDeliveredMiss  atomic.Int64
+	RuntimeGonePublishedTotal atomic.Int64
+	RuntimeGonePublishErrors  atomic.Int64
+	RuntimeGoneReceivedTotal  atomic.Int64
 }
 
 var M = &Metrics{}
 
 func (m *Metrics) Snapshot() map[string]any {
 	return map[string]any{
-		"connects_total":              m.ConnectsTotal.Load(),
-		"disconnects_total":           m.DisconnectsTotal.Load(),
-		"active_connections":          m.ActiveConnections.Load(),
-		"slow_evictions_total":        m.SlowEvictionsTotal.Load(),
-		"wakeup_published_total":      m.WakeupPublishedTotal.Load(),
-		"wakeup_publish_errors":       m.WakeupPublishErrors.Load(),
-		"wakeup_received_total":       m.WakeupReceivedTotal.Load(),
-		"wakeup_delivered_hit_total":  m.WakeupDeliveredHit.Load(),
-		"wakeup_delivered_miss_total": m.WakeupDeliveredMiss.Load(),
+		"connects_total":                    m.ConnectsTotal.Load(),
+		"disconnects_total":                 m.DisconnectsTotal.Load(),
+		"active_connections":                m.ActiveConnections.Load(),
+		"slow_evictions_total":              m.SlowEvictionsTotal.Load(),
+		"wakeup_published_total":            m.WakeupPublishedTotal.Load(),
+		"wakeup_publish_errors":             m.WakeupPublishErrors.Load(),
+		"wakeup_received_total":             m.WakeupReceivedTotal.Load(),
+		"wakeup_delivered_hit_total":        m.WakeupDeliveredHit.Load(),
+		"wakeup_delivered_miss_total":       m.WakeupDeliveredMiss.Load(),
+		"runtime_gone_delivered_hit_total":  m.RuntimeGoneDeliveredHit.Load(),
+		"runtime_gone_delivered_miss_total": m.RuntimeGoneDeliveredMiss.Load(),
+		"runtime_gone_published_total":      m.RuntimeGonePublishedTotal.Load(),
+		"runtime_gone_publish_errors":       m.RuntimeGonePublishErrors.Load(),
+		"runtime_gone_received_total":       m.RuntimeGoneReceivedTotal.Load(),
 	}
 }
 
@@ -41,4 +52,9 @@ func (m *Metrics) Reset() {
 	m.WakeupReceivedTotal.Store(0)
 	m.WakeupDeliveredHit.Store(0)
 	m.WakeupDeliveredMiss.Store(0)
+	m.RuntimeGoneDeliveredHit.Store(0)
+	m.RuntimeGoneDeliveredMiss.Store(0)
+	m.RuntimeGonePublishedTotal.Store(0)
+	m.RuntimeGonePublishErrors.Store(0)
+	m.RuntimeGoneReceivedTotal.Store(0)
 }

@@ -33,6 +33,9 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `DATABASE_URL` | local `multica` database | PostgreSQL connection string |
 | `DATABASE_MAX_CONNS` | `25` | Maximum database connections per API process |
 | `DATABASE_MIN_CONNS` | `5` | Minimum connections each API process keeps |
+| `DATABASE_REPLICA_URL` | empty | Optional PostgreSQL read-only replica connection string; new connections are validated as read-only, while businesses must explicitly opt into eventual-consistency reads in code |
+| `DATABASE_REPLICA_MAX_CONNS` | `10` | Maximum replica connections per API process |
+| `DATABASE_REPLICA_MIN_CONNS` | `0` | Minimum replica connections each API process keeps |
 | `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | Container-level retry budget shared by migration and API startup; set to `0` for one fail-fast attempt per phase |
 | `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | Fallback timeout for each startup connection attempt; native pgx `connect_timeout`, `PGCONNECT_TIMEOUT`, or service settings take precedence |
 | `PORT` | `8080` | API listen port |
@@ -44,6 +47,8 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | How long an offline runtime may reconnect before its in-flight tasks fail; values below `150s` are clamped |
 
 When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must exceed the hold plus the time the actual shutdown needs.
+
+The primary and replica connection limits are independent. Budget their sum across every API process against the PostgreSQL cluster's connection ceiling. Replica connections are recycled after five minutes by default to refresh read-only validation after promotion. Replica connection failures transparently fall back to primary and open a short passive circuit; no background database probe is added. Replica reads have no application-enforced staleness bound, so monitor lag in the database layer and keep consistency-sensitive reads on primary.
 
 ## Public URLs and browser access
 
@@ -231,13 +236,15 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode-specific silence threshold |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Codex semantic-silence threshold. Codex's own timer cannot see that a tool is running, so it tracks the larger of the idle / tool budgets instead of holding a separate, shorter ceiling |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Explicit override for the Codex first-turn no-progress ceiling; `0` keeps the default. The effective first-turn wait stays bounded by `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` and the overall execution timeout — set `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` strictly above this value (with some margin), or the wait is truncated to it and the model-catalog startup retry is skipped. Equal values are not enough: the semantic timer is armed first, so at equal durations the retry can still be lost |
-| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server startup handshake ceiling |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`; `thread/start`, `thread/resume`: `60s` | Codex app-server startup handshake ceilings. An explicit value overrides both budgets globally |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Whether to restart into a `multica` binary replaced on disk out of band (`brew upgrade`, a re-download, a local build). Independent of `MULTICA_DAEMON_AUTO_UPDATE` |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for task working directories |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS only. Parent directory for private per-task temp dirs; must be an existing, writable absolute directory, and an invalid value fails task startup instead of falling back to `/tmp`. Pick a short path — child tools may bind AF_UNIX sockets under it, and `sun_path` is limited to 108 bytes on Linux and 104 on macOS |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep task directories for debugging |
+
+For the internal context that the daemon injects into agent tasks, see [Task runtime environment](/daemon-runtimes#task-runtime-environment).
 
 Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw and MiniMax Code have no model variable because Multica never sends them a model; MiniMax Code's path variable is `MULTICA_MCODE_PATH` — see [AI coding tools comparison](/providers#model-sources). DeepSeek Harness supports `MULTICA_DSH_PATH` and `MULTICA_DSH_MODEL` (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`). Dim supports `MULTICA_DIM_PATH` and `MULTICA_DIM_MODEL` (a model id from the dim catalog). ZeroClaw supports `MULTICA_ZEROCLAW_PATH` but has no model variable; its agent profile owns the model selection. Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
 
@@ -272,7 +279,7 @@ Supported keys:
 | `heartbeat_interval` | `15s` | Heartbeat interval |
 | `agent_timeout` | unlimited | Absolute time limit per run |
 | `codex_semantic_inactivity_timeout` | derived | Codex semantic-silence threshold. With nothing set it takes the larger of the idle and tool watchdog budgets; a tool budget of `0` falls back to the idle budget, and only when the whole watchdog suite is disabled does Codex keep its own `10m` |
-| `codex_handshake_timeout` | `30s` | Codex app-server handshake ceiling |
+| `codex_handshake_timeout` | `30s`; `thread/start`, `thread/resume`: `60s` | Codex app-server startup handshake ceilings. An explicit value overrides both budgets globally |
 | `disable_auto_update` | follows environment | `true` turns auto-update off; `false` clears the local override and returns to the env var or default |
 | `auto_update_check_interval` | `6h` | Update check interval |
 | `disable_auto_reload` | follows environment | `true` stops the daemon following a binary replaced on disk; `false` clears the local override. Resolved separately from `disable_auto_update` |

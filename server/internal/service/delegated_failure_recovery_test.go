@@ -262,6 +262,46 @@ func TestPendingDelegatedFailureSweepRepairsCommittedCommentWithoutTask(t *testi
 	}
 }
 
+func TestPendingDelegatedFailureSweepSkipsCustomTerminalSourceIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET failure_reason = 'agent_error.process_failure', error = 'worker exited', completed_at = now()
+		WHERE id = $1`, failedID); err != nil {
+		t.Fatalf("stamp failed task: %v", err)
+	}
+	if target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID); err != nil || target == nil || !created {
+		t.Fatalf("ensure recovery comment = target %v created %v err %v", target != nil, created, err)
+	}
+
+	const customDone = "recovery_verified"
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO issue_status (
+			workspace_id, key, name, description, category, color, is_system, position
+		) VALUES ($1, $2, 'Recovery verified', '', 'done', '#22c55e', false, 1)`,
+		f.workspaceID, customDone); err != nil {
+		t.Fatalf("insert custom done status: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, customDone); err != nil {
+		t.Fatalf("move source issue to custom done status: %v", err)
+	}
+
+	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
+		t.Fatalf("terminal-source recovery sweep = %+v, %v; want zero result, nil", result, err)
+	}
+	var recoveryTasks int
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&recoveryTasks); err != nil {
+		t.Fatalf("count recovery tasks: %v", err)
+	}
+	if recoveryTasks != 0 {
+		t.Fatalf("recovery tasks = %d, want none for a custom terminal source issue", recoveryTasks)
+	}
+}
+
 func TestPendingDelegatedFailureSweepRequeuesTerminalUndeliveredTask(t *testing.T) {
 	for _, terminalStatus := range []string{"failed", "cancelled"} {
 		t.Run(terminalStatus, func(t *testing.T) {

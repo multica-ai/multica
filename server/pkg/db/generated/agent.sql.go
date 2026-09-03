@@ -5174,84 +5174,6 @@ func (q *Queries) ListActiveAgentsByRuntimeForUpdate(ctx context.Context, runtim
 	return items, nil
 }
 
-const listActiveSiblingIssueTasks = `-- name: ListActiveSiblingIssueTasks :many
-SELECT
-    atq.id AS task_id,
-    i.id AS issue_id,
-    w.issue_prefix,
-    i.number AS issue_number,
-    i.title AS issue_title,
-    atq.status,
-    atq.created_at,
-    atq.started_at
-FROM agent_task_queue atq
-JOIN issue i ON i.id = atq.issue_id
-JOIN workspace w ON w.id = i.workspace_id
-WHERE atq.agent_id = $1
-  AND atq.id <> $2
-  AND i.workspace_id = $3
-  AND atq.status IN ('dispatched', 'running', 'waiting_local_directory')
-ORDER BY
-    CASE atq.status
-        WHEN 'running' THEN 0
-        WHEN 'waiting_local_directory' THEN 1
-        ELSE 2
-    END,
-    atq.created_at DESC
-LIMIT 5
-`
-
-type ListActiveSiblingIssueTasksParams struct {
-	AgentID     pgtype.UUID `json:"agent_id"`
-	TaskID      pgtype.UUID `json:"task_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-type ListActiveSiblingIssueTasksRow struct {
-	TaskID      pgtype.UUID        `json:"task_id"`
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	IssuePrefix string             `json:"issue_prefix"`
-	IssueNumber int32              `json:"issue_number"`
-	IssueTitle  string             `json:"issue_title"`
-	Status      string             `json:"status"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	StartedAt   pgtype.Timestamptz `json:"started_at"`
-}
-
-// Claim-time context for agents that can work concurrently. Only tasks already
-// handed to a runtime can coordinate with the new claim; queued work is omitted
-// so the warning stays high-signal. Bounded so one heavily-used agent cannot
-// inflate every claim payload; issue-bound rows carry a concrete run-messages
-// lookup target.
-func (q *Queries) ListActiveSiblingIssueTasks(ctx context.Context, arg ListActiveSiblingIssueTasksParams) ([]ListActiveSiblingIssueTasksRow, error) {
-	rows, err := q.db.Query(ctx, listActiveSiblingIssueTasks, arg.AgentID, arg.TaskID, arg.WorkspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListActiveSiblingIssueTasksRow{}
-	for rows.Next() {
-		var i ListActiveSiblingIssueTasksRow
-		if err := rows.Scan(
-			&i.TaskID,
-			&i.IssueID,
-			&i.IssuePrefix,
-			&i.IssueNumber,
-			&i.IssueTitle,
-			&i.Status,
-			&i.CreatedAt,
-			&i.StartedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
@@ -5327,6 +5249,108 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 			&i.BranchName,
 			&i.DurableWorkDir,
 			&i.ChannelContextRevision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveTasksByIssueFamily = `-- name: ListActiveTasksByIssueFamily :many
+SELECT
+    atq.id AS task_id,
+    atq.agent_id,
+    atq.issue_id,
+    atq.status,
+    atq.created_at,
+    atq.started_at,
+    w.issue_prefix,
+    i.number AS issue_number,
+    i.title AS issue_title
+FROM agent_task_queue atq
+JOIN issue i ON i.id = atq.issue_id
+JOIN workspace w ON w.id = i.workspace_id
+WHERE i.workspace_id = $1
+  AND (i.id = $2::uuid OR i.parent_issue_id = $2::uuid)
+  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+ORDER BY
+    CASE atq.status
+        WHEN 'running' THEN 0
+        WHEN 'dispatched' THEN 1
+        WHEN 'waiting_local_directory' THEN 2
+        ELSE 3
+    END,
+    atq.created_at DESC
+LIMIT $3
+`
+
+type ListActiveTasksByIssueFamilyParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RootIssueID pgtype.UUID `json:"root_issue_id"`
+	RowLimit    int32       `json:"row_limit"`
+}
+
+type ListActiveTasksByIssueFamilyRow struct {
+	TaskID      pgtype.UUID        `json:"task_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	StartedAt   pgtype.Timestamptz `json:"started_at"`
+	IssuePrefix string             `json:"issue_prefix"`
+	IssueNumber int32              `json:"issue_number"`
+	IssueTitle  string             `json:"issue_title"`
+}
+
+// Cross-issue coordination read for parallel sub-issue work (#7768). Given a
+// family root — the target issue's parent, or the target itself when it has
+// none — return every in-flight task on the root and on all of its children,
+// so a run can see who else is already working in the family before it starts
+// overlapping work. Advisory only: nothing here gates, queues, or serialises
+// anything.
+//
+// Same active set as ListActiveTasksByIssue, including 'queued': a queued
+// sibling cannot answer you yet, but it is about to touch the same code, which
+// is exactly what the caller is trying to find out. The status column tells the
+// two apart.
+//
+// Issue identity is joined in because the caller renders runs from several
+// issues in one list and cannot label a row from the task alone. agent_id is
+// here for the same reason: this read spans agents, and which one is on a
+// sibling is the answer, not a detail.
+//
+// Columns are named rather than embedded. This is the coordination question,
+// not the execution log: result and context are JSONB blobs, and work_dir /
+// trigger_summary / the attribution ids are all execution-log fields that a
+// caller asking "who else is here?" never reads. Selecting them would make
+// Postgres detoast and ship roughly 5x the bytes per row for nothing.
+//
+// Ordered running-first so the truncation the LIMIT may impose drops the least
+// interesting rows, and bounded because a parent with hundreds of children must
+// not turn one coordination read into an unbounded scan.
+func (q *Queries) ListActiveTasksByIssueFamily(ctx context.Context, arg ListActiveTasksByIssueFamilyParams) ([]ListActiveTasksByIssueFamilyRow, error) {
+	rows, err := q.db.Query(ctx, listActiveTasksByIssueFamily, arg.WorkspaceID, arg.RootIssueID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveTasksByIssueFamilyRow{}
+	for rows.Next() {
+		var i ListActiveTasksByIssueFamilyRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.StartedAt,
+			&i.IssuePrefix,
+			&i.IssueNumber,
+			&i.IssueTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -5689,15 +5713,19 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 }
 
 const listPendingDelegatedFailureRecoveries = `-- name: ListPendingDelegatedFailureRecoveries :many
-SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision
+SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at
 FROM comment recovery
 JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
 JOIN agent_task_queue source ON source.id = failed.delegated_from_task_id
 JOIN issue source_issue ON source_issue.id = source.issue_id
 JOIN agent source_agent ON source_agent.id = source.agent_id
+LEFT JOIN issue_status source_status
+  ON source_status.workspace_id = source_issue.workspace_id
+ AND source_status.key = source_issue.status
 WHERE recovery.author_type = 'system'
   AND recovery.type = 'progress_update'
   AND recovery.source_task_id IS NOT NULL
+  AND recovery.recovery_settled_at IS NULL
   AND recovery.issue_id = source_issue.id
   AND recovery.workspace_id = source_issue.workspace_id
   AND failed.status = 'failed'
@@ -5707,7 +5735,7 @@ WHERE recovery.author_type = 'system'
   AND source.autopilot_run_id IS NULL
   AND source.issue_id IS NOT NULL
   AND source.agent_id <> failed.agent_id
-  AND issue_effective_status(source_issue.workspace_id, source_issue.status) NOT IN ('done', 'cancelled', 'backlog')
+  AND COALESCE(source_status.category, source_issue.status) NOT IN ('done', 'cancelled', 'backlog')
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id
@@ -5748,6 +5776,15 @@ LIMIT $1
 // explicit recovery signal avoids retroactively waking unrelated historical
 // delegated failures. A bounded runtime sweeper replays these comments after a
 // transient dispatch error or process restart.
+//
+// recovery_settled_at is what keeps this scan from growing with history. Every
+// other exclusion below is reversible — an issue can leave 'done', a cancelled
+// retry can be superseded — so none of them can be frozen into the index
+// predicate. A delivery receipt on a terminal task cannot be taken back, so
+// that one condition is recorded as durable state instead of being re-proven
+// through four joins and two NOT EXISTS subqueries on every tick. The predicate
+// of idx_comment_delegated_failure_unsettled matches the first four conditions,
+// so LIMIT now bounds the rows CHECKED and not just the rows RETURNED.
 func (q *Queries) ListPendingDelegatedFailureRecoveries(ctx context.Context, maxPerTick int32) ([]Comment, error) {
 	rows, err := q.db.Query(ctx, listPendingDelegatedFailureRecoveries, maxPerTick)
 	if err != nil {
@@ -5775,6 +5812,7 @@ func (q *Queries) ListPendingDelegatedFailureRecoveries(ctx context.Context, max
 			&i.QuickActionID,
 			&i.ViaPluginID,
 			&i.Revision,
+			&i.RecoverySettledAt,
 		); err != nil {
 			return nil, err
 		}
@@ -8132,6 +8170,70 @@ func (q *Queries) SetTaskDeliveredCommentIDs(ctx context.Context, arg SetTaskDel
 	var delivered_comment_ids []pgtype.UUID
 	err := row.Scan(&delivered_comment_ids)
 	return delivered_comment_ids, err
+}
+
+const settleDelegatedFailureRecoveriesForTask = `-- name: SettleDelegatedFailureRecoveriesForTask :execrows
+UPDATE comment recovery
+SET recovery_settled_at = now()
+FROM agent_task_queue task
+WHERE task.id = $1
+  AND task.status IN ('completed', 'failed', 'cancelled')
+  AND recovery.id = ANY(task.delivered_comment_ids)
+  AND recovery.author_type = 'system'
+  AND recovery.type = 'progress_update'
+  AND recovery.source_task_id IS NOT NULL
+  AND recovery.recovery_settled_at IS NULL
+`
+
+// Retire every delegated-failure recovery comment this task actually received.
+//
+// Callers MUST run this inside the same transaction that makes the task
+// terminal, and only there. While a task is still dispatched its receipt is
+// REPLACED rather than appended (SetTaskDeliveredCommentIDs), because a reclaim
+// by a differently-capable daemon must be able to drop an id it will not
+// deliver. Settling at receipt-write time would freeze that legitimate
+// transient window into a permanently lost recovery. Once the task is terminal
+// the receipt is final, which is exactly the guarantee this marker records.
+//
+// A comment that was only planned into the task and never delivered is absent
+// from delivered_comment_ids, so an automatic cancellation correctly leaves it
+// pending for the sweeper to replay.
+//
+// The terminal-status predicate is the guarantee itself, not a caller
+// convention. Settling a dispatched or running task's receipt would freeze the
+// reclaim window into a permanently lost recovery, and this marker is
+// monotonic — there is no later pass that could undo it. A caller that passes a
+// non-terminal task therefore updates nothing rather than silently destroying
+// the obligation.
+func (q *Queries) SettleDelegatedFailureRecoveriesForTask(ctx context.Context, taskID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, settleDelegatedFailureRecoveriesForTask, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const settleDelegatedFailureRecoveryComment = `-- name: SettleDelegatedFailureRecoveryComment :execrows
+UPDATE comment
+SET recovery_settled_at = now()
+WHERE id = $1
+  AND author_type = 'system'
+  AND type = 'progress_update'
+  AND source_task_id IS NOT NULL
+  AND recovery_settled_at IS NULL
+`
+
+// Retire one recovery comment by id, for the terminal outcomes that are not a
+// task reaching a terminal status: exhaustion of the bounded automatic attempts
+// writes its receipt onto an attempt row that may still be running, and the
+// user-visible explanation comment is what closes the obligation. Callers run
+// this in the same transaction that records that outcome.
+func (q *Queries) SettleDelegatedFailureRecoveryComment(ctx context.Context, commentID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, settleDelegatedFailureRecoveryComment, commentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const startAgentTask = `-- name: StartAgentTask :one

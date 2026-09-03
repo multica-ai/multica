@@ -62,7 +62,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           {
             title: "最初から最後まで追跡",
             description:
-              "すべてのタスクが「キュー追加 → 受け取り → 開始 → 完了 / 失敗」と流れます。静かに止まる失敗はありません。すべての遷移が記録され、共有されます。",
+              "すべての作業が「キュー追加 → 受け取り → 開始 → 完了 / 失敗」と流れます。静かに止まる失敗はありません。すべての遷移が記録され、共有されます。",
           },
           {
             title: "詰まったら先に知らせる",
@@ -118,7 +118,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           {
             title: "初回起動時に自動検出",
             description:
-              "Multica は Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI という23種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
+              "Multica は Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw という26種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
           },
         ],
       },
@@ -139,7 +139,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           title: "CLI をインストールしてマシンを接続",
           description:
-            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、23種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
+            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、26種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
         },
         {
           title: "最初のエージェントを作成",
@@ -193,7 +193,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica はどのコーディングエージェントに対応していますか?",
           answer:
-            "Multica は、Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI の23種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。オープンソースなので、独自のバックエンドを追加することもできます。",
+            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw の26種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。オープンソースなので、独自のバックエンドを追加することもできます。",
         },
         {
           question: "セルフホストが必須ですか、それともクラウド版もありますか?",
@@ -204,17 +204,17 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           question:
             "コーディングエージェントを直接使うのと、何が違うのですか?",
           answer:
-            "コーディングエージェントは実行が得意です。Multica はその上に、タスクキュー、チームの連携、スキルの再利用、ランタイムの監視、そして各エージェントの動きを一望できる統合ビューという管理レイヤーを加えます。エージェントのためのプロジェクトマネージャーだと考えてください。",
+            "コーディングエージェントは実行が得意です。Multica はその上に、作業キュー、チームの連携、スキルの再利用、ランタイムの監視、そして各エージェントの動きを一望できる統合ビューという管理レイヤーを加えます。エージェントのためのプロジェクトマネージャーだと考えてください。",
         },
         {
-          question: "エージェントは長時間のタスクを自律的にこなせますか?",
+          question: "エージェントは長時間の作業を自律的にこなせますか?",
           answer:
-            "はい。Multica は、キュー追加・受け取り・実行・完了または失敗まで、タスクのライフサイクル全体を管理します。エージェントは詰まったところを先に知らせ、進捗をリアルタイムにストリーミングします。好きなときに覗いてもよいですし、一晩じゅう走らせておくこともできます。",
+            "はい。Multica は、キュー追加・受け取り・実行・完了または失敗まで、作業のライフサイクル全体を管理します。エージェントは詰まったところを先に知らせ、進捗をリアルタイムにストリーミングします。好きなときに覗いてもよいですし、一晩じゅう走らせておくこともできます。",
         },
         {
           question: "コードは安全ですか? エージェントの実行はどこで行われますか?",
           answer:
-            "エージェントの実行は、あなたのマシン(ローカルデーモン)、または自社のクラウドインフラ上で行われます。コードが Multica のサーバーを経由することはありません。プラットフォームはタスクの状態を調整し、イベントを配信する役割だけを担います。",
+            "エージェントの実行は、あなたのマシン(ローカルデーモン)、または自社のクラウドインフラ上で行われます。コードが Multica のサーバーを経由することはありません。プラットフォームは作業の状態を調整し、イベントを配信する役割だけを担います。",
         },
         {
           question: "エージェントは何個まで動かせますか?",
@@ -269,6 +269,105 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         fixes: "バグ修正",
       },
       entries: [
+        {
+          version: "0.4.39",
+          date: "2026-09-03",
+          title: "タブ切り替えのショートカット、サーバーの性能改善、Autopilot の権限の扱いの改善",
+          changes: [],
+          features: [
+            "モデル一覧を自分で更新して、ランタイムがいま対応しているモデルをすぐ受け取れます。",
+            "WeCom では、実行の失敗が始めた会話に返ってきます。",
+            "デスクトップ版では数字のショートカットでタブを切り替えられます。",
+            "コマンドラインから Issue をカスタム プロパティで絞り込み、並べ替えできます。",
+            "カスタム プロパティがまだ未設定の Issue も探せます。",
+          ],
+          improvements: [
+            "Issue の割り当ての手順が減り、すぐに開始しない選択もそのまま使えます。",
+            "自己ホストのサーバーが、ランタイムの接続を保つためにかける裏側の処理が減りました。",
+            "ランタイムを削除するとすぐに反映され、古い接続が残りません。",
+          ],
+          fixes: [
+            "Squad のリーダーへの返信はそのリーダーが続けて担当し、引き継ぎの内容とセッションが失われません。",
+            "長い Issue の識別子が、一覧や表でタイトルを隠さなくなりました。",
+            "サインイン、エラー、404 のページが、選んだ言語で表示されます。",
+            "途中で言語を切り替えても、サインインは最後まで進みます。",
+            "Hermes は選んだモデルのプロバイダーを保ち、勝手に戻しません。",
+            "OpenClaw の管理下の MCP サーバーが起動し、自分の MCP 設定はそのまま残ります。",
+            "スケジュールと Webhook の Autopilot は、トリガーを作った人の権限で動きます。",
+            "作成者を確認できない古いトリガーは、そのまま動かずに止まります。",
+            "ワークスペースを離れたメンバーも、活動の記録では元の名前で表示されます。",
+          ],
+        },
+        {
+          version: "0.4.38",
+          date: "2026-09-02",
+          title: "Claude Code のモデル自動検出、プロパティ絞り込みの演算子、セッションの引き継ぎ、プロバイダー動作の安定化",
+          changes: [],
+          features: [
+            "モデル選択に、この端末で実際に使える Claude Code のモデルだけが並びます。",
+            "使えないモデルは先に示されるので、実行が失敗してから気づくことがありません。",
+            "Fable 5.1 を使えます。料金の表示もそろっています。",
+            "テキスト、数値、日付、URL のカスタム プロパティの内容で Issue を絞り込めます。",
+            "数値と日付のプロパティは範囲でも絞り込めます。",
+            "コマンドラインから、まだ動いているエージェントの実行を Issue と子 Issue までまとめて確認できます。",
+            "チャットの Issue のリンク、ホバー カード、入力候補にカスタムのステータス色が表示されます。",
+          ],
+          improvements: [
+            "失敗した引き継ぎタスクの復帰が、ほかの実行の足を引っぱらなくなりました。",
+            "日本語と韓国語の表記が、製品とドキュメントでそろいました。",
+            "短く省略された文字列でも、絵文字が途中で崩れません。",
+          ],
+          fixes: [
+            "Issue の説明の編集がそのまま保存され、身に覚えのない競合の確認が出ません。",
+            "準備の途中で失敗したタスクはそう伝え、モデルやエージェントのせいにしません。",
+            "タスクのログにタスク ID がすべて出るので、並行する実行を見分けられます。",
+            "後続のタスクは、前のタスクが作業フォルダーを手放すまで待ちます。",
+            "同じセッションのタスクは、同じブランチで作業を続けます。",
+            "すでに取得済みのリポジトリも、Co-authored-by の設定にすぐ従います。",
+            "Kimi はプロバイダーのエラーをそのまま伝え、返信なしで成功したように見せません。",
+            "Windows でも Pi のセッションが動きます。",
+            "Codex の速度を Standard に明示的に選べます。",
+            "バックグラウンドの片付けは、そのタスクの作業フォルダーだけを削除します。",
+            "特殊な文字を整えるときに、保存した内容が黙って欠けることがありません。",
+            "iOS で長い Markdown のリストをスクロールしても、表示が重なりません。",
+            "タスク詳細の画像が、ちらつかずに表示されます。",
+            "日付や金額が、選んだ言語の書き方で表示されます。",
+            "デスクトップ版のデーモンの操作が、すべて翻訳されました。",
+          ],
+        },
+        {
+          version: "0.4.37",
+          date: "2026-08-31",
+          title: "より速い Issue 一覧、より安定した長時間タスク、より充実した多言語表示",
+          changes: [],
+          features: [
+            "Huawei Cloud CodeArts を標準のエージェント ランタイムとして使えます。",
+            "モデルを選び、前のセッションを再開し、MCP やローカルのスキルも使えます。",
+            "iPad に Multica をネイティブでインストールでき、画面の向きも自由です。",
+            "複数のサーバーでセルフホストしていても、WeCom ボットの返信が届きます。",
+            "送れなかった WeCom の返信の件数と理由を確認できます。",
+          ],
+          improvements: [
+            "大きなワークスペースでも Issue の一覧が速く開きます。",
+            "スキルが多くても、エージェントの起動が速くなりました。",
+            "オンボーディング、スクワッド、エディター、ステータス、優先度の表記が各言語で自然になりました。",
+            "エージェントの出力にファイルのパスがそのまま表示され、誤って隠れません。",
+            "セルフホストのサーバーが、バックグラウンドでデータベースにかける負荷が減りました。",
+            "接続が滞っても、セルフホストのサーバーは応答を続けます。",
+          ],
+          fixes: [
+            "チャットが最新の返信に留まり、表示中に跳ねたりちらついたりしません。",
+            "狭い画面でも Analytics のランキングを横にスクロールでき、切れません。",
+            "Codex のセッションが、準備の途中で止まらず確実に始まります。",
+            "手元のデーモンが待機中でも、ローカルのスキルを読み込めます。",
+            "デスクトップ版が、予期せず止まったデーモンを復帰させます。",
+            "スマートフォンの Issue のヘッダーが再び引き締まり、アイコンと押しやすさはそのままです。",
+            "古いバージョンからのセルフホストの更新が、手作業なしで終わります。",
+            "作業フォルダーが変わっても、Pi と Oh My Pi のセッションが続きます。",
+            "ワークスペースを削除するとき、実際に消えるものだけを案内します。",
+            "長く動くタスクや待機中のタスクが、待っただけで取り消されなくなりました。",
+          ],
+        },
         {
           version: "0.4.36",
           date: "2026-08-28",

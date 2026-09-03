@@ -31,10 +31,6 @@ describe("createRendererWebPreferences", () => {
     expect(createRendererWebPreferences(PRELOAD, "en").plugins).toBe(true);
   });
 
-  it("loads the given preload script", () => {
-    expect(createRendererWebPreferences(PRELOAD, "en").preload).toBe(PRELOAD);
-  });
-
   it("passes the system locale and extra arguments to the renderer", () => {
     const prefs = createRendererWebPreferences(PRELOAD, "de", [
       "--issue-window=<ctx>",

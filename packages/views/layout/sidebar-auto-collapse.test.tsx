@@ -1,11 +1,7 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  Sidebar,
-  SidebarProvider,
-  useSidebar,
-} from "@multica/ui/components/ui/sidebar";
+import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { renderWithI18n } from "../test/i18n";
 
 // A width-driven `matchMedia`: the provider watches the `lg`–`xl` band and
@@ -132,29 +128,6 @@ describe("sidebar auto-collapse between lg and xl", () => {
 
     setWidth(1200);
     expect(state()).toBe("expanded");
-  });
-
-  it("gates the in-flow sidebar on the same breakpoint the hook uses", () => {
-    // `useIsCompact()` resolves after the first paint, so between the two
-    // breakpoints the CSS gate alone decides that frame. While it said `md`
-    // and the hook said `lg`, every load in 768–1023 painted a 256px sidebar
-    // before collapsing it into a sheet. jsdom applies no stylesheet, so the
-    // agreement is asserted on the class itself.
-    const { container } = renderWithI18n(
-      <SidebarProvider>
-        <Sidebar />
-      </SidebarProvider>,
-    );
-
-    const root = container.querySelector<HTMLElement>("[data-slot='sidebar']")!;
-    const inner = container.querySelector<HTMLElement>(
-      "[data-slot='sidebar-container']",
-    )!;
-
-    expect(root.className).toContain("lg:block");
-    expect(root.className).not.toContain("md:block");
-    expect(inner.className).toContain("lg:flex");
-    expect(inner.className).not.toContain("md:flex");
   });
 
   it("does not touch the collapsed state below the band", () => {

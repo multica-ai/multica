@@ -16,6 +16,16 @@ import {
   unwrapToolOutput,
 } from "./trace-event-presenter";
 
+describe("traceEventSummary truncation", () => {
+  it("truncates a long summary with the single-character ellipsis", () => {
+    const summary = traceEventSummary({ type: "thinking", content: "x".repeat(300) });
+    expect(summary.endsWith("…")).toBe(true);
+    expect(summary.endsWith("...")).toBe(false);
+    // 200 content code points plus the ellipsis.
+    expect(Array.from(summary)).toHaveLength(201);
+  });
+});
+
 describe("traceEventKind / traceEventLabel", () => {
   it("maps the five persisted types and keeps unknown types as generic", () => {
     expect(traceEventKind({ type: "text" })).toBe("agent");

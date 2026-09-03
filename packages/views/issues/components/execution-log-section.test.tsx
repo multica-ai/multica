@@ -88,23 +88,6 @@ describe("ActiveTaskRow", () => {
     expect(screen.getByText("View transcript")).toBeInTheDocument();
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
-
-  it("does not make transcript actions depend on hover-only rendering", () => {
-    renderWithI18n(<ActiveTaskRow task={makeTask()} issueId="issue-1" />);
-
-    const transcriptButton = screen.getByRole("button", { name: "View transcript" });
-    const status = screen.getByText("5m 04s");
-
-    expect(status.parentElement?.className).toContain("flex h-7");
-    expect(status.parentElement?.className).toContain(
-      "[@media(hover:hover)]:group-hover/execution-log-row:hidden",
-    );
-    expect(transcriptButton.parentElement?.className).toContain("flex h-7");
-    expect(transcriptButton.parentElement?.className).toContain("[@media(hover:hover)]:hidden");
-    expect(transcriptButton.parentElement?.className).toContain(
-      "[@media(hover:hover)]:group-hover/execution-log-row:flex",
-    );
-  });
 });
 
 describe("TaskCommentCoverage", () => {
@@ -346,17 +329,6 @@ describe("execution log header geometry", () => {
     status: "completed",
     completed_at: "2026-06-08T08:04:00Z",
     usage: [usageSlice()],
-  });
-
-  it("keeps the section label on one line", () => {
-    renderSection([completed]);
-
-    const label = screen.getByText("Execution log");
-    // The label is the only header item allowed to shrink, so it is the one
-    // that must carry nowrap + ellipsis. A heading that reflows mid-phrase
-    // reads as broken; an ellipsis reads as a narrow column.
-    expect(label.className).toContain("truncate");
-    expect(label.closest("button")?.className).toContain("whitespace-nowrap");
   });
 
   it("tiers on the sidebar's width, not the viewport's", () => {

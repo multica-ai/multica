@@ -1170,8 +1170,7 @@ func commentMentionsAnyone(content string) bool {
 // to a squad. Assign and backlog-promotion paths use this directly; comment
 // paths go through computeCommentAgentTriggers so preview and create share the
 // same trigger set.
-// enqueueSquadLeaderTask returns true when it actually enqueued a leader task
-// (so the caller can record a handoff trace only on a real run start).
+// It returns true only when a leader task was actually enqueued.
 func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID, handoffNote string) bool {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
@@ -1211,8 +1210,8 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		return false
 	}
 
-	// triggerCommentID is always empty on the assign/promote path; the handoff
-	// note rides its own task column, never trigger_comment_id.
+	// triggerCommentID is always empty on the assign/promote path; legacy
+	// handoff text rides its dedicated task column instead.
 	_ = triggerCommentID
 	// The member who performed the assign/promote is the accountable human for the
 	// leader run (MUL-4302 §4) — the same principal the gate above judged. An agent

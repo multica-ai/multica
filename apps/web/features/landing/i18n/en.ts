@@ -101,7 +101,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 23 supported coding tools on your machine.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 26 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -116,7 +116,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 23 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 26 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 23 supported coding tools (Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 26 supported coding tools (Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -192,7 +192,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 23 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
+          "Multica supports 26 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -293,6 +293,105 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.4.39",
+        date: "2026-09-03",
+        title: "Tab-switching shortcuts, server performance, and Autopilot identity authorization",
+        changes: [],
+        features: [
+          "Refresh the model list yourself and get what your runtime supports right now.",
+          "WeCom brings a failed run back to the chat you started it from.",
+          "Switch desktop tabs with number shortcuts.",
+          "Filter and sort Issues by custom properties from the command line.",
+          "Find Issues where a custom property has no value yet.",
+        ],
+        improvements: [
+          "Assigning an Issue takes fewer steps, and you can still hold off starting the run.",
+          "Self-hosted servers do less background work to keep runtimes connected.",
+          "Deleting a runtime takes effect right away, with no stale connection left behind.",
+        ],
+        fixes: [
+          "Replying to a squad leader stays with that leader, keeping the briefing, folder, and session.",
+          "Long Issue identifiers no longer cover the title in lists and tables.",
+          "Sign-in, error, and not-found pages follow the language you picked.",
+          "Signing in still works after you switch languages part way through.",
+          "Hermes keeps the model provider you picked instead of switching back on its own.",
+          "OpenClaw's managed MCP servers start, and your own MCP settings stay untouched.",
+          "Scheduled and webhook Autopilot runs use the permissions of whoever created the trigger.",
+          "An older trigger whose creator can't be confirmed stops instead of running.",
+          "Members who left the workspace keep their name in activity history.",
+        ],
+      },
+      {
+        version: "0.4.38",
+        date: "2026-09-02",
+        title: "Claude Code model discovery, property filter operators, session continuity, and steadier providers",
+        changes: [],
+        features: [
+          "The model picker shows only the Claude Code models your machine can actually run.",
+          "Models you can't use are called out up front, not after a run fails.",
+          "Fable 5.1 is available, with its pricing already in place.",
+          "Filter Issues by what a custom text, number, date, or URL property contains.",
+          "Number and date properties can also be filtered by range.",
+          "See which agent runs are still active from the command line, across an Issue and its sub-Issues.",
+          "Custom status colors show up on Issue links, hover cards, and editor suggestions in chat.",
+        ],
+        improvements: [
+          "Recovering a handed-off task that failed no longer slows down everything else running.",
+          "Japanese and Korean read consistently across the product and the docs.",
+          "Shortened text keeps emoji intact instead of cutting them in half.",
+        ],
+        fixes: [
+          "Editing an Issue description saves cleanly, with no false conflict prompts.",
+          "A task that fails while preparing says so, instead of blaming the model or the agent.",
+          "Task logs show the full task ID, so parallel runs are easy to tell apart.",
+          "A replacement task waits for the previous one to release the working folder.",
+          "Every task in the same session keeps working on the same branch.",
+          "Repositories you already checked out follow your Co-authored-by setting right away.",
+          "Kimi reports provider errors instead of finishing with an empty reply.",
+          "Pi sessions run on Windows.",
+          "Codex can be set to Standard speed on purpose.",
+          "Background cleanup only removes a working folder that belongs to the task.",
+          "Nothing is quietly dropped from saved data when unusual characters are cleaned up.",
+          "Long Markdown lists on iOS no longer overlap while you scroll.",
+          "Images in task details load without flickering.",
+          "Dates and amounts follow the language you picked.",
+          "The daemon controls in the desktop app are fully translated.",
+        ],
+      },
+      {
+        version: "0.4.37",
+        date: "2026-08-31",
+        title: "Faster Issue lists, steadier long runs, and more complete localization",
+        changes: [],
+        features: [
+          "Use Huawei Cloud CodeArts as a native agent runtime.",
+          "Pick its models, pick up past sessions, and bring your MCP servers and local Skills.",
+          "Install Multica natively on iPad, in any screen orientation.",
+          "WeCom bot replies still arrive when you self-host Multica across several servers.",
+          "See how many WeCom replies never made it out, and why.",
+        ],
+        improvements: [
+          "Issue lists open faster in large workspaces.",
+          "Agents start faster when a lot of Skills are available to them.",
+          "Onboarding, Squads, the editor, statuses, and priorities read naturally in every language.",
+          "Agent output shows full file paths again, with nothing hidden by mistake.",
+          "Self-hosted servers do less background work against the database.",
+          "A self-hosted server keeps answering even when a connection stalls.",
+        ],
+        fixes: [
+          "Chat stays on the newest reply, with no jumping or flickering while it streams.",
+          "The Analytics leaderboard scrolls sideways in narrow windows instead of being cut off.",
+          "Codex sessions start reliably instead of giving up during setup.",
+          "Local Skills load even when the daemon on your machine has gone idle.",
+          "The desktop app brings back its daemon if it stops unexpectedly.",
+          "The Issue header on phones is compact again, with avatars and tap targets intact.",
+          "Self-hosted upgrades from older versions finish without manual repair.",
+          "Pi and Oh My Pi keep their session when the working folder changes.",
+          "Deleting a workspace now says exactly what will be removed.",
+          "Long runs and queued tasks are no longer cancelled just for waiting.",
+        ],
+      },
       {
         version: "0.4.36",
         date: "2026-08-28",

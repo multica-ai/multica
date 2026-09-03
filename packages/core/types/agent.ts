@@ -112,6 +112,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "codex",
   "copilot",
   "opencode",
+  "codearts",
   "deveco",
   "openclaw",
   "hermes",
@@ -346,13 +347,6 @@ export interface AgentTask {
    * or deleted.
    */
   trigger_summary?: string;
-  /**
-   * Handoff instruction the assigner attached when starting this run (MUL-3375).
-   * Present only on assignment-triggered runs that carried a note; the execution
-   * log shows it inline as the trigger reason. Absent (legacy / no note) falls
-   * back to the generic "initial run" label.
-   */
-  handoff_note?: string;
   /**
    * Server-computed source discriminator used by the activity row to label
    * tasks that have no linked issue (so e.g. quick-create tasks render
@@ -1102,6 +1096,28 @@ export interface RuntimeModel {
   thinking?: RuntimeModelThinking;
   /** Runtime-native execution tiers advertised for this exact model. */
   service_tiers?: RuntimeModelServiceTier[];
+  /**
+   * Whether this runtime's installed Codex CLI accepts the request-only
+   * `default` sentinel for explicit standard routing. Missing means false so
+   * a new client stays safe when connected to an older daemon.
+   */
+  supports_explicit_standard_service_tier?: boolean;
+}
+
+/**
+ * A model the runtime named but will not run on that host — today only Claude
+ * Code, reporting one that needs a newer CLI than the installed one.
+ *
+ * These arrive in their own list and never inside `models`, which is what keeps
+ * an older client from offering one: it reads `models`, and they are not there.
+ * The picker shows them greyed out with `reason` so the gap reads as "your CLI
+ * is behind" rather than "Multica does not support this model" (MUL-6961).
+ */
+export interface RuntimeUnavailableModel {
+  id: string;
+  label: string;
+  /** The runtime's own remedy, e.g. "Update to 2.1.255+ to use Fable 5.1". */
+  reason?: string;
 }
 
 export interface RuntimeModelServiceTier {
@@ -1146,6 +1162,8 @@ export interface RuntimeModelListRequest {
   runtime_id: string;
   status: RuntimeModelListStatus;
   models?: RuntimeModel[];
+  /** Advisory rows the runtime cannot run; never selectable. */
+  unavailable_models?: RuntimeUnavailableModel[];
   supported: boolean;
   error?: string;
   created_at: string;
@@ -1166,6 +1184,13 @@ export interface RuntimeModelListRequest {
 // from "provider does not honour per-agent model selection".
 export interface RuntimeModelsResult {
   models: RuntimeModel[];
+  /**
+   * Rows the runtime named but cannot run. Kept out of `models` on purpose —
+   * see RuntimeUnavailableModel. Optional like `cached` beside it: the resolver
+   * always sets it, but a backend older than the field contributes nothing, so
+   * consumers read it defensively.
+   */
+  unavailableModels?: RuntimeUnavailableModel[];
   supported: boolean;
   /**
    * True when the server answered from its catalog cache rather than a live

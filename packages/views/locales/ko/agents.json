@@ -35,6 +35,9 @@
     "idle": "유휴"
   },
   "presence_status_aria": "상태: {{status}}",
+  "avatar_stack": {
+    "overflow_aria_other": "에이전트 {{count}}개 더"
+  },
   "archived": {
     "active_link": "활성 에이전트",
     "title": "보관된 에이전트"
@@ -219,10 +222,13 @@
     "model_managed_by_runtime": "런타임에서 관리",
     "model_search_placeholder": "모델 ID 검색 또는 입력",
     "model_discovering": "모델 찾는 중...",
+    "model_refresh": "모델 새로고침",
+    "model_refreshing": "모델 새로고침 중...",
     "model_discovery_failed_title": "이 런타임의 모델을 가져오지 못했습니다.",
     "model_discovery_failed_hint": "위 입력란에 모델 ID를 직접 입력해 수동으로 지정할 수 있습니다.",
     "model_empty": "사용 가능한 모델이 없습니다",
     "model_empty_with_dot": "사용 가능한 모델이 없습니다.",
+    "model_unavailable_heading": "최신 CLI 필요",
     "model_custom_tooltip": "\"{{value}}\"을(를) 사용자 지정 모델 ID로 사용",
     "model_custom_use": "\"{{value}}\" 사용",
     "model_clear": "지우기(제공자 기본값 사용)",
@@ -232,6 +238,8 @@
     "thinking_clear": "CLI 설정 따르기",
     "thinking_clear_title": "재정의를 지우고 추론 수준을 로컬 CLI 설정(claude/codex)에 맡깁니다",
     "service_tier_default": "런타임 기본값",
+    "service_tier_standard": "표준",
+    "service_tier_standard_description": "기본 속도 및 표준 사용량",
     "service_tier_tooltip": "속도 · {{value}}",
     "service_tier_clear": "런타임 기본값",
     "service_tier_clear_title": "속도 재정의를 지우고 로컬 Codex 설정에 맡깁니다"
@@ -477,6 +485,10 @@
       "dialog_headers_label": "HTTP 헤더",
       "dialog_add_header": "헤더 추가",
       "dialog_remove_header": "헤더 제거",
+      "dialog_pair_key_placeholder": "키",
+      "dialog_pair_value_placeholder": "값",
+      "dialog_pair_key_aria": "{{label}} 키 {{index}}",
+      "dialog_pair_value_aria": "{{label}} 값 {{index}}",
       "dialog_native_json_hint": "기존 Provider 네이티브 형식입니다. 형식을 변경하지 않고 JSON으로 편집할 수 있습니다.",
       "dialog_json_label": "단일 Server 설정",
       "dialog_json_aria": "MCP Server JSON 설정",
@@ -789,6 +801,7 @@
       "api_invalid_request": "모델 API에서 요청을 거부함",
       "skill_bundle_unavailable": "에이전트 스킬을 다운로드할 수 없음",
       "runtime_cli_timeout": "로컬 런타임 CLI 시간 초과",
+      "environment_prepare_failed": "실행 환경을 준비하지 못함",
       "invalid_task_identity": "작업 ID 정보가 일치하지 않음",
       "agent_error_provider_auth_or_access": "공급자 인증 실패",
       "agent_error_provider_quota_limit": "공급자 할당량 소진",

@@ -207,6 +207,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` | Anthropic's coding agent |
 | [Antigravity CLI](https://antigravity.google/docs/cli-install) | `agy` | Google Antigravity CLI |
 | [CodeBuddy Code](https://www.codebuddy.ai/docs/cli/quickstart) | `codebuddy` | Tencent CodeBuddy Code (reads `CODEBUDDY.md`, not `CLAUDE.md`) |
+| [Huawei Cloud CodeArts](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0001.html) | `codearts` | Huawei Cloud coding agent (OpenCode-compatible JSON protocol) |
 | [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) | `deveco` | OpenHarmony DevEco Code |
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot) | `copilot` | GitHub's coding agent (model routed by your GitHub entitlement) |
@@ -252,7 +253,7 @@ Daemon behavior is configured via flags or environment variables:
 | Agent tool watchdog | — | `MULTICA_AGENT_TOOL_WATCHDOG` | same as the idle watchdog (`0` = never force-stop during a tool call) |
 | Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | same as the idle watchdog (Codex's timer is not tool-aware, so it tracks the larger of the idle / tool budgets) |
 | Codex first-turn no-progress timeout | — | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` (keeps the built-in `60s` ceiling) |
-| Codex handshake timeout | `--codex-handshake-timeout` | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` |
+| Codex handshake timeout | `--codex-handshake-timeout` | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`; `thread/start` and `thread/resume`: `60s` (an explicit value overrides both budgets globally) |
 | OpenCode idle watchdog | — | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` (`0` falls back to the generic idle watchdog; cannot extend it) |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
@@ -308,6 +309,8 @@ Agent-specific overrides:
 | `MULTICA_CODEBUDDY_PATH` | Custom path to the `codebuddy` binary |
 | `MULTICA_CODEBUDDY_MODEL` | Override the CodeBuddy model used |
 | `MULTICA_CODEBUDDY_ARGS` | Default extra arguments for CodeBuddy runs |
+| `MULTICA_CODEARTS_PATH` | Custom path to the `codearts` launcher or binary |
+| `MULTICA_CODEARTS_MODEL` | Override the CodeArts model used |
 | `MULTICA_DEVECO_PATH` | Custom path to the `deveco` binary |
 | `MULTICA_DEVECO_MODEL` | Override the DevEco Code model used |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
@@ -501,15 +504,23 @@ multica issue list --status todo --sort position       # board order (the defaul
 multica issue list --sort created_at --direction desc  # newest first
 ```
 
-Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--metadata`, `--limit`. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
+Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--metadata`, `--property`, `--limit`. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
 
-Results come back in board order (`position`, ascending) by default. Pass `--sort` to change the column (`position`, `title`, `created_at`, `start_date`, `due_date`, `priority`) and `--direction asc|desc` to flip the order. `position` is always ascending (it is the manual drag order), so `--direction` is rejected when `--sort` is `position` or omitted — use it only with `title`, `created_at`, `start_date`, `due_date`, or `priority`.
+Results come back in board order (`position`, ascending) by default. Pass `--sort` to change the column (`position`, `title`, `created_at`, `start_date`, `due_date`, `priority`, or `property:<name-or-id>` for a custom property — select properties order by option order, and issues without the property sort last) and `--direction asc|desc` to flip the order. `position` is always ascending (it is the manual drag order), so `--direction` is rejected when `--sort` is `position` or omitted — use it only with `title`, `created_at`, `start_date`, `due_date`, `priority`, or a `property:` sort.
 
 Use `--metadata key=value` (repeatable; combined with AND) to filter by per-issue metadata. The value is JSON-parsed: `true`/`false` become bool, numbers become numbers, anything else is a string. Wrap as `'"42"'` to force a string when the value would otherwise sniff as a number:
 
 ```bash
 multica issue list --metadata pipeline_status=waiting_review
 multica issue list --metadata pr_number=482 --metadata is_blocked=true
+```
+
+Use `--property "Name=Value"` (repeatable; one value per flag) to filter by custom property. Names and select option values are case-insensitive and resolve to ids; repeating the same property matches any of its values, different properties must all match. Values are option names or ids (select types), `true`/`false` (checkbox), a member name, email, or id (actor types), or the stored value itself for `text`, `url`, `number`, and `date` (`YYYY-MM-DD`). Only `=` is supported today; the `>=`, `<=` and `!=` spellings are reserved for comparison filters and are rejected. The reserved value `__none__` matches issues where the property is unset:
+
+```bash
+multica issue list --property "Impact=High" --property "Impact=Medium"
+multica issue list --property "Impact=__none__" --status in_review
+multica issue list --property "Score=42" --property "Ship Date=2026-08-28"
 ```
 
 ### Get Issue
@@ -697,6 +708,23 @@ Subscribers receive notifications about issue activity (new comments, status cha
 multica issue runs <issue-id>
 multica issue runs <issue-id> --full-id
 multica issue runs <issue-id> --output json
+
+# Only work in flight (queued / dispatched / running / waiting_local_directory)
+multica issue runs <issue-id> --active --output json
+
+# ...and across the sub-issue family: the issue's parent (or itself, when it has
+# no parent) plus every child of that parent, each row labelled with its issue.
+# Answers "is another agent already working next to me?" before you start
+# overlapping code or PR work. Advisory only — it reserves nothing.
+#
+# Returns a compact per-run row — task_id, issue_id, issue_identifier,
+# issue_title, agent_id, status, created_at, started_at — not the full
+# execution-log record. Follow a task_id with `issue run-messages` for detail.
+#
+# Ordered running-first, newest-first within a status, capped at 20 rows. When
+# the cap truncates the answer the server sets X-Active-Runs-Truncated and the
+# CLI warns on stderr, so a short list is never mistaken for a complete one.
+multica issue runs <issue-id> --siblings --output json
 
 # View messages for a specific execution run
 multica issue run-messages <task-id>
