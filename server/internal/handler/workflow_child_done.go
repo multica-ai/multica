@@ -15,7 +15,7 @@ import (
 )
 
 func (h *Handler) tryAdvanceWorkflowFromClosedStage(ctx context.Context, parent db.Issue, closedStage int32) bool {
-	_, err := h.Queries.GetActiveWorkflowRunForIssue(ctx, db.GetActiveWorkflowRunForIssueParams{
+	activeRun, err := h.Queries.GetActiveWorkflowRunForIssue(ctx, db.GetActiveWorkflowRunForIssueParams{
 		WorkspaceID: parent.WorkspaceID,
 		IssueID:     parent.ID,
 	})
@@ -26,10 +26,17 @@ func (h *Handler) tryAdvanceWorkflowFromClosedStage(ctx context.Context, parent 
 		slog.Warn("workflow child done: active-run lookup failed", "error", err, "parent_id", uuidToString(parent.ID))
 		return true
 	}
+	// A batch may report a higher closed frontier than the run currently owns.
+	// Reconcile from the durable current stage; the service will deterministically
+	// skip any already-terminal later stages from the final sibling snapshot.
+	reconcileStage := closedStage
+	if reconcileStage > activeRun.CurrentStage {
+		reconcileStage = activeRun.CurrentStage
+	}
 	result, err := h.WorkflowService.AdvanceFromClosedStage(ctx, service.AdvanceWorkflowParams{
 		WorkspaceID: parent.WorkspaceID,
 		IssueID:     parent.ID,
-		ClosedStage: closedStage,
+		ClosedStage: reconcileStage,
 		Actor:       service.WorkflowActor{Type: "system"},
 	})
 	if err != nil {

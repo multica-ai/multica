@@ -204,10 +204,6 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		if parentStatus == "backlog" {
 			continue
 		}
-		if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
-			continue
-		}
-
 		children, err := h.Queries.ListChildIssues(ctx, parent.ID)
 		if err != nil {
 			slog.Warn("batch child done: failed to list siblings for stage barrier",
@@ -222,6 +218,9 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			// in the final state. stageBarrierClosed ignores `completed` on the
 			// unstaged path, so any completed child stands in for the barrier check.
 			if !stageBarrierClosed(children, g.children[0], isTerminal) {
+				continue
+			}
+			if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
 				continue
 			}
 			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch)
@@ -253,6 +252,12 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			}
 		}
 		if !found {
+			continue
+		}
+		if h.tryAdvanceWorkflowFromClosedStage(ctx, parent, bestStage) {
+			continue
+		}
+		if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
 			continue
 		}
 		h.postChildDoneComment(ctx, parent, rep, children, true, bestStage, batch)
