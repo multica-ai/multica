@@ -481,6 +481,18 @@ process_group_id() {
   ps -p "$1" -o pgid= 2>/dev/null | tr -d ' ' || true
 }
 
+process_descends_from() {
+  local pid=$1 ancestor=$2 parent hops=0
+  while [ -n "$pid" ] && [ "$pid" -gt 1 ] && [ "$hops" -lt 64 ]; do
+    [ "$pid" = "$ancestor" ] && return 0
+    parent="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ' || true)"
+    [ -n "$parent" ] && [ "$parent" != "$pid" ] || break
+    pid="$parent"
+    hops=$((hops + 1))
+  done
+  return 1
+}
+
 listener_belongs_to_component() {
   local component=$1 port=$2 launcher listener recorded
   launcher="$(component_pid "$component" || true)"
@@ -488,7 +500,8 @@ listener_belongs_to_component() {
   [ -n "$launcher" ] && [ -n "$listener" ] || return 1
   recorded="$(cat "$(listener_pid_file "$component")" 2>/dev/null || true)"
   [ -n "$recorded" ] && [ "$listener" = "$recorded" ] && return 0
-  [ "$(process_group_id "$listener")" = "$launcher" ]
+  [ "$(process_group_id "$listener")" = "$launcher" ] \
+    || process_descends_from "$listener" "$launcher"
 }
 
 health_belongs_to_api() {

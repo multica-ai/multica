@@ -174,6 +174,15 @@ if bash -c 'source "$1"; api_started_after '\''{"status":"ok"}'\'' 1' _ "$root_d
   fail "legacy /health without started_at was accepted as current"
 fi
 
+# Turbo/Next may put the listener in a nested process group. Ownership remains
+# safe to prove while the listener is still a descendant of our launcher.
+if ! bash -c 'source "$1"; process_descends_from "$$" "$PPID"' _ "$root_dir/scripts/dev-env.sh"; then
+  fail "process_descends_from did not recognize the direct parent"
+fi
+if bash -c 'source "$1"; process_descends_from "$PPID" "$$"' _ "$root_dir/scripts/dev-env.sh"; then
+  fail "process_descends_from accepted a child as its ancestor"
+fi
+
 # ---------------------------------------------------------------------------
 # Unknown names and components fail loudly instead of doing something else.
 # ---------------------------------------------------------------------------
