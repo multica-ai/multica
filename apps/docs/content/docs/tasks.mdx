@@ -94,7 +94,7 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 | Reason | Meaning | What to do |
 | --- | --- | --- |
 | `runtime_offline` | The runtime went offline during the run | Restore the runtime and retry; see [Daemon and runtimes](/daemon-runtimes) |
-| `queued_expired` | The runtime stopped heartbeating for longer than the reconnect grace, and the task had also been queued that long | Confirm the runtime is online, then retry |
+| `queued_expired` | The runtime stopped heartbeating for longer than the reconnect grace, and the task had also been queued for at least that long (or the agent's shorter **Queue wait timeout** override) | Confirm the runtime is online, then retry |
 | `runtime_recovery` | The daemon reclaimed an interrupted run after restarting | Retry directly |
 | `environment_prepare_failed` | The daemon could not set up the execution environment for this run — its working directory, or the local runtime config written into it | Read the raw error to see which step failed, then check that machine: disk space, permissions, a directory still in use, or the AI coding tool's local config |
 | `cancelled` | Stopped manually, or cancelled along with an archive or delete | Nothing to do |
@@ -151,6 +151,7 @@ The numbers below reflect the server's default configuration, for quick cross-ch
 | --- | --- | --- |
 | `deferred` | Scheduled to fire later | Enters `queued` at the scheduled time, then the rules below apply |
 | `queued` | Waiting for a runtime to claim it | Waits as long as its runtime keeps heartbeating, and in every case for at least one reconnect grace after being queued; fails only when both windows have passed, and is not retried automatically |
+| `queued` | Waiting for a runtime to claim it | Waits as long as its runtime keeps heartbeating, and in every case for at least one reconnect grace after being queued. An agent may set a shorter **Queue wait timeout**, but the task still fails only after both its own queue window and the runtime-offline window have passed; not retried automatically |
 | `dispatched` | Claimed; the tool is starting | Treated as failed after more than **5 minutes** in this state |
 | `waiting_local_directory` | Waiting for the local directory lock to release | No timeout of its own; returns to the startup flow once the directory is released |
 | `running` | The AI coding tool is executing | No fixed duration cap; liveness follows the runtime heartbeat — one every 15 seconds; a runtime that loses its heartbeat is marked offline within about 3 minutes at the latest, and its tasks fail with it |

@@ -23,6 +23,11 @@ const navigationStub: NavigationAdapter = {
 };
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
+const { toastError, toastSuccess, toastWarning } = vi.hoisted(() => ({
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastWarning: vi.fn(),
+}));
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -32,6 +37,33 @@ vi.mock("@multica/core/hooks", () => ({
 // stand-in here, so swap it out.
 vi.mock("./model-dropdown", () => ({
   ModelDropdown: () => null,
+}));
+
+vi.mock("./instructions-editor", () => ({
+  InstructionsEditor: ({
+    value,
+    onChange,
+    placeholder,
+  }: {
+    value?: string;
+    onChange?: (value: string) => void;
+    placeholder?: string;
+  }) => (
+    <textarea
+      aria-label="Instructions"
+      placeholder={placeholder}
+      value={value ?? ""}
+      onChange={(event) => onChange?.(event.target.value)}
+    />
+  ),
+}));
+
+vi.mock("./skill-multi-select", () => ({
+  SkillMultiSelect: () => null,
+}));
+
+vi.mock("../../common/avatar-upload-control", () => ({
+  AvatarUploadControl: () => null,
 }));
 
 // Provider logos don't matter for these assertions but they pull in SVGs.
@@ -45,7 +77,7 @@ vi.mock("../../common/actor-avatar", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: { error: toastError, success: toastSuccess, warning: toastWarning },
 }));
 
 import { CreateAgentDialog } from "./create-agent-dialog";
@@ -97,12 +129,12 @@ function makeRuntime(overrides: Partial<RuntimeDevice>): RuntimeDevice {
   };
 }
 
-function makeDuplicateSource(runtimeId: string): Agent {
+function makeTemplate(runtimeId: string, overrides: Partial<Agent> = {}): Agent {
   return {
-    id: "agent-source",
+    id: "agent-template",
     workspace_id: "ws-1",
     runtime_id: runtimeId,
-    name: "Source Agent",
+    name: "Template Agent",
     description: "",
     instructions: "",
     avatar_url: null,
@@ -121,6 +153,8 @@ function makeDuplicateSource(runtimeId: string): Agent {
     updated_at: "2026-04-01T00:00:00Z",
     archived_at: null,
     archived_by: null,
+    queued_ttl_seconds: null,
+    ...overrides,
   };
 }
 
@@ -232,8 +266,8 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     expect(screen.getByText("My Runtime", { selector: "span.truncate" })).toBeInTheDocument();
   });
 
-  it("in duplicate mode, does not pre-fill the source agent's runtime when it's now locked", async () => {
-    // The source runtime is owned by someone else and now private — the
+  it("in duplicate mode, does not pre-fill the template's runtime when it's now locked", async () => {
+    // Template runtime is owned by someone else and now private — the
     // duplicate flow used to seed with it anyway, leaving the user with
     // a Create button that 403s server-side. Now we fall back to the
     // first usable runtime instead.
@@ -249,8 +283,8 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       owner_id: ME,
       visibility: "private",
     });
-    const duplicateSource = makeDuplicateSource("rt-others-private");
-    const { onCreate } = renderDialog([othersPrivate, mine], duplicateSource);
+    const template = makeTemplate("rt-others-private");
+    const { onCreate } = renderDialog([othersPrivate, mine], template);
 
     expect(
       screen.getByText("My Runtime", { selector: "span.truncate" }),
@@ -266,8 +300,8 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     expect(onCreate.mock.calls[0]?.[0].runtime_id).toBe("rt-mine");
   });
 
-  it("disables Create when the selected runtime is locked (duplicate source + no usable fallback)", () => {
-    // Edge case: the source agent points at a locked runtime AND the workspace
+  it("disables Create when the selected runtime is locked (template + no usable fallback)", () => {
+    // Edge case: template points at a locked runtime AND the workspace
     // has no usable alternatives in scope. The defense-in-depth gate on
     // the Create button must keep the user from submitting a 403.
     const onlyOthersPrivate = makeRuntime({
@@ -279,8 +313,8 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     // Flip the picker to "All" so the locked runtime is at least
     // visible — that's the scope where the selected-but-locked state
     // can persist after the initial seed search returns nothing.
-    const duplicateSource = makeDuplicateSource("rt-only-others-private");
-    renderDialog([onlyOthersPrivate], duplicateSource);
+    const template = makeTemplate("rt-only-others-private");
+    renderDialog([onlyOthersPrivate], template);
 
     // The Create button is rendered by lucide-free CTA text "Create".
     const createBtn = screen
@@ -288,6 +322,120 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       .find((b) => b.textContent === "Create");
     expect(createBtn).toBeDefined();
     expect((createBtn as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("submits the default queued timeout for new agents", async () => {
+    const runtime = makeRuntime({ id: "rt-mine", name: "My Runtime" });
+    const { onCreate } = renderDialog([runtime]);
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Queue Default Agent" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate.mock.calls[0]?.[0]).toMatchObject({
+      name: "Queue Default Agent",
+      runtime_id: "rt-mine",
+      queued_ttl_seconds: 7200,
+    });
+  });
+
+  it("preserves an exact duplicate template queued timeout override when present", async () => {
+    const runtime = makeRuntime({ id: "rt-mine", name: "My Runtime" });
+    const template = makeTemplate("rt-mine", { queued_ttl_seconds: 1799 });
+    const { onCreate } = renderDialog([runtime], template);
+
+    const queuedTimeoutInput = screen.getByLabelText(
+      "Queue wait timeout (minutes)",
+    ) as HTMLInputElement;
+    expect(queuedTimeoutInput.value).toBe("");
+
+    expect(
+      screen.getByText(
+        "This agent keeps the source wait timeout of 1799 seconds until you edit this field.",
+      ),
+    ).not.toBeNull();
+    expect(
+      screen.queryByText(/Leave it empty or set it to 0 to use the system default\./),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByText("Create"));
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate.mock.calls[0]?.[0]).toMatchObject({
+      runtime_id: "rt-mine",
+      queued_ttl_seconds: 1799,
+    });
+  });
+
+  it("submits edited queued timeout minutes as seconds in duplicate mode", async () => {
+    const runtime = makeRuntime({ id: "rt-mine", name: "My Runtime" });
+    const template = makeTemplate("rt-mine", { queued_ttl_seconds: 1799 });
+    const { onCreate } = renderDialog([runtime], template);
+
+    fireEvent.change(screen.getByLabelText("Queue wait timeout (minutes)"), {
+      target: { value: "45" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate.mock.calls[0]?.[0]).toMatchObject({
+      runtime_id: "rt-mine",
+      queued_ttl_seconds: 2700,
+    });
+  });
+
+  it("does not submit when queued timeout input is invalid", async () => {
+    const runtime = makeRuntime({ id: "rt-mine", name: "My Runtime" });
+    const { onCreate } = renderDialog([runtime]);
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Invalid Timeout Agent" },
+    });
+    fireEvent.change(screen.getByLabelText("Queue wait timeout (minutes)"), {
+      target: { value: "1.5" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    const queuedTimeoutInput = screen.getByLabelText(
+      "Queue wait timeout (minutes)",
+    ) as HTMLInputElement;
+    const errorText = "Enter a whole number of minutes or leave it empty / 0.";
+
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(queuedTimeoutInput.getAttribute("aria-invalid")).toBe("true");
+    expect(queuedTimeoutInput).toHaveFocus();
+    const errorNode = screen.getByText(errorText);
+    expect(errorNode).not.toBeNull();
+    expect(errorNode.getAttribute("role")).toBe("alert");
+    const describedBy = queuedTimeoutInput.getAttribute("aria-describedby") ?? "";
+    expect(describedBy.length).toBeGreaterThan(0);
+    expect(toastError).toHaveBeenCalledWith(errorText);
+  });
+
+  it("uses the 120-minute default when duplicating a template without a queued timeout override", async () => {
+    const runtime = makeRuntime({ id: "rt-mine", name: "My Runtime" });
+    const template = makeTemplate("rt-mine");
+    const { onCreate } = renderDialog([runtime], template);
+
+    fireEvent.click(screen.getByText("Create"));
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate.mock.calls[0]?.[0]).toMatchObject({
+      runtime_id: "rt-mine",
+      queued_ttl_seconds: 7200,
+    });
   });
 });
 
