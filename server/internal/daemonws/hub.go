@@ -407,9 +407,9 @@ func (h *Hub) notifyRuntimeGone(runtimeID, eventID string) {
 	}
 	delivered, deduped := h.notifyFrame(runtimeID, data, eventID)
 	if delivered {
-		M.WakeupDeliveredHit.Add(1)
+		M.RuntimeGoneDeliveredHit.Add(1)
 	} else if !deduped {
-		M.WakeupDeliveredMiss.Add(1)
+		M.RuntimeGoneDeliveredMiss.Add(1)
 	}
 }
 
@@ -480,9 +480,9 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 		}
 		delivered, deduped := h.notifyFrame(payload.RuntimeID, frame, eventID)
 		if delivered {
-			M.WakeupDeliveredHit.Add(1)
+			M.RuntimeGoneDeliveredHit.Add(1)
 		} else if !deduped {
-			M.WakeupDeliveredMiss.Add(1)
+			M.RuntimeGoneDeliveredMiss.Add(1)
 		}
 	default:
 		M.WakeupDeliveredMiss.Add(1)

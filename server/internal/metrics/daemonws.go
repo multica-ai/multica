@@ -17,6 +17,7 @@ type DaemonWSCollector struct {
 	wakeupPublishErrors  *prometheus.Desc
 	wakeupReceivedTotal  *prometheus.Desc
 	wakeupDeliveredTotal *prometheus.Desc
+	runtimeGoneDelivered *prometheus.Desc
 }
 
 func NewDaemonWSCollector(m *daemonws.Metrics) *DaemonWSCollector {
@@ -31,6 +32,7 @@ func NewDaemonWSCollector(m *daemonws.Metrics) *DaemonWSCollector {
 		wakeupPublishErrors:  newDaemonWSDesc("wakeup_publish_errors_total", "Total daemon wakeup Redis publish errors."),
 		wakeupReceivedTotal:  newDaemonWSDesc("wakeup_received_total", "Total daemon wakeups received from the Redis relay."),
 		wakeupDeliveredTotal: prometheus.NewDesc("multica_daemonws_wakeup_delivered_total", "Total daemon wakeup local delivery attempts.", []string{"result"}, nil),
+		runtimeGoneDelivered: prometheus.NewDesc("multica_daemonws_runtime_gone_delivered_total", "Total runtime-gone local delivery attempts.", []string{"result"}, nil),
 	}
 }
 
@@ -48,6 +50,7 @@ func (c *DaemonWSCollector) Describe(ch chan<- *prometheus.Desc) {
 		c.wakeupPublishErrors,
 		c.wakeupReceivedTotal,
 		c.wakeupDeliveredTotal,
+		c.runtimeGoneDelivered,
 	} {
 		ch <- desc
 	}
@@ -67,4 +70,6 @@ func (c *DaemonWSCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.wakeupReceivedTotal, prometheus.CounterValue, float64(m.WakeupReceivedTotal.Load()))
 	ch <- prometheus.MustNewConstMetric(c.wakeupDeliveredTotal, prometheus.CounterValue, float64(m.WakeupDeliveredHit.Load()), "hit")
 	ch <- prometheus.MustNewConstMetric(c.wakeupDeliveredTotal, prometheus.CounterValue, float64(m.WakeupDeliveredMiss.Load()), "miss")
+	ch <- prometheus.MustNewConstMetric(c.runtimeGoneDelivered, prometheus.CounterValue, float64(m.RuntimeGoneDeliveredHit.Load()), "hit")
+	ch <- prometheus.MustNewConstMetric(c.runtimeGoneDelivered, prometheus.CounterValue, float64(m.RuntimeGoneDeliveredMiss.Load()), "miss")
 }

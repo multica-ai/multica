@@ -1106,7 +1106,6 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	qtx := h.Queries.WithTx(tx)
 	var sourceContextAttachmentURLs []string
 	var sourceContextIntentURLs []string
-	var runtimeIDs []string
 
 	// SET LOCAL is transaction-scoped, so pgxpool hands this connection back
 	// out with the default (unbounded) lock_timeout after COMMIT / ROLLBACK.
@@ -1122,15 +1121,16 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		failWorkspaceDelete(w, r, workspaceID, "lock workspace", err)
 		return
 	}
-	// Snapshot the runtime IDs while the workspace row lock prevents new
-	// runtime registrations. Notify their active daemon connections only after
-	// the workspace teardown commits.
+	// Take a best-effort snapshot for post-commit daemon invalidation. Runtime
+	// registration does not participate in the workspace delete lock protocol,
+	// so PR1 retains the heartbeat lookup as the correctness fallback for a
+	// registration that races this snapshot.
 	runtimes, err := qtx.ListAgentRuntimes(r.Context(), requester.WorkspaceID)
 	if err != nil {
 		failWorkspaceDelete(w, r, workspaceID, "list runtimes", err)
 		return
 	}
-	runtimeIDs = make([]string, 0, len(runtimes))
+	runtimeIDs := make([]string, 0, len(runtimes))
 	for _, runtime := range runtimes {
 		runtimeIDs = append(runtimeIDs, uuidToString(runtime.ID))
 	}

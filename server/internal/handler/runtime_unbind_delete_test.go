@@ -12,6 +12,14 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+type recordingRuntimeGoneNotifier struct {
+	runtimeIDs []string
+}
+
+func (n *recordingRuntimeGoneNotifier) NotifyRuntimeGone(runtimeID string) {
+	n.runtimeIDs = append(n.runtimeIDs, runtimeID)
+}
+
 // parseExpectedActiveAgentIDs is the cascade endpoint's input validator.
 // Empty list is a valid plan ("no active agents" — cascade just deletes the
 // runtime); malformed UUIDs must surface as 400 so a bug in the front-end

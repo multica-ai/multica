@@ -462,10 +462,11 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 
 	// Now the runtime rows have no agent references; remove them, then the
 	// profile itself.
-	if _, err := qtx.DeleteAgentRuntimesByProfile(r.Context(), db.DeleteAgentRuntimesByProfileParams{
+	deletedRuntimes, err := qtx.DeleteAgentRuntimesByProfile(r.Context(), db.DeleteAgentRuntimesByProfileParams{
 		ProfileID:   profileUUID,
 		WorkspaceID: wsUUID,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Error("DeleteAgentRuntimesByProfile failed", "error", err, "profile_id", uuidToString(profileUUID))
 		writeError(w, http.StatusInternalServerError, "failed to clean up runtime instances")
 		return
@@ -484,8 +485,8 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit transaction")
 		return
 	}
-	for _, runtimeID := range runtimeIDs {
-		h.NotifyRuntimeGone(uuidToString(runtimeID))
+	for _, runtime := range deletedRuntimes {
+		h.NotifyRuntimeGone(uuidToString(runtime.ID))
 	}
 
 	// Tell connected clients to refetch the runtime list (instances vanished),

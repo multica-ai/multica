@@ -25,6 +25,26 @@ func TestNotifyRuntimeGone(t *testing.T) {
 	if payload.Status != protocol.HeartbeatStatusRuntimeGone || !payload.RuntimeGone {
 		t.Fatalf("payload = %+v, want runtime_gone acknowledgement", payload)
 	}
+	if M.RuntimeGoneDeliveredHit.Load() != 1 {
+		t.Fatalf("runtime-gone delivered hit metric = %d, want 1", M.RuntimeGoneDeliveredHit.Load())
+	}
+	if M.WakeupDeliveredHit.Load() != 0 || M.WakeupDeliveredMiss.Load() != 0 {
+		t.Fatalf("runtime-gone polluted wakeup delivery metrics: hit=%d miss=%d", M.WakeupDeliveredHit.Load(), M.WakeupDeliveredMiss.Load())
+	}
+}
+
+func TestNotifyRuntimeGoneMissingConnectionDoesNotPolluteWakeupMetrics(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	NewHub().NotifyRuntimeGone("offline-runtime")
+
+	if M.RuntimeGoneDeliveredHit.Load() != 0 || M.RuntimeGoneDeliveredMiss.Load() != 1 {
+		t.Fatalf("runtime-gone delivery metrics: hit=%d miss=%d, want 0/1", M.RuntimeGoneDeliveredHit.Load(), M.RuntimeGoneDeliveredMiss.Load())
+	}
+	if M.WakeupDeliveredHit.Load() != 0 || M.WakeupDeliveredMiss.Load() != 0 {
+		t.Fatalf("runtime-gone polluted wakeup delivery metrics: hit=%d miss=%d", M.WakeupDeliveredHit.Load(), M.WakeupDeliveredMiss.Load())
+	}
 }
 
 func TestRelayNotifierPublishesAndDeliversRuntimeGone(t *testing.T) {
@@ -54,6 +74,12 @@ func TestRelayNotifierPublishesAndDeliversRuntimeGone(t *testing.T) {
 	case duplicate := <-remoteClient.send:
 		t.Fatalf("expected duplicate relay event to be dropped, got %s", duplicate)
 	case <-time.After(20 * time.Millisecond):
+	}
+	if M.RuntimeGoneDeliveredHit.Load() != 1 || M.RuntimeGoneDeliveredMiss.Load() != 0 {
+		t.Fatalf("runtime-gone delivery metrics after loopback: hit=%d miss=%d, want 1/0", M.RuntimeGoneDeliveredHit.Load(), M.RuntimeGoneDeliveredMiss.Load())
+	}
+	if M.WakeupDeliveredHit.Load() != 0 || M.WakeupDeliveredMiss.Load() != 0 {
+		t.Fatalf("runtime-gone polluted wakeup delivery metrics: hit=%d miss=%d", M.WakeupDeliveredHit.Load(), M.WakeupDeliveredMiss.Load())
 	}
 }
 
