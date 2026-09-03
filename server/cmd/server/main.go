@@ -621,7 +621,6 @@ func main() {
 	if dbRoutingMetrics != nil {
 		readRecorder = dbRoutingMetrics
 	}
-	readSelector := dbreader.New(pool, replicaPool, readRecorder)
 
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:         httpMetrics,
@@ -634,10 +633,16 @@ func main() {
 		WecomSenders:        wecomSenders,
 		WecomRelayOutbound:  wecomRelayOutbound,
 		FeatureFlags:        flags,
-		ReadSelector:        readSelector,
 		HeartbeatScheduler:  heartbeatScheduler,
 		LLMMaxRetries:       llmMaxRetries,
 	})
+	var replicaQueries *db.Queries
+	if replicaPool != nil {
+		replicaQueries = db.New(replicaPool)
+	}
+	// Reuse the handler's primary Queries handle so replica routing does not
+	// create a second wrapper around the same primary pool.
+	h.ReadSelector = dbreader.New(h.Queries, replicaQueries, readRecorder)
 
 	srv := newMainHTTPServer(":"+port, r)
 	profilingServer := profiling.NewServer()

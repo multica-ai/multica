@@ -10,7 +10,7 @@ func NewDBRoutingMetrics() *DBRoutingMetrics {
 	return &DBRoutingMetrics{
 		readRoutes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_db_read_routes_total",
-			Help: "Read selections by business, database role, and bounded reason.",
+			Help: "Routing decisions by business, role, and reason; a replica fallback records both the replica selection and primary retry.",
 		}, []string{"business", "role", "reason"}),
 	}
 }

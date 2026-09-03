@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -113,9 +114,15 @@ func newSizedDBPool(ctx context.Context, dbURL string, connectTimeout time.Durat
 func applyPoolSizing(cfg *pgxpool.Config, dbURL string, sizing dbPoolSizing) {
 	urlParams := poolParamsFromURL(dbURL)
 	if sizing.requireReadOnly {
-		// Enforce the replica contract in code even when the connection string
-		// omits target_session_attrs. This check runs on every new connection.
-		cfg.ConnConfig.Config.ValidateConnect = pgconn.ValidateConnectTargetSessionAttrsReadOnly
+		// Standby validation is stricter than read-only validation, so preserve
+		// an operator's explicit target_session_attrs=standby. Every other value
+		// is replaced with read-only to keep the replica contract fail-closed.
+		if !sameValidateConnect(
+			cfg.ConnConfig.Config.ValidateConnect,
+			pgconn.ValidateConnectTargetSessionAttrsStandby,
+		) {
+			cfg.ConnConfig.Config.ValidateConnect = pgconn.ValidateConnectTargetSessionAttrsReadOnly
+		}
 	}
 	if sizing.defaultMaxConnLifetime > 0 && !urlParams["pool_max_conn_lifetime"] {
 		cfg.MaxConnLifetime = sizing.defaultMaxConnLifetime
@@ -144,6 +151,13 @@ func applyPoolSizing(cfg *pgxpool.Config, dbURL string, sizing dbPoolSizing) {
 	if cfg.MinConns > cfg.MaxConns {
 		cfg.MinConns = cfg.MaxConns
 	}
+}
+
+func sameValidateConnect(got, want pgconn.ValidateConnectFunc) bool {
+	if got == nil || want == nil {
+		return got == nil && want == nil
+	}
+	return reflect.ValueOf(got).Pointer() == reflect.ValueOf(want).Pointer()
 }
 
 // poolParamsFromURL returns the set of pool_* query params present on the

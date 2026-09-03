@@ -1,7 +1,6 @@
 package main
 
 import (
-	"reflect"
 	"testing"
 	"time"
 
@@ -123,13 +122,46 @@ func TestReplicaPoolEnforcesReadOnlyAndShortConnectionLifetime(t *testing.T) {
 		"",
 		replicaPoolSizing,
 	)
-	gotValidator := reflect.ValueOf(cfg.ConnConfig.Config.ValidateConnect).Pointer()
-	wantValidator := reflect.ValueOf(pgconn.ValidateConnectTargetSessionAttrsReadOnly).Pointer()
-	if gotValidator != wantValidator {
+	if !sameValidateConnect(
+		cfg.ConnConfig.Config.ValidateConnect,
+		pgconn.ValidateConnectTargetSessionAttrsReadOnly,
+	) {
 		t.Fatal("replica ValidateConnect does not enforce target_session_attrs=read-only")
 	}
 	if cfg.MaxConnLifetime != defaultReplicaMaxConnLifetime {
 		t.Fatalf("replica max lifetime = %s, want %s", cfg.MaxConnLifetime, defaultReplicaMaxConnLifetime)
+	}
+}
+
+func TestReplicaPoolPreservesStricterStandbyValidation(t *testing.T) {
+	cfg := resolvedPoolConfig(
+		t,
+		"postgres://u:p@replica/db?sslmode=disable&target_session_attrs=standby",
+		"",
+		"",
+		replicaPoolSizing,
+	)
+	if !sameValidateConnect(
+		cfg.ConnConfig.Config.ValidateConnect,
+		pgconn.ValidateConnectTargetSessionAttrsStandby,
+	) {
+		t.Fatal("replica ValidateConnect replaced target_session_attrs=standby")
+	}
+}
+
+func TestReplicaPoolOverridesWritableValidation(t *testing.T) {
+	cfg := resolvedPoolConfig(
+		t,
+		"postgres://u:p@replica/db?sslmode=disable&target_session_attrs=read-write",
+		"",
+		"",
+		replicaPoolSizing,
+	)
+	if !sameValidateConnect(
+		cfg.ConnConfig.Config.ValidateConnect,
+		pgconn.ValidateConnectTargetSessionAttrsReadOnly,
+	) {
+		t.Fatal("replica ValidateConnect accepted target_session_attrs=read-write")
 	}
 }
 

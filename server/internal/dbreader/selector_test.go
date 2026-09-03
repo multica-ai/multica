@@ -13,14 +13,16 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-const testBusiness Business = "test"
+const testBusiness = BusinessDashboard
 
 type recorderStub struct {
 	routes []selection
+	labels []string
 }
 
-func (r *recorderStub) RecordReadRoute(_, role, reason string) {
+func (r *recorderStub) RecordReadRoute(business, role, reason string) {
 	r.routes = append(r.routes, selection{role: Role(role), reason: Reason(reason)})
+	r.labels = append(r.labels, business)
 }
 
 func testSelector() (*Selector, *db.Queries, *db.Queries, *recorderStub) {
@@ -34,6 +36,16 @@ func testSelector() (*Selector, *db.Queries, *db.Queries, *recorderStub) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	return selector, primary, replica, recorder
+}
+
+func TestNewKeepsProvidedQueryHandles(t *testing.T) {
+	primary := &db.Queries{}
+	replica := &db.Queries{}
+	selector := New(primary, replica, nil)
+
+	if selector.primary != primary || selector.replica != replica {
+		t.Fatal("New replaced the provided query handles")
+	}
 }
 
 func TestPrimaryOnlySelectorPreservesExistingRouting(t *testing.T) {
@@ -73,6 +85,21 @@ func TestEventualConsistencyUsesConfiguredReplica(t *testing.T) {
 	}
 	if len(recorder.routes) != 1 || recorder.routes[0].role != RoleReplica {
 		t.Fatalf("routes = %#v, want one replica route", recorder.routes)
+	}
+}
+
+func TestUnknownBusinessUsesBoundedMetricLabel(t *testing.T) {
+	selector, _, _, recorder := testSelector()
+
+	_, err := Read(context.Background(), selector, Business("request-123"), EventualConsistency,
+		func(_ context.Context, _ *db.Queries) (string, error) {
+			return "replica result", nil
+		})
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(recorder.labels) != 1 || recorder.labels[0] != string(businessUnknown) {
+		t.Fatalf("business labels = %#v, want bounded unknown label", recorder.labels)
 	}
 }
 
@@ -191,7 +218,7 @@ func TestCircuitAllowsOnlyOneHalfOpenTrial(t *testing.T) {
 	if !allowed || halfOpen {
 		t.Fatalf("initial allow = %v, halfOpen=%v; want normal replica read", allowed, halfOpen)
 	}
-	if !circuit.fail(generation, now, 1, defaultReplicaCircuitCooldown) {
+	if !circuit.fail(generation, now, defaultReplicaCircuitCooldown) {
 		t.Fatal("first availability failure did not open circuit")
 	}
 	if allowed, _, _ := circuit.allow(now); allowed {
@@ -205,6 +232,47 @@ func TestCircuitAllowsOnlyOneHalfOpenTrial(t *testing.T) {
 	}
 	if allowed, _, _ := circuit.allow(now); allowed {
 		t.Fatal("circuit allowed a second concurrent half-open trial")
+	}
+}
+
+func TestPanicReleasesHalfOpenTrial(t *testing.T) {
+	selector, _, replica, _ := testSelector()
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	selector.now = func() time.Time { return now }
+
+	_, err := Read(context.Background(), selector, testBusiness, EventualConsistency,
+		func(_ context.Context, queries *db.Queries) (string, error) {
+			if queries == replica {
+				return "", &pgconn.PgError{Code: "08006", Message: "connection failure"}
+			}
+			return "primary result", nil
+		})
+	if err != nil {
+		t.Fatalf("open circuit: %v", err)
+	}
+	now = now.Add(defaultReplicaCircuitCooldown)
+
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != "boom" {
+				t.Fatalf("recovered = %#v, want boom", recovered)
+			}
+		}()
+		_, _ = Read(context.Background(), selector, testBusiness, EventualConsistency,
+			func(_ context.Context, queries *db.Queries) (string, error) {
+				if queries != replica {
+					t.Fatalf("half-open trial used %#v, want replica", queries)
+				}
+				panic("boom")
+			})
+	}()
+
+	got, err := Read(context.Background(), selector, testBusiness, EventualConsistency,
+		func(_ context.Context, queries *db.Queries) (*db.Queries, error) {
+			return queries, nil
+		})
+	if err != nil || got != replica {
+		t.Fatalf("read after panic = %#v, %v; want a new replica trial", got, err)
 	}
 }
 

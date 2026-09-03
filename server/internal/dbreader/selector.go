@@ -10,24 +10,22 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-const (
-	// Availability failures prove that the replica cannot serve this request,
-	// so one failure is enough to stop making every caller pay the connection
-	// timeout. The read callback is explicitly idempotent, so the failed attempt
-	// can be retried once on primary.
-	defaultReplicaCircuitFailureThreshold = 1
-
-	// A two-second cooldown caps failed replica connection attempts at one per
-	// API process per interval while restoring replica traffic quickly. Recovery
-	// is driven by one half-open business read, not a background database query.
-	defaultReplicaCircuitCooldown = 2 * time.Second
-)
+// A two-second cooldown caps failed replica connection attempts at one per API
+// process per interval while restoring replica traffic quickly. One
+// availability failure opens the circuit because it already proves that the
+// replica cannot serve the request. Recovery is driven by one half-open
+// business read, not a background database query.
+const defaultReplicaCircuitCooldown = 2 * time.Second
 
 type Business string
+
+const (
+	BusinessDashboard Business = "dashboard"
+	businessUnknown   Business = "unknown"
+)
 
 type Consistency string
 
@@ -73,11 +71,10 @@ type Selector struct {
 }
 
 type replicaCircuit struct {
-	mu                  sync.Mutex
-	generation          uint64
-	consecutiveFailures int
-	openUntil           time.Time
-	halfOpenInFlight    bool
+	mu               sync.Mutex
+	generation       uint64
+	openUntil        time.Time
+	halfOpenInFlight bool
 }
 
 type selection struct {
@@ -94,12 +91,8 @@ type fallbackDecision struct {
 	reason      Reason
 }
 
-func New(primaryPool, replicaPool *pgxpool.Pool, recorder Recorder) *Selector {
-	primary := db.New(primaryPool)
-	if replicaPool == nil {
-		return newSelector(primary, nil, recorder, slog.Default())
-	}
-	return newSelector(primary, db.New(replicaPool), recorder, slog.Default())
+func New(primary, replica *db.Queries, recorder Recorder) *Selector {
+	return newSelector(primary, replica, recorder, slog.Default())
 }
 
 func NewPrimaryOnly(primary *db.Queries) *Selector {
@@ -132,6 +125,11 @@ func Read[T any](
 	query func(context.Context, *db.Queries) (T, error),
 ) (T, error) {
 	selected := selector.selectForRead(business, consistency)
+	if selected.halfOpen {
+		// Normal returns finish the trial through succeed, fail, or
+		// abandonTrial. This defer is the panic-safe liveness backstop.
+		defer selector.circuit.releaseTrial(selected.generation)
+	}
 	result, err := query(ctx, selected.queries)
 	if selected.role != RoleReplica {
 		return result, err
@@ -194,7 +192,16 @@ func (s *Selector) route(
 
 func (s *Selector) recordRoute(business Business, role Role, reason Reason) {
 	if s.recorder != nil {
-		s.recorder.RecordReadRoute(string(business), string(role), string(reason))
+		s.recorder.RecordReadRoute(business.metricLabel(), string(role), string(reason))
+	}
+}
+
+func (b Business) metricLabel() string {
+	switch b {
+	case BusinessDashboard:
+		return string(b)
+	default:
+		return string(businessUnknown)
 	}
 }
 
@@ -255,7 +262,6 @@ func (s *Selector) replicaFailed(selected selection, reason Reason, err error) {
 	if s.circuit.fail(
 		selected.generation,
 		s.now(),
-		defaultReplicaCircuitFailureThreshold,
 		defaultReplicaCircuitCooldown,
 	) {
 		s.logger.Warn("database replica circuit opened; using primary",
@@ -304,36 +310,38 @@ func (c *replicaCircuit) succeed(generation uint64, halfOpen bool) (closed bool)
 		return false
 	}
 	if c.openUntil.IsZero() {
-		c.consecutiveFailures = 0
 		return false
 	}
 	if !halfOpen || !c.halfOpenInFlight {
 		return false
 	}
 	c.generation++
-	c.consecutiveFailures = 0
 	c.openUntil = time.Time{}
 	c.halfOpenInFlight = false
 	return true
 }
 
-func (c *replicaCircuit) fail(generation uint64, now time.Time, threshold int, cooldown time.Duration) (opened bool) {
+func (c *replicaCircuit) fail(generation uint64, now time.Time, cooldown time.Duration) (opened bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if generation != c.generation {
 		return false
 	}
-	c.consecutiveFailures++
-	if c.consecutiveFailures < threshold {
-		return false
-	}
 	wasOpen := !c.openUntil.IsZero()
 	c.generation++
-	c.consecutiveFailures = 0
 	c.openUntil = now.Add(cooldown)
 	c.halfOpenInFlight = false
 	return !wasOpen
+}
+
+func (c *replicaCircuit) releaseTrial(generation uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if generation == c.generation {
+		c.halfOpenInFlight = false
+	}
 }
 
 func (c *replicaCircuit) abandonTrial(generation uint64, now time.Time, cooldown time.Duration) {
