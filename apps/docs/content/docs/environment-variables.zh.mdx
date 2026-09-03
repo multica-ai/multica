@@ -234,6 +234,11 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 没有输出且没有工具执行时的静默上限；`0` 表示整套 watchdog 关闭 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | 单个工具调用持续静默的上限；只有希望工具比模型有更多余量时才单独设置，`0` 表示工具执行期间永不强制停止 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 专用静默阈值 |
+| `MULTICA_OPENCODE_DISCOVERY_BASE_URL` | 空 | 用其 `/models` 目录补充 OpenCode 运行时的 OpenAI 兼容 API 根地址（例如 `https://gateway.example/v1`） |
+| `MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID` | `openai-compatible` | 已发现模型使用的提供商前缀，例如 `gpustack` |
+| `MULTICA_OPENCODE_DISCOVERY_PROVIDER_NAME` | 提供商 ID | 注入 OpenCode 临时提供商配置的显示名称 |
+| `OPENCODE_DISCOVERY_API_KEY` | 空 | 发现端点使用的守护进程本地 bearer token；运行已发现模型时 OpenCode 及其子进程会继承它 |
+| `MULTICA_OPENCODE_DISCOVERY_API_KEY_ENV` | `OPENCODE_DISCOVERY_API_KEY` | 可选的其他守护进程本地 bearer token 环境变量名；token 本身不会写入生成的配置 |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | Codex 语义静默阈值。Codex 自己的计时器看不到工具是否在执行，因此跟随 idle / tool 预算中较大的那个，而不再单独保留一个更短的上限 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | 显式覆盖 Codex 首轮无进展上限；`0` 保持默认值。实际首轮等待仍受 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 和总执行超时限制——需将 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 设为严格大于此值（并留出余量），否则等待会被截断至该值，且会跳过模型目录启动重试。设为相等还不够：语义计时器先启动，两者相等时仍可能丢失该重试 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 启动握手上限；显式设置后会统一覆盖两类预算 |

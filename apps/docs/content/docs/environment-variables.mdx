@@ -234,6 +234,11 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | Silence ceiling with no output and no tool execution; `0` disables the watchdog entirely |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Silence ceiling for a single tool call; set it only to give tools more room than the model gets, `0` never force-stops a tool call |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode-specific silence threshold |
+| `MULTICA_OPENCODE_DISCOVERY_BASE_URL` | empty | OpenAI-compatible API root whose `/models` catalog supplements the OpenCode runtime (for example `https://gateway.example/v1`) |
+| `MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID` | `openai-compatible` | Provider prefix used for discovered models, such as `gpustack` |
+| `MULTICA_OPENCODE_DISCOVERY_PROVIDER_NAME` | provider ID | Display name injected into OpenCode's transient provider configuration |
+| `OPENCODE_DISCOVERY_API_KEY` | empty | Daemon-local bearer token for the discovery endpoint; OpenCode and its child processes inherit it when a discovered model runs |
+| `MULTICA_OPENCODE_DISCOVERY_API_KEY_ENV` | `OPENCODE_DISCOVERY_API_KEY` | Optional name of another daemon-local environment variable containing the bearer token; the token itself is never copied into generated configuration |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Codex semantic-silence threshold. Codex's own timer cannot see that a tool is running, so it tracks the larger of the idle / tool budgets instead of holding a separate, shorter ceiling |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Explicit override for the Codex first-turn no-progress ceiling; `0` keeps the default. The effective first-turn wait stays bounded by `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` and the overall execution timeout — set `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` strictly above this value (with some margin), or the wait is truncated to it and the model-catalog startup retry is skipped. Equal values are not enough: the semantic timer is armed first, so at equal durations the retry can still be lost |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`; `thread/start`, `thread/resume`: `60s` | Codex app-server startup handshake ceilings. An explicit value overrides both budgets globally |

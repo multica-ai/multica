@@ -62,6 +62,19 @@ DeepSeek Harness のモデルカタログはランタイム自身が提供しま
 ツールによってモデル名が異なることがあります。AI コーディングツールを変更すると、以前のモデル値は新しいツールで使えないため、選び直す必要があります。
 </Callout>
 
+### OpenCode 向け OpenAI 互換モデル検出
+
+デーモンは、運用者が設定した 1 つの OpenAI 互換 `/models` エンドポイントから OpenCode のカタログを補完できます。GPUStack、LiteLLM、LM Studio、および models.dev にモデルを公開していないプライベートゲートウェイで利用できます。
+
+```dotenv
+MULTICA_OPENCODE_DISCOVERY_BASE_URL=https://gateway.example/v1
+MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID=gpustack
+MULTICA_OPENCODE_DISCOVERY_PROVIDER_NAME=GPUStack
+OPENCODE_DISCOVERY_API_KEY=replace-with-a-local-key
+```
+
+これらをデーモンのローカル環境に設定し、デーモンを再起動します。Multica は `.../models` を取得して返されたモデル ID を通常の `opencode models` カタログへ統合し、タスク開始時には選択されたモデルだけを OpenCode へ注入します。API キーはマシン環境に留まり、生成設定や Multica サーバーデータベースへコピーされません。検出に失敗しても OpenCode の通常カタログは維持されます。
+
 ## セッション再開
 
 表で ✓ が付いたツールは、後続の実行で既存のセッションを続行できます。ただし、元のセッションが残っており、そのセッションへアクセスできるランタイムで作業が実行される必要があります。MiniMax Code 0.1.2 は ACP でセッション読み込み機能を通知しないため、後続の実行では新しい MCode セッションを開始します。

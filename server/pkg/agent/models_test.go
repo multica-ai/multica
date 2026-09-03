@@ -2,7 +2,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -823,6 +827,159 @@ exit 1
 	}
 	if models[0].ID != "openai/gpt-4o" || models[0].Thinking != nil {
 		t.Fatalf("unexpected fallback model: %+v", models[0])
+	}
+}
+
+func TestDiscoverOpenCodeCompatibleProviderBuildsTransientConfig(t *testing.T) {
+	t.Parallel()
+
+	type capturedRequest struct{ path, auth string }
+	captured := make(chan capturedRequest, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured <- capturedRequest{path: r.URL.Path, auth: r.Header.Get("Authorization")}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"qwen3-coder"},{"id":"deepseek-r1"},{"id":"qwen3-coder"},{"id":"bad#variant"},{"id":""}]}`))
+	}))
+	defer srv.Close()
+
+	env := map[string]string{
+		"MULTICA_OPENCODE_DISCOVERY_BASE_URL":      srv.URL + "/v1/",
+		"MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID":   "gpustack",
+		"MULTICA_OPENCODE_DISCOVERY_PROVIDER_NAME": "GPUStack",
+		"MULTICA_OPENCODE_DISCOVERY_API_KEY_ENV":   "GPUSTACK_API_KEY",
+		"GPUSTACK_API_KEY":                         "secret-token",
+	}
+	discovery, ok := discoverOpenCodeCompatibleProvider(context.Background(), srv.Client(), func(key string) string {
+		return env[key]
+	})
+	if !ok {
+		t.Fatal("expected compatible provider discovery")
+	}
+	request := <-captured
+	if request.path != "/v1/models" || request.auth != "Bearer secret-token" {
+		t.Fatalf("request = %+v", request)
+	}
+	if !reflect.DeepEqual(discovery.Models, []string{"deepseek-r1", "qwen3-coder"}) {
+		t.Fatalf("models = %v", discovery.Models)
+	}
+
+	content, err := openCodeDiscoveryConfigContent(discovery)
+	if err != nil {
+		t.Fatalf("openCodeDiscoveryConfigContent: %v", err)
+	}
+	if strings.Contains(content, "secret-token") {
+		t.Fatal("transient OpenCode config must not contain the API key value")
+	}
+	var payload struct {
+		Provider map[string]struct {
+			Name    string `json:"name"`
+			NPM     string `json:"npm"`
+			Options struct {
+				BaseURL string `json:"baseURL"`
+				APIKey  string `json:"apiKey"`
+			} `json:"options"`
+			Models map[string]struct {
+				Name string `json:"name"`
+			} `json:"models"`
+		} `json:"provider"`
+	}
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		t.Fatalf("generated config is invalid JSON: %v", err)
+	}
+	provider := payload.Provider["gpustack"]
+	if provider.Name != "GPUStack" || provider.NPM != "@ai-sdk/openai-compatible" {
+		t.Fatalf("unexpected provider config: %+v", provider)
+	}
+	if provider.Options.BaseURL != srv.URL+"/v1" || provider.Options.APIKey != "{env:GPUSTACK_API_KEY}" {
+		t.Fatalf("unexpected provider options: %+v", provider.Options)
+	}
+	if provider.Models["qwen3-coder"].Name != "qwen3-coder" {
+		t.Fatalf("qwen3-coder config missing: %+v", provider.Models)
+	}
+}
+
+func TestDiscoverOpenCodeModelsSupplementsCLIFromCompatibleEndpoint(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"qwen3-coder"}]}`))
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_OPENCODE_DISCOVERY_BASE_URL", srv.URL+"/v1")
+	t.Setenv("MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID", "gpustack")
+
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "opencode")
+	script := `#!/bin/sh
+echo "openai/gpt-4o"
+case "${OPENCODE_CONFIG_CONTENT-}" in
+  *qwen3-coder*) echo "gpustack/qwen3-coder" ;;
+esac
+`
+	writeTestExecutable(t, fake, []byte(script))
+
+	models, err := discoverOpenCodeModels(context.Background(), Command{Path: fake})
+	if err != nil {
+		t.Fatalf("discoverOpenCodeModels: %v", err)
+	}
+	if got := modelIDs(models); !reflect.DeepEqual(got, []string{"openai/gpt-4o", "gpustack/qwen3-coder"}) {
+		t.Fatalf("models = %v", got)
+	}
+}
+
+func modelIDs(models []Model) []string {
+	ids := make([]string, 0, len(models))
+	for _, model := range models {
+		ids = append(ids, model.ID)
+	}
+	return ids
+}
+
+func TestDiscoverOpenCodeCompatibleProviderRejectsInvalidProviderID(t *testing.T) {
+	t.Parallel()
+
+	discovery, ok := discoverOpenCodeCompatibleProvider(context.Background(), http.DefaultClient, func(key string) string {
+		switch key {
+		case "MULTICA_OPENCODE_DISCOVERY_BASE_URL":
+			return "http://127.0.0.1:1234/v1"
+		case "MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID":
+			return "bad/provider"
+		default:
+			return ""
+		}
+	})
+	if ok || len(discovery.Models) != 0 {
+		t.Fatalf("invalid provider ID must disable discovery, got %+v", discovery)
+	}
+}
+
+func TestApplyOpenCodeDiscoveryEnvInjectsConfigForModelCommand(t *testing.T) {
+	t.Parallel()
+
+	cmd := exec.Command("opencode", "models") //nolint:gosec
+	applyOpenCodeDiscoveryEnv(cmd, openCodeCompatibleDiscovery{
+		ProviderID:   "gpustack",
+		ProviderName: "GPUStack",
+		BaseURL:      "http://127.0.0.1:1234/v1",
+		APIKeyEnv:    "GPUSTACK_API_KEY",
+		Models:       []string{"qwen3-coder"},
+	})
+	env := map[string]string{}
+	for _, entry := range cmd.Env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			env[key] = value
+		}
+	}
+	content := env["OPENCODE_CONFIG_CONTENT"]
+	if content == "" {
+		t.Fatal("OPENCODE_CONFIG_CONTENT was not injected")
+	}
+	if !strings.Contains(content, `"gpustack"`) || !strings.Contains(content, `"qwen3-coder"`) {
+		t.Fatalf("unexpected injected config: %s", content)
 	}
 }
 

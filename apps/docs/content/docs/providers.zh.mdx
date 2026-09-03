@@ -62,6 +62,19 @@ DeepSeek Harness 的模型目录由运行时自身提供（`dsh --profile multic
 不同工具可能使用不同的模型名称。更换 AI 编程工具后，原有的模型值在新工具中无效，需要重新选择。
 </Callout>
 
+### 为 OpenCode 发现 OpenAI 兼容模型
+
+守护进程可以从一个由运维人员配置的 OpenAI 兼容 `/models` 端点补充 OpenCode 模型目录。它适用于 GPUStack、LiteLLM、LM Studio，以及模型未发布到 models.dev 的私有网关：
+
+```dotenv
+MULTICA_OPENCODE_DISCOVERY_BASE_URL=https://gateway.example/v1
+MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID=gpustack
+MULTICA_OPENCODE_DISCOVERY_PROVIDER_NAME=GPUStack
+OPENCODE_DISCOVERY_API_KEY=replace-with-a-local-key
+```
+
+在守护进程的本地环境中设置这些变量，然后重启守护进程。Multica 会获取 `.../models`，把返回的模型 ID 合并到正常的 `opencode models` 目录，并在 task 启动时仅向 OpenCode 注入所选模型。API key 始终保留在本机环境中，不会写入生成配置或 Multica 服务端数据库。发现失败时仍保留 OpenCode 的正常目录。
+
 ## 会话恢复
 
 表格中标记 ✓ 的工具支持在后续执行中继续已有会话。前提是原来的会话仍然存在，并且 task 由能够访问它的运行时执行。MiniMax Code 0.1.2 尚未通过 ACP 声明会话加载能力，因此后续执行会新建 MCode 会话。

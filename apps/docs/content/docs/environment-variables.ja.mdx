@@ -234,6 +234,11 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 出力もツール実行もない状態の静穏上限。`0` で watchdog 全体を無効化 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG` と同じ | 単一のツール呼び出しが静穏なままでいられる上限。モデルより長い余裕をツールに与えたい場合のみ設定し、`0` はツール実行中に強制停止しません |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 専用の静穏しきい値 |
+| `MULTICA_OPENCODE_DISCOVERY_BASE_URL` | 空 | `/models` カタログを OpenCode ランタイムへ追加する OpenAI 互換 API ルート（例: `https://gateway.example/v1`） |
+| `MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID` | `openai-compatible` | 検出モデルに付けるプロバイダー接頭辞（例: `gpustack`） |
+| `MULTICA_OPENCODE_DISCOVERY_PROVIDER_NAME` | プロバイダー ID | OpenCode の一時プロバイダー設定へ注入する表示名 |
+| `OPENCODE_DISCOVERY_API_KEY` | 空 | 検出エンドポイント用のデーモンローカル bearer token。検出モデルの実行時に OpenCode とその子プロセスが継承します |
+| `MULTICA_OPENCODE_DISCOVERY_API_KEY_ENV` | `OPENCODE_DISCOVERY_API_KEY` | bearer token を保持する別のデーモンローカル環境変数名（任意）。token 自体は生成設定へコピーされません |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `MULTICA_AGENT_IDLE_WATCHDOG` と同じ | Codex のセマンティック静穏しきい値。Codex 自身のタイマーはツール実行中かどうかを判別できないため、独自の短い上限を持たず idle / tool 予算の大きい方に追従します |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Codex 初回ターンの無進捗上限を明示的に上書き；`0` はデフォルトを維持。実効の初回ターン待機は依然として `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` と全体の実行タイムアウトに制限される——`MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` をこの値より厳密に大きく（余裕を持たせて）設定すること。さもないと待機はその値で打ち切られ、モデルカタログの起動リトライがスキップされる。同値では不十分：セマンティックタイマーが先に起動するため、同値の場合でもリトライが失われることがある |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`、`thread/start`・`thread/resume`：`60s` | Codex app-server 起動ハンドシェイクの上限。明示的な値は両方の予算を一括で上書きします |
