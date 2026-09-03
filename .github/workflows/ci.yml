@@ -95,10 +95,9 @@ jobs:
               # mode for everyone with no error anywhere, so a change to the
               # frontend half must run the backend suite.
               - 'packages/core/runtimes/cli-version.ts'
-              # internal/daemon/agent_command_names_test.go reads both of
-              # these as test inputs; the guard script is additionally the
-              # entry point scripts/test-go.sh runs, and the names file is
-              # the data that guard consumes.
+              # internal/daemon/agent_command_names_test.go exercises the
+              # guard script; scripts/test-go.sh also uses it as the backend
+              # test entry point, and the script reads the command names file.
               - 'scripts/agent-cli-command-names.txt'
               - 'scripts/go-test-with-agent-cli-guard.sh'
               - 'scripts/helm-config.test.sh'
