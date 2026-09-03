@@ -123,6 +123,7 @@ import type {
   CreateIssueStatusRequest,
   UpdateIssueStatusRequest,
   IssueLifecycleResponse,
+  UpdateIssueLifecycleStatusRequest,
   TransitionIssueStatusNodeRequest,
   TransitionIssueStatusNodeResponse,
   IssueLabelsResponse,
@@ -3744,6 +3745,47 @@ export class ApiClient {
     });
     return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
       endpoint: "PUT /api/projects/{id}/issue-lifecycle",
+    });
+  }
+
+  async updateIssueLifecycleStatus(
+    lifecycleId: string,
+    statusId: string,
+    data: UpdateIssueLifecycleStatusRequest,
+  ): Promise<IssueLifecycleResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/${lifecycleId}/statuses/${statusId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PATCH /api/issue-lifecycles/{lifecycleId}/statuses/{statusId}",
+    });
+  }
+
+  async archiveIssueLifecycleStatus(
+    lifecycleId: string,
+    statusId: string,
+    expectedRevision: number,
+  ): Promise<IssueLifecycleResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/${lifecycleId}/statuses/${statusId}?expected_revision=${expectedRevision}`, {
+      method: "DELETE",
+    });
+    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "DELETE /api/issue-lifecycles/{lifecycleId}/statuses/{statusId}",
+    });
+  }
+
+  async reorderIssueLifecycleStatuses(
+    lifecycleId: string,
+    statusIds: string[],
+    expectedRevision: number,
+  ): Promise<IssueLifecycleResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/${lifecycleId}/statuses/reorder`, {
+      method: "PATCH",
+      body: JSON.stringify({ status_ids: statusIds, expected_revision: expectedRevision }),
+    });
+    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PATCH /api/issue-lifecycles/{lifecycleId}/statuses/reorder",
     });
   }
 

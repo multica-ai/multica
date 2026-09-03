@@ -163,6 +163,7 @@ INSERT INTO issue (
         WHERE w.id = $1
           AND s.workspace_id = $1
           AND s.legacy_status_key = $4
+          AND s.archived_at IS NULL
     )
 ) RETURNING *;
 
@@ -350,6 +351,7 @@ INSERT INTO issue (
         WHERE w.id = $1
           AND s.workspace_id = $1
           AND s.legacy_status_key = $4
+          AND s.archived_at IS NULL
     )
 ) RETURNING *;
 

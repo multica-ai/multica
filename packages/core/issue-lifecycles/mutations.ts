@@ -1,9 +1,30 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
 import { projectKeys } from "../projects/queries";
 import type { IssueLifecycleResponse } from "../types";
 import { issueLifecycleKeys } from "./queries";
+
+function setLifecycleQueryData(
+  qc: QueryClient,
+  wsId: string,
+  lifecycle: IssueLifecycleResponse,
+  projectId?: string,
+) {
+  const queryKey = projectId
+    ? issueLifecycleKeys.effective(wsId, projectId)
+    : issueLifecycleKeys.all(wsId);
+  for (const [key, cached] of qc.getQueriesData<IssueLifecycleResponse>({ queryKey })) {
+    if (!cached || (!projectId && cached.lifecycle.id !== lifecycle.lifecycle.id)) continue;
+    const options = key[key.length - 1] as { includeArchived?: boolean } | undefined;
+    qc.setQueryData<IssueLifecycleResponse>(key, {
+      ...lifecycle,
+      statuses: options?.includeArchived
+        ? lifecycle.statuses
+        : lifecycle.statuses.filter((status) => !status.archived_at),
+    });
+  }
+}
 
 export function useUpdateProjectIssueLifecycle() {
   const qc = useQueryClient();
@@ -17,17 +38,7 @@ export function useUpdateProjectIssueLifecycle() {
       mode: "default" | "custom";
     }) => api.updateProjectIssueLifecycle(projectId, mode),
     onSuccess: (lifecycle, { projectId }) => {
-      for (const [key] of qc.getQueriesData<IssueLifecycleResponse>({
-        queryKey: issueLifecycleKeys.effective(wsId, projectId),
-      })) {
-        const options = key[key.length - 1] as { includeArchived?: boolean } | undefined;
-        qc.setQueryData<IssueLifecycleResponse>(key, {
-          ...lifecycle,
-          statuses: options?.includeArchived
-            ? lifecycle.statuses
-            : lifecycle.statuses.filter((status) => !status.archived_at),
-        });
-      }
+      setLifecycleQueryData(qc, wsId, lifecycle, projectId);
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     },
     onError: (_error, { projectId }) => {
@@ -35,5 +46,45 @@ export function useUpdateProjectIssueLifecycle() {
         queryKey: issueLifecycleKeys.effective(wsId, projectId),
       });
     },
+  });
+}
+
+export function useUpdateIssueLifecycleStatus() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      lifecycleId,
+      statusId,
+      data,
+    }: {
+      lifecycleId: string;
+      statusId: string;
+      data: Parameters<typeof api.updateIssueLifecycleStatus>[2];
+    }) => api.updateIssueLifecycleStatus(lifecycleId, statusId, data),
+    onSuccess: (lifecycle) => setLifecycleQueryData(qc, wsId, lifecycle),
+    onError: () => qc.invalidateQueries({ queryKey: issueLifecycleKeys.all(wsId) }),
+  });
+}
+
+export function useArchiveIssueLifecycleStatus() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ lifecycleId, statusId, expectedRevision }: { lifecycleId: string; statusId: string; expectedRevision: number }) =>
+      api.archiveIssueLifecycleStatus(lifecycleId, statusId, expectedRevision),
+    onSuccess: (lifecycle) => setLifecycleQueryData(qc, wsId, lifecycle),
+    onError: () => qc.invalidateQueries({ queryKey: issueLifecycleKeys.all(wsId) }),
+  });
+}
+
+export function useReorderIssueLifecycleStatuses() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ lifecycleId, statusIds, expectedRevision }: { lifecycleId: string; statusIds: string[]; expectedRevision: number }) =>
+      api.reorderIssueLifecycleStatuses(lifecycleId, statusIds, expectedRevision),
+    onSuccess: (lifecycle) => setLifecycleQueryData(qc, wsId, lifecycle),
+    onError: () => qc.invalidateQueries({ queryKey: issueLifecycleKeys.all(wsId) }),
   });
 }

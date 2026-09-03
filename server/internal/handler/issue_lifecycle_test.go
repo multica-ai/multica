@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -77,6 +78,118 @@ func TestProjectLifecycleAPIAndStatusNodeTransition(t *testing.T) {
 		t.Fatalf("custom lifecycle status count = %d, want at least 7", len(customized.Statuses))
 	}
 
+	var inProgressID, backlogID string
+	for _, status := range customized.Statuses {
+		if status.LegacyStatusKey == nil {
+			continue
+		}
+		switch *status.LegacyStatusKey {
+		case "in_progress":
+			inProgressID = status.ID
+		case "backlog":
+			backlogID = status.ID
+		}
+	}
+	if inProgressID == "" || backlogID == "" {
+		t.Fatalf("custom lifecycle is missing required status nodes: %#v", customized.Statuses)
+	}
+
+	// Definition mutations advance the lifecycle version once. Entry Policy
+	// has its own revision so a worker can pin the exact instructions it ran.
+	definitionRevision := customized.Lifecycle.Revision
+	var updated issueLifecycleResponse
+	updateBody := func(revision int64) map[string]any {
+		return map[string]any{
+			"expected_revision": revision,
+			"name":              "Building",
+			"entry_policy": map[string]any{
+				"assignee":     map[string]any{"type": "human", "id": testUserID},
+				"executor":     map[string]any{"type": "none"},
+				"instructions": "Wait for a human confirmation.",
+				"advance":      "human_confirms",
+			},
+		}
+	}
+	testutil.Call(t, testHandler.UpdateIssueLifecycleStatus,
+		testutil.WithURLParams(newRequest(http.MethodPatch, "/api/issue-lifecycles/"+customized.Lifecycle.ID+"/statuses/"+inProgressID, updateBody(definitionRevision)),
+			"lifecycleId", customized.Lifecycle.ID, "statusId", inProgressID)).Want(http.StatusOK).JSON(&updated)
+	if updated.Lifecycle.Revision != definitionRevision+1 {
+		t.Fatalf("updated lifecycle revision = %d, want %d", updated.Lifecycle.Revision, definitionRevision+1)
+	}
+	var updatedNode issueLifecycleStatusResponse
+	for _, status := range updated.Statuses {
+		if status.ID == inProgressID {
+			updatedNode = status
+			break
+		}
+	}
+	if updatedNode.Name != "Building" || updatedNode.EntryPolicyRevision != 2 ||
+		updatedNode.EntryPolicy.Assignee.Type != issuelifecycle.AssigneeHuman ||
+		updatedNode.EntryPolicy.Assignee.ID != testUserID {
+		t.Fatalf("updated lifecycle node = %#v", updatedNode)
+	}
+
+	// Repeating the same semantic policy is a stable no-op for both versions.
+	var noopDefinition issueLifecycleResponse
+	testutil.Call(t, testHandler.UpdateIssueLifecycleStatus,
+		testutil.WithURLParams(newRequest(http.MethodPatch, "/api/issue-lifecycles/"+customized.Lifecycle.ID+"/statuses/"+inProgressID, updateBody(updated.Lifecycle.Revision)),
+			"lifecycleId", customized.Lifecycle.ID, "statusId", inProgressID)).Want(http.StatusOK).JSON(&noopDefinition)
+	if noopDefinition.Lifecycle.Revision != updated.Lifecycle.Revision {
+		t.Fatalf("no-op lifecycle revision = %d, want %d", noopDefinition.Lifecycle.Revision, updated.Lifecycle.Revision)
+	}
+	testutil.Call(t, testHandler.UpdateIssueLifecycleStatus,
+		testutil.WithURLParams(newRequest(http.MethodPatch, "/api/issue-lifecycles/"+customized.Lifecycle.ID+"/statuses/"+inProgressID, updateBody(definitionRevision)),
+			"lifecycleId", customized.Lifecycle.ID, "statusId", inProgressID)).Want(http.StatusConflict)
+
+	testutil.Call(t, testHandler.UpdateIssueLifecycleStatus,
+		testutil.WithURLParams(newRequest(http.MethodPatch, "/api/issue-lifecycles/"+customized.Lifecycle.ID+"/statuses/"+inProgressID, map[string]any{
+			"expected_revision": updated.Lifecycle.Revision,
+			"entry_policy": map[string]any{
+				"assignee": map[string]any{"type": "keep"}, "executor": map[string]any{"type": "none"},
+				"instructions": "", "advance": "executor_may_transition",
+			},
+		}), "lifecycleId", customized.Lifecycle.ID, "statusId", inProgressID)).Want(http.StatusBadRequest)
+
+	// Reordering replaces the complete active order atomically.
+	statusIDs := make([]string, len(updated.Statuses))
+	for i := range updated.Statuses {
+		statusIDs[len(updated.Statuses)-1-i] = updated.Statuses[i].ID
+	}
+	var reordered issueLifecycleResponse
+	testutil.Call(t, testHandler.ReorderIssueLifecycleStatuses,
+		testutil.WithURLParams(newRequest(http.MethodPatch, "/api/issue-lifecycles/"+customized.Lifecycle.ID+"/statuses/reorder", map[string]any{
+			"expected_revision": updated.Lifecycle.Revision, "status_ids": statusIDs,
+		}), "lifecycleId", customized.Lifecycle.ID)).Want(http.StatusOK).JSON(&reordered)
+	if reordered.Lifecycle.Revision != updated.Lifecycle.Revision+1 || reordered.Statuses[0].ID != statusIDs[0] {
+		t.Fatalf("reordered lifecycle = %#v", reordered)
+	}
+
+	// Archive retains the node in definition history but prevents future use.
+	var archived issueLifecycleResponse
+	testutil.Call(t, testHandler.ArchiveIssueLifecycleStatus,
+		testutil.WithURLParams(newRequest(http.MethodDelete, "/api/issue-lifecycles/"+customized.Lifecycle.ID+"/statuses/"+backlogID+"?expected_revision="+strconv.FormatInt(reordered.Lifecycle.Revision, 10), nil),
+			"lifecycleId", customized.Lifecycle.ID, "statusId", backlogID)).Want(http.StatusOK).JSON(&archived)
+	if archived.Lifecycle.Revision != reordered.Lifecycle.Revision+1 {
+		t.Fatalf("archived lifecycle revision = %d, want %d", archived.Lifecycle.Revision, reordered.Lifecycle.Revision+1)
+	}
+	var archivedAt *string
+	for _, status := range archived.Statuses {
+		if status.ID == backlogID {
+			archivedAt = status.ArchivedAt
+		}
+	}
+	if archivedAt == nil {
+		t.Fatal("archived status is missing archived_at")
+	}
+	testutil.Call(t, testHandler.UpdateIssueLifecycleStatus,
+		testutil.WithURLParams(newRequest(http.MethodPatch, "/api/issue-lifecycles/"+customized.Lifecycle.ID+"/statuses/"+backlogID, map[string]any{"expected_revision": archived.Lifecycle.Revision, "name": "Later"}),
+			"lifecycleId", customized.Lifecycle.ID, "statusId", backlogID)).Want(http.StatusConflict)
+	testutil.Call(t, testHandler.CreateIssue,
+		newRequest(http.MethodPost, "/api/issues", map[string]any{
+			"title": "archived lifecycle status", "status": "backlog", "project_id": projectID,
+		})).Want(http.StatusConflict)
+	customized = archived
+
 	var effective issueLifecycleResponse
 	testutil.Call(t, testHandler.GetEffectiveIssueLifecycle,
 		newRequest(http.MethodGet, "/api/issue-lifecycles/effective?project_id="+projectID, nil)).Want(http.StatusOK).JSON(&effective)
@@ -108,16 +221,6 @@ func TestProjectLifecycleAPIAndStatusNodeTransition(t *testing.T) {
 		t.Fatalf("list response omitted canonical lifecycle cursors: %#v", listedCreated)
 	}
 
-	var inProgressID string
-	for _, status := range customized.Statuses {
-		if status.LegacyStatusKey != nil && *status.LegacyStatusKey == "in_progress" {
-			inProgressID = status.ID
-			break
-		}
-	}
-	if inProgressID == "" {
-		t.Fatal("custom lifecycle has no in_progress status")
-	}
 	var transitioned transitionIssueStatusNodeResponse
 	testutil.Call(t, testHandler.TransitionIssueStatusNode,
 		withURLParam(newRequest(http.MethodPost, "/api/issues/"+created.ID+"/transitions", map[string]any{

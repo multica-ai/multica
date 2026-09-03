@@ -1972,6 +1972,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// installed-client adapters while new clients address stable status
 			// nodes and project inheritance explicitly.
 			r.Get("/api/issue-lifecycles/effective", h.GetEffectiveIssueLifecycle)
+			r.Route("/api/issue-lifecycles/{lifecycleId}", func(r chi.Router) {
+				r.Patch("/statuses/reorder", h.ReorderIssueLifecycleStatuses)
+				r.Patch("/statuses/{statusId}", h.UpdateIssueLifecycleStatus)
+				r.Delete("/statuses/{statusId}", h.ArchiveIssueLifecycleStatus)
+			})
 
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {

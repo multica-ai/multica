@@ -155,6 +155,18 @@ describe("ApiClient issue lifecycle routes", () => {
 
     await client.getEffectiveIssueLifecycle("project-1", true);
     await client.updateProjectIssueLifecycle("project-1", "custom");
+    await client.updateIssueLifecycleStatus("lifecycle-1", "status-2", {
+      expected_revision: 4,
+      name: "Building",
+      entry_policy: {
+        assignee: { type: "keep" },
+        executor: { type: "agent", id: "agent-1" },
+        instructions: "Implement the issue.",
+        advance: "executor_may_transition",
+      },
+    });
+    await client.reorderIssueLifecycleStatuses("lifecycle-1", ["status-2", "status-1"], 5);
+    await client.archiveIssueLifecycleStatus("lifecycle-1", "status-1", 6);
     await client.transitionIssueStatusNode("issue-1", {
       lifecycle_status_id: "status-2",
       expected_revision: 9,
@@ -172,10 +184,30 @@ describe("ApiClient issue lifecycle routes", () => {
       mode: "custom",
     });
     expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      "https://api.example.test/api/issue-lifecycles/lifecycle-1/statuses/status-2",
+    );
+    expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("PATCH");
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      expected_revision: 4,
+      name: "Building",
+      entry_policy: { executor: { type: "agent", id: "agent-1" } },
+    });
+    expect(fetchMock.mock.calls[3]?.[0]).toBe(
+      "https://api.example.test/api/issue-lifecycles/lifecycle-1/statuses/reorder",
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body))).toEqual({
+      status_ids: ["status-2", "status-1"],
+      expected_revision: 5,
+    });
+    expect(fetchMock.mock.calls[4]?.[0]).toBe(
+      "https://api.example.test/api/issue-lifecycles/lifecycle-1/statuses/status-1?expected_revision=6",
+    );
+    expect(fetchMock.mock.calls[4]?.[1]?.method).toBe("DELETE");
+    expect(fetchMock.mock.calls[5]?.[0]).toBe(
       "https://api.example.test/api/issues/issue-1/transitions",
     );
-    expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("POST");
-    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+    expect(fetchMock.mock.calls[5]?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body))).toEqual({
       lifecycle_status_id: "status-2",
       expected_revision: 9,
       expected_transition_id: "transition-8",

@@ -11,6 +11,46 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const archiveIssueLifecycleStatus = `-- name: ArchiveIssueLifecycleStatus :one
+UPDATE issue_lifecycle_status
+SET archived_at = now(),
+    updated_at = now()
+WHERE id = $1::uuid
+  AND workspace_id = $2::uuid
+  AND lifecycle_id = $3::uuid
+  AND archived_at IS NULL
+RETURNING id, workspace_id, lifecycle_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at
+`
+
+type ArchiveIssueLifecycleStatusParams struct {
+	StatusID    pgtype.UUID `json:"status_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	LifecycleID pgtype.UUID `json:"lifecycle_id"`
+}
+
+func (q *Queries) ArchiveIssueLifecycleStatus(ctx context.Context, arg ArchiveIssueLifecycleStatusParams) (IssueLifecycleStatus, error) {
+	row := q.db.QueryRow(ctx, archiveIssueLifecycleStatus, arg.StatusID, arg.WorkspaceID, arg.LifecycleID)
+	var i IssueLifecycleStatus
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.LifecycleID,
+		&i.LegacyStatusKey,
+		&i.Name,
+		&i.Description,
+		&i.Color,
+		&i.Position,
+		&i.Phase,
+		&i.Outcome,
+		&i.EntryPolicy,
+		&i.EntryPolicyRevision,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const bindIssueToDefaultLifecycle = `-- name: BindIssueToDefaultLifecycle :one
 UPDATE issue AS i
 SET lifecycle_id = w.default_issue_lifecycle_id,
@@ -645,6 +685,56 @@ func (q *Queries) InsertIssueTransition(ctx context.Context, arg InsertIssueTran
 	return result.RowsAffected(), nil
 }
 
+const listActiveIssueLifecycleStatuses = `-- name: ListActiveIssueLifecycleStatuses :many
+SELECT id, workspace_id, lifecycle_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at
+FROM issue_lifecycle_status
+WHERE workspace_id = $1::uuid
+  AND lifecycle_id = $2::uuid
+  AND archived_at IS NULL
+ORDER BY position ASC, created_at ASC, id ASC
+`
+
+type ListActiveIssueLifecycleStatusesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	LifecycleID pgtype.UUID `json:"lifecycle_id"`
+}
+
+func (q *Queries) ListActiveIssueLifecycleStatuses(ctx context.Context, arg ListActiveIssueLifecycleStatusesParams) ([]IssueLifecycleStatus, error) {
+	rows, err := q.db.Query(ctx, listActiveIssueLifecycleStatuses, arg.WorkspaceID, arg.LifecycleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueLifecycleStatus{}
+	for rows.Next() {
+		var i IssueLifecycleStatus
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.LifecycleID,
+			&i.LegacyStatusKey,
+			&i.Name,
+			&i.Description,
+			&i.Color,
+			&i.Position,
+			&i.Phase,
+			&i.Outcome,
+			&i.EntryPolicy,
+			&i.EntryPolicyRevision,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssueLifecycleConsistency = `-- name: ListIssueLifecycleConsistency :many
 SELECT
     w.id AS workspace_id,
@@ -814,6 +904,72 @@ func (q *Queries) ListIssueTransitions(ctx context.Context, arg ListIssueTransit
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockEditableIssueLifecycle = `-- name: LockEditableIssueLifecycle :one
+SELECT l.id, l.workspace_id, l.scope_type, l.scope_id, l.name, l.revision, l.created_at, l.updated_at
+FROM issue_lifecycle AS l
+WHERE l.id = $1::uuid
+  AND l.workspace_id = $2::uuid
+  AND l.scope_type = 'project'
+  AND EXISTS (
+      SELECT 1 FROM project AS p
+      WHERE p.id = l.scope_id
+        AND p.workspace_id = l.workspace_id
+        AND p.default_issue_lifecycle_id = l.id
+  )
+FOR UPDATE
+`
+
+type LockEditableIssueLifecycleParams struct {
+	LifecycleID pgtype.UUID `json:"lifecycle_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Every custom-definition mutation takes this row lock first. Besides
+// serializing the lifecycle revision, the active-pointer predicate prevents
+// editing a project definition after that project switched back to the
+// workspace default. Workspace-default fields continue to be maintained by
+// the legacy status adapter until the final cutover, avoiding two writers.
+func (q *Queries) LockEditableIssueLifecycle(ctx context.Context, arg LockEditableIssueLifecycleParams) (IssueLifecycle, error) {
+	row := q.db.QueryRow(ctx, lockEditableIssueLifecycle, arg.LifecycleID, arg.WorkspaceID)
+	var i IssueLifecycle
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.Name,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const reorderIssueLifecycleStatuses = `-- name: ReorderIssueLifecycleStatuses :execrows
+UPDATE issue_lifecycle_status AS status
+SET position = ordered.ordinality - 1,
+    updated_at = now()
+FROM unnest($3::uuid[]) WITH ORDINALITY AS ordered(id, ordinality)
+WHERE status.id = ordered.id
+  AND status.workspace_id = $1::uuid
+  AND status.lifecycle_id = $2::uuid
+  AND status.archived_at IS NULL
+`
+
+type ReorderIssueLifecycleStatusesParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	LifecycleID pgtype.UUID   `json:"lifecycle_id"`
+	StatusIds   []pgtype.UUID `json:"status_ids"`
+}
+
+func (q *Queries) ReorderIssueLifecycleStatuses(ctx context.Context, arg ReorderIssueLifecycleStatusesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reorderIssueLifecycleStatuses, arg.WorkspaceID, arg.LifecycleID, arg.StatusIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setIssueLastTransition = `-- name: SetIssueLastTransition :one
@@ -1038,6 +1194,75 @@ func (q *Queries) UpdateIssueLifecycleStatus(ctx context.Context, arg UpdateIssu
 		&i.LifecycleID,
 		&i.LifecycleStatusID,
 		&i.LastTransitionID,
+	)
+	return i, err
+}
+
+const updateIssueLifecycleStatusDefinition = `-- name: UpdateIssueLifecycleStatusDefinition :one
+UPDATE issue_lifecycle_status
+SET name = $1::text,
+    description = $2::text,
+    color = $3::text,
+    position = $4::double precision,
+    phase = $5::text,
+    outcome = $6::text,
+    entry_policy = $7::jsonb,
+    entry_policy_revision = entry_policy_revision + CASE
+        WHEN $8::boolean THEN 1 ELSE 0
+    END,
+    updated_at = now()
+WHERE id = $9::uuid
+  AND workspace_id = $10::uuid
+  AND lifecycle_id = $11::uuid
+  AND archived_at IS NULL
+RETURNING id, workspace_id, lifecycle_id, legacy_status_key, name, description, color, position, phase, outcome, entry_policy, entry_policy_revision, archived_at, created_at, updated_at
+`
+
+type UpdateIssueLifecycleStatusDefinitionParams struct {
+	Name                    string      `json:"name"`
+	Description             string      `json:"description"`
+	Color                   string      `json:"color"`
+	Position                float64     `json:"position"`
+	Phase                   string      `json:"phase"`
+	Outcome                 pgtype.Text `json:"outcome"`
+	EntryPolicy             []byte      `json:"entry_policy"`
+	BumpEntryPolicyRevision bool        `json:"bump_entry_policy_revision"`
+	StatusID                pgtype.UUID `json:"status_id"`
+	WorkspaceID             pgtype.UUID `json:"workspace_id"`
+	LifecycleID             pgtype.UUID `json:"lifecycle_id"`
+}
+
+func (q *Queries) UpdateIssueLifecycleStatusDefinition(ctx context.Context, arg UpdateIssueLifecycleStatusDefinitionParams) (IssueLifecycleStatus, error) {
+	row := q.db.QueryRow(ctx, updateIssueLifecycleStatusDefinition,
+		arg.Name,
+		arg.Description,
+		arg.Color,
+		arg.Position,
+		arg.Phase,
+		arg.Outcome,
+		arg.EntryPolicy,
+		arg.BumpEntryPolicyRevision,
+		arg.StatusID,
+		arg.WorkspaceID,
+		arg.LifecycleID,
+	)
+	var i IssueLifecycleStatus
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.LifecycleID,
+		&i.LegacyStatusKey,
+		&i.Name,
+		&i.Description,
+		&i.Color,
+		&i.Position,
+		&i.Phase,
+		&i.Outcome,
+		&i.EntryPolicy,
+		&i.EntryPolicyRevision,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

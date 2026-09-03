@@ -2143,7 +2143,12 @@ describe("issue lifecycle schemas", () => {
     position: 2,
     phase: "started",
     outcome: null,
-    entry_policy: { executor: { type: "agent", id: "agent-1" } },
+    entry_policy: {
+      assignee: { type: "keep" },
+      executor: { type: "agent", id: "agent-1" },
+      instructions: "Implement the issue.",
+      advance: "executor_may_transition",
+    },
     entry_policy_revision: 3,
     archived_at: null,
     created_at: "2026-09-03T00:00:00Z",
@@ -2158,7 +2163,22 @@ describe("issue lifecycle schemas", () => {
     });
     expect(parsed.lifecycle.revision).toBe(2);
     expect(parsed.statuses[0]?.entry_policy_revision).toBe(3);
+    expect(parsed.statuses[0]?.entry_policy.executor).toEqual({ type: "agent", id: "agent-1" });
     expect(parsed.statuses[1]?.phase).toBe("waiting");
+  });
+
+  it("normalizes an additive server's empty entry policy to safe defaults", () => {
+    const parsed = IssueLifecycleResponseSchema.parse({
+      lifecycle,
+      statuses: [{ ...status, entry_policy: {} }],
+      mode: "custom",
+    });
+    expect(parsed.statuses[0]?.entry_policy).toEqual({
+      assignee: { type: "keep" },
+      executor: { type: "none" },
+      instructions: "",
+      advance: "human_confirms",
+    });
   });
 
   it("falls back safely when a lifecycle response is malformed", () => {

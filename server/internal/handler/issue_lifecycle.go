@@ -30,20 +30,20 @@ type issueLifecycleDefinitionResponse struct {
 }
 
 type issueLifecycleStatusResponse struct {
-	ID                  string         `json:"id"`
-	LifecycleID         string         `json:"lifecycle_id"`
-	LegacyStatusKey     *string        `json:"legacy_status_key"`
-	Name                string         `json:"name"`
-	Description         string         `json:"description"`
-	Color               string         `json:"color"`
-	Position            float64        `json:"position"`
-	Phase               string         `json:"phase"`
-	Outcome             *string        `json:"outcome"`
-	EntryPolicy         map[string]any `json:"entry_policy"`
-	EntryPolicyRevision int64          `json:"entry_policy_revision"`
-	ArchivedAt          *string        `json:"archived_at"`
-	CreatedAt           string         `json:"created_at"`
-	UpdatedAt           string         `json:"updated_at"`
+	ID                  string                     `json:"id"`
+	LifecycleID         string                     `json:"lifecycle_id"`
+	LegacyStatusKey     *string                    `json:"legacy_status_key"`
+	Name                string                     `json:"name"`
+	Description         string                     `json:"description"`
+	Color               string                     `json:"color"`
+	Position            float64                    `json:"position"`
+	Phase               string                     `json:"phase"`
+	Outcome             *string                    `json:"outcome"`
+	EntryPolicy         issuelifecycle.EntryPolicy `json:"entry_policy"`
+	EntryPolicyRevision int64                      `json:"entry_policy_revision"`
+	ArchivedAt          *string                    `json:"archived_at"`
+	CreatedAt           string                     `json:"created_at"`
+	UpdatedAt           string                     `json:"updated_at"`
 }
 
 type issueLifecycleResponse struct {
@@ -66,9 +66,9 @@ func lifecycleDefinitionToResponse(lifecycle db.IssueLifecycle) issueLifecycleDe
 }
 
 func lifecycleStatusToResponse(status db.IssueLifecycleStatus) issueLifecycleStatusResponse {
-	policy := map[string]any{}
-	if len(status.EntryPolicy) > 0 {
-		_ = json.Unmarshal(status.EntryPolicy, &policy)
+	policy, err := issuelifecycle.DecodeEntryPolicy(status.EntryPolicy)
+	if err != nil {
+		policy = issuelifecycle.DefaultEntryPolicy()
 	}
 	return issueLifecycleStatusResponse{
 		ID:                  uuidToString(status.ID),

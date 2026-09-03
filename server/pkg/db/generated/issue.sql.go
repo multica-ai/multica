@@ -237,6 +237,7 @@ INSERT INTO issue (
         WHERE w.id = $1
           AND s.workspace_id = $1
           AND s.legacy_status_key = $4
+          AND s.archived_at IS NULL
     )
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, lifecycle_id, lifecycle_status_id, last_transition_id
 `
@@ -340,6 +341,7 @@ INSERT INTO issue (
         WHERE w.id = $1
           AND s.workspace_id = $1
           AND s.legacy_status_key = $4
+          AND s.archived_at IS NULL
     )
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, lifecycle_id, lifecycle_status_id, last_transition_id
 `

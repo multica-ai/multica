@@ -94,6 +94,22 @@ export interface IssueLifecycleDefinition {
   updated_at: string;
 }
 
+export type IssueLifecycleAssigneeTarget =
+  | { type: "keep"; id?: never }
+  | { type: "human" | "agent" | "squad"; id: string };
+
+export type IssueLifecycleExecutorTarget =
+  | { type: "none"; id?: never }
+  | { type: "agent" | "squad"; id: string };
+
+export interface IssueLifecycleEntryPolicy {
+  assignee: IssueLifecycleAssigneeTarget;
+  executor: IssueLifecycleExecutorTarget;
+  /** Prompt supplied to the executor when the issue enters this node. */
+  instructions: string;
+  advance: "executor_may_transition" | "human_confirms";
+}
+
 export interface IssueLifecycleStatusNode {
   id: string;
   lifecycle_id: string;
@@ -104,7 +120,7 @@ export interface IssueLifecycleStatusNode {
   position: number;
   phase: IssueLifecyclePhase | (string & {});
   outcome: "completed" | "cancelled" | null | (string & {});
-  entry_policy: Record<string, unknown>;
+  entry_policy: IssueLifecycleEntryPolicy;
   entry_policy_revision: number;
   archived_at: string | null;
   created_at: string;
@@ -115,6 +131,20 @@ export interface IssueLifecycleResponse {
   lifecycle: IssueLifecycleDefinition;
   statuses: IssueLifecycleStatusNode[];
   mode: "default" | "custom" | (string & {});
+}
+
+export interface UpdateIssueLifecycleStatusRequest {
+  expected_revision: number;
+  name?: string;
+  description?: string;
+  color?: string;
+  phase?: IssueLifecyclePhase;
+  entry_policy?: IssueLifecycleEntryPolicy;
+}
+
+export interface ReorderIssueLifecycleStatusesRequest {
+  expected_revision: number;
+  status_ids: string[];
 }
 
 export interface IssueTransitionRecord {

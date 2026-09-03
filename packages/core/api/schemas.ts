@@ -533,6 +533,23 @@ export const IssueLifecycleDefinitionSchema = z.object({
   updated_at: z.string(),
 }).loose();
 
+export const IssueLifecycleAssigneeTargetSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("keep") }),
+  z.object({ type: z.enum(["human", "agent", "squad"]), id: z.string() }),
+]);
+
+export const IssueLifecycleExecutorTargetSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("none") }),
+  z.object({ type: z.enum(["agent", "squad"]), id: z.string() }),
+]);
+
+export const IssueLifecycleEntryPolicySchema = z.object({
+  assignee: IssueLifecycleAssigneeTargetSchema.default({ type: "keep" }),
+  executor: IssueLifecycleExecutorTargetSchema.default({ type: "none" }),
+  instructions: z.string().default(""),
+  advance: z.enum(["executor_may_transition", "human_confirms"]).default("human_confirms"),
+});
+
 export const IssueLifecycleStatusNodeSchema = z.object({
   id: z.string(),
   lifecycle_id: z.string(),
@@ -543,7 +560,12 @@ export const IssueLifecycleStatusNodeSchema = z.object({
   position: z.number().default(0),
   phase: z.string(),
   outcome: z.string().nullable().default(null),
-  entry_policy: z.record(z.string(), z.unknown()).default({}),
+  entry_policy: IssueLifecycleEntryPolicySchema.default({
+    assignee: { type: "keep" },
+    executor: { type: "none" },
+    instructions: "",
+    advance: "human_confirms",
+  }),
   entry_policy_revision: z.number().int().positive().default(1),
   archived_at: z.string().nullable().default(null),
   created_at: z.string(),

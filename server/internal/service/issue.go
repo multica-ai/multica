@@ -302,6 +302,55 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}
 	}
 
+	// The legacy request still names a status key, but the durable write is a
+	// stable lifecycle node. Resolve that node before allocating a number so an
+	// archived project-specific node is rejected instead of creating an issue
+	// with a NULL or retired lifecycle binding. The INSERT repeats the active
+	// predicate as defense in depth; RecordTransition makes a concurrent
+	// definition change fail the transaction rather than commit a partial row.
+	lifecycle, err := issuelifecycle.Effective(ctx, qtx, p.WorkspaceID, projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Rolling deployments and old test fixtures can encounter a workspace
+		// before the backfill has installed its default lifecycle. Repair it in
+		// this same transaction, then resolve the project inheritance again.
+		if seedErr := qtx.SeedIssueStatusEntries(ctx, p.WorkspaceID); seedErr != nil {
+			return IssueCreateResult{}, fmt.Errorf("seed issue status catalog: %w", seedErr)
+		}
+		if _, ensureErr := issuelifecycle.EnsureDefault(ctx, qtx, p.WorkspaceID); ensureErr != nil {
+			return IssueCreateResult{}, ensureErr
+		}
+		lifecycle, err = issuelifecycle.Effective(ctx, qtx, p.WorkspaceID, projectID)
+	}
+	if err != nil {
+		return IssueCreateResult{}, err
+	}
+	lifecycleStatus, err := qtx.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
+		WorkspaceID: p.WorkspaceID, LifecycleID: lifecycle.ID,
+		LegacyStatusKey: pgtype.Text{String: p.Status, Valid: true},
+	})
+	if lifecycle.ScopeType == "workspace" && (errors.Is(err, pgx.ErrNoRows) || (err == nil && lifecycleStatus.ArchivedAt.Valid)) {
+		// Until the final adapter cutover the workspace-default definition is
+		// projected from issue_status. A direct legacy write (including older
+		// binaries during a rolling deploy) may have committed between syncs;
+		// repair that projection before deciding the node is unavailable.
+		if syncErr := issuelifecycle.SyncDefault(ctx, qtx, p.WorkspaceID); syncErr != nil {
+			return IssueCreateResult{}, syncErr
+		}
+		lifecycleStatus, err = qtx.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
+			WorkspaceID: p.WorkspaceID, LifecycleID: lifecycle.ID,
+			LegacyStatusKey: pgtype.Text{String: p.Status, Valid: true},
+		})
+	}
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return IssueCreateResult{}, ErrIssueStatusUnavailable
+		}
+		return IssueCreateResult{}, fmt.Errorf("resolve issue lifecycle status: %w", err)
+	}
+	if lifecycleStatus.ArchivedAt.Valid {
+		return IssueCreateResult{}, ErrIssueStatusUnavailable
+	}
+
 	// Validate labels before we increment the issue counter so a stale or
 	// wrong-scope selection fails the create cheaply. The de-duplicated rows
 	// are attached to the issue below, inside this same transaction, and

@@ -135,6 +135,25 @@ SELECT *
 FROM issue_lifecycle
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: LockEditableIssueLifecycle :one
+-- Every custom-definition mutation takes this row lock first. Besides
+-- serializing the lifecycle revision, the active-pointer predicate prevents
+-- editing a project definition after that project switched back to the
+-- workspace default. Workspace-default fields continue to be maintained by
+-- the legacy status adapter until the final cutover, avoiding two writers.
+SELECT l.*
+FROM issue_lifecycle AS l
+WHERE l.id = sqlc.arg('lifecycle_id')::uuid
+  AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND l.scope_type = 'project'
+  AND EXISTS (
+      SELECT 1 FROM project AS p
+      WHERE p.id = l.scope_id
+        AND p.workspace_id = l.workspace_id
+        AND p.default_issue_lifecycle_id = l.id
+  )
+FOR UPDATE;
+
 -- name: BumpIssueLifecycleRevision :one
 UPDATE issue_lifecycle
 SET revision = revision + 1,
@@ -156,6 +175,53 @@ FROM issue_lifecycle_status
 WHERE workspace_id = $1
   AND lifecycle_id = $2
   AND id = $3;
+
+-- name: UpdateIssueLifecycleStatusDefinition :one
+UPDATE issue_lifecycle_status
+SET name = sqlc.arg('name')::text,
+    description = sqlc.arg('description')::text,
+    color = sqlc.arg('color')::text,
+    position = sqlc.arg('position')::double precision,
+    phase = sqlc.arg('phase')::text,
+    outcome = sqlc.narg('outcome')::text,
+    entry_policy = sqlc.arg('entry_policy')::jsonb,
+    entry_policy_revision = entry_policy_revision + CASE
+        WHEN sqlc.arg('bump_entry_policy_revision')::boolean THEN 1 ELSE 0
+    END,
+    updated_at = now()
+WHERE id = sqlc.arg('status_id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND lifecycle_id = sqlc.arg('lifecycle_id')::uuid
+  AND archived_at IS NULL
+RETURNING *;
+
+-- name: ArchiveIssueLifecycleStatus :one
+UPDATE issue_lifecycle_status
+SET archived_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg('status_id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND lifecycle_id = sqlc.arg('lifecycle_id')::uuid
+  AND archived_at IS NULL
+RETURNING *;
+
+-- name: ListActiveIssueLifecycleStatuses :many
+SELECT *
+FROM issue_lifecycle_status
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND lifecycle_id = sqlc.arg('lifecycle_id')::uuid
+  AND archived_at IS NULL
+ORDER BY position ASC, created_at ASC, id ASC;
+
+-- name: ReorderIssueLifecycleStatuses :execrows
+UPDATE issue_lifecycle_status AS status
+SET position = ordered.ordinality - 1,
+    updated_at = now()
+FROM unnest(sqlc.arg('status_ids')::uuid[]) WITH ORDINALITY AS ordered(id, ordinality)
+WHERE status.id = ordered.id
+  AND status.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND status.lifecycle_id = sqlc.arg('lifecycle_id')::uuid
+  AND status.archived_at IS NULL;
 
 -- name: ListIssueLifecycleStatuses :many
 SELECT *
