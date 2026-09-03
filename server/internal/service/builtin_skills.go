@@ -53,9 +53,13 @@ var builtinSkillSystemKey = map[string]string{
 // intentionally leaves to skills.
 //
 // Layout: builtin_skills/<name>/SKILL.md plus optional supporting files. The
-// <name> directory carries a "multica-" prefix so its on-disk slug can never
-// collide with a workspace skill a user authored (see writeSkillFiles, which
-// derives the skill directory from AgentSkillData.Name).
+// <name> directory carries a "multica-" prefix to namespace its on-disk slug
+// away from workspace skills a user authored. That reduces collisions; it does
+// not prevent them, because nothing server-side reserves the prefix at skill
+// create/import time. When a workspace skill does sanitize to the same slug,
+// writeSkillFiles gives the built-in a suffixed directory and the brief
+// resolves its pointers from the built-in's own entry rather than the bare
+// name.
 // legacyRedirects asks for redirect stubs under the names this server has
 // stopped shipping. The runtime brief is assembled by the daemon, not the
 // server, so a backend deploy cannot rewrite an installed daemon's copy of it:

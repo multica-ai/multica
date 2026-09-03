@@ -62,8 +62,12 @@ func TestBuiltinSkillsConformToTemplate(t *testing.T) {
 
 	for _, skill := range skills {
 		t.Run(skill.Name, func(t *testing.T) {
-			// The multica- prefix keeps the on-disk slug from colliding with a
-			// user-authored workspace skill.
+			// The multica- prefix namespaces the on-disk slug away from
+			// user-authored workspace skills. It is a convention, not a
+			// reserved namespace — nothing rejects the prefix at skill
+			// create/import — so it reduces collisions rather than ruling
+			// them out, which is why the brief resolves its pointers from
+			// built-in source instead of trusting the bare name.
 			if !strings.HasPrefix(skill.Name, "multica-") {
 				t.Errorf("skill name %q must carry the multica- prefix", skill.Name)
 			}
@@ -98,6 +102,16 @@ func TestBuiltinSkillsConformToTemplate(t *testing.T) {
 			if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
 				t.Errorf("user-invocable = %q, want false (a platform-contract skill triggers from context, not a slash command)", got)
 			}
+			// allowed-tools is the union across everything the skill now covers.
+			// Merging eight skills merged their tool declarations too, so the
+			// router declares Bash(git *) / Bash(gh *) — which only issues.md
+			// needs — while an agent is reading, say, autopilots.md. The
+			// alternative is dropping them and regressing the issue workflow
+			// that legitimately runs `gh pr`. Recorded rather than silently
+			// widened: allowed-tools is a pre-approval list, and today the
+			// daemon's global permission mode means this grants no privilege
+			// the agent did not already have. Revisit if per-reference
+			// declarations ever exist.
 			if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
 				t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
 			}
@@ -391,6 +405,14 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 		{
 			file: "SKILL.md",
 			want: []string{
+				// Must-fix from review: "load on demand" is not "load exactly
+				// one". A task that creates a squad, assigns it an issue and
+				// writes a mention needs three references, and wording that
+				// implies one would have the agent act on contracts it never
+				// read — the recall loss the merge is not allowed to cause.
+				"open the reference(s) your task actually needs",
+				"crosses domains needs each domain it touches",
+				"Do not read them all",
 				// The router's whole job: name every domain and its file.
 				"references/issues.md",
 				"references/mentions.md",
@@ -410,6 +432,11 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Comment reads stay bounded",
 				"--roots-only --summary --compact",
 				"--thread <thread-id> --tail 30",
+			},
+			notWant: []string{
+				// The singular forms this replaced.
+				"open the ONE reference",
+				"there is never a reason to read all eight",
 			},
 		},
 		{

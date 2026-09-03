@@ -12,7 +12,8 @@ comment, what status to write. This skill owns the platform contracts behind
 it — what a command actually does, what the server validates, and which writes
 have consequences you cannot take back.
 
-Read the invariants below, then open the ONE reference that matches your task.
+Read the invariants below, then open the reference(s) your task actually needs
+— usually one, sometimes a few. Do not read them all.
 
 ## Routing
 
@@ -27,15 +28,22 @@ Read the invariants below, then open the ONE reference that matches your task.
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
 | `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
 
-Open one. They do not depend on each other — each states its own contracts in
-full, so there is never a reason to read all eight.
+Open what the task needs. A single-domain task usually needs one; a task that
+crosses domains needs each domain it touches — creating a squad, assigning it an
+issue, then writing a mention needs `squads.md`, `issues.md` and `mentions.md`,
+and skipping one of those means acting on a contract you have not read.
+
+What is never right is reading all eight because you are not sure. Each
+reference states its own contracts in full and none depends on another, so
+pick by domain and skip the rest.
 
 ## Invariants
 
 These hold across every reference and are not repeated there.
 
-**Read before you write.** Every domain has `list` and `get` commands that take
-`--output json` and have no side effects. Run them first. When a command's shape
+**Read before you write.** Start with the read-only commands the reference you
+opened names — most domains have a `list` and a `get` that take `--output json`
+and have no side effects. Run those before any mutation. When a command's shape
 is unclear, `multica <command> --help` beats guessing at flags.
 
 **A name is not an id.** Mention links, assignment, and every `--*-id` flag take

@@ -2306,7 +2306,7 @@ func TestBriefPointsAtThePlatformSkill(t *testing.T) {
 				AgentSkills: tc.skills,
 			})
 			if tc.want == "" {
-				if strings.Contains(out, "skill and open the one reference") {
+				if strings.Contains(out, "skill and open the reference") {
 					t.Errorf("brief emitted a platform pointer with no built-in platform skill present:\n%s", out)
 				}
 				return
@@ -2315,8 +2315,15 @@ func TestBriefPointsAtThePlatformSkill(t *testing.T) {
 			if !strings.Contains(out, want) {
 				t.Errorf("brief does not point at %q:\n%s", tc.want, out)
 			}
-			if !strings.Contains(out, "routing table names") {
-				t.Errorf("pointer does not tell the agent to open one reference:\n%s", out)
+			// Pinned as "the domains your task touches", never a count: a task
+			// that spans squads + issues + mentions needs all three, and
+			// wording that implies one would make the agent act on contracts
+			// it has not read.
+			if !strings.Contains(out, "for the domains your task touches") {
+				t.Errorf("pointer does not route by domain:\n%s", out)
+			}
+			if strings.Contains(out, "the one reference") {
+				t.Errorf("pointer narrows on-demand reading to a single reference:\n%s", out)
 			}
 		})
 	}
