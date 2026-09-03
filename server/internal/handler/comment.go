@@ -2395,9 +2395,12 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		return commentMergeError
 	}
 	overlay, connectedApps := h.TaskService.BuildRuntimeMCPOverlayForMerge(ctx, attr.UserID, trigger.Agent)
+	isLeader, squadID := triggerLeaderRole(trigger)
 	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
 		IssueID:                 issue.ID,
 		AgentID:                 trigger.Agent.ID,
+		NewIsLeaderTask:         isLeader,
+		NewSquadID:              squadID,
 		NewTriggerCommentID:     newTriggerCommentID,
 		NewOriginatorUserID:     attr.UserID,
 		NewAccountableUserID:    attr.AccountableUserID,
@@ -2790,6 +2793,12 @@ func (h *Handler) routeReplyToParentAuthor(ctx context.Context, issue db.Issue, 
 // handler downgrades the wire role again if the briefing cannot be injected,
 // so an is_leader_task row whose squad went missing later still cannot deliver
 // a leader run.
+//
+// Deleting a squad ARCHIVES it (DeleteSquad soft-archives after transferring
+// its issues to the leader agent), so its rows and the leader's old comments
+// both outlive the deletion. GetSquadInWorkspace does not filter archived_at —
+// reviving a deleted squad from a stale comment would be a role this issue no
+// longer has any assignment for — so the archived check belongs here.
 func (h *Handler) squadLeaderRoleOfAuthoringTask(ctx context.Context, issue db.Issue, parent db.Comment, agent db.Agent) (*db.Squad, bool) {
 	if !parent.SourceTaskID.Valid {
 		return nil, false
@@ -2802,10 +2811,23 @@ func (h *Handler) squadLeaderRoleOfAuthoringTask(ctx context.Context, issue db.I
 		ID:          task.SquadID,
 		WorkspaceID: issue.WorkspaceID,
 	})
-	if err != nil || uuidToString(squad.LeaderID) != uuidToString(agent.ID) {
+	if err != nil || squad.ArchivedAt.Valid || uuidToString(squad.LeaderID) != uuidToString(agent.ID) {
 		return nil, false
 	}
 	return &squad, true
+}
+
+// triggerLeaderRole is the (is_leader_task, squad_id) a fresh task for this
+// trigger would carry. Every branch of enqueueSingleCommentTrigger routes a
+// trigger with a Squad through EnqueueTaskForSquadLeader and one without it
+// through a non-leader enqueue, so Squad is the single discriminator — which is
+// what lets the coalescing path compare a pending task's stored role against
+// the role this comment would have produced.
+func triggerLeaderRole(trigger commentAgentTrigger) (bool, pgtype.UUID) {
+	if trigger.Squad == nil {
+		return false, pgtype.UUID{}
+	}
+	return true, trigger.Squad.ID
 }
 
 type conversationRoutedAgentInfo struct {

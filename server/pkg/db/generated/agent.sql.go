@@ -6820,6 +6820,17 @@ WHERE id = (
           COALESCE($14::text, '') = ''
           OR t.context->>'head_sha' = $14::text
       )
+      -- Role-scoped (MUL-7006), for the same reason the head is: this statement
+      -- re-attributes a task but never re-roles one, so folding across roles
+      -- silently executes the comment under the wrong one. A leader-role reply
+      -- merged into a queued direct-agent task loses its squad briefing and its
+      -- managed workdir; re-roling that task in place would be worse, moving
+      -- work the direct task was meant to do in the user's local_directory into
+      -- a managed one. A miss here is not a drop: the queued task counts as
+      -- active, so the caller defers and completion reconciliation recomputes
+      -- the routing and enqueues the correctly-roled task.
+      AND t.is_leader_task = $15::boolean
+      AND t.squad_id IS NOT DISTINCT FROM $16::uuid
     ORDER BY t.created_at DESC
     LIMIT 1
 )
@@ -6841,6 +6852,8 @@ type MergeCommentIntoPendingTaskParams struct {
 	IssueID                 pgtype.UUID `json:"issue_id"`
 	AgentID                 pgtype.UUID `json:"agent_id"`
 	HeadSha                 pgtype.Text `json:"head_sha"`
+	NewIsLeaderTask         bool        `json:"new_is_leader_task"`
+	NewSquadID              pgtype.UUID `json:"new_squad_id"`
 }
 
 type MergeCommentIntoPendingTaskRow struct {
@@ -6906,6 +6919,8 @@ func (q *Queries) MergeCommentIntoPendingTask(ctx context.Context, arg MergeComm
 		arg.IssueID,
 		arg.AgentID,
 		arg.HeadSha,
+		arg.NewIsLeaderTask,
+		arg.NewSquadID,
 	)
 	var i MergeCommentIntoPendingTaskRow
 	err := row.Scan(&i.ID, &i.CoalescedCommentIds)

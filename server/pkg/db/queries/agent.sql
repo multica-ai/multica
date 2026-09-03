@@ -1869,6 +1869,17 @@ WHERE id = (
           COALESCE(sqlc.narg('head_sha')::text, '') = ''
           OR t.context->>'head_sha' = sqlc.narg('head_sha')::text
       )
+      -- Role-scoped (MUL-7006), for the same reason the head is: this statement
+      -- re-attributes a task but never re-roles one, so folding across roles
+      -- silently executes the comment under the wrong one. A leader-role reply
+      -- merged into a queued direct-agent task loses its squad briefing and its
+      -- managed workdir; re-roling that task in place would be worse, moving
+      -- work the direct task was meant to do in the user's local_directory into
+      -- a managed one. A miss here is not a drop: the queued task counts as
+      -- active, so the caller defers and completion reconciliation recomputes
+      -- the routing and enqueues the correctly-roled task.
+      AND t.is_leader_task = @new_is_leader_task::boolean
+      AND t.squad_id IS NOT DISTINCT FROM sqlc.narg('new_squad_id')::uuid
     ORDER BY t.created_at DESC
     LIMIT 1
 )

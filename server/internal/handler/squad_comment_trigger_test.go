@@ -671,14 +671,16 @@ func TestCreateComment_ReplyToAgentCommentContinuesAuthoringRole(t *testing.T) {
 	}
 
 	cases := []struct {
-		name       string
-		seedLeader bool // the authoring task ran in the leader role
-		stampTask  bool // the comment records which run authored it
-		wantLeader bool
+		name         string
+		seedLeader   bool // the authoring task ran in the leader role
+		stampTask    bool // the comment records which run authored it
+		archiveSquad bool // the squad was deleted (soft-archived) since
+		wantLeader   bool
 	}{
 		{name: "leader-role comment continues as leader", seedLeader: true, stampTask: true, wantLeader: true},
 		{name: "worker-role comment stays direct agent", seedLeader: false, stampTask: true, wantLeader: false},
 		{name: "unrecorded authoring run stays direct agent", seedLeader: true, stampTask: false, wantLeader: false},
+		{name: "archived squad stays direct agent", seedLeader: true, stampTask: true, archiveSquad: true, wantLeader: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -712,6 +714,12 @@ func TestCreateComment_ReplyToAgentCommentContinuesAuthoringRole(t *testing.T) {
 				"author_id":      leaderID,
 				"source_task_id": sourceTaskID,
 			})
+			if tc.archiveSquad {
+				// DeleteSquad transfers the issue to the leader agent and then
+				// soft-archives the squad; the leader's old comments outlive it.
+				dbfx.Exec(t, `UPDATE squad SET archived_at = now() WHERE id = $1`, squadID)
+				dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, issueID, leaderID)
+			}
 
 			req := withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
 				"content":   "any update?",
@@ -931,5 +939,114 @@ func TestCreateComment_SquadMentionTriggersLeader(t *testing.T) {
 	// The squad's leader should have a queued task.
 	if got := countQueued(leaderID); got != 1 {
 		t.Fatalf("after @squad mention: expected 1 leader task, got %d", got)
+	}
+}
+
+// TestEnqueueCommentTrigger_DoesNotCoalesceAcrossLeaderRole pins the coalescing
+// half of MUL-7006. Recognising the leader role in the router is not enough: a
+// pending task for the same (issue, agent) short-circuits the enqueue through
+// MergeCommentIntoPendingTask, which re-attributes a task but never re-roles
+// one. Folding a leader-role reply into a queued direct-agent task would leave
+// it with no squad briefing and, on a local_directory project, in the user's
+// own directory — the exact bug, preserved in the concurrent shape.
+//
+// A role mismatch must MISS the merge and defer instead: the queued task counts
+// as active, so completion reconciliation recomputes the routing and enqueues
+// the correctly-roled task once it finishes. Re-roling the pending task in
+// place is not the alternative — that would move work the direct task was meant
+// to do in the user's directory into a managed one.
+func TestEnqueueCommentTrigger_DoesNotCoalesceAcrossLeaderRole(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	cases := []struct {
+		name            string
+		pendingIsLeader bool // the already-queued task's role
+		pendingSquad    bool // ...and whether it carries this squad
+		replyIsLeader   bool // the role the new reply resolves to
+		wantStatus      DispatchStatus
+	}{
+		{name: "leader reply does not fold into a direct task", pendingIsLeader: false, replyIsLeader: true, wantStatus: DispatchDeferred},
+		{name: "direct reply does not fold into a leader task", pendingIsLeader: true, pendingSquad: true, replyIsLeader: false, wantStatus: DispatchDeferred},
+		{name: "leader reply folds into a leader task", pendingIsLeader: true, pendingSquad: true, replyIsLeader: true, wantStatus: DispatchCoalesced},
+		{name: "direct reply folds into a direct task", pendingIsLeader: false, replyIsLeader: false, wantStatus: DispatchCoalesced},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			runtimeID := dbfx.Runtime(t, "coalesce-role runtime")
+			leaderID := dbfx.Agent(t, "Coalesce Role Leader", runtimeID)
+			squadID := dbfx.Squad(t, "Coalesce Role Squad", leaderID)
+			issueID := dbfx.Issue(t, "coalescing respects the task role", testutil.Cols{
+				"assignee_type": "squad",
+				"assignee_id":   squadID,
+			})
+
+			priorCommentID := dbfx.Comment(t, issueID, "the queued task's own trigger")
+			var pendingSquadID any
+			if tc.pendingSquad {
+				pendingSquadID = squadID
+			}
+			pendingTaskID := dbfx.Task(t, leaderID, testutil.Cols{
+				"runtime_id":         runtimeID,
+				"issue_id":           issueID,
+				"status":             "queued",
+				"trigger_comment_id": priorCommentID,
+				"is_leader_task":     tc.pendingIsLeader,
+				"squad_id":           pendingSquadID,
+			})
+
+			issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+			if err != nil {
+				t.Fatalf("load issue: %v", err)
+			}
+			agent, err := testHandler.Queries.GetAgent(ctx, util.MustParseUUID(leaderID))
+			if err != nil {
+				t.Fatalf("load agent: %v", err)
+			}
+			trigger := commentAgentTrigger{
+				Agent:          agent,
+				Source:         commentTriggerSourceThreadParent,
+				AlreadyPending: true,
+			}
+			if tc.replyIsLeader {
+				squad, err := testHandler.Queries.GetSquad(ctx, util.MustParseUUID(squadID))
+				if err != nil {
+					t.Fatalf("load squad: %v", err)
+				}
+				trigger.Squad = &squad
+			}
+
+			replyCommentID := dbfx.Comment(t, issueID, "any update?")
+			results := testHandler.enqueueCommentAgentTriggers(
+				ctx, issue, util.MustParseUUID(replyCommentID), []commentAgentTrigger{trigger})
+
+			res := results[leaderID]
+			if res.status != tc.wantStatus {
+				t.Fatalf("enqueue status = %q (reason %q), want %q", res.status, res.reason, tc.wantStatus)
+			}
+
+			// The decisive assertion: on a role mismatch the queued task must be
+			// left entirely alone — same trigger comment, same role. A status of
+			// "deferred" would still be a bug if the merge had partially landed.
+			var gotTrigger string
+			var gotLeader bool
+			dbfx.QueryRow(t, `
+				SELECT trigger_comment_id, is_leader_task FROM agent_task_queue WHERE id = $1
+			`, pendingTaskID).Scan(&gotTrigger, &gotLeader)
+
+			wantTrigger := priorCommentID
+			if tc.wantStatus == DispatchCoalesced {
+				wantTrigger = replyCommentID
+			}
+			if gotTrigger != wantTrigger {
+				t.Fatalf("pending task trigger_comment_id = %s, want %s", gotTrigger, wantTrigger)
+			}
+			if gotLeader != tc.pendingIsLeader {
+				t.Fatalf("pending task is_leader_task = %v, want %v (a merge must never re-role a task)",
+					gotLeader, tc.pendingIsLeader)
+			}
+		})
 	}
 }
