@@ -14,13 +14,17 @@ import (
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issuelifecycle"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -39,8 +43,9 @@ type IssueService struct {
 	// cmd/server/router.go after construction; nil in tests / self-hosted
 	// without the metrics listener — obsmetrics.RecordEvent treats a nil
 	// Metrics as "PostHog only", so leaving it unset is safe.
-	Metrics     *obsmetrics.BusinessMetrics
-	TaskService *TaskService
+	Metrics      *obsmetrics.BusinessMetrics
+	TaskService  *TaskService
+	FeatureFlags *featureflag.Service
 	// Entitlements supplies Cloud's effective issue-count instruction. Nil is
 	// the self-hosted unlimited path.
 	Entitlements entitlement.Provider
@@ -381,6 +386,13 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
+	}
+	issue, _, _, err = issuelifecycle.RecordTransition(ctx, qtx, nil, issue, issuelifecycle.TransitionActor{
+		Type: p.CreatorType,
+		ID:   p.CreatorID,
+	}, "issue_created")
+	if err != nil {
+		return IssueCreateResult{}, fmt.Errorf("record initial issue transition: %w", err)
 	}
 
 	if p.SourceContext != nil {
@@ -728,7 +740,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 	// Backlog is the parking lot: nothing runs from it, so nothing here needs
 	// explaining either. A custom status in the backlog category parks the
 	// same way. (MUL-6243)
-	if issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags)).IsParked() {
 		return pgtype.UUID{}
 	}
 	verdict, admitted := agentAssigneeVerdict(ctx, s.runtimeLookup(s.Queries), issue)
@@ -774,7 +786,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
 	// Resolved through q, not s.Queries: this runs inside the create
 	// transaction and must see the same snapshot as the rest of it. (MUL-6243)
-	if issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issuepolicy.ResolveIssue(ctx, q, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags)).IsParked() {
 		return false
 	}
 	return isAgentAssigneeReadyWithQueries(ctx, s.runtimeLookup(q), issue)
@@ -807,7 +819,7 @@ func agentAssigneeVerdict(ctx context.Context, lookup RuntimeLookup, issue db.Is
 }
 
 func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
-	if issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags)).IsParked() {
 		return false
 	}
 	return s.isSquadLeaderReady(ctx, issue)

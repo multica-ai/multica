@@ -10,8 +10,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/integrations/vcs"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -262,7 +263,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	if ev.State == "merged" || ev.State == "closed" {
 		for _, issue := range reevalIssues {
 			// A custom terminal status counts as terminal here. (MUL-6243)
-			if s := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status); s == "done" || s == "cancelled" {
+			if issuepolicy.ResolveIssue(ctx, h.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)).IsTerminal() {
 				continue
 			}
 			counts, err := h.Queries.GetIssueCombinedPullRequestCloseAggregate(ctx, issue.ID)

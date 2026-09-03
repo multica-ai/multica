@@ -21,7 +21,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/dispatch"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issuelifecycle"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -79,6 +82,10 @@ type IssueResponse struct {
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
 	Revision  int64   `json:"revision"`
+	// TransitionID is the optimistic status cursor. Additive clients may send
+	// it back as expected_transition_id; older clients continue using revision
+	// or no precondition.
+	TransitionID *string `json:"transition_id"`
 	// LastActivityAt is the latest semantic issue activity. It stays nullable
 	// while the operator-run historical backfill is incomplete.
 	LastActivityAt *string `json:"last_activity_at"`
@@ -205,12 +212,12 @@ func assertIssueStatusStillActive(ctx context.Context, qtx *db.Queries, workspac
 	return nil
 }
 
-// runWithIssueStatusGuard runs an issue write that lands on a custom status
-// inside a transaction that re-verifies the status under the shared catalog
-// lock (see assertIssueStatusStillActive). A built-in target skips the
-// transaction entirely.
+// runWithIssueStatusGuard runs an issue write that changes status inside one
+// transaction. Custom targets additionally take the catalog archive guard.
+// Built-in transitions also need the transaction now because the legacy field,
+// lifecycle projection, and immutable transition must commit atomically.
 func (h *Handler) runWithIssueStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, fn func(q *db.Queries) error) error {
-	if statusKey == "" || issuestatus.IsBuiltIn(statusKey) {
+	if statusKey == "" {
 		return fn(h.Queries)
 	}
 	tx, err := h.TxStarter.Begin(ctx)
@@ -323,6 +330,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
 		Revision:       i.Revision,
+		TransitionID:   uuidToPtr(i.LastTransitionID),
 		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
 		Metadata:       parseIssueMetadata(i.Metadata),
 		Properties:     parseIssueProperties(i.Properties),
@@ -2399,6 +2407,7 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Queries.ChildIssueProgress(r.Context(), db.ChildIssueProgressParams{
 		WorkspaceID:        wsUUID,
 		TerminalStatusKeys: terminalStatusKeys,
+		LifecycleEnabled:   featureflags.IssueLifecycleV1Enabled(r.Context(), h.FeatureFlags),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
@@ -3105,8 +3114,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
-	Title            *string `json:"title"`
+	ExpectedRevision     *int64  `json:"expected_revision,omitempty"`
+	ExpectedTransitionID *string `json:"expected_transition_id,omitempty"`
+	Title                *string `json:"title"`
 	// TitleBase is the title adopted by the editor before producing Title. It
 	// protects title edits without coupling them to unrelated issue mutations.
 	TitleBase   *string `json:"title_base,omitempty"`
@@ -3223,7 +3233,7 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 
 var errIssueFieldConflict = errors.New("issue text field conflict")
 
-func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string) (db.Issue, db.Issue, bool, error) {
+func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string, actor issuelifecycle.TransitionActor, cause string) (db.Issue, db.Issue, bool, error) {
 	if h.TxStarter == nil {
 		return db.Issue{}, db.Issue{}, false, errors.New("atomic issue update requires transaction starter")
 	}
@@ -3299,6 +3309,10 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	if err != nil {
 		return db.Issue{}, current, false, fmt.Errorf("update locked issue: %w", err)
 	}
+	issue, _, _, err = issuelifecycle.RecordTransition(ctx, qtx, &current, issue, actor, cause)
+	if err != nil {
+		return db.Issue{}, current, false, err
+	}
 
 	attachmentsChanged := false
 	if len(attachmentIDs) > 0 {
@@ -3354,6 +3368,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
+	// Resolve actor before the write so a status transition can record it in
+	// the same transaction as the issue mutation.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	transitionActor := issuelifecycle.TransitionActor{Type: actorType}
+	if actorID != "" {
+		transitionActor.ID, _ = util.ParseUUID(actorID)
+	}
+
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
 		ID:            prevIssue.ID,
@@ -3375,6 +3397,17 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.ExpectedRevision = pgtype.Int8{Int64: *req.ExpectedRevision, Valid: true}
+	}
+	if req.ExpectedTransitionID != nil {
+		expectedTransitionID, ok := parseUUIDOrBadRequest(w, *req.ExpectedTransitionID, "expected_transition_id")
+		if !ok {
+			return
+		}
+		if prevIssue.LastTransitionID != expectedTransitionID {
+			writeError(w, http.StatusConflict, "issue transition conflict; reload and retry")
+			return
+		}
+		params.ExpectedTransitionID = expectedTransitionID
 	}
 
 	// COALESCE fields — only set when explicitly provided
@@ -3551,7 +3584,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
-			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard,
+			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard, transitionActor, "issue_updated",
 		)
 		if lockedPrev.ID.Valid {
 			prevIssue = lockedPrev
@@ -3560,6 +3593,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		err = h.runWithIssueStatusGuard(r.Context(), prevIssue.WorkspaceID, statusKeyForGuard, func(q *db.Queries) error {
 			var innerErr error
 			issue, innerErr = q.UpdateIssue(r.Context(), params)
+			if innerErr == nil {
+				issue, _, _, innerErr = issuelifecycle.RecordTransition(r.Context(), q, &prevIssue, issue, transitionActor, "issue_updated")
+			}
 			return innerErr
 		})
 	}
@@ -3578,13 +3614,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if errors.Is(err, pgx.ErrNoRows) && req.ExpectedTransitionID != nil {
+			writeError(w, http.StatusConflict, "issue transition conflict; reload and retry")
+			return
+		}
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
 	}
-
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
@@ -3609,7 +3646,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
-	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+	updatePayload := map[string]any{
 		"issue":               resp,
 		"assignee_changed":    assigneeChanged,
 		"status_changed":      statusChanged,
@@ -3629,7 +3666,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"prev_description":    textToPtr(prevIssue.Description),
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
-	})
+	}
+	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, updatePayload)
+	if statusChanged {
+		h.publish(protocol.EventIssueTransitioned, workspaceID, actorType, actorID, updatePayload)
+	}
 	if attachmentsChanged {
 		// The full owner snapshot must be admitted before an auxiliary event at
 		// the same revision. Otherwise clients advance only the revision here and
@@ -3778,7 +3819,7 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 // UpdateIssue.
 func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
 	// A custom status in the backlog category parks like Backlog. (MUL-6243)
-	if issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issuepolicy.ResolveIssue(ctx, h.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)).IsParked() {
 		return false
 	}
 	return h.isAgentAssigneeReady(ctx, issue)
@@ -4089,6 +4130,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	transitionActor := issuelifecycle.TransitionActor{Type: actorType}
+	if actorID != "" {
+		transitionActor.ID, _ = util.ParseUUID(actorID)
+	}
 	// Status is validated against this workspace's catalog, so it has to wait
 	// for wsUUID above. One check for the whole batch — every issue in it
 	// shares the workspace — and a rejection rather than a silent skip, so a
@@ -4291,7 +4337,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
 			issue, lockedPrev, _, err = h.updateIssueAtomically(
-				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey,
+				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey, transitionActor, "batch_issue_updated",
 			)
 			if err == nil {
 				prevIssue = lockedPrev
@@ -4300,6 +4346,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			err = h.runWithIssueStatusGuard(r.Context(), wsUUID, batchStatusKey, func(q *db.Queries) error {
 				var innerErr error
 				issue, innerErr = q.UpdateIssue(r.Context(), params)
+				if innerErr == nil {
+					issue, _, _, innerErr = issuelifecycle.RecordTransition(r.Context(), q, &prevIssue, issue, transitionActor, "batch_issue_updated")
+				}
 				return innerErr
 			})
 		}
@@ -4316,8 +4365,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
-
 		fillBatch(&resp)
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
@@ -4325,13 +4372,18 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
 		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 
-		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+		updatePayload := map[string]any{
 			"issue":            resp,
 			"assignee_changed": assigneeChanged,
 			"status_changed":   statusChanged,
 			"priority_changed": priorityChanged,
 			"project_changed":  projectChanged,
-		})
+			"prev_status":      prevIssue.Status,
+		}
+		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, updatePayload)
+		if statusChanged {
+			h.publish(protocol.EventIssueTransitioned, workspaceID, actorType, actorID, updatePayload)
+		}
 
 		// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —
 		// mirrors UpdateIssue. See that handler for the rationale.
@@ -4368,10 +4420,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// comparison here left childDoneCompleted empty and silently skipped
 		// notifyParentsOfBatchChildDone entirely. (MUL-6243)
 		if statusChanged && issue.ParentIssueID.Valid {
-			prevTerminal := isTerminalChildStatus(
-				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
-			nowTerminal := isTerminalChildStatus(
-				issuestatus.Effective(r.Context(), h.Queries, issue.WorkspaceID, issue.Status))
+			lifecycleEnabled := featureflags.IssueLifecycleV1Enabled(r.Context(), h.FeatureFlags)
+			prevTerminal := issuepolicy.ResolveIssue(r.Context(), h.Queries, prevIssue, lifecycleEnabled).IsTerminal()
+			nowTerminal := issuepolicy.ResolveIssue(r.Context(), h.Queries, issue, lifecycleEnabled).IsTerminal()
 			if !prevTerminal && nowTerminal {
 				childDoneCompleted = append(childDoneCompleted, issue)
 			}

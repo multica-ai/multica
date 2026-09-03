@@ -54,18 +54,13 @@ func SubscribePluginEvents(bus *events.Bus, dispatcher EventSink) {
 	bus.Subscribe(protocol.EventTaskCompleted, forward(plugincontract.EventTaskCompleted))
 	bus.Subscribe(protocol.EventTaskFailed, forward(plugincontract.EventTaskFailed))
 
-	// issue.status_changed has no event of its own internally: a status change
-	// is an issue:updated carrying status_changed=true. Deriving it here rather
-	// than adding a second publish keeps one write producing one internal
-	// event, and lets a plugin subscribe to the specific thing it cares about
-	// instead of filtering every field change itself.
+	// issue.updated remains the compatibility stream for all field changes.
+	// Status hooks consume the explicit transition domain event so downstream
+	// behavior no longer has to infer a transition from a generic patch.
 	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
 		dispatcher.Dispatch(plugincontract.EventIssueUpdated, e.WorkspaceID, e.Payload)
-		// A map lookup, not a parse: cheap enough for the request goroutine.
-		if payloadFlag(e.Payload, "status_changed") {
-			dispatcher.Dispatch(plugincontract.EventIssueStatusChanged, e.WorkspaceID, e.Payload)
-		}
 	})
+	bus.Subscribe(protocol.EventIssueTransitioned, forward(plugincontract.EventIssueStatusChanged))
 }
 
 // issueIDFromPayload finds the issue an event is about, so the callback token
@@ -97,12 +92,4 @@ func issueIDFromPayload(payload any) pgtype.UUID {
 		}
 	}
 	return pgtype.UUID{}
-}
-
-func payloadFlag(payload any, key string) bool {
-	if fields, ok := payload.(map[string]any); ok {
-		flag, _ := fields[key].(bool)
-		return flag
-	}
-	return false
 }

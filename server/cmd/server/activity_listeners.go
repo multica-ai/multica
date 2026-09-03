@@ -60,33 +60,9 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 
-		statusChanged, _ := payload["status_changed"].(bool)
 		priorityChanged, _ := payload["priority_changed"].(bool)
 		assigneeChanged, _ := payload["assignee_changed"].(bool)
 		descriptionChanged, _ := payload["description_changed"].(bool)
-
-		if statusChanged {
-			prevStatus, _ := payload["prev_status"].(string)
-			details, _ := json.Marshal(map[string]string{
-				"from": prevStatus,
-				"to":   issue.Status,
-			})
-			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
-				ID:          dbid.NewV7(),
-				WorkspaceID: parseUUID(issue.WorkspaceID),
-				IssueID:     parseUUID(issue.ID),
-				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     optionalUUID(e.ActorID),
-				Action:      "status_changed",
-				Details:     details,
-			})
-			if err != nil {
-				slog.Error("activity: failed to record status change",
-					"issue_id", issue.ID, "error", err)
-			} else {
-				publishActivityEvent(bus, e, activity)
-			}
-		}
 
 		if priorityChanged {
 			prevPriority, _ := payload["prev_priority"].(string)
@@ -247,6 +223,36 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				publishActivityEvent(bus, e, activity)
 			}
 		}
+	})
+
+	// issue:transitioned — status activity is driven by the domain event. The
+	// compatibility issue:updated event still reaches realtime clients, but no
+	// in-process consumer has to infer a transition from a generic patch.
+	bus.Subscribe(protocol.EventIssueTransitioned, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		issue, ok := payload["issue"].(handler.IssueResponse)
+		if !ok {
+			return
+		}
+		prevStatus, _ := payload["prev_status"].(string)
+		details, _ := json.Marshal(map[string]string{"from": prevStatus, "to": issue.Status})
+		activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+			ID:          dbid.NewV7(),
+			WorkspaceID: parseUUID(issue.WorkspaceID),
+			IssueID:     parseUUID(issue.ID),
+			ActorType:   util.StrToText(e.ActorType),
+			ActorID:     optionalUUID(e.ActorID),
+			Action:      "status_changed",
+			Details:     details,
+		})
+		if err != nil {
+			slog.Error("activity: failed to record status change", "issue_id", issue.ID, "error", err)
+			return
+		}
+		publishActivityEvent(bus, e, activity)
 	})
 
 	// task:completed — record "task_completed" activity

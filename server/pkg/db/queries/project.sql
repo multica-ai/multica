@@ -57,8 +57,22 @@ WHERE project_id = $1;
 -- name: GetProjectIssueStats :many
 SELECT project_id,
        count(*)::bigint AS total_count,
-       count(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done_count
-FROM issue
-WHERE workspace_id = sqlc.arg('workspace_id')::uuid
-  AND project_id = ANY(sqlc.arg('project_ids')::uuid[])
+       count(*) FILTER (WHERE
+           CASE WHEN sqlc.arg('lifecycle_enabled')::bool THEN
+               CASE WHEN EXISTS (
+                   SELECT 1 FROM issue_lifecycle_status AS coherent
+                   WHERE coherent.id = i.lifecycle_status_id
+                     AND coherent.lifecycle_id = i.lifecycle_id
+                     AND coherent.workspace_id = i.workspace_id
+                     AND coherent.legacy_status_key = i.status
+               ) THEN EXISTS (
+                   SELECT 1 FROM issue_lifecycle_status AS terminal
+                   WHERE terminal.id = i.lifecycle_status_id
+                     AND terminal.outcome IN ('completed', 'cancelled')
+               ) ELSE i.status = ANY(sqlc.arg('terminal_status_keys')::text[]) END
+           ELSE i.status = ANY(sqlc.arg('terminal_status_keys')::text[]) END
+       )::bigint AS done_count
+FROM issue AS i
+WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND i.project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;

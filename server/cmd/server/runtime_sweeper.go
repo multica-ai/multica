@@ -12,7 +12,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -712,8 +712,8 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *ser
 				// work someone else is holding. A custom status resolves to the
 				// canonical status it inherits, so a custom review gate is
 				// excluded for the same reason In Review is. (MUL-6243)
-				effectiveStatus := issuestatus.Effective(ctx, queries, issue.WorkspaceID, issue.Status)
-				if effectiveStatus == "in_progress" && !processedIssues[issueKey] {
+				state := issuepolicy.ResolveIssue(ctx, queries, issue, false)
+				if state.AgentOwnsActiveWork() && !processedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					if hasActive, herr := queries.HasActiveTaskForIssue(ctx, t.IssueID); herr == nil && !hasActive {
 						queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: t.IssueID, Status: "todo", WorkspaceID: issue.WorkspaceID})

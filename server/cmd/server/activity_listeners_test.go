@@ -84,7 +84,7 @@ func TestActivityIssueUpdated_StatusChanged(t *testing.T) {
 	})
 
 	bus.Publish(events.Event{
-		Type:        protocol.EventIssueUpdated,
+		Type:        protocol.EventIssueTransitioned,
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,

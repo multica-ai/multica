@@ -263,7 +263,7 @@ func TestNotification_StatusChanged(t *testing.T) {
 	addTestSubscriber(t, issueID, "member", sub2ID, "commenter")
 
 	bus.Publish(events.Event{
-		Type:        protocol.EventIssueUpdated,
+		Type:        protocol.EventIssueTransitioned,
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID, // actor is the creator
@@ -347,7 +347,7 @@ func TestNotification_StatusChanged_Muted(t *testing.T) {
 	addTestSubscriber(t, issueID, "member", normalID, "commenter")
 
 	bus.Publish(events.Event{
-		Type:        protocol.EventIssueUpdated,
+		Type:        protocol.EventIssueTransitioned,
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
@@ -940,7 +940,7 @@ func TestNotification_ParentBubble_StatusChanged(t *testing.T) {
 	addTestSubscriber(t, parentID, "member", parentSubID, "manual")
 
 	bus.Publish(events.Event{
-		Type:        protocol.EventIssueUpdated,
+		Type:        protocol.EventIssueTransitioned,
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
@@ -1106,11 +1106,11 @@ func countInboxByTypeForRecipient(t *testing.T, recipientID, notifType string) (
 	return active, archived
 }
 
-// publishStatusChange is a small helper to publish the issue:updated event
+// publishStatusChange is a small helper to publish the issue:transitioned event
 // shape used by the notification listener for status-only transitions.
 func publishStatusChange(bus *events.Bus, issueID, newStatus, prevStatus string) {
 	bus.Publish(events.Event{
-		Type:        protocol.EventIssueUpdated,
+		Type:        protocol.EventIssueTransitioned,
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,

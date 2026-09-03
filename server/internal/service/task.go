@@ -22,6 +22,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issuelifecycle"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -5870,8 +5872,8 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				// the issue then — and a custom status resolves to the canonical
 				// status it inherits, so a custom review gate is excluded for
 				// the same reason In Review is. (MUL-6243)
-				effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
-				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
+				state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags))
+				if state.AgentOwnsActiveWork() && !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {
@@ -5880,10 +5882,12 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							"error", checkErr,
 						)
 					} else if !hasActive {
-						updatedIssue, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-							ID:          t.IssueID,
-							Status:      "todo",
+						transitioned, updateErr := s.transitionIssueStatus(ctx, IssueTransitionParams{
+							IssueID:     t.IssueID,
 							WorkspaceID: issue.WorkspaceID,
+							Status:      "todo",
+							Actor:       issuelifecycle.TransitionActor{Type: "system"},
+							Cause:       "task_failure_recovery",
 						})
 						if updateErr != nil {
 							slog.Warn("handle failed tasks: reset stuck issue failed",
@@ -5891,6 +5895,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 								"error", updateErr,
 							)
 						} else {
+							updatedIssue := transitioned.Issue
 							// This direct reset bypasses the HTTP UpdateIssue
 							// handler that normally emits issue:updated, so emit
 							// it here too. Without it the board / status-filter
@@ -6055,8 +6060,8 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 		}
 		return nil, fmt.Errorf("load source issue: %w", err)
 	}
-	effectiveStatus := issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status)
-	if effectiveStatus == issuestatus.Done || effectiveStatus == issuestatus.Cancelled || effectiveStatus == issuestatus.Backlog {
+	state := issuepolicy.ResolveIssue(ctx, q, issue, false)
+	if state.IsTerminal() || state.IsParked() {
 		return nil, nil
 	}
 	agent, err := q.GetAgent(ctx, source.AgentID)
@@ -7124,26 +7129,28 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 // status_changed.
 //
 // The `issue` payload is a map (IssueToMap), which the workspace WS fanout
-// (listeners.go SubscribeAll) marshals and broadcasts as-is — that is what
-// drives the UI reconcile. Note this does NOT cover the full HTTP UpdateIssue
-// side effects: the activity-log and inbox listeners type-assert `issue` to a
-// handler.IssueResponse and skip a map, so a background status reset does not
-// emit status-change activity / notifications. That is intentional for the
-// realtime-staleness fix (#4648 / MUL-3782); folding those side effects in
-// would mean unifying the payload type and is left as a follow-up.
+// marshals and broadcasts as-is — that is what drives the UI reconcile. A
+// status change is additionally published as issue:transitioned so lifecycle
+// consumers no longer need to infer a transition from a generic update.
 func (s *TaskService) broadcastIssueUpdated(ctx context.Context, issue db.Issue, prevStatus string) {
 	prefix := s.getIssuePrefix(issue.WorkspaceID)
-	s.Bus.Publish(events.Event{
+	payload := map[string]any{
+		"issue":          IssueToMapResolved(ctx, s.Queries, issue, prefix),
+		"status_changed": prevStatus != issue.Status,
+		"prev_status":    prevStatus,
+	}
+	event := events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
 		ActorType:   "system",
 		ActorID:     "",
-		Payload: map[string]any{
-			"issue":          IssueToMapResolved(ctx, s.Queries, issue, prefix),
-			"status_changed": prevStatus != issue.Status,
-			"prev_status":    prevStatus,
-		},
-	})
+		Payload:     payload,
+	}
+	s.Bus.Publish(event)
+	if prevStatus != issue.Status {
+		event.Type = protocol.EventIssueTransitioned
+		s.Bus.Publish(event)
+	}
 }
 
 func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
@@ -7349,6 +7356,7 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"updated_at":       util.TimestampToString(issue.UpdatedAt),
 		"last_activity_at": util.TimestampToNanoPtr(issue.LastActivityAt),
 		"revision":         issue.Revision,
+		"transition_id":    util.UUIDToPtr(issue.LastTransitionID),
 		"metadata":         util.JSONObjectOrEmpty(issue.Metadata),
 		"properties":       util.JSONObjectOrEmpty(issue.Properties),
 	}

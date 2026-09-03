@@ -447,6 +447,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.Metrics = opts.BusinessMetrics
 	h.FeatureFlags = opts.FeatureFlags
 	h.TaskService.FeatureFlags = opts.FeatureFlags
+	h.IssueService.FeatureFlags = opts.FeatureFlags
+	h.AutopilotService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
 	entitlementClient, entitlementErr := entitlement.New(entitlement.Config{

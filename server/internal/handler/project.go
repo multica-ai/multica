@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -70,6 +71,7 @@ func (h *Handler) loadProjectIssueStats(ctx context.Context, workspaceID, projec
 		WorkspaceID:        workspaceID,
 		ProjectIds:         []pgtype.UUID{projectID},
 		TerminalStatusKeys: terminalStatusKeys,
+		LifecycleEnabled:   featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags),
 	})
 	if err != nil || len(stats) == 0 {
 		return 0, 0
@@ -170,6 +172,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID:        wsUUID,
 			ProjectIds:         projectIDs,
 			TerminalStatusKeys: terminalStatusKeys,
+			LifecycleEnabled:   featureflags.IssueLifecycleV1Enabled(r.Context(), h.FeatureFlags),
 		})
 		if statsErr == nil {
 			for _, s := range stats {
@@ -925,6 +928,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID:        wsUUID,
 			ProjectIds:         projectIDs,
 			TerminalStatusKeys: terminalStatusKeys,
+			LifecycleEnabled:   featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags),
 		})
 		if statsErr == nil {
 			for _, s := range stats {

@@ -18,13 +18,16 @@ import (
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issuelifecycle"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issueposition"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -40,6 +43,7 @@ type AutopilotService struct {
 	TaskSvc      *TaskService
 	Entitlements entitlement.Provider
 	QuotaMetrics AutopilotQuotaMetrics
+	FeatureFlags *featureflag.Service
 }
 
 // DefaultAutopilotTriggerTimezone is the timezone used to render Autopilot
@@ -323,7 +327,8 @@ func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, aut
 	if err != nil {
 		return fmt.Errorf("dispatch for webhook delivery: load linked issue: %w", err)
 	}
-	if effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status); effective != "todo" && effective != "in_progress" {
+	state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags))
+	if state.LegacyCategory != "todo" && state.LegacyCategory != "in_progress" {
 		return nil
 	}
 	if autopilot.AssigneeType == "squad" {
@@ -725,6 +730,13 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	if err != nil {
 		return fmt.Errorf("create issue: %w", err)
 	}
+	issue, _, _, err = issuelifecycle.RecordTransition(ctx, qtx, nil, issue, issuelifecycle.TransitionActor{
+		Type: "agent",
+		ID:   leader.ID,
+	}, "autopilot_issue_created")
+	if err != nil {
+		return fmt.Errorf("record initial issue transition: %w", err)
+	}
 
 	// Fan out the default subscriber template inside the same tx as the
 	// issue insert, before EventIssueCreated fires — so notification
@@ -1068,10 +1080,10 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 	// The failure reason below deliberately keeps issue.Status, not the
 	// normalized key, so the audit trail names the status a human actually
 	// chose. (MUL-6243)
-	effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags))
 
-	switch effectiveStatus {
-	case "done", "in_review":
+	switch state.AutopilotResolution() {
+	case issuepolicy.AutopilotComplete:
 		updatedRun, err := s.completeAutopilotRun(ctx, db.UpdateAutopilotRunCompletedParams{
 			ID: run.ID,
 		})
@@ -1081,7 +1093,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 		}
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
-	case "cancelled", "blocked":
+	case issuepolicy.AutopilotFail:
 		reason := "issue " + issue.Status
 		updatedRun, err := s.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
 			ID:            run.ID,
