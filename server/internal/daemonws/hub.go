@@ -30,8 +30,10 @@ type ClientIdentity struct {
 	WorkspaceIDs []string
 	RuntimeIDs   []string
 	// RuntimeLeases is populated from the connection-time batch authorization
-	// query. Its keys are immutable for the lifetime of the connection; each
-	// value tracks only the DB liveness state needed to throttle writes.
+	// query. Entries are retained for the lifetime of the connection to avoid
+	// concurrent map writes; they are not an authorization source. client.runtimes
+	// is the sole mutable heartbeat scope and is checked before a lease is used.
+	// Each value tracks only the DB liveness state needed to throttle writes.
 	RuntimeLeases map[string]*RuntimeLease
 	ClientVersion string
 	// Capabilities is the raw X-Client-Capabilities header captured at connect,
@@ -190,7 +192,13 @@ func (c *client) trySend(frame []byte) bool {
 	}
 }
 
-const eventDedupCapacity = 128
+const (
+	eventDedupCapacity = 128
+	// The runtime-gone cache is hub-wide rather than per connection. Size it
+	// independently to retain a complete runtime GC batch (currently capped at
+	// 500) through local delivery and Redis loopback.
+	runtimeGoneDedupCapacity = 512
+)
 
 // markSeen records eventID as already delivered to this client. Empty event IDs
 // disable dedup and are always delivered.
@@ -250,7 +258,7 @@ func (h *Hub) markRuntimeGoneSeen(eventID string) bool {
 	}
 	h.runtimeGoneSeenIDs[eventID] = struct{}{}
 	h.runtimeGoneSeenOrder = append(h.runtimeGoneSeenOrder, eventID)
-	if len(h.runtimeGoneSeenOrder) > eventDedupCapacity {
+	if len(h.runtimeGoneSeenOrder) > runtimeGoneDedupCapacity {
 		drop := h.runtimeGoneSeenOrder[0]
 		h.runtimeGoneSeenOrder = h.runtimeGoneSeenOrder[1:]
 		delete(h.runtimeGoneSeenIDs, drop)
@@ -338,7 +346,7 @@ func NewHub() *Hub {
 		byRuntime:          make(map[string]map[*client]bool),
 		byWorkspace:        make(map[string]map[*client]bool),
 		byUser:             make(map[string]map[*client]bool),
-		runtimeGoneSeenIDs: make(map[string]struct{}, eventDedupCapacity),
+		runtimeGoneSeenIDs: make(map[string]struct{}, runtimeGoneDedupCapacity),
 	}
 }
 

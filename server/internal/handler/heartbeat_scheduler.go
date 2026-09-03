@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -90,9 +91,16 @@ type BatchedHeartbeatScheduler struct {
 // DefaultHeartbeatBatchInterval is the production tick cadence for the
 // BatchedHeartbeatScheduler. Chosen so the load-bearing chain
 // `flushInterval + heartbeatInterval + tickInterval < staleThresholdSeconds`
-// holds with a comfortable buffer (60 + 15 + 30 = 105 < 150). Lengthening
-// this requires bumping staleThresholdSeconds in lockstep.
+// holds with a comfortable buffer (60 + 15 + 30 = 105 < 150). One failed
+// flush retry adds another tick (135 < 150); additional failures keep the ID
+// fleet-bounded in pending until DB writes recover. Lengthening either interval
+// requires bumping RuntimeClaimFreshnessSeconds in lockstep.
 const DefaultHeartbeatBatchInterval = 30 * time.Second
+
+// Only a row old enough for the sweeper to demote can be restored from a batch
+// receipt. A freshly-offline row was explicitly deregistered and must remain
+// offline even if an older heartbeat was already pending.
+const heartbeatReceiptRecoveryThreshold = time.Duration(service.RuntimeClaimFreshnessSeconds) * time.Second
 
 func NewBatchedHeartbeatScheduler(queries *db.Queries, tickInterval time.Duration, runtimeGone RuntimeGoneNotifier) *BatchedHeartbeatScheduler {
 	if tickInterval <= 0 {
@@ -220,9 +228,17 @@ func (b *BatchedHeartbeatScheduler) flushOnce(ctx context.Context) {
 	}
 	existing := make(map[pgtype.UUID]struct{}, len(states))
 	recovered := 0
+	preservedOffline := 0
 	missing := 0
+	now := time.Now()
 	for _, state := range states {
 		existing[state.ID] = struct{}{}
+		if state.Status != "offline" || !state.LastSeenAt.Valid || now.Sub(state.LastSeenAt.Time) < heartbeatReceiptRecoveryThreshold {
+			// The omission was not a stale-sweeper race. In particular, preserve
+			// recent explicit deregistration and its offline_reason metadata.
+			preservedOffline++
+			continue
+		}
 		if _, err := b.queries.MarkAgentRuntimeOnline(ctx, state.ID); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				missing++
@@ -248,11 +264,16 @@ func (b *BatchedHeartbeatScheduler) flushOnce(ctx context.Context) {
 		"scheduled", len(ids),
 		"touched", len(touched),
 		"recovered", recovered,
+		"preserved_offline", preservedOffline,
 		"missing", missing,
 	)
 }
 
 func (b *BatchedHeartbeatScheduler) requeue(ids []pgtype.UUID) {
+	// A runtime can disconnect while its ID waits here, so a recovered DB may
+	// receive one final delayed last_seen_at refresh. That delay is bounded by
+	// one retry tick after recovery; keeping the ID is required because the
+	// connection lease already advanced its local flush watermark.
 	b.mu.Lock()
 	for _, id := range ids {
 		b.pending[id] = struct{}{}

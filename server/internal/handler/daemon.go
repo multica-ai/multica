@@ -1172,6 +1172,8 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	if lease == nil {
 		return nil, fmt.Errorf("runtime not in connection lease")
 	}
+	// Defensive consistency assertion only: the workspace scope and lease came
+	// from the same connection-time query. This does not re-authorize against DB.
 	if !identity.AllowsWorkspace(lease.Snapshot().WorkspaceID) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
