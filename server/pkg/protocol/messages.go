@@ -141,6 +141,12 @@ type TaskProgressPayload struct {
 	Total   int    `json:"total,omitempty"`
 }
 
+// AutopilotFailureMarker is the first-line output marker a run-only agent uses
+// when its provider turn completed normally but the automation contract did
+// not. The autopilot task listener converts that declared outcome into a failed
+// autopilot_run with a visible failure_reason.
+const AutopilotFailureMarker = "[MULTICA_AUTOPILOT_FAILED]"
+
 // TaskCompletedPayload is sent from daemon to server when a task finishes.
 type TaskCompletedPayload struct {
 	TaskID string `json:"task_id"`

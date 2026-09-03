@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // This file holds the runtime brief assembler — the post-MUL-3560 path
@@ -587,6 +588,7 @@ func writeWorkflowAutopilot(b *strings.Builder, ctx TaskContextForEnv) {
 		fmt.Fprintf(b, "- Run `multica autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
 	}
 	b.WriteString("- Complete the autopilot instructions directly\n")
+	fmt.Fprintf(b, "- If the run cannot satisfy its delivery contract, begin the final response with `%s <short_reason_code>: <reason>`. This explicit marker makes the autopilot run `failed`; writing failure prose without it is still a normally completed agent turn. Use it only for a terminal incomplete outcome, not for an acceptable degraded delivery.\n", protocol.AutopilotFailureMarker)
 	b.WriteString("- " + AutopilotIssueCommandsGuard + "\n\n")
 }
 
