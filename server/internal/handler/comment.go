@@ -2134,12 +2134,24 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 			// No same-head QUEUED row to fold into (merge missed). The two paths
 			// resolve differently.
 			if !lostRace {
-				// (b) AlreadyPending path: this comment arrived AFTER its task, so
-				// it is newer than the task and completion reconcile covers it by
-				// timestamp; MUL-4195 leaves the claimed task untouched. Defer to
-				// the active task, or enqueue fresh if it has since finished.
-				active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, trigger.Agent.ID)
-				if status, reason, enqueueFresh := decidePostMergeMiss(active, activeErr); !enqueueFresh {
+				// (b) AlreadyPending path: defer to an active task whose completion
+				// reconcile can still SEE this comment, or enqueue fresh if none
+				// can. MUL-4195 leaves the claimed task untouched.
+				//
+				// This used to assume the comment was newer than the task — true
+				// while every AlreadyPending task was one the merge could fold
+				// into, so a miss meant the task had been claimed and therefore
+				// still predated the comment. Role scoping (MUL-7006) broke that:
+				// the merge can now refuse a task the pending check accepted, and
+				// a task inserted between this comment's INSERT and its routing is
+				// NEWER than it. Reconcile reads `created_at > since` and the
+				// comment is not in that task's planned ids, so deferring there
+				// promised a follow-up nobody would make. Ask for the ordering
+				// instead of assuming it; when it does not hold, fall through to
+				// the enqueue, whose duplicate-key path routes this into the same
+				// durable hand-off a lost race gets.
+				covered, activeErr := h.hasActiveTaskCoveringComment(ctx, issue.ID, trigger.Agent.ID, triggerCommentID)
+				if status, reason, enqueueFresh := decidePostMergeMiss(covered, activeErr); !enqueueFresh {
 					return status, reason
 				}
 				// enqueueFresh → fall through to the enqueue below.
@@ -2281,6 +2293,28 @@ func (h *Handler) hasActiveTaskForIssueAndAgent(ctx context.Context, issueID, ag
 		return false, err
 	}
 	return active, nil
+}
+
+// hasActiveTaskCoveringComment reports whether an active task's completion
+// reconciliation will actually REPLAY this comment — an active task created
+// strictly before it, which is the `created_at > since` relation reconcile
+// itself reads. Same fail-closed contract as hasActiveTaskForIssueAndAgent: the
+// error is returned, never swallowed, because "cannot confirm coverage" is not
+// coverage. See the query for why the weaker "is anything active" question is
+// not enough (MUL-7006).
+func (h *Handler) hasActiveTaskCoveringComment(ctx context.Context, issueID, agentID, commentID pgtype.UUID) (bool, error) {
+	covers, err := h.Queries.HasActiveTaskCoveringCommentForIssueAndAgent(ctx, db.HasActiveTaskCoveringCommentForIssueAndAgentParams{
+		IssueID:   issueID,
+		AgentID:   agentID,
+		CommentID: commentID,
+	})
+	if err != nil {
+		slog.Warn("active task comment-coverage check failed",
+			"issue_id", uuidToString(issueID), "agent_id", uuidToString(agentID),
+			"comment_id", uuidToString(commentID), "error", err)
+		return false, err
+	}
+	return covers, nil
 }
 
 // decidePostMergeMiss decides what to do after a comment merge missed on a

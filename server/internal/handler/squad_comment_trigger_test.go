@@ -950,11 +950,15 @@ func TestCreateComment_SquadMentionTriggersLeader(t *testing.T) {
 // it with no squad briefing and, on a local_directory project, in the user's
 // own directory — the exact bug, preserved in the concurrent shape.
 //
-// A role mismatch must MISS the merge and defer instead: the queued task counts
-// as active, so completion reconciliation recomputes the routing and enqueues
-// the correctly-roled task once it finishes. Re-roling the pending task in
-// place is not the alternative — that would move work the direct task was meant
-// to do in the user's directory into a managed one.
+// Only that direction is refused. A leader task is a strict superset of a
+// direct-agent one, so a direct-role comment still folds into it and no
+// coalescing that works today stops working — which is why the @agent-mention
+// cases below must stay coalesced.
+//
+// A refused merge defers here because these tasks all PREDATE the comment, so
+// reconciliation can still replay it. That ordering is proven, not assumed; see
+// TestEnqueueCommentTrigger_RoleMismatchWithNewerTaskIsNotReportedCovered for
+// the window where it does not hold.
 func TestEnqueueCommentTrigger_DoesNotCoalesceAcrossLeaderRole(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -968,8 +972,9 @@ func TestEnqueueCommentTrigger_DoesNotCoalesceAcrossLeaderRole(t *testing.T) {
 		wantStatus      DispatchStatus
 	}{
 		{name: "leader reply does not fold into a direct task", pendingIsLeader: false, replyIsLeader: true, wantStatus: DispatchDeferred},
-		{name: "direct reply does not fold into a leader task", pendingIsLeader: true, pendingSquad: true, replyIsLeader: false, wantStatus: DispatchDeferred},
+		{name: "leader reply does not fold into another squad's leader task", pendingIsLeader: true, pendingSquad: false, replyIsLeader: true, wantStatus: DispatchDeferred},
 		{name: "leader reply folds into a leader task", pendingIsLeader: true, pendingSquad: true, replyIsLeader: true, wantStatus: DispatchCoalesced},
+		{name: "direct reply folds into a leader task", pendingIsLeader: true, pendingSquad: true, replyIsLeader: false, wantStatus: DispatchCoalesced},
 		{name: "direct reply folds into a direct task", pendingIsLeader: false, replyIsLeader: false, wantStatus: DispatchCoalesced},
 	}
 	for _, tc := range cases {
@@ -1048,5 +1053,104 @@ func TestEnqueueCommentTrigger_DoesNotCoalesceAcrossLeaderRole(t *testing.T) {
 					gotLeader, tc.pendingIsLeader)
 			}
 		})
+	}
+}
+
+// TestEnqueueCommentTrigger_RoleMismatchWithNewerTaskIsNotReportedCovered closes
+// the window role scoping opened in the AlreadyPending path (MUL-7006).
+//
+// That path deferred to "an active task" on the reasoning that the comment
+// arrived after it, so completion reconciliation would replay it. The reasoning
+// held only while every pending task the check accepted was one the merge could
+// fold into. Now the merge can refuse on role, and a task inserted for the same
+// (issue, agent) between a comment's INSERT and its trigger resolution is NEWER
+// than the comment: reconcile reads `created_at > since` and the comment is not
+// in that task's planned ids, so nothing would ever replay it. Reporting
+// deferred there promises a follow-up no run will make.
+//
+// The blocker is queued, so there is no safe place to park the comment — a
+// planned id on a pre-claim task is marked delivered at claim time, which is
+// how the wrong-role run would consume it. That is the same shape as the
+// different-head queued blocker the enqueue path already documents. So the
+// requirement is not that the comment gets covered; it is that we never CLAIM
+// it was: the outcome must be a truthful non-success, and the blocking task
+// must be left untouched.
+func TestEnqueueCommentTrigger_RoleMismatchWithNewerTaskIsNotReportedCovered(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID := dbfx.Runtime(t, "role-race runtime")
+	leaderID := dbfx.Agent(t, "Role Race Leader", runtimeID)
+	squadID := dbfx.Squad(t, "Role Race Squad", leaderID)
+	issueID := dbfx.Issue(t, "role mismatch against a newer task", testutil.Cols{
+		"assignee_type": "squad",
+		"assignee_id":   squadID,
+	})
+
+	// Comment C lands first...
+	replyCommentID := dbfx.Comment(t, issueID, "reply to the leader's comment", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '2 minutes'"),
+	})
+	// ...and a concurrent request then queues a direct-agent task B for the same
+	// (issue, agent). B is NEWER than C, so B's reconcile pass cannot see it.
+	priorCommentID := dbfx.Comment(t, issueID, "the newer task's own trigger")
+	blockerTaskID := dbfx.Task(t, leaderID, testutil.Cols{
+		"runtime_id":         runtimeID,
+		"issue_id":           issueID,
+		"status":             "queued",
+		"trigger_comment_id": priorCommentID,
+		"is_leader_task":     false,
+	})
+
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	agent, err := testHandler.Queries.GetAgent(ctx, util.MustParseUUID(leaderID))
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+	squad, err := testHandler.Queries.GetSquad(ctx, util.MustParseUUID(squadID))
+	if err != nil {
+		t.Fatalf("load squad: %v", err)
+	}
+	// AlreadyPending is what the router computes: its query is not role-scoped,
+	// so it sees B and reports a pending task the merge will then refuse.
+	trigger := commentAgentTrigger{
+		Agent:          agent,
+		Source:         commentTriggerSourceThreadParent,
+		Squad:          &squad,
+		AlreadyPending: true,
+	}
+
+	res := testHandler.enqueueCommentAgentTriggers(
+		ctx, issue, util.MustParseUUID(replyCommentID), []commentAgentTrigger{trigger})[leaderID]
+
+	switch res.status {
+	case DispatchDeferred, DispatchCoalesced, DispatchQueued:
+		t.Fatalf("uncovered comment reported as %q (reason %q): no run will replay a comment "+
+			"that predates the only task holding the slot", res.status, res.reason)
+	}
+
+	// And the refusal must not have half-landed on the blocker.
+	var gotTrigger string
+	var gotLeader bool
+	var plannedHasReply bool
+	dbfx.QueryRow(t, `
+		SELECT trigger_comment_id, is_leader_task, $2::uuid = ANY(coalesced_comment_ids)
+		FROM agent_task_queue WHERE id = $1
+	`, blockerTaskID, replyCommentID).Scan(&gotTrigger, &gotLeader, &plannedHasReply)
+
+	if gotTrigger != priorCommentID {
+		t.Fatalf("blocking task trigger_comment_id = %s, want %s (untouched)", gotTrigger, priorCommentID)
+	}
+	if gotLeader {
+		t.Fatal("blocking task was re-roled to leader; a merge must never re-role a task")
+	}
+	if plannedHasReply {
+		t.Fatal("comment was parked on the wrong-role blocker: a planned id on a pre-claim " +
+			"task is marked delivered at claim time, so that run would consume it")
 	}
 }

@@ -4827,6 +4827,47 @@ func (q *Queries) GetWorkspaceAgentRunCounts(ctx context.Context, workspaceID pg
 	return items, nil
 }
 
+const hasActiveTaskCoveringCommentForIssueAndAgent = `-- name: HasActiveTaskCoveringCommentForIssueAndAgent :one
+SELECT count(*) > 0 AS covers FROM agent_task_queue t
+WHERE t.issue_id = $1 AND t.agent_id = $2
+  AND (
+    t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+    OR (t.status = 'deferred' AND t.context->>'channel_issue_media_pending' = 'true')
+  )
+  AND t.created_at < (SELECT c.created_at FROM comment c WHERE c.id = $3)
+`
+
+type HasActiveTaskCoveringCommentForIssueAndAgentParams struct {
+	IssueID   pgtype.UUID `json:"issue_id"`
+	AgentID   pgtype.UUID `json:"agent_id"`
+	CommentID pgtype.UUID `json:"comment_id"`
+}
+
+// MUL-7006: true when an active task exists whose completion reconciliation
+// will REPLAY this comment, rather than merely that one exists.
+//
+// HasActiveTaskForIssueAndAgent answers the weaker question, and the comment
+// enqueue path used to treat the two as the same: a merge that missed on a
+// pending task deferred to "the active task", on the reasoning that the comment
+// arrived after that task and therefore sits inside reconcile's
+// `created_at > since` window. Nothing enforced that ordering. A task created
+// for the same (issue, agent) between a comment's INSERT and its trigger
+// resolution is NEWER than the comment, so its reconcile pass cannot see it —
+// and the comment is not in its planned ids either. Deferring to it promised a
+// follow-up that no run would ever make.
+//
+// So this asks reconcile's own question directly: is there an active task
+// created strictly BEFORE the comment? A missing comment row yields NULL and
+// therefore false, which is the safe answer — the caller then attempts a
+// durable hand-off and converges to a truthful non-success rather than
+// reporting coverage it cannot back.
+func (q *Queries) HasActiveTaskCoveringCommentForIssueAndAgent(ctx context.Context, arg HasActiveTaskCoveringCommentForIssueAndAgentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveTaskCoveringCommentForIssueAndAgent, arg.IssueID, arg.AgentID, arg.CommentID)
+	var covers bool
+	err := row.Scan(&covers)
+	return covers, err
+}
+
 const hasActiveTaskForIssue = `-- name: HasActiveTaskForIssue :one
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
@@ -6821,16 +6862,31 @@ WHERE id = (
           OR t.context->>'head_sha' = $14::text
       )
       -- Role-scoped (MUL-7006), for the same reason the head is: this statement
-      -- re-attributes a task but never re-roles one, so folding across roles
-      -- silently executes the comment under the wrong one. A leader-role reply
-      -- merged into a queued direct-agent task loses its squad briefing and its
-      -- managed workdir; re-roling that task in place would be worse, moving
-      -- work the direct task was meant to do in the user's local_directory into
-      -- a managed one. A miss here is not a drop: the queued task counts as
-      -- active, so the caller defers and completion reconciliation recomputes
-      -- the routing and enqueues the correctly-roled task.
-      AND t.is_leader_task = $15::boolean
-      AND t.squad_id IS NOT DISTINCT FROM $16::uuid
+      -- re-attributes a task but never re-roles one, so folding a comment into a
+      -- task that cannot carry its role silently executes it under the wrong one.
+      --
+      -- The direction matters, and only one of the two is harmful. A leader task
+      -- is a strict superset of a direct-agent one — it carries the squad
+      -- briefing and coordinates rather than binding to the project's
+      -- local_directory — so a direct-role comment folds into it safely, exactly
+      -- as the mention resolver already upgrades a plain @agent trigger when a
+      -- @squad names the same leader. The reverse loses everything the role is:
+      -- a leader-role reply folded into a queued direct-agent task claims no
+      -- briefing and, on a local_directory project, runs in the user's own
+      -- directory. Only that direction is refused, so no coalescing that works
+      -- today stops working.
+      --
+      -- A refusal here is not a drop, but it is not automatically covered
+      -- either: the caller must PROVE the blocking task's completion reconcile
+      -- can still see this comment (HasActiveTaskCoveringCommentForIssueAndAgent)
+      -- before reporting it deferred.
+      AND (
+          NOT $15::boolean
+          OR (
+              t.is_leader_task
+              AND t.squad_id IS NOT DISTINCT FROM $16::uuid
+          )
+      )
     ORDER BY t.created_at DESC
     LIMIT 1
 )
