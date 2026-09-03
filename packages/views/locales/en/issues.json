@@ -556,12 +556,12 @@
     "placeholder": "Leave a reply..."
   },
   "agent_activity": {
-    "hover_header_one": "{{count}} agent working",
-    "hover_header_other": "{{count}} agents working",
-    "hover_header_tasks_one": "{{count}} run active",
-    "hover_header_tasks_other": "{{count}} runs active",
-    "hover_header_queued_one": "{{count}} agent queued",
-    "hover_header_queued_other": "{{count}} agents queued",
+    "hover_header_one": "{{count}} active agent",
+    "hover_header_other": "{{count}} active agents",
+    "hover_header_tasks_one": "{{count}} active run",
+    "hover_header_tasks_other": "{{count}} active runs",
+    "hover_header_queued_one": "{{count}} queued agent",
+    "hover_header_queued_other": "{{count}} queued agents",
     "status_running": "Working",
     "status_queued": "Queued",
     "empty_hover": "No agents working right now",

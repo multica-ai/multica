@@ -159,8 +159,8 @@
       "prompt": "What are you best at helping with? Give me a concise overview."
     },
     "first_task": {
-      "label": "Suggest a first task",
-      "prompt": "Suggest three useful tasks I could delegate to you."
+      "label": "Suggest a first issue",
+      "prompt": "Suggest three useful issues I could assign to you."
     },
     "recommend": {
       "label": "Recommend an action",

@@ -186,7 +186,7 @@ describe("WorkingAgentsHoverContent", () => {
       />,
     );
 
-    expect(screen.getByText("2 agents working")).toBeTruthy();
+    expect(screen.getByText("2 active agents")).toBeTruthy();
     expect(screen.getByText("Agent a1")).toBeTruthy();
     expect(screen.getByText("1 run")).toBeTruthy();
     expect(screen.getByText("Agent a2")).toBeTruthy();

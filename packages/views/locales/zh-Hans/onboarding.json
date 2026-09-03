@@ -128,7 +128,7 @@
   },
   "cloud_waitlist": {
     "intro_main": "云运行时尚未上线。留下邮箱，上线时通过邮件通知你。",
-    "intro_warning": "提示：没有运行时，智能体无法开始运行——如果现在跳过，在你回来安装之前不会有任何运行开始。",
+    "intro_warning": "提示：未配置运行时，智能体就无法工作——如果现在跳过，在你回来安装之前不会启动任何运行。",
     "email_label": "邮箱",
     "email_placeholder": "you@work.com",
     "reason_label": "为什么选择云？",

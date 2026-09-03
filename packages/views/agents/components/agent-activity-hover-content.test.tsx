@@ -119,7 +119,7 @@ describe("AgentActivityHoverContent", () => {
   it("counts runs, not agents, in the header", () => {
     renderWithI18n(<AgentActivityHoverContent tasks={threeTasksTwoAgents} />);
 
-    expect(screen.getByText("3 runs active")).toBeInTheDocument();
+    expect(screen.getByText("3 active runs")).toBeInTheDocument();
     // The old agent-worded copy would have read "3 agents working" here and
     // disagreed with the chip's unique-agent count.
     expect(screen.queryByText(/agents? working/)).not.toBeInTheDocument();
@@ -130,7 +130,7 @@ describe("AgentActivityHoverContent", () => {
   it("uses the singular run copy for a single run", () => {
     renderWithI18n(<AgentActivityHoverContent tasks={[makeTask({})]} />);
 
-    expect(screen.getByText("1 run active")).toBeInTheDocument();
+    expect(screen.getByText("1 active run")).toBeInTheDocument();
   });
 
   it("renders the Chinese run copy", () => {

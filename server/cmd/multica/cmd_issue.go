@@ -112,7 +112,7 @@ func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePat
 	if !within {
 		return fmt.Errorf(
 			"--%s path %q resolves outside the current working directory; "+
-				"write agent temp files inside the task workdir (e.g. ./%s.md) rather than machine-shared "+
+				"write agent temp files inside the run workdir (e.g. ./%s.md) rather than machine-shared "+
 				"paths like /tmp, where another run's stale file can be read by mistake. "+
 				"Pass --allow-external-file to override.",
 			fileFlag, filePath, flagName)
@@ -337,7 +337,7 @@ var issueRunsCmd = &cobra.Command{
 }
 
 var issueRunMessagesCmd = &cobra.Command{
-	Use:   "run-messages <task-id>",
+	Use:   "run-messages <run-id>",
 	Short: "List messages for an execution",
 	Args:  exactArgs(1),
 	RunE:  runIssueRunMessages,
@@ -358,8 +358,8 @@ var issueRerunCmd = &cobra.Command{
 }
 
 var issueCancelTaskCmd = &cobra.Command{
-	Use:   "cancel-task <task-id>",
-	Short: "Cancel a running or queued run (interrupts in-flight agent)",
+	Use:   "cancel-task <run-id>",
+	Short: "Cancel an in-progress or queued run (interrupts in-flight agent)",
 	Long: "Cancel a single run by its ID. Accepts the short ID prefix shown by `issue runs`. " +
 		"Use --issue to scope short-ID resolution to a specific issue when ambiguous. " +
 		"Triggers daemon-side interrupt of any in-flight agent so it stops emitting tool calls promptly.",
@@ -588,18 +588,18 @@ func init() {
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
 	// issue cancel-task
 	issueCancelTaskCmd.Flags().String("output", "json", "Output format: table or json")
-	issueCancelTaskCmd.Flags().String("issue", "", "Issue ID/key to scope short task ID prefix resolution")
+	issueCancelTaskCmd.Flags().String("issue", "", "Issue ID/key to scope short run ID prefix resolution")
 	// issue run-messages
 	issueRunMessagesCmd.Flags().String("output", "json", "Output format: table or json")
 	issueRunMessagesCmd.Flags().Int("since", 0, "Only return messages after this sequence number")
-	issueRunMessagesCmd.Flags().String("issue", "", "Issue ID/key to scope short task ID prefix resolution")
+	issueRunMessagesCmd.Flags().String("issue", "", "Issue ID/key to scope short run ID prefix resolution")
 
 	// issue comment add
 	issueCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
 	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
-	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent task must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
+	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent run must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -1077,7 +1077,7 @@ func ensureAttachmentWithinWorkdir(cmd *cobra.Command, filePath string) error {
 	if !within {
 		return fmt.Errorf(
 			"--attachment path %q resolves outside the current working directory; "+
-				"attach files generated inside the task workdir rather than machine-shared "+
+				"attach files generated inside the run workdir rather than machine-shared "+
 				"paths like /tmp, where another run's stale file can be attached by mistake. "+
 				"Pass --allow-external-file to override.",
 			filePath)
@@ -2231,7 +2231,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 	// On a single-issue read that column would repeat the argument on every
 	// line, so it stays off there.
 	if siblings {
-		headers := []string{"TASK", "ISSUE", "AGENT", "STATUS", "STARTED"}
+		headers := []string{"RUN", "ISSUE", "AGENT", "STATUS", "STARTED"}
 		rows := make([][]string, 0, len(runs))
 		for _, r := range runs {
 			started := strVal(r, "started_at")
@@ -2336,7 +2336,7 @@ func runIssueRunMessages(cmd *cobra.Command, args []string) error {
 	}
 	taskRef, err := resolveTaskRunID(ctx, client, issueID, args[0])
 	if err != nil {
-		return fmt.Errorf("resolve task run: %w", err)
+		return fmt.Errorf("resolve run: %w", err)
 	}
 
 	path := "/api/tasks/" + url.PathEscape(taskRef.ID) + "/messages"
@@ -2436,7 +2436,7 @@ func runIssueCancelTask(cmd *cobra.Command, args []string) error {
 	}
 	taskRef, err := resolveTaskRunID(ctx, client, issueScope, args[0])
 	if err != nil {
-		return fmt.Errorf("resolve task run: %w", err)
+		return fmt.Errorf("resolve run: %w", err)
 	}
 
 	var result map[string]any
