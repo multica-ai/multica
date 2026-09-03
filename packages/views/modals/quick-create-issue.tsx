@@ -338,6 +338,16 @@ export function AgentCreatePanel({
         : undefined,
     [runtimes, selectedAgent?.runtime_id],
   );
+  // We can only pre-check a version we can actually see. A non-admin member's
+  // runtime list (ListVisibleAgentRuntimes) omits other members' private
+  // machines, so a selected agent bound to such a runtime yields no row here.
+  // That absence is "unknown version", NOT "daemon reported no version": the
+  // two must not collapse, or the member gets the misleading "upgrade your
+  // daemon" wall for a runtime that is in fact new enough (#7633). When we
+  // can't pre-check, defer to the server's authoritative gate
+  // (checkQuickCreateDaemonVersion, which reads the row by id regardless of
+  // role) instead of failing closed in the UI.
+  const canPrecheckVersion = selectedAgent?.runtime_id != null && selectedRuntime != null;
   const runtimeCliVersion = readRuntimeCliVersion(selectedRuntime?.metadata);
   const baseVersionCheck = useMemo(
     () => checkQuickCreateCliVersion(runtimeCliVersion),
@@ -350,8 +360,9 @@ export function AgentCreatePanel({
   const usesExplicitFields = priority !== "none" || dueDate !== null;
   const versionCheck = usesExplicitFields ? fieldVersionCheck : baseVersionCheck;
   const versionBlocked =
-    baseVersionCheck.state !== "ok" ||
-    (usesExplicitFields && fieldVersionCheck.state !== "ok");
+    canPrecheckVersion &&
+    (baseVersionCheck.state !== "ok" ||
+      (usesExplicitFields && fieldVersionCheck.state !== "ok"));
 
   const initialPrompt = draft.agent.prompt || (data?.prompt as string) || "";
   // The editor is uncontrolled — we read the latest markdown via the ref at
