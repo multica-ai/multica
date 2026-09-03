@@ -303,6 +303,13 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
 		agents["zeroclaw"] = e
 	}
+	// Command Code (`commandcode`) is a Node CLI driven headlessly through
+	// `commandcode -p --output-format json`. It speaks its own NDJSON event
+	// protocol rather than ACP. MULTICA_COMMANDCODE_MODEL carries the default
+	// model because Command Code accepts `--model` per run.
+	if e, ok := probe("MULTICA_COMMANDCODE_PATH", "commandcode", "MULTICA_COMMANDCODE_MODEL"); ok {
+		agents["commandcode"] = e
+	}
 	return agents
 }
 

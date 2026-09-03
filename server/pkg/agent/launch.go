@@ -454,6 +454,7 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"kimi":        kimiBlockedArgs,
 	"kiro":        kiroBlockedArgs,
 	"opencode":    opencodeBlockedArgs,
+	"commandcode": commandcodeBlockedArgs,
 	"openclaw":    openclawBlockedArgs,
 	"pi":          piBlockedArgs,
 	"qoder":       qoderBlockedArgs,
