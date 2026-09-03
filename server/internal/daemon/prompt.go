@@ -221,7 +221,11 @@ func buildPromptBody(task Task, provider string) string {
 		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
-	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Scan the threads first with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. For `--since` incremental polling, pagination, and folding, see `multica issue comment list --help`.\n", task.IssueID)
+	// Workflow step 2 owns the catch-up rule for every issue turn; this line
+	// only hands over the commands. It used to add "(assignment-triggered tasks
+	// treat the read as mandatory)", which read as if comment-triggered turns
+	// did not (MUL-6984).
+	fmt.Fprintf(&b, "For comment history, workflow step 2 applies. Scan the threads first with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. For `--since` incremental polling, pagination, and folding, see `multica issue comment list --help`.\n", task.IssueID)
 	return b.String()
 }
 
@@ -433,18 +437,34 @@ func buildCommentPrompt(task Task, provider string) string {
 		}
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
-	// Comment-reading pointer. Warm path with new comments: issue-wide
-	// since-delta count, but steer the agent to read the triggering thread
-	// first. Warm resumed path with no new comments: the trigger is already
-	// injected, so don't force a duplicate thread read. Cold path: read the
-	// triggering thread, not the flat timeline. Final fallback (no trigger id,
-	// shouldn't happen here): plain read.
-	if hint := execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount); hint != "" {
+	// Comment-reading pointer. Which hint renders is decided by whether this
+	// run actually RESUMES a provider session, and only then by the new-comment
+	// delta — never by the delta alone. A run whose resume was dropped (session
+	// store unreachable, Codex rollout missing, provider rejected the resume)
+	// still carries a since-anchor from its last task, but its memory is fresh;
+	// the delta hint would frame a partial read as the catch-up, so that run
+	// takes the fresh-session path and the continuity notice says why
+	// (MUL-6984).
+	//
+	// Resumed + new comments: issue-wide count, the triggering thread's delta,
+	// and the scan as the wide read. Resumed + no new comments: the trigger is
+	// already injected and the server-computed delta is empty, which is the
+	// scan's answer. Fresh session: the triggering thread plus the scan. Whether
+	// the scan happens is never decided here — workflow step 2 owns that; these
+	// hints carry this turn's facts and exact commands. Final fallback (no
+	// trigger id, shouldn't happen here): plain read.
+	var hint string
+	if task.PriorSessionID != "" {
+		hint = execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount)
+		if hint == "" {
+			hint = execenv.BuildResumedCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID)
+		}
+	}
+	if hint == "" {
+		hint = execenv.BuildColdCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID)
+	}
+	if hint != "" {
 		b.WriteString(hint)
-	} else if task.PriorSessionID != "" {
-		b.WriteString(execenv.BuildResumedCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID))
-	} else if cold := execenv.BuildColdCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID); cold != "" {
-		b.WriteString(cold)
 	} else {
 		fmt.Fprintf(&b, "Read the discussion: scan with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand what matters with `--thread <thread-id> --tail 30`.\n\n", task.IssueID)
 	}

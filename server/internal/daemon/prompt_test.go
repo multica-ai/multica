@@ -1067,10 +1067,13 @@ func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {
 }
 
 // TestBuildPromptNewCommentsHint pins that a comment-triggered task whose agent
-// ran before on this issue (NewCommentsSince set, NewCommentCount > 0) gets the
-// since-delta hint with the ISSUE-WIDE new-comment count, but is steered to read
-// the triggering (parent) thread first rather than blindly pulling every new
-// comment.
+// ran before on this issue (NewCommentsSince set, NewCommentCount > 0) AND whose
+// provider session resumes gets the since-delta hint with the ISSUE-WIDE
+// new-comment count, the triggering (parent) thread's delta as the first read,
+// and the scan handed over as the wide read step 2 requires. The session is
+// part of the fixture on purpose: the hint is selected by resume first
+// (MUL-6984) — see TestBuildPromptDroppedResumeWithNewCommentsTakesFreshPath
+// for the same delta without a session.
 func TestBuildPromptNewCommentsHint(t *testing.T) {
 	const (
 		issueID = "issue-new-1"
@@ -1082,6 +1085,7 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 		TriggerThreadID:       "thread-root-1",
 		TriggerCommentContent: "please look",
 		TriggerAuthorType:     "member",
+		PriorSessionID:        "session-123",
 		NewCommentCount:       3,
 		NewCommentsSince:      since,
 	}
@@ -1091,9 +1095,10 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	if !strings.Contains(out, "3 new comment(s) on this issue since your last run") {
 		t.Errorf("hint must report the issue-wide new-comment count, got:\n%s", out)
 	}
-	// Don't-blindly-read-all guidance.
-	if !strings.Contains(out, "blindly") {
-		t.Errorf("hint must discourage blindly reading every new comment, got:\n%s", out)
+	// The hint carries facts and commands, no modality (MUL-6984): the scan is
+	// handed over as the wide read step 2 requires, never as an option.
+	if !strings.Contains(out, "across all threads") {
+		t.Errorf("hint must state the count is issue-wide, got:\n%s", out)
 	}
 	// Parent thread first: the --thread <trigger> read is the prioritized action.
 	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --since "+since+" --compact --output json") {
@@ -1102,11 +1107,16 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	if !strings.Contains(out, "--tail 30") {
 		t.Errorf("hint must offer the full-thread (--tail 30) option, got:\n%s", out)
 	}
-	// Issue-wide catch-up is demoted to an only-if-needed fallback, phrased as
-	// a rerun of the thread command minus `--thread` (MUL-5721 OPT-1) instead
-	// of a second full command that restated the UUID and anchor.
-	if !strings.Contains(out, "rerun it without `--thread` for the issue-wide catch-up") {
-		t.Errorf("hint must keep the issue-wide catch-up fallback, got:\n%s", out)
+	// The scan is phrased as a flag swap on the thread command (MUL-5721
+	// OPT-1) instead of a second full command that restated the UUID and
+	// anchor, and it is pointed at as the wide read step 2 requires.
+	if !strings.Contains(out, "`--roots-only --summary` in place of `--thread ... --since ...`") {
+		t.Errorf("hint must hand over the scan as the wide read, got:\n%s", out)
+	}
+	for _, banned := range []string{"blindly", "Only if you need", "rerun it without `--thread`"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("warm hint must not make the wide read optional (%q), got:\n%s", banned, out)
+		}
 	}
 	if strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
 		t.Errorf("warm hint must not render a second full issue-wide command (MUL-5721 OPT-1), got:\n%s", out)
@@ -1145,8 +1155,11 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	// flag surface here would put reference text on every cold turn. The scan
 	// is phrased as a flag swap on the thread command, not a second full
 	// command restating the UUID (MUL-5721 OPT-1).
-	if !strings.Contains(out, "Rerun with `--roots-only --summary` replacing `--thread ... --tail 30`") {
-		t.Errorf("cold start should offer the cheap roots scan for cross-thread background, got:\n%s", out)
+	if !strings.Contains(out, "`--roots-only --summary` in place of `--thread ... --tail 30`") {
+		t.Errorf("cold start must hand over the roots scan as the wide read, got:\n%s", out)
+	}
+	if strings.Contains(out, "Need cross-thread background") {
+		t.Errorf("cold hint must not make the scan optional (MUL-6984), got:\n%s", out)
 	}
 	if strings.Contains(out, "multica issue comment list "+issueID+" --roots-only --summary --output json") {
 		t.Errorf("cold hint must not render a second full command for the roots scan (MUL-5721 OPT-1), got:\n%s", out)
@@ -1177,8 +1190,8 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"If your reply depends on thread context",
-		"do not rely only on resumed session memory",
+		"issue-wide delta is empty",
+		"if resumed memory is not enough",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
 		if !strings.Contains(out, want) {
@@ -1195,8 +1208,48 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 	if strings.Contains(out, "scoped to the triggering thread") {
 		t.Errorf("resumed/no-delta prompt must not claim the delta is thread-scoped, got:\n%s", out)
 	}
-	if strings.Contains(out, "Read the triggering conversation first") {
-		t.Errorf("resumed/no-delta prompt must not use the cold-start forced-read wording, got:\n%s", out)
+	if strings.Contains(out, "starts a fresh session on this issue") {
+		t.Errorf("resumed/no-delta prompt must not use the fresh-session wording, got:\n%s", out)
+	}
+}
+
+// TestBuildPromptDroppedResumeWithNewCommentsTakesFreshPath pins MUL-6984: the
+// hint is selected by whether the session RESUMES, then by the delta. A run
+// whose resume the daemon dropped still carries a since-anchor and a positive
+// count, but its memory is fresh — the delta hint would frame the triggering
+// thread's delta as the catch-up and the continuity notice would then tell the
+// agent to rebuild from the record. It takes the fresh-session path instead.
+func TestBuildPromptDroppedResumeWithNewCommentsTakesFreshPath(t *testing.T) {
+	const issueID = "issue-dropped-1"
+	task := Task{
+		IssueID:                       issueID,
+		TriggerCommentID:              "trigger-1",
+		TriggerThreadID:               "thread-root-1",
+		TriggerCommentContent:         "hi",
+		TriggerAuthorType:             "member",
+		NewCommentCount:               3,
+		NewCommentsSince:              "2026-05-28T11:00:00Z",
+		PriorSessionID:                "",
+		PriorSessionResumeUnavailable: true,
+	}
+	out := BuildPrompt(task, "claude")
+	for _, want := range []string{
+		"starts a fresh session on this issue",
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
+		"`--roots-only --summary` in place of `--thread ... --tail 30`",
+		"## Session Continuity Notice",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dropped-resume prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	for _, banned := range []string{
+		"new comment(s) on this issue since your last run",
+		"You're resuming the prior session",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("dropped-resume prompt must not render the resumed-path hint (%q)\n--- output ---\n%s", banned, out)
+		}
 	}
 }
 

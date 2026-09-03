@@ -310,13 +310,52 @@ func TestPerRunCommentContextStaysOutOfBrief(t *testing.T) {
 	hint := BuildNewCommentsHint(issueID, "reply-abc", "thread-abc", since, 4)
 	for _, want := range []string{
 		"4 new comment(s) on this issue since your last run",
-		"blindly",
+		"across all threads",
 		"--thread thread-abc --since " + since + " --compact --output json",
 		"--tail 30",
 	} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("BuildNewCommentsHint missing %q\n---\n%s", want, hint)
 		}
+	}
+}
+
+// TestCommentHintsCarryNoModality pins MUL-6984: the per-turn comment hints
+// carry this turn's facts and exact commands and never decide whether the
+// wide read happens — workflow step 2 owns that. Each hint hands the scan over
+// (or, on the resumed no-delta path, reports the server-computed answer to
+// it); none of them makes it conditional on the agent's own guess.
+func TestCommentHintsCarryNoModality(t *testing.T) {
+	t.Parallel()
+	const issueID = "55555555-6666-7777-8888-999999999999"
+	hints := map[string]string{
+		"cold":    BuildColdCommentsHint(issueID, "trigger-1", "thread-root-1"),
+		"warm":    BuildNewCommentsHint(issueID, "trigger-1", "thread-root-1", "2026-05-28T11:00:00Z", 4),
+		"resumed": BuildResumedCommentsHint(issueID, "trigger-1", "thread-root-1"),
+	}
+	for name, hint := range hints {
+		if hint == "" {
+			t.Fatalf("%s hint rendered empty", name)
+		}
+		for _, banned := range []string{
+			"Only if you need",
+			"Need cross-thread background",
+			"If your reply depends on thread context",
+			"read them all blindly",
+			"only if needed",
+		} {
+			if strings.Contains(hint, banned) {
+				t.Errorf("%s hint must not make the wide read optional (%q):\n%s", name, banned, hint)
+			}
+		}
+	}
+	for _, name := range []string{"cold", "warm"} {
+		if !strings.Contains(hints[name], "--roots-only --summary") {
+			t.Errorf("%s hint must hand over the scan step 2 requires:\n%s", name, hints[name])
+		}
+	}
+	if !strings.Contains(hints["resumed"], "issue-wide delta is empty") {
+		t.Errorf("resumed hint must report the empty delta as the scan's answer:\n%s", hints["resumed"])
 	}
 }
 
@@ -346,8 +385,8 @@ func TestResumedCommentsHintSkipsDefaultThreadRead(t *testing.T) {
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"If your reply depends on thread context",
-		"do not rely only on resumed session memory",
+		"issue-wide delta is empty",
+		"if resumed memory is not enough",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
 		if !strings.Contains(hint, want) {
@@ -362,8 +401,8 @@ func TestResumedCommentsHintSkipsDefaultThreadRead(t *testing.T) {
 	if strings.Contains(hint, "scoped to the triggering thread") {
 		t.Errorf("resumed/no-delta hint must not claim the delta is thread-scoped, got:\n%s", hint)
 	}
-	if strings.Contains(hint, "Read the triggering conversation first") {
-		t.Errorf("resumed/no-delta hint must not use the cold-start forced-read wording, got:\n%s", hint)
+	if strings.Contains(hint, "starts a fresh session on this issue") {
+		t.Errorf("resumed/no-delta hint must not use the fresh-session wording, got:\n%s", hint)
 	}
 }
 
