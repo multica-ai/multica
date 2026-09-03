@@ -525,6 +525,14 @@ type Daemon struct {
 	pendingWorkInflight map[string]struct{}  // runtime_id -> hint-driven heartbeat in flight
 	pendingWorkLastRun  map[string]time.Time // runtime_id -> when the last hint-driven heartbeat started
 
+	// forceRecheckMu guards forceRecheckRuntimes, the set of runtimes woken by a
+	// targeted `task_available` since the last batch claim (#7452). The next
+	// claim carries them so the server bypasses their cached "empty" verdict,
+	// repairing a stale verdict left by a lost EmptyClaim.Bump instead of
+	// stalling the queued task until the 3-minute TTL.
+	forceRecheckMu       sync.Mutex
+	forceRecheckRuntimes map[string]struct{} // runtime_id -> woken since last claim
+
 	cancelFunc context.CancelFunc // set by Run(); called by triggerRestart
 	rootCtx    context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
 	// restartMu guards restartBinary. Two goroutines can reach triggerRestart —
@@ -5035,9 +5043,13 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			// The batch poller re-derives allRuntimeIDs() each cycle; nudge it to
 			// pick up a registered/removed runtime promptly.
 			nudge()
-		case <-taskWakeups:
+		case wk := <-taskWakeups:
 			// Targeted-runtime and catch-up wakeups both trigger one batch claim
-			// across the whole runtime set.
+			// across the whole runtime set. A targeted wakeup also records its
+			// runtime so the next claim forces a server-side re-check that bypasses
+			// a stale cached "empty" verdict (#7452); a catch-up wakeup has no
+			// runtime id and only nudges.
+			d.noteWokenRuntime(wk.runtimeID)
 			nudge()
 		}
 	}
@@ -5100,10 +5112,19 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			continue
 		}
 
-		tasks, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
+		// Drain the runtimes woken since the last claim and force a server-side
+		// re-check for them so a stale cached "empty" verdict cannot strand their
+		// queued task until the TTL (#7452).
+		forceRecheck := d.drainWokenRuntimes()
+		tasks, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots), forceRecheck...)
 		if err != nil {
 			d.exitClaim()
 			releaseSlots(slots)
+			// Preserve the force signal across a transient claim failure so the
+			// woken runtime is still re-checked on the next cycle.
+			for _, rid := range forceRecheck {
+				d.noteWokenRuntime(rid)
+			}
 			if pollerCtx.Err() == nil {
 				d.logger.Warn("batch claim failed", "error", err)
 			}
@@ -5167,6 +5188,39 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			return
 		}
 	}
+}
+
+// noteWokenRuntime records a runtime woken by a targeted `task_available` so the
+// next batch claim forces a server-side re-check that bypasses its cached
+// "empty" verdict (#7452). A catch-up wakeup carries no runtime id and is a
+// no-op here — it still nudges the poller, which polls the whole set normally.
+func (d *Daemon) noteWokenRuntime(runtimeID string) {
+	if runtimeID == "" {
+		return
+	}
+	d.forceRecheckMu.Lock()
+	if d.forceRecheckRuntimes == nil {
+		d.forceRecheckRuntimes = make(map[string]struct{})
+	}
+	d.forceRecheckRuntimes[runtimeID] = struct{}{}
+	d.forceRecheckMu.Unlock()
+}
+
+// drainWokenRuntimes returns and clears the runtimes woken since the last claim.
+// The poller calls it immediately before issuing a claim; on a claim error the
+// caller re-notes them so a transient failure does not drop the force signal.
+func (d *Daemon) drainWokenRuntimes() []string {
+	d.forceRecheckMu.Lock()
+	defer d.forceRecheckMu.Unlock()
+	if len(d.forceRecheckRuntimes) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(d.forceRecheckRuntimes))
+	for id := range d.forceRecheckRuntimes {
+		out = append(out, id)
+	}
+	d.forceRecheckRuntimes = nil
+	return out
 }
 
 func signalPollerWakeup(wakeup chan<- struct{}) {

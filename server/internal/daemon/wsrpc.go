@@ -312,7 +312,11 @@ func (c *wsRPCClient) deliver(resp protocol.RPCResponsePayload) {
 // retried over HTTP only after a short safety window. The request/response bodies
 // are identical to the HTTP endpoint so both transports are interchangeable.
 // Wired into the claim poller as part of the poller cutover.
-func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+// forceRecheckIDs (#7452) names runtimes woken by a targeted `task_available`
+// since the last claim; it is forwarded unchanged over whichever transport
+// wins so the server bypasses their cached "empty" verdict. The legacy
+// per-runtime fallback ignores it (an un-upgraded server has no such route).
+func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int, forceRecheckIDs ...string) ([]*Task, error) {
 	// Un-upgraded server without the batch route: a prior poll already learned
 	// this (via a 404), so go straight to the legacy per-runtime claim and skip
 	// the WS + batch attempts each cycle.
@@ -339,11 +343,7 @@ func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtime
 		}
 		// batchClaimRequestTimeout is the server-side execution budget; the
 		// daemon waits that plus the client's grace margin for the response.
-		_, err := d.wsRPC.CallIfRPCV1Supported(ctx, "tasks.claim", batchClaimRequestTimeout, map[string]any{
-			"daemon_id":   daemonID,
-			"runtime_ids": runtimeIDs,
-			"max_tasks":   maxTasks,
-		}, &resp)
+		_, err := d.wsRPC.CallIfRPCV1Supported(ctx, "tasks.claim", batchClaimRequestTimeout, claimTasksBody(daemonID, runtimeIDs, maxTasks, forceRecheckIDs...), &resp)
 		if err == nil {
 			return resp.Tasks, nil
 		}
@@ -354,6 +354,11 @@ func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtime
 			// execution budget plus response grace has elapsed. If the WS claim
 			// committed, the task is already dispatched and stale reclaim owns
 			// recovery; if it did not, HTTP regains liveness for the queued task.
+			// The drained forceRecheck set (#7452) is intentionally not re-noted
+			// here: the caller treats this nil error as success and does not
+			// restore it, so a runtime whose bypass rode this uncertain claim
+			// falls back to the next targeted wakeup or the empty-claim TTL rather
+			// than risk a double-claim by replaying the force signal immediately.
 			delay := wsClaimUncertainFallbackDelay
 			if delay < 0 {
 				delay = 0
@@ -364,7 +369,7 @@ func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtime
 		}
 		d.logger.Debug("ws claim failed; falling back to http", "error", err)
 	}
-	tasks, err := d.client.ClaimTasks(ctx, daemonID, runtimeIDs, maxTasks)
+	tasks, err := d.client.ClaimTasks(ctx, daemonID, runtimeIDs, maxTasks, forceRecheckIDs...)
 	if err == nil {
 		return tasks, nil
 	}
