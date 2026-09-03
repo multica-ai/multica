@@ -199,8 +199,8 @@
   "overview": {
     "agent_context": "智能体",
     "access": "访问权限",
-    "attention_title": "task 需要处理",
-    "attention_queued_other": "运行时不可用，当前有 {{count}} 个 task 正在排队。"
+    "attention_title": "需要处理的运行",
+    "attention_queued_other": "运行时不可用，当前有 {{count}} 次运行正在排队。"
   },
   "skill_attach": {
     "trigger_aria": "附加工作区 skill",
@@ -264,7 +264,7 @@
     "page_navigation_aria": "智能体页面",
     "section_navigation_aria": "智能体分区",
     "activity": "动态",
-    "tasks": "task",
+    "tasks": "运行",
     "instructions": "指令",
     "skills": "Skills",
     "environment": "环境变量",
@@ -901,7 +901,7 @@
       "skill_bundle_unavailable": "无法下载智能体的 skill",
       "runtime_cli_timeout": "本地运行时 CLI 超时",
       "environment_prepare_failed": "无法准备执行环境",
-      "invalid_task_identity": "task 身份不匹配",
+      "invalid_task_identity": "运行身份不匹配",
       "agent_error_provider_auth_or_access": "提供商认证失败",
       "agent_error_provider_quota_limit": "提供商配额已用尽",
       "agent_error_provider_capacity_or_rate_limit": "受到提供商速率限制",

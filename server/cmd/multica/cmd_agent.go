@@ -65,7 +65,7 @@ var agentRestoreCmd = &cobra.Command{
 
 var agentTasksCmd = &cobra.Command{
 	Use:   "tasks <id>",
-	Short: "List tasks for an agent",
+	Short: "List runs for an agent",
 	Args:  exactArgs(1),
 	RunE:  runAgentTasks,
 }
@@ -176,7 +176,7 @@ func init() {
 	agentCreateCmd.Flags().String("permission-mode", "", "Invocation permission mode: private (owner only) or public_to (allow-list via --public-to-*). Authoritative over --visibility when set.")
 	agentCreateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
 	agentCreateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
-	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks (1-50)")
+	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent runs (1-50)")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent update
@@ -206,7 +206,7 @@ func init() {
 	agentUpdateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
 	agentUpdateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentUpdateCmd.Flags().String("status", "", "New status")
-	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks (1-50)")
+	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent runs (1-50)")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent archive
@@ -879,7 +879,7 @@ func runAgentTasks(cmd *cobra.Command, args []string) error {
 
 	var tasks []map[string]any
 	if err := client.GetJSON(ctx, "/api/agents/"+args[0]+"/tasks", &tasks); err != nil {
-		return fmt.Errorf("list agent tasks: %w", err)
+		return fmt.Errorf("list agent runs: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")

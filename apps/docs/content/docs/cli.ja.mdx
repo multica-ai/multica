@@ -108,7 +108,7 @@ multica issue create --title "アップグレードメモ" --description-stdin <
 multica issue comment add MUL-123 --content-stdin < review.md
 ```
 
-1 回の実行のメッセージを表示する、または作業を停止する:
+1 回の実行のメッセージを表示する、または実行を停止する:
 
 ```bash
 multica issue run-messages <task-id> --issue MUL-123
@@ -154,7 +154,7 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
-アクティブなエージェントがまだ紐付いているランタイムの削除は、デフォルトで拒否されます。`multica runtime delete <id> --cascade` は、それらのエージェントをランタイムから解除して設定と履歴を保持し、アクティブな作業をキャンセルします。
+アクティブなエージェントがまだ紐付いているランタイムの削除は、デフォルトで拒否されます。`multica runtime delete <id> --cascade` は、それらのエージェントをランタイムから解除して設定と履歴を保持し、アクティブな実行をキャンセルします。
 
 仕組みとカスタムプロファイルについては[デーモンとランタイム](/daemon-runtimes)を参照してください。
 
@@ -182,7 +182,7 @@ multica runtime activity <runtime-id>
 
 タスクには `MUL-123` のようなキーまたは完全な UUID を使います。UUID の短いプレフィックスは受け付けません。
 
-その他のリソースの `list` コマンドは通常、コピーできる短い ID を表示し、`--full-id` で完全な UUID を出力できます。短い ID が一意に定まらない場合、CLI は文字の追加か完全な UUID への切り替えを求めます。作業の短い ID は、所属するタスクを `--issue` で指定する必要もあります。
+その他のリソースの `list` コマンドは通常、コピーできる短い ID を表示し、`--full-id` で完全な UUID を出力できます。短い ID が一意に定まらない場合、CLI は文字の追加か完全な UUID への切り替えを求めます。実行の短い ID は、所属するタスクを `--issue` で指定する必要もあります。
 
 多くのコマンドが構造化出力をサポートします:
 
@@ -243,7 +243,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `run-messages <task-id>` | 1 回の実行のメッセージを表示 | `--since`、`--issue` |
 | | `usage <issue-id>` | 集計されたトークン使用量を表示 | |
 | | `rerun <id>` | 現在の担当者で実行を再キューイング | |
-| | `cancel-task <task-id>` | 実行中またはキュー中の作業をキャンセル | `--issue` |
+| | `cancel-task <task-id>` | 進行中またはキュー中の実行をキャンセル | `--issue` |
 | `project` | `list/get/create/update/delete` | プロジェクトを管理 | |
 | | `status <id> <status>` | プロジェクトのステータスを変更 | |
 | | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url`、`--local-path`、`--daemon-id`、`--execution-mode`（ローカルディレクトリの `in_place` / `worktree`） |
@@ -251,7 +251,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`）、`--option`（繰り返し可、select 系のみ）；`list`: `--include-archived`；タイプは作成後に変更できません |
 | `agent` | `list/get/create/update/archive/restore` | エージェントを管理 | `--name`、`--runtime-id`（`create` では必須）、`--instructions`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 新しいエージェントとして複製。元のエージェントは変更されません | `--name`（デフォルトは元の名前 + ` (copy)`）、`--runtime-id`（別のランタイムへ複製する場合は `--model` の同時指定が必須）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` などの機密設定は複製されないため、`create` と同じフラグで再指定してください |
-| | `tasks <id>` | エージェントの作業を表示 | |
+| | `tasks <id>` | エージェントの実行を表示 | |
 | | `avatar <id>` | アバターをアップロード | |
 | | `env get/set <agent-id>` | カスタム環境変数の読み書き（owner と admin のみ） | |
 | | `skills list/set/add <agent-id>` | 紐付けられたスキルを管理 | `--skill-ids`（`set` は全置換、`add` は追加） |
@@ -281,7 +281,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `stop` / `status` / `restart` | 停止、状態の確認、再起動（`restart` は `start` と同じフラグ） | |
 | | `logs` | デーモンのログを表示 | `--follow`、`--lines` |
 | | `disk-usage` | ローカルのディスク使用量を表示 | `--by-workspace`、`--by-task`、`--top` |
-| `runtime` | `list/usage/activity/update/rename/delete` | ランタイムを表示・管理 | `delete`: `--cascade`（紐付くエージェントを解除してデータを保持し、その作業をキャンセル） |
+| `runtime` | `list/usage/activity/update/rename/delete` | ランタイムを表示・管理 | `delete`: `--cascade`（紐付くエージェントを解除してデータを保持し、その実行をキャンセル） |
 | | `profile list/create/update/delete` | カスタムランタイムプロファイルを管理 | |
 | | `profile set-path/unset-path <profile-id>` | ローカルの実行ファイルパスを固定（ローカルのみ有効。サーバーには送信されません） | |
 
@@ -316,5 +316,5 @@ Claude Code のプラグインマーケットプレイス、Codex の skill イ�
 
 - [Multica CLI skill](https://github.com/multica-ai/multica-cli) — Codex、Claude Code、Cursor から Multica を操作する。
 - [認証とトークン](/auth-tokens) — PAT の作成、更新、失効。
-- [トラブルシューティング](/troubleshooting) — コマンドのエラーと、いつまでも開始しない作業の診断。
+- [トラブルシューティング](/troubleshooting) — コマンドのエラーと、いつまでも開始しない実行の診断。
 - [エージェントの作成と設定](/agents-create) — `agent create` 各フィールドの完全な意味。

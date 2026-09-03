@@ -100,7 +100,7 @@
   },
   "empty": {
     "title": "No usage yet",
-    "body": "Once agents start runs here, their token spend and run time will appear in this view."
+    "body": "Once agents start working here, their token spend and run time will appear in this view."
   },
   "duration": {
     "less_than_minute": "<1m"

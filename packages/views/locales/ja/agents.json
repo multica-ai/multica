@@ -794,7 +794,7 @@
       "skill_bundle_unavailable": "エージェントのスキルをダウンロードできませんでした",
       "runtime_cli_timeout": "ローカルランタイム CLI がタイムアウトしました",
       "environment_prepare_failed": "実行環境を準備できませんでした",
-      "invalid_task_identity": "作業のエージェント情報が一致しません",
+      "invalid_task_identity": "実行のエージェント情報が一致しません",
       "agent_error_provider_auth_or_access": "プロバイダーの認証に失敗しました",
       "agent_error_provider_quota_limit": "プロバイダーのクォータを使い切りました",
       "agent_error_provider_capacity_or_rate_limit": "プロバイダーによるレート制限",

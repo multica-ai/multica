@@ -639,9 +639,9 @@
     "note_estimate": "费用按各模型公开价目估算；供应商回报实际费用时以回报值为准。"
   },
   "terminate_dialog": {
-    "title": "确定停止该 task？",
-    "body": "task 会被取消且无法恢复。",
-    "running_note": " 进行中的 task 可能需要几秒才能完全停止。",
+    "title": "确定停止本次运行？",
+    "body": "本次运行会被取消且无法恢复。",
+    "running_note": "进行中的运行可能需要几秒才能完全停止。",
     "keep": "保留运行",
     "confirm": "停止运行"
   },

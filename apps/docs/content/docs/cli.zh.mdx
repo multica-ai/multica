@@ -182,7 +182,7 @@ multica runtime activity <runtime-id>
 
 任务使用 `MUL-123` 这样的 key 或完整 UUID，不接受 UUID 短前缀。
 
-其他资源的 `list` 命令通常显示可复制的短 ID，并支持 `--full-id` 输出完整 UUID。短 ID 不唯一时，CLI 会要求增加字符或改用完整 UUID。task 的短 ID 还需要通过 `--issue` 指明所属任务。
+其他资源的 `list` 命令通常显示可复制的短 ID，并支持 `--full-id` 输出完整 UUID。短 ID 不唯一时，CLI 会要求增加字符或改用完整 UUID。运行的短 ID 还需要通过 `--issue` 指明所属任务。
 
 许多命令支持结构化输出：
 
@@ -314,5 +314,5 @@ Claude Code 插件市场、Codex skill 安装器、Cursor 以及其他任何加�
 
 - [Multica CLI skill](https://github.com/multica-ai/multica-cli) — 在 Codex、Claude Code 或 Cursor 里操作 Multica。
 - [认证与令牌](/auth-tokens) — PAT 的创建、续期和吊销。
-- [故障排查](/troubleshooting) — 命令报错和 task 不开始的排查路径。
+- [故障排查](/troubleshooting) — 命令报错和运行不开始的排查路径。
 - [创建和配置智能体](/agents-create) — `agent create` 各字段的完整语义。

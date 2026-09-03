@@ -215,7 +215,7 @@
     "empty_lede_prefix": "智能体运行时就是我们要连接的 AI 编程工具，比如 ",
     "empty_lede_suffix": "。装好任意一个后点刷新，或从下面选择一种方式。",
     "empty_skip_title": "暂时跳过",
-    "empty_skip_subtitle": "先进入工作区。在这台电脑上连接智能体运行时之前，智能体无法执行 task——但你仍可以浏览、规划、邀请同事。",
+    "empty_skip_subtitle": "先进入工作区。在这台电脑上连接智能体运行时之前，智能体无法开始运行——但你仍可以浏览、规划、邀请同事。",
     "empty_skip_action": "跳过",
     "empty_waitlist_title": "使用云电脑",
     "empty_waitlist_subtitle": "我们会在云上为你运行一台电脑。尚未上线。",

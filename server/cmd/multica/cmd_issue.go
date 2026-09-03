@@ -327,7 +327,7 @@ const headerActiveRunsTruncated = "X-Active-Runs-Truncated"
 var issueRunsCmd = &cobra.Command{
 	Use:   "runs <issue-id>",
 	Short: "List execution history for an issue",
-	Long: "List agent task runs for an issue.\n\n" +
+	Long: "List agent runs for an issue.\n\n" +
 		"Defaults to this issue's full execution history, newest first. Narrow it to " +
 		"work in flight with --active, or widen it across the sub-issue family with " +
 		"--siblings when you need to know whether another agent is already working " +
@@ -352,15 +352,15 @@ var issueUsageCmd = &cobra.Command{
 
 var issueRerunCmd = &cobra.Command{
 	Use:   "rerun <id>",
-	Short: "Re-enqueue an issue's current agent assignment as a fresh task",
+	Short: "Re-enqueue an issue's current agent assignment as a fresh run",
 	Args:  exactArgs(1),
 	RunE:  runIssueRerun,
 }
 
 var issueCancelTaskCmd = &cobra.Command{
 	Use:   "cancel-task <task-id>",
-	Short: "Cancel a running or queued task (interrupts in-flight agent)",
-	Long: "Cancel a single task by its ID. Accepts the short ID prefix shown by `issue runs`. " +
+	Short: "Cancel a running or queued run (interrupts in-flight agent)",
+	Long: "Cancel a single run by its ID. Accepts the short ID prefix shown by `issue runs`. " +
 		"Use --issue to scope short-ID resolution to a specific issue when ambiguous. " +
 		"Triggers daemon-side interrupt of any in-flight agent so it stops emitting tool calls promptly.",
 	Args: exactArgs(1),
@@ -577,9 +577,9 @@ func init() {
 
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
-	issueRunsCmd.Flags().Bool("full-id", false, "Show full task UUIDs in table output")
+	issueRunsCmd.Flags().Bool("full-id", false, "Show full run UUIDs in table output")
 	issueRunsCmd.Flags().Bool("active", false, "Only in-flight runs (queued, dispatched, running, waiting_local_directory) instead of the full execution history. Answers \"is an agent working on this right now\" without pulling every past run.")
-	issueRunsCmd.Flags().Bool("siblings", false, "Widen to this issue's sub-issue family — its parent (or itself, when it has no parent) plus every child of that parent — so you can see whether another run is already working alongside you before starting overlapping code or PR work. Implies --active. Returns a compact per-run row (task, issue, agent, status, started) rather than the full execution-log record. Ordered running-first, newest-first within a status, and capped at 20 rows; when the cap truncates the answer the CLI says so on stderr, so a short list is never mistaken for a complete one. Advisory only: it reports work in flight, it does not reserve or serialise anything.")
+	issueRunsCmd.Flags().Bool("siblings", false, "Widen to this issue's sub-issue family — its parent (or itself, when it has no parent) plus every child of that parent — so you can see whether another run is already working alongside you before starting overlapping code or PR work. Implies --active. Returns a compact per-run row (run, issue, agent, status, started) rather than the full execution-log record. Ordered running-first, newest-first within a status, and capped at 20 rows; when the cap truncates the answer the CLI says so on stderr, so a short list is never mistaken for a complete one. Advisory only: it reports work in flight, it does not reserve or serialise anything.")
 
 	// issue usage
 	issueUsageCmd.Flags().String("output", "table", "Output format: table or json")
@@ -2408,7 +2408,7 @@ func runIssueRerun(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, task)
 	}
 	agent := loadActorDisplayLookup(ctx, client).agent(strVal(task, "agent_id"))
-	fmt.Fprintf(os.Stdout, "Re-enqueued task %s on agent %s\n", strVal(task, "id"), agent)
+	fmt.Fprintf(os.Stdout, "Re-enqueued run %s on agent %s\n", strVal(task, "id"), agent)
 	return nil
 }
 
@@ -2442,7 +2442,7 @@ func runIssueCancelTask(cmd *cobra.Command, args []string) error {
 	var result map[string]any
 	path := "/api/tasks/" + url.PathEscape(taskRef.ID) + "/cancel"
 	if err := client.PostJSON(ctx, path, map[string]any{}, &result); err != nil {
-		return fmt.Errorf("cancel task: %w", err)
+		return fmt.Errorf("cancel run: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -2453,7 +2453,7 @@ func runIssueCancelTask(cmd *cobra.Command, args []string) error {
 	if status == "" {
 		status = "cancelled"
 	}
-	fmt.Fprintf(os.Stdout, "Task %s -> status=%s\n", taskRef.ID, status)
+	fmt.Fprintf(os.Stdout, "Run %s -> status=%s\n", taskRef.ID, status)
 	return nil
 }
 
