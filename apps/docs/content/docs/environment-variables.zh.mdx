@@ -33,6 +33,12 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | 本地 `multica` 数据库 | PostgreSQL 连接地址 |
 | `DATABASE_MAX_CONNS` | `25` | 单个 API 进程的最大数据库连接数 |
 | `DATABASE_MIN_CONNS` | `5` | 单个 API 进程保留的最小连接数 |
+| `DATABASE_REPLICA_URL` | 空 | 可选的 PostgreSQL 只读从库连接地址；配置后只启用健康探测，业务仍需在代码中显式选择从库读取 |
+| `DATABASE_REPLICA_MAX_CONNS` | `10` | 单个 API 进程的最大从库连接数 |
+| `DATABASE_REPLICA_MIN_CONNS` | `0` | 单个 API 进程保留的最小从库连接数 |
+| `DATABASE_REPLICA_PROBE_INTERVAL` | `2s` | API 检查从库是否为可用只读 standby 的间隔 |
+| `DATABASE_REPLICA_PROBE_TIMEOUT` | `1s` | 单次从库可用性探测访问主库与从库的总超时 |
+| `DATABASE_REPLICA_MAX_REPLAY_LAG` | `5s` | 从库 WAL 位点落后主库时允许的最大回放延迟；超限后回退主库 |
 | `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | 容器启动过程中，migration 与 API 共享的暂时性数据库故障重试时长；设为 `0` 时每个阶段只尝试一次 |
 | `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | 启动期间单次数据库连接的兜底超时；pgx 原生 `connect_timeout`、`PGCONNECT_TIMEOUT` 或 service 配置优先 |
 | `PORT` | `8080` | API 监听端口 |
@@ -44,6 +50,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途 task 的宽限时间；低于 `150s` 时按 `150s` 处理 |
 
 在 Kubernetes 中设置 shutdown hold 时，`terminationGracePeriodSeconds` 要大于 hold 与实际退出所需时间之和。
+
+主库与从库的连接上限彼此独立，需要按全部 API 进程的连接数总和预留 PostgreSQL 集群连接额度。从库配置是可选的非关键依赖：配置无效、不可用、已提升为主库、可写或延迟超限时，从库都不会被选中，已显式接入的读取会改走主库。
 
 ## 对外地址与浏览器访问
 

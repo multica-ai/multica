@@ -33,6 +33,12 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `DATABASE_URL` | local `multica` database | PostgreSQL connection string |
 | `DATABASE_MAX_CONNS` | `25` | Maximum database connections per API process |
 | `DATABASE_MIN_CONNS` | `5` | Minimum connections each API process keeps |
+| `DATABASE_REPLICA_URL` | empty | Optional PostgreSQL read-only standby connection string; configuring it only enables health probing until a business explicitly opts into replica reads in code |
+| `DATABASE_REPLICA_MAX_CONNS` | `10` | Maximum replica connections per API process |
+| `DATABASE_REPLICA_MIN_CONNS` | `0` | Minimum replica connections each API process keeps |
+| `DATABASE_REPLICA_PROBE_INTERVAL` | `2s` | How often the API checks whether the replica is an eligible read-only standby |
+| `DATABASE_REPLICA_PROBE_TIMEOUT` | `1s` | Timeout for one replica eligibility probe across primary and replica |
+| `DATABASE_REPLICA_MAX_REPLAY_LAG` | `5s` | Maximum replay age while the replica WAL position is behind primary; over-budget replicas fall back to primary |
 | `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | Container-level retry budget shared by migration and API startup; set to `0` for one fail-fast attempt per phase |
 | `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | Fallback timeout for each startup connection attempt; native pgx `connect_timeout`, `PGCONNECT_TIMEOUT`, or service settings take precedence |
 | `PORT` | `8080` | API listen port |
@@ -44,6 +50,8 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | How long an offline runtime may reconnect before its in-flight tasks fail; values below `150s` are clamped |
 
 When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must exceed the hold plus the time the actual shutdown needs.
+
+The primary and replica connection limits are independent. Budget their sum across every API process against the PostgreSQL cluster's connection ceiling. Replica configuration is optional and non-critical: an invalid, unavailable, promoted, writable, or over-lag replica stays ineligible, and opted-in reads use primary instead.
 
 ## Public URLs and browser access
 

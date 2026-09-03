@@ -33,6 +33,12 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | ローカルの `multica` データベース | PostgreSQL 接続文字列 |
 | `DATABASE_MAX_CONNS` | `25` | API プロセスあたりの最大データベース接続数 |
 | `DATABASE_MIN_CONNS` | `5` | API プロセスが保持する最小接続数 |
+| `DATABASE_REPLICA_URL` | 空 | オプションの PostgreSQL 読み取り専用スタンバイ接続文字列。設定しただけではヘルスプローブのみが有効になり、各機能はコードで明示的にレプリカ読み取りを選択する必要があります |
+| `DATABASE_REPLICA_MAX_CONNS` | `10` | API プロセスあたりの最大レプリカ接続数 |
+| `DATABASE_REPLICA_MIN_CONNS` | `0` | API プロセスが保持する最小レプリカ接続数 |
+| `DATABASE_REPLICA_PROBE_INTERVAL` | `2s` | レプリカが読み取り可能なスタンバイか確認する間隔 |
+| `DATABASE_REPLICA_PROBE_TIMEOUT` | `1s` | primary とレプリカをまたぐ 1 回の適格性プローブのタイムアウト |
+| `DATABASE_REPLICA_MAX_REPLAY_LAG` | `5s` | レプリカの WAL 位置が primary より遅れている場合に許容する最大リプレイ遅延。超過時は primary にフォールバックします |
 | `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | コンテナ起動時に migration と API が共有する、一時的なデータベース障害への再試行時間。`0` にすると各フェーズで 1 回だけ試行します |
 | `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | 起動時の接続試行ごとのフォールバックタイムアウト。pgx ネイティブの `connect_timeout`、`PGCONNECT_TIMEOUT`、service 設定が優先されます |
 | `PORT` | `8080` | API のリッスンポート |
@@ -44,6 +50,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | オフラインのランタイムが処理中の作業を失敗させずに再接続できる猶予時間。`150s` 未満は `150s` に補正されます |
 
 Kubernetes で shutdown hold を設定する場合、`terminationGracePeriodSeconds` は hold と実際のシャットダウンにかかる時間の合計より大きくしてください。
+
+primary とレプリカの接続上限は独立しています。全 API プロセスの合計が PostgreSQL クラスターの接続上限に収まるように設定してください。レプリカはオプションの非クリティカル依存関係です。設定不正、到達不能、primary への昇格、書き込み可能、または遅延超過の場合は選択されず、明示的に対応した読み取りは primary を使用します。
 
 ## 公開アドレスとブラウザアクセス
 

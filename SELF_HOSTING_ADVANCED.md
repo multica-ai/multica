@@ -16,12 +16,20 @@ All configuration is done via environment variables. Copy `.env.example` as a st
 
 ### Database Pool Tuning (Optional)
 
-These have sensible defaults and only need to be set when tuning a large or constrained deployment. Precedence (highest first): env var → `pool_*` query params on `DATABASE_URL` → built-in default.
+These have sensible defaults and only need to be set when tuning a large or constrained deployment. For each pool, precedence is: its environment variable → `pool_*` query parameters on that pool's URL → built-in default.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DATABASE_MAX_CONNS` | pgxpool max connections per pod. `pod_count × DATABASE_MAX_CONNS` should stay well below the Postgres `max_connections` ceiling. With a connection pooler (PgBouncer / RDS Proxy / Supavisor) in front, this can be raised significantly. | `25` |
 | `DATABASE_MIN_CONNS` | pgxpool warm baseline connections per pod. Auto-clamped to `DATABASE_MAX_CONNS`. | `5` |
+| `DATABASE_REPLICA_URL` | Optional PostgreSQL read-only standby connection string. The replica is probed but receives no business traffic until a read path explicitly opts in. | - |
+| `DATABASE_REPLICA_MAX_CONNS` | Maximum replica connections per pod. This budget is independent of `DATABASE_MAX_CONNS`. | `10` |
+| `DATABASE_REPLICA_MIN_CONNS` | Warm replica connections per pod. | `0` |
+| `DATABASE_REPLICA_PROBE_INTERVAL` | Interval between replica eligibility checks. | `2s` |
+| `DATABASE_REPLICA_PROBE_TIMEOUT` | Timeout shared by the primary and replica queries in one eligibility check. | `1s` |
+| `DATABASE_REPLICA_MAX_REPLAY_LAG` | Maximum replay age allowed while the replica WAL position is behind primary. | `5s` |
+
+Budget the sum of primary and replica pool limits across every API pod against the PostgreSQL cluster connection ceiling. Replica configuration is non-critical: invalid configuration, connection failure, promotion, writable state, or excess replay lag makes it ineligible and explicitly opted-in reads fall back to primary. Existing read paths remain primary-only until migrated individually.
 
 ### Email (Required for Authentication)
 

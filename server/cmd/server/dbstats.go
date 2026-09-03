@@ -35,6 +35,36 @@ const (
 	// Both values are overridable via DATABASE_MAX_CONNS / DATABASE_MIN_CONNS.
 	defaultMaxConns int32 = 25
 	defaultMinConns int32 = 5
+
+	// The optional replica has its own connection budget. Do not clone the
+	// primary's warm pool per API process: a newly configured replica should
+	// not double idle connections before any business opts into replica reads.
+	defaultReplicaMaxConns int32 = 10
+	defaultReplicaMinConns int32 = 0
+)
+
+type dbPoolSizing struct {
+	maxConnsEnv     string
+	minConnsEnv     string
+	defaultMaxConns int32
+	defaultMinConns int32
+	allowZeroMin    bool
+}
+
+var (
+	primaryPoolSizing = dbPoolSizing{
+		maxConnsEnv:     "DATABASE_MAX_CONNS",
+		minConnsEnv:     "DATABASE_MIN_CONNS",
+		defaultMaxConns: defaultMaxConns,
+		defaultMinConns: defaultMinConns,
+	}
+	replicaPoolSizing = dbPoolSizing{
+		maxConnsEnv:     "DATABASE_REPLICA_MAX_CONNS",
+		minConnsEnv:     "DATABASE_REPLICA_MIN_CONNS",
+		defaultMaxConns: defaultReplicaMaxConns,
+		defaultMinConns: defaultReplicaMinConns,
+		allowZeroMin:    true,
+	}
 )
 
 // newDBPool builds a pgxpool with sane production defaults and env overrides.
@@ -53,34 +83,48 @@ const (
 // pgx's own built-in default (max(4, NumCPU)) is intentionally NOT used as a
 // fallback — it is the value that caused the prod incident.
 func newDBPool(ctx context.Context, dbURL string, connectTimeout time.Duration) (*pgxpool.Pool, error) {
+	return newSizedDBPool(ctx, dbURL, connectTimeout, primaryPoolSizing)
+}
+
+func newReplicaDBPool(ctx context.Context, dbURL string, connectTimeout time.Duration) (*pgxpool.Pool, error) {
+	return newSizedDBPool(ctx, dbURL, connectTimeout, replicaPoolSizing)
+}
+
+func newSizedDBPool(ctx context.Context, dbURL string, connectTimeout time.Duration, sizing dbPoolSizing) (*pgxpool.Pool, error) {
 	cfg, err := dbstartup.ParsePoolConfig(dbURL, connectTimeout)
 	if err != nil {
 		return nil, err
 	}
+	applyPoolSizing(cfg, dbURL, sizing)
+	return pgxpool.NewWithConfig(ctx, cfg)
+}
 
+func applyPoolSizing(cfg *pgxpool.Config, dbURL string, sizing dbPoolSizing) {
 	urlParams := poolParamsFromURL(dbURL)
 
 	// Compute the non-env fallback first: honor URL pool_* params if the
 	// operator set them, otherwise use our code default. This fallback is
 	// also what an *invalid* env value falls back to — never pgx's built-in
 	// default of 4/0, which is the value that caused the prod incident.
-	maxFallback := defaultMaxConns
+	maxFallback := sizing.defaultMaxConns
 	if urlParams["pool_max_conns"] {
 		maxFallback = cfg.MaxConns
 	}
-	cfg.MaxConns = envInt32("DATABASE_MAX_CONNS", maxFallback)
+	cfg.MaxConns = envInt32(sizing.maxConnsEnv, maxFallback)
 
-	minFallback := defaultMinConns
+	minFallback := sizing.defaultMinConns
 	if urlParams["pool_min_conns"] {
 		minFallback = cfg.MinConns
 	}
-	cfg.MinConns = envInt32("DATABASE_MIN_CONNS", minFallback)
+	if sizing.allowZeroMin {
+		cfg.MinConns = envNonNegativeInt32(sizing.minConnsEnv, minFallback)
+	} else {
+		cfg.MinConns = envInt32(sizing.minConnsEnv, minFallback)
+	}
 
 	if cfg.MinConns > cfg.MaxConns {
 		cfg.MinConns = cfg.MaxConns
 	}
-
-	return pgxpool.NewWithConfig(ctx, cfg)
 }
 
 // poolParamsFromURL returns the set of pool_* query params present on the
@@ -115,13 +159,28 @@ func envInt32(name string, def int32) int32 {
 	return int32(v)
 }
 
+func envNonNegativeInt32(name string, def int32) int32 {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || v < 0 {
+		slog.Warn("invalid env var, using default",
+			"name", name, "value", raw, "default", def, "error", err)
+		return def
+	}
+	return int32(v)
+}
+
 // logPoolConfig prints the effective pgxpool configuration once at startup.
 // Surfacing this is critical because pgxpool defaults are surprisingly small
 // (MaxConns = max(4, NumCPU)) — without seeing the value in the log it's
 // easy to mistake pool exhaustion for "the database is slow".
-func logPoolConfig(pool *pgxpool.Pool) {
+func logPoolConfig(role string, pool *pgxpool.Pool) {
 	cfg := pool.Config()
 	slog.Info("db pool config",
+		"role", role,
 		"max_conns", cfg.MaxConns,
 		"min_conns", cfg.MinConns,
 		"max_conn_lifetime", cfg.MaxConnLifetime.String(),
@@ -136,7 +195,7 @@ func logPoolConfig(pool *pgxpool.Pool) {
 // exhaustion (a request had to wait because no idle conn was available) and
 // the smoking gun we're looking for to confirm the slow /tasks/claim
 // hypothesis.
-func runDBStatsLogger(ctx context.Context, pool *pgxpool.Pool) {
+func runDBStatsLogger(ctx context.Context, role string, pool *pgxpool.Pool) {
 	ticker := time.NewTicker(dbStatsInterval)
 	defer ticker.Stop()
 
@@ -168,6 +227,7 @@ func runDBStatsLogger(ctx context.Context, pool *pgxpool.Pool) {
 		}
 
 		fields := []any{
+			"role", role,
 			"max_conns", s.MaxConns(),
 			"total_conns", s.TotalConns(),
 			"acquired_conns", s.AcquiredConns(),
