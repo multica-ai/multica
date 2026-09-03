@@ -104,6 +104,36 @@ describe("authStore", () => {
     expect(storage.snapshot().multica_token).toBeUndefined();
   });
 
+  it("runs the expiry handler instead of the logout one when given both", () => {
+    const storage = makeStorage({ multica_token: "t" });
+    const api = makeApi();
+    const onLogout = vi.fn();
+    const onSessionExpired = vi.fn();
+    const store = createAuthStore({ api, storage, onLogout, onSessionExpired });
+
+    store.setState({ user: fakeUser, status: "authenticated", isLoading: false });
+    store.getState().sessionExpired();
+
+    // Desktop's logout teardown stops the local daemon, which is the wrong
+    // answer for a session the user did not choose to end (MUL-7028).
+    expect(onSessionExpired).toHaveBeenCalledOnce();
+    expect(onLogout).not.toHaveBeenCalled();
+  });
+
+  it("still runs the logout teardown for an explicit logout", () => {
+    const storage = makeStorage({ multica_token: "t" });
+    const api = makeApi();
+    const onLogout = vi.fn();
+    const onSessionExpired = vi.fn();
+    const store = createAuthStore({ api, storage, onLogout, onSessionExpired });
+
+    store.setState({ user: fakeUser, status: "authenticated", isLoading: false });
+    store.getState().logout();
+
+    expect(onLogout).toHaveBeenCalledOnce();
+    expect(onSessionExpired).not.toHaveBeenCalled();
+  });
+
   it("treats a burst of parallel 401s as the one expiry it is", () => {
     const storage = makeStorage({ multica_token: "t" });
     const api = makeApi();

@@ -96,7 +96,6 @@ function renderInitializer({
         cookieAuth={cookieAuth}
         identity={{ platform }}
         onLogin={onLogin}
-        onLogout={onLogout}
         storage={storage}
       >
         <div>child</div>

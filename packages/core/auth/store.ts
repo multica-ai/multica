@@ -9,6 +9,12 @@ export interface AuthStoreOptions {
   storage: StorageAdapter;
   onLogin?: () => void;
   onLogout?: () => void;
+  /**
+   * Cleanup for a session the server ended, as opposed to one the user did.
+   * Defaults to `onLogout` — a shell only needs its own handler when some of
+   * its logout teardown is too destructive for an expiry it did not ask for.
+   */
+  onSessionExpired?: () => void;
   /** When true, rely on HttpOnly cookies instead of localStorage for auth tokens. */
   cookieAuth?: boolean;
 }
@@ -44,7 +50,8 @@ export interface AuthState {
 }
 
 export function createAuthStore(options: AuthStoreOptions) {
-  const { api, storage, onLogin, onLogout, cookieAuth } = options;
+  const { api, storage, onLogin, onLogout, onSessionExpired, cookieAuth } =
+    options;
 
   return create<AuthState>((set, get) => ({
     user: null,
@@ -148,7 +155,7 @@ export function createAuthStore(options: AuthStoreOptions) {
       // entry. Mirrors AuthInitializer's boot-time rejection.
       if (!cookieAuth) setCurrentWorkspace(null, null);
       resetAnalytics();
-      onLogout?.();
+      (onSessionExpired ?? onLogout)?.();
       set({
         user: null,
         isLoading: false,

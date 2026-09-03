@@ -31,14 +31,15 @@ const RECOVERY_RETRY_DELAYS_MS = [
 export function AuthInitializer({
   children,
   onLogin,
-  onLogout,
   storage = defaultStorage,
   cookieAuth,
   identity,
 }: {
   children: ReactNode;
   onLogin?: () => void;
-  onLogout?: () => void;
+  // No `onLogout`: every unauthenticated exit below delegates to the auth
+  // store's own teardown, which is where the logout / session-expiry
+  // callbacks live.
   storage?: StorageAdapter;
   cookieAuth?: boolean;
   identity?: ClientIdentity;
@@ -313,13 +314,12 @@ export function AuthInitializer({
     if (!cookieAuth) {
       const token = storage.getItem("multica_token");
       if (!token) {
+        // No credential to verify. Same published state as a rejected one,
+        // and the same teardown — which on desktop is what keeps a daemon
+        // running across the restart after an expiry, instead of the app
+        // treating a missing token as if the user had signed out.
         settled = true;
-        onLogout?.();
-        useAuthStore.setState({
-          user: null,
-          isLoading: false,
-          status: "unauthenticated",
-        });
+        useAuthStore.getState().sessionExpired();
       } else {
         api.setToken(token);
         window.addEventListener("online", retryNow);
