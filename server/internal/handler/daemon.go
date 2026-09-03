@@ -4016,11 +4016,11 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 				slog.Info("reconcile comments on completion: replay blocked, obligation handed to the active task",
 					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID))
 			} else {
-				// The slot is held by an unmergeable queued task: a different HEAD
-				// cannot accept the comment without violating TEN-356, and an
-				// incompatible role cannot accept it without losing the leader
-				// context. Today's schema has no safe place to park the obligation,
-				// so surface it loudly rather than let it disappear quietly.
+				// The slot is held by a DIFFERENT-head queued task: it can neither
+				// cover this comment nor accept it (merging would let an old-head
+				// run consume a new-head request — TEN-356). Today's schema has no
+				// safe place to park the obligation, so surface it loudly rather
+				// than let it disappear quietly.
 				slog.Error("reconcile comments on completion: replay blocked and obligation could not be handed off; comment needs a durable obligation record",
 					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID),
 					"reason", res.reason)

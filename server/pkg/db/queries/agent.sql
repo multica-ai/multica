@@ -1869,41 +1869,16 @@ WHERE id = (
           COALESCE(sqlc.narg('head_sha')::text, '') = ''
           OR t.context->>'head_sha' = sqlc.narg('head_sha')::text
       )
-      -- Role-scoped (MUL-7006), for the same reason the head is: this statement
-      -- re-attributes a task but never re-roles one, so folding a comment into a
-      -- task that cannot carry its role silently executes it under the wrong one.
-      --
-      -- The direction matters, and only one of the two is harmful. A leader task
-      -- is a strict superset of a direct-agent one — it carries the squad
-      -- briefing and coordinates rather than binding to the project's
-      -- local_directory — so a direct-role comment folds into it safely, exactly
-      -- as the mention resolver already upgrades a plain @agent trigger when a
-      -- @squad names the same leader. The reverse loses everything the role is:
-      -- a leader-role reply folded into a queued direct-agent task claims no
-      -- briefing and, on a local_directory project, runs in the user's own
-      -- directory. Only that direction is refused, so no coalescing that works
-      -- today stops working.
-      --
-      -- A refusal here is not a drop, but it is not automatically covered
-      -- either: the caller must complete a write-backed hand-off to a claimed
-      -- task or create a fresh task before reporting success.
-      AND (
-          NOT @new_is_leader_task::boolean
-          OR (
-              t.is_leader_task
-              AND t.squad_id IS NOT DISTINCT FROM sqlc.narg('new_squad_id')::uuid
-          )
-      )
     ORDER BY t.created_at DESC
     LIMIT 1
 )
 RETURNING id, coalesced_comment_ids;
 
 -- name: RegisterPlannedCommentForActiveTask :one
--- #5914: durably register an uncovered comment as a PLANNED (undelivered)
--- input on the same-(issue, agent) ACTIVE task whose queued row
+-- #5914: durably register a comment that lost an enqueue race as a PLANNED
+-- (undelivered) input on the same-(issue, agent) ACTIVE task whose queued row
 -- MergeCommentIntoPendingTask could no longer target (it was claimed →
--- dispatched/running). The comment can predate that task's created_at,
+-- dispatched/running). The losing comment can predate that task's created_at,
 -- so completion reconciliation's `created_at > since` window cannot see it;
 -- appending it to coalesced_comment_ids (the planned set) WITHOUT touching
 -- delivered_comment_ids makes reconcileCommentsOnCompletion replay it as a
@@ -1911,9 +1886,8 @@ RETURNING id, coalesced_comment_ids;
 --
 -- Head-scoped (TEN-356): only a task stamped with the SAME head_sha is a target,
 -- so a new-HEAD comment is never attached to an old-HEAD run. Returns
--- pgx.ErrNoRows when no same-head active task exists (different HEAD, the task
--- just terminated, or an unclaimed blocker holds the slot), so the caller tries
--- a fresh enqueue instead of inferring coverage.
+-- pgx.ErrNoRows when no same-head active task exists (different HEAD, or the task
+-- just terminated) so the caller falls back to the active-task decision.
 --
 -- 'queued' is DELIBERATELY EXCLUDED (#5914, Elon round 3): a not-yet-claimed
 -- task has no claim receipt, so a comment merged into it WILL be recorded as
@@ -1924,16 +1898,6 @@ RETURNING id, coalesced_comment_ids;
 -- could execute under the first member's identity/connected-apps (MUL-4302).
 -- Only claim-receipt statuses (already-built delivered set) are safe planned-id
 -- targets.
---
--- The write also refuses while ANY unclaimed task holds the pair's pending slot
--- (MUL-7006). A running task A can predate comment C while a newer queued task B
--- occupies that slot. Registering C on A would look durable, but A's replay can
--- collide with B; when B has the wrong role or HEAD, neither the queued merge nor
--- B's timestamp window can carry C onward. Checking the blocker in the same
--- UPDATE that registers C keeps that mixed A+C+B state from becoming a false
--- deferred promise. If B is claimed concurrently, it becomes a valid receipt
--- target itself; if it remains queued, the caller retries the merge/fresh enqueue
--- and reports non-success when no write can prove coverage.
 UPDATE agent_task_queue
 SET coalesced_comment_ids = (
         SELECT COALESCE(array_agg(DISTINCT e), '{}')
@@ -1948,18 +1912,6 @@ WHERE id = (
       AND (
           COALESCE(sqlc.narg('head_sha')::text, '') = ''
           OR t.context->>'head_sha' = sqlc.narg('head_sha')::text
-      )
-      AND NOT EXISTS (
-          SELECT 1 FROM agent_task_queue blocker
-          WHERE blocker.issue_id = @issue_id
-            AND blocker.agent_id = @agent_id
-            AND (
-                blocker.status = 'queued'
-                OR (
-                    blocker.status = 'deferred'
-                    AND blocker.context->>'channel_issue_media_pending' = 'true'
-                )
-            )
       )
     ORDER BY t.created_at DESC
     LIMIT 1
@@ -2177,10 +2129,13 @@ LIMIT @max_per_tick;
 -- MUL-4195: true when the (issue, agent) pair has any non-terminal task in a
 -- state whose completion will run completion reconciliation — queued,
 -- dispatched, running, waiting_local_directory, or the explicitly-marked
--- channel-media deferred state. Used by issue-trigger dedup and the squad-leader
--- self-trigger guard. Comment coalescing does not use this read as proof of
--- coverage: after a merge miss it requires a completed merge, planned-id write,
--- or fresh enqueue before reporting success.
+-- channel-media deferred state. Used by the comment enqueue
+-- path: when a merge into a pre-claim task fails (the task is already
+-- dispatched/running, or a mismatched pre-claim task exists), a fresh queued
+-- INSERT would collide with idx_one_pending_task_per_issue_agent AND would risk
+-- a duplicate run. Instead the caller relies on that active task's completion
+-- reconcile to schedule the guaranteed follow-up, and only enqueues fresh when
+-- NO active task exists.
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2
   AND (
