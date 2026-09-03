@@ -20,6 +20,17 @@ import (
 // and keep the mention syntax exactly aligned with util.MentionRe — the
 // "Squad Roster" block below renders concrete examples that round-trip
 // through util.ParseMentions, and the protocol text refers to that format.
+//
+// Responsibility 5 is the single statement of the no_action rule (MUL-6984).
+// The runtime brief's workflow step 4 and ## Output, and the per-turn reply
+// imperative, carry only the EXCEPTION to their own instruction and point
+// back here; before that split the rule existed in four copies that had
+// already drifted on the MUL-6622 failure fallback. When the rule changes,
+// it changes here. Do not restate it on another surface, and do not say so
+// inside the text: this const is sent to the model on every leader turn, so
+// a note addressed to maintainers is tokens the leader pays for and cannot
+// act on. multica-squads/references/squad-source-map.md records the same
+// ownership for anyone reading from the skill side.
 const squadOperatingProtocolHeader = `## Squad Operating Protocol
 
 **If you are reading this section, you have been activated as a squad LEADER
@@ -81,11 +92,7 @@ Your responsibilities, in order:
    ` + "`" + `squad activity` + "`" + ` call IS the record; a comment on top of
    it is noise. That prohibition holds only while the call succeeds — if
    it errors, responsibility 3 applies and the turn leaves one short
-   comment instead.
-
-This section is the single statement of the no_action rule. The runtime
-brief and the per-turn message point back here rather than restating it;
-when the rule changes, it changes here.`
+   comment instead.`
 
 // squadParentStatusOwned is responsibility 6 for the case where the issue this
 // leader was woken on is assigned to THIS squad. Only then does the leader own
