@@ -203,6 +203,30 @@ func TestRunBatchPollerClaimsAcrossRuntimes(t *testing.T) {
 	taskWG.Wait()
 }
 
+func TestTaskClaimPollIntervalTracksWSRPCAvailability(t *testing.T) {
+	t.Parallel()
+
+	d := New(Config{PollInterval: 30 * time.Second}, slog.Default())
+	if got := d.taskClaimPollInterval(); got != 30*time.Second {
+		t.Fatalf("interval without websocket = %v, want 30s", got)
+	}
+
+	generation := d.wsRPC.attach(func([]byte) (*wsOutbound, error) { return nil, nil })
+	if got := d.taskClaimPollInterval(); got != 30*time.Second {
+		t.Fatalf("interval before rpc-v1 negotiation = %v, want 30s", got)
+	}
+
+	d.wsRPC.markRPCV1Supported(generation)
+	if got := d.taskClaimPollInterval(); got != DefaultWSClaimPollInterval {
+		t.Fatalf("interval with rpc-v1 websocket = %v, want %v", got, DefaultWSClaimPollInterval)
+	}
+
+	d.wsRPC.attach(nil)
+	if got := d.taskClaimPollInterval(); got != 30*time.Second {
+		t.Fatalf("interval after websocket disconnect = %v, want 30s", got)
+	}
+}
+
 // TestRunBatchPollerWakesAfterTaskExit guards the gap where a queued task is
 // temporarily unclaimable (for example, because the same agent/issue task is
 // still running), the batch claim returns empty, and the poller goes to sleep

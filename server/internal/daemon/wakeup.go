@@ -232,6 +232,10 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 		// frame will be dropped), and flip the send-closed flag under sendMu so
 		// any in-flight guarded send finishes before we close writes.
 		d.wsRPC.attach(nil)
+		// A healthy WS connection lets the claim poller use a longer fallback
+		// interval. Wake it as soon as the connection drops so it immediately
+		// observes the detach and resumes the configured HTTP cadence.
+		signalTaskWakeup(taskWakeups, "")
 		sendMu.Lock()
 		sendClosed = true
 		sendMu.Unlock()

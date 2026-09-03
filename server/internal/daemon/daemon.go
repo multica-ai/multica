@@ -5159,14 +5159,24 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 		}
 
 		// If we filled every slot, more work may be queued — loop immediately.
-		// Otherwise wait for the next wakeup / poll interval.
+		// Otherwise wait for the next wakeup / poll interval. A connection that
+		// negotiated WS RPC receives task-available pushes, so this poll is only
+		// a missed-event safety net and can run less often. Claim errors retain
+		// the configured fallback cadence above.
 		if dispatched > 0 && dispatched == len(slots) {
 			continue
 		}
-		if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+		if err := sleepWithContextOrWakeup(pollerCtx, d.taskClaimPollInterval(), wakeup); err != nil {
 			return
 		}
 	}
+}
+
+func (d *Daemon) taskClaimPollInterval() time.Duration {
+	if d.wsRPC.supportsRPCV1() {
+		return DefaultWSClaimPollInterval
+	}
+	return d.cfg.PollInterval
 }
 
 func signalPollerWakeup(wakeup chan<- struct{}) {

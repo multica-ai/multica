@@ -19,9 +19,12 @@ import (
 )
 
 const (
-	DefaultServerURL         = "ws://localhost:8080/ws"
-	DefaultPollInterval      = 30 * time.Second
-	DefaultHeartbeatInterval = 15 * time.Second
+	DefaultServerURL    = "ws://localhost:8080/ws"
+	DefaultPollInterval = 30 * time.Second
+	// DefaultWSClaimPollInterval is the missed-event safety poll used while
+	// task availability and claims are both carried by a healthy WebSocket.
+	DefaultWSClaimPollInterval = 3 * time.Minute
+	DefaultHeartbeatInterval   = 15 * time.Second
 	// DefaultAgentTimeout is the optional absolute wall-clock cap on a single
 	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdog
 	// (DefaultAgentIdleWatchdog), so a session that keeps emitting events is
