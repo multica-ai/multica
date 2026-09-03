@@ -744,7 +744,11 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 		var task db.AgentTaskQueue
 		var err error
 		if agentRunFireAt.IsZero() {
-			task, err = s.TaskService.EnqueueTaskForIssue(ctx, issue)
+			if issue.OriginType.Valid && issue.OriginType.String == "lark_chat" && issue.OriginID.Valid {
+				task, err = s.TaskService.EnqueueInitialChannelIssueTask(ctx, issue)
+			} else {
+				task, err = s.TaskService.EnqueueTaskForIssue(ctx, issue)
+			}
 		} else {
 			task, err = s.TaskService.EnqueueDeferredChannelIssueTask(ctx, issue, agentRunFireAt)
 		}

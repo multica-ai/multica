@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -152,6 +154,8 @@ type PatcherQueries interface {
 	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error)
 	CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error)
 	UpdateLarkOutboundCardStatus(ctx context.Context, arg UpdateOutboundCardStatusParams) error
+	GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error)
+	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 }
 
 // CredentialsResolver decrypts an installation's app_secret for the
@@ -276,13 +280,15 @@ func (p *Patcher) SetTypingIndicatorManager(m *TypingIndicatorManager) {
 //     per-session generation the add can check when its call returns.
 //
 // We deliberately do NOT subscribe to EventTaskQueued / EventTaskRunning
-// (no thinking-card lifecycle anymore — adds noise without value) or to
-// EventTaskCompleted (chat tasks always emit EventChatDone first, which
-// is what we care about; non-chat tasks have no Lark binding anyway and
-// would early-return). Leaving EventTaskCompleted unsubscribed also
-// avoids the prior "Done." overwrite regression where the no-content
-// EventTaskCompleted payload would wipe the real reply.
+// (no thinking-card lifecycle anymore — adds noise without value).
+// EventTaskCompleted is handled only for issue tasks created via /issue
+// (IssueID.Valid && !ChatSessionID.Valid). The subscription stays
+// unconditional; processEvent drops chat completions before any DB work
+// because chat tasks already emit EventChatDone first with the real
+// reply, and reacting to EventTaskCompleted for them would duplicate the
+// bubble or resurrect the "Done." overwrite regression.
 func (p *Patcher) Register(bus *events.Bus) {
+	bus.Subscribe(protocol.EventTaskCompleted, p.handleEvent)
 	bus.Subscribe(protocol.EventTaskFailed, p.handleEvent)
 	bus.Subscribe(protocol.EventChatDone, p.handleEvent)
 	bus.Subscribe(protocol.EventTaskCancelled, p.handleEvent)
@@ -309,8 +315,19 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 	if !ok {
 		return nil
 	}
+
+	if e.Type == protocol.EventTaskCompleted {
+		if chatSessionID.Valid {
+			// Chat tasks already emitted ChatDone with the real reply;
+			// reacting to TaskCompleted would duplicate the bubble or
+			// resurrect the "Done." fallback. Return before any DB work.
+			return nil
+		}
+		return p.handleIssueCompleted(ctx, taskID, e)
+	}
+
 	if !chatSessionID.Valid {
-		// Issue / autopilot tasks have no chat_session.
+		// Issue / autopilot tasks have no chat_session for the chat path.
 		return nil
 	}
 	// A cancelled run has no reply to place, so the only thing owed to the user
@@ -408,6 +425,75 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		return p.fail(ctx, creds, binding, taskID, agentName, e.Payload)
 	}
 	return nil
+}
+
+func (p *Patcher) handleIssueCompleted(ctx context.Context, taskID pgtype.UUID, _ events.Event) error {
+	delivery, err := p.queries.GetChannelTaskDelivery(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("lookup lark task delivery: %w", err)
+	}
+	if delivery.ChannelType != channelTypeFeishu {
+		return nil
+	}
+	task, err := p.queries.GetAgentTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load agent task: %w", err)
+	}
+	if !task.IssueID.Valid || task.ChatSessionID.Valid {
+		return nil
+	}
+	binding := ChatSessionBinding{
+		ID: delivery.BindingID, InstallationID: delivery.InstallationID,
+		ChannelChatID: delivery.ChannelChatID, ChatType: delivery.ChatType, Config: delivery.Config,
+		LastMessageID: delivery.ChannelMessageID, LastThreadID: delivery.ChannelThreadID,
+	}
+	inst, err := p.queries.GetLarkInstallation(ctx, binding.InstallationID)
+	if err != nil {
+		return fmt.Errorf("load installation: %w", err)
+	}
+	if InstallationStatus(inst.Status) != InstallationActive {
+		return nil
+	}
+	creds, err := p.installationCredentials(inst)
+	if err != nil {
+		return err
+	}
+	issue, err := p.queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return fmt.Errorf("load issue: %w", err)
+	}
+	prefix := ""
+	if ws, werr := p.queries.GetWorkspace(ctx, issue.WorkspaceID); werr == nil {
+		prefix = ws.IssuePrefix
+	}
+	identifier := service.IssueIdentifier(prefix, issue.Number)
+	// TaskService.CompleteTask explicitly does NOT change issue status
+	// (task.go:4230), so this notification is for the agent run/task
+	// completing, not the issue reaching done/in_review. An in_progress
+	// issue after this message is expected — the task is done, the issue
+	// may still be worked on.
+	text := taskCompletedText(identifier, issue.Title)
+	target := threadReplyTarget(binding)
+	return sendWithThreadFallback(p.cfg.Logger, "send task completed", target, func(t ReplyTarget) error {
+		_, err := p.client.SendTextMessage(ctx, SendTextParams{
+			InstallationID: creds,
+			ChatID:         outboundChatID(binding),
+			Text:           text,
+			ReplyTarget:    t,
+		})
+		return err
+	})
+}
+
+func taskCompletedText(identifier, title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return "✅ Task completed for " + identifier
+	}
+	return "✅ Task completed for " + identifier + " — " + title
 }
 
 // sendChatReply turns ChatDonePayload.Content into a Lark message.
