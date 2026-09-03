@@ -263,7 +263,28 @@ func (o *codexFirstItemWaitObservation) snapshot() (time.Duration, string, codex
 // codexBackend implements Backend by spawning `codex app-server --listen stdio://`
 // and communicating via JSON-RPC 2.0 over stdin/stdout.
 type codexBackend struct {
-	cfg Config
+	cfg              Config
+	startProcessTree func(*exec.Cmd, *slog.Logger) error
+}
+
+// codexPreLaunchError marks failures that happen before the child process has
+// entered the Codex lifecycle. Unlike configuration and executable lookup
+// errors, a process-creation failure is often transient under host resource
+// pressure and is safe to retry because no semantic activity or provider
+// thread can have occurred. Keeping this marker typed prevents unrelated
+// setup failures from being retried blindly.
+type codexPreLaunchError struct{ err error }
+
+func (e *codexPreLaunchError) Error() string { return e.err.Error() }
+func (e *codexPreLaunchError) Unwrap() error { return e.err }
+
+func isCodexPreLaunchError(err error) bool {
+	var target *codexPreLaunchError
+	return errors.As(err, &target)
+}
+
+func codexStartupRetryBackoff() time.Duration {
+	return 75*time.Millisecond + time.Duration(time.Now().UnixNano()%50)*time.Millisecond
 }
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
@@ -841,7 +862,25 @@ func isCodexBareTomlKey(s string) bool {
 func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	firstSession, err := b.executeOnce(ctx, prompt, opts, 1)
 	if err != nil {
-		return nil, err
+		// executeOnce historically returned process-creation errors directly,
+		// before the session/result retry loop existed. A transient fork/exec or
+		// owned-process startup failure therefore consumed attempt 1 without ever
+		// reaching max_attempts. Retry only the explicitly marked pre-launch case,
+		// and only while the parent task is still alive.
+		if !isCodexPreLaunchError(err) || ctx.Err() != nil {
+			return nil, err
+		}
+		backoff := codexStartupRetryBackoff()
+		b.cfg.Logger.Warn("codex retry scheduled", "reason", "process_start", "attempt", 1, "next_attempt", 2, "backoff", backoff.String())
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(backoff):
+		}
+		firstSession, err = b.executeOnce(ctx, prompt, opts, 2)
+		if err != nil {
+			return nil, err
+		}
 	}
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -1071,9 +1110,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// the process group configured above already covers that and this is a plain
 	// Start. Ownership that cannot be taken is logged, not fatal; a child that
 	// cannot be resumed is killed and reported here.
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	startProcessTree := b.startProcessTree
+	if startProcessTree == nil {
+		startProcessTree = startOwnedProcessTree
+	}
+	if err := startProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
-		return nil, fmt.Errorf("start codex: %w", err)
+		return nil, fmt.Errorf("start codex: %w", &codexPreLaunchError{err: err})
 	}
 	activeLaunches := activeCodexLaunches.Add(1)
 	for {
@@ -1383,10 +1426,19 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				// still records bounded byte/truncation metadata.
 				finalError = withAgentStderr(finalError, "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
 			}
-			retrySafe := timedOut && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
-			if timedOut && !cleanupConfirmed {
+			// A failed initialize is retry-safe whether the handshake timed out or
+			// the process died outright: in both cases initialize never returned, so
+			// the agent produced no semantic activity and started no thread. Codex
+			// startup crashes caused by a sibling task clobbering its CODEX_HOME
+			// (ISE-2165) land here, and are exactly the case max_attempts exists for.
+			// The parent task deadline/cancellation ending the run is the one case
+			// that must NOT retry — the task itself is over. A handshake timeout also
+			// surfaces as a context error, so it is matched first and stays retryable.
+			parentEnded := !timedOut && contextEnded
+			retrySafe := !parentEnded && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
+			if !parentEnded && !cleanupConfirmed {
 				finalError += "; retry suppressed: process cleanup/reap not confirmed"
-			} else if timedOut && cleanupConfirmed && !codexInitializeRetrySupported() {
+			} else if !parentEnded && cleanupConfirmed && !codexInitializeRetrySupported() {
 				finalError += "; retry suppressed: process-tree cleanup cannot be confirmed on this platform"
 			}
 			b.cfg.Logger.Warn("codex lifecycle", "phase", "initialize_failure", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "attempt", attempt, "latency", initializeLatency.Round(time.Millisecond).String(), "semantic_activity", semanticObserved.Load(), "cleanup_confirmed", cleanupConfirmed, "retry_safe", retrySafe)

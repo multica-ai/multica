@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -2958,6 +2959,59 @@ func TestCodexExecuteRetriesInitializeTimeoutOnceAfterCleanup(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(data)); got != "2" {
 		t.Fatalf("launch count = %q, want 2", got)
+	}
+}
+
+func TestCodexExecuteRetriesPreLaunchProcessStartFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-prelaunch-retry"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-prelaunch-retry","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+
+	backendRaw, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := backendRaw.(*codexBackend)
+	startCalls := 0
+	backend.startProcessTree = func(cmd *exec.Cmd, logger *slog.Logger) error {
+		startCalls++
+		if startCalls == 1 {
+			return errors.New("injected process creation failure")
+		}
+		return startOwnedProcessTree(cmd, logger)
+	}
+
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+		Timeout:                   5 * time.Second,
+		HandshakeTimeout:          2 * time.Second,
+		SemanticInactivityTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("pre-launch failure should be retried: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected retry to complete, got status=%q error=%q", result.Status, result.Error)
+	}
+	if startCalls != 2 {
+		t.Fatalf("expected exactly one bounded pre-launch retry, got %d starts", startCalls)
 	}
 }
 
