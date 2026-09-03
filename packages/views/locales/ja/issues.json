@@ -855,5 +855,12 @@
     "surface_loading": "{{name}} を読み込んでいます…",
     "surface_unavailable": "{{name}} のインターフェースを読み込めません。インストール済みのバージョンに含まれていない可能性があります。",
     "surface_navigated": "{{name}} がパネルを外部から読み込んだページに置き換えようとしました。停止して接続を切りました。ワークスペース管理者に知らせてください。"
+  },
+  "automation": {
+    "title": "自動化",
+    "manual": "手動",
+    "entry_count_one": "{{count}} 件の実行",
+    "entry_count_other": "{{count}} 件の実行",
+    "take_over": "引き継ぐ"
   }
 }

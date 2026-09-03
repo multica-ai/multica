@@ -123,9 +123,11 @@ import type {
   CreateIssueStatusRequest,
   UpdateIssueStatusRequest,
   IssueLifecycleResponse,
+  AutomationExecution,
   UpdateIssueLifecycleStatusRequest,
   TransitionIssueStatusNodeRequest,
   TransitionIssueStatusNodeResponse,
+  TakeOverAutomationExecutionResponse,
   IssueLabelsResponse,
   LabelResourceType,
   ResourceLabelsResponse,
@@ -388,8 +390,10 @@ import {
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
   IssueLifecycleResponseSchema,
+  AutomationExecutionListSchema,
   EMPTY_ISSUE_LIFECYCLE_RESPONSE,
   TransitionIssueStatusNodeResponseSchema,
+  TakeOverAutomationExecutionResponseSchema,
   EMPTY_TRANSITION_ISSUE_STATUS_NODE_RESPONSE,
   IssuePropertySchema,
   ListPropertiesResponseSchema,
@@ -3735,6 +3739,20 @@ export class ApiClient {
     });
   }
 
+  async getIssueLifecycle(lifecycleId: string): Promise<IssueLifecycleResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/${lifecycleId}`);
+    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "GET /api/issue-lifecycles/{lifecycleId}",
+    });
+  }
+
+  async listIssueAutomationExecutions(issueId: string): Promise<AutomationExecution[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/automation-executions`);
+    return parseWithFallback(raw, AutomationExecutionListSchema, [], {
+      endpoint: "GET /api/issues/{id}/automation-executions",
+    });
+  }
+
   async updateProjectIssueLifecycle(
     projectId: string,
     mode: "default" | "custom",
@@ -3803,6 +3821,18 @@ export class ApiClient {
       EMPTY_TRANSITION_ISSUE_STATUS_NODE_RESPONSE,
       { endpoint: "POST /api/issues/{id}/transitions" },
     );
+  }
+
+  async takeOverAutomationExecution(
+    issueId: string,
+    executionId: string,
+    expectedRevision?: number,
+  ): Promise<TakeOverAutomationExecutionResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/automation-executions/${executionId}/take-over`, {
+      method: "POST",
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    });
+    return TakeOverAutomationExecutionResponseSchema.parse(raw) as TakeOverAutomationExecutionResponse;
   }
 
   // Custom issue properties

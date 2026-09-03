@@ -1886,6 +1886,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
 					r.Post("/transitions", h.TransitionIssueStatusNode)
+					r.Get("/automation-executions", h.ListIssueAutomationExecutions)
+					r.Post("/automation-executions/{executionId}/take-over", h.TakeOverAutomationExecution)
 					r.Post("/move", h.MoveIssue)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
@@ -1973,6 +1975,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// nodes and project inheritance explicitly.
 			r.Get("/api/issue-lifecycles/effective", h.GetEffectiveIssueLifecycle)
 			r.Route("/api/issue-lifecycles/{lifecycleId}", func(r chi.Router) {
+				r.Get("/", h.GetIssueLifecycle)
 				r.Patch("/statuses/reorder", h.ReorderIssueLifecycleStatuses)
 				r.Patch("/statuses/{statusId}", h.UpdateIssueLifecycleStatus)
 				r.Delete("/statuses/{statusId}", h.ArchiveIssueLifecycleStatus)

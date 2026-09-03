@@ -52,7 +52,7 @@ func TestIssueLifecycleMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 			category TEXT NOT NULL, archived_at TIMESTAMPTZ,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
-		CREATE TABLE agent_task_queue (id UUID PRIMARY KEY);
+		CREATE TABLE agent_task_queue (id UUID PRIMARY KEY, status TEXT NOT NULL DEFAULT 'queued');
 	`); err != nil {
 		t.Fatalf("create legacy fixture schema: %v", err)
 	}
@@ -100,6 +100,7 @@ func TestIssueLifecycleMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 		"462_issue_lifecycle_binding_index.up.sql",
 		"463_agent_task_automation_execution_index.up.sql",
 		"464_issue_lifecycle_backfill.up.sql",
+		"465_automation_execution_task_status.up.sql",
 	}
 	for _, name := range up {
 		applyMigrationFile(t, ctx, conn.Conn(), name)
@@ -129,6 +130,7 @@ func TestIssueLifecycleMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 	}
 
 	down := []string{
+		"465_automation_execution_task_status.down.sql",
 		"464_issue_lifecycle_backfill.down.sql",
 		"463_agent_task_automation_execution_index.down.sql",
 		"462_issue_lifecycle_binding_index.down.sql",

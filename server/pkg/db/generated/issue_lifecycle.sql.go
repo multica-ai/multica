@@ -200,6 +200,101 @@ func (q *Queries) BumpIssueLifecycleRevision(ctx context.Context, arg BumpIssueL
 	return i, err
 }
 
+const cancelTasksForSupersededAutomationExecutions = `-- name: CancelTasksForSupersededAutomationExecutions :many
+UPDATE agent_task_queue AS task
+SET status = 'cancelled',
+    completed_at = now(),
+    prepare_lease_expires_at = NULL
+FROM automation_execution AS execution
+WHERE task.automation_execution_id = execution.id
+  AND execution.issue_id = $1::uuid
+  AND execution.workspace_id = $2::uuid
+  AND execution.status = 'superseded'
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.automation_execution_id
+`
+
+type CancelTasksForSupersededAutomationExecutionsParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) CancelTasksForSupersededAutomationExecutions(ctx context.Context, arg CancelTasksForSupersededAutomationExecutionsParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, cancelTasksForSupersededAutomationExecutions, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
+			&i.DurableWorkDir,
+			&i.ChannelContextRevision,
+			&i.AutomationExecutionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const clearProjectIssueLifecycle = `-- name: ClearProjectIssueLifecycle :one
 UPDATE project
 SET default_issue_lifecycle_id = NULL,
@@ -298,6 +393,75 @@ func (q *Queries) CountIssueLifecycleStatuses(ctx context.Context, arg CountIssu
 	return column_1, err
 }
 
+const createAutomationExecution = `-- name: CreateAutomationExecution :one
+INSERT INTO automation_execution (
+    id, workspace_id, issue_id, trigger_transition_id, lifecycle_id,
+    lifecycle_revision, status_id, policy_revision, policy_snapshot,
+    executor_type, executor_id, status
+)
+VALUES (
+    $1::uuid, $2::uuid,
+    $3::uuid, $4::uuid,
+    $5::uuid, $6::bigint,
+    $7::uuid, $8::bigint,
+    $9::jsonb, $10::text,
+    $11::uuid, $12::text
+)
+ON CONFLICT (trigger_transition_id) DO UPDATE
+SET trigger_transition_id = EXCLUDED.trigger_transition_id
+RETURNING id, workspace_id, issue_id, trigger_transition_id, lifecycle_id, lifecycle_revision, status_id, policy_revision, policy_snapshot, executor_type, executor_id, status, created_at, updated_at
+`
+
+type CreateAutomationExecutionParams struct {
+	ID                  pgtype.UUID `json:"id"`
+	WorkspaceID         pgtype.UUID `json:"workspace_id"`
+	IssueID             pgtype.UUID `json:"issue_id"`
+	TriggerTransitionID pgtype.UUID `json:"trigger_transition_id"`
+	LifecycleID         pgtype.UUID `json:"lifecycle_id"`
+	LifecycleRevision   int64       `json:"lifecycle_revision"`
+	StatusID            pgtype.UUID `json:"status_id"`
+	PolicyRevision      int64       `json:"policy_revision"`
+	PolicySnapshot      []byte      `json:"policy_snapshot"`
+	ExecutorType        pgtype.Text `json:"executor_type"`
+	ExecutorID          pgtype.UUID `json:"executor_id"`
+	Status              string      `json:"status"`
+}
+
+func (q *Queries) CreateAutomationExecution(ctx context.Context, arg CreateAutomationExecutionParams) (AutomationExecution, error) {
+	row := q.db.QueryRow(ctx, createAutomationExecution,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.TriggerTransitionID,
+		arg.LifecycleID,
+		arg.LifecycleRevision,
+		arg.StatusID,
+		arg.PolicyRevision,
+		arg.PolicySnapshot,
+		arg.ExecutorType,
+		arg.ExecutorID,
+		arg.Status,
+	)
+	var i AutomationExecution
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.TriggerTransitionID,
+		&i.LifecycleID,
+		&i.LifecycleRevision,
+		&i.StatusID,
+		&i.PolicyRevision,
+		&i.PolicySnapshot,
+		&i.ExecutorType,
+		&i.ExecutorID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const ensureDefaultIssueLifecycle = `-- name: EnsureDefaultIssueLifecycle :one
 INSERT INTO issue_lifecycle (workspace_id, scope_type, scope_id, name)
 VALUES ($1, 'workspace', $1, 'Default')
@@ -348,6 +512,39 @@ func (q *Queries) EnsureProjectIssueLifecycle(ctx context.Context, arg EnsurePro
 		&i.ScopeID,
 		&i.Name,
 		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAutomationExecution = `-- name: GetAutomationExecution :one
+SELECT id, workspace_id, issue_id, trigger_transition_id, lifecycle_id, lifecycle_revision, status_id, policy_revision, policy_snapshot, executor_type, executor_id, status, created_at, updated_at FROM automation_execution
+WHERE id = $1::uuid
+  AND workspace_id = $2::uuid
+`
+
+type GetAutomationExecutionParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetAutomationExecution(ctx context.Context, arg GetAutomationExecutionParams) (AutomationExecution, error) {
+	row := q.db.QueryRow(ctx, getAutomationExecution, arg.ID, arg.WorkspaceID)
+	var i AutomationExecution
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.TriggerTransitionID,
+		&i.LifecycleID,
+		&i.LifecycleRevision,
+		&i.StatusID,
+		&i.PolicyRevision,
+		&i.PolicySnapshot,
+		&i.ExecutorType,
+		&i.ExecutorID,
+		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -735,6 +932,53 @@ func (q *Queries) ListActiveIssueLifecycleStatuses(ctx context.Context, arg List
 	return items, nil
 }
 
+const listIssueAutomationExecutions = `-- name: ListIssueAutomationExecutions :many
+SELECT id, workspace_id, issue_id, trigger_transition_id, lifecycle_id, lifecycle_revision, status_id, policy_revision, policy_snapshot, executor_type, executor_id, status, created_at, updated_at FROM automation_execution
+WHERE issue_id = $1::uuid
+  AND workspace_id = $2::uuid
+ORDER BY created_at DESC, id DESC
+`
+
+type ListIssueAutomationExecutionsParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) ListIssueAutomationExecutions(ctx context.Context, arg ListIssueAutomationExecutionsParams) ([]AutomationExecution, error) {
+	rows, err := q.db.Query(ctx, listIssueAutomationExecutions, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AutomationExecution{}
+	for rows.Next() {
+		var i AutomationExecution
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.TriggerTransitionID,
+			&i.LifecycleID,
+			&i.LifecycleRevision,
+			&i.StatusID,
+			&i.PolicyRevision,
+			&i.PolicySnapshot,
+			&i.ExecutorType,
+			&i.ExecutorID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssueLifecycleConsistency = `-- name: ListIssueLifecycleConsistency :many
 SELECT
     w.id AS workspace_id,
@@ -947,6 +1191,42 @@ func (q *Queries) LockEditableIssueLifecycle(ctx context.Context, arg LockEditab
 	return i, err
 }
 
+const markAutomationExecutionQueued = `-- name: MarkAutomationExecutionQueued :one
+UPDATE automation_execution
+SET status = 'queued', updated_at = now()
+WHERE id = $1::uuid
+  AND workspace_id = $2::uuid
+  AND status = 'pending'
+RETURNING id, workspace_id, issue_id, trigger_transition_id, lifecycle_id, lifecycle_revision, status_id, policy_revision, policy_snapshot, executor_type, executor_id, status, created_at, updated_at
+`
+
+type MarkAutomationExecutionQueuedParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) MarkAutomationExecutionQueued(ctx context.Context, arg MarkAutomationExecutionQueuedParams) (AutomationExecution, error) {
+	row := q.db.QueryRow(ctx, markAutomationExecutionQueued, arg.ID, arg.WorkspaceID)
+	var i AutomationExecution
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.TriggerTransitionID,
+		&i.LifecycleID,
+		&i.LifecycleRevision,
+		&i.StatusID,
+		&i.PolicyRevision,
+		&i.PolicySnapshot,
+		&i.ExecutorType,
+		&i.ExecutorID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const reorderIssueLifecycleStatuses = `-- name: ReorderIssueLifecycleStatuses :execrows
 UPDATE issue_lifecycle_status AS status
 SET position = ordered.ordinality - 1,
@@ -1084,6 +1364,93 @@ func (q *Queries) SetWorkspaceDefaultIssueLifecycle(ctx context.Context, arg Set
 	return err
 }
 
+const supersedeAutomationExecution = `-- name: SupersedeAutomationExecution :one
+UPDATE automation_execution
+SET status = 'superseded', updated_at = now()
+WHERE id = $1::uuid
+  AND issue_id = $2::uuid
+  AND workspace_id = $3::uuid
+  AND status IN ('pending', 'queued', 'running')
+RETURNING id, workspace_id, issue_id, trigger_transition_id, lifecycle_id, lifecycle_revision, status_id, policy_revision, policy_snapshot, executor_type, executor_id, status, created_at, updated_at
+`
+
+type SupersedeAutomationExecutionParams struct {
+	ID          pgtype.UUID `json:"id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) SupersedeAutomationExecution(ctx context.Context, arg SupersedeAutomationExecutionParams) (AutomationExecution, error) {
+	row := q.db.QueryRow(ctx, supersedeAutomationExecution, arg.ID, arg.IssueID, arg.WorkspaceID)
+	var i AutomationExecution
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.TriggerTransitionID,
+		&i.LifecycleID,
+		&i.LifecycleRevision,
+		&i.StatusID,
+		&i.PolicyRevision,
+		&i.PolicySnapshot,
+		&i.ExecutorType,
+		&i.ExecutorID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const supersedeIssueAutomationExecutions = `-- name: SupersedeIssueAutomationExecutions :many
+UPDATE automation_execution
+SET status = 'superseded', updated_at = now()
+WHERE issue_id = $1::uuid
+  AND workspace_id = $2::uuid
+  AND status IN ('pending', 'queued', 'running')
+RETURNING id, workspace_id, issue_id, trigger_transition_id, lifecycle_id, lifecycle_revision, status_id, policy_revision, policy_snapshot, executor_type, executor_id, status, created_at, updated_at
+`
+
+type SupersedeIssueAutomationExecutionsParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) SupersedeIssueAutomationExecutions(ctx context.Context, arg SupersedeIssueAutomationExecutionsParams) ([]AutomationExecution, error) {
+	rows, err := q.db.Query(ctx, supersedeIssueAutomationExecutions, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AutomationExecution{}
+	for rows.Next() {
+		var i AutomationExecution
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.TriggerTransitionID,
+			&i.LifecycleID,
+			&i.LifecycleRevision,
+			&i.StatusID,
+			&i.PolicyRevision,
+			&i.PolicySnapshot,
+			&i.ExecutorType,
+			&i.ExecutorID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const syncDefaultIssueLifecycleStatuses = `-- name: SyncDefaultIssueLifecycleStatuses :exec
 INSERT INTO issue_lifecycle_status (
     workspace_id, lifecycle_id, legacy_status_key, name, description, color,
@@ -1136,6 +1503,68 @@ func (q *Queries) SyncDefaultIssueLifecycleStatuses(ctx context.Context, arg Syn
 	return err
 }
 
+const updateIssueAssigneeFromEntryPolicy = `-- name: UpdateIssueAssigneeFromEntryPolicy :one
+UPDATE issue
+SET assignee_type = $1::text,
+    assignee_id = $2::uuid,
+    revision = revision + 1,
+    updated_at = now()
+WHERE id = $3::uuid
+  AND workspace_id = $4::uuid
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, lifecycle_id, lifecycle_status_id, last_transition_id
+`
+
+type UpdateIssueAssigneeFromEntryPolicyParams struct {
+	AssigneeType pgtype.Text `json:"assignee_type"`
+	AssigneeID   pgtype.UUID `json:"assignee_id"`
+	IssueID      pgtype.UUID `json:"issue_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) UpdateIssueAssigneeFromEntryPolicy(ctx context.Context, arg UpdateIssueAssigneeFromEntryPolicyParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, updateIssueAssigneeFromEntryPolicy,
+		arg.AssigneeType,
+		arg.AssigneeID,
+		arg.IssueID,
+		arg.WorkspaceID,
+	)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+		&i.Revision,
+		&i.LastActivityAt,
+		&i.LifecycleID,
+		&i.LifecycleStatusID,
+		&i.LastTransitionID,
+	)
+	return i, err
+}
+
 const updateIssueLifecycleStatus = `-- name: UpdateIssueLifecycleStatus :one
 UPDATE issue AS i
 SET status = s.legacy_status_key,
@@ -1161,6 +1590,81 @@ type UpdateIssueLifecycleStatusParams struct {
 
 func (q *Queries) UpdateIssueLifecycleStatus(ctx context.Context, arg UpdateIssueLifecycleStatusParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, updateIssueLifecycleStatus, arg.IssueID, arg.WorkspaceID, arg.LifecycleStatusID)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+		&i.Revision,
+		&i.LastActivityAt,
+		&i.LifecycleID,
+		&i.LifecycleStatusID,
+		&i.LastTransitionID,
+	)
+	return i, err
+}
+
+const updateIssueLifecycleStatusAndAssignee = `-- name: UpdateIssueLifecycleStatusAndAssignee :one
+UPDATE issue AS i
+SET status = s.legacy_status_key,
+    lifecycle_status_id = s.id,
+    assignee_type = $1::text,
+    assignee_id = $2::uuid,
+    revision = i.revision + 1,
+    updated_at = now()
+FROM issue_lifecycle_status AS s
+WHERE i.id = $3::uuid
+  AND i.workspace_id = $4::uuid
+  AND s.id = $5::uuid
+  AND s.workspace_id = i.workspace_id
+  AND s.lifecycle_id = i.lifecycle_id
+  AND s.legacy_status_key IS NOT NULL
+  AND s.archived_at IS NULL
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.lifecycle_id, i.lifecycle_status_id, i.last_transition_id
+`
+
+type UpdateIssueLifecycleStatusAndAssigneeParams struct {
+	AssigneeType      pgtype.Text `json:"assignee_type"`
+	AssigneeID        pgtype.UUID `json:"assignee_id"`
+	IssueID           pgtype.UUID `json:"issue_id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	LifecycleStatusID pgtype.UUID `json:"lifecycle_status_id"`
+}
+
+// Entry policy is applied at the same serialization boundary as the status
+// node. The caller has already resolved "keep" to the current persisted
+// assignee, so nullable values here mean an explicitly unassigned issue.
+func (q *Queries) UpdateIssueLifecycleStatusAndAssignee(ctx context.Context, arg UpdateIssueLifecycleStatusAndAssigneeParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, updateIssueLifecycleStatusAndAssignee,
+		arg.AssigneeType,
+		arg.AssigneeID,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.LifecycleStatusID,
+	)
 	var i Issue
 	err := row.Scan(
 		&i.ID,

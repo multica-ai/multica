@@ -15,8 +15,11 @@ export type {
   UpdateIssueLifecycleStatusRequest,
   ReorderIssueLifecycleStatusesRequest,
   IssueTransitionRecord,
+  AutomationExecutionStatus,
+  AutomationExecution,
   TransitionIssueStatusNodeRequest,
   TransitionIssueStatusNodeResponse,
+  TakeOverAutomationExecutionResponse,
 } from "./issue-status";
 export type {
   Agent,

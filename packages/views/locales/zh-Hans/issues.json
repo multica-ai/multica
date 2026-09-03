@@ -855,5 +855,12 @@
     "surface_loading": "正在加载 {{name}}…",
     "surface_unavailable": "{{name}} 的界面无法加载，已安装的版本可能不包含它。",
     "surface_navigated": "{{name}} 试图把面板替换成从别处加载的页面。已经拦下并断开连接，建议告知工作区管理员。"
+  },
+  "automation": {
+    "title": "自动化",
+    "manual": "手动",
+    "entry_count_one": "{{count}} 次进入",
+    "entry_count_other": "{{count}} 次进入",
+    "take_over": "人工接管"
   }
 }

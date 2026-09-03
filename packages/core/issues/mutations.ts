@@ -3,6 +3,7 @@ import { hashKey, useMutation, useQueryClient, type QueryKey } from "@tanstack/r
 import { api } from "../api";
 import { issueKeys } from "./queries";
 import { projectKeys } from "../projects/queries";
+import { issueLifecycleKeys } from "../issue-lifecycles/queries";
 import { inboxKeys } from "../inbox/queries";
 import {
   applyIssueChange,
@@ -356,7 +357,7 @@ export function useTransitionIssueStatusNode() {
     onSuccess: ({ issue }) => {
       const previous = qc.getQueryData<Issue>(issueKeys.detail(wsId, issue.id));
       const change = applyIssueChange(qc, wsId, issue.id, issue, {
-        changed: issueChangedDims({ status: issue.status }, previous),
+        changed: issueChangedDims(issue, previous),
         baseIssue: previous,
         acceptCurrent: (current) =>
           current.revision === undefined ||
@@ -366,6 +367,7 @@ export function useTransitionIssueStatusNode() {
       invalidateStaleListKeys(qc, change.staleKeys);
       invalidateIssueDerivatives(qc, wsId, { statusOrProjectChanged: true });
       qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueLifecycleKeys.executions(wsId, issue.id) });
     },
     onError: (_error, { id }) => {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, id) });

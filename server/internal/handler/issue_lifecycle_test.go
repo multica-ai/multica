@@ -196,6 +196,13 @@ func TestProjectLifecycleAPIAndStatusNodeTransition(t *testing.T) {
 	if effective.Lifecycle.ID != customized.Lifecycle.ID || effective.Mode != "custom" {
 		t.Fatalf("effective lifecycle response = %#v", effective)
 	}
+	var concrete issueLifecycleResponse
+	testutil.Call(t, testHandler.GetIssueLifecycle,
+		testutil.WithURLParams(newRequest(http.MethodGet, "/api/issue-lifecycles/"+customized.Lifecycle.ID, nil),
+			"lifecycleId", customized.Lifecycle.ID)).Want(http.StatusOK).JSON(&concrete)
+	if concrete.Lifecycle.ID != customized.Lifecycle.ID || len(concrete.Statuses) != len(customized.Statuses) {
+		t.Fatalf("concrete lifecycle response = %#v", concrete)
+	}
 
 	var created IssueResponse
 	testutil.Call(t, testHandler.CreateIssue,
@@ -234,6 +241,15 @@ func TestProjectLifecycleAPIAndStatusNodeTransition(t *testing.T) {
 	if transitioned.Transition == nil || transitioned.Transition.ID == "" || transitioned.Transition.ToStatusID != inProgressID {
 		t.Fatalf("transition audit response = %#v", transitioned.Transition)
 	}
+	if transitioned.Execution == nil || transitioned.Execution.Status != "dormant" || transitioned.Execution.TriggerTransitionID != transitioned.Transition.ID || transitioned.TaskID != nil {
+		t.Fatalf("manual entry execution response = %#v", transitioned)
+	}
+	var executionHistory []automationExecutionResponse
+	testutil.Call(t, testHandler.ListIssueAutomationExecutions,
+		withURLParam(newRequest(http.MethodGet, "/api/issues/"+created.ID+"/automation-executions", nil), "id", created.ID)).Want(http.StatusOK).JSON(&executionHistory)
+	if len(executionHistory) != 2 || executionHistory[0].ID != transitioned.Execution.ID {
+		t.Fatalf("automation execution history = %#v", executionHistory)
+	}
 	var noop transitionIssueStatusNodeResponse
 	testutil.Call(t, testHandler.TransitionIssueStatusNode,
 		withURLParam(newRequest(http.MethodPost, "/api/issues/"+created.ID+"/transitions", map[string]any{
@@ -241,7 +257,7 @@ func TestProjectLifecycleAPIAndStatusNodeTransition(t *testing.T) {
 			"expected_revision":      transitioned.Issue.Revision,
 			"expected_transition_id": transitioned.Issue.TransitionID,
 		}), "id", created.ID)).Want(http.StatusOK).JSON(&noop)
-	if noop.Transition != nil || noop.Issue.Revision != transitioned.Issue.Revision {
+	if noop.Transition != nil || noop.Execution != nil || noop.TaskID != nil || noop.Issue.Revision != transitioned.Issue.Revision {
 		t.Fatalf("same-node transition should be a stable no-op: %#v", noop)
 	}
 

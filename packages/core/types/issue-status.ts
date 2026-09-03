@@ -159,6 +159,32 @@ export interface IssueTransitionRecord {
   created_at: string;
 }
 
+export type AutomationExecutionStatus =
+  | "dormant"
+  | "pending"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "superseded";
+
+export interface AutomationExecution {
+  id: string;
+  issue_id: string;
+  trigger_transition_id: string;
+  lifecycle_id: string;
+  lifecycle_revision: number;
+  status_id: string;
+  policy_revision: number;
+  policy_snapshot: IssueLifecycleEntryPolicy;
+  executor_type: "agent" | "squad" | null | (string & {});
+  executor_id: string | null;
+  status: AutomationExecutionStatus | (string & {});
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TransitionIssueStatusNodeRequest {
   lifecycle_status_id: string;
   expected_revision?: number;
@@ -169,4 +195,13 @@ export interface TransitionIssueStatusNodeResponse {
   issue: import("./issue").Issue;
   /** Null when the issue was already on the requested node. */
   transition: IssueTransitionRecord | null;
+  /** Policy snapshot created for this concrete entry. */
+  execution: AutomationExecution | null;
+  /** Present only when the entry policy configured an agent or squad. */
+  task_id: string | null;
+}
+
+export interface TakeOverAutomationExecutionResponse {
+  issue: import("./issue").Issue;
+  execution: AutomationExecution;
 }

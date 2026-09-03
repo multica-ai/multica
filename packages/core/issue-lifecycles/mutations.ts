@@ -2,6 +2,7 @@ import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-q
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
 import { projectKeys } from "../projects/queries";
+import { issueKeys } from "../issues/queries";
 import type { IssueLifecycleResponse } from "../types";
 import { issueLifecycleKeys } from "./queries";
 
@@ -86,5 +87,19 @@ export function useReorderIssueLifecycleStatuses() {
       api.reorderIssueLifecycleStatuses(lifecycleId, statusIds, expectedRevision),
     onSuccess: (lifecycle) => setLifecycleQueryData(qc, wsId, lifecycle),
     onError: () => qc.invalidateQueries({ queryKey: issueLifecycleKeys.all(wsId) }),
+  });
+}
+
+export function useTakeOverAutomationExecution() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ issueId, executionId, expectedRevision }: { issueId: string; executionId: string; expectedRevision?: number }) =>
+      api.takeOverAutomationExecution(issueId, executionId, expectedRevision),
+    onSuccess: ({ issue }, { issueId }) => {
+      qc.setQueryData(issueKeys.detail(wsId, issueId), issue);
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: issueLifecycleKeys.executions(wsId, issueId) });
+    },
   });
 }

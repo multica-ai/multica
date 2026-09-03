@@ -390,6 +390,8 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 
 	var issue db.Issue
 	var assignedTask db.AgentTaskQueue
+	var lifecycleEntryTask bool
+	var customLifecycleEntryPolicy bool
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 			ID:            dbid.NewV7(),
@@ -436,13 +438,29 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
 	}
-	issue, _, _, err = issuelifecycle.RecordTransition(ctx, qtx, nil, issue, issuelifecycle.TransitionActor{
+	var initialTransition db.IssueTransition
+	issue, initialTransition, _, err = issuelifecycle.RecordTransition(ctx, qtx, nil, issue, issuelifecycle.TransitionActor{
 		Type: p.CreatorType,
 		ID:   p.CreatorID,
 	}, "issue_created")
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("record initial issue transition: %w", err)
 	}
+	issue, _, assignedTask, err = enterInitialLifecycleStatus(ctx, qtx, issue, initialTransition, issuelifecycle.TransitionActor{
+		Type: p.CreatorType,
+		ID:   p.CreatorID,
+	})
+	if err != nil {
+		return IssueCreateResult{}, fmt.Errorf("apply initial lifecycle entry policy: %w", err)
+	}
+	lifecycleEntryTask = assignedTask.ID.Valid
+	initialLifecycle, err := qtx.GetIssueLifecycleByID(ctx, db.GetIssueLifecycleByIDParams{
+		ID: issue.LifecycleID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return IssueCreateResult{}, fmt.Errorf("load initial lifecycle policy scope: %w", err)
+	}
+	customLifecycleEntryPolicy = initialLifecycle.ScopeType == "project"
 
 	if p.SourceContext != nil {
 		if _, err := PersistSourceContext(ctx, qtx, *p.SourceContext, issue.ID, pgtype.UUID{}); err != nil {
@@ -517,7 +535,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}
 	}
 
-	if !opts.AssignedAgentRunFireAt.IsZero() && s.shouldEnqueueAgentTaskWithQueries(ctx, qtx, issue) {
+	if !customLifecycleEntryPolicy && !assignedTask.ID.Valid && !opts.AssignedAgentRunFireAt.IsZero() && s.shouldEnqueueAgentTaskWithQueries(ctx, qtx, issue) {
 		// The issue must never become visible without its media-gated assigned
 		// task. Inserting both rows through qtx makes the unique-index winner
 		// deterministic: any observer that can discover the committed issue also
@@ -539,10 +557,9 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		actorID = util.UUIDToString(issue.CreatorID)
 	}
 
-	var assignedTaskID pgtype.UUID
+	assignedTaskID := assignedTask.ID
 	if !opts.AssignedAgentRunFireAt.IsZero() {
-		assignedTaskID = assignedTask.ID
-		if assignedTaskID.Valid {
+		if assignedTaskID.Valid && !lifecycleEntryTask {
 			if err := s.TaskService.hydrateDeferredChannelIssueTaskOverlay(ctx, assignedTask); err != nil {
 				// Runtime overlays are best-effort on every enqueue path. The task is
 				// already durable and safely deferred, so an optional integration
@@ -562,7 +579,12 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 
 	s.publishIssueCreated(issue, attachments, labels, p.CreatorType, actorID, opts)
 	s.captureCreatedAnalytics(issue, p.CreatorType, actorID, opts)
-	if opts.AssignedAgentRunFireAt.IsZero() {
+	if lifecycleEntryTask {
+		if s.TaskService != nil {
+			s.TaskService.BroadcastTaskQueued(ctx, assignedTask)
+			s.TaskService.NotifyTaskEnqueued(ctx, assignedTask)
+		}
+	} else if !customLifecycleEntryPolicy && opts.AssignedAgentRunFireAt.IsZero() {
 		assignedTaskID = s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID, opts.AssignedAgentRunFireAt)
 	}
 

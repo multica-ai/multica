@@ -1339,9 +1339,34 @@ export const IssueTransitionRecordSchema = z.object({
   created_at: z.string(),
 }).loose();
 
+export const AutomationExecutionSchema = z.object({
+  id: z.string(),
+  issue_id: z.string(),
+  trigger_transition_id: z.string(),
+  lifecycle_id: z.string(),
+  lifecycle_revision: z.number().int().positive(),
+  status_id: z.string(),
+  policy_revision: z.number().int().positive(),
+  policy_snapshot: IssueLifecycleEntryPolicySchema,
+  executor_type: z.string().nullable(),
+  executor_id: z.string().nullable(),
+  status: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const AutomationExecutionListSchema = z.array(AutomationExecutionSchema);
+
 export const TransitionIssueStatusNodeResponseSchema = z.object({
   issue: IssueSchema,
   transition: IssueTransitionRecordSchema.nullable(),
+  execution: AutomationExecutionSchema.nullable().optional().default(null),
+  task_id: z.string().nullable().optional().default(null),
+}).loose();
+
+export const TakeOverAutomationExecutionResponseSchema = z.object({
+  issue: IssueSchema,
+  execution: AutomationExecutionSchema,
 }).loose();
 
 export const EMPTY_TRANSITION_ISSUE_STATUS_NODE_RESPONSE: TransitionIssueStatusNodeResponse = {
@@ -1370,6 +1395,8 @@ export const EMPTY_TRANSITION_ISSUE_STATUS_NODE_RESPONSE: TransitionIssueStatusN
     updated_at: "",
   },
   transition: null,
+  execution: null,
+  task_id: null,
 };
 
 export const ListIssuesResponseSchema = z.object({

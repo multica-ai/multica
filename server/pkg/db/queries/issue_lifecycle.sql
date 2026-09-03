@@ -275,6 +275,37 @@ WHERE i.id = sqlc.arg('issue_id')::uuid
   AND s.archived_at IS NULL
 RETURNING i.*;
 
+-- name: UpdateIssueLifecycleStatusAndAssignee :one
+-- Entry policy is applied at the same serialization boundary as the status
+-- node. The caller has already resolved "keep" to the current persisted
+-- assignee, so nullable values here mean an explicitly unassigned issue.
+UPDATE issue AS i
+SET status = s.legacy_status_key,
+    lifecycle_status_id = s.id,
+    assignee_type = sqlc.narg('assignee_type')::text,
+    assignee_id = sqlc.narg('assignee_id')::uuid,
+    revision = i.revision + 1,
+    updated_at = now()
+FROM issue_lifecycle_status AS s
+WHERE i.id = sqlc.arg('issue_id')::uuid
+  AND i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND s.id = sqlc.arg('lifecycle_status_id')::uuid
+  AND s.workspace_id = i.workspace_id
+  AND s.lifecycle_id = i.lifecycle_id
+  AND s.legacy_status_key IS NOT NULL
+  AND s.archived_at IS NULL
+RETURNING i.*;
+
+-- name: UpdateIssueAssigneeFromEntryPolicy :one
+UPDATE issue
+SET assignee_type = sqlc.narg('assignee_type')::text,
+    assignee_id = sqlc.narg('assignee_id')::uuid,
+    revision = revision + 1,
+    updated_at = now()
+WHERE id = sqlc.arg('issue_id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+RETURNING *;
+
 -- name: InsertIssueTransition :execrows
 INSERT INTO issue_transition (
     id, workspace_id, issue_id, lifecycle_id, lifecycle_revision,
@@ -307,6 +338,73 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: ListIssueTransitions :many
 SELECT * FROM issue_transition
 WHERE issue_id = $1 AND workspace_id = $2
+ORDER BY created_at DESC, id DESC;
+
+-- name: CreateAutomationExecution :one
+INSERT INTO automation_execution (
+    id, workspace_id, issue_id, trigger_transition_id, lifecycle_id,
+    lifecycle_revision, status_id, policy_revision, policy_snapshot,
+    executor_type, executor_id, status
+)
+VALUES (
+    sqlc.arg('id')::uuid, sqlc.arg('workspace_id')::uuid,
+    sqlc.arg('issue_id')::uuid, sqlc.arg('trigger_transition_id')::uuid,
+    sqlc.arg('lifecycle_id')::uuid, sqlc.arg('lifecycle_revision')::bigint,
+    sqlc.arg('status_id')::uuid, sqlc.arg('policy_revision')::bigint,
+    sqlc.arg('policy_snapshot')::jsonb, sqlc.narg('executor_type')::text,
+    sqlc.narg('executor_id')::uuid, sqlc.arg('status')::text
+)
+ON CONFLICT (trigger_transition_id) DO UPDATE
+SET trigger_transition_id = EXCLUDED.trigger_transition_id
+RETURNING *;
+
+-- name: MarkAutomationExecutionQueued :one
+UPDATE automation_execution
+SET status = 'queued', updated_at = now()
+WHERE id = sqlc.arg('id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND status = 'pending'
+RETURNING *;
+
+-- name: SupersedeIssueAutomationExecutions :many
+UPDATE automation_execution
+SET status = 'superseded', updated_at = now()
+WHERE issue_id = sqlc.arg('issue_id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND status IN ('pending', 'queued', 'running')
+RETURNING *;
+
+-- name: SupersedeAutomationExecution :one
+UPDATE automation_execution
+SET status = 'superseded', updated_at = now()
+WHERE id = sqlc.arg('id')::uuid
+  AND issue_id = sqlc.arg('issue_id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND status IN ('pending', 'queued', 'running')
+RETURNING *;
+
+-- name: CancelTasksForSupersededAutomationExecutions :many
+UPDATE agent_task_queue AS task
+SET status = 'cancelled',
+    completed_at = now(),
+    prepare_lease_expires_at = NULL
+FROM automation_execution AS execution
+WHERE task.automation_execution_id = execution.id
+  AND execution.issue_id = sqlc.arg('issue_id')::uuid
+  AND execution.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND execution.status = 'superseded'
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+RETURNING task.*;
+
+-- name: GetAutomationExecution :one
+SELECT * FROM automation_execution
+WHERE id = sqlc.arg('id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid;
+
+-- name: ListIssueAutomationExecutions :many
+SELECT * FROM automation_execution
+WHERE issue_id = sqlc.arg('issue_id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
 ORDER BY created_at DESC, id DESC;
 
 -- name: GetIssueLifecycleConsistency :one
