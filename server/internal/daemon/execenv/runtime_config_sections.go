@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -392,16 +393,42 @@ func writeCommentFormatting(b *strings.Builder) {
 	b.WriteString("For issue comments, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`**. Never use inline `--content` for agent-authored comments (MUL-2904); never use `--content-stdin` HEREDOCs alongside other flags (#4182). Write the file inside your working directory, never `/tmp` or shared paths (MUL-4252). Keep the same `--parent` value from the trigger comment when replying; delete the temp file (`rm ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
 }
 
-// writeRepositories emits the Repositories section when at least one repo
-// is configured. The closing paragraph from the legacy version is dropped
-// (it re-stated the opening); intro is tightened into one line.
+// writeRepositories emits workspace repos that are not already represented by
+// a richer github_repo entry in Project Context. The claim deliberately lifts
+// project github_repo resources into ctx.Repos for checkout authorization and
+// caching, but rendering both lists repeated the same URL in the brief. This is
+// a presentation-only filter: ctx.Repos remains unchanged for runtime behavior
+// (issue #7773).
 func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
-	if len(ctx.Repos) == 0 {
+	projectRepoURLs := make(map[string]struct{})
+	for _, resource := range ctx.ProjectResources {
+		if resource.ResourceType != "github_repo" {
+			continue
+		}
+		var ref struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(resource.ResourceRef, &ref); err != nil {
+			continue
+		}
+		if url := strings.TrimSpace(ref.URL); url != "" {
+			projectRepoURLs[url] = struct{}{}
+		}
+	}
+
+	repos := make([]RepoContextForEnv, 0, len(ctx.Repos))
+	for _, repo := range ctx.Repos {
+		if _, duplicatedByProjectContext := projectRepoURLs[strings.TrimSpace(repo.URL)]; duplicatedByProjectContext {
+			continue
+		}
+		repos = append(repos, repo)
+	}
+	if len(repos) == 0 {
 		return
 	}
 	b.WriteString("## Repositories\n\n")
 	b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
-	for _, repo := range ctx.Repos {
+	for _, repo := range repos {
 		if repo.Description != "" {
 			fmt.Fprintf(b, "- %s — %s\n", repo.URL, repo.Description)
 		} else {
@@ -555,37 +582,17 @@ func writeWorkflowQuickCreate(b *strings.Builder) {
 	b.WriteString("- If the CLI returns an error, exit with that error as the only output. Do not retry.\n\n")
 }
 
-// AutopilotIssueCommandsGuard is the run-only autopilot issue-command boundary,
-// shared verbatim by the runtime brief (writeWorkflowAutopilot) and the
-// per-turn prompt (daemon.buildAutopilotPrompt). Both land in the same context
-// window; MUL-5696 found the two hand-maintained copies had drifted into an
-// unconditional ban on one surface and a conditional one on the other.
+// AutopilotIssueCommandsGuard is the run-only autopilot issue-command boundary.
+// The runtime brief is its single emission point; the per-turn prompt defers to
+// this stable, higher-priority copy. MUL-5696 found that two hand-maintained
+// copies had drifted into conflicting instructions.
 const AutopilotIssueCommandsGuard = "Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue"
 
-// writeWorkflowAutopilot emits the autopilot run-only workflow.
-func writeWorkflowAutopilot(b *strings.Builder, ctx TaskContextForEnv) {
+// writeWorkflowAutopilot emits only stable run-only policy. Per-run Autopilot
+// data belongs to daemon.buildAutopilotPrompt so it appears once, at user-turn
+// priority, without changing the runtime brief's cache prefix (issue #7773).
+func writeWorkflowAutopilot(b *strings.Builder) {
 	b.WriteString("**This task was triggered by an Autopilot in run-only mode.** There is no assigned Multica issue for this run.\n\n")
-	fmt.Fprintf(b, "- Autopilot run ID: `%s`\n", ctx.AutopilotRunID)
-	if ctx.AutopilotID != "" {
-		fmt.Fprintf(b, "- Autopilot ID: `%s`\n", ctx.AutopilotID)
-	}
-	if ctx.AutopilotTitle != "" {
-		fmt.Fprintf(b, "- Autopilot title: %s\n", ctx.AutopilotTitle)
-	}
-	if ctx.AutopilotSource != "" {
-		fmt.Fprintf(b, "- Trigger source: %s\n", ctx.AutopilotSource)
-	}
-	if ctx.AutopilotTriggerPayload != "" {
-		fmt.Fprintf(b, "- Trigger payload:\n\n```json\n%s\n```\n", ctx.AutopilotTriggerPayload)
-	}
-	if strings.TrimSpace(ctx.AutopilotDescription) != "" {
-		b.WriteString("\nAutopilot instructions:\n\n")
-		b.WriteString(ctx.AutopilotDescription)
-		b.WriteString("\n\n")
-	}
-	if ctx.AutopilotID != "" {
-		fmt.Fprintf(b, "- Run `multica autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
-	}
 	b.WriteString("- Complete the autopilot instructions directly\n")
 	b.WriteString("- " + AutopilotIssueCommandsGuard + "\n\n")
 }
@@ -953,7 +960,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	case kindQuickCreate:
 		writeWorkflowQuickCreate(&b)
 	case kindAutopilotRunOnly:
-		writeWorkflowAutopilot(&b, ctx)
+		writeWorkflowAutopilot(&b)
 	case kindIssue:
 		writeWorkflowIssue(&b, ctx)
 	}

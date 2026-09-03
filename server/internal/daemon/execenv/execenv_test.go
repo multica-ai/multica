@@ -697,15 +697,16 @@ func TestChatProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
 	}
 }
 
-// When the issue's project has its own github_repo resources, those should be
-// the only repos rendered in the meta-skill — workspace-level repos must not
-// leak into the agent prompt to avoid confusing it about which repo to use.
+// When the issue's project has its own github_repo resources, the claim lifts
+// them into Repos for checkout authorization as well as retaining their richer
+// ProjectResources representation. The brief must render each URL only once,
+// in Project Context, without changing the underlying runtime repo list.
 //
 // The handler-side override is exercised in handler tests; this test confirms
 // the rendering side: given a TaskContextForEnv where Repos was already
 // narrowed by the server to project repos only, the meta skill renders just
 // those.
-func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
+func TestProjectReposRenderedOnceInMetaSkill(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	ctx := TaskContextForEnv{
@@ -719,7 +720,8 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 			{
 				ID:           "33333333-4444-5555-6666-777777777777",
 				ResourceType: "github_repo",
-				ResourceRef:  []byte(`{"url":"https://github.com/org/project-repo"}`),
+				ResourceRef:  []byte(`{"url":"https://github.com/org/project-repo","ref":"release/v2","default_branch_hint":"main"}`),
+				Label:        "Primary repository",
 			},
 		},
 	}
@@ -731,11 +733,39 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 		t.Fatalf("read CLAUDE.md: %v", err)
 	}
 	s := string(content)
-	if !strings.Contains(s, "https://github.com/org/project-repo") {
-		t.Errorf("CLAUDE.md missing project repo URL")
+	if count := strings.Count(s, "https://github.com/org/project-repo"); count != 1 {
+		t.Errorf("CLAUDE.md project repo URL count = %d, want exactly one\n---\n%s", count, s)
 	}
-	if strings.Contains(s, "https://github.com/org/workspace-repo") {
-		t.Errorf("CLAUDE.md should not contain workspace repo when project has its own")
+	for _, want := range []string{"## Project Context", "**GitHub repo**", "release/v2", "Primary repository"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing richer project repo context %q", want)
+		}
+	}
+	if strings.Contains(s, "## Repositories") {
+		t.Errorf("CLAUDE.md should omit Repositories when every repo is already rendered in Project Context\n---\n%s", s)
+	}
+}
+
+func TestProjectContextKeepsUnmatchedWorkspaceRepoInMetaSkill(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		IssueID:   "11111111-2222-3333-4444-555555555555",
+		ProjectID: "22222222-3333-4444-5555-666666666666",
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/org/workspace-repo"},
+		},
+		ProjectResources: []ProjectResourceForEnv{
+			{
+				ID:           "33333333-4444-5555-6666-777777777777",
+				ResourceType: "local_directory",
+				ResourceRef:  []byte(`{"local_path":"/srv/project"}`),
+			},
+		},
+	}
+
+	s := buildMetaSkillContent("claude", ctx)
+	if !strings.Contains(s, "## Repositories") || !strings.Contains(s, "https://github.com/org/workspace-repo") {
+		t.Errorf("brief dropped a workspace repo not represented by Project Context\n---\n%s", s)
 	}
 }
 
@@ -2619,9 +2649,8 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 
 	for _, want := range []string{
 		"Autopilot in run-only mode",
-		"Autopilot run ID: `run-1`",
-		"Check dependencies and report outdated packages.",
-		"multica autopilot get autopilot-1 --output json",
+		"Complete the autopilot instructions directly",
+		AutopilotIssueCommandsGuard,
 		"Your final assistant output is captured automatically as the autopilot run result",
 	} {
 		if !strings.Contains(s, want) {
@@ -2630,6 +2659,11 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 	}
 
 	for _, absent := range []string{
+		"Autopilot run ID: `run-1`",
+		"autopilot-1",
+		"Daily dependency check",
+		"Check dependencies and report outdated packages.",
+		"Trigger source: manual",
 		"Run `multica issue get",
 		"Final results MUST be delivered via `multica issue comment add`",
 	} {
