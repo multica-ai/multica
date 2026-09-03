@@ -84,8 +84,12 @@ type DedupeStore interface {
 	// Claim reports whether the caller is the first to take key. It must be
 	// atomic across processes.
 	Claim(ctx context.Context, key string, ttl time.Duration) (bool, error)
-	// Release gives a claim back, for a delivery that provably did not happen.
-	Release(ctx context.Context, key string)
+	// Release gives a claim back, for a delivery that provably did not
+	// happen. It reports failure, because a claim that could not be given
+	// back is not "still claimed" in any useful sense: every later offer
+	// loses it and the publisher's watcher reads it as taken, so the caller
+	// is the last party that can still say what became of the reply.
+	Release(ctx context.Context, key string) error
 	// Held reports whether key is claimed right now. It is how the publisher
 	// learns, after the fact, whether ANY replica took a delivery it routed —
 	// see RelayOutbound.watchOutcomes.
@@ -800,11 +804,39 @@ func (r *RelayOutbound) perform(ctx context.Context, item queued) bool {
 	}
 	// Not ours, or provably never written: give the claim back — and offer it
 	// again locally too, because release alone wakes nobody (see !won above).
-	r.seen.forget(item.eventID)
 	if r.dedupe != nil {
-		r.dedupe.Release(ctx, key)
+		if err := r.dedupe.Release(ctx, key); err != nil {
+			// The key survives to its TTL. From here every re-offer loses the
+			// claim and never reaches the socket, and the publisher's settle
+			// reads the key as "somebody took it" and stays quiet — so a reply
+			// that nobody can deliver any more would end with delivered,
+			// dropped and unconfirmed all at zero. This replica holds the
+			// claim and is the only party that can still record the ending,
+			// so it records it here, once, and stops offering.
+			r.strandedClaim(ctx, item.frame, err)
+			return true
+		}
 	}
+	r.seen.forget(item.eventID)
 	return false
+}
+
+// strandedClaim records the one terminating outcome for a frame whose claim
+// could not be released. The reply counters are for agent replies, their
+// documented unit; an inbox push is logged and nothing else moves.
+func (r *RelayOutbound) strandedClaim(ctx context.Context, f relayFrame, releaseErr error) {
+	if f.Kind == relayKindReply {
+		r.mx().RecordOutboundDropped(string(dropTransport))
+	}
+	r.logger.WarnContext(ctx, "wecom outbound: reply not delivered",
+		"reason", string(dropTransport),
+		"kind", f.Kind,
+		"chat_session_id", f.SessionID,
+		"installation_id", f.InstallationID,
+		"task_id", f.TaskID,
+		"error", releaseErr,
+		"detail", "the frame never reached the wire and its delivery claim could not be released; "+
+			"the claim outlives every re-offer, so nothing else will record this reply's ending")
 }
 
 func dedupeKey(eventID string) string { return "wecom:outbound:claim:" + eventID }

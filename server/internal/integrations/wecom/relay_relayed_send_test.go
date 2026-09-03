@@ -139,6 +139,13 @@ var relayRetryConfig = RelayConfig{Shards: 1, LeaseSettle: 40 * time.Millisecond
 
 func newRelaySendRig(t *testing.T, failOn func(n int) bool) *relaySendRig {
 	t.Helper()
+	return newRelaySendRigWithDedupe(t, failOn, nil)
+}
+
+// newRelaySendRigWithDedupe is the rig with a claim store, for the paths the
+// claim gate takes part in.
+func newRelaySendRigWithDedupe(t *testing.T, failOn func(n int) bool, dedupe DedupeStore) *relaySendRig {
+	t.Helper()
 	reg := newSendersRegistry()
 	instID := mustTestUUID(t)
 	conn := &deadlineFlakyConn{failOn: failOn}
@@ -150,7 +157,7 @@ func newRelaySendRig(t *testing.T, failOn func(n int) bool) *relaySendRig {
 
 	// No dedupe store: that is the single-replica claim gate, and it leaves the
 	// retry chain — the thing under test — exactly as it is in production.
-	router := NewRelayOutbound(&fanoutRelay{}, nil, relayRetryConfig, testLogger())
+	router := NewRelayOutbound(&fanoutRelay{}, dedupe, relayRetryConfig, testLogger())
 	router.SetMetrics(mx)
 	router.Attach(o)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -265,3 +272,43 @@ func TestRelayedReply_ARetryThatSucceedsIsNotAlsoADrop(t *testing.T) {
 // ---------------------------------------------------------------------------
 // 2. a re-offer must not repeat what the user already read
 // ---------------------------------------------------------------------------
+
+// A claim that cannot be given back is not "still claimed" in any useful
+// sense. The key survives to its TTL, every re-offer loses it and never
+// reaches the socket, and the publisher's settle reads it as taken — so a
+// reply nobody can deliver any more would end with delivered, dropped and
+// unconfirmed all at zero. The replica holding the claim is the only party
+// left that can record the ending, and it does so exactly once.
+//
+// REVERSE VERIFICATION: ignore Release's error in perform (drop the
+// strandedClaim branch) and this fails with outbound_dropped = 0 — the reply
+// is re-offered, loses the claim every time, and nothing counts it.
+func TestRelayedReply_AClaimThatCannotBeReleasedIsCountedOnceAndNotReoffered(t *testing.T) {
+	t.Parallel()
+	dedupe := newSharedDedupe()
+	dedupe.releaseFails = true
+	// The first write fails before the frame leaves — provably not sent — so
+	// the claim has to go back; and it cannot.
+	rig := newRelaySendRigWithDedupe(t, func(n int) bool { return n == 1 }, dedupe)
+
+	rig.route(t, "the agent reply")
+	waitFor(t, "the stranded claim to be recorded", func() bool {
+		return rig.mx.get("outbound_dropped") >= 1
+	})
+	// Long enough for the whole retry chain to have run, had one been
+	// scheduled.
+	time.Sleep(rig.router.outcomeGrace())
+
+	if got := rig.mx.get("outbound_dropped"); got != 1 {
+		t.Fatalf("outbound_dropped = %d, want exactly 1", got)
+	}
+	if got := rig.mx.get("outbound_delivered"); got != 0 {
+		t.Fatalf("outbound_delivered = %d, want 0", got)
+	}
+	if got := rig.conn.writeAttempts(); got != 1 {
+		t.Fatalf("the frame was offered %d times, want 1: a claim that cannot be released is not offered again", got)
+	}
+	if dedupe.heldCount() != 1 {
+		t.Fatalf("%d claim keys held, want the 1 that could not be released", dedupe.heldCount())
+	}
+}
