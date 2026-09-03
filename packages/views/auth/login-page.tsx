@@ -522,7 +522,7 @@ export function LoginPage({
             {t(($) => $.signin.title)}
           </CardTitle>
           <CardDescription>
-            {t(($) => $.signin.description)}
+            {ldapActive ? t(($) => $.ldap.subtitle) : t(($) => $.signin.description)}
           </CardDescription>
         </CardHeader>
         {showTabs && (

@@ -729,37 +729,67 @@ describe("LoginPage", () => {
   // Directory (LDAP) login
   // -------------------------------------------------------------------------
 
-  it("renders both credential tabs when the server offers directory login", async () => {
+  it("renders both credential tabs when the server offers LDAP/AD login", async () => {
     renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
 
     expect(screen.getByRole("tab", { name: /email code/i })).toBeInTheDocument();
     expect(
-      screen.getByRole("tab", { name: /directory account/i }),
+      screen.getByRole("tab", { name: /ldap\/ad account/i }),
     ).toBeInTheDocument();
 
-    // Email panel is the default: its field is up, the directory fields are not.
+    // Email panel is the default: its field is up, the LDAP/AD fields are not.
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
     expect(
-      screen.queryByLabelText(/directory username/i),
+      screen.queryByLabelText(/enterprise ldap username/i),
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
   });
 
-  it("renders no directory tab when ldap is omitted", () => {
+  // Regression: the header subtitle used to stay hardcoded to the email-code
+  // copy ("Enter your email...") even while the LDAP/AD panel was showing,
+  // which reads as an error on the directory panel (COM-125).
+  it("swaps the header subtitle for the active panel instead of always showing the email copy", async () => {
+    renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
+
+    expect(
+      screen.getByText(/enter your email to get a login code/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/sign in with your enterprise ldap account and password/i),
+    ).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: /ldap\/ad account/i }));
+
+    expect(
+      screen.getByText(/sign in with your enterprise ldap account and password/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/enter your email to get a login code/i),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /email code/i }));
+
+    expect(
+      screen.getByText(/enter your email to get a login code/i),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no LDAP/AD tab when ldap is omitted", () => {
     renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
-    expect(screen.queryByRole("tab", { name: /directory account/i })).toBeNull();
+    expect(screen.queryByRole("tab", { name: /ldap\/ad account/i })).toBeNull();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
   });
 
-  it("renders no directory tab when ldap.enabled is false", () => {
+  it("renders no LDAP/AD tab when ldap.enabled is false", () => {
     renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: false }} />);
 
-    expect(screen.queryByRole("tab", { name: /directory account/i })).toBeNull();
+    expect(screen.queryByRole("tab", { name: /ldap\/ad account/i })).toBeNull();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
   });
 
-  it("hides the Google button while the directory panel is showing", async () => {
+  it("hides the Google button while the LDAP/AD panel is showing", async () => {
     renderWithI18n(
       <LoginPage
         onSuccess={onSuccess}
@@ -773,20 +803,20 @@ describe("LoginPage", () => {
       screen.getByRole("button", { name: /continue with google/i }),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: /directory account/i }));
+    await user.click(screen.getByRole("tab", { name: /ldap\/ad account/i }));
 
     expect(
       screen.queryByRole("button", { name: /continue with google/i }),
     ).toBeNull();
   });
 
-  it("clears the directory error when switching back to the email panel", async () => {
+  it("clears the LDAP/AD error when switching back to the email panel", async () => {
     mockLdapLogin.mockRejectedValueOnce(new ApiError("nope", 401, "Unauthorized"));
     renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("tab", { name: /directory account/i }));
-    await user.type(screen.getByLabelText(/directory username/i), "alice");
+    await user.click(screen.getByRole("tab", { name: /ldap\/ad account/i }));
+    await user.type(screen.getByLabelText(/enterprise ldap username/i), "alice");
     await user.type(screen.getByLabelText(/password/i), "s3cret");
     await user.click(screen.getByRole("button", { name: /^sign in$/i }));
 
@@ -803,7 +833,7 @@ describe("LoginPage", () => {
     ).toBeNull();
   });
 
-  it("signs in through the auth store and calls onSuccess on directory success", async () => {
+  it("signs in through the auth store and calls onSuccess on LDAP/AD success", async () => {
     mockLdapLogin.mockResolvedValueOnce({ id: "u1", email: "alice@corp.test" });
     mockApiListWorkspaces.mockResolvedValueOnce([{ id: "ws-1" }]);
     const onTokenObtained = vi.fn();
@@ -817,8 +847,8 @@ describe("LoginPage", () => {
     );
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("tab", { name: /directory account/i }));
-    await user.type(screen.getByLabelText(/directory username/i), "  alice  ");
+    await user.click(screen.getByRole("tab", { name: /ldap\/ad account/i }));
+    await user.type(screen.getByLabelText(/enterprise ldap username/i), "  alice  ");
     await user.type(screen.getByLabelText(/password/i), "s3cret");
     await user.click(screen.getByRole("button", { name: /^sign in$/i }));
 
@@ -826,7 +856,7 @@ describe("LoginPage", () => {
       expect(onSuccess).toHaveBeenCalled();
       expect(onTokenObtained).toHaveBeenCalled();
     });
-    // Username is trimmed before it reaches the directory.
+    // Username is trimmed before it reaches the LDAP/AD server.
     expect(mockLdapLogin).toHaveBeenCalledWith("alice", "s3cret");
     // Same cache seeding as the code path: onSuccess reads it synchronously.
     expect(mockSetQueryData).toHaveBeenCalled();
@@ -838,8 +868,8 @@ describe("LoginPage", () => {
     renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("tab", { name: /directory account/i }));
-    await user.type(screen.getByLabelText(/directory username/i), "alice");
+    await user.click(screen.getByRole("tab", { name: /ldap\/ad account/i }));
+    await user.type(screen.getByLabelText(/enterprise ldap username/i), "alice");
     await user.type(screen.getByLabelText(/password/i), "wrong");
     await user.click(screen.getByRole("button", { name: /^sign in$/i }));
 
@@ -851,19 +881,19 @@ describe("LoginPage", () => {
     expect(onSuccess).not.toHaveBeenCalled();
     // A wrong password is a typo: making the user retype the username too is
     // the difference between a shrug and a support ticket.
-    expect(screen.getByLabelText(/directory username/i)).toHaveValue("alice");
+    expect(screen.getByLabelText(/enterprise ldap username/i)).toHaveValue("alice");
     expect(screen.getByLabelText(/password/i)).toHaveValue("wrong");
   });
 
-  it("shows the directory-outage copy on a 502 and passes a 429 message through", async () => {
+  it("shows the LDAP/AD-outage copy on a 502 and passes a 429 message through", async () => {
     mockLdapLogin.mockRejectedValueOnce(new ApiError("down", 502, "Bad Gateway"));
     const { unmount } = renderWithI18n(
       <LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />,
     );
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("tab", { name: /directory account/i }));
-    await user.type(screen.getByLabelText(/directory username/i), "alice");
+    await user.click(screen.getByRole("tab", { name: /ldap\/ad account/i }));
+    await user.type(screen.getByLabelText(/enterprise ldap username/i), "alice");
     await user.type(screen.getByLabelText(/password/i), "pw");
     await user.click(screen.getByRole("button", { name: /^sign in$/i }));
 
@@ -876,8 +906,8 @@ describe("LoginPage", () => {
     // wording is what the user should read.
     mockLdapLogin.mockRejectedValueOnce(new ApiError("too many attempts", 429, "Too Many Requests"));
     renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
-    await user.click(screen.getByRole("tab", { name: /directory account/i }));
-    await user.type(screen.getByLabelText(/directory username/i), "alice");
+    await user.click(screen.getByRole("tab", { name: /ldap\/ad account/i }));
+    await user.type(screen.getByLabelText(/enterprise ldap username/i), "alice");
     await user.type(screen.getByLabelText(/password/i), "pw");
     await user.click(screen.getByRole("button", { name: /^sign in$/i }));
 
@@ -886,15 +916,15 @@ describe("LoginPage", () => {
     });
   });
 
-  it("requires both directory fields before submitting", async () => {
+  it("requires both LDAP/AD fields before submitting", async () => {
     renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("tab", { name: /directory account/i }));
+    await user.click(screen.getByRole("tab", { name: /ldap\/ad account/i }));
     const button = screen.getByRole("button", { name: /^sign in$/i });
     expect(button).toBeDisabled();
 
-    await user.type(screen.getByLabelText(/directory username/i), "alice");
+    await user.type(screen.getByLabelText(/enterprise ldap username/i), "alice");
     expect(button).toBeDisabled();
   });
 
@@ -909,8 +939,8 @@ describe("LoginPage", () => {
     );
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("tab", { name: /directory account/i }));
-    await user.type(screen.getByLabelText(/directory username/i), "alice");
+    await user.click(screen.getByRole("tab", { name: /ldap\/ad account/i }));
+    await user.type(screen.getByLabelText(/enterprise ldap username/i), "alice");
     await user.type(screen.getByLabelText(/password/i), "pw");
     await user.click(screen.getByRole("button", { name: /^sign in$/i }));
 
@@ -930,13 +960,13 @@ describe("LoginPage", () => {
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
-    await user.click(screen.getByRole("tab", { name: /directory account/i }));
+    await user.click(screen.getByRole("tab", { name: /ldap\/ad account/i }));
     await user.click(screen.getByRole("tab", { name: /email code/i }));
 
     expect(screen.getByLabelText(/email/i)).toHaveValue("test@example.com");
   });
 
-  it("does not offer the directory tab once the code step is open", async () => {
+  it("does not offer the LDAP/AD tab once the code step is open", async () => {
     mockSendCode.mockResolvedValueOnce(undefined);
     renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
 
@@ -948,7 +978,7 @@ describe("LoginPage", () => {
       expect(screen.getByText(/check your email/i)).toBeInTheDocument();
     });
     expect(
-      screen.queryByRole("tab", { name: /directory account/i }),
+      screen.queryByRole("tab", { name: /ldap\/ad account/i }),
     ).toBeNull();
   });
 });
