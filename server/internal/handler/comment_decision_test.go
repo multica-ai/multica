@@ -5,42 +5,6 @@ import (
 	"testing"
 )
 
-// TestDecidePostMergeMiss is Elon round-4 must-fix: the active-task check governs
-// what happens after a comment merge misses. A query FAILURE must fail closed —
-// never enqueue a fresh task (a duplicate concurrent-run risk) and never report a
-// success. Only a confirmed active task defers; a confirmed-none enqueues fresh.
-// Unit-tested here because a real DB fault cannot be forced through valid inputs,
-// and this decision — not the query call — is what actually governs the branch.
-func TestDecidePostMergeMiss(t *testing.T) {
-	t.Run("query error: fail closed, non-success internal_error", func(t *testing.T) {
-		status, reason, enqueueFresh := decidePostMergeMiss(false, errors.New("db down"))
-		if enqueueFresh {
-			t.Error("enqueueFresh = true on query error; must fail closed to avoid a duplicate run")
-		}
-		if status != DispatchBlocked || reason != ReasonInternalError {
-			t.Errorf("got %s/%s, want blocked/internal_error", status, reason)
-		}
-	})
-	t.Run("query error dominates a stale active=true", func(t *testing.T) {
-		status, _, enqueueFresh := decidePostMergeMiss(true, errors.New("db down"))
-		if enqueueFresh || status != DispatchBlocked {
-			t.Errorf("got status %s enqueueFresh %v, want blocked + no fresh enqueue", status, enqueueFresh)
-		}
-	})
-	t.Run("active task: defer, no fresh enqueue", func(t *testing.T) {
-		status, reason, enqueueFresh := decidePostMergeMiss(true, nil)
-		if enqueueFresh || status != DispatchDeferred || reason != ReasonDeferred {
-			t.Errorf("got %s/%s enqueueFresh %v, want deferred + no fresh enqueue", status, reason, enqueueFresh)
-		}
-	})
-	t.Run("no active task: enqueue a fresh follow-up", func(t *testing.T) {
-		_, _, enqueueFresh := decidePostMergeMiss(false, nil)
-		if !enqueueFresh {
-			t.Error("enqueueFresh = false with no active task; a fresh follow-up must run")
-		}
-	})
-}
-
 // TestCommentMergeTerminalOutcome is Elon round-5 must-fix: a pending-task merge
 // must report an HONEST public outcome. Only a real merge is coalesced; a
 // fail-closed refusal is blocked/attribution_blocked and any other failure is
@@ -59,7 +23,7 @@ func TestCommentMergeTerminalOutcome(t *testing.T) {
 		{"real merge coalesces", commentMergeSucceeded, true, DispatchCoalesced, ReasonCoalesced},
 		{"attribution fail-closed is blocked, not success", commentMergeAttributionBlocked, true, DispatchBlocked, ReasonAttributionBlocked},
 		{"unknown error is blocked, not success", commentMergeError, true, DispatchBlocked, ReasonInternalError},
-		{"no pending task defers to active-task decision", commentMergeNoPendingTask, false, "", ""},
+		{"no compatible pending task needs write-backed hand-off", commentMergeNoPendingTask, false, "", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

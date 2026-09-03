@@ -955,10 +955,11 @@ func TestCreateComment_SquadMentionTriggersLeader(t *testing.T) {
 // coalescing that works today stops working — which is why the @agent-mention
 // cases below must stay coalesced.
 //
-// A refused merge defers here because these tasks all PREDATE the comment, so
-// reconciliation can still replay it. That ordering is proven, not assumed; see
-// TestEnqueueCommentTrigger_RoleMismatchWithNewerTaskIsNotReportedCovered for
-// the window where it does not hold.
+// A refused merge is reported as a non-success even when the queued task
+// predates the comment. Timestamp ordering is still only a snapshot: a newer
+// blocker can arrive before completion and break the replay hand-off. The
+// resolver therefore requires a completed merge, planned-id registration, or
+// fresh enqueue before it returns a success-shaped outcome.
 func TestEnqueueCommentTrigger_DoesNotCoalesceAcrossLeaderRole(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -971,8 +972,8 @@ func TestEnqueueCommentTrigger_DoesNotCoalesceAcrossLeaderRole(t *testing.T) {
 		replyIsLeader   bool // the role the new reply resolves to
 		wantStatus      DispatchStatus
 	}{
-		{name: "leader reply does not fold into a direct task", pendingIsLeader: false, replyIsLeader: true, wantStatus: DispatchDeferred},
-		{name: "leader reply does not fold into another squad's leader task", pendingIsLeader: true, pendingSquad: false, replyIsLeader: true, wantStatus: DispatchDeferred},
+		{name: "leader reply does not fold into a direct task", pendingIsLeader: false, replyIsLeader: true, wantStatus: DispatchBlocked},
+		{name: "leader reply does not fold into another squad's leader task", pendingIsLeader: true, pendingSquad: false, replyIsLeader: true, wantStatus: DispatchBlocked},
 		{name: "leader reply folds into a leader task", pendingIsLeader: true, pendingSquad: true, replyIsLeader: true, wantStatus: DispatchCoalesced},
 		{name: "direct reply folds into a leader task", pendingIsLeader: true, pendingSquad: true, replyIsLeader: false, wantStatus: DispatchCoalesced},
 		{name: "direct reply folds into a direct task", pendingIsLeader: false, replyIsLeader: false, wantStatus: DispatchCoalesced},
@@ -1152,5 +1153,109 @@ func TestEnqueueCommentTrigger_RoleMismatchWithNewerTaskIsNotReportedCovered(t *
 	if plannedHasReply {
 		t.Fatal("comment was parked on the wrong-role blocker: a planned id on a pre-claim " +
 			"task is marked delivered at claim time, so that run would consume it")
+	}
+}
+
+// TestEnqueueCommentTrigger_RoleMismatchWithOlderRunningAndNewerQueuedIsNotReportedCovered
+// closes the mixed A+C+B window in MUL-7006. A predates leader reply C and would
+// ordinarily replay it by timestamp, but newer direct-role queued task B holds
+// the pending slot and cannot accept C. Merely observing A is not durable proof:
+// A's completion replay collides with B, and B cannot see the older C. The
+// resolver must therefore report a truthful non-success while B remains queued.
+func TestEnqueueCommentTrigger_RoleMismatchWithOlderRunningAndNewerQueuedIsNotReportedCovered(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID := dbfx.Runtime(t, "mixed role-race runtime")
+	leaderID := dbfx.Agent(t, "Mixed Role Race Leader", runtimeID)
+	squadID := dbfx.Squad(t, "Mixed Role Race Squad", leaderID)
+	issueID := dbfx.Issue(t, "role mismatch with an older running task", testutil.Cols{
+		"assignee_type": "squad",
+		"assignee_id":   squadID,
+	})
+
+	// A is running and predates C, so a timestamp-only snapshot calls it
+	// "covering" even though it cannot guarantee the later hand-off past B.
+	aTriggerID := dbfx.Comment(t, issueID, "running task A trigger", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '12 minutes'"),
+	})
+	taskAID := dbfx.Task(t, leaderID, testutil.Cols{
+		"runtime_id":         runtimeID,
+		"issue_id":           issueID,
+		"status":             "running",
+		"trigger_comment_id": aTriggerID,
+		"created_at":         testutil.Raw("now() - interval '11 minutes'"),
+		"started_at":         testutil.Raw("now() - interval '10 minutes'"),
+	})
+
+	// C is the leader-role reply that needs a correctly-roled follow-up.
+	replyCommentID := dbfx.Comment(t, issueID, "reply C to the leader", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '5 minutes'"),
+	})
+
+	// B is a newer direct-role queued task. It owns the unique pending slot,
+	// cannot be re-roled in place, and cannot replay older C by timestamp.
+	bTriggerID := dbfx.Comment(t, issueID, "queued task B trigger", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '2 minutes'"),
+	})
+	taskBID := dbfx.Task(t, leaderID, testutil.Cols{
+		"runtime_id":         runtimeID,
+		"issue_id":           issueID,
+		"status":             "queued",
+		"trigger_comment_id": bTriggerID,
+		"is_leader_task":     false,
+		"created_at":         testutil.Raw("now() - interval '1 minute'"),
+	})
+
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	agent, err := testHandler.Queries.GetAgent(ctx, util.MustParseUUID(leaderID))
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+	squad, err := testHandler.Queries.GetSquad(ctx, util.MustParseUUID(squadID))
+	if err != nil {
+		t.Fatalf("load squad: %v", err)
+	}
+	trigger := commentAgentTrigger{
+		Agent:          agent,
+		Source:         commentTriggerSourceThreadParent,
+		Squad:          &squad,
+		AlreadyPending: true,
+	}
+
+	res := testHandler.enqueueCommentAgentTriggers(
+		ctx, issue, util.MustParseUUID(replyCommentID), []commentAgentTrigger{trigger})[leaderID]
+	if res.status != DispatchBlocked || res.reason != ReasonInternalError {
+		t.Fatalf("mixed role race got %q/%q, want blocked/internal_error without a false coverage promise",
+			res.status, res.reason)
+	}
+
+	// Neither task may be mutated to manufacture coverage. A planned write to A
+	// would still strand C behind B when A completes; B must not be re-roled or
+	// receive C as a pre-claim planned id.
+	var plannedOnA bool
+	dbfx.QueryRow(t, `
+		SELECT $2::uuid = ANY(coalesced_comment_ids)
+		FROM agent_task_queue WHERE id = $1
+	`, taskAID, replyCommentID).Scan(&plannedOnA)
+	if plannedOnA {
+		t.Fatal("C was registered on A despite the newer wrong-role queued blocker B")
+	}
+
+	var gotBTrigger string
+	var gotBLeader bool
+	var plannedOnB bool
+	dbfx.QueryRow(t, `
+		SELECT trigger_comment_id, is_leader_task, $2::uuid = ANY(coalesced_comment_ids)
+		FROM agent_task_queue WHERE id = $1
+	`, taskBID, replyCommentID).Scan(&gotBTrigger, &gotBLeader, &plannedOnB)
+	if gotBTrigger != bTriggerID || gotBLeader || plannedOnB {
+		t.Fatalf("queued blocker B was mutated: trigger=%s leader=%v planned_C=%v",
+			gotBTrigger, gotBLeader, plannedOnB)
 	}
 }

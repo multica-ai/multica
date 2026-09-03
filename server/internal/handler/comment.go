@@ -2066,26 +2066,23 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 //     (service.ErrDuplicatePendingTask, #5914).
 //
 // Both mean "a task now exists". INVARIANT: a success-shaped outcome (coalesced /
-// deferred / queued) is returned only when the comment is provably attached to a
-// run that will address it:
+// deferred / queued) is returned only when a completed write proves the comment
+// is attached to a run that will address it:
 //
 //   - coalesced — an atomic head-scoped merge folded it into a queued task;
 //   - queued    — a fresh task was created for it;
-//   - deferred  — an active task's completion reconcile will replay it, either
-//     because a planned-id write landed on a claim-receipt task
-//     (lost-race path, where the comment may PREDATE the task) or
-//     because the comment is newer than that task and therefore
-//     inside reconcile's `created_at > since` window (AlreadyPending
-//     path, where the task existed before the comment).
+//   - deferred  — a planned-id write landed on a claim-receipt task, so its
+//     completion reconcile will replay the comment even when the comment
+//     predates that task.
 //
 // The deferral is not a one-shot prediction: if a replay is later blocked by a
 // task that cannot cover the comment, reconcileCommentsOnCompletion hands the
 // obligation on (propagateUncoveredCommentObligation) instead of discarding it,
 // and that hand-off retries across the blocker's state changes (#5914, Elon
-// rounds 8–9). It is best-effort in exactly one shape — a DIFFERENT-head QUEUED
-// blocker, which can neither cover the comment nor accept it without violating
-// TEN-356 — and that case is logged at error rather than hidden; closing it needs
-// a durable obligation record, which is deliberately out of scope here.
+// rounds 8–9). It is best-effort when an unmergeable QUEUED blocker (a different
+// HEAD or an incompatible leader role) can neither cover nor safely accept the
+// comment; that case is logged at error rather than hidden. Closing it needs a
+// durable obligation record, which is deliberately out of scope here.
 // It never defers off a mere classification of the current active tasks — a
 // snapshot cannot prove anything about state after it is read (round 7).
 // A duplicate that cannot yet be resolved re-loops (bounded by maxAttempts); on
@@ -2093,7 +2090,6 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 // deferred that would silently drop the comment.
 func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, triggerCommentID pgtype.UUID, getEscalationDelay func() time.Duration) (DispatchStatus, DispatchReasonCode) {
 	pending := trigger.AlreadyPending
-	lostRace := false
 	// Resolve the reviewed HEAD lazily and at most once — the common
 	// non-pending path enqueues without ever needing it, so it stays off the
 	// hot path. It keys both the head-scoped merge and the planned-comment
@@ -2109,8 +2105,8 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 	}
 	// Bounded retry (#5914, Elon round 3). INVARIANT: never return a
 	// success-shaped outcome (coalesced / deferred / queued) without a COMPLETED
-	// merge, planned-id registration, fresh enqueue, or a confirmed different-head
-	// deferral. A duplicate that cannot be durably resolved re-loops; on genuine
+	// merge, planned-id registration, or fresh enqueue. A duplicate that cannot
+	// be durably resolved re-loops; on genuine
 	// non-convergence we return a truthful internal_error below, never a
 	// fabricated deferred that would silently drop the comment. maxAttempts is a
 	// concurrent-churn backstop — each duplicate is followed by a merge/register
@@ -2131,63 +2127,34 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 			); terminal {
 				return status, reason
 			}
-			// No same-head QUEUED row to fold into (merge missed). The two paths
-			// resolve differently.
-			if !lostRace {
-				// (b) AlreadyPending path: defer to an active task whose completion
-				// reconcile can still SEE this comment, or enqueue fresh if none
-				// can. MUL-4195 leaves the claimed task untouched.
-				//
-				// This used to assume the comment was newer than the task — true
-				// while every AlreadyPending task was one the merge could fold
-				// into, so a miss meant the task had been claimed and therefore
-				// still predated the comment. Role scoping (MUL-7006) broke that:
-				// the merge can now refuse a task the pending check accepted, and
-				// a task inserted between this comment's INSERT and its routing is
-				// NEWER than it. Reconcile reads `created_at > since` and the
-				// comment is not in that task's planned ids, so deferring there
-				// promised a follow-up nobody would make. Ask for the ordering
-				// instead of assuming it; when it does not hold, fall through to
-				// the enqueue, whose duplicate-key path routes this into the same
-				// durable hand-off a lost race gets.
-				covered, activeErr := h.hasActiveTaskCoveringComment(ctx, issue.ID, trigger.Agent.ID, triggerCommentID)
-				if status, reason, enqueueFresh := decidePostMergeMiss(covered, activeErr); !enqueueFresh {
-					return status, reason
-				}
-				// enqueueFresh → fall through to the enqueue below.
-			} else {
-				// (c) Lost INSERT race: the losing comment can PREDATE the winner,
-				// which completion reconcile's `created_at > since` window cannot
-				// see. Register it as a planned (undelivered) input on a same-head
-				// CLAIM-RECEIPT task (dispatched/running/waiting; queued is excluded
-				// — it must fold through the atomic merge above), turning the drop
-				// into a bounded follow-up (#5914, Elon round 2).
-				registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, triggerCommentID, getHeadSha())
-				if err != nil {
-					slog.Warn("register planned lost-race comment failed",
-						"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
-					return DispatchBlocked, ReasonInternalError
-				}
-				if registered {
-					return DispatchDeferred, ReasonDeferred
-				}
-				// (d) No same-head QUEUED task to fold (merge missed) and no
-				// same-head CLAIM-RECEIPT task to register on. Do NOT try to defer
-				// off a classification of the current active tasks: a snapshot only
-				// proves state NOW, and a DIFFERENT-head task's reconcile covering
-				// this comment can be defeated by a newer blocker that appears after
-				// the snapshot but before that task completes (its replay collides
-				// with the blocker and completion reconcile discards the failure —
-				// Elon round 7). Every success-shaped outcome must be backed by a
-				// COMPLETED write, never a prediction. So just fall through to a
-				// fresh enqueue: if the unique slot is still occupied — necessarily
-				// by a different-head task we can neither fold into nor durably cover
-				// — the insert re-raises ErrDuplicatePendingTask and we re-loop,
-				// converging to a truthful non-success; if the slot is free, the
-				// enqueue creates the covering task. (The occupant's own completion
-				// reconcile still replays this comment best-effort in the common
-				// no-blocker case; we simply never PROMISE it.)
+			// No same-head compatible QUEUED row to fold into (merge missed).
+			// Treat both an AlreadyPending observation and a lost INSERT race the
+			// same from here: neither snapshot proves durable coverage. Register
+			// the comment as a planned (undelivered) input on a same-head
+			// CLAIM-RECEIPT task (dispatched/running/waiting), or enqueue fresh.
+			//
+			// RegisterPlannedCommentForActiveTask atomically refuses the write
+			// while any unclaimed task still holds the pending slot. That closes
+			// the mixed A+C+B race: an older running A cannot justify deferred
+			// while a newer wrong-role queued B will block A's replay and cannot
+			// itself accept C. If B is claimed, the write can safely land on B's
+			// already-built receipt; if B remains queued, the fresh INSERT below
+			// collides and the bounded loop converges to an honest non-success.
+			registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, triggerCommentID, getHeadSha())
+			if err != nil {
+				slog.Warn("register planned comment hand-off failed",
+					"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
+				return DispatchBlocked, ReasonInternalError
 			}
+			if registered {
+				return DispatchDeferred, ReasonDeferred
+			}
+			// No compatible queued merge and no safe claimed-task registration.
+			// Do NOT defer from a read-only classification of active tasks: a
+			// snapshot cannot prove the later hand-off. A fresh enqueue is the
+			// remaining write-backed outcome; duplicate-key means an unmergeable
+			// occupant still owns the slot, so re-loop and eventually report a
+			// truthful internal_error if it never becomes writable.
 		}
 		if err := h.enqueueSingleCommentTrigger(ctx, issue, triggerCommentID, trigger, getEscalationDelay); err != nil {
 			// Lost the enqueue race: a sibling task for this (issue, agent) now
@@ -2196,7 +2163,6 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 			// (dispatched) instead of dropping it (#5914).
 			if errors.Is(err, service.ErrDuplicatePendingTask) {
 				pending = true
-				lostRace = true
 				continue
 			}
 			return DispatchBlocked, commentEnqueueFailureReason(err)
@@ -2280,8 +2246,8 @@ func commentEnqueueFailureReason(err error) DispatchReasonCode {
 // returns the query error rather than swallowing it (MUL-4525, Elon round 4):
 // callers must fail closed on error (never enqueue a possibly-colliding
 // duplicate) AND must not report a success — "cannot confirm whether a run is
-// active" is never the same as "a run is active". See decidePostMergeMiss /
-// decideSuppressedLeaderOutcome for the two decisions.
+// active" is never the same as "a run is active". See
+// decideSuppressedLeaderOutcome for the remaining decision.
 func (h *Handler) hasActiveTaskForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID) (bool, error) {
 	active, err := h.Queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{
 		IssueID: issueID,
@@ -2293,45 +2259,6 @@ func (h *Handler) hasActiveTaskForIssueAndAgent(ctx context.Context, issueID, ag
 		return false, err
 	}
 	return active, nil
-}
-
-// hasActiveTaskCoveringComment reports whether an active task's completion
-// reconciliation will actually REPLAY this comment — an active task created
-// strictly before it, which is the `created_at > since` relation reconcile
-// itself reads. Same fail-closed contract as hasActiveTaskForIssueAndAgent: the
-// error is returned, never swallowed, because "cannot confirm coverage" is not
-// coverage. See the query for why the weaker "is anything active" question is
-// not enough (MUL-7006).
-func (h *Handler) hasActiveTaskCoveringComment(ctx context.Context, issueID, agentID, commentID pgtype.UUID) (bool, error) {
-	covers, err := h.Queries.HasActiveTaskCoveringCommentForIssueAndAgent(ctx, db.HasActiveTaskCoveringCommentForIssueAndAgentParams{
-		IssueID:   issueID,
-		AgentID:   agentID,
-		CommentID: commentID,
-	})
-	if err != nil {
-		slog.Warn("active task comment-coverage check failed",
-			"issue_id", uuidToString(issueID), "agent_id", uuidToString(agentID),
-			"comment_id", uuidToString(commentID), "error", err)
-		return false, err
-	}
-	return covers, nil
-}
-
-// decidePostMergeMiss decides what to do after a comment merge missed on a
-// target that had a pending task (MUL-4525, Elon round 4). On a query failure
-// (activeErr != nil) it FAILS CLOSED: never enqueue a fresh task — a duplicate
-// concurrent run risk — and report a non-success internal_error, since we cannot
-// confirm a run is active. A confirmed active task defers to that run's
-// reconcile; only a confirmed-none enqueues a fresh follow-up.
-func decidePostMergeMiss(active bool, activeErr error) (status DispatchStatus, reason DispatchReasonCode, enqueueFresh bool) {
-	switch {
-	case activeErr != nil:
-		return DispatchBlocked, ReasonInternalError, false
-	case active:
-		return DispatchDeferred, ReasonDeferred, false
-	default:
-		return "", "", true
-	}
 }
 
 // decideSuppressedLeaderOutcome maps the self-trigger-suppressed squad leader's
@@ -2361,8 +2288,8 @@ const (
 	// commentMergeSucceeded: the comment folded into the queued task → coalesced.
 	commentMergeSucceeded commentMergeResult = iota
 	// commentMergeNoPendingTask: no queued task to merge into anymore (it was
-	// claimed/started between the dedup check and now). The caller runs the
-	// active-task decision (defer vs fresh enqueue).
+	// claimed/started between the dedup check and now), or the queued task cannot
+	// carry the comment's HEAD/role. The caller tries a write-backed hand-off.
 	commentMergeNoPendingTask
 	// commentMergeAttributionBlocked: fail-closed attribution refused re-stamping
 	// the merge. The original task is kept and no fresh task is enqueued, but the
@@ -2375,8 +2302,8 @@ const (
 )
 
 // commentMergeTerminalOutcome maps a merge result that carries its own final
-// outcome (everything except commentMergeNoPendingTask, which needs the
-// active-task decision) to the reported (status, reason). terminal=false only
+// outcome (everything except commentMergeNoPendingTask, which needs a
+// write-backed hand-off) to the reported (status, reason). terminal=false only
 // for commentMergeNoPendingTask.
 func commentMergeTerminalOutcome(result commentMergeResult) (status DispatchStatus, reason DispatchReasonCode, terminal bool) {
 	switch result {
@@ -2395,9 +2322,9 @@ func commentMergeTerminalOutcome(result commentMergeResult) (status DispatchStat
 // pre-claim task for (issue, agent) instead of dropping it
 // (MUL-4195). It reports HOW it resolved via commentMergeResult so the caller
 // never mislabels a refused/failed merge as success (MUL-4525 §2). No path here
-// enqueues a duplicate: on any failure the original task is kept intact, so the
-// comment is still read by that run and its instruction is not lost — only the
-// re-attribution / merge bookkeeping is declined, and that is surfaced honestly.
+// enqueues a duplicate. A failed merge keeps the original task intact; a
+// no-match result leaves the caller responsible for a write-backed hand-off, so
+// role/HEAD incompatibility never masquerades as coverage.
 //
 // Recompute-on-merge (MUL-4195 review must-fix #1): on success the run's
 // originator_user_id, runtime_mcp_overlay and runtime_connected_apps are
@@ -2450,9 +2377,9 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 	})
 	if err != nil {
 		if isNotFound(err) {
-			// No pre-claim (queued/deferred) task to merge into. The caller
-			// defers to completion reconcile when an active task exists, or
-			// enqueues fresh when none does.
+			// No compatible pre-claim (queued/deferred) task to merge into. The
+			// caller attempts a write-backed hand-off to a claimed task, then a
+			// fresh enqueue; it never infers coverage from an active-task snapshot.
 			return commentMergeNoPendingTask
 		}
 		// Unknown error: the pending task most likely still exists, so do NOT
@@ -2473,14 +2400,14 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 	return commentMergeSucceeded
 }
 
-// registerPlannedCommentForActiveTask durably folds a lost-race comment into the
+// registerPlannedCommentForActiveTask durably folds an uncovered comment into the
 // same-head active task's planned (coalesced) set when the queued merge could no
 // longer target it (the winner was already claimed → dispatched/running). It
-// returns true when a same-head active task absorbed the comment; (false, nil)
-// means no same-head active task exists (a DIFFERENT-head task holds the slot, or
-// the task just terminated), so the caller falls back to the active-task
-// decision. Delivered ids are untouched, so completion reconcile replays the
-// comment as a single bounded follow-up (#5914). See the query doc.
+// returns true when a same-head active task safely absorbed the comment;
+// (false, nil) means no such task exists, the task just terminated, or an
+// unclaimed blocker still owns the pending slot. Delivered ids are untouched,
+// so completion reconcile replays the comment as a single bounded follow-up
+// (#5914). See the query doc.
 func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue db.Issue, agentID, commentID pgtype.UUID, headSha pgtype.Text) (bool, error) {
 	row, err := h.Queries.RegisterPlannedCommentForActiveTask(ctx, db.RegisterPlannedCommentForActiveTaskParams{
 		CommentID: commentID,
@@ -2494,7 +2421,7 @@ func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue
 		}
 		return false, err
 	}
-	slog.Info("registered lost-race comment as planned follow-up input",
+	slog.Info("registered comment as planned follow-up input",
 		"task_id", uuidToString(row.ID),
 		"issue_id", uuidToString(issue.ID),
 		"agent_id", uuidToString(agentID),
@@ -2519,10 +2446,11 @@ func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue
 // hand-off is not one atomic statement, so a blocker that completes or gets
 // claimed between two steps must be re-observed rather than lost (Elon round 9):
 //
-//  1. a CLAIM-RECEIPT task (dispatched/running/waiting), ANY head: a planned id
-//     added after the claim is never delivered to that run, so it cannot consume
-//     the comment under the wrong head — it purely schedules the comment for that
-//     task's own completion reconcile, which re-enqueues at the head current then;
+//  1. a CLAIM-RECEIPT task (dispatched/running/waiting), ANY head, provided no
+//     unclaimed blocker owns the pending slot: a planned id added after the claim
+//     is never delivered to that run, so it cannot consume the comment under the
+//     wrong head — it purely schedules the comment for that task's own completion
+//     reconcile, which re-enqueues at the head current then;
 //  2. a SAME-HEAD queued task: the atomic merge, which re-stamps trigger /
 //     originator / overlay (MUL-4302). This is HEAD-SCOPED on purpose: merging
 //     into a different-head queued task would make the comment that run's trigger
@@ -2534,10 +2462,10 @@ func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue
 //
 // A duplicate-key error from (3) means the slot is still held, so the loop
 // re-observes and tries again. Returns false only when every attempt found the
-// slot held by a task that can neither cover nor accept the comment (a
-// different-head QUEUED blocker); the caller logs that loudly — it is the one
-// shape today's schema has no safe place to park, and closing it needs a durable
-// obligation record rather than an in-request hand-off.
+// slot held by a queued task that can neither cover nor accept the comment (a
+// different HEAD or an incompatible leader role); the caller logs that loudly.
+// Today's schema has no safe place to park that shape, and closing it needs a
+// durable obligation record rather than an in-request hand-off.
 func (h *Handler) propagateUncoveredCommentObligation(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID, headSha pgtype.Text) bool {
 	noEscalation := func() time.Duration { return 0 }
 	const maxAttempts = 3

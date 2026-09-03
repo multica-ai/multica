@@ -4827,47 +4827,6 @@ func (q *Queries) GetWorkspaceAgentRunCounts(ctx context.Context, workspaceID pg
 	return items, nil
 }
 
-const hasActiveTaskCoveringCommentForIssueAndAgent = `-- name: HasActiveTaskCoveringCommentForIssueAndAgent :one
-SELECT count(*) > 0 AS covers FROM agent_task_queue t
-WHERE t.issue_id = $1 AND t.agent_id = $2
-  AND (
-    t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-    OR (t.status = 'deferred' AND t.context->>'channel_issue_media_pending' = 'true')
-  )
-  AND t.created_at < (SELECT c.created_at FROM comment c WHERE c.id = $3)
-`
-
-type HasActiveTaskCoveringCommentForIssueAndAgentParams struct {
-	IssueID   pgtype.UUID `json:"issue_id"`
-	AgentID   pgtype.UUID `json:"agent_id"`
-	CommentID pgtype.UUID `json:"comment_id"`
-}
-
-// MUL-7006: true when an active task exists whose completion reconciliation
-// will REPLAY this comment, rather than merely that one exists.
-//
-// HasActiveTaskForIssueAndAgent answers the weaker question, and the comment
-// enqueue path used to treat the two as the same: a merge that missed on a
-// pending task deferred to "the active task", on the reasoning that the comment
-// arrived after that task and therefore sits inside reconcile's
-// `created_at > since` window. Nothing enforced that ordering. A task created
-// for the same (issue, agent) between a comment's INSERT and its trigger
-// resolution is NEWER than the comment, so its reconcile pass cannot see it —
-// and the comment is not in its planned ids either. Deferring to it promised a
-// follow-up that no run would ever make.
-//
-// So this asks reconcile's own question directly: is there an active task
-// created strictly BEFORE the comment? A missing comment row yields NULL and
-// therefore false, which is the safe answer — the caller then attempts a
-// durable hand-off and converges to a truthful non-success rather than
-// reporting coverage it cannot back.
-func (q *Queries) HasActiveTaskCoveringCommentForIssueAndAgent(ctx context.Context, arg HasActiveTaskCoveringCommentForIssueAndAgentParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasActiveTaskCoveringCommentForIssueAndAgent, arg.IssueID, arg.AgentID, arg.CommentID)
-	var covers bool
-	err := row.Scan(&covers)
-	return covers, err
-}
-
 const hasActiveTaskForIssue = `-- name: HasActiveTaskForIssue :one
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
@@ -4899,13 +4858,10 @@ type HasActiveTaskForIssueAndAgentParams struct {
 // MUL-4195: true when the (issue, agent) pair has any non-terminal task in a
 // state whose completion will run completion reconciliation — queued,
 // dispatched, running, waiting_local_directory, or the explicitly-marked
-// channel-media deferred state. Used by the comment enqueue
-// path: when a merge into a pre-claim task fails (the task is already
-// dispatched/running, or a mismatched pre-claim task exists), a fresh queued
-// INSERT would collide with idx_one_pending_task_per_issue_agent AND would risk
-// a duplicate run. Instead the caller relies on that active task's completion
-// reconcile to schedule the guaranteed follow-up, and only enqueues fresh when
-// NO active task exists.
+// channel-media deferred state. Used by issue-trigger dedup and the squad-leader
+// self-trigger guard. Comment coalescing does not use this read as proof of
+// coverage: after a merge miss it requires a completed merge, planned-id write,
+// or fresh enqueue before reporting success.
 func (q *Queries) HasActiveTaskForIssueAndAgent(ctx context.Context, arg HasActiveTaskForIssueAndAgentParams) (bool, error) {
 	row := q.db.QueryRow(ctx, hasActiveTaskForIssueAndAgent, arg.IssueID, arg.AgentID)
 	var has_active bool
@@ -6877,9 +6833,8 @@ WHERE id = (
       -- today stops working.
       --
       -- A refusal here is not a drop, but it is not automatically covered
-      -- either: the caller must PROVE the blocking task's completion reconcile
-      -- can still see this comment (HasActiveTaskCoveringCommentForIssueAndAgent)
-      -- before reporting it deferred.
+      -- either: the caller must complete a write-backed hand-off to a claimed
+      -- task or create a fresh task before reporting success.
       AND (
           NOT $15::boolean
           OR (
@@ -7905,6 +7860,18 @@ WHERE id = (
           COALESCE($4::text, '') = ''
           OR t.context->>'head_sha' = $4::text
       )
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_task_queue blocker
+          WHERE blocker.issue_id = $2
+            AND blocker.agent_id = $3
+            AND (
+                blocker.status = 'queued'
+                OR (
+                    blocker.status = 'deferred'
+                    AND blocker.context->>'channel_issue_media_pending' = 'true'
+                )
+            )
+      )
     ORDER BY t.created_at DESC
     LIMIT 1
 )
@@ -7923,10 +7890,10 @@ type RegisterPlannedCommentForActiveTaskRow struct {
 	CoalescedCommentIds []pgtype.UUID `json:"coalesced_comment_ids"`
 }
 
-// #5914: durably register a comment that lost an enqueue race as a PLANNED
-// (undelivered) input on the same-(issue, agent) ACTIVE task whose queued row
+// #5914: durably register an uncovered comment as a PLANNED (undelivered)
+// input on the same-(issue, agent) ACTIVE task whose queued row
 // MergeCommentIntoPendingTask could no longer target (it was claimed →
-// dispatched/running). The losing comment can predate that task's created_at,
+// dispatched/running). The comment can predate that task's created_at,
 // so completion reconciliation's `created_at > since` window cannot see it;
 // appending it to coalesced_comment_ids (the planned set) WITHOUT touching
 // delivered_comment_ids makes reconcileCommentsOnCompletion replay it as a
@@ -7934,8 +7901,9 @@ type RegisterPlannedCommentForActiveTaskRow struct {
 //
 // Head-scoped (TEN-356): only a task stamped with the SAME head_sha is a target,
 // so a new-HEAD comment is never attached to an old-HEAD run. Returns
-// pgx.ErrNoRows when no same-head active task exists (different HEAD, or the task
-// just terminated) so the caller falls back to the active-task decision.
+// pgx.ErrNoRows when no same-head active task exists (different HEAD, the task
+// just terminated, or an unclaimed blocker holds the slot), so the caller tries
+// a fresh enqueue instead of inferring coverage.
 //
 // 'queued' is DELIBERATELY EXCLUDED (#5914, Elon round 3): a not-yet-claimed
 // task has no claim receipt, so a comment merged into it WILL be recorded as
@@ -7946,6 +7914,16 @@ type RegisterPlannedCommentForActiveTaskRow struct {
 // could execute under the first member's identity/connected-apps (MUL-4302).
 // Only claim-receipt statuses (already-built delivered set) are safe planned-id
 // targets.
+//
+// The write also refuses while ANY unclaimed task holds the pair's pending slot
+// (MUL-7006). A running task A can predate comment C while a newer queued task B
+// occupies that slot. Registering C on A would look durable, but A's replay can
+// collide with B; when B has the wrong role or HEAD, neither the queued merge nor
+// B's timestamp window can carry C onward. Checking the blocker in the same
+// UPDATE that registers C keeps that mixed A+C+B state from becoming a false
+// deferred promise. If B is claimed concurrently, it becomes a valid receipt
+// target itself; if it remains queued, the caller retries the merge/fresh enqueue
+// and reports non-success when no write can prove coverage.
 func (q *Queries) RegisterPlannedCommentForActiveTask(ctx context.Context, arg RegisterPlannedCommentForActiveTaskParams) (RegisterPlannedCommentForActiveTaskRow, error) {
 	row := q.db.QueryRow(ctx, registerPlannedCommentForActiveTask,
 		arg.CommentID,
