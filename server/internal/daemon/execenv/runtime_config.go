@@ -189,6 +189,19 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 	return content, writeRuntimeConfigFile(path, content)
 }
 
+// InjectMinimalRuntimeConfig writes the gateway-oriented runtime brief. It
+// preserves the facts a provider cannot infer from its own environment and a
+// neutral catalog of task-bound skills, but deliberately omits Multica's
+// workflow and skill-activation policy.
+func InjectMinimalRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (string, error) {
+	content := buildMinimalRuntimeContent(ctx)
+	path := runtimeConfigPath(workDir, provider)
+	if path == "" {
+		return content, nil
+	}
+	return content, writeRuntimeConfigFile(path, content)
+}
+
 // runtimeConfigPath returns the absolute path to the runtime config file that
 // InjectRuntimeConfig writes for the given provider, or "" when the provider
 // has no file-based config target. Centralising the mapping keeps Inject /

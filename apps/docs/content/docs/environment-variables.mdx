@@ -240,6 +240,7 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Whether to restart into a `multica` binary replaced on disk out of band (`brew upgrade`, a re-download, a local build). Independent of `MULTICA_DAEMON_AUTO_UPDATE` |
+| `MULTICA_PLATFORM_CONTEXT` | `full` | Multica context mode: `full` keeps the historical workflow brief; `minimal` keeps runtime facts and a neutral catalog of task-bound skills without activation rules; `off` removes the brief and server-provided built-in skills. Boolean `true`/`false` remain aliases for `full`/`off` |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for task working directories |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS only. Parent directory for private per-task temp dirs; must be an existing, writable absolute directory, and an invalid value fails task startup instead of falling back to `/tmp`. Pick a short path — child tools may bind AF_UNIX sockets under it, and `sun_path` is limited to 108 bytes on Linux and 104 on macOS |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep task directories for debugging |
@@ -283,6 +284,7 @@ Supported keys:
 | `disable_auto_update` | follows environment | `true` turns auto-update off; `false` clears the local override and returns to the env var or default |
 | `auto_update_check_interval` | `6h` | Update check interval |
 | `disable_auto_reload` | follows environment | `true` stops the daemon following a binary replaced on disk; `false` clears the local override. Resolved separately from `disable_auto_update` |
+| `platform_context_mode` | follows environment | `full`, `minimal`, or `off`; `minimal` keeps server-provided skills visible while leaving activation to the provider, and `off` removes them. Empty clears the local override |
 
 A few value rules:
 

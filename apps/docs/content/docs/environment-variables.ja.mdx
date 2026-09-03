@@ -240,6 +240,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud は `true`、セルフホストは `false` | CLI の更新を自動でチェックして適用するか |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 更新チェックの間隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 帯域外で置き換えられた `multica` バイナリ（`brew upgrade`、再ダウンロード、ローカルビルド）へ再起動して追従するかどうか。`MULTICA_DAEMON_AUTO_UPDATE` とは独立 |
+| `MULTICA_PLATFORM_CONTEXT` | `full` | Multica コンテキストモード。`full` は従来のワークフロー brief、`minimal` は実行環境の事実と中立な task Skill カタログのみを保持し、強制的な起動ルールを追加しません。`off` は brief とサーバー提供の組み込み Skills を削除します。`true`/`false` は `full`/`off` の別名です |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 作業作業ディレクトリのルート |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | Linux/macOS 専用。作業ごとのプライベート一時ディレクトリの親ディレクトリ。既存かつ書き込み可能な絶対パスである必要があり、無効な値の場合は `/tmp` にフォールバックせず作業の開始に失敗します。短いパスを選んでください。子ツールがその配下に AF_UNIX ソケットを作成する場合があり、`sun_path` の上限は Linux で 108 バイト、macOS で 104 バイトです |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | デバッグ用に作業ディレクトリを保持 |
@@ -283,6 +284,7 @@ multica config show
 | `disable_auto_update` | 環境に従う | `true` で自動更新を無効化。`false` はローカルの上書きをクリアし、環境変数またはデフォルトに戻します |
 | `auto_update_check_interval` | `6h` | 更新チェックの間隔 |
 | `disable_auto_reload` | 環境に従う | `true` でディスク上の置き換えへの追従を停止。`false` はローカルの上書きをクリア。`disable_auto_update` とは別に解決されます |
+| `platform_context_mode` | 環境に従う | `full`、`minimal`、`off`。`minimal` はサーバー提供 Skills を表示したまま起動判断を provider に委ね、`off` は削除します。空文字列でローカル上書きを解除します |
 
 値のルール:
 

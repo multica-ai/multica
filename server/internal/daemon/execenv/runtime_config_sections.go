@@ -749,6 +749,48 @@ func writeSkills(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("\n")
 }
 
+// buildMinimalRuntimeContent is the declarative-only Multica brief. The
+// provider still discovers every task-bound SKILL.md natively; this catalog
+// explains what is available without turning availability or broad topical
+// overlap into an activation rule.
+func buildMinimalRuntimeContent(ctx TaskContextForEnv) string {
+	var b strings.Builder
+	b.WriteString("# Multica Runtime\n\n")
+	b.WriteString("This task is delivered through Multica. Multica provides transport and task-local platform access; the underlying provider keeps its native instructions, tools, and workflow.\n\n")
+	b.WriteString("## Runtime Facts\n\n")
+	b.WriteString("- Ending the top-level turn finishes this Multica task, so collect required run-owned results before returning.\n")
+	b.WriteString("- Final assistant output is delivered by the current surface. Runtime-local paths are not deliverables; use the surface attachment mechanism when one is provided.\n")
+	b.WriteString("- The `multica` CLI is available for Multica resources. Use it only when the user explicitly requests a Multica operation or the task cannot be completed without a unique Multica platform capability. When it is needed, use the CLI rather than direct HTTP for authenticated Multica resources.\n\n")
+
+	skills := modelVisibleSkills(ctx.AgentSkills)
+	if len(skills) == 0 {
+		return b.String()
+	}
+	b.WriteString("## Available Task Skills\n\n")
+	b.WriteString("The following task-bound skills are installed and discoverable. This catalog is informational: a skill's presence, description, or broad topical overlap is not an instruction to load or invoke it. Use one only when the user explicitly requests that capability or the task cannot be completed without its unique platform operation.\n\n")
+	for _, skill := range skills {
+		name := sanitizeNameForBriefMarkdown(skill.Name)
+		description := conciseSkillDescription(skill.Description)
+		if description == "" {
+			fmt.Fprintf(&b, "- **%s**\n", name)
+			continue
+		}
+		fmt.Fprintf(&b, "- **%s** — %s\n", name, description)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func conciseSkillDescription(description string) string {
+	const maxRunes = 180
+	description = sanitizeNameForBriefMarkdown(description)
+	runes := []rune(description)
+	if len(runes) <= maxRunes {
+		return description
+	}
+	return string(runes[:maxRunes]) + "…"
+}
+
 // writeMentions emits the @mention side-effects section (compressed).
 func writeMentions(b *strings.Builder) {
 	b.WriteString("## Mentions\n\n")

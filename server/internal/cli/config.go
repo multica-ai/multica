@@ -12,12 +12,32 @@ import (
 const (
 	defaultCLIConfigPath = ".multica/config.json"
 
+	PlatformContextFull    = "full"
+	PlatformContextMinimal = "minimal"
+	PlatformContextOff     = "off"
+
 	// TaskConfigRootEnv points daemon-managed CLI invocations at a private,
 	// per-task Multica config directory. It is deliberately Multica-specific:
 	// phase-one hardening keeps the real HOME/XDG environment available to
 	// provider tooling while preventing implicit Owner-profile discovery.
 	TaskConfigRootEnv = "MULTICA_TASK_CONFIG_ROOT"
 )
+
+// NormalizePlatformContextMode accepts the documented mode names plus the
+// boolean spellings used by the original MULTICA_PLATFORM_CONTEXT switch.
+// Returning the canonical name keeps config files and diagnostics stable.
+func NormalizePlatformContextMode(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case PlatformContextFull, "true", "1", "on", "enabled":
+		return PlatformContextFull, nil
+	case PlatformContextMinimal:
+		return PlatformContextMinimal, nil
+	case PlatformContextOff, "false", "0", "disabled":
+		return PlatformContextOff, nil
+	default:
+		return "", fmt.Errorf("platform context mode must be full, minimal, or off (got %q)", value)
+	}
+}
 
 // CLIConfig holds persistent CLI settings.
 type CLIConfig struct {
@@ -136,6 +156,15 @@ type CLIConfig struct {
 	// --no-auto-reload flag, MULTICA_DAEMON_AUTO_RELOAD=false env, this
 	// field, default (enabled).
 	DisableAutoReload bool `json:"disable_auto_reload,omitempty"`
+
+	// PlatformContextMode controls how much host-authored Multica context the
+	// daemon adds to provider CLIs. "full" preserves the historical workflow
+	// brief; "minimal" keeps only runtime facts plus a neutral catalog of the
+	// server-provided skills; "off" removes both the brief and those skills.
+	// Empty means "follow env/default". Resolution precedence:
+	// --platform-context/--no-platform-context, MULTICA_PLATFORM_CONTEXT, this
+	// field, default (full).
+	PlatformContextMode string `json:"platform_context_mode,omitempty"`
 
 	// Backends contains per-backend overrides for users who want to point
 	// the daemon at non-default tool installations (e.g. an OpenClaw bundled

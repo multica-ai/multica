@@ -240,6 +240,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自托管 `false` | 是否自动检查并更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 检查更新的间隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二进制被带外替换（`brew upgrade`、重新下载、本地构建）后重启到新二进制。与 `MULTICA_DAEMON_AUTO_UPDATE` 相互独立 |
+| `MULTICA_PLATFORM_CONTEXT` | `full` | Multica 上下文模式：`full` 保留原有工作流提示；`minimal` 只保留运行事实和中性的 task skill 清单，不附加强制触发规则；`off` 同时移除运行提示和服务端内置 skill。布尔值 `true`/`false` 仍分别等价于 `full`/`off` |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | task 工作目录的根目录 |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | 仅适用于 Linux/macOS。私有 task 临时目录的父目录；必须是现有、可写的绝对路径，无效值会使 task 启动失败，不会回退到 `/tmp`。请选择较短的路径——子工具可能会在其中绑定 AF_UNIX socket；Linux 的 `sun_path` 上限为 108 字节，macOS 为 104 字节 |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 保留 task 目录用于调试 |
@@ -283,6 +284,7 @@ multica config show
 | `disable_auto_update` | 跟随环境 | `true` 关闭自动更新；`false` 清除本地覆盖，回到环境变量或默认 |
 | `auto_update_check_interval` | `6h` | 检查更新的间隔 |
 | `disable_auto_reload` | 跟随环境 | `true` 让守护进程不再跟随磁盘上被替换的二进制；`false` 清除本地覆盖。与 `disable_auto_update` 分开解析 |
+| `platform_context_mode` | 跟随环境 | 可设为 `full`、`minimal` 或 `off`；`minimal` 保持服务端 skill 可见，由 provider 自行决定是否触发；`off` 将其移除。空值清除本地覆盖 |
 
 几条取值规则：
 

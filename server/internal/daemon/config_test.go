@@ -1107,6 +1107,60 @@ func TestLoadConfig_AutoReload_OffSwitches(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_PlatformContextModes(t *testing.T) {
+	t.Run("default full", func(t *testing.T) {
+		stageFakeAgent(t)
+		t.Setenv("MULTICA_PLATFORM_CONTEXT", "")
+		cfg, err := LoadConfig(Overrides{
+			ServerURL:      "http://localhost:8080",
+			WorkspacesRoot: t.TempDir(),
+		})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.PlatformContextMode != cli.PlatformContextFull {
+			t.Fatalf("PlatformContextMode = %q, want full", cfg.PlatformContextMode)
+		}
+	})
+
+	for _, tc := range []struct {
+		name      string
+		env       string
+		overrides Overrides
+		want      string
+	}{
+		{name: "env minimal", env: "minimal", want: cli.PlatformContextMinimal},
+		{name: "env false compatibility", env: "false", want: cli.PlatformContextOff},
+		{name: "env off", env: "off", want: cli.PlatformContextOff},
+		{name: "mode override", overrides: Overrides{PlatformContextMode: "minimal"}, want: cli.PlatformContextMinimal},
+		{name: "legacy no-context alias beats truthy env", env: "true", overrides: Overrides{DisablePlatformContext: true}, want: cli.PlatformContextOff},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stageFakeAgent(t)
+			t.Setenv("MULTICA_PLATFORM_CONTEXT", tc.env)
+			overrides := tc.overrides
+			overrides.ServerURL = "http://localhost:8080"
+			overrides.WorkspacesRoot = t.TempDir()
+			cfg, err := LoadConfig(overrides)
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			if cfg.PlatformContextMode != tc.want {
+				t.Fatalf("PlatformContextMode = %q, want %q", cfg.PlatformContextMode, tc.want)
+			}
+		})
+	}
+
+	t.Run("invalid mode", func(t *testing.T) {
+		stageFakeAgent(t)
+		t.Setenv("MULTICA_PLATFORM_CONTEXT", "aggressive")
+		_, err := LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: t.TempDir()})
+		if err == nil || !strings.Contains(err.Error(), "full, minimal, or off") {
+			t.Fatalf("LoadConfig error = %v, want mode validation", err)
+		}
+	})
+}
+
 // TestResolveAgentsViaLoginShell_StripsAliasShadowing locks down the fix for
 // #2512: when the user's rc file declares an alias with the same name as the
 // agent CLI, the resolver must still return the real binary on PATH, not the

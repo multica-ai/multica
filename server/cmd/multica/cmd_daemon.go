@@ -107,6 +107,8 @@ func init() {
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	f.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	f.String("platform-context", "", "Multica context mode: full, minimal, or off (env: MULTICA_PLATFORM_CONTEXT)")
+	f.Bool("no-platform-context", false, "Alias for --platform-context=off")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
@@ -129,6 +131,8 @@ func init() {
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	rf.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	rf.String("platform-context", "", "Multica context mode: full, minimal, or off (env: MULTICA_PLATFORM_CONTEXT)")
+	rf.Bool("no-platform-context", false, "Alias for --platform-context=off")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by task")
@@ -896,6 +900,11 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if b, _ := cmd.Flags().GetBool("no-auto-reload"); b {
 		args = append(args, "--no-auto-reload")
 	}
+	if b, _ := cmd.Flags().GetBool("no-platform-context"); b {
+		args = append(args, "--no-platform-context")
+	} else if v := flagString(cmd, "platform-context"); v != "" {
+		args = append(args, "--platform-context", v)
+	}
 
 	// Forward global persistent flags.
 	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
@@ -1043,6 +1052,21 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	noAutoReloadFlag, _ := cmd.Flags().GetBool("no-auto-reload")
 	if resolveDaemonDisableSignal(noAutoReloadFlag, "MULTICA_DAEMON_AUTO_RELOAD", fileCfg.DisableAutoReload) {
 		overrides.DisableAutoReload = true
+	}
+	// Platform context is a tri-state. Explicit flags win over env, env wins
+	// over the profile, and the daemon defaults to the historical full brief.
+	platformContextFlag, _ := cmd.Flags().GetString("platform-context")
+	noPlatformContextFlag, _ := cmd.Flags().GetBool("no-platform-context")
+	if noPlatformContextFlag && strings.TrimSpace(platformContextFlag) != "" {
+		return fmt.Errorf("--platform-context and --no-platform-context are mutually exclusive")
+	}
+	switch {
+	case noPlatformContextFlag:
+		overrides.DisablePlatformContext = true
+	case platformContextFlag != "":
+		overrides.PlatformContextMode = platformContextFlag
+	case strings.TrimSpace(os.Getenv("MULTICA_PLATFORM_CONTEXT")) == "" && fileCfg.PlatformContextMode != "":
+		overrides.PlatformContextMode = fileCfg.PlatformContextMode
 	}
 	autoUpdateFlag, _ := cmd.Flags().GetDuration("auto-update-interval")
 	autoUpdateOverride, err := resolveDaemonDurationOverride(autoUpdateFlag, "MULTICA_DAEMON_AUTO_UPDATE_INTERVAL", fileCfg.AutoUpdateCheckInterval)

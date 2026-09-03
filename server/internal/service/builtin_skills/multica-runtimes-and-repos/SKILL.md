@@ -53,6 +53,7 @@ multica repo checkout <url> --ref <branch-or-sha>
 
 The daemon injects a task-scoped `mat_` credential for Multica API commands and a private task-local Multica configuration root. Inside that managed task context:
 
+- The `multica` command remains available in every platform-context mode. Official binaries are exposed from their install directory; a locally renamed daemon gets a task-private `multica` alias without requiring a machine-wide symlink.
 - API commands such as `issue list`, `issue get`, and `issue runs` use the injected task identity and never fall back to the daemon Owner's saved Multica profile.
 - `config show` and `config set` operate only on task-local Multica state. A missing task config root fails closed.
 - `auth status` may verify the task identity but omits all token material from its output.
@@ -62,6 +63,8 @@ The daemon injects a task-scoped `mat_` credential for Multica API commands and 
 `MULTICA_DAEMON_PORT` alone is a weak, defense-in-depth signal for task-safe API and profile resolution, not task identity for human/local command rejection. Genuine tasks also carry `MULTICA_AGENT_ID` / `MULTICA_TASK_ID`, `MULTICA_TASK_CONFIG_ROOT`, or a daemon-managed workdir marker. When the port is the only signal, `daemon status` uses the selected host profile's derived health port; ordinary API and profile-resolving commands still fail closed. Host operators should not export `MULTICA_DAEMON_PORT`; the daemon derives its host health port from the selected profile and injects the variable into tasks itself.
 
 The daemon still preserves the real `HOME` and XDG variables for provider tools such as `gh`, `aws`, `kubectl`, and npm. This is CLI resolution hardening, not hard filesystem confidentiality: a process under the same OS user can still open an explicitly known Owner path. Dedicated Unix users, containers, VMs, or an equivalent OS boundary are required for that stronger isolation.
+
+Host operators can set `platform_context_mode` in the human profile (or start the daemon with `--platform-context` / `MULTICA_PLATFORM_CONTEXT`). `full` preserves the historical workflow brief; `minimal` keeps only runtime facts and a neutral catalog of task-bound skills, so server-provided skills stay visible without Multica imposing activation rules; `off` removes the brief and server-provided skills. `--no-platform-context` remains an alias for `off`. User-installed and workspace-assigned skills remain available in every mode. This is a host-profile setting: changing task-local config from inside a managed task does not reconfigure the daemon.
 
 ## Debugging an agent that did not run
 

@@ -259,6 +259,7 @@ Daemon behavior is configured via flags or environment variables:
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
+| Platform context | `--platform-context` (`--no-platform-context` = `off`) | `MULTICA_PLATFORM_CONTEXT` | `full`; `minimal` keeps runtime facts and an optional skill catalog, `off` removes both |
 | Workspaces root | — | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` |
 | GC enabled | — | `MULTICA_GC_ENABLED` | `true` (set `false`/`0` to disable) |
 | GC scan interval | — | `MULTICA_GC_INTERVAL` | `2h` |

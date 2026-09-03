@@ -6076,6 +6076,21 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	}
 }
 
+// syncPlatformRuntimeBrief keeps the on-disk provider instructions aligned
+// with the local platform-context policy. Cleanup matters on reused workdirs:
+// simply skipping injection would leave the previous task's managed block in
+// AGENTS.md / CLAUDE.md and native providers would continue loading it.
+func syncPlatformRuntimeBrief(workDir, provider string, taskCtx execenv.TaskContextForEnv, mode string) (string, error) {
+	switch mode {
+	case cli.PlatformContextMinimal:
+		return execenv.InjectMinimalRuntimeConfig(workDir, provider, taskCtx)
+	case cli.PlatformContextOff:
+		return "", execenv.CleanupRuntimeConfig(workDir, provider)
+	default:
+		return execenv.InjectRuntimeConfig(workDir, provider, taskCtx)
+	}
+}
+
 // gateResumeToReachableSession clears the task's prior session unless this run
 // can actually reach the store the session lives in, and reports whether that
 // held. Most CLI backends key their session stores to the cwd (Claude Code
@@ -6445,6 +6460,40 @@ func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 	}
 	task.Agent.Skills = skills
 	return nil
+}
+
+// stripPlatformBuiltinSkills removes only server-provided Multica skills from
+// a claimed task. User-installed skills are seeded independently from the
+// provider's real home, and workspace-assigned skills have source=workspace;
+// both remain untouched in native provider mode.
+func stripPlatformBuiltinSkills(task *Task) {
+	if task == nil || task.Agent == nil {
+		return
+	}
+
+	agent := *task.Agent
+	refs := make([]SkillRefData, 0, len(agent.SkillRefs))
+	for _, ref := range task.Agent.SkillRefs {
+		if isPlatformBuiltinSkill(ref.Source, ref.ID) {
+			continue
+		}
+		refs = append(refs, ref)
+	}
+	agent.SkillRefs = refs
+
+	skills := make([]SkillData, 0, len(agent.Skills))
+	for _, skill := range task.Agent.Skills {
+		if isPlatformBuiltinSkill(skill.Source, skill.ID) {
+			continue
+		}
+		skills = append(skills, skill)
+	}
+	agent.Skills = skills
+	task.Agent = &agent
+}
+
+func isPlatformBuiltinSkill(source, id string) bool {
+	return source == skillbundle.SourceBuiltin || strings.HasPrefix(id, "builtin:")
 }
 
 // resolveSkillBundle downloads one skill bundle and writes it to the on-disk
@@ -7161,6 +7210,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	stopPrepareLease := d.startTaskPrepareLeaseExtender(prepareCtx, task, taskLog)
 	defer stopPrepareLease()
 
+	if d.cfg.PlatformContextMode == cli.PlatformContextOff {
+		stripPlatformBuiltinSkills(&task)
+	}
 	if err := d.ensureTaskSkillBundles(prepareCtx, &task); err != nil {
 		return TaskResult{}, err
 	}
@@ -7818,9 +7870,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+	runtimeBrief, err := syncPlatformRuntimeBrief(env.WorkDir, provider, taskCtx, d.cfg.PlatformContextMode)
 	if err != nil {
-		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+		d.logger.Warn("execenv: sync runtime config failed (non-fatal)", "error", err)
 	}
 	// An exempt turn runs in the user's directory without having queued for it,
 	// so a sibling coding task may be writing to the same tree right now. That
@@ -7878,11 +7930,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
-	// inherit the daemon's PATH. Prepend the directory of the running
-	// multica binary so that `multica` commands in the agent always resolve.
+	// inherit the daemon's PATH. A locally built daemon may also have a custom
+	// filename, so taskCLIPath creates a task-private `multica` alias when the
+	// running binary is not already using the canonical command name.
 	if selfBin, err := resolveSelfExecutable(); err == nil {
-		binDir := filepath.Dir(selfBin)
-		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+		taskPath, aliasErr := taskCLIPath(selfBin, taskTempDir, os.Getenv("PATH"))
+		if aliasErr != nil {
+			taskLog.Warn("could not create task-local multica CLI alias", "executable", selfBin, "error", aliasErr)
+		}
+		agentEnv["PATH"] = taskPath
 	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
@@ -8199,7 +8255,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		task.PriorSessionResumeUnavailable = true
 		execOpts.ResumeContinuityNotice = ""
 		taskCtx.PriorSessionResumed = false
-		if freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); briefErr != nil {
+		if freshBrief, briefErr := syncPlatformRuntimeBrief(env.WorkDir, provider, taskCtx, d.cfg.PlatformContextMode); briefErr != nil {
 			taskLog.Warn("execenv: re-inject cold runtime config for fresh retry failed (non-fatal)", "error", briefErr)
 		} else {
 			runtimeBrief = freshBrief

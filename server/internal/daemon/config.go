@@ -124,6 +124,7 @@ type Config struct {
 	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
 	AutoReloadEnabled              bool                  // restart when the multica binary on disk no longer matches the running version (default: true for CLI-launched daemons)
+	PlatformContextMode            string                // full (historical brief), minimal (runtime facts + optional skill catalog), or off (default: full)
 	PollInterval                   time.Duration
 	HeartbeatInterval              time.Duration
 	AgentTimeout                   time.Duration
@@ -184,6 +185,11 @@ type Overrides struct {
 	// Single-direction for the same reason as DisableAutoUpdate: the
 	// env/default already resolves to enabled.
 	DisableAutoReload bool
+	// PlatformContextMode selects full, minimal, or off. Empty leaves env/default
+	// resolution in control. DisablePlatformContext remains a one-way legacy CLI
+	// alias for --no-platform-context and always resolves to off.
+	PlatformContextMode    string
+	DisablePlatformContext bool
 }
 
 // LoadConfig builds the daemon configuration from environment variables
@@ -583,6 +589,26 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		autoReloadEnabled = false
 	}
 
+	// Full platform context is the backward-compatible default. The original
+	// boolean environment switch remains accepted: true maps to full and false
+	// maps to off. Minimal is the gateway-oriented middle ground.
+	platformContextMode := cli.PlatformContextFull
+	if raw := strings.TrimSpace(os.Getenv("MULTICA_PLATFORM_CONTEXT")); raw != "" {
+		platformContextMode, err = cli.NormalizePlatformContextMode(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("MULTICA_PLATFORM_CONTEXT: %w", err)
+		}
+	}
+	if overrides.PlatformContextMode != "" {
+		platformContextMode, err = cli.NormalizePlatformContextMode(overrides.PlatformContextMode)
+		if err != nil {
+			return Config{}, err
+		}
+	}
+	if overrides.DisablePlatformContext {
+		platformContextMode = cli.PlatformContextOff
+	}
+
 	return Config{
 		ServerBaseURL:                   serverBaseURL,
 		DaemonID:                        daemonID,
@@ -609,6 +635,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AutoUpdateEnabled:               autoUpdateEnabled,
 		AutoUpdateCheckInterval:         autoUpdateInterval,
 		AutoReloadEnabled:               autoReloadEnabled,
+		PlatformContextMode:             platformContextMode,
 		HealthPort:                      healthPort,
 		MaxConcurrentTasks:              maxConcurrentTasks,
 		PollInterval:                    pollInterval,

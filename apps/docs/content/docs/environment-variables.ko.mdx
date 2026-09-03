@@ -240,6 +240,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`, 자체 호스팅 `false` | CLI 자동 확인 및 업데이트 여부 |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 업데이트 확인 간격 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 외부에서 교체된 `multica` 바이너리(`brew upgrade`, 재다운로드, 로컬 빌드)로 재시작할지 여부. `MULTICA_DAEMON_AUTO_UPDATE`와 독립적 |
+| `MULTICA_PLATFORM_CONTEXT` | `full` | Multica 컨텍스트 모드입니다. `full`은 기존 워크플로 brief를 유지하고, `minimal`은 실행 환경 정보와 중립적인 task Skill 카탈로그만 유지하며 강제 실행 규칙을 추가하지 않습니다. `off`는 brief와 서버 제공 기본 Skills를 제거합니다. `true`/`false`는 `full`/`off`의 별칭입니다 |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 작업 작업 디렉터리의 루트 |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`(Linux/macOS) | Linux/macOS 전용. 작업별 비공개 임시 디렉터리의 상위 디렉터리입니다. 기존의 쓰기 가능한 절대 경로여야 하며, 값이 잘못되면 `/tmp`로 대체하지 않고 작업 시작에 실패합니다. 짧은 경로를 선택하세요. 하위 도구가 그 아래에 AF_UNIX 소켓을 만들 수 있으며 `sun_path` 제한은 Linux에서 108바이트, macOS에서 104바이트입니다 |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 디버깅을 위해 작업 디렉터리 유지 |
@@ -283,6 +284,7 @@ multica config show
 | `disable_auto_update` | 환경을 따름 | `true`는 자동 업데이트를 끔. `false`는 로컬 덮어쓰기를 지우고 환경 변수 또는 기본값으로 복귀 |
 | `auto_update_check_interval` | `6h` | 업데이트 확인 간격 |
 | `disable_auto_reload` | 환경을 따름 | `true`는 디스크에서 교체된 바이너리 추적을 끔. `false`는 로컬 덮어쓰기를 지움. `disable_auto_update`와 별도로 해석됨 |
+| `platform_context_mode` | 환경을 따름 | `full`, `minimal`, `off` 중 하나입니다. `minimal`은 서버 제공 Skills를 표시한 채 실행 판단을 provider에 맡기고, `off`는 제거합니다. 빈 문자열은 로컬 재정의를 지웁니다 |
 
 값에는 다음 규칙이 적용됩니다.
 
