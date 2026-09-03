@@ -335,6 +335,7 @@ var SupportedTypes = []string{
 	"mcode",
 	"dim",
 	"zeroclaw",
+	"commandcode",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -402,6 +403,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &copilotBackend{cfg: cfg}, nil
 	case "opencode":
 		return &opencodeBackend{cfg: cfg}, nil
+	case "commandcode":
+		return &commandcodeBackend{cfg: cfg}, nil
 	case "codearts":
 		return newCodeArtsBackend(cfg)
 	case "deveco":
@@ -464,6 +467,7 @@ func DetectVersion(ctx context.Context, cmd Command) (string, error) {
 var launchHeaders = map[string]string{
 	"antigravity": "agy -p (non-interactive)",
 	"claude":      "claude (stream-json)",
+	"commandcode": "commandcode -p (json events)",
 	"codebuddy":   "codebuddy (stream-json)",
 	"codex":       "codex app-server",
 	"copilot":     "copilot (json)",

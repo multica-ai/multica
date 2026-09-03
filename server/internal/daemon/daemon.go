@@ -6018,15 +6018,16 @@ func taskRootDirParams(workspacesRoot string, task Task) execenv.RootDirParams {
 // this map at init so their display names stay in lockstep with the
 // descriptor.
 var runtimeDisplayNameOverrides = map[string]string{
-	"codearts":   "CodeArts",
-	"dsh":        "DeepSeek Harness",
-	"traecli":    "Trae",
-	"grok":       "Grok",
-	"qoderclicn": "Qoder CN",
-	"qwen":       "Qwen Code",
-	"qwenpaw":    "QwenPaw",
-	"mcode":      "MiniMax Code",
-	"zeroclaw":   "ZeroClaw",
+	"codearts":    "CodeArts",
+	"dsh":         "DeepSeek Harness",
+	"traecli":     "Trae",
+	"grok":        "Grok",
+	"qoderclicn":  "Qoder CN",
+	"qwen":        "Qwen Code",
+	"qwenpaw":     "QwenPaw",
+	"mcode":       "MiniMax Code",
+	"zeroclaw":    "ZeroClaw",
+	"commandcode": "Command Code",
 }
 
 func init() {

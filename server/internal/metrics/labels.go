@@ -157,6 +157,7 @@ var (
 		"dim":           "dim",
 		"mcode":         "mcode",
 		"zeroclaw":      "zeroclaw",
+		"commandcode":   "commandcode",
 		"multica_agent": "multica_agent",
 		"openclaw":      "openclaw",
 		"opencode":      "opencode",
