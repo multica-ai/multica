@@ -179,3 +179,46 @@ func workflowActiveRunUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "workflow_run_one_active_per_issue"
 }
+
+func (s *WorkflowService) Cancel(ctx context.Context, workspaceID, issueID pgtype.UUID, actor WorkflowActor) (WorkflowMutationResult, error) {
+	if !validWorkflowActor(actor) {
+		return WorkflowMutationResult{}, fmt.Errorf("%w: invalid workflow actor", ErrWorkflowConflict)
+	}
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return WorkflowMutationResult{}, fmt.Errorf("begin workflow cancel tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+
+	run, err := qtx.LockActiveWorkflowRunForIssue(ctx, db.LockActiveWorkflowRunForIssueParams{WorkspaceID: workspaceID, IssueID: issueID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		latest, latestErr := qtx.GetLatestWorkflowRunForIssue(ctx, db.GetLatestWorkflowRunForIssueParams{WorkspaceID: workspaceID, IssueID: issueID})
+		if errors.Is(latestErr, pgx.ErrNoRows) {
+			return WorkflowMutationResult{}, ErrWorkflowRunNotFound
+		}
+		if latestErr != nil {
+			return WorkflowMutationResult{}, fmt.Errorf("get latest workflow run for cancel: %w", latestErr)
+		}
+		if latest.Status == "cancelled" {
+			return WorkflowMutationResult{Run: latest, Outcome: "already_cancelled"}, nil
+		}
+		return WorkflowMutationResult{}, fmt.Errorf("%w: workflow run is already terminal", ErrWorkflowConflict)
+	}
+	if err != nil {
+		return WorkflowMutationResult{}, fmt.Errorf("lock active workflow run for cancel: %w", err)
+	}
+	updated, transition, err := persistWorkflowTransition(ctx, qtx, run, workflowTransitionMutation{
+		Status: "cancelled", CurrentStage: run.CurrentStage, Kind: "cancelled", Actor: actor,
+		CancelledAt: workflowTimestamp(), Payload: map[string]any{"reason": "explicit_cancel"},
+	})
+	if err != nil {
+		return WorkflowMutationResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return WorkflowMutationResult{}, fmt.Errorf("commit workflow cancel: %w", err)
+	}
+	return WorkflowMutationResult{
+		Run: updated, Transitions: []db.WorkflowTransition{transition}, Outcome: "cancelled",
+	}, nil
+}

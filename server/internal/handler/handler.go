@@ -194,6 +194,7 @@ type Handler struct {
 	TaskService            *service.TaskService
 	PluginService          *service.PluginService
 	IssueService           *service.IssueService
+	WorkflowService        *service.WorkflowService
 	AutopilotService       *service.AutopilotService
 	// Entitlements supplies workspace-scoped commercial gates. A nil provider
 	// preserves self-hosted behavior without extra reads.
@@ -469,6 +470,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		TaskService:                  taskSvc,
 		PluginService:                service.NewPluginService(queries, txStarter),
 		IssueService:                 service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
+		WorkflowService:              service.NewWorkflowService(queries, txStarter),
 		AutopilotService:             service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:                 emailService,
 		UpdateStore:                  NewInMemoryUpdateStore(),

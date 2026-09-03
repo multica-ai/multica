@@ -1861,6 +1861,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
+			// Ordered workflow definitions. Reads are member-visible; definition
+			// mutations are explicit human owner/admin actions.
+			r.Route("/api/workflow-definitions", func(r chi.Router) {
+				r.Get("/", h.ListWorkflowDefinitions)
+				r.With(handler.RequireHumanActor, middleware.RequireWorkspaceRole(queries, "owner", "admin")).Post("/", h.CreateWorkflowDefinition)
+				r.Get("/{id}", h.GetWorkflowDefinition)
+			})
+
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/limit-usage", h.GetIssueLimitUsage)
@@ -1882,6 +1890,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
+					r.Get("/workflow", h.GetIssueWorkflow)
+					r.Post("/workflow/start", h.StartIssueWorkflow)
+					r.Post("/workflow/resume", h.ResumeIssueWorkflow)
+					r.With(handler.RequireHumanActor).Post("/workflow/cancel", h.CancelIssueWorkflow)
+					r.Get("/workflow/transitions", h.ListIssueWorkflowTransitions)
 					r.Put("/", h.UpdateIssue)
 					r.Post("/move", h.MoveIssue)
 					r.Delete("/", h.DeleteIssue)
