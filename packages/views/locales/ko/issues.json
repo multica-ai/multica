@@ -859,7 +859,6 @@
   "automation": {
     "title": "자동화",
     "manual": "수동",
-    "entry_count_one": "실행 {{count}}개",
     "entry_count_other": "실행 {{count}}개",
     "take_over": "직접 인계받기"
   }

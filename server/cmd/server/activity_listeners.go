@@ -238,7 +238,14 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 		prevStatus, _ := payload["prev_status"].(string)
-		details, _ := json.Marshal(map[string]string{"from": prevStatus, "to": issue.Status})
+		detailValues := map[string]string{"from": prevStatus, "to": issue.Status}
+		if name, _ := payload["prev_status_name"].(string); name != "" {
+			detailValues["from_name"] = name
+		}
+		if name, _ := payload["status_name"].(string); name != "" {
+			detailValues["to_name"] = name
+		}
+		details, _ := json.Marshal(detailValues)
 		activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
 			ID:          dbid.NewV7(),
 			WorkspaceID: parseUUID(issue.WorkspaceID),

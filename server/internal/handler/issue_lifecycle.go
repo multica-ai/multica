@@ -396,6 +396,7 @@ func (h *Handler) TransitionIssueStatusNode(w http.ResponseWriter, r *http.Reque
 		assigneeChanged := result.Previous.AssigneeType != result.Issue.AssigneeType || result.Previous.AssigneeID != result.Issue.AssigneeID
 		payload := map[string]any{
 			"issue": resp, "status_changed": true, "prev_status": result.Previous.Status,
+			"prev_status_name": result.PreviousStatusName, "status_name": result.StatusName,
 			"assignee_changed": assigneeChanged,
 			"transition":       transitionHistoryToResponse(result.Transition),
 		}

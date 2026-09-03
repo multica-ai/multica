@@ -859,7 +859,6 @@
   "automation": {
     "title": "自动化",
     "manual": "手动",
-    "entry_count_one": "{{count}} 次进入",
     "entry_count_other": "{{count}} 次进入",
     "take_over": "人工接管"
   }

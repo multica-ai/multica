@@ -15,6 +15,24 @@ import (
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
+func TestLifecycleStatusSnapshotName(t *testing.T) {
+	for _, tc := range []struct {
+		name, key, want string
+	}{
+		{name: "Todo", key: "todo", want: ""},
+		{name: "Ready for Agent", key: "todo", want: "Ready for Agent"},
+		{name: "Customer Review", key: "customer_review", want: "Customer Review"},
+	} {
+		status := db.IssueLifecycleStatus{
+			Name:            tc.name,
+			LegacyStatusKey: pgtype.Text{String: tc.key, Valid: true},
+		}
+		if got := lifecycleStatusSnapshotName(status); got != tc.want {
+			t.Errorf("lifecycleStatusSnapshotName(%q, %q) = %q, want %q", tc.key, tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T) {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {

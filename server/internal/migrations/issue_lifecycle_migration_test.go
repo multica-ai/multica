@@ -128,6 +128,20 @@ func TestIssueLifecycleMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 	if phase != "started" || legacyStatus != "human_review" || cause != "migration_backfill" || !issueBound || !projectInherits {
 		t.Fatalf("backfill = phase %q status %q cause %q issue_bound=%v project_inherits=%v", phase, legacyStatus, cause, issueBound, projectInherits)
 	}
+	var orderedStatuses []string
+	var orderedPositions []float64
+	if err := conn.QueryRow(ctx, `
+		SELECT array_agg(legacy_status_key ORDER BY position), array_agg(position ORDER BY position)
+		FROM issue_lifecycle_status
+	`).Scan(&orderedStatuses, &orderedPositions); err != nil {
+		t.Fatalf("read lifecycle status order: %v", err)
+	}
+	wantOrder := []string{"backlog", "todo", "in_progress", "in_review", "human_review", "done", "blocked", "cancelled"}
+	for i := range wantOrder {
+		if orderedStatuses[i] != wantOrder[i] || orderedPositions[i] != float64(i) {
+			t.Fatalf("lifecycle status[%d] = key %q position %v, want key %q position %d", i, orderedStatuses[i], orderedPositions[i], wantOrder[i], i)
+		}
+	}
 
 	down := []string{
 		"465_automation_execution_task_status.down.sql",

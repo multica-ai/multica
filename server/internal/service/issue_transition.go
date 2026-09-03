@@ -49,13 +49,15 @@ type IssueStatusNodeTransitionParams struct {
 }
 
 type IssueTransitionResult struct {
-	Previous       db.Issue
-	Issue          db.Issue
-	Transition     db.IssueTransition
-	Execution      db.AutomationExecution
-	Task           db.AgentTaskQueue
-	CancelledTasks []db.AgentTaskQueue
-	Changed        bool
+	Previous           db.Issue
+	Issue              db.Issue
+	PreviousStatusName string
+	StatusName         string
+	Transition         db.IssueTransition
+	Execution          db.AutomationExecution
+	Task               db.AgentTaskQueue
+	CancelledTasks     []db.AgentTaskQueue
+	Changed            bool
 }
 
 type IssueAutomationTakeoverParams struct {
@@ -182,7 +184,22 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 		return IssueTransitionResult{}, ErrIssueTransitionStatusUnavailable
 	}
 	if previous.LifecycleStatusID == target.ID {
-		return IssueTransitionResult{Previous: previous, Issue: previous}, nil
+		name := lifecycleStatusSnapshotName(target)
+		return IssueTransitionResult{
+			Previous: previous, Issue: previous,
+			PreviousStatusName: name, StatusName: name,
+		}, nil
+	}
+	var previousStatus db.IssueLifecycleStatus
+	if previous.LifecycleStatusID.Valid {
+		previousStatus, err = qtx.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
+			WorkspaceID: p.WorkspaceID,
+			LifecycleID: previous.LifecycleID,
+			ID:          previous.LifecycleStatusID,
+		})
+		if err != nil {
+			return IssueTransitionResult{}, fmt.Errorf("load previous lifecycle status: %w", err)
+		}
 	}
 	policy, err := issuelifecycle.DecodeEntryPolicy(target.EntryPolicy)
 	if err != nil {
@@ -224,7 +241,11 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 		return IssueTransitionResult{}, err
 	}
 	if !changed {
-		return IssueTransitionResult{Previous: previous, Issue: current}, nil
+		return IssueTransitionResult{
+			Previous: previous, Issue: current,
+			PreviousStatusName: lifecycleStatusSnapshotName(previousStatus),
+			StatusName:         lifecycleStatusSnapshotName(target),
+		}, nil
 	}
 
 	if _, err := qtx.SupersedeIssueAutomationExecutions(ctx, db.SupersedeIssueAutomationExecutionsParams{
@@ -281,8 +302,27 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 	}
 	return IssueTransitionResult{
 		Previous: previous, Issue: current, Transition: transition, Execution: execution,
-		Task: task, CancelledTasks: cancelledTasks, Changed: changed,
+		PreviousStatusName: lifecycleStatusSnapshotName(previousStatus),
+		StatusName:         lifecycleStatusSnapshotName(target),
+		Task:               task, CancelledTasks: cancelledTasks, Changed: changed,
 	}, nil
+}
+
+// lifecycleStatusSnapshotName keeps user-authored lifecycle names in history
+// while leaving untouched built-ins blank so clients can continue localizing
+// those canonical labels from their stable legacy keys.
+func lifecycleStatusSnapshotName(status db.IssueLifecycleStatus) string {
+	if !status.LegacyStatusKey.Valid {
+		return status.Name
+	}
+	canonicalNames := map[string]string{
+		"backlog": "Backlog", "todo": "Todo", "in_progress": "In Progress",
+		"in_review": "In Review", "done": "Done", "blocked": "Blocked", "cancelled": "Cancelled",
+	}
+	if status.Name == canonicalNames[status.LegacyStatusKey.String] {
+		return ""
+	}
+	return status.Name
 }
 
 func createLifecycleEntryTask(

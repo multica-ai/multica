@@ -1467,6 +1467,31 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
+  it("renders lifecycle status snapshots instead of legacy projection names", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-lifecycle-names",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: {
+          from: "todo",
+          to: "in_progress",
+          from_name: "Ready for Agent",
+          to_name: "Squad Build",
+        },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText(/from Ready for Agent to Squad Build/i)).toBeInTheDocument();
+    });
+  });
+
   // -------------------------------------------------------------------------
   // MUL-6413 — the activity glyph is per CATEGORY, so a move into a custom
   // status drew the icon of the built-in it sits beside: "In Review → Awaiting

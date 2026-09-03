@@ -859,7 +859,6 @@
   "automation": {
     "title": "自動化",
     "manual": "手動",
-    "entry_count_one": "{{count}} 件の実行",
     "entry_count_other": "{{count}} 件の実行",
     "take_over": "引き継ぐ"
   }

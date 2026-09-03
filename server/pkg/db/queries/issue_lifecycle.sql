@@ -23,7 +23,22 @@ SELECT
     s.name,
     s.description,
     s.color,
-    s.position,
+    (ROW_NUMBER() OVER (
+        PARTITION BY s.workspace_id
+        ORDER BY
+            CASE s.category
+                WHEN 'backlog' THEN 0
+                WHEN 'todo' THEN 1
+                WHEN 'in_progress' THEN 2
+                WHEN 'in_review' THEN 3
+                WHEN 'done' THEN 4
+                WHEN 'blocked' THEN 5
+                WHEN 'cancelled' THEN 6
+                ELSE 7
+            END,
+            s.position,
+            s.key
+    ) - 1)::double precision,
     CASE s.category
         WHEN 'backlog' THEN 'backlog'
         WHEN 'todo' THEN 'unstarted'

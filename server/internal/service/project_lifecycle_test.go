@@ -124,6 +124,12 @@ func TestProjectLifecycleCustomizationPinsNewIssuesAndStatusNodeTransitions(t *t
 	if len(customStatuses) != 7 {
 		t.Fatalf("cloned status count = %d, want 7", len(customStatuses))
 	}
+	wantOrder := []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
+	for i, status := range customStatuses {
+		if status.Position != float64(i) || !status.LegacyStatusKey.Valid || status.LegacyStatusKey.String != wantOrder[i] {
+			t.Fatalf("cloned status[%d] = key %q position %v, want key %q position %d", i, status.LegacyStatusKey.String, status.Position, wantOrder[i], i)
+		}
+	}
 
 	customized := createIssue("pins project lifecycle")
 	if customized.LifecycleID != customLifecycle.ID {

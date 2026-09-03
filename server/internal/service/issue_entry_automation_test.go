@@ -107,7 +107,7 @@ func TestLifecycleEntryAutomationExactlyOnceReentryAndTakeover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE issue_lifecycle_status SET entry_policy=$1::jsonb, entry_policy_revision=2 WHERE id=$2`, string(rawPolicy), todo.ID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE issue_lifecycle_status SET name='Ready for Agent', entry_policy=$1::jsonb, entry_policy_revision=2 WHERE id=$2`, string(rawPolicy), todo.ID); err != nil {
 		t.Fatal(err)
 	}
 	squadPolicy := issuelifecycle.EntryPolicy{
@@ -119,7 +119,7 @@ func TestLifecycleEntryAutomationExactlyOnceReentryAndTakeover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE issue_lifecycle_status SET entry_policy=$1::jsonb, entry_policy_revision=2 WHERE id=$2`, string(rawSquadPolicy), inProgress.ID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE issue_lifecycle_status SET name='Squad Build', entry_policy=$1::jsonb, entry_policy_revision=2 WHERE id=$2`, string(rawSquadPolicy), inProgress.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -188,6 +188,9 @@ func TestLifecycleEntryAutomationExactlyOnceReentryAndTakeover(t *testing.T) {
 	if !squadEntry.Task.ID.Valid || squadEntry.Execution.ExecutorType.String != "squad" || squadEntry.Execution.ExecutorID != squadID || squadEntry.Issue.AssigneeType.String != "squad" || squadEntry.Issue.AssigneeID != squadID {
 		t.Fatalf("squad entry did not resolve leader run and assignment: %#v", squadEntry)
 	}
+	if squadEntry.PreviousStatusName != "Ready for Agent" || squadEntry.StatusName != "Squad Build" {
+		t.Fatalf("squad entry lifecycle names = %q -> %q", squadEntry.PreviousStatusName, squadEntry.StatusName)
+	}
 	reentered, err := issueSvc.TransitionStatusNode(ctx, IssueStatusNodeTransitionParams{
 		IssueID: created.Issue.ID, WorkspaceID: workspaceID, LifecycleStatusID: todo.ID,
 		Actor: issuelifecycle.TransitionActor{Type: "member", ID: userID}, ExpectedRevision: pgtype.Int8{Int64: squadEntry.Issue.Revision, Valid: true},
@@ -197,6 +200,9 @@ func TestLifecycleEntryAutomationExactlyOnceReentryAndTakeover(t *testing.T) {
 	}
 	if !reentered.Task.ID.Valid || reentered.Execution.TriggerTransitionID != reentered.Transition.ID {
 		t.Fatalf("re-entry did not create a new task/execution: %#v", reentered)
+	}
+	if reentered.PreviousStatusName != "Squad Build" || reentered.StatusName != "Ready for Agent" {
+		t.Fatalf("re-entry lifecycle names = %q -> %q", reentered.PreviousStatusName, reentered.StatusName)
 	}
 	if len(reentered.CancelledTasks) != 1 || reentered.CancelledTasks[0].ID != squadEntry.Task.ID {
 		t.Fatalf("leaving squad entry did not supersede its run: %#v", reentered.CancelledTasks)
