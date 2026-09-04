@@ -146,11 +146,6 @@ backend:
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
     localUploadBaseUrl: http://api.multica.dev.lan
-    # How long a task may sit in the queue unclaimed before failing with
-    # `queued_expired`; raise it when a runtime's low task concurrency lets
-    # tasks legitimately wait behind long-running work.
-    # Accepts a positive duration and empty/unset falls back to the server default of 2h.
-    taskQueuedTTL: 2h
   resources:
     requests:
       cpu: 100m
@@ -210,20 +205,3 @@ ingress:
   # tls:
   #   - hosts: [multica.dev.lan, api.multica.dev.lan]
   #     secretName: multica-tls
-
-# -----------------------------------------------------------------------------
-# Monitoring
-# -----------------------------------------------------------------------------
-monitoring:
-  prometheusRule:
-    # Requires the Prometheus Operator CRD (monitoring.coreos.com/v1). Kept
-    # disabled by default so minimal self-host installs without that CRD still
-    # render and install.
-    enabled: false
-    additionalLabels: {}
-    samplerQueryErrorsFor: 5m
-    samplerQueryLatencyFor: 10m
-    seatCapacityDeadLetteredFor: 5m
-    seatCapacityPendingAgeSeconds: 900
-    seatCapacityPendingFor: 5m
-    severity: warning

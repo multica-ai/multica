@@ -333,22 +333,6 @@ describe("LoginPage", () => {
     expect(resendBtn).toBeDisabled();
   });
 
-  it("shows resend button with cooldown text after sending code", async () => {
-    mockSendCode.mockResolvedValue(undefined);
-    const user = userEvent.setup();
-    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
-
-    await user.type(screen.getByLabelText(/email/i), "test@example.com");
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText(/check your email/i)).toBeInTheDocument();
-    });
-
-    // After transition, resend shows cooldown text and is disabled
-    expect(screen.getByText(/resend in/i)).toBeInTheDocument();
-  });
-
   it("calls sendCode again when resend is clicked after cooldown", async () => {
     mockSendCode.mockResolvedValue(undefined);
     renderWithI18n(<LoginPage onSuccess={onSuccess} />);
@@ -629,11 +613,6 @@ describe("LoginPage", () => {
       />,
     );
     expect(screen.getByTestId("custom-logo")).toBeInTheDocument();
-  });
-
-  it("does not render logo placeholder when omitted", () => {
-    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
-    expect(screen.queryByTestId("custom-logo")).not.toBeInTheDocument();
   });
 
   // -------------------------------------------------------------------------

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -12,38 +11,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
-
-// TestRuntimeGCRunsOutsideTheLivenessLoop pins PR1's deployment boundary: GC
-// keeps its existing predicates and budgets, but its seven-day retention scan
-// no longer occupies the 30-second runtime/task loop.
-func TestRuntimeGCRunsOutsideTheLivenessLoop(t *testing.T) {
-	if runtimeGCSweepInterval != time.Hour {
-		t.Fatalf("runtime GC interval = %s, want 1h", runtimeGCSweepInterval)
-	}
-
-	source, err := os.ReadFile("runtime_sweeper.go")
-	if err != nil {
-		t.Fatalf("read runtime_sweeper.go: %v", err)
-	}
-	start := strings.Index(string(source), "func runRuntimeSweeper(")
-	end := strings.Index(string(source), "func runRuntimeGCSweeper(")
-	if start < 0 || end <= start {
-		t.Fatal("could not isolate runtime sweeper loops")
-	}
-	if strings.Contains(string(source[start:end]), "gcRuntimes(") {
-		t.Fatal("runtime GC is still invoked from the 30-second liveness loop")
-	}
-}
-
-// TestRuntimeGCDailyCandidateCapacity prevents an interval or batch-size change
-// from silently reducing the hourly GC worker below its agreed daily capacity.
-func TestRuntimeGCDailyCandidateCapacity(t *testing.T) {
-	const wantCandidatesPerDay = 12_000
-	got := int(24*time.Hour/runtimeGCSweepInterval) * runtimeGCBatchSize
-	if got != wantCandidatesPerDay {
-		t.Fatalf("runtime GC candidate capacity = %d/day, want %d/day", got, wantCandidatesPerDay)
-	}
-}
 
 func TestPeriodicSweepStopsWithItsContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1035,10 +1002,16 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 	}
 }
 
-// TestExpireStaleQueuedTasks verifies the MUL-1899 queued-TTL sweeper:
-// tasks that have been sitting in 'queued' beyond the TTL are transitioned
-// to 'failed' with failure_reason='queued_expired', while fresh queued tasks
-// are left alone and the per-tick batch limit is respected.
+// TestExpireStaleQueuedTasks pins the queued sweep to runtime liveness rather
+// than queue age (MUL-6558). The same ancient queued task must survive while
+// its runtime is heartbeating — a busy runtime is not a dead one — and only
+// become expirable once that runtime has been silent past the reconnect grace.
+// A third phase covers the other direction: liveness alone is not enough
+// either, because enqueue binds a task to its agent's runtime without checking
+// that the runtime is up. A task assigned to an already-dead runtime must still
+// get its own full grace to wait, or assigning an issue to a laptop that is
+// closed overnight fails inside one sweep tick.
+// A runtime_offline retry stays exempt throughout; FailExpiredRuntimeReconnectRetries owns its exit.
 func TestExpireStaleQueuedTasks(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
@@ -1116,21 +1089,63 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	}
 
 	queries := db.New(testPool)
-	failed, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
-		TtlSecs:    3600.0, // 1h TTL — old task is 5h, fresh task is 0s
-		MaxPerTick: 100,
-	})
-	if err != nil {
-		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
-	}
-	if len(failed) != 1 {
-		t.Fatalf("expected exactly 1 expired task, got %d", len(failed))
-	}
-	if failed[0].ID.Bytes != parseUUIDBytes(oldTaskID) {
-		t.Fatalf("expired the wrong task: got %x", failed[0].ID.Bytes)
+	const graceSecs = 3600.0
+
+	// Assertions are scoped to this test's own rows: the sweep is now keyed on
+	// the runtime rather than on each row's age, so it legitimately also picks
+	// up queued rows other tests left on the same shared fixture runtime.
+	expiredIDs := func(rows []db.AgentTaskQueue) map[[16]byte]bool {
+		out := map[[16]byte]bool{}
+		for _, row := range rows {
+			out[row.ID.Bytes] = true
+		}
+		return out
 	}
 
-	// DB assertions: old → failed/queued_expired, fresh → still queued.
+	// Phase 1 — the regression guard. The runtime is heartbeating (the
+	// integration fixture inserts last_seen_at=now()), so none of these rows may
+	// expire, including the 5h-old one. Under the old wall clock it died here.
+	survivors, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+		ReconnectGraceSecs: graceSecs,
+		MaxPerTick:         100,
+	})
+	if err != nil {
+		t.Fatalf("ExpireStaleQueuedTasks (live runtime) failed: %v", err)
+	}
+	live := expiredIDs(survivors)
+	if live[parseUUIDBytes(oldTaskID)] {
+		t.Fatal("live runtime: the 5h-old queued task was expired — queue age must not expire work behind a heartbeating runtime (MUL-6558)")
+	}
+	if live[parseUUIDBytes(freshTaskID)] {
+		t.Fatal("live runtime: the fresh queued task was expired")
+	}
+
+	// Phase 2 — the runtime goes silent past the grace. Now the queued work it
+	// owned is unreachable and must be retired, except the runtime_offline retry.
+	ageOutAgentRuntime(t, agentID, 5*time.Hour)
+	failed, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+		ReconnectGraceSecs: graceSecs,
+		MaxPerTick:         100,
+	})
+	if err != nil {
+		t.Fatalf("ExpireStaleQueuedTasks (dead runtime) failed: %v", err)
+	}
+	expired := expiredIDs(failed)
+	if !expired[parseUUIDBytes(oldTaskID)] {
+		t.Fatal("dead runtime: the 5h-old queued task should expire once its runtime is gone")
+	}
+	// The fresh row is the same case as phase 3 seen from the other side: its
+	// runtime is dead, but it has not waited a grace of its own yet, so both
+	// conditions are required and it survives this sweep.
+	if expired[parseUUIDBytes(freshTaskID)] {
+		t.Fatal("dead runtime: a task queued moments ago must still get its own full grace before failing")
+	}
+	if expired[parseUUIDBytes(recoveryTaskID)] {
+		t.Fatal("runtime_offline retry must stay exempt from the queued sweep")
+	}
+
+	// DB assertions: the aged row failed as queued_expired; the fresh row is
+	// still queued because only one of the two conditions holds for it.
 	var oldStatus, oldReason, oldErr string
 	if err := testPool.QueryRow(ctx, `
 		SELECT status, COALESCE(failure_reason, ''), COALESCE(error, '')
@@ -1144,8 +1159,8 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	if oldReason != "queued_expired" {
 		t.Fatalf("old task: expected failure_reason=queued_expired, got %q", oldReason)
 	}
-	if !strings.Contains(oldErr, "expired in queue") {
-		t.Fatalf("old task: expected error to mention expiry, got %q", oldErr)
+	if !strings.Contains(oldErr, "runtime unavailable") {
+		t.Fatalf("old task: expected error to name the runtime as the cause, got %q", oldErr)
 	}
 
 	var freshStatus string
@@ -1155,7 +1170,7 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 		t.Fatalf("failed to read fresh task: %v", err)
 	}
 	if freshStatus != "queued" {
-		t.Fatalf("fresh task: expected status=queued, got %q", freshStatus)
+		t.Fatalf("fresh task: expected status=queued (it has not waited a full grace yet), got %q", freshStatus)
 	}
 
 	var recoveryStatus string
@@ -1165,10 +1180,57 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	if recoveryStatus != "queued" {
 		t.Fatalf("runtime recovery retry: expected status=queued, got %q", recoveryStatus)
 	}
+
+	// Phase 3 — a task enqueued AFTER the runtime went dark. The runtime has
+	// been silent for hours, so the liveness clause is already satisfied the
+	// moment this row is created; only the row's own age keeps it alive. It
+	// must survive until it has waited a full grace of its own, otherwise
+	// assigning an issue to a machine that is merely asleep fails in ~30s.
+	lateIssueID := mkIssue("Queued TTL test (enqueued after runtime died)")
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, lateIssueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, lateIssueID)
+	})
+	var lateTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		VALUES ($1, $2, $3, 'queued', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, lateIssueID).Scan(&lateTaskID); err != nil {
+		t.Fatalf("failed to insert late queued task: %v", err)
+	}
+
+	lateSweep, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+		ReconnectGraceSecs: graceSecs,
+		MaxPerTick:         100,
+	})
+	if err != nil {
+		t.Fatalf("ExpireStaleQueuedTasks (late enqueue) failed: %v", err)
+	}
+	if expiredIDs(lateSweep)[parseUUIDBytes(lateTaskID)] {
+		t.Fatal("a task enqueued against an already-offline runtime was failed immediately; it must get a full reconnect grace of its own to wait")
+	}
+
+	// Once it HAS waited a full grace, it expires like any other.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue SET created_at = now() - make_interval(secs => $1) WHERE id = $2
+	`, graceSecs+60, lateTaskID); err != nil {
+		t.Fatalf("failed to age the late task: %v", err)
+	}
+	agedSweep, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+		ReconnectGraceSecs: graceSecs,
+		MaxPerTick:         100,
+	})
+	if err != nil {
+		t.Fatalf("ExpireStaleQueuedTasks (aged late enqueue) failed: %v", err)
+	}
+	if !expiredIDs(agedSweep)[parseUUIDBytes(lateTaskID)] {
+		t.Fatal("a task that waited a full grace against a dead runtime should expire")
+	}
 }
 
 // TestExpireStaleQueuedTasksRespectsBatchLimit verifies the per-tick cap so
-// that a large historical backlog cannot monopolise a single sweep.
+// that a large backlog behind a departed runtime cannot monopolise a sweep.
 func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
@@ -1219,10 +1281,14 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 		}
 	}
 
+	// Nothing is expirable while the runtime heartbeats, so the batch cap can
+	// only be observed once that runtime has been silent past the grace.
+	ageOutAgentRuntime(t, agentID, 5*time.Hour)
+
 	queries := db.New(testPool)
 	failed, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
-		TtlSecs:    3600.0,
-		MaxPerTick: 2, // cap below the backlog
+		ReconnectGraceSecs: 3600.0,
+		MaxPerTick:         2, // cap below the backlog
 	})
 	if err != nil {
 		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)

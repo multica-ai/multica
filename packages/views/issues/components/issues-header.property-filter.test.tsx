@@ -293,6 +293,50 @@ describe("IssueFilterMenu scalar property filter", () => {
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha", "beta"] });
   });
 
+  it("preserves other observed members when editing the input value", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", { [PROP]: "alpha" }),
+      issueWithProperties("i-2", { [PROP]: "beta" }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /beta/ }));
+    await userEvent.clear(screen.getByRole("textbox"));
+    await userEvent.type(screen.getByRole("textbox"), "gamma");
+    fireEvent.blur(screen.getByRole("textbox"));
+
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["gamma", "beta"] });
+  });
+
+  it("keeps an uncommitted draft when an observed value is toggled", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", { [PROP]: "alpha" }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    await userEvent.type(screen.getByRole("textbox"), "custom");
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
+    expect(screen.getByRole("textbox")).toHaveValue("custom");
+
+    await userEvent.type(screen.getByRole("textbox"), "{Enter}");
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["custom", "alpha"] });
+  });
+
+  it("does not expose malformed values in the local scalar facet fallback", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", { [PROP]: "alpha" }),
+      issueWithProperties("i-2", { [PROP]: 42 }),
+      issueWithProperties("i-3", { [PROP]: ["array-value"] }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    expect(screen.getByRole("menuitemcheckbox", { name: /alpha/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitemcheckbox", { name: /42/ })).toBeNull();
+    expect(screen.queryByRole("menuitemcheckbox", { name: /array-value/ })).toBeNull();
+    expect(store.getState().propertyFilters).toEqual({});
+  });
+
   it("renders observed values from server facets and ignores the legacy __set__ bucket", async () => {
     // A new menu against an OLD backend receives the pre-per-value shape: the
     // two-bucket "__set__"/"__none__" response. "__set__" must not surface as
@@ -320,5 +364,49 @@ describe("IssueFilterMenu scalar property filter", () => {
     // Toggling a server-facet value commits the same bare equality member.
     await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha"] });
+  });
+
+  it("picking contains with an empty draft, then typing commits an operator object", async () => {
+    // Regression: killing the pending operator on click downgraded the next
+    // commit back to equality — the pick silently did nothing.
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
+    await openPropertySubmenu("Note");
+
+    expect(screen.getByRole("radiogroup", { name: "Filter operator" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "is" })).toBeChecked();
+    const contains = screen.getByRole("radio", { name: "contains" });
+    await userEvent.click(contains);
+    expect(contains).toBeChecked();
+    await userEvent.type(screen.getByRole("textbox"), "hello{Enter}");
+
+    expect(store.getState().propertyFilters).toEqual({
+      [PROP]: [{ op: "contains", value: "hello" }],
+    });
+  });
+
+  it("clicking an operator commits the current draft with it immediately", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
+    await openPropertySubmenu("Note");
+
+    await userEvent.type(screen.getByRole("textbox"), "hello");
+    await userEvent.click(screen.getByRole("radio", { name: "contains" }));
+
+    expect(store.getState().propertyFilters).toEqual({
+      [PROP]: [{ op: "contains", value: "hello" }],
+    });
+  });
+
+  it("switching back to is commits a bare string again", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
+    await openPropertySubmenu("Note");
+
+    await userEvent.type(screen.getByRole("textbox"), "hello");
+    await userEvent.click(screen.getByRole("radio", { name: "contains" }));
+    expect(store.getState().propertyFilters).toEqual({
+      [PROP]: [{ op: "contains", value: "hello" }],
+    });
+
+    await userEvent.click(screen.getByRole("radio", { name: "is" }));
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["hello"] });
   });
 });

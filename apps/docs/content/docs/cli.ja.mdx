@@ -1,11 +1,11 @@
 ---
 title: CLI を使う
-description: Multica CLI をインストールしてサインインし、ターミナルからワークスペース、イシュー、エージェント、ランタイムを管理します。
+description: Multica CLI をインストールしてサインインし、ターミナルからワークスペース、タスク、エージェント、ランタイムを管理します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica CLI は、ローカルのランタイムを接続する役割と、ターミナルからワークスペース、イシュー、エージェント、オートパイロットを管理する役割の両方を担います。このページではよく使う操作の流れを紹介します。現在のバージョンがサポートするフラグは、常に各コマンド自身の `--help` が正です。
+Multica CLI は、ローカルのランタイムを接続する役割と、ターミナルからワークスペース、タスク、エージェント、オートパイロットを管理する役割の両方を担います。このページではよく使う操作の流れを紹介します。現在のバージョンがサポートするフラグは、常に各コマンド自身の `--help` が正です。
 
 ## インストール
 
@@ -82,7 +82,7 @@ multica workspace member invite teammate@example.com
 multica workspace member invite admin@example.com --role admin
 ```
 
-## よく使うイシュー操作
+## よく使うタスク操作
 
 ```bash
 # 表示と検索
@@ -108,7 +108,7 @@ multica issue create --title "アップグレードメモ" --description-stdin <
 multica issue comment add MUL-123 --content-stdin < review.md
 ```
 
-1 回の実行のメッセージを表示する、またはタスクを停止する:
+1 回の実行のメッセージを表示する、または実行を停止する:
 
 ```bash
 multica issue run-messages <task-id> --issue MUL-123
@@ -154,7 +154,7 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
-アクティブなエージェントがまだ紐付いているランタイムの削除は、デフォルトで拒否されます。`multica runtime delete <id> --cascade` は、それらのエージェントをランタイムから解除して設定と履歴を保持し、アクティブなタスクをキャンセルします。
+アクティブなエージェントがまだ紐付いているランタイムの削除は、デフォルトで拒否されます。`multica runtime delete <id> --cascade` は、それらのエージェントをランタイムから解除して設定と履歴を保持し、アクティブな実行をキャンセルします。
 
 仕組みとカスタムプロファイルについては[デーモンとランタイム](/daemon-runtimes)を参照してください。
 
@@ -162,7 +162,7 @@ multica runtime activity <runtime-id>
 
 | コマンド | 用途 |
 | --- | --- |
-| `issue` | イシューの作成、更新、割り当て、検索。コメント、購読者、ラベル、プロパティ、実行履歴の管理 |
+| `issue` | タスクの作成、更新、割り当て、検索。コメント、購読者、ラベル、プロパティ、実行履歴の管理 |
 | `project` | プロジェクトとそのリソースを管理 |
 | `label`、`property` | ワークスペースのラベルとカスタムプロパティを管理 |
 | `agent`、`skill`、`squad` | エージェント、スキル、スクワッドを管理 |
@@ -180,9 +180,9 @@ multica runtime activity <runtime-id>
 
 ## ID と出力形式
 
-イシューには `MUL-123` のようなキーまたは完全な UUID を使います。UUID の短いプレフィックスは受け付けません。
+タスクには `MUL-123` のようなキーまたは完全な UUID を使います。UUID の短いプレフィックスは受け付けません。
 
-その他のリソースの `list` コマンドは通常、コピーできる短い ID を表示し、`--full-id` で完全な UUID を出力できます。短い ID が一意に定まらない場合、CLI は文字の追加か完全な UUID への切り替えを求めます。タスクの短い ID は、所属するイシューを `--issue` で指定する必要もあります。
+その他のリソースの `list` コマンドは通常、コピーできる短い ID を表示し、`--full-id` で完全な UUID を出力できます。短い ID が一意に定まらない場合、CLI は文字の追加か完全な UUID への切り替えを求めます。実行の短い ID は、所属するタスクを `--issue` で指定する必要もあります。
 
 多くのコマンドが構造化出力をサポートします:
 
@@ -224,26 +224,26 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 
 | コマンド | サブコマンド | 用途 | 主なフラグ |
 | --- | --- | --- | --- |
-| `issue` | `list` | イシューを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（繰り返し可）、`--limit`、`--offset`、`--sort`、`--full-id` |
-| | `get <id>` | 単一のイシューを表示 | |
-| | `create` | イシューを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可） |
-| | `update <id>` | イシューのフィールドを更新 | `create` と同系のフィールドに加え `--position`、`--no-start` |
+| `issue` | `list` | タスクを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（繰り返し可）、`--property`（繰り返し可、`"名前=値"`；`__none__` は未設定に一致）、`--limit`、`--offset`、`--sort`（`property:<名前または id>` に対応）、`--full-id` |
+| | `get <id>` | 単一のタスクを表示 | |
+| | `create` | タスクを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可） |
+| | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--position`、`--no-start` |
 | | `assign <id>` | 割り当てまたは割り当て解除 | `--to`（メンバー、エージェント、スクワッドを名前であいまいマッチ）、`--to-id`、`--unassign`、`--no-start` |
 | | `status <id> <status>` | ステータスを変更 | `--no-start` |
 | | `reorder <id>` | カラム内で移動 | |
-| | `search <query>` | イシューを検索 | `--limit`、`--include-closed` |
-| | `children <id>` | サブイシューをステージごとに一覧 | |
+| | `search <query>` | タスクを検索 | `--limit`、`--include-closed` |
+| | `children <id>` | サブタスクをステージごとに一覧 | |
 | | `pull-requests <id>` | 関連付けられた PR を一覧 | |
 | | `comment list/add/delete/resolve/unresolve` | コメントを管理 | `add`: `--content` / `--content-stdin` / `--content-file`、`--parent`、`--attachment`；`list`: `--since`、`--thread`、`--tail` |
 | | `subscriber list/add/remove <issue-id>` | 購読者を管理 | `--user`、`--user-id`（省略時は現在のユーザー） |
-| | `label list/add/remove <issue-id>` | イシューのラベルを管理 | |
-| | `metadata list/get/set/delete <issue-id>` | イシューレベルのキー・バリューメタデータを管理 | |
+| | `label list/add/remove <issue-id>` | タスクのラベルを管理 | |
+| | `metadata list/get/set/delete <issue-id>` | タスクレベルのキー・バリューメタデータを管理 | |
 | | `property list/set/unset <issue-id>` | カスタムプロパティの値を設定 | `set`: `--name`、`--value`（`actor` / `multi_actor` はメンバーの名前・メール・id を受け付けます） |
 | | `runs <issue-id>` | 実行履歴を表示 | `--full-id` |
 | | `run-messages <task-id>` | 1 回の実行のメッセージを表示 | `--since`、`--issue` |
 | | `usage <issue-id>` | 集計されたトークン使用量を表示 | |
 | | `rerun <id>` | 現在の担当者で実行を再キューイング | |
-| | `cancel-task <task-id>` | 実行中またはキュー中のタスクをキャンセル | `--issue` |
+| | `cancel-task <task-id>` | 進行中またはキュー中の実行をキャンセル | `--issue` |
 | `project` | `list/get/create/update/delete` | プロジェクトを管理 | |
 | | `status <id> <status>` | プロジェクトのステータスを変更 | |
 | | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url`、`--local-path`、`--daemon-id`、`--execution-mode`（ローカルディレクトリの `in_place` / `worktree`） |
@@ -251,7 +251,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`）、`--option`（繰り返し可、select 系のみ）；`list`: `--include-archived`；タイプは作成後に変更できません |
 | `agent` | `list/get/create/update/archive/restore` | エージェントを管理 | `--name`、`--runtime-id`（`create` では必須）、`--instructions`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 新しいエージェントとして複製。元のエージェントは変更されません | `--name`（デフォルトは元の名前 + ` (copy)`）、`--runtime-id`（別のランタイムへ複製する場合は `--model` の同時指定が必須）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` などの機密設定は複製されないため、`create` と同じフラグで再指定してください |
-| | `tasks <id>` | エージェントのタスクを表示 | |
+| | `tasks <id>` | エージェントの実行を表示 | |
 | | `avatar <id>` | アバターをアップロード | |
 | | `env get/set <agent-id>` | カスタム環境変数の読み書き（owner と admin のみ） | |
 | | `skills list/set/add <agent-id>` | 紐付けられたスキルを管理 | `--skill-ids`（`set` は全置換、`add` は追加） |
@@ -281,7 +281,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `stop` / `status` / `restart` | 停止、状態の確認、再起動（`restart` は `start` と同じフラグ） | |
 | | `logs` | デーモンのログを表示 | `--follow`、`--lines` |
 | | `disk-usage` | ローカルのディスク使用量を表示 | `--by-workspace`、`--by-task`、`--top` |
-| `runtime` | `list/usage/activity/update/rename/delete` | ランタイムを表示・管理 | `delete`: `--cascade`（紐付くエージェントを解除してデータを保持し、そのタスクをキャンセル） |
+| `runtime` | `list/usage/activity/update/rename/delete` | ランタイムを表示・管理 | `delete`: `--cascade`（紐付くエージェントを解除してデータを保持し、その実行をキャンセル） |
 | | `profile list/create/update/delete` | カスタムランタイムプロファイルを管理 | |
 | | `profile set-path/unset-path <profile-id>` | ローカルの実行ファイルパスを固定（ローカルのみ有効。サーバーには送信されません） | |
 
@@ -302,7 +302,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 
 作業の多くを Codex、Claude Code、Cursor の中で進めているなら、ターミナルに切り替えず
 そこから Multica を操作できます。[Multica CLI skill](https://github.com/multica-ai/multica-cli)
-は、このページのコマンドを安全に扱う方法をそれらのエージェントに教えます。イシューと
+は、このページのコマンドを安全に扱う方法をそれらのエージェントに教えます。タスクと
 コメントスレッドをトークンを浪費せずに読み、コメントはファイル経由で書き、メンション・
 ステータス変更・アサインが伴う副作用を正しく扱います。
 
@@ -316,5 +316,5 @@ Claude Code のプラグインマーケットプレイス、Codex の skill イ�
 
 - [Multica CLI skill](https://github.com/multica-ai/multica-cli) — Codex、Claude Code、Cursor から Multica を操作する。
 - [認証とトークン](/auth-tokens) — PAT の作成、更新、失効。
-- [トラブルシューティング](/troubleshooting) — コマンドのエラーと、いつまでも開始しないタスクの診断。
+- [トラブルシューティング](/troubleshooting) — コマンドのエラーと、いつまでも開始しない実行の診断。
 - [エージェントの作成と設定](/agents-create) — `agent create` 各フィールドの完全な意味。

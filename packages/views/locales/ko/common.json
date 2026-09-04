@@ -121,6 +121,11 @@
     "error_not_member": "로그인한 Multica 계정이 이 워크스페이스의 멤버가 아니에요.",
     "error_unknown": "문제가 발생했어요. 다시 시도해 보고, 계속되면 워크스페이스 관리자에게 문의하세요."
   },
+  "not_found": {
+    "title": "페이지를 찾을 수 없습니다",
+    "description": "찾으시는 페이지가 없거나 이동되었습니다.",
+    "back_to_multica": "Multica로 돌아가기"
+  },
   "navigation": {
     "open_in_new_tab": "새 탭에서 열기"
   }

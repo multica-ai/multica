@@ -1,22 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_RUNTIME_CONFIG,
   deriveWsUrl,
   parseRuntimeConfig,
   runtimeConfigFromDevEnv,
 } from "./runtime-config";
 
 describe("runtime config", () => {
-  it("uses cloud defaults without a desktop.json file", () => {
-    expect(DEFAULT_RUNTIME_CONFIG).toEqual({
-      schemaVersion: 1,
-      apiUrl: "https://api.multica.ai",
-      wsUrl: "wss://api.multica.ai/ws",
-      appUrl: "https://multica.ai",
-    });
-  });
-
   it("derives https/wss compatible URLs from apiUrl", () => {
     expect(
       parseRuntimeConfig(

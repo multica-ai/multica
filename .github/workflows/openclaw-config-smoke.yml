@@ -1,0 +1,76 @@
+name: OpenClaw config compatibility smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openclaw-config-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  managed-mcp-isolation:
+    name: Managed MCP isolation (${{ matrix.channel }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Initial manual measurement on 2026-08-26 resolved these channels to
+        # 2026.6.34, 2026.7.1-2, and 2026.8.1-beta.3 respectively. Keep the
+        # channel names floating so loader-semantic drift is detected when
+        # OpenClaw publishes a replacement.
+        channel:
+          - extended-stable
+          - latest
+          - beta
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.x"
+          check-latest: true
+
+      - name: Install OpenClaw (${{ matrix.channel }})
+        run: npm install --global "openclaw@${{ matrix.channel }}"
+
+      - name: Record resolved OpenClaw version
+        run: openclaw --version
+
+      # A skipped Go test reports `ok` at the package level, so without this the
+      # job goes green whenever the CLI is absent, MULTICA_RUN_REAL_AGENT_SMOKE
+      # is unset, or the -run pattern stops matching — i.e. exactly when the
+      # thing being verified is not being verified. #6897's Windows step calls
+      # out the same hazard for the same reason. Require the RUN/PASS line and
+      # reject SKIP explicitly rather than trusting the exit status.
+      - name: Verify managed MCP isolation through the real loader
+        working-directory: server
+        env:
+          MULTICA_RUN_REAL_AGENT_SMOKE: "1"
+        run: |
+          set -o pipefail
+          go test -tags agentintegration ./internal/daemon/execenv/ \
+            -run '^TestPrepareOpenclawConfigRealCLI$' -count=1 -v \
+            2>&1 | tee smoke.log
+          if grep -q -- '--- SKIP: TestPrepareOpenclawConfigRealCLI' smoke.log; then
+            echo "::error::the real-loader test skipped; nothing was verified for ${{ matrix.channel }}"
+            exit 1
+          fi
+          if ! grep -q -- '--- PASS: TestPrepareOpenclawConfigRealCLI' smoke.log; then
+            echo "::error::no PASS line for the real-loader test on ${{ matrix.channel }}"
+            exit 1
+          fi

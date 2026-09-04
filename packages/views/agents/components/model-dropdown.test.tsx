@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { RuntimeModelsResult } from "@multica/core/types";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import enAgents from "../../locales/en/agents.json";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
@@ -31,6 +31,7 @@ const CODEX_MODELS: RuntimeModelsResult = {
 // Discovery outcome for the next render. resolveRuntimeModels rejects with the
 // daemon's reported error text, so a failure is modelled as a throwing queryFn.
 let discovery: () => Promise<RuntimeModelsResult> = async () => CODEX_MODELS;
+const mockRefreshRuntimeModels = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/runtimes", () => ({
   runtimeModelsOptions: (runtimeId: string | null) => ({
@@ -38,6 +39,8 @@ vi.mock("@multica/core/runtimes", () => ({
     queryKey: ["runtime-models", runtimeId, discoveryKey],
     queryFn: () => discovery(),
   }),
+  refreshRuntimeModels: (...args: unknown[]) =>
+    mockRefreshRuntimeModels(...args),
 }));
 
 // Bumped per test so React Query cannot serve a previous case's cached result.
@@ -72,9 +75,14 @@ function openDropdown(container: HTMLElement) {
 }
 
 describe("ModelDropdown", () => {
+  beforeEach(() => {
+    mockRefreshRuntimeModels.mockResolvedValue(CODEX_MODELS);
+  });
+
   afterEach(() => {
     cleanup();
     discovery = async () => CODEX_MODELS;
+    mockRefreshRuntimeModels.mockReset();
     discoveryKey += 1;
   });
 
@@ -91,6 +99,21 @@ describe("ModelDropdown", () => {
 
     fireEvent.click(screen.getByText("GPT-5.6 Terra"));
     expect(onChange).toHaveBeenCalledWith("gpt-5.6-terra");
+  });
+
+  it("offers an explicit refresh that requests the runtime's live catalog", async () => {
+    const { container } = renderDropdown();
+    openDropdown(container);
+
+    await screen.findByText("GPT-5.6 Sol");
+    fireEvent.click(
+      screen.getByRole("button", { name: enAgents.pickers.model_refresh }),
+    );
+
+    expect(mockRefreshRuntimeModels).toHaveBeenCalledWith(
+      expect.any(QueryClient),
+      "rt-codex",
+    );
   });
 
   // MUL-6606: a runtime that could not enumerate its models used to report an
@@ -135,5 +158,64 @@ describe("ModelDropdown", () => {
 
     fireEvent.click(await screen.findByText(/vertex\/gemini-3\.1-pro/));
     expect(onChange).toHaveBeenCalledWith("vertex/gemini-3.1-pro");
+  });
+
+  // MUL-6961: Claude Code reports a model its own version cannot run in a
+  // separate list. It must be visible — a missing row reads as "Multica doesn't
+  // support Fable 5.1" when the truth is the user's CLI is behind — and it must
+  // be impossible to pick, because picking one is a guaranteed 400.
+  describe("models the runtime cannot run", () => {
+    const WITH_UNAVAILABLE: RuntimeModelsResult = {
+      models: [{ id: "claude-fable-5", label: "Fable", provider: "anthropic" }],
+      unavailableModels: [
+        {
+          id: "cc-update-required-1",
+          label: "Fable 5.1 (disabled)",
+          reason: "Update to 2.1.255+ to use Fable 5.1",
+        },
+      ],
+      supported: true,
+    };
+
+    it("shows the row with the runtime's upgrade hint but renders no control for it", async () => {
+      discovery = async () => WITH_UNAVAILABLE;
+      const { container, onChange } = renderDropdown();
+      openDropdown(container);
+
+      const row = await screen.findByText("Fable 5.1 (disabled)");
+      expect(
+        screen.getByText("Update to 2.1.255+ to use Fable 5.1"),
+      ).toBeTruthy();
+
+      // Nothing clickable was rendered for it, so there is no path to select it.
+      expect(row.closest("button")).toBeNull();
+      fireEvent.click(row);
+      expect(onChange).not.toHaveBeenCalled();
+
+      // The model this CLI *can* run is still a normal pick.
+      fireEvent.click(screen.getByText("Fable"));
+      expect(onChange).toHaveBeenCalledWith("claude-fable-5");
+    });
+
+    it("keeps the unavailable id out of the selectable catalog", async () => {
+      discovery = async () => WITH_UNAVAILABLE;
+      const { container, onChange } = renderDropdown();
+      openDropdown(container);
+      await screen.findByText("Fable 5.1 (disabled)");
+
+      // Searching the placeholder id must not surface a selectable row for it.
+      // Manual entry stays available — that escape hatch accepts any string and
+      // is not what this guards — but it must be the only way the text reaches
+      // onChange, and only on an explicit second click.
+      const input = screen.getByPlaceholderText(
+        enAgents.pickers.model_search_placeholder,
+      );
+      fireEvent.change(input, { target: { value: "cc-update-required-1" } });
+
+      expect(
+        screen.queryByRole("button", { name: /cc-update-required-1$/ }),
+      ).toBeNull();
+      expect(onChange).not.toHaveBeenCalled();
+    });
   });
 });

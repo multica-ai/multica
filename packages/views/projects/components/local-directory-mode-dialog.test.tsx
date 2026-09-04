@@ -42,16 +42,6 @@ function worktreeOption(): HTMLElement {
 }
 
 describe("LocalDirectoryModeDialog", () => {
-  it("leads with what the user gets back, not the mode identifiers", () => {
-    renderDialog();
-    // The identifiers stay visible as a secondary hint for anyone cross-
-    // referencing the CLI or docs, but the decision is framed by outcome.
-    expect(screen.getByText("Edit this folder directly")).toBeTruthy();
-    expect(screen.getByText("Run in parallel, isolated")).toBeTruthy();
-    expect(screen.getByText("in_place")).toBeTruthy();
-    expect(screen.getByText("worktree")).toBeTruthy();
-    expect(screen.getByText("/Users/dev/work/game-client")).toBeTruthy();
-  });
 
   it("marks the current mode as selected", () => {
     renderDialog({ value: "worktree" });

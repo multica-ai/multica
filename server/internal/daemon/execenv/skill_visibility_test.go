@@ -136,18 +136,6 @@ Hidden body.`,
 			t.Errorf("brief advertised disable-model-invocation skill:\n%s", out)
 		}
 	}
-
-	// issue_context.md and its quick-create / autopilot variants no longer
-	// carry a skill list at all; nothing read that copy.
-	for name, out := range map[string]string{
-		"issue context": renderIssueContext("codex", TaskContextForEnv{IssueID: ctx.IssueID, AgentSkills: ctx.AgentSkills}),
-		"quick create":  renderQuickCreateContext(TaskContextForEnv{QuickCreatePrompt: ctx.QuickCreatePrompt, AgentSkills: ctx.AgentSkills}),
-		"autopilot":     renderAutopilotContext(TaskContextForEnv{AutopilotRunID: ctx.AutopilotRunID, AgentSkills: ctx.AgentSkills}),
-	} {
-		if strings.Contains(out, "## Agent Skills") || strings.Contains(out, "visible-skill") {
-			t.Errorf("%s still renders a skill list:\n%s", name, out)
-		}
-	}
 }
 
 // sanitizeSkillName is not injective — "A B" and "A-B" both reduce to "a-b" —
@@ -260,11 +248,6 @@ Hidden body.`,
 	if strings.Contains(runtimeConfig, "## Skills") {
 		t.Errorf("runtime config should omit Skills section when every skill disables model invocation:\n%s", runtimeConfig)
 	}
-
-	issueContext := renderIssueContext("codex", ctx)
-	if strings.Contains(issueContext, "## Agent Skills") {
-		t.Errorf("issue context should omit Agent Skills section when every skill disables model invocation:\n%s", issueContext)
-	}
 }
 
 func TestWriteContextFilesHydratesDisableModelInvocationSkillButDoesNotAdvertiseIt(t *testing.T) {
@@ -298,12 +281,13 @@ Hidden body.`,
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
-	issueContext, err := os.ReadFile(filepath.Join(dir, ".agent_context", "issue_context.md"))
-	if err != nil {
-		t.Fatalf("read issue_context.md: %v", err)
-	}
-	if strings.Contains(string(issueContext), "Hidden Skill") {
-		t.Fatalf("issue_context.md advertised hidden skill:\n%s", string(issueContext))
+	// The sidecar brief is gone (MUL-6984): nothing pointed at
+	// .agent_context/issue_context.md, so it was a third copy of facts the
+	// runtime brief and per-turn message already carry. Prepare must not
+	// resurrect it — a workdir-local file no surface names is exactly how a
+	// stale duplicate goes unnoticed.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); !os.IsNotExist(err) {
+		t.Fatalf("writeContextFiles wrote a sidecar brief; stat err = %v, want not-exist", err)
 	}
 
 	hiddenSkill, err := os.ReadFile(filepath.Join(dir, ".agent_context", "skills", "hidden-skill", "SKILL.md"))

@@ -15,8 +15,8 @@
     "tokens_label": "토큰 · {{days}}일",
     "tokens_hint": "입력 {{input}} · 출력 {{output}}",
     "run_time_label": "실행 시간 · {{days}}일",
-    "run_time_hint": "작업 {{tasks}}개 기준",
-    "tasks_label": "작업 · {{days}}일",
+    "run_time_hint": "실행 {{tasks}}개 기준",
+    "tasks_label": "실행 · {{days}}일",
     "tasks_hint": "실패 {{failed}}개"
   },
   "dim": {
@@ -28,12 +28,12 @@
     "title_cost": "일별 비용",
     "title_tokens": "일별 토큰",
     "title_time": "일별 실행 시간",
-    "title_tasks": "일별 작업",
+    "title_tasks": "일별 실행",
     "title_errors": "일별 오류",
     "metric_cost": "비용",
     "metric_tokens": "토큰",
     "metric_time": "시간",
-    "metric_tasks": "작업",
+    "metric_tasks": "실행",
     "no_data": "이 기간에는 사용량이 없습니다.",
     "metric_label": "지표"
   },
@@ -41,12 +41,12 @@
     "title_cost": "주별 비용",
     "title_tokens": "주별 토큰",
     "title_time": "주별 실행 시간",
-    "title_tasks": "주별 작업",
+    "title_tasks": "주별 실행",
     "title_errors": "주별 오류",
     "partial_label": "{{range}} (부분 · 7일 중 {{covered}}일)"
   },
   "errors": {
-    "kpi_failed_label": "실패한 작업 · {{days}}일",
+    "kpi_failed_label": "실패한 실행 · {{days}}일",
     "kpi_failed_hint": "실행 {{total}}회 중",
     "kpi_rate_label": "실패율 · {{days}}일",
     "kpi_agents_label": "영향받은 에이전트 · {{days}}일",
@@ -93,14 +93,14 @@
     "header_tokens": "토큰",
     "header_cost": "비용",
     "header_time": "시간",
-    "header_tasks": "작업",
+    "header_tasks": "실행",
     "show_all": "전체 보기",
     "show_less": "상위 {{count}}개만",
     "no_data": "이 기간에는 에이전트 활동이 없습니다."
   },
   "empty": {
     "title": "아직 사용량이 없습니다",
-    "body": "여기에서 에이전트가 작업을 실행하기 시작하면 토큰 비용과 실행 시간이 이 화면에 표시됩니다."
+    "body": "여기에서 에이전트가 실행을 시작하면 토큰 비용과 실행 시간이 이 화면에 표시됩니다."
   },
   "duration": {
     "less_than_minute": "1분 미만"

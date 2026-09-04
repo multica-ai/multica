@@ -92,7 +92,7 @@ Backend 容器每次启动时都会先运行数据库 migration，再启动服�
 
 ### 本机访问
 
-直接打开 [http://localhost:3000](http://localhost:3000)。后面运行 `multica setup self-host` 时也不需要传 URL。
+直接打开 [http://localhost:3000P172。后面运行 `multica setup self-host` 时也不需要传 URL。
 
 ### 远程访问
 
@@ -117,24 +117,24 @@ MULTICA_PUBLIC_URL=https://api.example.com
 
 ```text
 app.example.com {
-    # 浏览器的 WebSocket 直接交给 backend
-    @ws path /ws /ws/*
-    handle @ws {
-        reverse_proxy 127.0.0.1:8080 {
-            flush_interval -1
-        }
-    }
+ # 浏览器的 WebSocket 直接交给 backend
+ @ws path /ws /ws/*
+ handle @ws {
+ reverse_proxy 127.0.0.1:8080 {
+ flush_interval -1
+ }
+ }
 
-    # 其余路径交给 frontend；它会转发 API 和登录请求
-    handle {
-        reverse_proxy 127.0.0.1:3000
-    }
+ # 其余路径交给 frontend；它会转发 API 和登录请求
+ handle {
+ reverse_proxy 127.0.0.1:3000
+ }
 }
 
 api.example.com {
-    reverse_proxy 127.0.0.1:8080 {
-        flush_interval -1
-    }
+ reverse_proxy 127.0.0.1:8080 {
+ flush_interval -1
+ }
 }
 ```
 
@@ -142,31 +142,31 @@ api.example.com {
 
 ```text
 multica.example.com {
-    # CLI 可达性探测：`multica setup` 会 GET <server-url>/health 并要求 200，
-    # 旧版 frontend 不转发这个路径，直接路由到 backend
-    handle /health {
-        reverse_proxy 127.0.0.1:8080
-    }
+ # CLI 可达性探测：`multica setup` 会 GET <server-url>/health 并要求 200，
+ # 旧版 frontend 不转发这个路径，直接路由到 backend
+ handle /health {
+ reverse_proxy 127.0.0.1:8080
+ }
 
-    # 网页端 realtime WebSocket——前端镜像代理不了 WS 升级，直通 backend
-    handle /ws {
-        reverse_proxy 127.0.0.1:8080 {
-            flush_interval -1
-        }
-    }
+ # 网页端 realtime WebSocket——前端镜像代理不了 WS 升级，直通 backend
+ handle /ws {
+ reverse_proxy 127.0.0.1:8080 {
+ flush_interval -1
+ }
+ }
 
-    # daemon 长连接：拨的是 {server-url}/api/daemon/ws（不是 /ws）。
-    # 缺了这条，握手失败后 daemon 会静默回退到轮询
-    handle /api/daemon/ws {
-        reverse_proxy 127.0.0.1:8080 {
-            flush_interval -1
-        }
-    }
+ # daemon 长连接：拨的是 {server-url}/api/daemon/ws（不是 /ws）。
+ # 缺了这条，握手失败后 daemon 会静默回退到轮询
+ handle /api/daemon/ws {
+ reverse_proxy 127.0.0.1:8080 {
+ flush_interval -1
+ }
+ }
 
-    # 其余路径交给 frontend；它会转发 API 和登录请求
-    handle {
-        reverse_proxy 127.0.0.1:3000
-    }
+ # 其余路径交给 frontend；它会转发 API 和登录请求
+ handle {
+ reverse_proxy 127.0.0.1:3000
+ }
 }
 ```
 
@@ -194,7 +194,7 @@ curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs backend \
-  | grep "Verification code"
+ | grep "Verification code"
 ```
 
 日志中会出现类似内容：
@@ -214,7 +214,7 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 下面的命令在**运行 AI 编程工具的电脑**上执行，不一定是运行 Docker 的服务器。
 
 <Callout type="warning">
-任务以运行守护进程的用户的全部权限执行——该用户能读写的一切，任务都能读写。请用专用 Unix 用户、容器或虚拟机来运行守护进程，而不是你的个人账号。详见[安全模型](/security-model)。
+每次执行都拥有守护进程所属用户的全部权限——该用户能读写的一切，运行都能读写。请用专用 Unix 用户、容器或虚拟机来运行守护进程，而不是你的个人账号。详见[安全模型](/security-model)。
 </Callout>
 
 先安装 Multica CLI：
@@ -241,8 +241,8 @@ multica setup self-host
 
 ```bash
 multica setup self-host \
-  --server-url https://api.example.com \
-  --app-url https://app.example.com
+ --server-url https://api.example.com \
+ --app-url https://app.example.com
 ```
 
 这条命令会先检查 `<server-url>/health`，再打开浏览器完成登录。登录完成后，它会保存本机凭据并启动守护进程。这一步报 `Server not reachable`，说明 `/health` 没有通过探测拿到 200：可能是代理把所有流量转给了不转发该路径的旧版 frontend，可能是代理根本没把 `/health` 路由到 backend，也可能是更底层的问题（DNS、TLS、防火墙、超时、backend 返回 5xx）——见[故障排查](/troubleshooting#multica-setup-报告服务器不可达)。
@@ -261,7 +261,7 @@ multica daemon status
 
 ## 6. 完成第一次执行
 
-回到 Multica。运行时列表中出现在线的运行时后，创建一个智能体，并把第一个 issue 分配给它。
+回到 Multica。运行时列表中出现在线的运行时后，创建一个智能体，并把第一个任务分配给它。
 
 执行日志变为"已完成"、时间线中出现智能体的回复，说明自托管服务、执行电脑和 AI 编程工具已经连通。详细步骤见[快速上手](/cloud-quickstart)第 3-5 步。
 
@@ -318,7 +318,7 @@ docker compose -f docker-compose.selfhost.yml up -d
 
 ```bash
 grep MULTICA_IMAGE_TAG .env
-# MULTICA_IMAGE_TAG=v0.4.5   ← 钉死了：先改成 latest（或你想要的版本）
+# MULTICA_IMAGE_TAG=v0.4.5 ← 钉死了：先改成 latest（或你想要的版本）
 ```
 </Callout>
 
@@ -332,7 +332,7 @@ migration 只往前走、不回滚，所以正式环境升级前先导一份：
 
 ```bash
 docker compose -f docker-compose.selfhost.yml exec -T postgres \
-  pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
+ pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
 ```
 
 <Callout type="warning">
@@ -380,7 +380,7 @@ Helm 有自己的升级路径：在 values 文件里把 `images.backend.tag` / `
 | 收不到验证码 | 请求一次验证码，再从 backend 日志中查找 `Verification code`。 |
 | `setup self-host` 提示 server 不可达 | 在执行电脑上请求 `https://api.example.com/health`，确认 DNS、TLS 和反向代理都可达。返回 404 说明代理把 `/health` 转给了不转发该路径的旧版 frontend——改为直通 backend（见[故障排查](/troubleshooting#multica-setup-报告服务器不可达)）。 |
 | 守护进程没有列出 `Agents` | 确认 AI 编程工具在 `PATH` 中并已登录，然后运行 `multica daemon restart`。 |
-| issue 一直排队 | 运行 `multica daemon status`，确认守护进程正在运行并连接了工作区。 |
+| 任务一直排队 | 运行 `multica daemon status`，确认守护进程正在运行并连接了工作区。 |
 
 更多情况见[故障排查](/troubleshooting)。
 

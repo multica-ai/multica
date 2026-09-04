@@ -447,7 +447,11 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)
 	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": h.workspaceToResponse(ws)})
-	if req.Name != nil {
+	// A rename changes what daemons display; a settings edit changes how they
+	// behave — the GitHub master switch and the Co-authored-by toggle are read
+	// from this JSONB. Daemons cache settings and have no other way to learn
+	// they moved, so both edits have to wake every member's daemons.
+	if req.Name != nil || req.Settings != nil {
 		if members, err := h.Queries.ListMembers(r.Context(), ws.ID); err == nil {
 			userIDs := make([]string, 0, len(members))
 			for _, member := range members {
@@ -1117,6 +1121,15 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		failWorkspaceDelete(w, r, workspaceID, "lock workspace", err)
 		return
 	}
+	// Take a best-effort snapshot for post-commit daemon invalidation. Runtime
+	// registration does not participate in the workspace delete lock protocol,
+	// so PR1 retains the heartbeat lookup as the correctness fallback for a
+	// registration that races this snapshot.
+	runtimeIDs, err := qtx.ListAgentRuntimeIDsByWorkspace(r.Context(), requester.WorkspaceID)
+	if err != nil {
+		failWorkspaceDelete(w, r, workspaceID, "list runtimes", err)
+		return
+	}
 
 	if _, err := qtx.LockChatSessionsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
 		failWorkspaceDelete(w, r, workspaceID, "lock chat sessions", err)
@@ -1309,6 +1322,9 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("commit workspace delete failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
 		return
+	}
+	for _, runtimeID := range runtimeIDs {
+		h.NotifyRuntimeGone(uuidToString(runtimeID))
 	}
 	h.deleteS3Objects(r.Context(), append(sourceContextAttachmentURLs, sourceContextIntentURLs...))
 

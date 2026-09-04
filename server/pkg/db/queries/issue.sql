@@ -291,7 +291,8 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 -- name: FindActiveDuplicateIssue :one
 SELECT * FROM issue
 WHERE workspace_id = $1
-  AND issue_effective_status(workspace_id, status) NOT IN ('done', 'cancelled')
+  -- Negate only known terminal keys so an unknown legacy key remains active.
+  AND NOT (status = ANY(sqlc.arg('terminal_status_keys')::text[]))
   AND project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
   AND parent_issue_id IS NOT DISTINCT FROM sqlc.arg('parent_issue_id')::uuid
   AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = sqlc.arg('normalized_title')
@@ -301,7 +302,8 @@ LIMIT 1;
 -- name: FindRecentAutopilotDuplicateIssue :one
 SELECT i.* FROM issue i
 WHERE i.workspace_id = $1
-  AND issue_effective_status(i.workspace_id, i.status) NOT IN ('done', 'cancelled')
+  -- Negate only known terminal keys so an unknown legacy key remains active.
+  AND NOT (i.status = ANY(sqlc.arg('terminal_status_keys')::text[]))
   AND i.origin_type = 'autopilot'
   AND i.origin_id = $2
   AND i.project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
@@ -351,7 +353,8 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.revision
 FROM issue i
 WHERE i.workspace_id = $1
-  AND issue_effective_status(i.workspace_id, i.status) NOT IN ('done', 'cancelled')
+  -- Negate only known terminal keys so an unknown legacy key remains visible.
+  AND NOT (i.status = ANY(sqlc.arg('terminal_status_keys')::text[]))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
@@ -359,12 +362,21 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
   -- properties_filter is a jsonb array of groups, each group an array of
-  -- containment patterns (built by parsePropertiesFilterParam): the issue
-  -- must match at least one pattern from EVERY group (AND of ORs). A pattern
-  -- of the shape {"__none__": "<definitionId>"} is the "no value" marker and
-  -- matches when the issue's properties are missing that key. The correlated
-  -- form skips the GIN index, which is fine here: open_only is an
-  -- unpaginated workspace scan already narrowed by status.
+  -- patterns (built by parsePropertiesFilterParam): the issue must match at
+  -- least one pattern from EVERY group (AND of ORs). Three pattern shapes:
+  --   {"__none__": "<definitionId>"}                         — "no value" marker;
+  --   {"<definitionId>": <value>, ...}                        — containment;
+  --   {"__op__": "<op>", "def": "<id>", "value": "<v>"}       — scalar operator
+  -- (contains / gt / gte / lt / lte / before / after), where the contains
+  -- value arrives already ILIKE-escaped and the op was validated in Go, so
+  -- the per-op branches below only ever see legal values. A contains pattern
+  -- additionally carries "prefilter" when its needle survives jsonb text
+  -- serialization intact; the clause it enables is redundant by construction
+  -- (prefilterableContainsNeedle in property.go) and stays here so both renderings
+  -- of the filter keep matching row for row. The correlated form skips the GIN
+  -- index, which is fine here: open_only is an unpaginated workspace scan. The
+  -- terminal-status predicate intentionally remains a filter rather than a
+  -- positive index narrowing so unknown legacy status keys stay visible.
   AND (
     sqlc.narg('properties_filter')::jsonb IS NULL
     OR NOT EXISTS (
@@ -374,7 +386,35 @@ WHERE i.workspace_id = $1
         SELECT 1
         FROM jsonb_array_elements(pf.alternatives) AS alt(pattern)
         WHERE (alt.pattern ? '__none__' AND NOT (i.properties ? (alt.pattern ->> '__none__')))
-           OR (NOT (alt.pattern ? '__none__') AND i.properties @> alt.pattern)
+           OR (NOT (alt.pattern ? '__none__') AND NOT (alt.pattern ? '__op__')
+               AND i.properties @> alt.pattern)
+           OR (alt.pattern ? '__op__'
+               AND i.properties ->> (alt.pattern ->> 'def') IS NOT NULL
+               AND (
+                 (alt.pattern ->> '__op__' = 'contains'
+                  AND (NOT (alt.pattern ? 'prefilter')
+                       OR LOWER(i.properties::text) LIKE LOWER('%' || (alt.pattern ->> 'prefilter') || '%'))
+                  AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'string'
+                  AND (i.properties ->> (alt.pattern ->> 'def')) ILIKE '%' || (alt.pattern ->> 'value') || '%')
+                 OR (alt.pattern ->> '__op__' = 'gt'
+                  AND CASE WHEN jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
+                    THEN (i.properties ->> (alt.pattern ->> 'def'))::numeric END > (alt.pattern ->> 'value')::numeric)
+                 OR (alt.pattern ->> '__op__' = 'gte'
+                  AND CASE WHEN jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
+                    THEN (i.properties ->> (alt.pattern ->> 'def'))::numeric END >= (alt.pattern ->> 'value')::numeric)
+                 OR (alt.pattern ->> '__op__' = 'lt'
+                  AND CASE WHEN jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
+                    THEN (i.properties ->> (alt.pattern ->> 'def'))::numeric END < (alt.pattern ->> 'value')::numeric)
+                 OR (alt.pattern ->> '__op__' = 'lte'
+                  AND CASE WHEN jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
+                    THEN (i.properties ->> (alt.pattern ->> 'def'))::numeric END <= (alt.pattern ->> 'value')::numeric)
+                 OR (alt.pattern ->> '__op__' = 'before'
+                  AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'string'
+                  AND i.properties ->> (alt.pattern ->> 'def') < (alt.pattern ->> 'value'))
+                 OR (alt.pattern ->> '__op__' = 'after'
+                  AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'string'
+                  AND i.properties ->> (alt.pattern ->> 'def') > (alt.pattern ->> 'value'))
+               ))
       )
     )
   )
@@ -510,7 +550,7 @@ GROUP BY assignee_type, assignee_id;
 -- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE issue_effective_status(workspace_id, status) IN ('done', 'cancelled'))::bigint AS done
+       COUNT(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL

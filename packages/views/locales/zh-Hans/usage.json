@@ -14,9 +14,9 @@
     "cost_label": "费用 · {{days}}天",
     "tokens_label": "Token · {{days}}天",
     "tokens_hint": "输入 {{input}} · 输出 {{output}}",
-    "run_time_label": "运行时长 · {{days}}天",
-    "run_time_hint": "共 {{tasks}} 个 task",
-    "tasks_label": "task 数 · {{days}}天",
+    "run_time_label": "耗时 · {{days}}天",
+    "run_time_hint": "共 {{tasks}} 次运行",
+    "tasks_label": "运行数 · {{days}}天",
     "tasks_hint": "失败 {{failed}} 个"
   },
   "dim": {
@@ -27,26 +27,26 @@
   "daily": {
     "title_cost": "每日费用",
     "title_tokens": "每日 Token",
-    "title_time": "每日运行时长",
-    "title_tasks": "每日 task 数",
+    "title_time": "每日耗时",
+    "title_tasks": "每日运行数",
     "title_errors": "每日错误",
     "metric_cost": "费用",
     "metric_tokens": "Token",
-    "metric_time": "运行时长",
-    "metric_tasks": "task 数",
+    "metric_time": "耗时",
+    "metric_tasks": "运行数",
     "no_data": "所选时间范围内暂无消耗。",
     "metric_label": "指标"
   },
   "weekly": {
     "title_cost": "每周费用",
     "title_tokens": "每周 Token",
-    "title_time": "每周运行时长",
-    "title_tasks": "每周 task 数",
+    "title_time": "每周耗时",
+    "title_tasks": "每周运行数",
     "title_errors": "每周错误",
     "partial_label": "{{range}}（未满 · 已过 {{covered}} / 7 天）"
   },
   "errors": {
-    "kpi_failed_label": "失败 task · {{days}}天",
+    "kpi_failed_label": "失败运行 · {{days}}天",
     "kpi_failed_hint": "共 {{total}} 次运行",
     "kpi_rate_label": "失败率 · {{days}}天",
     "kpi_agents_label": "受影响智能体 · {{days}}天",
@@ -92,15 +92,15 @@
     "header_agent": "智能体",
     "header_tokens": "Token",
     "header_cost": "费用",
-    "header_time": "运行时长",
-    "header_tasks": "task 数",
+    "header_time": "耗时",
+    "header_tasks": "运行数",
     "show_all": "展开全部",
     "show_less": "只看前 {{count}} 个",
     "no_data": "所选时间范围内暂无智能体活动。"
   },
   "empty": {
     "title": "暂无消耗数据",
-    "body": "当智能体在这里开始执行 task 后，它们的 token 消耗和运行时长将出现在此处。"
+    "body": "当智能体在这里开始运行后，它们的 token 消耗和耗时将出现在此处。"
   },
   "duration": {
     "less_than_minute": "<1分钟"

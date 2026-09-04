@@ -3299,6 +3299,18 @@ WITH victims AS (
     SELECT id FROM agent_task_queue
     WHERE status = 'queued'
       AND created_at < now() - make_interval(secs => $1::double precision)
+      AND (
+          runtime_id IS NULL
+          OR NOT EXISTS (
+              SELECT 1 FROM agent_runtime r WHERE r.id = agent_task_queue.runtime_id
+          )
+          OR EXISTS (
+              SELECT 1 FROM agent_runtime r
+              WHERE r.id = agent_task_queue.runtime_id
+                AND COALESCE(r.last_seen_at, r.updated_at) <
+                    now() - make_interval(secs => $1::double precision)
+          )
+      )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue retry_parent
           WHERE retry_parent.id = agent_task_queue.parent_task_id
@@ -3311,13 +3323,23 @@ WITH victims AS (
 UPDATE agent_task_queue t
 SET status = 'failed',
     completed_at = now(),
-    error = 'task expired in queue',
+    error = 'runtime unavailable while task was queued',
     failure_reason = 'queued_expired',
     prepare_lease_expires_at = NULL
 FROM victims v
 WHERE t.id = v.id
   AND t.status = 'queued'
   AND t.created_at < now() - make_interval(secs => $1::double precision)
+  AND (
+      t.runtime_id IS NULL
+      OR NOT EXISTS (SELECT 1 FROM agent_runtime r WHERE r.id = t.runtime_id)
+      OR EXISTS (
+          SELECT 1 FROM agent_runtime r
+          WHERE r.id = t.runtime_id
+            AND COALESCE(r.last_seen_at, r.updated_at) <
+                now() - make_interval(secs => $1::double precision)
+      )
+  )
   AND NOT EXISTS (
       SELECT 1 FROM agent_task_queue retry_parent
       WHERE retry_parent.id = t.parent_task_id
@@ -3327,19 +3349,56 @@ RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t
 `
 
 type ExpireStaleQueuedTasksParams struct {
-	TtlSecs    float64 `json:"ttl_secs"`
-	MaxPerTick int32   `json:"max_per_tick"`
+	ReconnectGraceSecs float64 `json:"reconnect_grace_secs"`
+	MaxPerTick         int32   `json:"max_per_tick"`
 }
 
-// Fails tasks that have been sitting in 'queued' for longer than the TTL.
-// This is the cleanup arm of the MUL-1899 "queued backlog" fix: even with the
-// new dispatch-time admission gate that refuses to enqueue when the runtime
-// is offline, we still need to drain the historical 87k+ doomed rows and
-// handle edge cases where a runtime goes offline AFTER a task is already
-// queued (the admission check protects new enqueues, not in-flight queue
-// depth). A retry created by runtime_offline is exempt: it deliberately waits
-// for that runtime to reconnect, so time spent in this recovery state must not
-// consume the generic queue TTL.
+// Fails queued tasks whose runtime can no longer prove it is alive.
+//
+// This used to be a pure wall clock: queued for longer than a TTL (default 2h)
+// meant failed. That conflated "nobody is coming for this task" with "the
+// queue ahead of it is long", and the second one is not a failure. MUL-6558
+// was exactly that — a self-hosted runtime with low task concurrency held its
+// own queue past 2h and healthy work died as queued_expired. The TTL knob
+// added then (MULTICA_TASK_QUEUED_TTL) only moved the cliff; it did not stop
+// a busy runtime from eventually crossing it.
+//
+// So the question is not "how long has this waited" but "is anything still
+// able to pick it up". A runtime that keeps heartbeating is busy, not dead,
+// and its backlog must be allowed to drain however long that takes. The
+// liveness signal is the same one FailTasksForOfflineRuntimes uses for
+// dispatched/running rows, so a daemon going down now retires its queued and
+// its in-flight work on one clock instead of two.
+//
+// The row must ALSO have been queued for a full grace of its own. Enqueue binds
+// a task to agent.runtime_id without checking that the runtime is up, so
+// runtime liveness alone would fail a task the instant it is assigned to a
+// runtime that has been offline a while — a laptop closed overnight would turn
+// "assign this issue" into a failure inside one 30s sweep tick instead of
+// waiting for the machine to come back. Requiring the task's own age keeps the
+// promise the name makes: a queued task gets one full reconnect grace before it
+// is given up on, counted from when it started waiting. It also bounds the
+// scan, which would otherwise re-evaluate the runtime subquery against every
+// queued row on every tick.
+//
+// Heartbeat age is read directly rather than gated on runtime.status='online',
+// so a row stuck at 'online' with a long-dead heartbeat still releases its
+// queue.
+//
+// The runtime_id IS NULL / missing-runtime arms are fail-closed defence, not
+// live paths: the schema already excludes both. runtime_id was NOT NULL from
+// migration 004 until 251 replaced it with CHECK (runtime_id IS NOT NULL OR
+// completed_at IS NOT NULL), which every insert and update is checked against
+// (NOT VALID only skips the backfill scan), so no queued row can be unbound.
+// A dangling reference is impossible because agent_task_queue_runtime_id_fkey
+// (migration 004) is ON DELETE CASCADE: deleting a runtime removes the rows
+// referencing it rather than orphaning them, and the normal delete path
+// (migration 251, MUL-5559) explicitly unbinds history tasks first in the same
+// transaction. They are kept so a future schema change cannot silently strand
+// rows that have no liveness signal at all.
+//
+// A retry created by runtime_offline is exempt: it deliberately waits for that
+// runtime to reconnect, and FailExpiredRuntimeReconnectRetries owns its exit.
 //
 // Concurrency safety: the daemon's claim path may race with this sweeper to
 // transition the same row out of 'queued'. We protect against that two
@@ -3347,7 +3406,7 @@ type ExpireStaleQueuedTasksParams struct {
 //  1. The CTE selects victims with FOR UPDATE SKIP LOCKED so a row that is
 //     currently being claimed (or otherwise locked) is skipped — no lock
 //     contention with the dispatch path, and we won't queue up behind it.
-//  2. The outer UPDATE re-checks status='queued' AND the TTL predicate at
+//  2. The outer UPDATE re-checks status='queued' AND the liveness predicate at
 //     apply time. If a daemon claimed the row between selection and update
 //     (e.g. lock released after the claim transaction commits), the row is
 //     already 'dispatched'/'running' and the WHERE clause filters it out
@@ -3357,7 +3416,7 @@ type ExpireStaleQueuedTasksParams struct {
 // the DB when the backlog is large — the sweeper drains the rest on
 // subsequent ticks.
 func (q *Queries) ExpireStaleQueuedTasks(ctx context.Context, arg ExpireStaleQueuedTasksParams) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, expireStaleQueuedTasks, arg.TtlSecs, arg.MaxPerTick)
+	rows, err := q.db.Query(ctx, expireStaleQueuedTasks, arg.ReconnectGraceSecs, arg.MaxPerTick)
 	if err != nil {
 		return nil, err
 	}
@@ -5115,84 +5174,6 @@ func (q *Queries) ListActiveAgentsByRuntimeForUpdate(ctx context.Context, runtim
 	return items, nil
 }
 
-const listActiveSiblingIssueTasks = `-- name: ListActiveSiblingIssueTasks :many
-SELECT
-    atq.id AS task_id,
-    i.id AS issue_id,
-    w.issue_prefix,
-    i.number AS issue_number,
-    i.title AS issue_title,
-    atq.status,
-    atq.created_at,
-    atq.started_at
-FROM agent_task_queue atq
-JOIN issue i ON i.id = atq.issue_id
-JOIN workspace w ON w.id = i.workspace_id
-WHERE atq.agent_id = $1
-  AND atq.id <> $2
-  AND i.workspace_id = $3
-  AND atq.status IN ('dispatched', 'running', 'waiting_local_directory')
-ORDER BY
-    CASE atq.status
-        WHEN 'running' THEN 0
-        WHEN 'waiting_local_directory' THEN 1
-        ELSE 2
-    END,
-    atq.created_at DESC
-LIMIT 5
-`
-
-type ListActiveSiblingIssueTasksParams struct {
-	AgentID     pgtype.UUID `json:"agent_id"`
-	TaskID      pgtype.UUID `json:"task_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-type ListActiveSiblingIssueTasksRow struct {
-	TaskID      pgtype.UUID        `json:"task_id"`
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	IssuePrefix string             `json:"issue_prefix"`
-	IssueNumber int32              `json:"issue_number"`
-	IssueTitle  string             `json:"issue_title"`
-	Status      string             `json:"status"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	StartedAt   pgtype.Timestamptz `json:"started_at"`
-}
-
-// Claim-time context for agents that can work concurrently. Only tasks already
-// handed to a runtime can coordinate with the new claim; queued work is omitted
-// so the warning stays high-signal. Bounded so one heavily-used agent cannot
-// inflate every claim payload; issue-bound rows carry a concrete run-messages
-// lookup target.
-func (q *Queries) ListActiveSiblingIssueTasks(ctx context.Context, arg ListActiveSiblingIssueTasksParams) ([]ListActiveSiblingIssueTasksRow, error) {
-	rows, err := q.db.Query(ctx, listActiveSiblingIssueTasks, arg.AgentID, arg.TaskID, arg.WorkspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListActiveSiblingIssueTasksRow{}
-	for rows.Next() {
-		var i ListActiveSiblingIssueTasksRow
-		if err := rows.Scan(
-			&i.TaskID,
-			&i.IssueID,
-			&i.IssuePrefix,
-			&i.IssueNumber,
-			&i.IssueTitle,
-			&i.Status,
-			&i.CreatedAt,
-			&i.StartedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
@@ -5268,6 +5249,108 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 			&i.BranchName,
 			&i.DurableWorkDir,
 			&i.ChannelContextRevision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveTasksByIssueFamily = `-- name: ListActiveTasksByIssueFamily :many
+SELECT
+    atq.id AS task_id,
+    atq.agent_id,
+    atq.issue_id,
+    atq.status,
+    atq.created_at,
+    atq.started_at,
+    w.issue_prefix,
+    i.number AS issue_number,
+    i.title AS issue_title
+FROM agent_task_queue atq
+JOIN issue i ON i.id = atq.issue_id
+JOIN workspace w ON w.id = i.workspace_id
+WHERE i.workspace_id = $1
+  AND (i.id = $2::uuid OR i.parent_issue_id = $2::uuid)
+  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+ORDER BY
+    CASE atq.status
+        WHEN 'running' THEN 0
+        WHEN 'dispatched' THEN 1
+        WHEN 'waiting_local_directory' THEN 2
+        ELSE 3
+    END,
+    atq.created_at DESC
+LIMIT $3
+`
+
+type ListActiveTasksByIssueFamilyParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RootIssueID pgtype.UUID `json:"root_issue_id"`
+	RowLimit    int32       `json:"row_limit"`
+}
+
+type ListActiveTasksByIssueFamilyRow struct {
+	TaskID      pgtype.UUID        `json:"task_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	StartedAt   pgtype.Timestamptz `json:"started_at"`
+	IssuePrefix string             `json:"issue_prefix"`
+	IssueNumber int32              `json:"issue_number"`
+	IssueTitle  string             `json:"issue_title"`
+}
+
+// Cross-issue coordination read for parallel sub-issue work (#7768). Given a
+// family root — the target issue's parent, or the target itself when it has
+// none — return every in-flight task on the root and on all of its children,
+// so a run can see who else is already working in the family before it starts
+// overlapping work. Advisory only: nothing here gates, queues, or serialises
+// anything.
+//
+// Same active set as ListActiveTasksByIssue, including 'queued': a queued
+// sibling cannot answer you yet, but it is about to touch the same code, which
+// is exactly what the caller is trying to find out. The status column tells the
+// two apart.
+//
+// Issue identity is joined in because the caller renders runs from several
+// issues in one list and cannot label a row from the task alone. agent_id is
+// here for the same reason: this read spans agents, and which one is on a
+// sibling is the answer, not a detail.
+//
+// Columns are named rather than embedded. This is the coordination question,
+// not the execution log: result and context are JSONB blobs, and work_dir /
+// trigger_summary / the attribution ids are all execution-log fields that a
+// caller asking "who else is here?" never reads. Selecting them would make
+// Postgres detoast and ship roughly 5x the bytes per row for nothing.
+//
+// Ordered running-first so the truncation the LIMIT may impose drops the least
+// interesting rows, and bounded because a parent with hundreds of children must
+// not turn one coordination read into an unbounded scan.
+func (q *Queries) ListActiveTasksByIssueFamily(ctx context.Context, arg ListActiveTasksByIssueFamilyParams) ([]ListActiveTasksByIssueFamilyRow, error) {
+	rows, err := q.db.Query(ctx, listActiveTasksByIssueFamily, arg.WorkspaceID, arg.RootIssueID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveTasksByIssueFamilyRow{}
+	for rows.Next() {
+		var i ListActiveTasksByIssueFamilyRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.StartedAt,
+			&i.IssuePrefix,
+			&i.IssueNumber,
+			&i.IssueTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -5630,15 +5713,19 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 }
 
 const listPendingDelegatedFailureRecoveries = `-- name: ListPendingDelegatedFailureRecoveries :many
-SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision
+SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at
 FROM comment recovery
 JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
 JOIN agent_task_queue source ON source.id = failed.delegated_from_task_id
 JOIN issue source_issue ON source_issue.id = source.issue_id
 JOIN agent source_agent ON source_agent.id = source.agent_id
+LEFT JOIN issue_status source_status
+  ON source_status.workspace_id = source_issue.workspace_id
+ AND source_status.key = source_issue.status
 WHERE recovery.author_type = 'system'
   AND recovery.type = 'progress_update'
   AND recovery.source_task_id IS NOT NULL
+  AND recovery.recovery_settled_at IS NULL
   AND recovery.issue_id = source_issue.id
   AND recovery.workspace_id = source_issue.workspace_id
   AND failed.status = 'failed'
@@ -5648,7 +5735,7 @@ WHERE recovery.author_type = 'system'
   AND source.autopilot_run_id IS NULL
   AND source.issue_id IS NOT NULL
   AND source.agent_id <> failed.agent_id
-  AND issue_effective_status(source_issue.workspace_id, source_issue.status) NOT IN ('done', 'cancelled', 'backlog')
+  AND COALESCE(source_status.category, source_issue.status) NOT IN ('done', 'cancelled', 'backlog')
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id
@@ -5689,6 +5776,15 @@ LIMIT $1
 // explicit recovery signal avoids retroactively waking unrelated historical
 // delegated failures. A bounded runtime sweeper replays these comments after a
 // transient dispatch error or process restart.
+//
+// recovery_settled_at is what keeps this scan from growing with history. Every
+// other exclusion below is reversible — an issue can leave 'done', a cancelled
+// retry can be superseded — so none of them can be frozen into the index
+// predicate. A delivery receipt on a terminal task cannot be taken back, so
+// that one condition is recorded as durable state instead of being re-proven
+// through four joins and two NOT EXISTS subqueries on every tick. The predicate
+// of idx_comment_delegated_failure_unsettled matches the first four conditions,
+// so LIMIT now bounds the rows CHECKED and not just the rows RETURNED.
 func (q *Queries) ListPendingDelegatedFailureRecoveries(ctx context.Context, maxPerTick int32) ([]Comment, error) {
 	rows, err := q.db.Query(ctx, listPendingDelegatedFailureRecoveries, maxPerTick)
 	if err != nil {
@@ -5716,6 +5812,7 @@ func (q *Queries) ListPendingDelegatedFailureRecoveries(ctx context.Context, max
 			&i.QuickActionID,
 			&i.ViaPluginID,
 			&i.Revision,
+			&i.RecoverySettledAt,
 		); err != nil {
 			return nil, err
 		}
@@ -6920,6 +7017,53 @@ func (q *Queries) MergeDelegatedFailureCommentIntoPendingTask(ctx context.Contex
 	return i, err
 }
 
+const nextDeferredTaskFireAtForRuntimes = `-- name: NextDeferredTaskFireAtForRuntimes :one
+SELECT MIN(fire_at)::timestamptz
+FROM agent_task_queue t
+WHERE t.runtime_id = ANY($1::uuid[])
+  AND t.status = 'deferred'
+  AND EXISTS (
+    SELECT 1 FROM agent_runtime r
+    WHERE r.id = t.runtime_id
+      AND r.status = 'online'
+      AND COALESCE(r.last_seen_at, r.updated_at) >=
+          now() - make_interval(secs => $2::double precision)
+  )
+  AND (
+    t.fire_at > now()
+    OR NOT EXISTS (
+      SELECT 1 FROM agent_task_queue occupant
+      WHERE occupant.issue_id = t.issue_id
+        AND occupant.agent_id = t.agent_id
+        AND occupant.id <> t.id
+        AND (
+          occupant.status IN ('queued', 'dispatched')
+          OR (occupant.status = 'deferred' AND occupant.context->>'channel_issue_media_pending' = 'true')
+        )
+    )
+  )
+`
+
+type NextDeferredTaskFireAtForRuntimesParams struct {
+	RuntimeIds       []pgtype.UUID `json:"runtime_ids"`
+	RuntimeStaleSecs float64       `json:"runtime_stale_secs"`
+}
+
+// Returns the next future deferred task for a daemon's authorized runtime set,
+// or an eligible task that crossed fire_at during this claim. Overdue tasks
+// whose runtime is offline/stale or that are blocked by an existing issue+agent
+// occupant are omitted so they cannot cause a tight poll loop. Keep both fences
+// in sync with PromoteDueDeferredTasksForRuntimes: a task that cannot be
+// promoted must not advertise an immediate follow-up claim. The response
+// converts the timestamp to a relative delay, avoiding any dependency on
+// daemon/server clock synchronization.
+func (q *Queries) NextDeferredTaskFireAtForRuntimes(ctx context.Context, arg NextDeferredTaskFireAtForRuntimesParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, nextDeferredTaskFireAtForRuntimes, arg.RuntimeIds, arg.RuntimeStaleSecs)
+	var column_1 pgtype.Timestamptz
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const promoteDeferredChannelIssueTask = `-- name: PromoteDeferredChannelIssueTask :one
 UPDATE agent_task_queue
 SET status = 'queued', fire_at = NULL
@@ -8073,6 +8217,70 @@ func (q *Queries) SetTaskDeliveredCommentIDs(ctx context.Context, arg SetTaskDel
 	var delivered_comment_ids []pgtype.UUID
 	err := row.Scan(&delivered_comment_ids)
 	return delivered_comment_ids, err
+}
+
+const settleDelegatedFailureRecoveriesForTask = `-- name: SettleDelegatedFailureRecoveriesForTask :execrows
+UPDATE comment recovery
+SET recovery_settled_at = now()
+FROM agent_task_queue task
+WHERE task.id = $1
+  AND task.status IN ('completed', 'failed', 'cancelled')
+  AND recovery.id = ANY(task.delivered_comment_ids)
+  AND recovery.author_type = 'system'
+  AND recovery.type = 'progress_update'
+  AND recovery.source_task_id IS NOT NULL
+  AND recovery.recovery_settled_at IS NULL
+`
+
+// Retire every delegated-failure recovery comment this task actually received.
+//
+// Callers MUST run this inside the same transaction that makes the task
+// terminal, and only there. While a task is still dispatched its receipt is
+// REPLACED rather than appended (SetTaskDeliveredCommentIDs), because a reclaim
+// by a differently-capable daemon must be able to drop an id it will not
+// deliver. Settling at receipt-write time would freeze that legitimate
+// transient window into a permanently lost recovery. Once the task is terminal
+// the receipt is final, which is exactly the guarantee this marker records.
+//
+// A comment that was only planned into the task and never delivered is absent
+// from delivered_comment_ids, so an automatic cancellation correctly leaves it
+// pending for the sweeper to replay.
+//
+// The terminal-status predicate is the guarantee itself, not a caller
+// convention. Settling a dispatched or running task's receipt would freeze the
+// reclaim window into a permanently lost recovery, and this marker is
+// monotonic — there is no later pass that could undo it. A caller that passes a
+// non-terminal task therefore updates nothing rather than silently destroying
+// the obligation.
+func (q *Queries) SettleDelegatedFailureRecoveriesForTask(ctx context.Context, taskID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, settleDelegatedFailureRecoveriesForTask, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const settleDelegatedFailureRecoveryComment = `-- name: SettleDelegatedFailureRecoveryComment :execrows
+UPDATE comment
+SET recovery_settled_at = now()
+WHERE id = $1
+  AND author_type = 'system'
+  AND type = 'progress_update'
+  AND source_task_id IS NOT NULL
+  AND recovery_settled_at IS NULL
+`
+
+// Retire one recovery comment by id, for the terminal outcomes that are not a
+// task reaching a terminal status: exhaustion of the bounded automatic attempts
+// writes its receipt onto an attempt row that may still be running, and the
+// user-visible explanation comment is what closes the obligation. Callers run
+// this in the same transaction that records that outcome.
+func (q *Queries) SettleDelegatedFailureRecoveryComment(ctx context.Context, commentID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, settleDelegatedFailureRecoveryComment, commentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const startAgentTask = `-- name: StartAgentTask :one

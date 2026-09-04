@@ -462,8 +462,8 @@ importers:
         specifier: 0.83.6
         version: 0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0)
       react-native-enriched-markdown:
-        specifier: ^0.5.0
-        version: 0.5.0(@expo/config-plugins@55.0.9)(katex@0.16.45)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
+        specifier: ^0.6.0
+        version: 0.6.0(@expo/config-plugins@55.0.9)(katex@0.16.45)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
       react-native-gesture-handler:
         specifier: ~2.30.1
         version: 2.30.1(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
@@ -1047,9 +1047,15 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.0
         version: 19.2.3(@types/react@19.2.14)
+      '@typescript-eslint/parser':
+        specifier: ^8.35.0
+        version: 8.58.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
       '@vitejs/plugin-react':
         specifier: 'catalog:'
         version: 6.0.1(babel-plugin-react-compiler@1.0.0)(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(@types/node@25.5.0)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.0))
+      eslint:
+        specifier: ^9.0.0
+        version: 9.39.4(jiti@2.7.0)
       eslint-plugin-i18next:
         specifier: 'catalog:'
         version: 6.1.4
@@ -9269,8 +9275,8 @@ packages:
       react-native-svg:
         optional: true
 
-  react-native-enriched-markdown@0.5.0:
-    resolution: {integrity: sha512-CYihNlcg8IjsrVbmypDjFHsDF6Z6vYO0yraw6CkR30SDsg99J6fcBrOkyWOItO8PIDD21jw8yD1eYP/0LBOCdA==}
+  react-native-enriched-markdown@0.6.0:
+    resolution: {integrity: sha512-/ZkKZv9jGPAuc/oXevkf3MpVfcrG3pjHoVMyKzpJhGsmIXxeTRr2dlsIqo66k+Pa4JrChBg+HB6ImQ44Fg3wJw==}
     peerDependencies:
       '@expo/config-plugins': '>=50.0.0'
       katex: '>=0.16.0'
@@ -20902,7 +20908,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  react-native-enriched-markdown@0.5.0(@expo/config-plugins@55.0.9)(katex@0.16.45)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0):
+  react-native-enriched-markdown@0.6.0(@expo/config-plugins@55.0.9)(katex@0.16.45)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0):
     dependencies:
       react: 19.2.0
       react-native: 0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0)

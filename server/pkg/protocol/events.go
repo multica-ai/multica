@@ -150,10 +150,11 @@ const (
 	EventDaemonRuntimeProfilesChanged = "daemon:runtime_profiles_changed"
 	EventDaemonWorkspacesChanged      = "daemon:workspaces_changed"
 	// EventDaemonPendingWork is a runtime-scoped hint that a heartbeat-carried
-	// request (today: model-list discovery) is queued for that runtime. Without
-	// it the daemon only learns about the request on its next scheduled
-	// heartbeat, which adds up to one HeartbeatInterval (15s by default) of
-	// dead wait to an interactive UI flow (MUL-5444). The hint carries no work
+	// request (model discovery, capability discovery, or local-skill import) is
+	// queued for that runtime. Without it the daemon only learns about the
+	// request on its next scheduled heartbeat, adding up to one HeartbeatInterval
+	// (15s by default) of dead wait to an interactive UI flow (MUL-5444). The
+	// hint carries no work
 	// itself: the daemon still pulls the request through the normal heartbeat
 	// claim, so a lost or duplicated hint is harmless.
 	EventDaemonPendingWork = "daemon:pending_work"

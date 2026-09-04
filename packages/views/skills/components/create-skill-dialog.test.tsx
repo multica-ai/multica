@@ -126,22 +126,6 @@ describe("CreateSkillDialog local import", () => {
     });
   });
 
-  it("lists Import from local as the second method", () => {
-    renderDialog();
-    const cards = screen.getAllByRole("button");
-    const titles = cards
-      .map((el) => el.textContent ?? "")
-      .filter((text) =>
-        /Create manually|Import from local|Import from URL|Copy from runtime/.test(
-          text,
-        ),
-      );
-    expect(titles[0]).toContain("Create manually");
-    expect(titles[1]).toContain("Import from local");
-    expect(titles[2]).toContain("Import from URL");
-    expect(titles[3]).toContain("Copy from runtime");
-  });
-
   it("opens the folder picker when Import from local is clicked", () => {
     renderDialog();
     const click = vi.fn();
@@ -153,6 +137,43 @@ describe("CreateSkillDialog local import", () => {
     input.click = click;
     fireEvent.click(screen.getByRole("button", { name: /Import from local/i }));
     expect(click).toHaveBeenCalled();
+  });
+
+  // The local panel keeps its footer at Cancel + Import: a footer that also
+  // carried both source pickers overflowed the dialog and clipped Cancel
+  // (MUL-6794). The pickers live in the panel body instead.
+  it("offers both source pickers in the panel body", () => {
+    renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: /Import from local/i }));
+
+    const archiveInput = document.querySelector(
+      'input[type="file"][accept]',
+    ) as HTMLInputElement;
+    const click = vi.fn();
+    archiveInput.click = click;
+    fireEvent.click(
+      screen.getByRole("button", { name: /Choose \.skill \/ \.zip/i }),
+    );
+    expect(click).toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: /Choose folder/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps Import disabled until a folder is prepared", async () => {
+    renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: /Import from local/i }));
+    expect(screen.getByRole("button", { name: /^Import$/i })).toBeDisabled();
+
+    const input = document.querySelector(
+      'input[type="file"][multiple]',
+    ) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(["---\nname: review-helper\n---\n"], "SKILL.md")] },
+    });
+
+    expect((await screen.findAllByText("review-helper")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /^Import$/i })).toBeEnabled();
   });
 
   it("does not import when the folder has no SKILL.md", async () => {

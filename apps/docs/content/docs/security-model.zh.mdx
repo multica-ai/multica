@@ -1,23 +1,23 @@
 ---
 title: 安全模型
-description: 一个 Multica 任务能访问运行它的机器上的哪些内容，以及真正的隔离边界在哪里。
+description: 一个 Multica 运行能访问运行它的机器上的哪些内容，以及真正的隔离边界在哪里。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-当智能体接到任务时，守护进程会把 AI 编程工具（Codex、Claude Code 等）作为子进程启动。理解这个进程能碰到什么，就理解了全部安全模型。
+当智能体接到运行时，守护进程会把 AI 编程工具（Codex、Claude Code 等）作为子进程启动。理解这个进程能碰到什么，就理解了全部安全模型。
 
 ## 边界是运行守护进程的那个用户
 
-默认情况下，任务以**运行守护进程的操作系统用户的全部权限**执行。该用户能读写的文件，任务都能读写；该用户的凭据，任务都能使用；网络访问不受限制。
+默认情况下，每次执行都拥有**守护进程所属操作系统用户的全部权限**。该用户能读写的文件，运行都能读写；该用户的凭据，运行都能使用；网络访问不受限制。
 
-Multica 不对文件系统沙箱作任何保证。目前只有一个狭窄的例外——在 Windows 上显式开启 Codex 原生沙箱——而且哪些平台与配置组合会真正启用沙箱属于兼容性细节，会随工具版本变化。请把每一个任务都当作无沙箱来对待，并把边界放在守护进程之外。
+Multica 不对文件系统沙箱作任何保证。目前只有一个狭窄的例外——在 Windows 上显式开启 Codex 原生沙箱——而且哪些平台与配置组合会真正启用沙箱属于兼容性细节，会随工具版本变化。请把每一次运行都当作无沙箱来对待，并把边界放在守护进程之外。
 
 <Callout type="warning">
-Multica 不会替你做文件系统沙箱。如果守护进程跑在你的个人账号下，任务可以读取你的 SSH 私钥、修改你的 shell 配置、删除你的文档。隔离必须来自你为守护进程设置的外层边界。
+Multica 不会替你做文件系统沙箱。如果守护进程跑在你的个人账号下，运行可以读取你的 SSH 私钥、修改你的 shell 配置、删除你的文档。隔离必须来自你为守护进程设置的外层边界。
 </Callout>
 
-这是有意为之。智能体需要安装依赖、执行构建、使用你的云 CLI，这些工具都假设自己面对一个正常的 home 目录。不完整的文件系统沙箱会以极难排查的方式破坏这些工作——工具报"未登录"，或者悄悄用错了账号——同时又保护不了最要紧的东西：它无法阻止任务读取凭据并通过网络发出去。
+这是有意为之。智能体需要安装依赖、执行构建、使用你的云 CLI，这些工具都假设自己面对一个正常的 home 目录。不完整的文件系统沙箱会以极难排查的方式破坏这些工作——工具报"未登录"，或者悄悄用错了账号——同时又保护不了最要紧的东西：它无法阻止运行读取凭据并通过网络发出去。
 
 所以 Multica 不假装自己是边界。请在它外面加一层。
 
@@ -35,25 +35,25 @@ Multica 不会替你做文件系统沙箱。如果守护进程跑在你的个人
 
 以下是真实存在的隔离，但它们属于便利性与影响面收敛，**不是**用来防御主动逃逸的安全边界：
 
-- **每任务独立工作目录。** 每个任务在 `~/multica_workspaces/` 下拥有独立 workdir，并发任务不会在同一份 checkout 上打架。
-- **每任务独立的智能体状态。** Codex 任务拥有任务级 `CODEX_HOME`，保存配置、会话与技能，不会污染你的 `~/.codex/`。
-- **任务级 API token。** 交给任务的 `MULTICA_TOKEN` 由服务端绑定到该智能体与该任务，因此任务无法通过 Multica API 以你或其他智能体的身份行事。
+- **每次运行独立工作目录。** 每个运行在 `~/multica_workspaces/` 下拥有独立 workdir，并发运行不会在同一份 checkout 上打架。
+- **每次运行独立的智能体状态。** Codex 运行拥有运行级 `CODEX_HOME`，保存配置、会话与技能，不会污染你的 `~/.codex/`。
+- **运行级 API token。** 交给运行的 `MULTICA_TOKEN` 由服务端绑定到该智能体与该运行，因此运行无法通过 Multica API 以你或其他智能体的身份行事。
 
 ## 不构成边界的部分
 
-- **编程工具自带的沙箱与审批设置。** Multica 以无人值守方式运行智能体，审批请求会被自动应答。默认路径下文件系统沙箱同样处于关闭状态：Codex 使用 `sandbox_mode = "danger-full-access"`，Claude Code 使用 `--permission-mode bypassPermissions`。例外是 Windows——如果你显式配置了 Codex 原生沙箱（`windows.sandbox = "unelevated"` 或 `"elevated"`），Multica 会尊重这个 opt-in，对这些任务保留 `workspace-write`。适用场景下值得开启，但它只覆盖一个平台上的一个工具，不改变你应当如何收窄守护进程用户的权限。
-- **你的 `HOME` 目录结构。** 任务继承守护进程用户真实的 `HOME` 与 `XDG_*` 变量——正因如此，`gh`、`aws`、`kubectl`、`gcloud`、`glab` 等宿主 CLI 在任务内的行为与在你 shell 里完全一致。这同时也意味着该 home 下的一切都可触达。
+- **编程工具自带的沙箱与审批设置。** Multica 以无人值守方式运行智能体，审批请求会被自动应答。默认路径下文件系统沙箱同样处于关闭状态：Codex 使用 `sandbox_mode = "danger-full-access"`，Claude Code 使用 `--permission-mode bypassPermissions`。例外是 Windows——如果你显式配置了 Codex 原生沙箱（`windows.sandbox = "unelevated"` 或 `"elevated"`），Multica 会尊重这个 opt-in，对这些运行保留 `workspace-write`。适用场景下值得开启，但它只覆盖一个平台上的一个工具，不改变你应当如何收窄守护进程用户的权限。
+- **你的 `HOME` 目录结构。** 运行继承守护进程用户真实的 `HOME` 与 `XDG_*` 变量——正因如此，`gh`、`aws`、`kubectl`、`gcloud`、`glab` 等宿主 CLI 在运行内的行为与在你 shell 里完全一致。这同时也意味着该 home 下的一切都可触达。
 
 <Callout>
-在 Linux 上，Codex 任务过去运行在 `workspace-write` 沙箱下并使用重定向的每任务 `HOME`。该机制已被移除：它会让宿主 CLI 在任务内处于未配置状态，而且由于它只限制写入，从未能阻止任务读取并外传凭据。现在 Linux 与 macOS、Windows 的默认行为一致。
+在 Linux 上，Codex 过去会在 `workspace-write` 沙箱下运行，并使用为每次运行重定向的 `HOME`。该机制已被移除：它会让宿主 CLI 在运行内处于未配置状态，而且由于它只限制写入，从未能阻止运行读取并外传凭据。现在 Linux 与 macOS、Windows 的默认行为一致。
 </Callout>
 
-## 如何确认任务实际以什么模式运行
+## 如何确认运行实际以什么模式运行
 
-任务以无沙箱方式启动时，守护进程会记录 warn 级日志：
+运行以无沙箱方式启动时，守护进程会记录 warn 级日志：
 
 ```bash
 multica daemon logs --lines 200 | grep "codex sandbox"
 ```
 
-要确认 Codex 的实际生效配置，可以查看该任务 `CODEX_HOME` 下 `config.toml` 中的托管块——`# BEGIN multica-managed` 与 `# END multica-managed` 标记之间的内容由守护进程在每次运行时写入。
+要确认 Codex 的实际生效配置，可以查看该运行 `CODEX_HOME` 下 `config.toml` 中的托管块——`# BEGIN multica-managed` 与 `# END multica-managed` 标记之间的内容由守护进程在每次运行时写入。

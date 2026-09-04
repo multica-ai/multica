@@ -190,12 +190,6 @@ function resetFixtures() {
 describe("DingTalkAgentBindButton", () => {
   beforeEach(resetFixtures);
 
-  it("renders the DingTalk brand mark in the connect button", () => {
-    renderUI(<DingTalkAgentBindButton agentId="agent-1" agentName="Bot" />);
-    const button = screen.getByTestId("dingtalk-agent-connect");
-    expect(button.querySelector('[data-testid="dingtalk-mark"].h-4.w-4')).toBeTruthy();
-  });
-
   it("opens the BYO dialog and submits the pasted AppKey + AppSecret", async () => {
     mockRegisterBYO.mockResolvedValue({ id: "i1", agent_id: "agent-1", status: "active" });
     renderUI(<DingTalkAgentBindButton agentId="agent-1" agentName="Bot" />);

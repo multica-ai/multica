@@ -1,23 +1,23 @@
 ---
-title: Tasks
-description: How a single agent run is queued, runs, stops, and retries.
+title: Runs
+description: How a single agent run is queued, executed, stopped, and retried.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Every time an agent starts working, Multica creates a **task**. It records what triggered the run, which agent it went to, how far it has progressed, and whether it ultimately succeeded.
+Every time an agent starts working, Multica creates a **run**. It records what triggered the work, which agent it went to, how far it has progressed, and whether it ultimately succeeded.
 
-## Issues and tasks
+## Issues and runs
 
-An issue holds the goal, discussion, assignee, and final status of a piece of work; a task records one agent run against that work.
+An issue holds the goal, discussion, assignee, and final status of a piece of work; a run records one agent execution against that work.
 
-| | Issue | Task |
+| | Issue | Run |
 | --- | --- | --- |
 | What it records | A piece of work moving forward | One agent run |
 | How long it lasts | Can be discussed, amended, and reassigned repeatedly | From trigger until completion, failure, or cancellation |
 | Cardinality | One issue can span many runs | Every run gets its own record |
 
-So the same issue can be handed to different agents in turn, or run again after a failure. Each run produces a new task; earlier records are never overwritten.
+So the same issue can be handed to different agents in turn, or run again after a failure. Each execution produces a new run record; earlier records are never overwritten.
 
 ## Trigger sources
 
@@ -28,11 +28,11 @@ Any of the following can trigger a run:
 - Sending a message to an agent in chat.
 - An Autopilot firing on a schedule or from an external event.
 
-Different entry points provide different context, but execution works the same way: Multica creates a task, a runtime claims it, and the runtime invokes the AI coding tool the agent is configured with.
+Different entry points provide different context, but execution works the same way: Multica creates a run, a runtime claims it, and the runtime invokes the AI coding tool the agent is configured with.
 
 ## Execution lifecycle
 
-A task typically moves through these states:
+A run typically moves through these states:
 
 | State | Meaning |
 | --- | --- |
@@ -45,17 +45,17 @@ A task typically moves through these states:
 | `failed` | The run errored or was interrupted |
 | `cancelled` | The run was stopped manually |
 
-When the runtime is online, a new task usually starts quickly; if the runtime goes offline after the task enters the queue, the task stays queued until it recovers. A task left unclaimed for more than 2 hours by default ends as failed; the limit is adjustable via `MULTICA_TASK_QUEUED_TTL` ([Environment variables](/environment-variables)).
+When the runtime is online, a new run usually starts quickly; if the runtime goes offline after the run enters the queue, the run stays queued until it recovers. Queued work is not expired for waiting too long — a runtime that keeps heartbeating is busy, not gone, so its backlog is allowed to drain however long that takes. A queued run fails only when **both** are true: its runtime has been silent past the reconnect grace, **and** the run itself has been queued that long. The second condition matters when you assign work to a machine that is already asleep — the run still gets a full grace for you to bring it back, rather than failing straight away.
 
 <Callout type="info">
-If the system already knows the target runtime is offline before triggering, some immediate actions report that the run cannot start right now instead of creating a task nothing can claim.
+If the system already knows the target runtime is offline before triggering, some immediate actions report that the run cannot start right now instead of creating a run nothing can claim.
 </Callout>
 
-A runtime with a healthy heartbeat can execute long tasks; the server never force-ends a run just because it has been running for a while. The runtime decides whether the process has stalled based on actual activity; see [Environment variables](/environment-variables#daemon-configuration) for the relevant settings.
+A runtime with a healthy heartbeat can execute long runs; the server never force-ends a run just because it has been running for a while. The runtime decides whether the process has stalled based on actual activity; see [Environment variables](/environment-variables#daemon-configuration) for the relevant settings.
 
 ## Viewing run history
 
-Every task an issue produces is listed in the **Execution log** section of the issue's right sidebar — not on a separate page or tab. The section is expanded by default: active runs stay pinned at the top, and finished ones sit behind **Show past runs (N)**. Each row shows the trigger source, the executing agent, the state, and timing. If you don't see the section, open the sidebar with the panel button in the issue header; on narrow screens it starts collapsed.
+Every run an issue produces is listed in the **Execution log** section of the issue's right sidebar — not on a separate page or tab. The section is expanded by default: active runs stay pinned at the top, and finished ones sit behind **Show past runs (N)**. Each row shows the trigger source, the executing agent, the state, and timing. If you don't see the section, open the sidebar with the panel button in the issue header; on narrow screens it starts collapsed.
 
 The log updates over the realtime connection while the page stays open — new runs, status changes, and the agent's comments appear without a manual reload.
 
@@ -64,26 +64,26 @@ While an agent is working, the issue header also carries a live chip such as "En
 From here you can:
 
 - Click **View transcript** on a row to see the agent's messages, tool calls, and error output. For a run still in progress the transcript keeps streaming while the dialog stays open, and a **Newest first** toggle flips the event order.
-- Stop tasks that are deferred, queued, starting, waiting for a local directory, or running.
-- Retry a failed or cancelled task.
+- Stop runs that are deferred, queued, starting, waiting for a local directory, or running.
+- Retry a failed or cancelled run.
 
 ![Execution log in the issue sidebar: active runs above past runs](/images/docs/quickstart-run-result.webp)
 
 ![Run record: status timeline, agent summary, and individual tool calls](/images/docs/task-transcript.webp)
 
 <Callout type="warning">
-Changing an issue's assignee or status does not stop a run that has already started. To interrupt one, stop the corresponding task in the execution log. Active tasks are cancelled along with an issue only when the issue is deleted.
+Changing an issue's assignee or status does not stop a run that has already started. To interrupt one, stop the corresponding run in the execution log. Active runs are cancelled along with an issue only when the issue is deleted.
 </Callout>
 
 ## Failures and automatic retries
 
-Transient faults — a runtime going briefly offline, a daemon restart, an execution timeout, or a network interruption in the AI coding tool — can trigger an automatic retry. A regular task runs at most twice by default; tool network interruptions get up to three attempts.
+Transient faults — a runtime going briefly offline, a daemon restart, an execution timeout, or a network interruption in the AI coding tool — can trigger an automatic retry. A regular run executes at most twice by default; tool network interruptions get up to three attempts.
 
 Errors returned by the agent itself are usually not retried automatically. Expired credentials, exhausted quota, misconfiguration, or a model unable to complete the request all need the cause fixed first, followed by a manual retry.
 
-An Autopilot's **run only** mode does not retry automatically, to avoid overlapping with the next scheduled run. The **create issue** mode produces regular issue tasks, so infrastructure failures still retry under the rules above. Both modes show their final result in the Autopilot run history.
+An Autopilot's **run only** mode does not retry automatically, to avoid overlapping with the next scheduled run. The **create issue** mode produces regular issue runs, so infrastructure failures still retry under the rules above. Both modes show their final result in the Autopilot run history.
 
-When an issue has no other active task and no new retry waiting to run, a failure moves an `in_progress` issue back to `todo`.
+When an issue has no other active run and no new retry waiting to run, a failure moves an `in_progress` issue back to `todo`.
 
 ## Failure reason reference
 
@@ -94,8 +94,9 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 | Reason | Meaning | What to do |
 | --- | --- | --- |
 | `runtime_offline` | The runtime went offline during the run | Restore the runtime and retry; see [Daemon and runtimes](/daemon-runtimes) |
-| `queued_expired` | Queued past the unclaimed limit (2 hours by default, adjustable via `MULTICA_TASK_QUEUED_TTL`) with no runtime claiming it | Confirm the runtime is online, then retry |
+| `queued_expired` | The runtime stopped heartbeating for longer than the reconnect grace, and the run had also been queued that long | Confirm the runtime is online, then retry |
 | `runtime_recovery` | The daemon reclaimed an interrupted run after restarting | Retry directly |
+| `environment_prepare_failed` | The daemon could not set up the execution environment for this run — its working directory, or the local runtime config written into it | Read the raw error to see which step failed, then check that machine: disk space, permissions, a directory still in use, or the AI coding tool's local config |
 | `cancelled` | Stopped manually, or cancelled along with an archive or delete | Nothing to do |
 | `timeout` | Exceeded the daemon's configured execution time limit | Narrow the issue scope, or adjust the daemon's `agent_timeout` |
 | `iteration_limit` | Hit the iteration cap for a run | Narrow the issue scope |
@@ -124,7 +125,7 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 
 ## Manual retry
 
-Clicking the retry button on a row in the execution log invokes **the agent that ran that task at the time**. Even if the issue has since been reassigned, the retry does not switch to the new assignee.
+Clicking the retry button on a row in the execution log invokes **the agent that handled that run at the time**. Even if the issue has since been reassigned, the retry does not switch to the new assignee.
 
 A retry keeps the files the previous run already wrote to the local directory whenever possible. If the original session is still safe and the same runtime claims the retry, it also continues the previous session. Errors that poison the session, such as context overflow or invalid requests, start a new session on top of the original working directory instead. When the original directory no longer exists, a fresh working directory is used.
 
@@ -134,9 +135,9 @@ You can also rerun the current issue from the CLI:
 multica issue rerun <issue-id>
 ```
 
-This form does not point at a specific past task, so it uses the issue's current agent assignee and starts with a fresh session and working directory.
+This form does not point at a specific past run, so it uses the issue's current agent assignee and starts with a fresh session and working directory.
 
-## Task completion and issue completion
+## Run completion and issue completion
 
 `completed` only means this particular run ended normally — it does not confirm the issue's goal has been met. You can still review the result, keep discussing, add requirements, or trigger the agent again.
 
@@ -149,12 +150,12 @@ The numbers below reflect the server's default configuration, for quick cross-ch
 | State | Meaning | Timeout and consequence |
 | --- | --- | --- |
 | `deferred` | Scheduled to fire later | Enters `queued` at the scheduled time, then the rules below apply |
-| `queued` | Waiting for a runtime to claim it | Fails after **2 hours by default** unclaimed (limit settable via `MULTICA_TASK_QUEUED_TTL`); not retried automatically |
+| `queued` | Waiting for a runtime to claim it | Waits as long as its runtime keeps heartbeating, and in every case for at least one reconnect grace after being queued; fails only when both windows have passed, and is not retried automatically |
 | `dispatched` | Claimed; the tool is starting | Treated as failed after more than **5 minutes** in this state |
 | `waiting_local_directory` | Waiting for the local directory lock to release | No timeout of its own; returns to the startup flow once the directory is released |
-| `running` | The AI coding tool is executing | No fixed duration cap; liveness follows the runtime heartbeat — one every 15 seconds; a runtime that loses its heartbeat is marked offline within about 3 minutes at the latest, and its tasks fail with it |
+| `running` | The AI coding tool is executing | No fixed duration cap; liveness follows the runtime heartbeat — one every 15 seconds; a runtime that loses its heartbeat is marked offline within about 3 minutes at the latest, and its runs fail with it |
 
-Automatic retry covers only the transient faults below, and only applies to tasks attached to an issue or a chat (excluding the Autopilot **run only** mode):
+Automatic retry covers only the transient faults below, and only applies to runs attached to an issue or a chat (excluding the Autopilot **run only** mode):
 
 | Auto-retryable failure reason | Attempt ceiling |
 | --- | --- |
@@ -169,6 +170,6 @@ All other failure reasons (auth, quota, configuration, model, and so on) never r
 
 ## Next steps
 
-- [Daemon and runtimes](/daemon-runtimes) — which computer a task executes on.
+- [Daemon and runtimes](/daemon-runtimes) — which computer a run executes on.
 - [Assigning issues to agents](/assigning-issues) — trigger a run from an issue.
 - [Mentioning agents](/mentioning-agents) — add requirements in comments or bring in other agents.

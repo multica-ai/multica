@@ -73,6 +73,8 @@
     "group_users": "ユーザー",
     "group_issues": "タスク",
     "all_members": "すべてのメンバー",
+    "agent_badge": "エージェント",
+    "squad_badge": "スクワッド",
     "searching": "検索中...",
     "no_results": "結果なし",
     "group_current": "現在のページ",
@@ -81,6 +83,7 @@
     "group_cancelled": "キャンセル済み"
   },
   "code_block": {
+    "html_preview": "HTML プレビュー",
     "copy_code": "コードをコピー",
     "show_preview": "プレビューを表示",
     "show_source": "ソースを表示",
@@ -101,6 +104,7 @@
     "title_aria_label": "タイトル"
   },
   "mermaid": {
+    "diagram_label": "Mermaid 図",
     "render_error": "Mermaid ダイアグラムを描画できません。",
     "rendering": "ダイアグラムを描画中…",
     "viewer_title": "ダイアグラム",

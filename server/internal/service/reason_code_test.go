@@ -44,10 +44,10 @@ func TestAgentReadinessVerdict(t *testing.T) {
 
 	// The agent-only half needs no runtime row, so AgentReadiness answers before
 	// it queries one.
-	if got, _ := AgentReadiness(t.Context(), nil, db.Agent{}); got.Reason != dispatch.ReasonAgentRuntimeRequired || !got.Blocked() {
+	if got, _ := AgentReadiness(t.Context(), RuntimeLookup{}, db.Agent{}); got.Reason != dispatch.ReasonAgentRuntimeRequired || !got.Blocked() {
 		t.Errorf("no runtime bound: got %+v, want blocked/agent_runtime_required", got)
 	}
-	if got, _ := AgentReadiness(t.Context(), nil, db.Agent{ArchivedAt: archivedAt, RuntimeID: validRuntime}); got.Reason != dispatch.ReasonTargetUnavailable || !got.Blocked() {
+	if got, _ := AgentReadiness(t.Context(), RuntimeLookup{}, db.Agent{ArchivedAt: archivedAt, RuntimeID: validRuntime}); got.Reason != dispatch.ReasonTargetUnavailable || !got.Blocked() {
 		t.Errorf("archived agent: got %+v, want blocked/target_unavailable", got)
 	}
 

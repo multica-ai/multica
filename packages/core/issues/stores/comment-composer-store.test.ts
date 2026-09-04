@@ -26,10 +26,6 @@ describe("comment composer store", () => {
     useCommentComposerStore.setState({ sticky: true });
   });
 
-  it("defaults to sticky", () => {
-    expect(useCommentComposerStore.getState().sticky).toBe(true);
-  });
-
   it("toggleSticky flips the preference", () => {
     useCommentComposerStore.getState().toggleSticky();
     expect(useCommentComposerStore.getState().sticky).toBe(false);

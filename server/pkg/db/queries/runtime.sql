@@ -3,6 +3,11 @@ SELECT * FROM agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListAgentRuntimeIDsByWorkspace :many
+SELECT id FROM agent_runtime
+WHERE workspace_id = $1
+ORDER BY id ASC;
+
 -- name: ListVisibleAgentRuntimes :many
 -- A private runtime is another member's machine and must not leak into their
 -- runtime list. The owner can always see their own runtime; everyone else
@@ -23,6 +28,15 @@ WHERE id = $1;
 -- runtime. Rows are returned only for ids that exist; the caller matches them
 -- back by id and skips any that are missing.
 SELECT * FROM agent_runtime
+WHERE id = ANY(@ids::uuid[]);
+
+-- name: GetAgentRuntimeHeartbeatLeases :many
+-- Narrow connection-time and heartbeat-reconciliation projection. The daemon
+-- WebSocket authenticates its whole runtime set in one round trip and then
+-- keeps these immutable ownership fields plus liveness state in its connection
+-- lease, avoiding a GetAgentRuntime call on every heartbeat.
+SELECT id, workspace_id, daemon_id, status, last_seen_at
+FROM agent_runtime
 WHERE id = ANY(@ids::uuid[]);
 
 -- name: LockAgentRuntime :one
@@ -178,19 +192,20 @@ UPDATE agent_runtime
 SET last_seen_at = now()
 WHERE id = $1 AND status = 'online';
 
--- name: TouchAgentRuntimesLastSeenBatch :execrows
+-- name: TouchAgentRuntimesLastSeenBatch :many
 -- Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
 -- coalesces N per-runtime "bump last_seen_at" requests into a single UPDATE so a
 -- fleet beating every 15s costs ~1 DB transaction per batch tick instead of N.
 --
 -- Same load-bearing predicate as the single-id form: status='online' avoids
 -- silently un-deleting a sweeper-flipped offline row, and we deliberately do
--- NOT touch updated_at so the rows stay HOT-eligible. Affected-rows < len(ids)
--- means some IDs raced to offline between Schedule and flush; their next beat
--- will fall through the recordHeartbeat sync path and call MarkAgentRuntimeOnline.
+-- NOT touch updated_at so the rows stay HOT-eligible. RETURNING is load-bearing:
+-- the scheduler reconciles omitted IDs in one narrow batch query, restoring
+-- sweeper-raced offline rows and invalidating connections for deleted rows.
 UPDATE agent_runtime
 SET last_seen_at = now()
-WHERE id = ANY(@ids::uuid[]) AND status = 'online';
+WHERE id = ANY(@ids::uuid[]) AND status = 'online'
+RETURNING id;
 
 -- name: MarkAgentRuntimeOnline :one
 -- Used on the offline→online transition (and on first heartbeat after
@@ -530,77 +545,3 @@ SELECT EXISTS (
 -- Final fail-closed assertion after UnbindTasksFromRuntime. A non-zero result
 -- aborts the transaction instead of relying on the legacy ON DELETE CASCADE.
 SELECT count(*) FROM agent_task_queue WHERE runtime_id = $1;
-
--- name: CountStaleOfflineRuntimesBlockedByTasks :one
--- Preserve the original blocked-runtimes signal for dashboard and alert
--- compatibility. This deliberately counts only otherwise-unowned stale
--- runtimes with a directly pinned non-terminal task; the broader reason
--- inventory below is exposed under a separate backlog metric.
-SELECT count(*) FROM (
-  SELECT 1 FROM agent_runtime
-  WHERE status = 'offline'
-    AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
-    AND NOT EXISTS (
-      SELECT 1
-      FROM agent
-      WHERE agent.runtime_id = agent_runtime.id
-    )
-    AND EXISTS (
-      SELECT 1
-      FROM agent_task_queue
-      WHERE agent_task_queue.runtime_id = agent_runtime.id
-        AND agent_task_queue.completed_at IS NULL
-    )
-  LIMIT @max_rows::int
-) AS blocked_runtimes;
-
--- name: CountStaleOfflineRuntimeGCBacklogByReason :many
--- Classifies one bounded oldest-first cohort into mutually exclusive states.
--- active_agent has priority because it already makes the runtime ineligible;
--- archived cross-workspace bindings get their own diagnostic bucket. The task
--- branch mirrors teardown's fail-closed predicate, including tasks owned by a
--- bound user agent but pinned to another runtime after a historical move.
-WITH stale_runtimes AS MATERIALIZED (
-  SELECT id, workspace_id FROM agent_runtime
-  WHERE status = 'offline'
-    AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
-  ORDER BY last_seen_at ASC, id ASC
-  LIMIT @max_rows::int
-), classified AS (
-  SELECT CASE
-    WHEN EXISTS (
-      SELECT 1 FROM agent
-      WHERE agent.runtime_id = stale_runtimes.id
-        AND agent.kind = 'user'
-        AND agent.archived_at IS NULL
-    ) THEN 'active_agent'::text
-    WHEN EXISTS (
-      SELECT 1 FROM agent
-      WHERE agent.runtime_id = stale_runtimes.id
-        AND agent.kind = 'user'
-        AND agent.workspace_id <> stale_runtimes.workspace_id
-    ) THEN 'workspace_mismatch'::text
-    WHEN EXISTS (
-      SELECT 1 FROM agent_task_queue AS task
-      WHERE task.runtime_id = stale_runtimes.id
-        AND task.completed_at IS NULL
-    ) OR EXISTS (
-      SELECT 1
-      FROM agent AS owner
-      WHERE owner.runtime_id = stale_runtimes.id
-        AND owner.kind = 'user'
-        AND EXISTS (
-          SELECT 1
-          FROM agent_task_queue AS task
-          WHERE task.agent_id = owner.id
-            AND task.completed_at IS NULL
-        )
-    ) THEN 'non_terminal_task'::text
-    ELSE 'eligible'::text
-  END AS reason
-  FROM stale_runtimes
-)
-SELECT reason, count(*)::bigint AS count
-FROM classified
-GROUP BY reason
-ORDER BY reason;

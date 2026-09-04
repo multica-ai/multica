@@ -111,6 +111,7 @@
     "./issue-views/baseline": "./issue-views/baseline.ts",
     "./issue-views/preferences": "./issue-views/preferences.ts",
     "./billing": "./billing/index.ts",
+    "./billing/recovery": "./billing/recovery.ts",
     "./billing/queries": "./billing/queries.ts",
     "./billing/mutations": "./billing/mutations.ts",
     "./github": "./github/index.ts",

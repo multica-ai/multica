@@ -82,6 +82,10 @@ const runtimeOfflineCodeNotExecutable = "not_executable"
 // AgentReadiness reports whether an agent can accept new work right now, and
 // what the caller should do when it cannot.
 //
+// The lookup carries the connection to read on plus the source label the
+// runtime read is attributed to (MUL-6884), so each admission path stays
+// distinguishable in multica_agent_runtime_lookup_total.
+//
 // err is non-nil only on DB lookup failure for the runtime row. Callers that
 // treat a transient DB error as "do not skip" (the autopilot admission gate)
 // should swallow it; callers that need a hard yes/no (the squad-leader
@@ -98,7 +102,7 @@ const runtimeOfflineCodeNotExecutable = "not_executable"
 // one starts allowing "starting" runtimes while another doesn't, and the bug
 // only surfaces when a user assigns the same agent through two different entry
 // points. Touch this function, all of them move together.
-func AgentReadiness(ctx context.Context, q *db.Queries, agent db.Agent) (AgentVerdict, error) {
+func AgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent) (AgentVerdict, error) {
 	if agent.ArchivedAt.Valid {
 		return AgentVerdict{
 			Availability: AgentBlocked,
@@ -113,7 +117,7 @@ func AgentReadiness(ctx context.Context, q *db.Queries, agent db.Agent) (AgentVe
 			Detail:       "agent has no runtime bound",
 		}, nil
 	}
-	rt, err := q.GetAgentRuntime(ctx, agent.RuntimeID)
+	rt, err := lookup.Get(ctx, agent.RuntimeID)
 	if err != nil {
 		return AgentVerdict{}, err
 	}

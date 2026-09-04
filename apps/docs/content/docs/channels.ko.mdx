@@ -5,7 +5,7 @@ description: Multica 에이전트를 Feishu, Lark, Slack, DingTalk, WeCom 또는
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-채팅 연동을 사용하면 팀이 Multica를 열지 않고도 에이전트에게 바로 질문하고, 그룹 채팅에서 @멘션하거나, 채팅 창에서 이슈를 만들 수 있습니다.
+채팅 연동을 사용하면 팀이 Multica를 열지 않고도 에이전트에게 바로 질문하고, 그룹 채팅에서 @멘션하거나, 채팅 창에서 태스크를 만들 수 있습니다.
 
 현재 Feishu/Lark, Slack, DingTalk, WeCom, Telegram을 지원합니다. 같은 대화, 신원, 실행 메커니즘을 사용하지만 설치 방법은 다릅니다.
 
@@ -16,7 +16,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 | 설치 방법 | Multica에서 QR 코드를 만든 뒤 Feishu로 스캔해 승인 | Slack에서 app을 만든 뒤 두 token을 Multica에 입력 | 사내 app과 Stream 모드 로봇을 만든 뒤 AppKey와 AppSecret을 Multica에 입력 | WeCom 관리자 콘솔에서 장기 연결을 켠 스마트 봇을 만든 뒤 Bot ID와 Secret을 Multica에 입력 | @BotFather에서 Bot을 만든 뒤 token을 Multica에 입력 |
 | 에이전트와 DM | 지원 | 지원 | 지원 | 지원 | 지원 |
 | 그룹 채팅 또는 채널 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하거나 Bot에 답장하면 트리거 |
-| 이슈 만들기 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` slash 명령으로 에이전트가 설명을 정리한 뒤 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 |
+| 태스크 만들기 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` slash 명령으로 에이전트가 설명을 정리한 뒤 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 |
 | 새 Chat 시작 | `/new [메시지]` | DM: `/new [메시지]`, 채널/thread: `@Multica /new [메시지]` | `/new [메시지]` | `/new [메시지]` | `/new [메시지]` |
 | 현재 Chat 컨텍스트 지우기 | `/clear [메시지]` | DM: `/clear [메시지]`, 채널/thread: `@Multica /clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` |
 | 연결 방식 | 플랫폼 장기 연결 | Socket Mode | Stream 모드 | 플랫폼 장기 연결 | `getUpdates` long polling |
@@ -43,12 +43,12 @@ Telegram은 현재 텍스트 메시지만 처리합니다. 미지원 미디어�
 1. Multica가 Bot을 기준으로 해당 워크스페이스와 에이전트를 찾습니다.
 2. 그룹 채팅이나 채널에서는 Bot을 명시적으로 @멘션한 메시지만 처리됩니다. DM에서는 @멘션이 필요 없습니다.
 3. Multica가 보낸 사람의 계정 연결과 워크스페이스 멤버 자격을 확인합니다.
-4. 메시지가 [에이전트 대화](/chat)에 들어가고 실행 태스크가 하나 생성됩니다.
+4. 메시지가 [에이전트 대화](/chat)에 들어가고 실행이 하나 생성됩니다.
 5. 에이전트의 답변이 원래 DM 또는 스레드로 돌아옵니다.
 
 Bot을 @멘션하지 않은 채널 메시지는 에이전트를 트리거하지 않으며 대화 컨텍스트에도 추가되지 않습니다.
 
-일반 메시지는 위 흐름으로 처리됩니다. `/issue`는 명령이며 채팅 turn이 아닙니다. Multica는 원래 플랫폼에 처리 결과를 보내지만 명령 자체는 Multica Chat에 추가하지 않습니다. Slack의 기본 slash 명령은 별도의 비동기 태스크 생성 흐름으로 처리됩니다.
+일반 메시지는 위 흐름으로 처리됩니다. `/issue`는 명령이며 채팅 turn이 아닙니다. Multica는 원래 플랫폼에 처리 결과를 보내지만 명령 자체는 Multica Chat에 추가하지 않습니다. Slack의 기본 slash 명령은 별도의 비동기 실행 생성 흐름으로 처리됩니다.
 
 ## 대화 컨텍스트 제어
 
@@ -98,7 +98,12 @@ MULTICA_TELEGRAM_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 
 이 키는 Bot 자격 증명을 암호화해 저장하는 데 사용됩니다. 생성, 보관, 교체 방법은 [환경 변수](/environment-variables)를 참고하세요. Multica Cloud에는 이미 설정되어 있습니다.
 
-WeCom은 추가로 백엔드를 **단일 레플리카**로 운영해야 합니다. 발신 경로가 한 프로세스가 보유한 WebSocket뿐이어서 다른 레플리카에서 생성된 응답은 폐기됩니다. 레플리카 간 발신 라우팅이 구현되기 전까지 WeCom을 켠 백엔드는 다중화하지 마세요.
+WeCom의 발신 경로는 한 프로세스가 보유한 WebSocket뿐입니다. **다른 레플리카**에서 생성된 응답이 어떻게 되는지는 실시간 릴레이 모드에 따라 달라집니다.
+
+- **샤딩 / 듀얼 릴레이 모드**(`REDIS_URL` 설정, Redis가 있을 때의 기본값): 응답이 연결을 보유한 레플리카로 전달되어 배달됩니다. **다중 레플리카 운영을 지원합니다.**
+- **레거시 릴레이 모드 또는 Redis 없음**: 응답이 폐기됩니다. 이 구성에서는 WeCom을 켠 백엔드를 단일 레플리카로 운영하세요.
+
+어떤 모드에서든 **어느 레플리카도** 연결을 보유하지 않은 순간(모두 재연결 중)에 생성된 응답은 배달되지 않습니다. 다만 집계는 됩니다. 응답을 전달한 레플리카가 이후에 어느 레플리카든 그 배달을 가져갔는지 확인하고, 아무도 가져가지 않았으면 `multica_wecom_outbound_dropped_total{reason="no_live_connection"}` 을 올리므로 이 구간의 크기를 실제로 측정할 수 있습니다. 이 손실을 허용할 수 없다면 단일 레플리카가 가장 보수적인 구성입니다.
 
 ## 다음 단계
 

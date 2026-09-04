@@ -132,124 +132,6 @@ func (q *Queries) CountActiveAgentsByRuntime(ctx context.Context, runtimeID pgty
 	return count, err
 }
 
-const countStaleOfflineRuntimeGCBacklogByReason = `-- name: CountStaleOfflineRuntimeGCBacklogByReason :many
-WITH stale_runtimes AS MATERIALIZED (
-  SELECT id, workspace_id FROM agent_runtime
-  WHERE status = 'offline'
-    AND last_seen_at < now() - make_interval(secs => $1::double precision)
-  ORDER BY last_seen_at ASC, id ASC
-  LIMIT $2::int
-), classified AS (
-  SELECT CASE
-    WHEN EXISTS (
-      SELECT 1 FROM agent
-      WHERE agent.runtime_id = stale_runtimes.id
-        AND agent.kind = 'user'
-        AND agent.archived_at IS NULL
-    ) THEN 'active_agent'::text
-    WHEN EXISTS (
-      SELECT 1 FROM agent
-      WHERE agent.runtime_id = stale_runtimes.id
-        AND agent.kind = 'user'
-        AND agent.workspace_id <> stale_runtimes.workspace_id
-    ) THEN 'workspace_mismatch'::text
-    WHEN EXISTS (
-      SELECT 1 FROM agent_task_queue AS task
-      WHERE task.runtime_id = stale_runtimes.id
-        AND task.completed_at IS NULL
-    ) OR EXISTS (
-      SELECT 1
-      FROM agent AS owner
-      WHERE owner.runtime_id = stale_runtimes.id
-        AND owner.kind = 'user'
-        AND EXISTS (
-          SELECT 1
-          FROM agent_task_queue AS task
-          WHERE task.agent_id = owner.id
-            AND task.completed_at IS NULL
-        )
-    ) THEN 'non_terminal_task'::text
-    ELSE 'eligible'::text
-  END AS reason
-  FROM stale_runtimes
-)
-SELECT reason, count(*)::bigint AS count
-FROM classified
-GROUP BY reason
-ORDER BY reason
-`
-
-type CountStaleOfflineRuntimeGCBacklogByReasonParams struct {
-	StaleSeconds float64 `json:"stale_seconds"`
-	MaxRows      int32   `json:"max_rows"`
-}
-
-type CountStaleOfflineRuntimeGCBacklogByReasonRow struct {
-	Reason string `json:"reason"`
-	Count  int64  `json:"count"`
-}
-
-// Classifies one bounded oldest-first cohort into mutually exclusive states.
-// active_agent has priority because it already makes the runtime ineligible;
-// archived cross-workspace bindings get their own diagnostic bucket. The task
-// branch mirrors teardown's fail-closed predicate, including tasks owned by a
-// bound user agent but pinned to another runtime after a historical move.
-func (q *Queries) CountStaleOfflineRuntimeGCBacklogByReason(ctx context.Context, arg CountStaleOfflineRuntimeGCBacklogByReasonParams) ([]CountStaleOfflineRuntimeGCBacklogByReasonRow, error) {
-	rows, err := q.db.Query(ctx, countStaleOfflineRuntimeGCBacklogByReason, arg.StaleSeconds, arg.MaxRows)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []CountStaleOfflineRuntimeGCBacklogByReasonRow{}
-	for rows.Next() {
-		var i CountStaleOfflineRuntimeGCBacklogByReasonRow
-		if err := rows.Scan(&i.Reason, &i.Count); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const countStaleOfflineRuntimesBlockedByTasks = `-- name: CountStaleOfflineRuntimesBlockedByTasks :one
-SELECT count(*) FROM (
-  SELECT 1 FROM agent_runtime
-  WHERE status = 'offline'
-    AND last_seen_at < now() - make_interval(secs => $1::double precision)
-    AND NOT EXISTS (
-      SELECT 1
-      FROM agent
-      WHERE agent.runtime_id = agent_runtime.id
-    )
-    AND EXISTS (
-      SELECT 1
-      FROM agent_task_queue
-      WHERE agent_task_queue.runtime_id = agent_runtime.id
-        AND agent_task_queue.completed_at IS NULL
-    )
-  LIMIT $2::int
-) AS blocked_runtimes
-`
-
-type CountStaleOfflineRuntimesBlockedByTasksParams struct {
-	StaleSeconds float64 `json:"stale_seconds"`
-	MaxRows      int32   `json:"max_rows"`
-}
-
-// Preserve the original blocked-runtimes signal for dashboard and alert
-// compatibility. This deliberately counts only otherwise-unowned stale
-// runtimes with a directly pinned non-terminal task; the broader reason
-// inventory below is exposed under a separate backlog metric.
-func (q *Queries) CountStaleOfflineRuntimesBlockedByTasks(ctx context.Context, arg CountStaleOfflineRuntimesBlockedByTasksParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countStaleOfflineRuntimesBlockedByTasks, arg.StaleSeconds, arg.MaxRows)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countTasksByRuntime = `-- name: CountTasksByRuntime :one
 SELECT count(*) FROM agent_task_queue WHERE runtime_id = $1
 `
@@ -599,6 +481,50 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 	return i, err
 }
 
+const getAgentRuntimeHeartbeatLeases = `-- name: GetAgentRuntimeHeartbeatLeases :many
+SELECT id, workspace_id, daemon_id, status, last_seen_at
+FROM agent_runtime
+WHERE id = ANY($1::uuid[])
+`
+
+type GetAgentRuntimeHeartbeatLeasesRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	DaemonID    pgtype.Text        `json:"daemon_id"`
+	Status      string             `json:"status"`
+	LastSeenAt  pgtype.Timestamptz `json:"last_seen_at"`
+}
+
+// Narrow connection-time and heartbeat-reconciliation projection. The daemon
+// WebSocket authenticates its whole runtime set in one round trip and then
+// keeps these immutable ownership fields plus liveness state in its connection
+// lease, avoiding a GetAgentRuntime call on every heartbeat.
+func (q *Queries) GetAgentRuntimeHeartbeatLeases(ctx context.Context, ids []pgtype.UUID) ([]GetAgentRuntimeHeartbeatLeasesRow, error) {
+	rows, err := q.db.Query(ctx, getAgentRuntimeHeartbeatLeases, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAgentRuntimeHeartbeatLeasesRow{}
+	for rows.Next() {
+		var i GetAgentRuntimeHeartbeatLeasesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DaemonID,
+			&i.Status,
+			&i.LastSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAgentRuntimes = `-- name: GetAgentRuntimes :many
 SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
 WHERE id = ANY($1::uuid[])
@@ -677,6 +603,32 @@ func (q *Queries) IsAgentRuntimeEligibleForGC(ctx context.Context, arg IsAgentRu
 	var eligible bool
 	err := row.Scan(&eligible)
 	return eligible, err
+}
+
+const listAgentRuntimeIDsByWorkspace = `-- name: ListAgentRuntimeIDsByWorkspace :many
+SELECT id FROM agent_runtime
+WHERE workspace_id = $1
+ORDER BY id ASC
+`
+
+func (q *Queries) ListAgentRuntimeIDsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAgentRuntimeIDsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAgentRuntimes = `-- name: ListAgentRuntimes :many
@@ -1313,10 +1265,11 @@ func (q *Queries) TouchAgentRuntimeLastSeen(ctx context.Context, id pgtype.UUID)
 	return result.RowsAffected(), nil
 }
 
-const touchAgentRuntimesLastSeenBatch = `-- name: TouchAgentRuntimesLastSeenBatch :execrows
+const touchAgentRuntimesLastSeenBatch = `-- name: TouchAgentRuntimesLastSeenBatch :many
 UPDATE agent_runtime
 SET last_seen_at = now()
 WHERE id = ANY($1::uuid[]) AND status = 'online'
+RETURNING id
 `
 
 // Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
@@ -1325,15 +1278,27 @@ WHERE id = ANY($1::uuid[]) AND status = 'online'
 //
 // Same load-bearing predicate as the single-id form: status='online' avoids
 // silently un-deleting a sweeper-flipped offline row, and we deliberately do
-// NOT touch updated_at so the rows stay HOT-eligible. Affected-rows < len(ids)
-// means some IDs raced to offline between Schedule and flush; their next beat
-// will fall through the recordHeartbeat sync path and call MarkAgentRuntimeOnline.
-func (q *Queries) TouchAgentRuntimesLastSeenBatch(ctx context.Context, ids []pgtype.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, touchAgentRuntimesLastSeenBatch, ids)
+// NOT touch updated_at so the rows stay HOT-eligible. RETURNING is load-bearing:
+// the scheduler reconciles omitted IDs in one narrow batch query, restoring
+// sweeper-raced offline rows and invalidating connections for deleted rows.
+func (q *Queries) TouchAgentRuntimesLastSeenBatch(ctx context.Context, ids []pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, touchAgentRuntimesLastSeenBatch, ids)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected(), nil
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const unbindTasksFromRuntime = `-- name: UnbindTasksFromRuntime :execrows

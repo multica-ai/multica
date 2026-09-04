@@ -7,7 +7,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -15,16 +21,12 @@ import (
 // returns, with the few fields these tests assert on.
 type batchClaimResponse struct {
 	Tasks []struct {
-		ID                string `json:"id"`
-		RuntimeID         string `json:"runtime_id"`
-		AuthToken         string `json:"auth_token"`
-		ActiveSiblingRuns []struct {
-			TaskID          string `json:"task_id"`
-			IssueID         string `json:"issue_id"`
-			IssueIdentifier string `json:"issue_identifier"`
-			Status          string `json:"status"`
-		} `json:"active_sibling_runs"`
+		ID        string `json:"id"`
+		RuntimeID string `json:"runtime_id"`
+		AuthToken string `json:"auth_token"`
 	} `json:"tasks"`
+	ClaimPollHintSupported      bool  `json:"claim_poll_hint_supported"`
+	NextDeferredTaskAfterMillis int64 `json:"next_deferred_task_after_ms"`
 }
 
 func seedQueuedIssueTask(t *testing.T, ctx context.Context, agentID, runtimeID, issueID string) string {
@@ -42,19 +44,132 @@ func seedQueuedIssueTask(t *testing.T, ctx context.Context, agentID, runtimeID, 
 }
 
 func postBatchClaim(t *testing.T, workspaceID string, runtimeIDs []string, maxTasks int) *httptest.ResponseRecorder {
+	return postBatchClaimWithCapabilities(t, workspaceID, runtimeIDs, maxTasks, "")
+}
+
+func postBatchClaimWithCapabilities(t *testing.T, workspaceID string, runtimeIDs []string, maxTasks int, capabilities string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/claim",
-		map[string]any{"daemon_id": batchClaimTestDaemonID, "runtime_ids": runtimeIDs, "max_tasks": maxTasks},
-		workspaceID, batchClaimTestDaemonID)
+	req := batchClaimRequest(workspaceID, runtimeIDs, maxTasks, capabilities)
 	testHandler.ClaimTasksByRuntime(w, req)
 	return w
+}
+
+func batchClaimRequest(workspaceID string, runtimeIDs []string, maxTasks int, capabilities string) *http.Request {
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/claim",
+		map[string]any{"daemon_id": batchClaimTestDaemonID, "runtime_ids": runtimeIDs, "max_tasks": maxTasks}, workspaceID, batchClaimTestDaemonID)
+	if capabilities != "" {
+		req.Header.Set("X-Client-Capabilities", capabilities)
+	}
+	return req
 }
 
 // batchClaimTestDaemonID is the daemon id used by both the mdt_ token context
 // and the request body in batch-claim handler tests, so the daemon_id
 // consistency check passes on the happy path.
 const batchClaimTestDaemonID = "batch-claim-review"
+
+func TestClaimTasksByRuntime_ClaimPollHintSchedulesNextDeferredTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Batch claim deferred hint")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Batch claim deferred hint agent")
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"issue_id":   issueID,
+		"status":     "deferred",
+		"fire_at":    testutil.Raw("now() + interval '5 seconds'"),
+	})
+
+	hinted := testutil.Decode[batchClaimResponse](t, testHandler.ClaimTasksByRuntime,
+		batchClaimRequest(testWorkspaceID, []string{runtimeID}, 1, protocol.DaemonCapabilityClaimPollHintsV1), http.StatusOK)
+	if !hinted.ClaimPollHintSupported {
+		t.Fatal("response did not confirm claim poll hint support")
+	}
+	if hinted.NextDeferredTaskAfterMillis <= 0 || hinted.NextDeferredTaskAfterMillis > 5000 {
+		t.Fatalf("next deferred delay = %dms, want 1..5000ms", hinted.NextDeferredTaskAfterMillis)
+	}
+
+	legacy := testutil.Decode[batchClaimResponse](t, testHandler.ClaimTasksByRuntime,
+		batchClaimRequest(testWorkspaceID, []string{runtimeID}, 1, ""), http.StatusOK)
+	if legacy.ClaimPollHintSupported || legacy.NextDeferredTaskAfterMillis != 0 {
+		t.Fatalf("legacy response unexpectedly exposed poll hints: %+v", legacy)
+	}
+}
+
+func TestNextDeferredTaskFireAtForRuntimes_OmitsIneligibleOverdueTasks(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	tests := []struct {
+		name        string
+		runtimeCols testutil.Cols
+		occupied    bool
+		wantHint    bool
+	}{
+		{name: "eligible", wantHint: true},
+		{name: "occupied", occupied: true},
+		{name: "runtime offline", runtimeCols: testutil.Cols{"status": "offline"}},
+		{name: "runtime stale", runtimeCols: testutil.Cols{
+			"last_seen_at": testutil.Raw("now() - interval '10 minutes'"),
+			"updated_at":   testutil.Raw("now() - interval '10 minutes'"),
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtimeID := dbfx.Runtime(t, "deferred hint "+tt.name, tt.runtimeCols)
+			agentID := dbfx.Agent(t, "deferred hint "+tt.name, runtimeID)
+			issueID := dbfx.Issue(t, "deferred hint "+tt.name)
+			dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id": runtimeID,
+				"issue_id":   issueID,
+				"status":     "deferred",
+				"fire_at":    testutil.Raw("now() - interval '1 second'"),
+			})
+			if tt.occupied {
+				dbfx.Task(t, agentID, testutil.Cols{
+					"runtime_id": runtimeID,
+					"issue_id":   issueID,
+					"status":     "queued",
+				})
+			}
+
+			next, err := testHandler.Queries.NextDeferredTaskFireAtForRuntimes(t.Context(), db.NextDeferredTaskFireAtForRuntimesParams{
+				RuntimeIds:       []pgtype.UUID{parseUUID(runtimeID)},
+				RuntimeStaleSecs: service.RuntimeClaimFreshnessSeconds,
+			})
+			if err != nil {
+				t.Fatalf("NextDeferredTaskFireAtForRuntimes: %v", err)
+			}
+			if next.Valid != tt.wantHint {
+				t.Fatalf("hint validity = %v, want %v", next.Valid, tt.wantHint)
+			}
+		})
+	}
+}
+
+func TestClaimPollHintDelayHasOneSecondFloor(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	for _, tt := range []struct {
+		name   string
+		fireAt time.Time
+		want   time.Duration
+	}{
+		{name: "overdue", fireAt: now.Add(-time.Minute), want: time.Second},
+		{name: "sub-second", fireAt: now.Add(100 * time.Millisecond), want: time.Second},
+		{name: "future", fireAt: now.Add(5 * time.Second), want: 5 * time.Second},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := claimPollHintDelay(now, tt.fireAt); got != tt.want {
+				t.Fatalf("claimPollHintDelay() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
 
 // TestClaimTasksByRuntime_RoutesAcrossRuntimesAndMintsTokens covers the happy
 // path: one call claims across two runtimes on the same machine, returns one
@@ -92,64 +207,6 @@ func TestClaimTasksByRuntime_RoutesAcrossRuntimesAndMintsTokens(t *testing.T) {
 	}
 	if seen[rt1] != 1 || seen[rt2] != 1 {
 		t.Fatalf("runtime distribution = %v, want one task each for rt1/rt2", seen)
-	}
-}
-
-func TestClaimTasksByRuntime_IncludesActiveSiblingRun(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-	runtimeID := createClaimReclaimRuntime(t, ctx, "Sibling claim runtime")
-	agentID, sourceIssueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Sibling claim agent")
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET max_concurrent_tasks = 2 WHERE id = $1`, agentID); err != nil {
-		t.Fatalf("raise concurrency: %v", err)
-	}
-	insertRunningIssueTask(t, agentID, sourceIssueID)
-
-	var targetIssueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'sibling target', 'todo', 'none', $2, 'member',
-			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1), 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&targetIssueID); err != nil {
-		t.Fatalf("create target issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, targetIssueID) })
-	queuedID := seedQueuedIssueTask(t, ctx, agentID, runtimeID, targetIssueID)
-
-	// A queued task cannot coordinate yet and must not dilute the warning. Seed
-	// it after the target so the deterministic claim order still picks queuedID.
-	var queuedSiblingIssueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'queued sibling', 'todo', 'none', $2, 'member',
-			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1), 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&queuedSiblingIssueID); err != nil {
-		t.Fatalf("create queued sibling issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, queuedSiblingIssueID) })
-	seedQueuedIssueTask(t, ctx, agentID, runtimeID, queuedSiblingIssueID)
-
-	w := postBatchClaim(t, testWorkspaceID, []string{runtimeID}, 1)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var resp batchClaimResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(resp.Tasks) != 1 || resp.Tasks[0].ID != queuedID {
-		t.Fatalf("claimed task = %+v, want %s", resp.Tasks, queuedID)
-	}
-	if len(resp.Tasks[0].ActiveSiblingRuns) != 1 {
-		t.Fatalf("active_sibling_runs = %+v, want one running sibling", resp.Tasks[0].ActiveSiblingRuns)
-	}
-	sibling := resp.Tasks[0].ActiveSiblingRuns[0]
-	if sibling.IssueID != sourceIssueID || sibling.Status != "running" || sibling.IssueIdentifier == "" {
-		t.Fatalf("wrong sibling payload: %+v", sibling)
 	}
 }
 

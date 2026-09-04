@@ -4,6 +4,7 @@ import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/ac
 import { AVATAR_SIZE_PX, type AvatarSize } from "@multica/ui/lib/avatar-size";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "../../i18n";
 
 interface AgentAvatarStackProps {
   // Agent ids to render, in display order. The component does NOT dedupe —
@@ -41,6 +42,7 @@ export function AgentAvatarStack({
   className,
 }: AgentAvatarStackProps) {
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
+  const { t } = useT("agents");
   if (agentIds.length === 0) return null;
 
   const visible = agentIds.slice(0, max);
@@ -84,7 +86,9 @@ export function AgentAvatarStack({
             fontSize: Math.max(9, Math.round(px * 0.45)),
           }}
           className="ring-2 ring-background rounded-full bg-muted text-muted-foreground inline-flex items-center justify-center font-medium tabular-nums"
-          aria-label={`${overflow} more`}
+          aria-label={t(($) => $.avatar_stack.overflow_aria, {
+            count: overflow,
+          })}
         >
           +{overflow}
         </span>

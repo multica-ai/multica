@@ -58,7 +58,11 @@ func newModelListFixture(t *testing.T) *modelListFixture {
 		fx.listedPrefix = append([]string(nil), runtimeCmd.Prefix...)
 		fx.listCalls++
 		fx.mu.Unlock()
-		return agent.Catalog{Models: []agent.Model{{ID: "m-1", Label: "M 1"}}}, nil
+		return agent.Catalog{Models: []agent.Model{{
+			ID:                                  "m-1",
+			Label:                               "M 1",
+			SupportsExplicitStandardServiceTier: true,
+		}}}, nil
 	}
 	t.Cleanup(func() { listModels = orig })
 
@@ -171,6 +175,30 @@ func TestHandleModelList_BuiltinRuntimeUnaffected(t *testing.T) {
 	}
 	if got := report["status"]; got != "completed" {
 		t.Fatalf("report status = %v, want completed (report: %v)", got, report)
+	}
+}
+
+func TestHandleModelListReportsExplicitStandardCapability(t *testing.T) {
+	fx := newModelListFixture(t)
+	d := fx.daemon
+
+	builtinPath := fakeExecutable(t, "codex")
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: builtinPath}}
+	d.runtimeIndex["rt-builtin"] = Runtime{ID: "rt-builtin", Provider: "codex"}
+
+	d.handleModelList(context.Background(), d.runtimeIndex["rt-builtin"], "req-1")
+
+	_, _, _, report := fx.snapshot()
+	models, ok := report["models"].([]any)
+	if !ok || len(models) != 1 {
+		t.Fatalf("report models = %T %v, want one model", report["models"], report["models"])
+	}
+	model, ok := models[0].(map[string]any)
+	if !ok {
+		t.Fatalf("reported model = %T %v, want object", models[0], models[0])
+	}
+	if got := model["supports_explicit_standard_service_tier"]; got != true {
+		t.Fatalf("reported capability = %v, want true (model: %v)", got, model)
 	}
 }
 

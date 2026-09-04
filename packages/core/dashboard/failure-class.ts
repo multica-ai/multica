@@ -1,6 +1,6 @@
 // Display grouping for `agent_task_queue.failure_reason`.
 //
-// The backend taxonomy (server/pkg/taskfailure) has 22 reasons, which is far
+// The backend taxonomy (server/pkg/taskfailure) has 26 reasons, which is far
 // too many series for a stacked chart or a scannable breakdown list. These
 // seven classes are the granularity an operator actually acts on: an auth
 // spike means "go re-auth", a rate-limit spike means "back off or raise the
@@ -23,7 +23,7 @@ export const FAILURE_CLASSES = [
 
 export type FailureClass = (typeof FAILURE_CLASSES)[number];
 
-// Reason → class. Keys are the wire values written by the backend: the 22
+// Reason → class. Keys are the wire values written by the backend: the 26
 // canonical `taskfailure.Reason` strings, the `"unclassified"` sentinel the
 // failure rollups substitute for a failed row with an empty column, and the
 // pre-MUL-1949 coarse values that still sit in historical rows.
@@ -70,6 +70,12 @@ const REASON_CLASS: Record<string, FailureClass> = {
   // fix is on the host running the daemon — a faster CLI or a raised timeout —
   // not with the model provider, which was never contacted.
   runtime_cli_timeout: "runtime",
+  // The daemon could not build or re-open the task's execution environment on
+  // its own host — its workspace directory, or the local runtime config
+  // written into it. The reason this class exists at all: these rows used to
+  // arrive as agent_error.* and inflated the agent class with problems only a
+  // machine owner can fix (#7913).
+  environment_prepare_failed: "runtime",
 
   // The agent process itself produced the failure.
   "agent_error.process_failure": "agent",

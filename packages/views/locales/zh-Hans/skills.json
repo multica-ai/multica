@@ -233,7 +233,7 @@
     "method": {
       "chooser": {
         "title": "新建 skill",
-        "desc": "选择一种方式把 skill 添加到工作区。"
+        "desc": "选择添加 skill 的方式。"
       },
       "manual": {
         "title": "手动创建",
@@ -241,26 +241,16 @@
       },
       "local": {
         "title": "从本地导入",
-        "desc": "在这台电脑上选择一个 skill 文件夹，文件会打包后上传。"
+        "desc": "选择包含 SKILL.md 的文件夹，或 .skill / .zip 压缩包。"
       },
       "url": {
         "title": "从 URL 导入",
-        "desc": "通过 URL 拉取已发布的 skill，文件由服务端拉取。"
+        "desc": "通过 URL 拉取已发布的 skill。"
       },
       "runtime": {
         "title": "从运行时复制",
-        "desc": "扫描本地运行时，把它磁盘上的 skill 提升到工作区。"
+        "desc": "把本地运行时里已装好的 skill 提升到工作区。"
       }
-    },
-    "method_card": {
-      "manual_title": "手动创建",
-      "manual_desc": "从空白 SKILL.md 开始，自己写指令。",
-      "local_title": "从本地导入",
-      "local_desc": "选择包含 SKILL.md 的文件夹，或一个 .skill / .zip 压缩包。",
-      "url_title": "从 URL 导入",
-      "url_desc": "从 ClawHub 或 Skills.sh 拉取已发布的 skill。",
-      "runtime_title": "从运行时复制",
-      "runtime_desc": "把本地运行时里已经装好的 skill 提升过来。"
     },
     "manual": {
       "name_label": "名称",
@@ -278,7 +268,6 @@
     "local": {
       "choose_folder": "选择文件夹",
       "choose_archive": "选择 .skill / .zip",
-      "pick_hint": "选择包含 SKILL.md 的文件夹，或打包好的 .skill / .zip 文件。",
       "folder_label": "文件夹",
       "archive_label": "压缩包",
       "files_other": "{{count}} 个文件",

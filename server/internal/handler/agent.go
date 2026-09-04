@@ -317,20 +317,6 @@ type ProjectResourceData struct {
 // while sharing the canonical JSON shape with the runtime app metadata package.
 type ConnectedAppData = runtimeapps.ConnectedApp
 
-// ActiveSiblingRunData is bounded claim-time context about another in-flight
-// issue task for the same agent. Queued tasks are intentionally absent because
-// they cannot coordinate yet. It lets the daemon warn a newly claimed run
-// before it repeats code or PR work already underway elsewhere.
-type ActiveSiblingRunData struct {
-	TaskID          string `json:"task_id"`
-	IssueID         string `json:"issue_id"`
-	IssueIdentifier string `json:"issue_identifier"`
-	IssueTitle      string `json:"issue_title"`
-	Status          string `json:"status"`
-	CreatedAt       string `json:"created_at"`
-	StartedAt       string `json:"started_at,omitempty"`
-}
-
 // taskIssueStatusCap bounds the custom statuses a claim payload carries. A
 // defensive ceiling, not a product limit: a real catalog holds a handful of
 // entries, and the brief must not grow without bound on a workspace that
@@ -389,32 +375,31 @@ type AgentTaskResponse struct {
 	// IssueStatusesOmitted is how many active custom statuses were dropped by
 	// the cap, so the brief can say the list is incomplete instead of
 	// presenting a truncated catalog as the whole one.
-	IssueStatusesOmitted int                    `json:"issue_statuses_omitted,omitempty"`
-	ActiveSiblingRuns    []ActiveSiblingRunData `json:"active_sibling_runs,omitempty"`
-	ThreadName           string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
-	Status               string                 `json:"status"`
-	Priority             int32                  `json:"priority"`
-	DispatchedAt         *string                `json:"dispatched_at"`
-	StartedAt            *string                `json:"started_at"`
-	CompletedAt          *string                `json:"completed_at"`
-	Result               any                    `json:"result"`
-	Error                *string                `json:"error"`
-	FailureReason        string                 `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt              int32                  `json:"attempt"`
-	MaxAttempts          int32                  `json:"max_attempts"`
-	ParentTaskID         *string                `json:"parent_task_id,omitempty"`
-	IsLeaderTask         bool                   `json:"is_leader_task,omitempty"`
-	LeaderRoleResolved   bool                   `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
-	Agent                *TaskAgentData         `json:"agent,omitempty"`
-	ConnectedApps        []ConnectedAppData     `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
-	Repos                []RepoData             `json:"repos,omitempty"`
-	ProjectID            string                 `json:"project_id,omitempty"`          // issue's project, when present
-	ProjectTitle         string                 `json:"project_title,omitempty"`       // for surfacing in agent context
-	ProjectDescription   string                 `json:"project_description,omitempty"` // durable project-level context injected into the brief
-	ProjectResources     []ProjectResourceData  `json:"project_resources,omitempty"`   // resources attached to the project
-	CreatedAt            string                 `json:"created_at"`
-	PriorSessionID       string                 `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
-	PriorWorkDir         string                 `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	IssueStatusesOmitted int                   `json:"issue_statuses_omitted,omitempty"`
+	ThreadName           string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	Status               string                `json:"status"`
+	Priority             int32                 `json:"priority"`
+	DispatchedAt         *string               `json:"dispatched_at"`
+	StartedAt            *string               `json:"started_at"`
+	CompletedAt          *string               `json:"completed_at"`
+	Result               any                   `json:"result"`
+	Error                *string               `json:"error"`
+	FailureReason        string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt              int32                 `json:"attempt"`
+	MaxAttempts          int32                 `json:"max_attempts"`
+	ParentTaskID         *string               `json:"parent_task_id,omitempty"`
+	IsLeaderTask         bool                  `json:"is_leader_task,omitempty"`
+	LeaderRoleResolved   bool                  `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
+	Agent                *TaskAgentData        `json:"agent,omitempty"`
+	ConnectedApps        []ConnectedAppData    `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
+	Repos                []RepoData            `json:"repos,omitempty"`
+	ProjectID            string                `json:"project_id,omitempty"`          // issue's project, when present
+	ProjectTitle         string                `json:"project_title,omitempty"`       // for surfacing in agent context
+	ProjectDescription   string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
+	ProjectResources     []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
+	CreatedAt            string                `json:"created_at"`
+	PriorSessionID       string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
+	PriorWorkDir         string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback. The daemon surfaces the continuity gap in
@@ -476,7 +461,7 @@ type AgentTaskResponse struct {
 	QuickCreateDueDate       string                 `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
 	QuickCreateAttachmentIDs []string               `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
 	QuickCreateSourceContext json.RawMessage        `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
-	HandoffNote              string                 `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the run's opening prompt + issue_context.md (omitempty so old daemons ignore it)
+	HandoffNote              string                 `json:"handoff_note,omitempty"`                // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
 	SquadID                  string                 `json:"squad_id,omitempty"`                    // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
 	SquadName                string                 `json:"squad_name,omitempty"`                  // display name for the picker squad
 	ParentIssueID            string                 `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
@@ -768,13 +753,13 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.DurableWorkDir.Valid {
 		durableWorkDir = t.DurableWorkDir.String
 	}
-	handoffNote := ""
-	if t.HandoffNote.Valid {
-		handoffNote = t.HandoffNote.String
-	}
 	branchName := ""
 	if t.BranchName.Valid {
 		branchName = t.BranchName.String
+	}
+	handoffNote := ""
+	if t.HandoffNote.Valid {
+		handoffNote = t.HandoffNote.String
 	}
 	return AgentTaskResponse{
 		ID:                     uuidToString(t.ID),
@@ -2352,11 +2337,12 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cancel all pending/active tasks for this agent. Discard the returned
-	// rows here — the agent:archived event below already triggers a full
-	// active-tasks invalidation on every connected client, so per-task
-	// task:cancelled events would be redundant noise.
-	if cancelled, err := h.Queries.CancelAgentTasksByAgent(r.Context(), agent.ID); err != nil {
+	// Cancel all pending/active tasks for this agent. The cancel and its
+	// delegated-failure settlement commit together — a settlement issued after
+	// the cancel committed could never be repaired. Per-task task:cancelled
+	// events are still skipped: the agent:archived event below already triggers
+	// a full active-tasks invalidation on every connected client.
+	if cancelled, err := h.TaskService.CancelTasksForArchivedAgent(r.Context(), agent.ID); err != nil {
 		slog.Warn("cancel agent tasks on archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 	} else {
 		h.TaskService.CaptureCancelledTasks(r.Context(), cancelled)
