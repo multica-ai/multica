@@ -303,6 +303,41 @@ func TestWorkingOnIssuesSkillCoversIssueLoopContracts(t *testing.T) {
 	}
 }
 
+// TestWorkingOnIssuesSkillCoversRecurringWorkRouting pins the GitHub
+// issue #6417 gap-1 fix: an agent about to delegate a recurring ask (a cron
+// schedule, "every N minutes", a periodic check) via sub-issue must be
+// routed to an autopilot instead. The runtime brief only carries a one-line
+// pointer to this skill (see TestSubIssueCreationSectionIsUnconditional in
+// package execenv); the full routing rationale, the CLI, and the cron-floor
+// limits live here.
+func TestWorkingOnIssuesSkillCoversRecurringWorkRouting(t *testing.T) {
+	skill, ok := findSkill(t, "multica-working-on-issues")
+	if !ok {
+		return
+	}
+	_, body, _ := splitFrontmatter(skill.Content)
+
+	mustContain := []string{
+		"Recurring work → autopilot, not a sub-issue",
+		"A sub-issue is a single run",
+		"multica autopilot create",
+		"--mode run_only",
+		"multica autopilot trigger-add",
+		"--kind schedule",
+		// The cron-floor limits Bohan spelled out on the issue thread: no
+		// sub-minute cadence, and run_only over create_issue at that
+		// frequency so the autopilot doesn't spam ~1440 issues a day.
+		"One minute is the finest granularity",
+		"Use `run_only`, not `create_issue`, for anything frequent",
+		"multica-autopilots",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("working-on-issues skill missing recurring-work routing content %q", want)
+		}
+	}
+}
+
 func TestSkillImportingSkillCoversWorkspaceImportContracts(t *testing.T) {
 	skill, ok := findSkill(t, "multica-skill-importing")
 	if !ok {

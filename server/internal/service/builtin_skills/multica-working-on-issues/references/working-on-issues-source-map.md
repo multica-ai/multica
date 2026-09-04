@@ -148,6 +148,35 @@ never cancels tasks now. `CancelTasksForIssue` fires only from the issue-deletio
 paths (`DeleteIssue` / `BatchDeleteIssues`), where the owning issue row is going
 away, so no task is left orphaned.
 
+## Recurring work → autopilot routing (MUL-6417 gap 1)
+
+GitHub issue #6417 traced a "task commits prematurely" report to a
+recurring ask (a periodic temperature check) handled as one-shot sub-issue
+delegation: the sub-agent's single run produced one reading and nothing
+re-triggered it, and the parent additionally marked itself `in_review` on
+dispatch (gap 2, fixed separately — see the runtime-brief status-side-effects
+row above, MUL-6417). This section covers gap 1: routing a recurring request
+to an autopilot instead of a sub-issue.
+
+| Behavior | File:line | Drifted from |
+|---|---|---|
+| `--mode run_only` / `--mode create_issue` on `autopilot create`; mode validated to exactly these two values | `server/cmd/multica/cmd_autopilot.go:123,283-286` | new citation |
+| `--kind schedule` requires `--cron`; `--kind webhook` rejects `--cron`/`--timezone` | `server/cmd/multica/cmd_autopilot.go:156,549-560` | new citation |
+| Schedule triggers parse standard 5-field cron (no seconds field, so sub-minute cadences are not expressible) | `server/internal/handler/autopilot_cron_preview.go` (`CronPreview`) | new citation |
+| Scheduler tick interval defaults to 30s (`Options.TickInterval`) | `server/internal/scheduler/manager.go:23-26,50-51` | new citation |
+| Autopilot schedule-dispatch job is hook-driven (`Cadence: 0`) and rides the manager's tick; `CatchUpLatestOnly` claims only the most recently due plan per scope, so a missed tick is coalesced into the next one rather than backfilled | `server/internal/scheduler/jobs_autopilot.go:89-119` (`AutopilotScheduleDispatchJob`), `server/internal/scheduler/spec.go:23-43` (`CatchUpMode`, `CatchUpLatestOnly`) | new citation |
+| `run_only` dispatch creates an agent task directly, no issue row | `server/internal/service/autopilot.go` (`dispatchRunOnly`) | new citation |
+| Full autopilot CLI, execution-mode semantics, debugging | `server/internal/service/builtin_skills/multica-autopilots/SKILL.md` and its own `references/autopilots-source-map.md` | new citation |
+| Brief pointer: `writeSubIssueCreation` routes a recurring request to the `multica-autopilots` skill instead of `issue create` | `server/internal/daemon/execenv/runtime_config_sections.go` (`writeSubIssueCreation`) | new citation |
+
+Verification for the cron floor / tick claims:
+
+```bash
+cd server
+grep -n 'TickInterval = 30' internal/scheduler/manager.go
+grep -n 'Cadence:.*0.*hook-driven\|CatchUpLatestOnly' internal/scheduler/jobs_autopilot.go
+```
+
 ## Ownership-only assignment and duplicate-run awareness
 
 | Behavior | Source |

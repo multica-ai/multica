@@ -714,9 +714,21 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 // the moment an agent is about to create sub-issues, and that moment is
 // exactly what triggers the skill. The brief keeps the one-line map so the
 // flags remain discoverable without the skill.
+//
+// The recurring-work pointer below is the other half of that moment: a
+// sub-issue is a single run, not a schedule, so an agent about to create one
+// for a periodic ask ("every N minutes", a cron expression, a recurring
+// check) needs to be routed to an autopilot instead before it reaches for
+// `issue create`. GitHub issue #6417 traced a premature `in_review` commit
+// back to exactly this — a recurring request handled as a one-shot
+// sub-issue delegation with no executor left behind once that single run
+// ended. Same demotion pattern as the line above: the routing rule is a
+// pointer, the full autopilot-vs-sub-issue playbook lives in
+// multica-working-on-issues.
 func writeSubIssueCreation(b *strings.Builder) {
 	b.WriteString("## Sub-issue Creation\n\n")
 	b.WriteString("`--status todo` starts an agent-assigned child immediately; `--status backlog` parks it for later promotion; `--stage <N>` groups children into ordered stages. Before creating sub-issues, read the `multica-working-on-issues` skill — it covers serial chains, promotion, and stage wake semantics.\n\n")
+	b.WriteString("If the request is recurring (a cron schedule, \"every N minutes\", a periodic check), this is an autopilot with a schedule trigger, not a sub-issue — see the `multica-autopilots` skill.\n\n")
 }
 
 // writeSkills emits the Skills section: an index of invocable skill names.
