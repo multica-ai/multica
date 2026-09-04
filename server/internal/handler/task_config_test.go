@@ -262,7 +262,7 @@ func TestResolveTaskConfigEndpointUsesDatabaseAndDaemonBinding(t *testing.T) {
 	call := func(routeRuntimeID, daemon string, body []byte) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/api/daemon/runtimes/"+routeRuntimeID+"/tasks/"+taskID+"/configs/"+resourceID+"/resolve", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID, "resourceId", resourceID)
+		req = withURLParams(req, "runtimeId", routeRuntimeID, "taskId", taskID, "resourceId", resourceID)
 		req = req.WithContext(middleware.WithDaemonContext(req.Context(), testWorkspaceID, daemon))
 		w := httptest.NewRecorder()
 		h.ResolveTaskConfig(w, req)
