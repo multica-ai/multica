@@ -1,6 +1,6 @@
 ---
 name: multica-projects-and-resources
-description: "Use when creating, inspecting, updating, or debugging Multica projects and their resources (github_repo, local_directory)."
+description: "Use when creating, inspecting, updating, or debugging Multica projects and their resources (github_repo, local_directory, task_config)."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -31,6 +31,11 @@ Common resource types:
 - `github_repo` — durable GitHub repo context, with `resource_ref.url`, optional checkout `ref`, and optional prompt-only `default_branch_hint`;
 - `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, optional label, and
   optional `execution_mode` (`in_place`, the default, or `worktree`).
+- `task_config` — control-plane-managed task configuration, with a provider reference, immutable version, safe
+  relative destination, file mode, and repo/target/account/region selectors. Its payload contains metadata only;
+  configuration bytes are never stored in project resources, claims, or metadata. Only workspace `owner`/`admin`
+  members may create, update, or remove it, and the server must be configured with an approved provider-reference
+  prefix allowlist. It cannot coexist with a project-level `local_directory`.
 
 ## CLI
 
@@ -48,6 +53,8 @@ multica project resource add <project-id> --type github_repo --url <github-url> 
 multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json
 multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --output json
 multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --execution-mode worktree --output json
+# task_config uses the generic JSON ref; the provider reference is metadata, not secret bytes.
+multica project resource add <project-id> --type task_config --ref '<json-resource-ref>' --output json
 multica project resource update <project-id> <resource-id> --execution-mode in_place --output json
 multica project resource update <project-id> <resource-id> --url <new-github-url> --output json
 multica project resource update <project-id> <resource-id> --ref <branch-or-sha> --output json
@@ -74,6 +81,8 @@ not advertise the capability — the fix is updating the Multica app there, then
 it back to the default.
 
 For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default checkout branch/tag/SHA for future tasks in that project. JSON `--ref '<json>'` remains the escape hatch for full payloads or resource types not covered by shortcuts.
+
+For `task_config`, use the generic JSON `--ref` form with the provider reference, immutable version, safe relative path, mode, and selector tuple. The server rejects this operation unless the configured provider allowlist approves the reference and the caller is an `owner` or `admin`; an empty allowlist disables the resource. Do not put configuration bytes in the JSON ref. Removing or adding a `local_directory` is rejected while the project has a `task_config` resource.
 
 `--start-date` / `--due-date` are optional calendar days (`YYYY-MM-DD`, like issue dates). On `project update`, pass an empty string (`--start-date ""`) to clear a date; an unset flag leaves it untouched.
 
@@ -108,7 +117,7 @@ is task-local checkout state.
 
 1. `multica project get <project-id> --output json`.
 2. `multica project resource list <project-id> --output json`.
-3. Check `github_repo.resource_ref.url`, optional `ref`, `default_branch_hint`, and `local_directory.resource_ref.daemon_id`.
+3. Check `github_repo.resource_ref.url`, optional `ref`, `default_branch_hint`, `local_directory.resource_ref.daemon_id`, and the metadata-only `task_config` reference plus its selector tuple.
 4. Updating resources is a durable mutation. After an update, listing the
    resource is the verification path.
 5. If resources match the expected task context, inspect runtime/repo checkout

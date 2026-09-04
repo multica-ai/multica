@@ -578,6 +578,12 @@ func TestProjectsAndResourcesSkillCoversDurableContext(t *testing.T) {
 		"multica project resource add <project-id> --type github_repo --url <github-url> --output json",
 		"multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json",
 		"multica project resource add <project-id> --type local_directory",
+		"task_config",
+		"`owner`/`admin`",
+		"provider-reference",
+		"prefix allowlist",
+		"cannot coexist with a project-level `local_directory`",
+		"multica project resource add <project-id> --type task_config --ref",
 		"Project resources are durable and affect future tasks",
 		"github_repo.resource_ref.url",
 		"resource_ref.ref",
@@ -590,6 +596,22 @@ func TestProjectsAndResourcesSkillCoversDurableContext(t *testing.T) {
 	}
 	if !skillHasFile(skill, "references/projects-and-resources-source-map.md") {
 		t.Errorf("projects-and-resources skill missing supporting file references/projects-and-resources-source-map.md")
+	}
+	var sourceMap string
+	for _, f := range skill.Files {
+		if f.Path == "references/projects-and-resources-source-map.md" {
+			sourceMap = f.Content
+			break
+		}
+	}
+	for _, want := range []string{
+		"`task_config` is added through the generic JSON",
+		"owner/admin authorization gate as create/update",
+		"Secret configuration bytes are never part",
+	} {
+		if !strings.Contains(sourceMap, want) {
+			t.Errorf("projects-and-resources source map missing %q", want)
+		}
 	}
 }
 
