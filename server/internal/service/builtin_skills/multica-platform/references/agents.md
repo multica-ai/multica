@@ -220,6 +220,11 @@ backends may consume protocol selectors before launch:
   parameter. `zeroclaw acp` has no such CLI flag. Set one of these custom args
   when ZeroClaw has multiple agents and no `[acp].default_agent`; omit it for a
   sole-agent config so ZeroClaw can auto-select that agent.
+- Junie owns ACP, prompt, resume/session, input/output-format, and gateway
+  arguments. The daemon filters those from `custom_args`, launches
+  `junie --acp=true`, and sends the first-class `model` as the opaque value of
+  ACP config option `model`. It intentionally uses `session/set_config_option`,
+  not Junie's currently incompatible `session/set_model` method.
 
 Never put credentials or other secrets in `custom_args`. Daemon command logs
 redact argument values, but values that a backend does not consume still live
@@ -287,7 +292,7 @@ Two ways `mcp_config` differs from `custom_env`:
   field is `null` and `mcp_config_redacted` is `true`. Agent actors never see
   it, and a workspace may force redaction for everyone.
 
-Provider support is not uniform: Qwen Code accepts a managed `mcp_config` through a daemon-owned 0600 temporary JSON file passed with `--mcp-config`; it is removed when the run exits. Leave the field unset (`null`) to inherit Qwen Code native settings.
+Provider support is not uniform: Qwen Code accepts a managed `mcp_config` through a daemon-owned 0600 temporary JSON file passed with `--mcp-config`; it is removed when the run exits. Leave the field unset (`null`) to inherit Qwen Code native settings. Junie receives Multica-managed entries through ACP `session/new` / `session/load`, filtered to transports the live runtime advertises. Its native `~/.junie/mcp/mcp.json` is listed for visibility but is not reinjected, because Junie loads that file itself.
 
 #### Workspace MCP servers
 

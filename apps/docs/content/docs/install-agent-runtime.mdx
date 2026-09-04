@@ -28,6 +28,7 @@ Multica currently detects these commands:
 | Hermes Agent | `hermes` | [Hermes quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
 | Kiro CLI | `kiro-cli` | [Install Kiro CLI](https://kiro.dev/docs/cli/installation/) |
+| Junie CLI | `junie` | [Install Junie CLI](https://junie.jetbrains.com/docs/junie-cli-usage.html) |
 | MiniMax Code | `mcode` | [Install MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) |
 | OpenClaw | `openclaw` | [Install OpenClaw](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode quickstart](https://opencode.ai/en/docs) |
@@ -50,6 +51,8 @@ After installing, launch the tool once in a terminal on its own and complete its
 For CodeArts, verify the non-interactive path with `codearts run --model provider/model "Reply OK"`, not only the TUI. The current CodeArts CLI can let a custom provider work in the TUI while `run`, `models`, and `serve` still require [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html). Multica can discover custom models from `~/.codeartsdoer/codearts_cli.json` or `.jsonc`, but agent runs use `codearts run` and therefore follow its authorization requirements.
 
 For Reasonix, run `reasonix setup` and configure a default provider and model before starting the daemon.
+
+For Junie, launch `junie` once and use `/account` to choose a JetBrains Account, a `JUNIE_API_KEY`, BYOK, or a custom/local endpoint. Ollama, LM Studio, LiteLLM, and Junie Local models appear in the same model picker that Multica discovers over ACP. Start the selected local model service before running a task; Multica discovers the configuration but does not start or manage that service. Multica does not copy or store those credentials.
 
 For QwenPaw, choose the provider and model in QwenPaw's own configuration. Multica cannot override a QwenPaw model at run time.
 
