@@ -661,9 +661,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// (service.LoadAgentSkillBundles), so a claimed task's AgentSkills is never
 	// empty and the skill-less branch is effectively unreachable in production.
 	// Emptying an agent's own skill list is NOT a way to opt out of the overlay.
-	if params.Provider == "hermes" && len(params.Task.AgentSkills) > 0 {
+	if params.Provider == "hermes" && needsHermesOverlay(params.Task) {
 		hermesHome := filepath.Join(envRoot, "hermes-home")
-		sessions, err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, params.HermesSessionStore, logger)
+		sessions, err := prepareHermesHomeWithSoul(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentInstructions, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, params.HermesSessionStore, logger)
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
 		}
@@ -960,8 +960,8 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// skill-less agent.
 	if params.Provider == "hermes" && env.RootDir != "" {
 		hermesHome := filepath.Join(env.RootDir, "hermes-home")
-		if len(params.Task.AgentSkills) > 0 {
-			sessions, err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, params.HermesSessionStore, logger)
+		if needsHermesOverlay(params.Task) {
+			sessions, err := prepareHermesHomeWithSoul(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentInstructions, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, params.HermesSessionStore, logger)
 			if err != nil {
 				// Fail closed: a half-built overlay must not run. Returning nil
 				// makes the daemon fall back to a fresh Prepare, whose error
@@ -1029,6 +1029,13 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 
 	logger.Info("execenv: reusing env", "workdir", params.WorkDir)
 	return env
+}
+
+// needsHermesOverlay reports whether Multica owns any native Hermes-home input
+// for this task: agent instructions (rendered as SOUL.md) or bound skills.
+// A plain Hermes task with neither keeps the user's real home.
+func needsHermesOverlay(task TaskContextForEnv) bool {
+	return len(task.AgentSkills) > 0 || strings.TrimSpace(task.AgentInstructions) != ""
 }
 
 // hydrateCodexSkills populates the per-task CODEX_HOME/skills directory with
