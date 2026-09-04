@@ -26,10 +26,46 @@
  *     Just invalidate on settle. Matches web.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { InboxItem } from "@multica/core/types";
+import type { QueryClient } from "@tanstack/react-query";
+import type { InboxItem, InboxWorkspaceUnread } from "@multica/core/types";
 import { api } from "@/data/api";
 import { inboxKeys } from "@/data/queries/inbox";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { deduplicateInboxItems } from "@/lib/inbox-display";
+
+/**
+ * Refresh the cross-workspace unread summary that backs the tab badge. It
+ * lives under its own account-level key, so invalidating the workspace list
+ * does not reach it — every mutation here can change the number it holds.
+ */
+function invalidateUnreadSummary(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+}
+
+/**
+ * Re-derive this workspace's unread count from the just-patched list cache
+ * and write it into the summary cache, so the tab badge follows an optimistic
+ * patch instead of waiting for the round-trip.
+ *
+ * Mirrors syncUnreadSummaryFromList in packages/core/inbox/mutations.ts, and
+ * reuses the same `deduplicateInboxItems` the inbox screen renders through —
+ * the badge can therefore never disagree with the rows on screen. Both caches
+ * are read defensively: absent means nothing to be optimistic about, and the
+ * server value stands until `onSettled`.
+ */
+function syncUnreadSummaryFromList(qc: QueryClient, wsId: string | null) {
+  if (!wsId) return;
+  const items = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+  if (!items) return;
+  const count = deduplicateInboxItems(items).filter((i) => !i.read).length;
+  qc.setQueryData<InboxWorkspaceUnread[]>(inboxKeys.unreadSummary(), (old) => {
+    if (!old) return old;
+    // Order carries no meaning — consumers look up by workspace id. A
+    // zero-count workspace is dropped, mirroring the server response.
+    const others = old.filter((entry) => entry.workspace_id !== wsId);
+    return count > 0 ? [...others, { workspace_id: wsId, count }] : others;
+  });
+}
 
 export function useMarkInboxRead() {
   const qc = useQueryClient();
@@ -43,6 +79,9 @@ export function useMarkInboxRead() {
       qc.setQueryData<InboxItem[]>(key, (old) =>
         old?.map((item) => (item.id === id ? { ...item, read: true } : item)),
       );
+      // Same frame as the row patch, so the badge and the row never disagree
+      // across the transition.
+      syncUnreadSummaryFromList(qc, wsId);
       // Then the standard cancel + snapshot dance for rollback.
       await qc.cancelQueries({ queryKey: key });
       const prev = qc.getQueryData<InboxItem[]>(key);
@@ -50,9 +89,11 @@ export function useMarkInboxRead() {
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev);
+      syncUnreadSummaryFromList(qc, wsId);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      invalidateUnreadSummary(qc);
     },
   });
 }
@@ -81,13 +122,17 @@ export function useArchiveInbox() {
             : item,
         ),
       );
+      // Archiving an unread issue group drops it out of the badge at once.
+      syncUnreadSummaryFromList(qc, wsId);
       return { prev, key };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev);
+      syncUnreadSummaryFromList(qc, wsId);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      invalidateUnreadSummary(qc);
     },
   });
 }
@@ -107,13 +152,16 @@ export function useMarkAllInboxRead() {
           !item.archived ? { ...item, read: true } : item,
         ),
       );
+      syncUnreadSummaryFromList(qc, wsId);
       return { prev, key };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev);
+      syncUnreadSummaryFromList(qc, wsId);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      invalidateUnreadSummary(qc);
     },
   });
 }
@@ -121,7 +169,8 @@ export function useMarkAllInboxRead() {
 // Batch archive mutations — invalidate-only, matching web. The optimistic
 // path isn't worth the complexity: archive-completed depends on the issue
 // status of each linked issue (not carried on InboxItem), and predicting
-// that on the client risks divergence with the server's SQL filter.
+// that on the client risks divergence with the server's SQL filter. The badge
+// therefore catches up on settle rather than moving instantly.
 export function useArchiveAllInbox() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
@@ -129,6 +178,7 @@ export function useArchiveAllInbox() {
     mutationFn: () => api.archiveAllInbox(),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      invalidateUnreadSummary(qc);
     },
   });
 }
@@ -140,6 +190,7 @@ export function useArchiveAllReadInbox() {
     mutationFn: () => api.archiveAllReadInbox(),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      invalidateUnreadSummary(qc);
     },
   });
 }
@@ -151,6 +202,7 @@ export function useArchiveCompletedInbox() {
     mutationFn: () => api.archiveCompletedInbox(),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      invalidateUnreadSummary(qc);
     },
   });
 }

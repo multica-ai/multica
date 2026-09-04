@@ -67,7 +67,7 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { inboxKeys, deduplicateInboxItems, inboxUnreadSummaryOptions, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
+import { inboxUnreadSummaryOptions, useInboxUnreadCount, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useChatStore } from "@multica/core/chat";
@@ -104,7 +104,6 @@ function isNavActive(pathname: string, href: string): boolean {
 const EMPTY_PINS: PinnedItem[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
-const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
 const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>> = [];
 
 // Nav items reference WorkspacePaths method names so they can be resolved
@@ -447,15 +446,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   }, [pathname, setOpenMobile]);
 
   const wsId = workspace?.id;
-  const { data: inboxItems = EMPTY_INBOX } = useQuery({
-    queryKey: wsId ? inboxKeys.list(wsId) : ["inbox", "disabled"],
-    queryFn: () => api.listInbox(),
-    enabled: !!wsId,
-  });
-  const unreadCount = React.useMemo(
-    () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
-    [inboxItems],
-  );
+  // Nav badge. Reads the cross-workspace unread summary fetched just below
+  // for the switcher dot, so the count costs no request of its own — it used
+  // to download the whole inbox list here just to count it (MUL-6967).
+  const unreadCount = useInboxUnreadCount(wsId);
   // Chat tab unread badge: IM-style total of unread *messages* across chat
   // threads (countUnreadChatMessages is the shared definition — mobile's tab
   // badge derives from the same function, keeping the platforms in agreement).

@@ -2465,6 +2465,12 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/unarchive`, { method: "POST" });
   }
 
+  // Raw unread ROW count — not the number any badge shows. The inbox renders
+  // one row per issue, so a single issue with three unread notifications
+  // counts once there and three times here. `getInboxUnreadSummary` is the
+  // deduplicated, per-workspace count the UI is built on (see
+  // `useInboxUnreadCount`); reach for this one only when raw rows are what
+  // you actually mean.
   async getUnreadInboxCount(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/unread-count");
   }
