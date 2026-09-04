@@ -271,7 +271,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.4.40",
           date: "2026-09-04",
-          title: "MCP 서버 관리, 일관된 '실행' 용어, 로그인 만료 복구, 공유 에이전트 사용 가능 상태",
+          title: "MCP 서버 이름 변경과 연결 교체, 업데이트 중에도 안정적인 태스크 시작, 로그인 만료 시 깔끔한 로그아웃, 공유 에이전트의 정확한 상태",
           changes: [],
           features: [
             "MCP 서버 이름을 바꿔도 연결 설정과 배정된 에이전트가 그대로 유지됩니다.",

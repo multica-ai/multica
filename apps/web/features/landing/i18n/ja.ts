@@ -272,7 +272,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           version: "0.4.40",
           date: "2026-09-04",
-          title: "MCP サーバー管理、「実行」表記の統一、サインイン期限切れからの復帰、共有エージェントの利用可否",
+          title: "MCP サーバーの改名と接続の差し替え、アップデート中も安定したタスク起動、サインイン期限切れ時のクリーンな復帰、共有エージェントの正確な状態",
           changes: [],
           features: [
             "MCP サーバーの名前を変えても、接続設定と割り当て済みのエージェントはそのまま残ります。",

@@ -296,7 +296,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.40",
         date: "2026-09-04",
-        title: "MCP 服务器管理、统一的「运行」说法、登录过期恢复、共享智能体可用状态",
+        title: "MCP 服务器改名与连接替换、升级期间任务启动更稳、登录过期的干净退出、共享智能体状态更准",
         changes: [],
         features: [
           "给 MCP 服务器改名不会再弄丢连接配置和已分配的智能体。",

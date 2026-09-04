@@ -296,7 +296,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.40",
         date: "2026-09-04",
-        title: "MCP server management, consistent run terminology, sign-in recovery, and shared agent availability",
+        title: "MCP server renames and connection swaps, steadier task starts during upgrades, cleaner sign-out on expiry, and accurate shared-agent status",
         changes: [],
         features: [
           "Rename an MCP server without losing its connection details or the agents using it.",
