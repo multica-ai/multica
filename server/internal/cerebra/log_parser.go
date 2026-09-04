@@ -1,6 +1,9 @@
 package cerebra
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // FailureKind classifies an error string returned by the agent runtime.
 type FailureKind int
@@ -31,6 +34,13 @@ var quotaSignals = []string{
 	"quota exceeded",
 	"billing_hard_limit_reached",
 	"you've exceeded",
+	"you exceeded",
+	"exceeded your current quota",
+	"exceeded your quota",
+	"quota_exceeded",
+	"resource_exhausted",
+	"resourceexhausted",
+	"please retry in",
 	"rate_limit_exceeded",
 	"rate limit exceeded",
 	"rate-limited",
@@ -54,6 +64,22 @@ var quotaSignals = []string{
 	"purchased credits",
 	"purchase more",
 	"insufficient balance",
+}
+
+var failedModelRegex = regexp.MustCompile(`(?i)\bmodel(?:s)?(?:\s*[:=]\s*|\s+['"]?)([a-zA-Z0-9_.:/-]+)`)
+
+// ExtractFailedModel attempts to extract the specific model identifier named in an error message.
+// For example: "model: gemma-4-26b" -> "gemma-4-26b", "models/gemini-1.5-pro" -> "gemini-1.5-pro".
+func ExtractFailedModel(errMsg string) string {
+	matches := failedModelRegex.FindStringSubmatch(errMsg)
+	if len(matches) > 1 {
+		clean := strings.Trim(matches[1], `'".,;:`)
+		lower := strings.ToLower(clean)
+		if clean != "" && lower != "not" && lower != "found" && lower != "is" && lower != "the" && lower != "does" {
+			return clean
+		}
+	}
+	return ""
 }
 
 // contextLengthSignals indicate that the context window was exceeded.

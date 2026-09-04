@@ -1,8 +1,8 @@
 {
   "manifest_version": 1,
   "key": "com.multica.cerebra",
-  "name": "cerebra- v1.0.0",
-  "description": "Zero-config intelligent model routing for all agents. Automatically routes each task to the optimal model tier (simple/standard/heavy) based on prompt complexity and your connected providers. Works with any runtime: OpenCode, OpenClaw, Claude, Kimi, Grok, Ollama, or any custom provider.",
+  "name": "Cerebra",
+  "description": "Zero-config intelligent model routing and resilience for all Multica agents. Automatically routes each task to the optimal model tier (simple/standard/heavy) based on prompt complexity, MCP tools, and connected providers. Works with OpenCode, Claude, Codex, Kimi, Hermes, Ollama, and custom providers.",
   "version": "1.0.1",
   "author": {
     "name": "Multica Community",
@@ -15,24 +15,6 @@
     "net:cerebra.localhost"
   ],
   "contributes": {
-    "hooks": [
-      {
-        "key": "cerebra_route",
-        "name": "Cerebra Model Router",
-        "description": "Intercepts task.started events and dynamically selects the optimal model based on prompt complexity and connected providers.",
-        "triggers": [
-          "event"
-        ],
-        "events": [
-          "task.started"
-        ],
-        "transport": {
-          "type": "http",
-          "url": "https://cerebra.localhost:7842/route"
-        },
-        "timeout_ms": 3000
-      }
-    ],
     "resources": [
       {
         "type": "skill",

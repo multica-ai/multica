@@ -11,16 +11,17 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebra"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // detectMCPUsage inspects the task's runtime MCP overlay, connected apps,
-// plugin hook tools, and remote MCP connections to decide whether the task
+// plugin hook tools, remote MCP connections, and agent skills to decide whether the task
 // is expected to call MCP/tool chains. Used to populate TaskMeta.WillUseMCPTools before routing.
-func detectMCPUsage(runtimeMCPOverlay []byte, connectedApps []string, pluginHooks int, remoteMCPs int) bool {
+func detectMCPUsage(runtimeMCPOverlay []byte, connectedApps []string, pluginHooks int, remoteMCPs int, skillsCount int) bool {
 	if len(runtimeMCPOverlay) > 2 { // non-empty JSON object
 		return true
 	}
-	if pluginHooks > 0 || remoteMCPs > 0 {
+	if pluginHooks > 0 || remoteMCPs > 0 || skillsCount > 0 {
 		return true
 	}
 	for _, app := range connectedApps {
@@ -121,7 +122,7 @@ func fetchLocalOllamaModels(ctx context.Context) []string {
 // machine-specific TierMap (Simple, Standard, Heavy).
 // If dynamic discovery returns models, it derives the tiers directly from the live models.
 // If discovery returns empty or errors, it falls back to known provider defaults.
-func deriveDynamicRuntimeTierMap(ctx context.Context, provider string, runtimeCmd agent.Command) map[cerebra.Tier]string {
+func deriveDynamicRuntimeTierMap(ctx context.Context, provider string, runtimeCmd agent.Command, unavail *cerebra.UnavailabilityStore, runtimeID string) map[cerebra.Tier]string {
 	var modelIDs []string
 
 	// 1. Proactively query local Ollama engine (instant zero-config auto-discovery for all locally downloaded models)
@@ -147,9 +148,18 @@ func deriveDynamicRuntimeTierMap(ctx context.Context, provider string, runtimeCm
 	}
 
 	if len(modelIDs) > 0 {
-		tierMap := cerebra.BuildTierMapFromCatalog(modelIDs)
-		if len(tierMap) > 0 {
-			return map[cerebra.Tier]string(tierMap)
+		var available []string
+		for _, m := range modelIDs {
+			if unavail != nil && !unavail.IsAvailable(ctx, runtimeID, m) {
+				continue
+			}
+			available = append(available, m)
+		}
+		if len(available) > 0 {
+			tierMap := cerebra.BuildTierMapFromCatalog(available)
+			if len(tierMap) > 0 {
+				return map[cerebra.Tier]string(tierMap)
+			}
 		}
 	}
 	return fallbackMap
@@ -233,4 +243,48 @@ func routeBeforeDispatch(
 	result := router.Route(ctx, prompt, meta, runtimes, agentDefaultModel)
 	slog.Info("cerebra routed task model", "task_id", meta.TaskID, "tier", string(result.Tier), "model", result.Model, "matched_rule", result.MatchedRule)
 	return result.Model
+}
+
+// isQuotaOrModelFailure reports whether an agent execution result or error indicates
+// quota exhaustion, rate limiting (HTTP 429), or an unavailable/missing model.
+func isQuotaOrModelFailure(result agent.Result, err error) (bool, string) {
+	// SECURITY GUARD: A successfully completed task (status="completed") with zero
+	// error must NEVER have its stdout parsed as a provider failure. This stops user
+	// code printing "429" or rate limit text from causing a cascade Denial of Service.
+	if (result.Status == "completed" || result.Status == "ok") && err == nil && result.Error == "" {
+		return false, ""
+	}
+
+	if err != nil {
+		errStr := err.Error()
+		kind := cerebra.ParseFailure(errStr)
+		if cerebra.ShouldMarkUnavailable(kind) {
+			return true, errStr
+		}
+		reason := taskfailure.Classify(errStr)
+		if reason == taskfailure.ReasonAgentProviderQuotaLimit || reason == taskfailure.ReasonAgentProviderCapacityOrRateLimit || reason == taskfailure.ReasonAgentModelNotFoundOrUnavailable {
+			return true, errStr
+		}
+	}
+	if result.Error != "" {
+		kind := cerebra.ParseFailure(result.Error)
+		if cerebra.ShouldMarkUnavailable(kind) {
+			return true, result.Error
+		}
+		reason := taskfailure.Classify(result.Error)
+		if reason == taskfailure.ReasonAgentProviderQuotaLimit || reason == taskfailure.ReasonAgentProviderCapacityOrRateLimit || reason == taskfailure.ReasonAgentModelNotFoundOrUnavailable {
+			return true, result.Error
+		}
+	}
+	if result.Output != "" {
+		kind := cerebra.ParseFailure(result.Output)
+		if cerebra.ShouldMarkUnavailable(kind) {
+			return true, result.Output
+		}
+		reason := taskfailure.Classify(result.Output)
+		if reason == taskfailure.ReasonAgentProviderQuotaLimit || reason == taskfailure.ReasonAgentProviderCapacityOrRateLimit || reason == taskfailure.ReasonAgentModelNotFoundOrUnavailable {
+			return true, result.Output
+		}
+	}
+	return false, ""
 }

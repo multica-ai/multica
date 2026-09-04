@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -291,6 +292,21 @@ func (r *Router) fallback(_ context.Context, defaultModel, matchedRule string, s
 	}
 }
 
+func sanitizeLogField(s string, maxLen int) string {
+	if len(s) > maxLen {
+		s = s[:maxLen]
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if r == '\n' || r == '\r' || r == '\t' || r == 0 {
+			b.WriteByte(' ')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func (r *Router) writeLog(_ context.Context, result RoutingResult, meta TaskMeta) {
 	if r.routingLogFn == nil {
 		return
@@ -300,13 +316,13 @@ func (r *Router) writeLog(_ context.Context, result RoutingResult, meta TaskMeta
 		taskID = meta.IssueID
 	}
 	entry := RoutingLogEntry{
-		TaskID:            taskID,
-		IssueID:           meta.IssueID,
-		SessionID:         meta.SessionID,
-		RuntimeID:         result.RuntimeID,
-		ChosenModel:       result.Model,
+		TaskID:            sanitizeLogField(taskID, 64),
+		IssueID:           sanitizeLogField(meta.IssueID, 64),
+		SessionID:         sanitizeLogField(meta.SessionID, 64),
+		RuntimeID:         sanitizeLogField(result.RuntimeID, 64),
+		ChosenModel:       sanitizeLogField(result.Model, 128),
 		Tier:              string(result.Tier),
-		MatchedRule:       result.MatchedRule,
+		MatchedRule:       sanitizeLogField(result.MatchedRule, 128),
 		ToolChainExpected: meta.WillUseMCPTools,
 		FallbackUsed:      result.FallbackUsed,
 		LatencyMs:         int(result.LatencyMs),
@@ -357,3 +373,16 @@ type RoutingLogEntry struct {
 // ErrNoRoute is returned by integration tests when no model can be selected
 // and no default is provided.
 var ErrNoRoute = errors.New("cerebra: no eligible model candidate")
+
+// InvalidateSession clears any session pin for the given issue and session ID.
+func (r *Router) InvalidateSession(ctx context.Context, issueID, sessionID string) {
+	if r.session != nil {
+		r.session.Delete(ctx, issueID, sessionID)
+	}
+}
+
+// UnavailabilityStore returns the underlying UnavailabilityStore.
+func (r *Router) UnavailabilityStore() *UnavailabilityStore {
+	return r.unavail
+}
+

@@ -90,15 +90,24 @@ type HeuristicClassifier struct{}
 
 // Score implements Classifier.
 func (h HeuristicClassifier) Score(_ context.Context, prompt string, meta TaskMeta) (Tier, string, error) {
+	// Security boundary: clamp prompt inspection size to 64KB to prevent ReDoS / CPU exhaustion
+	const maxClassifyLen = 64 * 1024
+	if len(prompt) > maxClassifyLen {
+		prompt = prompt[:maxClassifyLen]
+	}
+
 	lower := strings.ToLower(prompt)
 	words := tokenize(lower)
 
-	// Step 1 — keyword scan (highest-tier-wins across all matches).
+	// Step 1 — keyword scan on natural language text (markdown code blocks stripped).
+	// Keywords inside ```...``` or `...` are ignored so code examples don't falsely elevate tier.
+	// Negated keywords ("do not refactor", "don't architect") are ignored.
+	cleanText := stripCodeBlocks(lower)
 	resultTier := TierSimple
 	matchedRule := "default:simple"
 
 	for _, kt := range orderedKeywords {
-		if containsWord(lower, kt.keyword) {
+		if containsWord(cleanText, kt.keyword) {
 			if tierRank(kt.tier) > tierRank(resultTier) {
 				resultTier = kt.tier
 				matchedRule = "keyword:" + kt.keyword
@@ -122,9 +131,13 @@ func (h HeuristicClassifier) Score(_ context.Context, prompt string, meta TaskMe
 	}
 
 	// Step 3 — MCP/tool floor: tool tasks are never sent to simple models.
-	if meta.WillUseMCPTools && tierRank(resultTier) < tierRank(TierStandard) {
+	if (meta.WillUseMCPTools || hasExplicitToolExecutionIntent(cleanText)) && tierRank(resultTier) < tierRank(TierStandard) {
 		resultTier = TierStandard
-		matchedRule = "mcp_floor"
+		if meta.WillUseMCPTools {
+			matchedRule = "mcp_floor"
+		} else {
+			matchedRule = "tool_intent_floor"
+		}
 	}
 
 	return resultTier, matchedRule, nil
@@ -178,3 +191,57 @@ func containsWord(text, word string) bool {
 func itoa(n int) string {
 	return strconv.Itoa(n)
 }
+
+// stripCodeBlocks removes markdown fenced code blocks (```...```) and inline code (`...`)
+// so code syntax, comments, and identifiers do not falsely trigger routing keywords.
+func stripCodeBlocks(text string) string {
+	var b strings.Builder
+	inBlock := false
+	i := 0
+	n := len(text)
+	for i < n {
+		if i+2 < n && text[i] == '`' && text[i+1] == '`' && text[i+2] == '`' {
+			inBlock = !inBlock
+			i += 3
+			b.WriteByte(' ')
+			continue
+		}
+		if inBlock {
+			b.WriteByte(' ')
+			i++
+			continue
+		}
+		if text[i] == '`' {
+			j := i + 1
+			for j < n && text[j] != '`' && text[j] != '\n' {
+				j++
+			}
+			if j < n && text[j] == '`' {
+				for k := i; k <= j; k++ {
+					b.WriteByte(' ')
+				}
+				i = j + 1
+				continue
+			}
+		}
+		b.WriteByte(text[i])
+		i++
+	}
+	return b.String()
+}
+
+// hasExplicitToolExecutionIntent detects explicit shell or CLI invocation commands
+// that require tool-use capabilities, elevating them above simple models.
+func hasExplicitToolExecutionIntent(text string) bool {
+	commands := []string{
+		"bash ", "/bin/sh", "curl ", "pytest", "npm run", "docker run",
+		"git commit", "git push", "multica ", "python -m", "go test",
+	}
+	for _, cmd := range commands {
+		if strings.Contains(text, cmd) {
+			return true
+		}
+	}
+	return false
+}
+

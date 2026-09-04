@@ -128,7 +128,7 @@ func TestCLIRoutingSimulation(t *testing.T) {
 		}, nil
 	}
 
-	dynMap := deriveDynamicRuntimeTierMap(ctx, "ollama", agent.Command{})
+	dynMap := deriveDynamicRuntimeTierMap(ctx, "ollama", agent.Command{}, nil, "")
 	if dynMap[cerebra.TierSimple] == "" {
 		t.Errorf("expected non-empty dynamic Simple tier")
 	}
@@ -543,3 +543,90 @@ func TestAnyRuntimeWorks(t *testing.T) {
 	}
 	fmt.Println("========================================================================================================================")
 }
+
+func TestCerebraModelQuotaAutomaticFailover(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.Default()
+
+	classifier := cerebra.HeuristicClassifier{}
+	policy := &cerebra.Policy{}
+	sessionStore := cerebra.NewSessionStore(2 * time.Hour)
+	unavailStore := cerebra.NewUnavailabilityStore(time.Hour)
+	router := cerebra.NewRouter(classifier, policy, sessionStore, unavailStore, logger, nil)
+
+	// Simulated user error from screenshot:
+	quotaOutput := `You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit.
+• Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_paid_tier_input_token_count, limit: 16000, model: gemma-4-26b
+Please retry in 47.322940573s.`
+
+	// 1. Verify failure classification
+	res := agent.Result{Output: quotaOutput}
+	isQuota, failMsg := isQuotaOrModelFailure(res, nil)
+	if !isQuota {
+		t.Fatalf("expected isQuotaOrModelFailure to return true for quota output")
+	}
+
+	// 2. Verify model extraction
+	extracted := cerebra.ExtractFailedModel(failMsg)
+	if extracted != "gemma-4-26b" {
+		t.Fatalf("expected extracted model to be 'gemma-4-26b', got %q", extracted)
+	}
+
+	// 3. Setup candidate models including the failing model
+	catalogWithGemma := []string{
+		"gemma-4-26b",
+		"gemini-2.5-pro",
+		"claude-3-5-sonnet",
+		"gpt-4o-mini",
+		"o1",
+	}
+
+	runtimeID := "local-test-runtime"
+	tierMapBefore := cerebra.BuildTierMapFromCatalog(catalogWithGemma)
+	if tierMapBefore[cerebra.TierStandard] != "gemma-4-26b" {
+		// Gemma was selected as the standard model
+	}
+
+	// 4. Mark the failing model as unavailable
+	unavailStore.MarkUnavailable(ctx, runtimeID, extracted, 0)
+	if unavailStore.IsAvailable(ctx, runtimeID, extracted) {
+		t.Fatalf("expected 'gemma-4-26b' to be unavailable")
+	}
+
+	// 5. Invalidate session pin
+	sessionStore.Set(ctx, "TEST-39", "session-1", runtimeID, "gemma-4-26b", cerebra.TierStandard)
+	router.InvalidateSession(ctx, "TEST-39", "session-1")
+	if pin := sessionStore.Get(ctx, "TEST-39", "session-1"); pin != nil {
+		t.Fatalf("expected session pin to be invalidated")
+	}
+
+	// 6. Filter available catalog
+	var availableCatalog []string
+	for _, m := range catalogWithGemma {
+		if unavailStore.IsAvailable(ctx, runtimeID, m) {
+			availableCatalog = append(availableCatalog, m)
+		}
+	}
+	tierMapAfter := cerebra.BuildTierMapFromCatalog(availableCatalog)
+	if tierMapAfter[cerebra.TierStandard] == "gemma-4-26b" {
+		t.Fatalf("gemma-4-26b should not be selected in tierMapAfter")
+	}
+
+	// 7. Route prompt to alternative best model
+	prompt := "Debug the race condition in the in-memory cache layer. Fix the concurrent map read/write crash using sync.RWMutex and implement unit test cases to verify thread safety."
+	meta := cerebra.TaskMeta{IssueID: "TEST-39", SessionID: "session-1"}
+	runtimes := []cerebra.RuntimeEntry{
+		{RuntimeID: runtimeID, TierMap: tierMapAfter},
+	}
+
+	routed := router.Route(ctx, prompt, meta, runtimes, "fallback-model")
+	if routed.Model == "gemma-4-26b" {
+		t.Fatalf("routed model should NOT be gemma-4-26b after quota failure")
+	}
+	if routed.Model == "" || routed.Model == "fallback-model" {
+		t.Fatalf("expected alternative candidate model to be selected, got %q", routed.Model)
+	}
+
+	t.Logf("SUCCESS: Quota model 'gemma-4-26b' automatically failed over to best alternative: %s (Tier: %s)", routed.Model, routed.Tier)
+}
+

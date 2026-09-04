@@ -38,9 +38,26 @@ type ModelProfile struct {
 	Score   int
 }
 
+// isValidModelIdentifier validates that a model ID does not contain control characters
+// and is within a safe length bound (max 256 characters).
+func isValidModelIdentifier(model string) bool {
+	if len(model) == 0 || len(model) > 256 {
+		return false
+	}
+	for _, r := range model {
+		if r < 32 || r == 127 {
+			return false
+		}
+	}
+	return true
+}
+
 // ClassifyModelTier analyzes a model name/identifier and assigns its optimal complexity tier
 // based on capability, latency, and parameter tier heuristics.
 func ClassifyModelTier(modelID string) Tier {
+	if !isValidModelIdentifier(modelID) {
+		return TierStandard
+	}
 	lower := strings.ToLower(strings.TrimSpace(modelID))
 	if lower == "" {
 		return TierStandard
@@ -143,6 +160,9 @@ func isNonChatModel(model string) bool {
 			return true
 		}
 	}
+	if size, ok := extractParamSizeInBillions(lower); ok && size < 1.5 {
+		return true // Sub-1.5B models lack capacity for agent system prompts & tool calling
+	}
 	return false
 }
 
@@ -160,7 +180,7 @@ func BuildTierMapFromCatalog(availableModels []string) TierMap {
 	var heavyCandidates []string
 
 	for _, model := range availableModels {
-		if strings.TrimSpace(model) == "" || isNonChatModel(model) {
+		if strings.TrimSpace(model) == "" || !isValidModelIdentifier(model) || isNonChatModel(model) {
 			continue
 		}
 		tier := ClassifyModelTier(model)
@@ -254,33 +274,21 @@ func selectBestSimpleModel(candidates []string) string {
 	}
 	searchPool := filterPreferredPool(candidates)
 
-	// 1. Prefer smallest parameter model (e.g. 0.5B < 1B < 3B) with local Ollama priority
-	var bestCandidate string
-	minSize := 999999.0
-	for _, c := range searchPool {
-		if size, ok := extractParamSizeInBillions(c); ok {
-			effectiveSize := size
-			if strings.HasPrefix(strings.ToLower(c), "ollama/") {
-				effectiveSize -= 0.1 // Local priority
-			}
-			if effectiveSize < minSize {
-				minSize = effectiveSize
-				bestCandidate = c
-			}
-		}
-	}
-	if bestCandidate != "" {
-		return bestCandidate
-	}
-
-	// 2. Prefer fast lightweight models (mini, nano, mimo, haiku, lite, flash)
-	simpleTags := []string{"mini", "nano", "mimo", "haiku", "lite", "flash", "small", "tiny", "spark"}
-	for _, c := range searchPool {
-		base := getBaseModelName(c)
-		for _, tag := range simpleTags {
+	// 1. Prefer fast high-quality lightweight models (mimo, mini, haiku, flash, lite, nano)
+	simpleTags := []string{"mimo", "mini", "haiku", "flash", "lite", "nano", "spark", "small"}
+	for _, tag := range simpleTags {
+		for _, c := range searchPool {
+			base := getBaseModelName(c)
 			if hasModelSegment(base, tag) {
 				return c
 			}
+		}
+	}
+
+	// 2. Prefer 3B to 8B lightweight models
+	for _, c := range searchPool {
+		if size, ok := extractParamSizeInBillions(c); ok && size >= 3.0 && size <= 8.0 {
+			return c
 		}
 	}
 	return searchPool[0]
