@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -446,6 +447,15 @@ describe("electron-builder.yml packaging config", () => {
     resolve(process.cwd(), "electron-builder.yml"),
     resolve(process.cwd(), "apps/desktop/electron-builder.yml"),
   ].find((candidate) => existsSync(candidate));
+
+  it("keeps the imported CLI hashbang LF-terminated on Windows", () => {
+    expect(configPath, "electron-builder.yml not found").toBeTruthy();
+    const scriptPath = resolve(configPath, "..", "scripts/package.mjs");
+    expect(
+      readFileSync(scriptPath, "utf-8").split("\n")[0],
+      "Keep package.mjs LF-terminated per .gitattributes: CRLF breaks Vite's hashbang transform.",
+    ).toBe("#!/usr/bin/env node");
+  });
 
   // Extract the entries of the top-level `files:` block sequence without a
   // YAML dependency: collect the `  - "…"` items that follow `files:` up to

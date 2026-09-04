@@ -4,3 +4,6 @@ docker/entrypoint.sh text eol=lf
 
 # Default behavior
 * text=auto
+
+# Vite's SSR hashbang matcher requires LF when this CLI is imported by Vitest.
+apps/desktop/scripts/package.mjs text eol=lf

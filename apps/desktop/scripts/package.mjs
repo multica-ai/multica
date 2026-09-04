@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Keep this hashbang LF-terminated; .gitattributes pins it for Vite's SSR loader.
 // Wrapper around `electron-builder` that keeps the Desktop version in
 // lockstep with the CLI. Both are derived from `git describe --tags
 // --match 'v[0-9]*' --always --dirty` — the same source GoReleaser reads
@@ -84,7 +85,7 @@ const MAC_ALL_PLATFORM_TARGETS = [
 // escaped to a GitHub Release.
 function git(args, cwd) {
   try {
-    return execFileSync("git", args, { encoding: "utf-8", cwd }).trim();
+    return execFileSync("git", args, { encoding: "utf-8", cwd, windowsHide: true }).trim();
   } catch {
     return "";
   }
@@ -396,6 +397,7 @@ function main() {
     cwd: desktopRoot,
     env: envWithLocalBins(),
     shell: true,
+    windowsHide: true,
   });
   if (viteResult.error) {
     console.error(
@@ -444,6 +446,7 @@ function main() {
       {
         stdio: "inherit",
         cwd: desktopRoot,
+        windowsHide: true,
       },
     );
 
@@ -461,6 +464,7 @@ function main() {
       cwd: desktopRoot,
       env: envWithLocalBins(),
       shell: true,
+      windowsHide: true,
     });
 
     if (result.error) {

@@ -6,8 +6,8 @@
 // source — no more stale binary surprises. Go's build cache makes the
 // no-op case (nothing changed) effectively free.
 //
-// ldflags mirror `make build` so `multica --version` reports a meaningful
-// version / commit / date.
+// ldflags mirror `make build`. Custom release checkouts may have no CLI tags,
+// so MULTICA_CLI_VERSION supplies the validated release-plan version explicitly.
 //
 // Graceful: if `go` is not installed (e.g. frontend-only contributor), we
 // skip the build and fall through to auto-install at runtime. A genuine
@@ -81,15 +81,25 @@ const destBinary = join(destDir, binName);
 // 0.0.0-g<hash> fallback.
 function git(...args) {
   try {
-    return execFileSync("git", args, { encoding: "utf-8" }).trim();
+    return execFileSync("git", args, { encoding: "utf-8", windowsHide: true }).trim();
   } catch {
     return "";
   }
 }
 
+const explicitVersion = process.env.MULTICA_CLI_VERSION;
+if (
+  explicitVersion !== undefined &&
+  !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-custom\.[1-9]\d*)?$/.test(explicitVersion)
+) {
+  throw new Error(
+    "[bundle-cli] MULTICA_CLI_VERSION must be a stable or custom Desktop semantic version",
+  );
+}
+
 function hasGo() {
   try {
-    execSync("go version", { stdio: "pipe" });
+    execSync("go version", { stdio: "pipe", windowsHide: true });
     return true;
   } catch {
     return false;
@@ -107,8 +117,8 @@ async function exists(p) {
 
 if (hasGo()) {
   const version =
-    git("describe", "--tags", "--match", "v[0-9]*", "--always", "--dirty") ||
-    "dev";
+    explicitVersion ??
+    (git("describe", "--tags", "--match", "v[0-9]*", "--always", "--dirty") || "dev");
   const commit = git("rev-parse", "--short", "HEAD") || "unknown";
   const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
   const ldflags = `-X main.version=${version} -X main.commit=${commit} -X main.date=${date}`;
@@ -130,6 +140,7 @@ if (hasGo()) {
     {
       cwd: serverDir,
       stdio: "inherit",
+      windowsHide: true,
       env: {
         ...process.env,
         CGO_ENABLED: "0",
@@ -139,6 +150,9 @@ if (hasGo()) {
     },
   );
 } else {
+  if (explicitVersion !== undefined) {
+    throw new Error("[bundle-cli] MULTICA_CLI_VERSION requires Go; refusing to reuse a stale CLI");
+  }
   console.warn(
     "[bundle-cli] `go` not found in PATH — skipping CLI build. " +
       "Desktop will use whatever is already in resources/bin/, or fall back " +

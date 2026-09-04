@@ -48,6 +48,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify bundled CLI release version
+        working-directory: apps/desktop
+        run: node --test scripts/bundle-cli.integration.mjs
+
       - name: Package Desktop installers (${{ matrix.target }})
         working-directory: apps/desktop
         env:
