@@ -340,6 +340,8 @@ export interface IssueTableQuerySpec {
 export type IssueTableGroupSpec =
   | { kind: "none" }
   | { kind: "status" }
+  /** Group project work by stable lifecycle Status Node identity. */
+  | { kind: "lifecycle_status" }
   /**
    * Group by the CATEGORY a status behaves as, not by the status key.
    *
@@ -384,6 +386,18 @@ export interface IssueTableParentRef {
 
 export type IssueTableGroupValue =
   | { kind: "status"; status: string }
+  | {
+      kind: "lifecycle_status";
+      lifecycle_id?: string;
+      lifecycle_status_id?: string;
+      /** Legacy adapter key used by older create paths. */
+      status: string;
+      name: string;
+      color?: string;
+      position?: number;
+      phase?: string;
+      archived?: boolean;
+    }
   | { kind: "assignee"; actor: IssueTableActorRef | null }
   | { kind: "project"; project_id: string | null }
   | {

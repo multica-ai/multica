@@ -74,6 +74,7 @@ import {
   IssueLifecycleResponseSchema,
   EMPTY_ISSUE_LIFECYCLE_RESPONSE,
   TransitionIssueStatusNodeResponseSchema,
+  IssueTableGroupsResponseSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
 
@@ -2198,5 +2199,34 @@ describe("issue lifecycle schemas", () => {
     });
     expect(parsed.issue.lifecycle_status_id).toBe("status-1");
     expect(parsed.transition).toBeNull();
+  });
+
+  it("preserves lifecycle status-node identity in table group descriptors", () => {
+    const parsed = IssueTableGroupsResponseSchema.parse({
+      query_fingerprint: "query-1",
+      total: 2,
+      groups: [
+        {
+          key: "lifecycle_status:status-1",
+          value: {
+            kind: "lifecycle_status",
+            lifecycle_id: "lifecycle-1",
+            lifecycle_status_id: "status-1",
+            status: "todo",
+            name: "Implementation",
+            color: "#2563eb",
+            position: 2,
+            phase: "started",
+          },
+          count: 2,
+        },
+      ],
+      next_cursor: null,
+    });
+    expect(parsed.groups[0]?.value).toMatchObject({
+      kind: "lifecycle_status",
+      lifecycle_status_id: "status-1",
+      name: "Implementation",
+    });
   });
 });

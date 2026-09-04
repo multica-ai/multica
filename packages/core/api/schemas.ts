@@ -1519,6 +1519,17 @@ const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
     status: z.string(),
   }).loose(),
   z.object({
+    kind: z.literal("lifecycle_status"),
+    lifecycle_id: z.string().optional(),
+    lifecycle_status_id: z.string().optional(),
+    status: z.string().default(""),
+    name: z.string(),
+    color: z.string().optional(),
+    position: z.number().optional(),
+    phase: z.string().optional(),
+    archived: z.boolean().optional(),
+  }).loose(),
+  z.object({
     kind: z.literal("assignee"),
     actor: IssueTableActorRefSchema.nullable(),
   }).loose(),

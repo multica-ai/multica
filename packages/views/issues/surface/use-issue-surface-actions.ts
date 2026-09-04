@@ -20,6 +20,7 @@ import { useT } from "../../i18n";
 export type MoveIssueUpdates = Pick<
   UpdateIssueRequest,
   | "status"
+  | "lifecycle_status_id"
   | "assignee_type"
   | "assignee_id"
   | "position"
