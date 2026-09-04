@@ -629,7 +629,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsProfilesWithTasks(t *testing.T) {
 	}, "", "", false)
 
 	got := out.String()
-	if !strings.Contains(got, "Other workspace roots contain task directories:") {
+	if !strings.Contains(got, "Other workspace roots contain run directories:") {
 		t.Fatalf("hint output = %q, want profile suggestion header", got)
 	}
 	if !strings.Contains(got, "multica --profile two-tasks daemon disk-usage") {
@@ -644,7 +644,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsProfilesWithTasks(t *testing.T) {
 	if !strings.Contains(got, "multica daemon disk-usage --all-profiles") {
 		t.Fatalf("hint output = %q, want --all-profiles tip", got)
 	}
-	if strings.Contains(got, "(0 task") {
+	if strings.Contains(got, "(0 run") {
 		t.Fatalf("hint output = %q, want empty profile omitted", got)
 	}
 	if strings.Index(got, "two-tasks") > strings.Index(got, "one-task") {
@@ -797,7 +797,7 @@ func TestPrintAggregateDiskUsageShowsRootsAndGrandTotal(t *testing.T) {
 	if !strings.Contains(got, "/home/u/multica_workspaces_desktop-host") {
 		t.Fatalf("output = %q, want desktop root path", got)
 	}
-	if !strings.Contains(got, "Grand total:") || !strings.Contains(got, "across 2 task(s) in 2 root(s)") {
+	if !strings.Contains(got, "Grand total:") || !strings.Contains(got, "across 2 run(s) in 2 root(s)") {
 		t.Fatalf("output = %q, want grand total line", got)
 	}
 }

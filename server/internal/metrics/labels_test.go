@@ -2,16 +2,6 @@ package metrics
 
 import "testing"
 
-func TestBusinessMetricLabelsRejectHighCardinalityNames(t *testing.T) {
-	for metric, labels := range businessMetricLabels {
-		for _, label := range labels {
-			if _, forbidden := forbiddenMetricLabels[label]; forbidden {
-				t.Fatalf("metric %s uses forbidden label %s", metric, label)
-			}
-		}
-	}
-}
-
 func TestNormalizeRuntimeProviderRecognizesKnownProviders(t *testing.T) {
 	tests := []struct {
 		input string

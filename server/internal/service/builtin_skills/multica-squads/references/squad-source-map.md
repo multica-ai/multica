@@ -161,7 +161,18 @@ Contracts:
 - the `no_action` comment prohibition is conditional on this write succeeding
   (comment.go:1851 checks the activity exists), so the injected instructions
   tell leaders to fall back to a comment when the call errors — capped at one
-  comment, and only when the turn has not already commented.
+  comment, and only when the turn has not already commented. That rule is
+  stated in exactly one place: responsibility 5 of the Squad Operating Protocol
+  (`squadOperatingProtocolFor`, `server/internal/handler/squad_briefing.go`),
+  which the server appends to a leader's Instructions. The runtime brief
+  (workflow step 4 and `## Output` in
+  `server/internal/daemon/execenv/runtime_config_sections.go`) and the per-turn
+  reply imperative (`BuildCommentReplyInstructions` /
+  `BuildMultiThreadCommentReplyInstructions`,
+  `server/internal/daemon/execenv/reply_instructions.go`) carry only the
+  `no_action` EXCEPTION to their own imperative and point back at the protocol.
+  They used to restate the rule; the four copies had already drifted on the
+  failure fallback when they were collapsed (MUL-6984).
 
 ## Issue Assignment
 

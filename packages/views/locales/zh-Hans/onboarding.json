@@ -128,7 +128,7 @@
   },
   "cloud_waitlist": {
     "intro_main": "云运行时尚未上线。留下邮箱，上线时通过邮件通知你。",
-    "intro_warning": "提示：没有运行时，智能体无法执行 task——如果现在跳过，在你回来装一个之前不会有任何 task 运行。",
+    "intro_warning": "提示：未配置运行时，智能体就无法工作——如果现在跳过，在你回来安装之前不会启动任何运行。",
     "email_label": "邮箱",
     "email_placeholder": "you@work.com",
     "reason_label": "为什么选择云？",
@@ -215,7 +215,7 @@
     "empty_lede_prefix": "智能体运行时就是我们要连接的 AI 编程工具，比如 ",
     "empty_lede_suffix": "。装好任意一个后点刷新，或从下面选择一种方式。",
     "empty_skip_title": "暂时跳过",
-    "empty_skip_subtitle": "先进入工作区。在这台电脑上连接智能体运行时之前，智能体无法执行 task——但你仍可以浏览、规划、邀请同事。",
+    "empty_skip_subtitle": "先进入工作区。在这台电脑上连接智能体运行时之前，智能体无法开始运行——但你仍可以浏览、规划、邀请同事。",
     "empty_skip_action": "跳过",
     "empty_waitlist_title": "使用云电脑",
     "empty_waitlist_subtitle": "我们会在云上为你运行一台电脑。尚未上线。",

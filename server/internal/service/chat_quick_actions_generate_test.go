@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"unicode"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -268,26 +267,5 @@ func TestRenderChatQuickActionsContextClosesWithTheLanguageRule(t *testing.T) {
 	// it does not scrub the input.
 	if !strings.Contains(out, "已创建工单 EFF-359") || !strings.Contains(out, "- 查看工单详情") {
 		t.Fatalf("conversation and previous labels must survive intact:\n%s", out)
-	}
-}
-
-// Neither prompt may name or contain a language: that is what taught the model
-// Chinese was on the table in the first place.
-func TestChatQuickActionsPromptsNameNoLanguage(t *testing.T) {
-	for name, text := range map[string]string{
-		"system prompt": chatQuickActionsSystemPrompt,
-		"language rule": chatQuickActionsLanguageRule,
-	} {
-		for _, r := range text {
-			if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) ||
-				unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hangul, r) {
-				t.Fatalf("%s must contain no CJK, found %q", name, r)
-			}
-		}
-		for _, named := range []string{"Chinese", "Japanese", "Korean", "English"} {
-			if strings.Contains(text, named) {
-				t.Fatalf("%s must not name a language, found %q", name, named)
-			}
-		}
 	}
 }

@@ -143,6 +143,43 @@ func seededHumanMember(t *testing.T) (memberID, userID, userName string) {
 	return
 }
 
+// TestSquadOperatingProtocolOwnsNoActionRule pins the protocol as the single
+// statement of the no_action rule (MUL-6984). It used to be written four
+// times — here, in the per-turn prompt, in the brief's workflow step 4, and in
+// the brief's ## Output — and the four copies had already drifted: only some
+// of them carried the MUL-6622 / GH #7487 escape hatch, which is what keeps a
+// FAILED `squad activity` call from ending the turn in silence. The other
+// three surfaces now point here, so this text has to carry the whole rule:
+// the prohibition, its exact scope, and the failure fallback.
+func TestSquadOperatingProtocolOwnsNoActionRule(t *testing.T) {
+	for _, ownsParentStatus := range []bool{true, false} {
+		protocol := squadOperatingProtocolFor(ownsParentStatus)
+		compact := strings.Join(strings.Fields(protocol), " ")
+
+		for _, want := range []string{
+			// the rule and how it is recorded
+			"multica squad activity <issue-id> <outcome> --reason",
+			"record `no_action` and exit silently",
+			// what "silently" forbids — MUL-2168 was a leader posting
+			// "no reply needed. Exiting silently."
+			"posting NO comment at all",
+			"not one saying you are exiting",
+			// MUL-6622 / #7487: the prohibition lapses when the call fails,
+			// because the server only rejects a leader comment once the
+			// no_action activity exists.
+			"holds only while the call succeeds",
+			"responsibility 3 applies",
+			// one comment, not two — the fallback must not collide with the
+			// one-comment-per-turn rule
+			"never post a second comment",
+		} {
+			if !strings.Contains(compact, want) {
+				t.Errorf("ownsParentStatus=%v: protocol missing %q\n--- protocol ---\n%s", ownsParentStatus, want, protocol)
+			}
+		}
+	}
+}
+
 func TestBuildSquadLeaderBriefing_FullSquad(t *testing.T) {
 	ctx := context.Background()
 	leaderID, leaderName := seededLeaderAgent(t)

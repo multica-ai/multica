@@ -2118,6 +2118,19 @@ describe("ApiClient model discovery response schema", () => {
     expect(result.cached_at).toBe("2026-07-29T00:00:00Z");
   });
 
+  it("requests a live model list when force refresh is selected", async () => {
+    stubJSON(completed);
+
+    await new ApiClient("https://api.example.test").initiateListModels("rt-1", {
+      force: true,
+    });
+
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/runtimes/rt-1/models?force=true",
+    );
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
+  });
+
   // The picker drives a state machine off `status`, so a malformed body must
   // become an explicit failure — not a fabricated empty catalog, and not an
   // endless "discovering models" spinner.

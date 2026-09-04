@@ -2742,26 +2742,6 @@ func TestRunIssueCommentList_DoesNotPrintShowingPreamble(t *testing.T) {
 	}
 }
 
-func TestValidIssueStatuses(t *testing.T) {
-	expected := map[string]bool{
-		"backlog":     true,
-		"todo":        true,
-		"in_progress": true,
-		"in_review":   true,
-		"done":        true,
-		"blocked":     true,
-		"cancelled":   true,
-	}
-	for _, s := range validIssueStatuses {
-		if !expected[s] {
-			t.Errorf("unexpected status in validIssueStatuses: %q", s)
-		}
-	}
-	if len(validIssueStatuses) != len(expected) {
-		t.Errorf("validIssueStatuses has %d entries, expected %d", len(validIssueStatuses), len(expected))
-	}
-}
-
 // TestValidateIssueStatus pins the post-MUL-6243 contract: the CLI validates
 // the SHAPE of a status key, not its membership. A workspace can define custom
 // statuses, so only the server knows the valid set; rejecting an unknown key
@@ -4096,7 +4076,7 @@ func TestRunIssueRunsSiblingsTableRendersFamilyColumns(t *testing.T) {
 	}
 	// The task id has to survive the new payload's task_id key — reading `id`
 	// here would render a column of blanks and lose the run-messages target.
-	for _, want := range []string{"TASK", "ISSUE", "MUL-7001", "abcd1234"} {
+	for _, want := range []string{"RUN", "ISSUE", "MUL-7001", "abcd1234"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("family table missing %q:\n%s", want, out)
 		}

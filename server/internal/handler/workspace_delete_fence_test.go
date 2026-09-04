@@ -349,12 +349,15 @@ func TestMergeLegacyRuntime_KeepsOldRuntimeWhenFenceRefuses(t *testing.T) {
 	}
 	ctx := context.Background()
 	f := newWorkspaceDeletePathFixture(t, "mergefence")
+	notifier := &recordingRuntimeGoneNotifier{}
+	h := *testHandler
+	h.DaemonRuntimeGone = notifier
 
 	// A target runtime id that does not resolve — the same state a merge sees when
 	// the target's workspace was torn down a moment ago.
 	vanishedTarget := parseUUID("00000000-0000-0000-0000-0000000000fe")
 
-	err := testHandler.mergeLegacyRuntime(ctx, vanishedTarget, parseUUID(f.victimRuntime), "legacy-daemon", "delete-test")
+	err := h.mergeLegacyRuntime(ctx, vanishedTarget, parseUUID(f.victimRuntime), "legacy-daemon", "delete-test")
 	if !errors.Is(err, errRuntimeMergeFenced) {
 		t.Fatalf("mergeLegacyRuntime = %v, want errRuntimeMergeFenced", err)
 	}
@@ -374,6 +377,9 @@ func TestMergeLegacyRuntime_KeepsOldRuntimeWhenFenceRefuses(t *testing.T) {
 	if !stillOnOldRuntime {
 		t.Error("the task was re-pointed at the vanished runtime")
 	}
+	if len(notifier.runtimeIDs) != 0 {
+		t.Fatalf("fenced merge emitted runtime-gone notifications: %v", notifier.runtimeIDs)
+	}
 
 	// And the happy path still merges, so the abort is not unconditional.
 	var freshRuntime string
@@ -384,7 +390,7 @@ RETURNING id
 `, f.victimID, testUserID).Scan(&freshRuntime); err != nil {
 		t.Fatalf("create merge target: %v", err)
 	}
-	if err := testHandler.mergeLegacyRuntime(ctx, parseUUID(freshRuntime), parseUUID(f.victimRuntime),
+	if err := h.mergeLegacyRuntime(ctx, parseUUID(freshRuntime), parseUUID(f.victimRuntime),
 		"legacy-daemon", "delete-test"); err != nil {
 		t.Fatalf("merge onto a live runtime: %v", err)
 	}
@@ -393,6 +399,9 @@ RETURNING id
 	}
 	if !rowExists(t, "agent_task_queue", f.taskViaRuntime) {
 		t.Error("a completed merge lost the old runtime's task")
+	}
+	if len(notifier.runtimeIDs) != 1 || notifier.runtimeIDs[0] != f.victimRuntime {
+		t.Fatalf("runtime-gone notifications = %v, want [%s]", notifier.runtimeIDs, f.victimRuntime)
 	}
 }
 

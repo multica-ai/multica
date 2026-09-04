@@ -299,7 +299,7 @@
     "disabled_badge": "已禁用",
     "admin_only_note": "只有工作区 owner 和 admin 可以修改共享的 MCP 服务。",
     "delete_title": "移除共享服务？",
-    "delete_description": "{{name}} 将从服务库以及所有已分配的智能体上移除，在它们的下一个 task 起生效。",
+    "delete_description": "{{name}} 将从服务库以及所有已分配的智能体上移除，从各智能体的下一次运行起生效。",
     "delete_confirm": "移除",
     "cancel": "取消",
     "added_toast": "已添加共享 MCP 服务",
@@ -394,8 +394,8 @@
       "issues_write": "创建和修改任务",
       "comments_read": "读取评论",
       "comments_write": "发表评论",
-      "tasks_read": "读取智能体 task",
-      "tasks_write": "启动和更新智能体 task",
+      "tasks_read": "读取智能体运行",
+      "tasks_write": "启动和更新智能体运行",
       "agents_read": "读取智能体列表",
       "members_read": "读取成员列表",
       "storage_user": "为每位成员单独存储数据",
@@ -548,7 +548,7 @@
     "click_avatar_hint": "点击上传头像",
     "name_label": "姓名",
     "profile_description_label": "关于你",
-    "profile_description_hint": "会随 task 一起发送给为你工作的智能体——角色、技术栈、偏好，任何你会在第一天告诉新同事的内容。",
+    "profile_description_hint": "会随每次运行发送给为你工作的智能体——角色、技术栈、偏好，以及任何你会在第一天告诉新同事的内容。",
     "profile_description_placeholder": "例如：后端工程师（Go + Postgres）。喜欢简洁的 PR，改动同时附上测试。",
     "profile_description_too_long": "资料过长（最多 {{max}} 字符，当前 {{count}}）。",
     "save": "更新资料",
@@ -585,7 +585,7 @@
       },
       "agent_activity": {
         "label": "智能体活动",
-        "description": "智能体 task 完成或失败时"
+        "description": "智能体运行完成或失败时"
       }
     },
     "system": {
@@ -1154,7 +1154,7 @@
       "settings_saved": "守护进程设置已保存",
       "settings_save_failed": "保存守护进程设置失败",
       "signin_expired": "登录已过期",
-      "signin_expired_description": "本地守护进程无法完成身份验证，因此此设备暂时不能接收 task。请重新登录以恢复运行。",
+      "signin_expired_description": "本地守护进程无法完成身份验证，因此此设备暂时不能接收新的运行。请重新登录以恢复。",
       "signin_again": "重新登录",
       "external_description_before": "此设备的守护进程在应用之外运行（例如 WSL2 中），因此应用无法启动或停止它。请在相应环境中运行",
       "external_description_after": "。",
@@ -1195,8 +1195,8 @@
       "stop": "停止",
       "start": "启动",
       "retry_setup": "重试设置",
-      "stop_confirm_title_other": "停止守护进程并中断 {{count}} 个活动 task？",
-      "stop_confirm_description_other": "此设备当前有 {{count}} 个 task 正在运行。立即停止会中断这些 task；超时后，受影响的 task 会被标记为失败。守护进程不会自动重启。",
+      "stop_confirm_title_other": "停止守护进程并中断正在进行的 {{count}} 次运行？",
+      "stop_confirm_description_other": "此设备当前有 {{count}} 次运行正在进行。立即停止会中断这些运行；超时后，受影响的运行会被标记为失败。守护进程不会自动重启。",
       "cancel": "取消",
       "stop_daemon": "停止守护进程",
       "logs_title": "本地守护进程日志",
