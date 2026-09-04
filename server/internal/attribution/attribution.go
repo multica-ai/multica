@@ -478,10 +478,18 @@ type SubscriptionFacts struct {
 //   - OriginOriginator valid AND the chain root is a DIRECT human act →
 //     subscribe. Because attribution COPIES the accountable human across every
 //     agent hop rather than chaining it (see SourceDelegation), the originator
-//     resolves the ORIGINAL human at any depth. No depth cap: depth is exactly
-//     where a lost signal hurts most, and the delivery tier — not a cap — is what
-//     bounds the noise. The root check is what keeps "has a human" from being
-//     read as "a human asked", see below.
+//     resolves the ORIGINAL human at any depth, and the delivery tier — not a
+//     depth cutoff — is what bounds the noise a deep chain makes. The root check
+//     is what keeps "has a human" from being read as "a human asked", see below.
+//
+//     WHO the human is therefore has no depth limit; proving the chain BEGAN
+//     with them does: the caller reads the root by walking the lineage, and that
+//     walk stops after 32 hops (GetDelegatedSubscriptionFacts). Past that the
+//     root is reported as unproven and nobody is subscribed, which is a real
+//     truncation and not a formality — accepted deliberately (MUL-7051, Bohan's
+//     call) because no observed chain approaches it. Raising it is a one-number
+//     change; moving the root onto the run at enqueue time would remove the
+//     limit outright.
 //
 //   - quick_create → reason 'creator', agent_create → reason 'delegated'. The
 //     quick-create human asked for THAT issue by name, so it is direct intent and

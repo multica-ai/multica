@@ -221,13 +221,21 @@ type GetDelegatedSubscriptionFactsRow struct {
 //
 // Tenancy: every hop re-joins agent and re-checks workspace_id — the same guard
 // GetAgentTaskInWorkspace applies to a single task (MUL-4252) — so a foreign
-// delegated_from_task_id can never pull a row from another tenant. The depth cap
-// is defence in depth only: a run can only reference an older run, so the
-// lineage cannot cycle.
+// delegated_from_task_id can never pull a row from another tenant. Both hops
+// carry it: the anchor's predicate is the one an issue pointing straight at a
+// foreign run exercises, the recursive one is what stops a local run from
+// claiming a parent outside the workspace.
 //
-// A lineage truncated by a deleted ancestor reports the hop label it stopped on,
-// never a root label, so the caller reads it as "not proven" instead of assuming
-// a human asked.
+// The 32-hop stop is a REAL product limit, not just cycle protection (a run can
+// only reference an older run, so the lineage cannot cycle anyway): a chain
+// deeper than that reports the hop label it stopped on and its human is not
+// subscribed. Accepted deliberately — no observed chain comes close, and this
+// read is on the issue-create path — see DelegatedSubscriber for the contract
+// and what removing the limit would take.
+//
+// A lineage truncated by a deleted ancestor, or by that limit, reports the hop
+// label it stopped on, never a root label, so the caller reads it as "not
+// proven" instead of assuming a human asked.
 func (q *Queries) GetDelegatedSubscriptionFacts(ctx context.Context, arg GetDelegatedSubscriptionFactsParams) (GetDelegatedSubscriptionFactsRow, error) {
 	row := q.db.QueryRow(ctx, getDelegatedSubscriptionFacts, arg.OriginTaskID, arg.WorkspaceID)
 	var i GetDelegatedSubscriptionFactsRow
