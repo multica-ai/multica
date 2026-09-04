@@ -4154,3 +4154,243 @@ func TestRunIssueRunsWarnsOnTruncatedFamilyRead(t *testing.T) {
 		})
 	}
 }
+
+// fakeIssueRows builds n minimal issue rows for a fake /api/issues response.
+func fakeIssueRows(n int) []map[string]any {
+	rows := make([]map[string]any, 0, n)
+	for i := 0; i < n; i++ {
+		rows = append(rows, map[string]any{
+			"id":         fmt.Sprintf("issue-%d", i+1),
+			"identifier": fmt.Sprintf("MUL-%d", i+1),
+			"title":      fmt.Sprintf("Issue %d", i+1),
+			"status":     "todo",
+			"priority":   "none",
+		})
+	}
+	return rows
+}
+
+// newFakeIssueListServer serves /api/issues with the given rows and total
+// (nil omits the field); other paths get an empty object. It returns the
+// /api/issues request count and the last request's query.
+func newFakeIssueListServer(t *testing.T, rows []map[string]any, total any) (*httptest.Server, *int, *url.Values) {
+	t.Helper()
+	var (
+		requests int
+		query    url.Values
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" {
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		requests++
+		query = r.URL.Query()
+		body := map[string]any{"issues": rows}
+		if total != nil {
+			body["total"] = total
+		}
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &requests, &query
+}
+
+// TestRunIssueListRejectsOutOfRangeLimitAndOffset guards that --limit outside
+// 1..100 and a negative --offset are rejected before any request is made. The
+// --assignee case pins that the guard runs before the assignee resolver.
+func TestRunIssueListRejectsOutOfRangeLimitAndOffset(t *testing.T) {
+	srv, requests, _ := newFakeIssueListServer(t, nil, 0)
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name     string
+		flag     string
+		value    string
+		assignee string
+		wantErr  string
+	}{
+		{name: "limit zero", flag: "limit", value: "0", wantErr: "--limit must be between 1 and 100"},
+		{name: "limit negative", flag: "limit", value: "-5", wantErr: "--limit must be between 1 and 100"},
+		{name: "limit above the page cap", flag: "limit", value: "101", wantErr: "--limit must be between 1 and 100"},
+		{name: "limit checked before assignee resolution", flag: "limit", value: "500", assignee: "someone", wantErr: "--limit must be between 1 and 100"},
+		{name: "offset negative", flag: "offset", value: "-1", wantErr: "--offset must be zero or greater"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set(tc.flag, tc.value)
+			if tc.assignee != "" {
+				_ = cmd.Flags().Set("assignee", tc.assignee)
+			}
+			err := runIssueList(cmd, nil)
+			if err == nil {
+				t.Fatalf("runIssueList: expected error for --%s %s", tc.flag, tc.value)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %q, want it to contain %q", err, tc.wantErr)
+			}
+			if *requests != 0 {
+				t.Fatalf("server received %d request(s); a rejected flag must not reach the API", *requests)
+			}
+		})
+	}
+}
+
+// TestRunIssueListSendsLimitAndOffset guards that limit and offset reach the
+// query as given.
+func TestRunIssueListSendsLimitAndOffset(t *testing.T) {
+	srv, _, query := newFakeIssueListServer(t, nil, 0)
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	if err := runIssueList(cmd, nil); err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+	if got := query.Get("limit"); got != "50" {
+		t.Fatalf("default limit query = %q, want 50", got)
+	}
+	if query.Has("offset") {
+		t.Fatalf("offset query = %q, want it omitted at the default of 0", query.Get("offset"))
+	}
+
+	cmd = newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	_ = cmd.Flags().Set("limit", "100")
+	_ = cmd.Flags().Set("offset", "200")
+	if err := runIssueList(cmd, nil); err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+	if got := query.Get("limit"); got != "100" {
+		t.Fatalf("limit query = %q, want 100", got)
+	}
+	if got := query.Get("offset"); got != "200" {
+		t.Fatalf("offset query = %q, want 200", got)
+	}
+}
+
+// TestRunIssueListJSONEnvelopeReportsAppliedPage guards the --output json
+// paging contract: limit is the page size actually applied, has_more is false
+// on an empty page, and nothing is written to stderr.
+func TestRunIssueListJSONEnvelopeReportsAppliedPage(t *testing.T) {
+	cases := []struct {
+		name        string
+		limit       string
+		offset      string
+		rows        int
+		total       any
+		wantTotal   float64
+		wantLimit   float64
+		wantHasMore bool
+	}{
+		{name: "full page", limit: "100", offset: "0", rows: 100, total: 145, wantTotal: 145, wantLimit: 100, wantHasMore: true},
+		{name: "last partial page", limit: "100", offset: "100", rows: 45, total: 145, wantTotal: 145, wantLimit: 100, wantHasMore: false},
+		{name: "server applied a smaller page than requested", limit: "100", offset: "0", rows: 20, total: 145, wantTotal: 145, wantLimit: 20, wantHasMore: true},
+		{name: "empty page past the end", limit: "100", offset: "500", rows: 0, total: 145, wantTotal: 145, wantLimit: 100, wantHasMore: false},
+		{name: "empty page while total still claims more", limit: "100", offset: "100", rows: 0, total: 145, wantTotal: 145, wantLimit: 100, wantHasMore: false},
+		{name: "total missing from the response", limit: "100", offset: "0", rows: 3, total: nil, wantTotal: 0, wantLimit: 100, wantHasMore: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _, _ := newFakeIssueListServer(t, fakeIssueRows(tc.rows), tc.total)
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			stderr := captureStderr(t)
+			defer stderr.restore()
+
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set("output", "json")
+			_ = cmd.Flags().Set("limit", tc.limit)
+			_ = cmd.Flags().Set("offset", tc.offset)
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+
+			var env map[string]any
+			if err := json.Unmarshal([]byte(out), &env); err != nil {
+				t.Fatalf("decode envelope: %v\n%s", err, out)
+			}
+			if issues, _ := env["issues"].([]any); len(issues) != tc.rows {
+				t.Errorf("issues = %d rows, want %d", len(issues), tc.rows)
+			}
+			if got := env["limit"]; got != tc.wantLimit {
+				t.Errorf("limit = %v, want %v", got, tc.wantLimit)
+			}
+			wantOffset, _ := strconv.ParseFloat(tc.offset, 64)
+			if got := env["offset"]; got != wantOffset {
+				t.Errorf("offset = %v, want %v", got, wantOffset)
+			}
+			if got := env["total"]; got != tc.wantTotal {
+				t.Errorf("total = %v, want %v", got, tc.wantTotal)
+			}
+			if got := env["has_more"]; got != tc.wantHasMore {
+				t.Errorf("has_more = %v, want %v", got, tc.wantHasMore)
+			}
+			if got := stderr.read(); got != "" {
+				t.Errorf("stderr = %q, want nothing in JSON mode", got)
+			}
+		})
+	}
+}
+
+// TestRunIssueListTableFooterReportsPage guards the table-mode page footer:
+// on stderr, stdout stays a plain table, silent when everything fit.
+func TestRunIssueListTableFooterReportsPage(t *testing.T) {
+	cases := []struct {
+		name       string
+		limit      string
+		offset     string
+		rows       int
+		total      any
+		wantStderr string
+	}{
+		{name: "first page of many", limit: "3", offset: "0", rows: 3, total: 145, wantStderr: "Showing 1-3 of 145 issues. Next page: --offset 3"},
+		{name: "middle page", limit: "3", offset: "50", rows: 3, total: 145, wantStderr: "Showing 51-53 of 145 issues. Next page: --offset 53"},
+		{name: "server applied a smaller page than requested", limit: "50", offset: "0", rows: 20, total: 145, wantStderr: "Showing 1-20 of 145 issues. Next page: --offset 20"},
+		{name: "last page", limit: "5", offset: "140", rows: 5, total: 145, wantStderr: "Showing 141-145 of 145 issues."},
+		{name: "everything fits", limit: "50", offset: "0", rows: 3, total: 3, wantStderr: ""},
+		{name: "no results", limit: "50", offset: "0", rows: 0, total: 0, wantStderr: ""},
+		{name: "empty page past the end", limit: "50", offset: "500", rows: 0, total: 145, wantStderr: "No issues at --offset 500 (145 total)."},
+		{name: "empty page exactly at the end", limit: "50", offset: "3", rows: 0, total: 3, wantStderr: "No issues at --offset 3 (3 total)."},
+		{name: "total missing from the response", limit: "3", offset: "50", rows: 3, total: nil, wantStderr: ""},
+		{name: "total missing on an empty page", limit: "50", offset: "50", rows: 0, total: nil, wantStderr: ""},
+		{name: "total not a number on an empty page", limit: "50", offset: "50", rows: 0, total: "145", wantStderr: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _, _ := newFakeIssueListServer(t, fakeIssueRows(tc.rows), tc.total)
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			stderr := captureStderr(t)
+			defer stderr.restore()
+
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set("limit", tc.limit)
+			_ = cmd.Flags().Set("offset", tc.offset)
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+
+			if !strings.HasPrefix(out, "KEY") {
+				t.Errorf("stdout should start with the table header, got %q", out)
+			}
+			if strings.Contains(out, "Showing") || strings.Contains(out, "No issues at") {
+				t.Errorf("stdout must stay a plain table, got %q", out)
+			}
+			if got := strings.TrimSpace(stderr.read()); got != tc.wantStderr {
+				t.Errorf("stderr = %q, want %q", got, tc.wantStderr)
+			}
+		})
+	}
+}
