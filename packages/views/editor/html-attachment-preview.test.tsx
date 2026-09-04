@@ -78,6 +78,26 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("HtmlAttachmentPreview — visual shell (does not use file-card chrome)", () => {
+  it("keeps the toolbar visible on devices that cannot hover", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>ok</p>",
+      originalContentType: "text/html",
+    });
+    renderWithQuery(
+      <HtmlAttachmentPreview
+        attachmentId="att-1"
+        filename="report.html"
+        onPreview={() => {}}
+        onDownload={() => {}}
+      />,
+    );
+
+    const toolbar = (await screen.findByTitle("Preview")).parentElement;
+    expect(toolbar?.className).toContain(
+      "[@media(hover:none)]:opacity-100",
+    );
+  });
+
   it("does not render the filename row that AttachmentCard chrome would render", async () => {
     getAttachmentTextContentMock.mockResolvedValueOnce({
       text: "<p>ok</p>",

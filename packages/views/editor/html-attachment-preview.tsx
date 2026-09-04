@@ -101,7 +101,7 @@ export function HtmlAttachmentPreview({
           // only user-reachable escape hatches when inline render fails.
           isError
             ? "opacity-100"
-            : "opacity-0 group-hover/html-preview:opacity-100",
+            : "opacity-0 group-hover/html-preview:opacity-100 [@media(hover:none)]:opacity-100",
         )}
       >
         <button
