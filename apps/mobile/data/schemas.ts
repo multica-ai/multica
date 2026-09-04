@@ -375,12 +375,10 @@ const SearchIssueResultSchema = IssueSchema.safeExtend({
 
 export const SearchIssuesResponseSchema = z.object({
   issues: z.array(SearchIssueResultSchema).default([]),
-  total: z.number().default(0),
 }).loose();
 
 export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   issues: [],
-  total: 0,
 };
 
 const SearchProjectResultSchema = ProjectSchema.safeExtend({

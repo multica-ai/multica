@@ -516,7 +516,6 @@ export interface SearchIssueResult extends Issue {
 
 export interface SearchIssuesResponse {
   issues: SearchIssueResult[];
-  total: number;
 }
 
 export interface SearchProjectResult extends Project {
