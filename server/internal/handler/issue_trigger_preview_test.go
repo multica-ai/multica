@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/daemon"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // seededReadyAgentID returns a workspace agent that has a runtime bound (the
@@ -217,6 +220,52 @@ func TestUpdateIssueSuppressRunSkipsEnqueue(t *testing.T) {
 	}
 	if got := taskCountFor(t, control.ID, agentID); got == 0 {
 		t.Fatalf("control (no suppress_run) should enqueue, got 0 tasks")
+	}
+}
+
+// TestLegacyV0438HandoffPayloadReachesTaskPrompt is the cross-version guard
+// for installed clients: the v0.4.38 update payload must survive the current
+// API, task queue, claim wire shape, and daemon prompt rendering.
+func TestLegacyV0438HandoffPayloadReachesTaskPrompt(t *testing.T) {
+	agentID := seededReadyAgentID(t)
+	note := "Only touch the login flow."
+	issue := createIssueForTest(t, map[string]any{
+		"title":  "legacy handoff compatibility",
+		"status": "todo",
+	})
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+		"handoff_note":  note,
+	}), "id", issue.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue with v0.4.38 handoff payload: %d %s", w.Code, w.Body.String())
+	}
+
+	tasks, err := testHandler.Queries.ListTasksByIssue(context.Background(), util.MustParseUUID(issue.ID))
+	if err != nil {
+		t.Fatalf("ListTasksByIssue: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("legacy handoff update queued %d tasks, want 1", len(tasks))
+	}
+
+	claimJSON, err := json.Marshal(taskToResponse(tasks[0], testWorkspaceID))
+	if err != nil {
+		t.Fatalf("marshal claim response: %v", err)
+	}
+	var claimed daemon.Task
+	if err := json.Unmarshal(claimJSON, &claimed); err != nil {
+		t.Fatalf("decode daemon task: %v", err)
+	}
+	if claimed.HandoffNote != note {
+		t.Fatalf("claimed handoff note = %q, want %q", claimed.HandoffNote, note)
+	}
+	if prompt := daemon.BuildPrompt(claimed, "codex"); !strings.Contains(prompt, note) {
+		t.Fatalf("daemon prompt dropped legacy handoff note:\n%s", prompt)
 	}
 }
 

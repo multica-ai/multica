@@ -10,4 +10,8 @@ export const defaultStorage: StorageAdapter = {
   removeItem: (k) => {
     if (typeof window !== "undefined") localStorage.removeItem(k);
   },
+  keys: () => {
+    if (typeof window === "undefined") return [];
+    return Object.keys(localStorage);
+  },
 };

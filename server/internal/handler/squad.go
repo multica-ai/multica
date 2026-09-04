@@ -585,6 +585,29 @@ type SquadMemberStatusListResponse struct {
 	Members []SquadMemberStatusResponse `json:"members"`
 }
 
+// deriveRuntimeAvailability owns the shared three-state runtime reachability
+// policy. Agent projections use these values directly; squad presence maps an
+// online runtime to its user-facing "idle" bucket after workload precedence.
+func deriveRuntimeAvailability(
+	runtimeStatus pgtype.Text,
+	lastSeen pgtype.Timestamptz,
+	now time.Time,
+) string {
+	if !runtimeStatus.Valid {
+		return "offline"
+	}
+	if runtimeStatus.String == "online" {
+		return "online"
+	}
+	if !lastSeen.Valid {
+		return "offline"
+	}
+	if now.Sub(lastSeen.Time) < 5*time.Minute {
+		return "unstable"
+	}
+	return "offline"
+}
+
 // deriveSquadMemberStatus collapses runtime + task signals into the five
 // status buckets used by the squad UI. Mirrors the workload+availability
 // split in packages/core/agents/derive-presence.ts: working wins over
@@ -616,19 +639,11 @@ func deriveSquadMemberStatus(
 	if hasWorkingTask {
 		return "working"
 	}
-	if !runtimeStatus.Valid {
-		return "offline"
-	}
-	if runtimeStatus.String == "online" {
+	availability := deriveRuntimeAvailability(runtimeStatus, lastSeen, now)
+	if availability == "online" {
 		return "idle"
 	}
-	if !lastSeen.Valid {
-		return "offline"
-	}
-	if now.Sub(lastSeen.Time) < 5*time.Minute {
-		return "unstable"
-	}
-	return "offline"
+	return availability
 }
 
 // ListSquadMemberStatus returns one entry per squad member with derived
@@ -1171,7 +1186,7 @@ func commentMentionsAnyone(content string) bool {
 // paths go through computeCommentAgentTriggers so preview and create share the
 // same trigger set.
 // It returns true only when a leader task was actually enqueued.
-func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) bool {
+func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID, handoffNote string) bool {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
@@ -1210,12 +1225,13 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		return false
 	}
 
-	// triggerCommentID is always empty on the assign/promote path.
+	// triggerCommentID is always empty on the assign/promote path; legacy
+	// handoff text rides its dedicated task column instead.
 	_ = triggerCommentID
 	// The member who performed the assign/promote is the accountable human for the
 	// leader run (MUL-4302 §4) — the same principal the gate above judged. An agent
 	// author is not a human, so only a member actor is threaded.
-	if _, err := h.TaskService.EnqueueTaskForSquadLeaderByActor(ctx, issue, squad.LeaderID, squad.ID, memberActorUserID(authorType, authorID)); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, handoffNote, memberActorUserID(authorType, authorID)); err != nil {
 		slog.Warn("enqueue squad leader task failed",
 			"issue_id", uuidToString(issue.ID),
 			"squad_id", uuidToString(squad.ID),

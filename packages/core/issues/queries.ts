@@ -442,9 +442,9 @@ export function issueDetailOptions(wsId: string, id: string) {
  *
  * It deliberately does NOT use `/api/issues/search`: that endpoint runs the
  * workspace-wide full-text query (title/description/comment `LIKE`, ranking,
- * snippet subquery, `COUNT(*) OVER()`) which is orders of magnitude more
- * expensive than a point read, and autolink resolution was the dominant
- * caller of it (MUL-6268).
+ * and snippet subqueries) which is orders of magnitude more expensive than a
+ * point read, and autolink resolution was the dominant caller of it
+ * (MUL-6268).
  *
  * Server state → TanStack Query; the key includes `wsId` and the identifier,
  * so identical identifiers across the app share one request. Caller gates

@@ -409,7 +409,7 @@ func TestWorktreeModeDeliversBranchWithoutSidecars(t *testing.T) {
 	if env.WorkDir != env.LocalWorktree.Path {
 		t.Errorf("WorkDir = %q, want the worktree root %q", env.WorkDir, env.LocalWorktree.Path)
 	}
-	if _, err := os.Stat(filepath.Join(env.WorkDir, ".agent_context")); err != nil {
+	if _, err := os.Stat(filepath.Join(env.WorkDir, TaskContextMarkerRelPath)); err != nil {
 		t.Fatalf("precondition: Prepare should have written sidecars into the worktree: %v", err)
 	}
 

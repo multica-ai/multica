@@ -128,7 +128,7 @@
   },
   "cloud_waitlist": {
     "intro_main": "Cloud runtimes aren't live yet. Leave your email and we'll reach out when they are.",
-    "intro_warning": "Heads-up: agents can't execute tasks without a runtime — if you hit Skip now, nothing will run until you come back and install one.",
+    "intro_warning": "Heads-up: agents can't start runs without a runtime — if you hit Skip now, nothing will run until you come back and install one.",
     "email_label": "Email",
     "email_placeholder": "you@work.com",
     "reason_label": "Why cloud?",
@@ -216,7 +216,7 @@
     "empty_lede_prefix": "An agent runtime is an AI coding tool we connect to — like ",
     "empty_lede_suffix": ". Install one and refresh, or pick a path below.",
     "empty_skip_title": "Skip for now",
-    "empty_skip_subtitle": "Enter your workspace now. Your agent can't run tasks until an agent runtime is connected on this computer — but you can still browse, plan, and invite teammates.",
+    "empty_skip_subtitle": "Enter your workspace now. Your agent can't start runs until an agent runtime is connected on this computer — but you can still browse, plan, and invite teammates.",
     "empty_skip_action": "Skip",
     "empty_waitlist_title": "Use a cloud computer",
     "empty_waitlist_subtitle": "We'll run a computer for you in the cloud. Not live yet.",

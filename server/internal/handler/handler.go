@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -179,8 +180,17 @@ type RuntimeGoneNotifier interface {
 	NotifyRuntimeGone(runtimeID string)
 }
 
+// RuntimeRecoveryNotifier republishes the daemon:register lifecycle refresh
+// after a heartbeat actually flipped an offline runtime row back online
+// (sweeper-race fallback, batch-receipt reconciliation). Recovery paths already
+// know the workspace, so publishing never needs a follow-up database lookup.
+type RuntimeRecoveryNotifier interface {
+	NotifyRuntimeRecovered(ctx context.Context, workspaceID string)
+}
+
 type Handler struct {
 	Queries                *db.Queries
+	ReadSelector           *dbreader.Selector
 	DB                     dbExecutor
 	TxStarter              txStarter
 	Hub                    *realtime.Hub
@@ -455,6 +465,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	taskSvc.QuickActions = llmClient
 	h := &Handler{
 		Queries:                      queries,
+		ReadSelector:                 dbreader.NewPrimaryOnly(queries),
 		DB:                           executor,
 		TxStarter:                    txStarter,
 		Hub:                          hub,
@@ -490,6 +501,11 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		cfg: cfg,
 	}
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
+	// The default passthrough scheduler reports sweeper-race recoveries so the
+	// daemon:register refresh fires even without the production batched wiring.
+	if passthrough, ok := h.HeartbeatScheduler.(*PassthroughHeartbeatScheduler); ok {
+		passthrough.RecoveryNotifier = h
+	}
 
 	// GitHub API snapshot pipeline for PR cards (MUL-5265). Built
 	// unconditionally but inert (every trigger no-ops) when the App private key
@@ -739,6 +755,16 @@ func (h *Handler) NotifyRuntimeGone(runtimeID string) {
 		return
 	}
 	h.DaemonRuntimeGone.NotifyRuntimeGone(runtimeID)
+}
+
+// NotifyRuntimeRecovered republishes the workspace-scoped daemon:register
+// lifecycle event after a heartbeat restored a runtime from offline. Runtime
+// details are intentionally omitted from the payload.
+func (h *Handler) NotifyRuntimeRecovered(_ context.Context, workspaceID string) {
+	if h == nil || workspaceID == "" {
+		return
+	}
+	h.PublishRuntimeRefresh(workspaceID, "system", "", "heartbeat_recovery")
 }
 
 // publishTask is publish() plus a TaskID hint so the realtime layer can route
