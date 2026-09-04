@@ -525,7 +525,6 @@ export interface SearchProjectResult extends Project {
 
 export interface SearchProjectsResponse {
   projects: SearchProjectResult[];
-  total: number;
 }
 
 export interface UpdateMeRequest {

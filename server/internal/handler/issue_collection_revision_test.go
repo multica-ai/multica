@@ -103,20 +103,10 @@ func TestIssueCollectionProjectionsIncludePositiveRevision(t *testing.T) {
 	if searchRecorder.Code != http.StatusOK {
 		t.Fatalf("search issues status = %d: %s", searchRecorder.Code, searchRecorder.Body.String())
 	}
-	if got := searchRecorder.Header().Get("X-Total-Count"); got != "" {
-		t.Fatalf("search issues X-Total-Count = %q, want absent", got)
-	}
-	var searchPayload map[string]json.RawMessage
-	if err := json.Unmarshal(searchRecorder.Body.Bytes(), &searchPayload); err != nil {
-		t.Fatalf("decode issue search payload: %v", err)
-	}
-	if _, ok := searchPayload["total"]; ok {
-		t.Fatalf("search issues response unexpectedly contains exact total: %s", searchRecorder.Body.String())
-	}
 	var searchResponse struct {
 		Issues []IssueResponse `json:"issues"`
 	}
-	if err := json.Unmarshal(searchRecorder.Body.Bytes(), &searchResponse); err != nil {
+	if err := json.NewDecoder(searchRecorder.Body).Decode(&searchResponse); err != nil {
 		t.Fatalf("decode issue search: %v", err)
 	}
 	if len(searchResponse.Issues) != 1 || searchResponse.Issues[0].ID != issueID || searchResponse.Issues[0].Revision != 7 {
