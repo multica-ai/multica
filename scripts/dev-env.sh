@@ -481,6 +481,15 @@ process_group_id() {
   ps -p "$1" -o pgid= 2>/dev/null | tr -d ' ' || true
 }
 
+is_descendant() {
+  local cur=$1 target=$2
+  while [ -n "$cur" ] && [ "$cur" -gt 1 ] 2>/dev/null; do
+    [ "$cur" = "$target" ] && return 0
+    cur="$(ps -p "$cur" -o ppid= 2>/dev/null | tr -d ' ' || true)"
+  done
+  return 1
+}
+
 listener_belongs_to_component() {
   local component=$1 port=$2 launcher listener recorded
   launcher="$(component_pid "$component" || true)"
@@ -488,7 +497,7 @@ listener_belongs_to_component() {
   [ -n "$launcher" ] && [ -n "$listener" ] || return 1
   recorded="$(cat "$(listener_pid_file "$component")" 2>/dev/null || true)"
   [ -n "$recorded" ] && [ "$listener" = "$recorded" ] && return 0
-  [ "$(process_group_id "$listener")" = "$launcher" ]
+  [ "$(process_group_id "$listener")" = "$launcher" ] || is_descendant "$listener" "$launcher"
 }
 
 health_belongs_to_api() {
@@ -572,6 +581,7 @@ start_web() {
         stop_component web
         die "Web on :$FRONTEND_PORT is not owned by the process group this environment launched."
       fi
+      printf '%s\n' "$listener" > "$(listener_pid_file web)"
       ok "web serving http://localhost:$FRONTEND_PORT (pid ${listener:-?})"
       return 0
     fi
@@ -840,7 +850,8 @@ stop_component() {
     listener="$(port_listener_pid "$port")"
     if [ -n "$listener" ]; then
       if { [ -n "$recorded_listener" ] && [ "$listener" = "$recorded_listener" ]; } \
-        || { [ -n "$launcher" ] && [ "$(process_group_id "$listener")" = "$launcher" ]; }; then
+        || { [ -n "$launcher" ] && [ "$(process_group_id "$listener")" = "$launcher" ]; } \
+        || { [ -n "$launcher" ] && is_descendant "$listener" "$launcher"; }; then
         kill -TERM "$listener" 2>/dev/null || true
         sleep 1
         if kill -0 "$listener" 2>/dev/null; then

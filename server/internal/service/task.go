@@ -2932,6 +2932,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 
 	slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCancelled(ctx, task)
+	s.autoAdvanceIssueOnTaskCancel(ctx, task)
 	if !opts.QueuedOnly {
 		cancelledChatMessage = s.finalizeCancelledChatMessage(ctx, task, opts)
 	}
@@ -3548,6 +3549,7 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 
 	slog.Info("task claimed", "task_id", util.UUIDToString(claimed.ID), "agent_id", util.UUIDToString(agentID))
 	s.captureTaskDispatched(ctx, *claimed)
+	s.autoAdvanceIssueOnTaskStart(ctx, *claimed)
 
 	// Refresh agent status from active tasks. This avoids a stale unconditional
 	// working write racing after a just-cancelled claim.
@@ -4394,6 +4396,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// for assignment-triggered tasks it is NULL and the fallback is top-level.
 	// Chat tasks have no IssueID and are handled separately below.
 	if task.IssueID.Valid {
+		s.autoAdvanceIssueOnTaskComplete(ctx, task)
 		suppressNoActionComment, err := HasSquadLeaderNoActionEvaluationForTask(ctx, s.Queries, task)
 		if err != nil {
 			slog.Warn("checking squad leader no_action evaluation failed",
@@ -5036,8 +5039,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// daemon hiccup. Delegated failures keep this existing failed-issue comment
 	// in addition to the coordinator recovery signal, preserving visibility on
 	// both sides of a cross-issue handoff.
-	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
+	if task.IssueID.Valid && retried == nil {
+		s.autoAdvanceIssueOnTaskFail(ctx, task, failureReason)
+		if errMsg != "" {
+			s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
+		}
 	}
 
 	// Quick-create tasks: push a failure inbox notification to the
@@ -7135,6 +7141,120 @@ func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
 		return ""
 	}
 	return ws.IssuePrefix
+}
+
+// autoAdvanceIssueOnTaskStart automatically moves an issue from backlog or todo
+// to in_progress when its task begins execution.
+func (s *TaskService) autoAdvanceIssueOnTaskStart(ctx context.Context, task db.AgentTaskQueue) {
+	if !task.IssueID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return
+	}
+	effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	if effective == "todo" || effective == "backlog" {
+		updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:          task.IssueID,
+			Status:      "in_progress",
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err == nil {
+			s.broadcastIssueUpdated(ctx, updated, issue.Status)
+			slog.Info("auto-advanced issue status on task start",
+				"issue_id", util.UUIDToString(task.IssueID),
+				"prev_status", issue.Status,
+				"new_status", "in_progress",
+			)
+		}
+	}
+}
+
+// autoAdvanceIssueOnTaskComplete automatically moves an issue from in_progress or todo
+// to in_review when its task completes successfully.
+func (s *TaskService) autoAdvanceIssueOnTaskComplete(ctx context.Context, task db.AgentTaskQueue) {
+	if !task.IssueID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return
+	}
+	effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	if effective == "in_progress" || effective == "todo" {
+		updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:          task.IssueID,
+			Status:      "in_review",
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err == nil {
+			s.broadcastIssueUpdated(ctx, updated, issue.Status)
+			slog.Info("auto-advanced issue status on task complete",
+				"issue_id", util.UUIDToString(task.IssueID),
+				"prev_status", issue.Status,
+				"new_status", "in_review",
+			)
+		}
+	}
+}
+
+// autoAdvanceIssueOnTaskFail automatically marks an issue as blocked when its task fails terminally.
+func (s *TaskService) autoAdvanceIssueOnTaskFail(ctx context.Context, task db.AgentTaskQueue, failureReason string) {
+	if !task.IssueID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return
+	}
+	effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	if effective == "in_progress" || effective == "todo" {
+		updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:          task.IssueID,
+			Status:      "blocked",
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err == nil {
+			s.broadcastIssueUpdated(ctx, updated, issue.Status)
+			slog.Info("auto-advanced issue status on task failure",
+				"issue_id", util.UUIDToString(task.IssueID),
+				"prev_status", issue.Status,
+				"new_status", "blocked",
+				"reason", failureReason,
+			)
+		}
+	}
+}
+
+// autoAdvanceIssueOnTaskCancel reverts an in_progress issue back to todo when its task is cancelled.
+func (s *TaskService) autoAdvanceIssueOnTaskCancel(ctx context.Context, task db.AgentTaskQueue) {
+	if !task.IssueID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return
+	}
+	effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	if effective == "in_progress" {
+		hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
+		if err == nil && !hasActive {
+			updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ID:          task.IssueID,
+				Status:      "todo",
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err == nil {
+				s.broadcastIssueUpdated(ctx, updated, issue.Status)
+				slog.Info("auto-reset issue status on task cancellation",
+					"issue_id", util.UUIDToString(task.IssueID),
+					"prev_status", issue.Status,
+					"new_status", "todo",
+				)
+			}
+		}
+	}
 }
 
 // commentEventFields renders the `comment` object carried by comment:created
