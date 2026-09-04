@@ -72,20 +72,15 @@ describe("tearDownOnSessionExpiry", () => {
     expect(t.stopDaemon).not.toHaveBeenCalled();
   });
 
-  // The same person is usually about to sign straight back in, and AppContent
-  // re-validates tab groups against the workspace list of whoever does.
-  it("keeps the user's tabs", () => {
-    const t = makeTeardown();
-    tearDownOnSessionExpiry(t);
-
-    expect(t.resetTabs).not.toHaveBeenCalled();
-  });
-
-  it("still reports the session end and drops stale window-local state", () => {
+  // Tab paths carry workspace slugs and issue ids. Leaving them for the
+  // workspace validator to prune catches nothing when the next user shares a
+  // workspace with the last one.
+  it("clears window state the next user must not inherit", () => {
     const t = makeTeardown();
     tearDownOnSessionExpiry(t);
 
     expect(t.reportAuthSession).toHaveBeenCalledWith(null);
+    expect(t.resetTabs).toHaveBeenCalledOnce();
     expect(t.closeOverlay).toHaveBeenCalledOnce();
     expect(t.resetWelcome).toHaveBeenCalledOnce();
   });

@@ -80,6 +80,29 @@ describe("authStore", () => {
     expect(store.getState().expired).toBe(true);
   });
 
+  // Desktop's deep link writes the token, then verifies it. A rejected token
+  // never leaves "unauthenticated", so an idempotence guard placed before the
+  // credential teardown would return with the invalid token still in storage,
+  // to be replayed at the next launch. The old 401 handler always removed it.
+  it("drops a rejected token even when there was no session to end", async () => {
+    const storage = makeStorage();
+    const api = {
+      setToken: vi.fn(),
+      getMe: vi.fn().mockRejectedValue(new Error("unauthorized")),
+    } as unknown as ApiClient;
+    const store = createAuthStore({ api, storage });
+    store.setState({ user: null, status: "unauthenticated", isLoading: false });
+
+    await expect(
+      store.getState().loginWithToken("stale-deep-link-token"),
+    ).rejects.toThrow();
+    // Stands in for the api client's 401 hook, which fires inside getMe.
+    store.getState().sessionExpired();
+
+    expect(storage.snapshot().multica_token).toBeUndefined();
+    expect(api.setToken).toHaveBeenLastCalledWith(null);
+  });
+
   it("does not claim a session expired for a client that never had one", () => {
     const storage = makeStorage();
     const api = makeApi();

@@ -138,7 +138,6 @@ export function createAuthStore(options: AuthStoreOptions) {
      * about it separately.
      */
     sessionExpired: () => {
-      if (get().status === "unauthenticated") return;
       // "Expired" is a claim about the user's own history, so only make it
       // when this client really did present a credential the server then
       // rejected: a live session, or a stored token left by an earlier one.
@@ -148,8 +147,21 @@ export function createAuthStore(options: AuthStoreOptions) {
       const hadCredential =
         get().status === "authenticated" ||
         storage.getItem("multica_token") !== null;
+
+      // Dropping the rejected credential happens before the idempotence
+      // guard, and unconditionally. A login attempt that 401s never leaves
+      // `unauthenticated` — Desktop's deep link writes the token, calls
+      // getMe, and gets rejected — so a guard placed first would return with
+      // that invalid token still sitting in storage, to be replayed at the
+      // next launch. Nothing below this point is safe to repeat; this is.
       storage.removeItem("multica_token");
       api.setToken(null);
+
+      // Past here we are ending a session, which happens once no matter how
+      // many in-flight requests learn the credential is dead — and does not
+      // happen at all when there was no session to end.
+      if (get().status === "unauthenticated") return;
+
       // Cookie mode leaves the workspace singleton alone: there the URL owns
       // workspace identity and the login route overwrites it on the next
       // entry. Mirrors AuthInitializer's boot-time rejection.

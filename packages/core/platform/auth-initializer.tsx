@@ -13,6 +13,7 @@ import {
 import { configStore } from "../config";
 import { workspaceListOptions } from "../workspace/queries";
 import { createLogger } from "../logger";
+import { clearClientSessionData } from "./session-cleanup";
 import { defaultStorage } from "./storage";
 import type { ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
@@ -338,23 +339,28 @@ export function AuthInitializer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retryGeneration]);
 
-  // An involuntary session end (401 → sessionExpired) leaves a fully warmed
-  // query cache behind, and every query in it has `staleTime: Infinity` — so
-  // whoever signs in next on this client, the same user or a colleague on a
-  // shared machine, would render the dead session's data and never refetch it
-  // away. Explicit logout already clears the cache (views/auth/use-logout);
-  // this covers the path the user did not choose. The effect runs after the
-  // commit that unmounted the shell on `user: null`, so nothing is left
-  // observing the queries it drops.
+  // An involuntary session end (401 → sessionExpired) leaves the whole client
+  // side of that session behind: a warmed query cache whose every entry has
+  // `staleTime: Infinity`, per-workspace drafts and chat selection, the
+  // desktop tab layout. The screen it lands on offers a login form, and the
+  // next person to use it is not guaranteed to be the one who was just signed
+  // in — on a shared machine a colleague would inherit all of it, and sharing
+  // a workspace with them means the tab validator finds nothing to drop.
+  //
+  // So an expiry erases exactly what an explicit logout erases. Only the auth
+  // teardown itself differs (see the auth store's `sessionExpired`), plus
+  // anything owned by a process that outlives the session — Desktop's daemon.
+  // The effect runs after the commit that unmounted the shell on `user: null`,
+  // so nothing is left observing the queries it drops.
   const authStatus = useAuthStore((state) => state.status);
   const previousAuthStatus = useRef(authStatus);
   useEffect(() => {
     const previous = previousAuthStatus.current;
     previousAuthStatus.current = authStatus;
     if (previous === "authenticated" && authStatus === "unauthenticated") {
-      qc.clear();
+      clearClientSessionData(qc, storage);
     }
-  }, [authStatus, qc]);
+  }, [authStatus, qc, storage]);
 
   return <>{children}</>;
 }

@@ -13,6 +13,10 @@ import {
 } from "../auth";
 import type { StorageAdapter, User, Workspace } from "../types";
 import { workspaceKeys } from "../workspace/queries";
+import {
+  registerDraftCleanup,
+  __clearDraftCleanupRegistryForTest,
+} from "../drafts/cleanup-registry";
 import { AuthInitializer } from "./auth-initializer";
 
 const logger = vi.hoisted(() => ({
@@ -108,6 +112,7 @@ function renderInitializer({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  __clearDraftCleanupRegistryForTest();
 });
 
 afterEach(() => {
@@ -270,12 +275,35 @@ describe("AuthInitializer recovery", () => {
     expect(getConfig).toHaveBeenCalledTimes(3);
   });
 
-  it("drops the query cache when a live session is rejected", async () => {
-    const api = makeApi();
-    const { queryClient } = renderInitializer({ api });
+  // A → 401 → B, where B shares a workspace with A so the post-login stale-tab
+  // validator prunes nothing. B must find none of A's client state. What
+  // exactly gets cleared is pinned in platform/session-cleanup.test.ts; this
+  // asserts the 401 is wired to it at all.
+  it("erases the previous user's client state when a live session is rejected", async () => {
+    const shared = "acme";
+    const storage = makeStorage({
+      multica_token: "token-1",
+      "multica_comment_drafts:acme": '{"issue-1":"A private draft"}',
+      multica_tabs: '[{"path":"/acme/issues/secret"}]',
+    });
+    const resetInMemory = vi.fn();
+    registerDraftCleanup({
+      storageKey: "multica_comment_drafts",
+      workspaceScoped: true,
+      resetInMemory,
+    });
+    const api = makeApi({
+      listWorkspaces: vi
+        .fn()
+        .mockResolvedValue([{ id: "ws-1", slug: shared }] as Workspace[]),
+    });
+    const { queryClient } = renderInitializer({ api, storage });
 
     await waitFor(() => {
       expect(useAuthStore.getState().status).toBe("authenticated");
+    });
+    await waitFor(() => {
+      expect(queryClient.getQueryData(workspaceKeys.list())).toHaveLength(1);
     });
     queryClient.setQueryData(["issues", "ws-1"], [{ id: "i-1" }]);
 
@@ -286,6 +314,8 @@ describe("AuthInitializer recovery", () => {
     await waitFor(() => {
       expect(queryClient.getQueryData(["issues", "ws-1"])).toBeUndefined();
     });
+    expect(storage.snapshot()).toEqual({});
+    expect(resetInMemory).toHaveBeenCalled();
     expect(useAuthStore.getState().expired).toBe(true);
   });
 
