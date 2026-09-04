@@ -52,3 +52,28 @@ export function extractCopyText(
   if (pieces.length === 0) return message.content ?? "";
   return pieces.join("\n\n");
 }
+
+/**
+ * Whether the timeline's trailing text (`final`) is the same answer the
+ * persisted row carries in `message.content`, compared after normalization.
+ *
+ * The two sources describe one turn, but they are produced by different write
+ * paths, so incidental formatting differences (trailing newlines, CRLF vs LF,
+ * blank-line separators between segments, whitespace runs) must not read as a
+ * divergence. Any real text difference does: a truncated tail (final is a
+ * strict prefix of content — a daemon tail-flush lost the last chunks) or a
+ * stale surviving frame (the final answer never persisted; a mid-run
+ * narration text sits after the last non-text item instead). This is the
+ * Fallback trigger: when the two disagree and content is non-empty, the
+ * render path uses content as the authoritative answer.
+ */
+export function timelineFinalMatchesContent(
+  finalItems: ChatTimelineItem[],
+  content: string | null | undefined,
+): boolean {
+  const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
+  return (
+    normalize(finalItems.map((i) => i.content ?? "").join("")) ===
+    normalize(content ?? "")
+  );
+}
