@@ -221,6 +221,28 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 	if err != nil {
 		return Installation{}, err
 	}
+	// A bot SWAP on an existing installation: the row and its id are reused —
+	// UpsertChannelInstallation conflicts on (workspace_id, agent_id,
+	// channel_type) and only rewrites config — so every dependent row keyed on
+	// installation_id would otherwise survive into a bot it does not belong to.
+	//
+	// They are not merely stale. A WeCom aibot userid is anonymized per (bot,
+	// user), which is the premise the whole binding flow rests on (binding.go),
+	// so a carried-over channel_user_binding holds an id from a namespace the
+	// new bot does not share. Outbound.tryDeliverInbox looks that binding up by
+	// (workspace, member, channel_type) — not by bot — resolves the sender by
+	// its installation_id, which is now the LIVE NEW bot, and addresses the OLD
+	// bot's userid over it. A p2p chat binding carries the same userid as its
+	// channel_chat_id, and a queued task delivery carries it again.
+	//
+	// Runs in this transaction, before the upsert, so a swap that fails later
+	// leaves the old bot's rows intact rather than half-cleared. (#6547)
+	if carried.ID.Valid && carried.BotID != "" && carried.BotID != p.BotID {
+		if err := qtx.Queries.ClearChannelInstallationBotScopedRows(ctx, carried.ID); err != nil {
+			return Installation{}, fmt.Errorf("wecom: clear previous bot's rows: %w", err)
+		}
+	}
+
 	// The chat name is optional in the dialog, so an admin rotating a leaked
 	// secret leaves it blank — and blanking it would put group slash commands
 	// back to the whitespace guess that this field exists to replace. Keep what

@@ -358,6 +358,66 @@ func (q *Queries) ClearChannelChatSessionPendingFreshForRevision(ctx context.Con
 	return err
 }
 
+const clearChannelInstallationBotScopedRows = `-- name: ClearChannelInstallationBotScopedRows :exec
+WITH cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding AS binding
+    WHERE binding.installation_id = $1
+    RETURNING binding.chat_session_id
+),
+cleared_outbound_cards AS (
+    DELETE FROM channel_outbound_card_message AS card
+    WHERE card.chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+),
+cleared_task_deliveries AS (
+    DELETE FROM channel_task_delivery AS delivery
+    WHERE delivery.installation_id = $1
+),
+cleared_outbound_messages AS (
+    DELETE FROM channel_outbound_message AS outbound
+    WHERE outbound.installation_id = $1
+),
+cleared_binding_tokens AS (
+    DELETE FROM channel_binding_token AS token
+    WHERE token.installation_id = $1
+),
+cleared_inbound_dedup AS (
+    DELETE FROM channel_inbound_message_dedup AS dedup
+    WHERE dedup.installation_id = $1
+)
+DELETE FROM channel_user_binding AS user_binding
+WHERE user_binding.installation_id = $1
+`
+
+// Bot-swap cleanup. Pointing an existing installation at a DIFFERENT bot keeps
+// the installation row and its id — UpsertChannelInstallation conflicts on
+// (workspace_id, agent_id, channel_type) and only rewrites config — so every
+// dependent row keyed on installation_id survives into a bot it does not belong
+// to. This clears the ones that are scoped to the OLD bot (#6547).
+//
+// Why they are invalid rather than merely stale: a WeCom aibot userid is
+// anonymized per (bot, user), so a carried-over channel_user_binding addresses
+// the new bot with an id from a namespace it does not share — Outbound's inbox
+// push resolves the sender by installation_id (reused, hence the LIVE new bot)
+// and then sends to the OLD bot's userid. The same reasoning covers a p2p chat
+// binding, whose channel_chat_id IS that userid, and every queued outbound row
+// carrying one.
+//
+// The installation itself, and the audit trail beneath it, deliberately stay:
+// the row is the same connection under new credentials, and a channel_inbound_
+// audit row still records something an operator can act on. Reclaim DETACHes
+// audit only because the installation is going away, which here it is not.
+//
+// chat_session is likewise NOT touched. Deleting the binding detaches the WeCom
+// route from the Chat, the same shape a disconnect leaves behind; the Chat and
+// its history are the user's work product and outlive whichever bot carried
+// them. channel_outbound_card_message has no installation_id and no FK, so it
+// is reached through the just-removed bindings — the only link back — and goes
+// because the platform message ids on it belong to the old bot.
+func (q *Queries) ClearChannelInstallationBotScopedRows(ctx context.Context, installationID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearChannelInstallationBotScopedRows, installationID)
+	return err
+}
+
 const consumeChannelBindingToken = `-- name: ConsumeChannelBindingToken :one
 UPDATE channel_binding_token
 SET consumed_at = now()
