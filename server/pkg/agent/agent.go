@@ -59,6 +59,12 @@ type ExecOptions struct {
 	// protocol transport. It is currently consumed by Codex app-server;
 	// zero uses the provider default rather than disabling the bound.
 	HandshakeTimeout time.Duration
+	// TurnInterruptTimeout bounds how long the Codex backend waits for the
+	// app-server to acknowledge turn/interrupt and emit turn/completed after a
+	// task is cancelled. Zero uses the provider default. A positive override is
+	// useful on slower hosts without coupling cancellation cleanup to the much
+	// longer execution or handshake budgets.
+	TurnInterruptTimeout time.Duration
 	// ThreadHandshakeTimeout optionally gives Codex's heavier thread/start and
 	// thread/resume RPCs a wider budget than initialize and turn/start. Zero
 	// preserves the legacy behavior for callers that explicitly set
