@@ -317,7 +317,7 @@ func stripBlockCode(content string) string {
 				}
 				j++
 			}
-			if indent >= 4 {
+			if indent >= 4 && !isNestedListItem(content, i, indent) {
 				for i < len(content) && content[i] != '\n' {
 					b.WriteByte(' ')
 					i++
@@ -362,6 +362,87 @@ func stripBlockCode(content string) string {
 		atLineStart = false
 	}
 	return b.String()
+}
+
+// isNestedListItem distinguishes a nested list marker from a standalone
+// indented code block. CommonMark allows a child list to be indented beyond
+// four columns relative to the document start, so treating every such line as
+// code would hide real mentions in nested lists. A lower-indented list marker
+// in the same contiguous list block is the required parent context; without
+// it, the fail-closed indented-code behavior remains unchanged.
+func isNestedListItem(content string, lineStart, indent int) bool {
+	j := lineStart
+	for j < len(content) && (content[j] == ' ' || content[j] == '\t') {
+		j++
+	}
+	if !isListMarkerAt(content, j) {
+		return false
+	}
+
+	for cursor := lineStart; cursor > 0; {
+		cursor--
+		for cursor >= 0 && content[cursor] == '\n' {
+			cursor--
+		}
+		if cursor < 0 {
+			return false
+		}
+		end := cursor + 1
+		start := strings.LastIndexByte(content[:end], '\n') + 1
+		prevIndent, prevIsList := listLineInfo(content, start, end)
+		if strings.TrimSpace(content[start:end]) == "" {
+			cursor = start
+			continue
+		}
+		if prevIsList {
+			// A marker indented by at most three columns is a real
+			// document/list item, never an indented code block. Deeper
+			// markers may themselves be inside an indented code block, so
+			// keep looking for that unambiguous list ancestor before
+			// allowing the current line.
+			if prevIndent <= 3 {
+				return prevIndent < indent
+			}
+			cursor = start
+			continue
+		}
+		if prevIndent == 0 {
+			return false
+		}
+		cursor = start
+	}
+	return false
+}
+
+func listLineInfo(content string, start, end int) (int, bool) {
+	j := start
+	indent := 0
+	for j < end && (content[j] == ' ' || content[j] == '\t') {
+		if content[j] == '\t' {
+			indent += 4
+		} else {
+			indent++
+		}
+		j++
+	}
+	return indent, isListMarkerAt(content[:end], j)
+}
+
+func isListMarkerAt(content string, index int) bool {
+	if index >= len(content) {
+		return false
+	}
+	if content[index] == '-' || content[index] == '*' || content[index] == '+' {
+		return index+1 < len(content) && (content[index+1] == ' ' || content[index+1] == '\t')
+	}
+	if content[index] < '0' || content[index] > '9' {
+		return false
+	}
+	j := index
+	for j < len(content) && content[j] >= '0' && content[j] <= '9' {
+		j++
+	}
+	return j < len(content) && (content[j] == '.' || content[j] == ')') && j+1 < len(content) && (content[j+1] == ' ' || content[j+1] == '\t')
 }
 
 type backtickRun struct {

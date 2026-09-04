@@ -90,6 +90,21 @@ func TestEvaluateTreatsDeliveredCodeAsSubstantive(t *testing.T) {
 	}
 }
 
+func TestEvaluateDoesNotClassifyInlineCodeAsAcknowledgement(t *testing.T) {
+	requesterID := "47474747-4747-4474-8474-474747474747"
+	decision := Evaluate(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "What do you think about this review?",
+	}, "Noted. `the review is sound and the cost constraint is binding`")
+	if decision.Admitted {
+		t.Fatal("substantive inline-code response was admitted as an acknowledgement")
+	}
+	if decision.Classification != ClassificationSubstantive {
+		t.Fatalf("classification = %q, want %q", decision.Classification, ClassificationSubstantive)
+	}
+}
+
 func TestCheckAllowsMentionedSubstantiveOpinionReply(t *testing.T) {
 	requesterID := "22222222-2222-4222-8222-222222222222"
 	err := Check(Parent{
@@ -123,6 +138,54 @@ func TestCheckAllowsMentionAfterMultipleInlineAndFencedCodeSpans(t *testing.T) {
 	}, "See `server/internal/service/task.go:4309` and ``server/pkg/db/query.sql:528``.\n\n```go\n[@Requester](mention://agent/"+requesterID+")\n```\n\n[@Requester](mention://agent/"+requesterID+")")
 	if err != nil {
 		t.Fatalf("mention after multiple code spans rejected: %v", err)
+	}
+}
+
+func TestCheckAllowsRequesterMentionInNestedListItem(t *testing.T) {
+	requesterID := "48484848-4848-4484-8484-484848484848"
+	err := Check(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Please give your opinion on this review.",
+	}, "- Findings:\n    - [@Requester](mention://agent/"+requesterID+")\n    - The review is sound.")
+	if err != nil {
+		t.Fatalf("mention in nested list item rejected: %v", err)
+	}
+}
+
+func TestCheckRejectsMentionInStandaloneIndentedCodeBlock(t *testing.T) {
+	requesterID := "49494949-4949-4494-8494-494949494949"
+	err := Check(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Please give your opinion on this review.",
+	}, "Findings:\n\n    [@Requester](mention://agent/"+requesterID+")")
+	if err == nil {
+		t.Fatal("mention in standalone indented code block satisfied admission")
+	}
+}
+
+func TestCheckRejectsMentionInIndentedCodeThatLooksLikeNestedList(t *testing.T) {
+	requesterID := "51515151-5151-4451-8451-515151515151"
+	err := Check(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Please give your opinion on this review.",
+	}, "    - code example\n        - [@Requester](mention://agent/"+requesterID+")")
+	if err == nil {
+		t.Fatal("mention in list-shaped indented code satisfied admission")
+	}
+}
+
+func TestEvaluateDoesNotClassifyUnclosedFencedSubstanceAsAcknowledgement(t *testing.T) {
+	requesterID := "50505050-5050-4450-8450-505050505050"
+	decision := Evaluate(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "What do you think about this review?",
+	}, "Noted.\n\n```md\nThe review is sound and the cost constraint is binding.")
+	if decision.Admitted {
+		t.Fatal("substantive unclosed-fence response was admitted as an acknowledgement")
 	}
 }
 

@@ -162,6 +162,38 @@ func TestCreateComment_AgentOpinionAcknowledgementRemainsExempt(t *testing.T) {
 	}
 }
 
+func TestCreateComment_AgentOpinionFencedSubstanceCannotUseAcknowledgementExemption(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	requesterID := createHandlerTestAgent(t, "Fenced Opinion Requester", nil)
+	responderID := createHandlerTestAgent(t, "Fenced Opinion Responder", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "server reply admission fenced substance", "", "")
+	parentID := dbfx.Comment(t, issueID, "What is your opinion on this review?", testutil.Cols{
+		"author_type": "agent",
+		"author_id":   requesterID,
+	})
+	taskID := createHandlerTestTaskForAgentOnIssue(t, responderID, issueID)
+
+	w := httptest.NewRecorder()
+	r := newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{
+		"content":   "Noted.\n\n```md\nThe review is sound and the cost constraint is binding.\n```",
+		"parent_id": parentID,
+	})
+	r = withURLParam(r, "id", issueID)
+	r.Header.Set("X-Agent-ID", responderID)
+	r.Header.Set("X-Task-ID", taskID)
+
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("CreateComment fenced substance: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countAgentCommentsForIssue(t, issueID, responderID); got != 0 {
+		t.Fatalf("rejected fenced substantive reply was persisted: got %d agent comments", got)
+	}
+}
+
 // TestUpdateComment_AgentOpinionEditRequiresRequesterMention covers the
 // second HTTP writer. Editing an already stored agent comment into a
 // substantive opinion response must not bypass the same admission rule.
