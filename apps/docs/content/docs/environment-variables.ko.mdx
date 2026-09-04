@@ -228,6 +228,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_DAEMON_DEVICE_NAME` | host 이름 | 런타임 목록의 기기 이름 |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | 런타임 표시 이름 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | wakeup 이벤트가 없을 때 실행 polling 간격 |
+| `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | 정상 WebSocket에서 claim 안전 polling의 상한. `MULTICA_DAEMON_POLL_INTERVAL`과 독립적으로 설정되며, 하향 jitter를 적용한 기본 실제 간격은 `2m30s`–`2m45s`이고 구형 Server 또는 결과가 불확실한 claim은 일반 polling 간격을 유지합니다 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | heartbeat 간격 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 데몬 하나의 동시 실행 상한 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 단일 실행의 절대 시간 제한. `0`은 제한 없음 |
@@ -276,6 +277,7 @@ multica config show
 | `workspaces_root` | `~` 아래 profile별 경로 | 실행용 작업 디렉터리의 루트 |
 | `max_concurrent_tasks` | `20` | 동시 실행 상한. `0` 또는 빈 값은 설정되지 않음을 의미 |
 | `poll_interval` | `30s` | 실행 polling 간격 |
+| `ws_claim_poll_interval` | `3m` | 정상 WebSocket에서 claim 안전 polling의 상한. `poll_interval`과 독립적으로 설정되며 Daemon은 하향 jitter를 적용합니다 |
 | `heartbeat_interval` | `15s` | heartbeat 간격 |
 | `agent_timeout` | 제한 없음 | 단일 실행의 절대 시간 제한 |
 | `codex_semantic_inactivity_timeout` | 파생 | Codex 의미 활동 없음 기준값. 설정하지 않으면 idle과 tool watchdog 예산 중 큰 값을 따르고, tool 예산이 `0`이면 idle 예산으로 되돌아갑니다. Codex 자체의 `10m`은 watchdog 전체를 비활성화했을 때만 유지됩니다 |

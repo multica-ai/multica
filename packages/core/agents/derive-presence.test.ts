@@ -404,6 +404,39 @@ describe("buildPresenceMap", () => {
     expect(o?.workload).toBe("working");
   });
 
+  it("uses an agent liveness projection when its private runtime is hidden", () => {
+    const shared = makeAgent({
+      id: "shared",
+      runtime_id: "private-runtime",
+      runtime_availability: "online",
+    });
+    const map = buildPresenceMap({
+      agents: [shared],
+      runtimes: [],
+      snapshot: [makeTask({ agent_id: "shared", status: "running" })],
+      now: NOW,
+    });
+
+    expect(map.get("shared")?.availability).toBe("online");
+    expect(map.get("shared")?.workload).toBe("working");
+  });
+
+  it("keeps a recent loss unstable from a hidden runtime projection", () => {
+    const shared = makeAgent({
+      id: "shared",
+      runtime_id: "private-runtime",
+      runtime_availability: "unstable",
+    });
+    const map = buildPresenceMap({
+      agents: [shared],
+      runtimes: [],
+      snapshot: [],
+      now: NOW,
+    });
+
+    expect(map.get("shared")?.availability).toBe("unstable");
+  });
+
   it("threads the same `now` so every agent on a shared runtime gets the same availability", () => {
     // Multi-agent scenario: one local daemon backs N agents, daemon dies.
     // All dependent agents should report unstable together — the shared

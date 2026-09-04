@@ -228,6 +228,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_DAEMON_DEVICE_NAME` | ホスト名 | ランタイム一覧に表示されるデバイス名 |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | ランタイムの表示名 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | ウェイクイベントがないときの実行ポーリング間隔 |
+| `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | 正常な WebSocket での claim 安全ポーリング上限。`MULTICA_DAEMON_POLL_INTERVAL` とは独立して設定され、下方向のジッターにより既定値は実際には `2m30s`–`2m45s` となり、旧 Server または結果が不確実な claim では通常のポーリング間隔を維持します |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | ハートビート間隔 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | デーモン 1 つあたりの同時実行上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 1 回の実行の絶対時間上限。`0` は上限なし |
@@ -276,6 +277,7 @@ multica config show
 | `workspaces_root` | `~` 配下のプロファイル別パス | 実行用作業ディレクトリのルート |
 | `max_concurrent_tasks` | `20` | 同時実行上限。`0` または空は未設定を意味します |
 | `poll_interval` | `30s` | 実行のポーリング間隔 |
+| `ws_claim_poll_interval` | `3m` | 正常な WebSocket での claim 安全ポーリング上限。`poll_interval` とは独立して設定され、Daemon は下方向のジッターを適用します |
 | `heartbeat_interval` | `15s` | ハートビート間隔 |
 | `agent_timeout` | 無制限 | 1 回の実行の絶対時間上限 |
 | `codex_semantic_inactivity_timeout` | 派生値 | Codex のセマンティック静穏しきい値。未設定なら idle と tool の watchdog 予算のうち大きい方を採用し、tool 予算が `0` の場合は idle 予算に回帰します。Codex 自身の `10m` が残るのは watchdog 一式を無効化したときだけです |

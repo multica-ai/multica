@@ -228,6 +228,7 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_DAEMON_DEVICE_NAME` | hostname | Device name shown in the runtime list |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | Runtime display name |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Run polling interval when no wake event arrives |
+| `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | Upper bound for healthy WebSocket claim safety polls, configured independently of `MULTICA_DAEMON_POLL_INTERVAL`; downward jitter makes the normal default `2m30s`–`2m45s`, while old servers and uncertain claims retain the ordinary poll interval |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat interval |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Concurrent run ceiling per daemon |
 | `MULTICA_AGENT_TIMEOUT` | `0` | Absolute time limit per run; `0` means no limit |
@@ -276,6 +277,7 @@ Supported keys:
 | `workspaces_root` | profile-aware path under `~` | Root directory for run working directories |
 | `max_concurrent_tasks` | `20` | Concurrent run ceiling; `0` or empty means unset |
 | `poll_interval` | `30s` | Run polling interval |
+| `ws_claim_poll_interval` | `3m` | Upper bound for healthy WebSocket claim safety polls, independent of `poll_interval`; the daemon applies downward-only jitter |
 | `heartbeat_interval` | `15s` | Heartbeat interval |
 | `agent_timeout` | unlimited | Absolute time limit per run |
 | `codex_semantic_inactivity_timeout` | derived | Codex semantic-silence threshold. With nothing set it takes the larger of the idle and tool watchdog budgets; a tool budget of `0` falls back to the idle budget, and only when the whole watchdog suite is disabled does Codex keep its own `10m` |

@@ -9,13 +9,12 @@ import {
   captureSignupSource,
   identify as identifyAnalytics,
   initAnalytics,
-  resetAnalytics,
 } from "../analytics";
 import { configStore } from "../config";
 import { workspaceListOptions } from "../workspace/queries";
 import { createLogger } from "../logger";
+import { clearClientSessionData } from "./session-cleanup";
 import { defaultStorage } from "./storage";
-import { setCurrentWorkspace } from "./workspace-storage";
 import type { ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 import type { User } from "../types";
@@ -33,14 +32,15 @@ const RECOVERY_RETRY_DELAYS_MS = [
 export function AuthInitializer({
   children,
   onLogin,
-  onLogout,
   storage = defaultStorage,
   cookieAuth,
   identity,
 }: {
   children: ReactNode;
   onLogin?: () => void;
-  onLogout?: () => void;
+  // No `onLogout`: every unauthenticated exit below delegates to the auth
+  // store's own teardown, which is where the logout / session-expiry
+  // callbacks live.
   storage?: StorageAdapter;
   cookieAuth?: boolean;
   identity?: ClientIdentity;
@@ -205,6 +205,7 @@ export function AuthInitializer({
         user,
         isLoading: false,
         status: "authenticated",
+        expired: false,
       });
       identifyAnalytics(user.id, { email: user.email, name: user.name });
       if (authRecoveryPendingRef.current) {
@@ -215,24 +216,14 @@ export function AuthInitializer({
       }
     };
 
-    const onAuthFailure = () => {
-      onLogout?.();
-      resetAnalytics();
-      useAuthStore.setState({
-        user: null,
-        isLoading: false,
-        status: "unauthenticated",
-      });
-    };
-
     const rejectSession = () => {
       settled = true;
       window.removeEventListener("online", retryNow);
       if (retryTimer !== undefined) clearTimeout(retryTimer);
-      if (!cookieAuth) {
-        setCurrentWorkspace(null, null);
-      }
-      onAuthFailure();
+      // One teardown for every dead session, whether it died at boot or
+      // under a running shell. The api client's 401 hook has normally run
+      // this already by the time we get here; the action is idempotent.
+      useAuthStore.getState().sessionExpired();
     };
 
     const scheduleRetry = (attempt: () => Promise<void>) => {
@@ -324,13 +315,12 @@ export function AuthInitializer({
     if (!cookieAuth) {
       const token = storage.getItem("multica_token");
       if (!token) {
+        // No credential to verify. Same published state as a rejected one,
+        // and the same teardown — which on desktop is what keeps a daemon
+        // running across the restart after an expiry, instead of the app
+        // treating a missing token as if the user had signed out.
         settled = true;
-        onLogout?.();
-        useAuthStore.setState({
-          user: null,
-          isLoading: false,
-          status: "unauthenticated",
-        });
+        useAuthStore.getState().sessionExpired();
       } else {
         api.setToken(token);
         window.addEventListener("online", retryNow);
@@ -348,6 +338,42 @@ export function AuthInitializer({
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retryGeneration]);
+
+  // A session that ends leaves its whole client side behind: a warmed query
+  // cache whose every entry has `staleTime: Infinity`, per-workspace drafts
+  // and chat selection, the desktop tab layout. The screen it lands on offers
+  // a login form, and the next person to use it is not guaranteed to be the
+  // one who was just signed in — on a shared machine a colleague would inherit
+  // all of it, and sharing a workspace with them means the tab validator finds
+  // nothing to drop. So an expiry erases exactly what a logout erases; only
+  // the auth teardown differs (the auth store's `sessionExpired`), plus what
+  // belongs to a process outliving the session — Desktop's daemon.
+  //
+  // Keyed on being unauthenticated rather than on a transition out of
+  // `authenticated`, because the case that leaks worst never passes through
+  // `authenticated` at all: the app starts, the stale token on disk is
+  // rejected at the identity probe, and the previous session's drafts sit
+  // there waiting for whoever signs in next.
+  //
+  // This cannot sign anyone out. Reaching `unauthenticated` IS the decision to
+  // end the session, and only two things reach it: a 401 on a credential we
+  // presented, or having no credential at all. A client that cannot reach the
+  // server — offline, DNS down, 5xx — settles on `recovering` and keeps both
+  // its token and everything below (see `attempt`'s catch, which narrows to
+  // `ApiError` with status 401 before rejecting anything).
+  const authStatus = useAuthStore((state) => state.status);
+  const clearedForThisSession = useRef(false);
+  useEffect(() => {
+    if (authStatus === "authenticated") {
+      clearedForThisSession.current = false;
+      return;
+    }
+    if (authStatus !== "unauthenticated" || clearedForThisSession.current) {
+      return;
+    }
+    clearedForThisSession.current = true;
+    clearClientSessionData(qc, storage);
+  }, [authStatus, qc, storage]);
 
   return <>{children}</>;
 }

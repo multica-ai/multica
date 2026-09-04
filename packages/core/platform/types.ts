@@ -31,6 +31,10 @@ export interface CoreProviderProps {
   onLogin?: () => void;
   /** Called after logout (e.g. clear cookie). */
   onLogout?: () => void;
+  /** Called when the server ends the session (401) rather than the user.
+   *  Defaults to `onLogout`; pass it only when some of this shell's logout
+   *  teardown is too destructive for an expiry the user did not ask for. */
+  onSessionExpired?: () => void;
   /** Identifies the calling client (web/desktop + version + os) to the server. */
   identity?: ClientIdentity;
   /** Active locale, determined server-side (web) or at app boot (desktop). */

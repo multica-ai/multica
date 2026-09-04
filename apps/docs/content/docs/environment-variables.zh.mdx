@@ -228,6 +228,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_DAEMON_DEVICE_NAME` | 主机名 | 运行时列表中的设备名 |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | 运行时显示名 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | 没有唤醒事件时的运行轮询间隔 |
+| `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | 健康 WebSocket 下 claim 安全轮询的上限，与 `MULTICA_DAEMON_POLL_INTERVAL` 独立配置；向下抖动后默认实际为 `2m30s`–`2m45s`，旧 Server 或结果不确定的 claim 仍使用普通轮询间隔 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 心跳间隔 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 单个守护进程的并发运行上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 单次执行的绝对时限；`0` 表示不设置 |
@@ -276,6 +277,7 @@ multica config show
 | `workspaces_root` | `~` 下按 profile 区分的路径 | 执行工作目录的根目录 |
 | `max_concurrent_tasks` | `20` | 并发运行上限；`0` 或留空表示未设置 |
 | `poll_interval` | `30s` | 运行轮询间隔 |
+| `ws_claim_poll_interval` | `3m` | 健康 WebSocket 下 claim 安全轮询的上限，与 `poll_interval` 独立配置；Daemon 会应用向下抖动 |
 | `heartbeat_interval` | `15s` | 心跳间隔 |
 | `agent_timeout` | 不限制 | 单次执行的绝对时限 |
 | `codex_semantic_inactivity_timeout` | 派生 | Codex 语义静默阈值。未设置时取 idle 与 tool watchdog 预算中较大的那个；tool 预算为 `0` 时回落到 idle 预算；只有整套 watchdog 关闭时才保留 Codex 自己的 `10m` |

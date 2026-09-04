@@ -99,6 +99,7 @@ func init() {
 	f.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
 	f.String("workspaces-root", "", "Base directory for run workspaces (env: MULTICA_WORKSPACES_ROOT)")
 	f.Duration("poll-interval", 0, "Run poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
+	f.Duration("ws-claim-poll-interval", 0, "Healthy WebSocket claim safety-poll upper bound (env: MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL)")
 	f.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	f.Duration("agent-timeout", 0, "Absolute per-run wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
 	f.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
@@ -121,6 +122,7 @@ func init() {
 	rf.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
 	rf.String("workspaces-root", "", "Base directory for run workspaces (env: MULTICA_WORKSPACES_ROOT)")
 	rf.Duration("poll-interval", 0, "Run poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
+	rf.Duration("ws-claim-poll-interval", 0, "Healthy WebSocket claim safety-poll upper bound (env: MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL)")
 	rf.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	rf.Duration("agent-timeout", 0, "Absolute per-run wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
 	rf.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
@@ -869,6 +871,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if d, _ := cmd.Flags().GetDuration("poll-interval"); d > 0 {
 		args = append(args, "--poll-interval", d.String())
 	}
+	if d, _ := cmd.Flags().GetDuration("ws-claim-poll-interval"); d > 0 {
+		args = append(args, "--ws-claim-poll-interval", d.String())
+	}
 	if d, _ := cmd.Flags().GetDuration("heartbeat-interval"); d > 0 {
 		args = append(args, "--heartbeat-interval", d.String())
 	}
@@ -988,6 +993,14 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	if pollOverride > 0 {
 		overrides.PollInterval = pollOverride
+	}
+	wsClaimPollFlag, _ := cmd.Flags().GetDuration("ws-claim-poll-interval")
+	wsClaimPollOverride, err := resolveDaemonDurationOverride(wsClaimPollFlag, "MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL", fileCfg.WSClaimPollInterval)
+	if err != nil {
+		return err
+	}
+	if wsClaimPollOverride > 0 {
+		overrides.WSClaimPollInterval = wsClaimPollOverride
 	}
 	heartbeatFlag, _ := cmd.Flags().GetDuration("heartbeat-interval")
 	heartbeatOverride, err := resolveDaemonDurationOverride(heartbeatFlag, "MULTICA_DAEMON_HEARTBEAT_INTERVAL", fileCfg.HeartbeatInterval)
