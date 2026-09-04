@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { dynamic, GET } from "./route";
+import { GET } from "./route";
 
 describe("GET /favicon.ico", () => {
   it("redirects to the SVG favicon", () => {
@@ -20,19 +20,5 @@ describe("GET /favicon.ico", () => {
 
     expect(location.startsWith("/")).toBe(true);
     expect(location).not.toMatch(/^https?:\/\//);
-  });
-
-  it("stays off the prerender cache path", () => {
-    // Regression: `GET()` takes no arguments, so nothing marks the route
-    // dynamic the way the old `request.url` read did. Next then tried to cache
-    // a zero-byte body, which the prerender LRU rejects — one
-    // "calculateSize returned 0" error per request, and every browser asks for
-    // /favicon.ico unprompted.
-    //
-    // This asserts the export, not the framework behaviour it buys: a unit test
-    // cannot observe Next's caching lifecycle. The behaviour itself is checked
-    // against a production build (`pnpm build && pnpm start`), where the fix
-    // removes both `cache-control: s-maxage=31536000` and the error.
-    expect(dynamic).toBe("force-dynamic");
   });
 });

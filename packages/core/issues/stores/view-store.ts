@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { IssueStatus, IssueStatusCategory, IssuePriority } from "../../types";
+import type { IssueStatus, IssueStatusCategory, IssuePriority, PropertyFilterValue } from "../../types";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
@@ -127,7 +127,7 @@ export interface FilterSnapshot {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
-  propertyFilters: Record<string, string[]>;
+  propertyFilters: Record<string, PropertyFilterValue[]>;
 }
 
 /** Filter-bar chip dimensions. Date is excluded: `dateFilter` lives outside
@@ -190,12 +190,14 @@ export interface IssueViewState {
   includeNoProject: boolean;
   labelFilters: string[];
   /**
-   * Custom-property filters: definition id → selected option ids (checkbox
-   * definitions use the pseudo-options "true"/"false"). Empty array = no
+   * Custom-property filters: definition id → selected values (checkbox
+   * definitions use the pseudo-options "true"/"false"; scalars hold the
+   * committed value as a bare string, or an operator object per
+   * `PropertyFilterValue`, plus the "__none__" sentinel). Empty array = no
    * filter for that definition; matching is OR within a definition and AND
    * across definitions, mirroring the other filter groups.
    */
-  propertyFilters: Record<string, string[]>;
+  propertyFilters: Record<string, PropertyFilterValue[]>;
   dateFilter: IssueDateFilter | null;
   // When true, the list only shows issues that currently have at least one
   // agent task in `running` status. Drives the workspace "agents working"
@@ -255,6 +257,9 @@ export interface IssueViewState {
   toggleNoProject: () => void;
   toggleLabelFilter: (labelId: string) => void;
   togglePropertyFilter: (propertyId: string, optionId: string) => void;
+  /** Replace a property's full filter value set (used by scalar value inputs
+   *  for text/number/date/url, which build the array including "__none__"). */
+  setPropertyFilterValues: (propertyId: string, optionIds: PropertyFilterValue[]) => void;
   setDateFilter: (filter: IssueDateFilter | null) => void;
   toggleAgentRunningFilter: () => void;
   hideStatus: (category: IssueStatusCategory) => void;
@@ -398,6 +403,13 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       const propertyFilters = { ...state.propertyFilters };
       if (next.length === 0) delete propertyFilters[propertyId];
       else propertyFilters[propertyId] = next;
+      return { propertyFilters };
+    }),
+  setPropertyFilterValues: (propertyId, optionIds) =>
+    set((state) => {
+      const propertyFilters = { ...state.propertyFilters };
+      if (optionIds.length === 0) delete propertyFilters[propertyId];
+      else propertyFilters[propertyId] = optionIds;
       return { propertyFilters };
     }),
   setDateFilter: (filter) => set({ dateFilter: filter }),

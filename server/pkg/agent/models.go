@@ -14,7 +14,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // Model describes a single LLM model exposed by an agent provider.
@@ -28,11 +31,12 @@ import (
 // default, which is always closer to what the user's account /
 // environment actually supports than a static guess here.
 type Model struct {
-	ID           string             `json:"id"`
-	Label        string             `json:"label"`
-	Provider     string             `json:"provider,omitempty"`
-	Default      bool               `json:"default,omitempty"`
-	ServiceTiers []ModelServiceTier `json:"service_tiers,omitempty"`
+	ID                                  string             `json:"id"`
+	Label                               string             `json:"label"`
+	Provider                            string             `json:"provider,omitempty"`
+	Default                             bool               `json:"default,omitempty"`
+	ServiceTiers                        []ModelServiceTier `json:"service_tiers,omitempty"`
+	SupportsExplicitStandardServiceTier bool               `json:"supports_explicit_standard_service_tier,omitempty"`
 	// Thinking advertises the runtime's reasoning/effort catalog for this
 	// model. nil means the runtime/model has no thinking-level control
 	// (or the daemon couldn't discover one); the UI hides its picker. The
@@ -40,6 +44,29 @@ type Model struct {
 	// per-model and Claude's `--effort` superset has known per-model gaps
 	// (`xhigh` is Opus-only, `max` is session-only). See MUL-2339.
 	Thinking *ModelThinking `json:"thinking,omitempty"`
+}
+
+// UnavailableModel is a model the runtime named but will not run on this host —
+// today only Claude Code, reporting one that needs a newer CLI than the
+// installed one. Reason is the runtime's own remedy ("Update to 2.1.255+ to use
+// Fable 5.1"), forwarded verbatim so the copy stays right without Multica
+// tracking upstream version floors.
+//
+// It is a distinct type, and travels in a distinct list, precisely so it can
+// never be mistaken for something selectable. Marking such a row with a flag
+// inside the models list was the first attempt and it was wrong twice over:
+// every consumer that did not learn the flag (the inspector picker, the agent
+// builder) kept offering it, and — the part a flag cannot fix — an already
+// installed desktop client does not know the field at all, so it would render
+// the row as an ordinary model and persist a model id the CLI rejects. Keeping
+// the two lists separate makes old clients correct by construction, since they
+// only ever read `models` (MUL-6961).
+type UnavailableModel struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Reason is display copy, not a machine contract: it comes from the
+	// runtime and may be empty when it offered none.
+	Reason string `json:"reason,omitempty"`
 }
 
 // ModelServiceTier is one runtime-native execution tier advertised for a
@@ -80,6 +107,11 @@ type ThinkingLevel struct {
 // plus whether they were actually discovered.
 type Catalog struct {
 	Models []Model
+	// Unavailable carries models the runtime named but will not run here. It is
+	// deliberately NOT part of Models: every capability lookup in this package
+	// walks Models, so keeping these out is what makes an unrunnable model fail
+	// closed everywhere without each lookup having to remember a flag.
+	Unavailable []UnavailableModel
 	// Fallback reports that discovery did not succeed and Models is a static
 	// stand-in rather than the runtime's real catalog.
 	//
@@ -105,8 +137,9 @@ func discovered(models []Model, err error) (Catalog, error) {
 // modelCache memoizes dynamic discovery calls so repeated UI loads
 // don't re-shell the agent CLI. Entries expire after cacheTTL.
 type modelCacheEntry struct {
-	models    []Model
-	expiresAt time.Time
+	models      []Model
+	unavailable []UnavailableModel
+	expiresAt   time.Time
 }
 
 var (
@@ -118,15 +151,14 @@ const modelCacheTTL = 60 * time.Second
 
 // ListModels returns the models supported by the given agent provider.
 // For providers with a known static catalog it returns the baked-in
-// list; for providers with a CLI discovery mechanism (codex, opencode,
-// pi, openclaw) it shells out with caching and falls back where the
+// list; for providers with a CLI discovery mechanism (claude, codex,
+// opencode, pi, openclaw) it shells out with caching and falls back where the
 // provider has a safe static catalog.
 //
-// For claude, codex, opencode, pi, and kimi, the catalog is augmented with
-// per-model thinking-level options discovered from the local CLI. Codex
-// discovery failures fall back to a model + thinking snapshot; providers
-// without a safe fallback leave Thinking nil, which makes the UI hide the
-// thinking picker.
+// For claude, codex, opencode, pi, and kimi, the catalog carries per-model
+// thinking-level options taken from the local CLI. Claude and Codex discovery
+// failures fall back to a model + thinking snapshot; providers without a safe
+// fallback leave Thinking nil, which makes the UI hide the thinking picker.
 //
 // runtimeCmd lets the caller point at a non-default binary; pass the zero
 // Command to use the provider's default name on PATH. Its launch prefix — a
@@ -152,11 +184,9 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 	}
 	switch providerType {
 	case "claude":
-		models := claudeStaticModels()
-		annotateClaudeThinking(ctx, models, runtimeCmd)
-		// Claude's catalog is static by design, not by failure: there is no
-		// discovery step to fall back from, so this is authoritative.
-		return Catalog{Models: models}, nil
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discoverClaudeCatalog(ctx, runtimeCmd), nil
+		})
 	case "codex":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverCodexModels(ctx, runtimeCmd), nil)
@@ -211,6 +241,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverOpenCodeModels(ctx, runtimeCmd))
 		})
+	case "codearts":
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discovered(discoverCodeArtsModels(ctx, runtimeCmd))
+		})
 	case "deveco":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverDevecoModels(ctx, runtimeCmd))
@@ -262,6 +296,13 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discoverDimModels(ctx, runtimeCmd)
 		})
+	case "zeroclaw":
+		// ZeroClaw's ACP server advertises no catalog: session/new answers
+		// exactly {sessionId, workspaceDir} (verified against 0.8.4), and it
+		// has no session-scoped model selection to consume one anyway — see
+		// ModelSelectionSupported. Return an empty list rather than spawning
+		// an ACP subprocess that can only ever come back empty.
+		return Catalog{Models: []Model{}}, nil
 	default:
 		return Catalog{}, fmt.Errorf("unknown agent type: %q", providerType)
 	}
@@ -365,7 +406,7 @@ func QualifyModelID(catalog Catalog, model string) (string, bool) {
 // dropdown plus a silently-ignored manual-entry field.
 func ModelSelectionSupported(providerType string) bool {
 	switch providerType {
-	case "qwenpaw", "mcode":
+	case "qwenpaw", "mcode", "zeroclaw":
 		// QwenPaw's `session/set_model` persists to agent.json at the agent
 		// scope, not the session scope. Calling it would mutate the user's
 		// shared, persistent agent config. Model override is therefore
@@ -373,7 +414,11 @@ func ModelSelectionSupported(providerType string) bool {
 		// the agent profile. If QwenPaw makes model selection session-scoped
 		// upstream, this can be reverted to `true`. MCode similarly exposes no
 		// model option through ACP, so its runtime configuration remains the
-		// source of truth.
+		// source of truth. ZeroClaw goes further: `session/set_model` is not in
+		// its ACP dispatch table at all (0.8.4 answers -32601) and no handler
+		// reads a model param, so the model comes from the ZeroClaw agent
+		// profile (`agents.<alias>.model_provider`) and nothing Multica sends
+		// can change it.
 		return false
 	default:
 		return true
@@ -463,9 +508,9 @@ func modelHasKnownPrefix(model string) bool {
 func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 	modelCacheMu.Lock()
 	if entry, ok := modelCache[key]; ok && time.Now().Before(entry.expiresAt) {
-		out := entry.models
+		out, unavailable := entry.models, entry.unavailable
 		modelCacheMu.Unlock()
-		return Catalog{Models: out}, nil
+		return Catalog{Models: out, Unavailable: unavailable}, nil
 	}
 	modelCacheMu.Unlock()
 
@@ -490,7 +535,11 @@ func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 	}
 
 	modelCacheMu.Lock()
-	modelCache[key] = modelCacheEntry{models: catalog.Models, expiresAt: time.Now().Add(modelCacheTTL)}
+	modelCache[key] = modelCacheEntry{
+		models:      catalog.Models,
+		unavailable: catalog.Unavailable,
+		expiresAt:   time.Now().Add(modelCacheTTL),
+	}
 	modelCacheMu.Unlock()
 	return catalog, nil
 }
@@ -523,6 +572,7 @@ func claudeStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-5", Label: "Claude Sonnet 5", Provider: "anthropic"},
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-fable-5-1", Label: "Claude Fable 5.1", Provider: "anthropic"},
 		{ID: "claude-fable-5", Label: "Claude Fable 5", Provider: "anthropic"},
 		{ID: "claude-opus-5", Label: "Claude Opus 5", Provider: "anthropic"},
 		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
@@ -716,7 +766,7 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 	// Parse whatever the verbose command printed, even on a non-zero exit — a
 	// stale config entry can make `opencode models` exit non-zero while still
 	// listing the resolvable catalog (mirrors the pi path; see #3729/#3627).
-	out, _ := cmd.Output()
+	out, _ := outputOwned(cmd, runtimeCmd.logger)
 	models := parseOpenCodeModels(string(out))
 	if len(models) == 0 {
 		// Verbose yielded nothing usable (unsupported flag, error text, or an
@@ -724,7 +774,7 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 		// but still prints the IDs.
 		cmd = runtimeCmd.exec(runCtx, "models")
 		hideAgentWindow(cmd)
-		out, _ = cmd.Output()
+		out, _ = outputOwned(cmd, runtimeCmd.logger)
 		models = parseOpenCodeModels(string(out))
 	}
 	if len(models) == 0 {
@@ -1007,10 +1057,11 @@ func discoverPiModelsRPC(ctx context.Context, runtimeCmd Command, lookedUp strin
 		_ = stdin.Close()
 		return nil, false
 	}
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, runtimeCmd.logger); err != nil {
 		_ = stdin.Close()
 		return nil, false
 	}
+	defer releaseProcessGroup(cmd)
 
 	encoder := json.NewEncoder(stdin)
 	requests := []map[string]string{
@@ -1162,7 +1213,7 @@ func discoverPiModelsTable(ctx context.Context, runtimeCmd Command) ([]Model, er
 	hideAgentWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
-	stdout, err := cmd.Output()
+	stdout, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil && len(stdout) == 0 && stderr.Len() == 0 {
 		return []Model{}, nil
 	}
@@ -1294,7 +1345,7 @@ func discoverOmpModels(ctx context.Context, runtimeCmd Command) ([]Model, error)
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "models", "--json")
 	hideAgentWindow(cmd)
-	stdout, err := cmd.Output()
+	stdout, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil || len(stdout) == 0 {
 		return []Model{}, nil
 	}
@@ -1363,15 +1414,26 @@ func parseOmpModels(data []byte) ([]Model, error) {
 // `_build_model_state` so whatever ~/.hermes/config.yaml resolves
 // to at runtime is exactly what the UI shows.
 //
-// Failure modes (hermes missing, no credentials, config resolution
-// error) all return an empty list so the UI falls back to the
-// creatable manual-entry input instead of blocking the form.
+// Failures propagate. Hermes has no static catalog to degrade to, so the
+// empty-list behaviour the other legacy providers keep would report a
+// successful discovery that found nothing — and the picker renders that as an
+// authoritative empty dropdown with no error and no hint, which is the one
+// outcome packages/core/runtimes/models.ts explicitly refuses to produce
+// (MUL-6606). An error instead puts the picker in its discovery-failed state,
+// which still offers the creatable manual-entry input, and carries the reason
+// Hermes gave for why it found nothing.
+//
+// Contrast grok (strictErrors with a static fallback) and codebuddy: those
+// substitute a baked-in list and only slog.Debug the reason, because a
+// stand-in catalog is better than nothing there. Here there is no stand-in.
 func discoverHermesModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
-	return discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
+	models, err := discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
 		defaultBin:   "hermes",
 		clientName:   "multica-model-discovery",
 		extraEnv:     []string{"HERMES_YOLO_MODE=1"},
 		tmpdirPrefix: "multica-hermes-discovery-",
+		strictErrors: true,
+		timeout:      hermesDiscoveryTimeout,
 		// The same handshake carries an effort selector on jcode and carries
 		// none on Hermes Agent, so annotate is what tells the two apart —
 		// Hermes Agent models come back with a nil Thinking and show no
@@ -1379,6 +1441,53 @@ func discoverHermesModels(ctx context.Context, runtimeCmd Command) ([]Model, err
 		// annotateACPThinkingForSessionModel.
 		annotate: annotateACPThinkingForSessionModel,
 	})
+	if err != nil {
+		return nil, annotateHermesDiscoveryUnconfigured(err)
+	}
+	return models, nil
+}
+
+// hermesDiscoveryUnconfiguredHint explains a "no LLM provider configured"
+// failure raised by MODEL DISCOVERY, which is a different story from the same
+// message raised by a task.
+//
+// Hermes' own remedy ("run `hermes model`") assumes the shell the user is
+// standing in. Discovery does not run there: it is a `hermes acp` child of the
+// daemon, and the daemon is frequently GUI-launched, in which case its
+// environment never saw the user's shell rc. agents_probe.go's login-shell
+// fallback does not close that gap — it resolves the binary's PATH and nothing
+// else — so a provider whose credentials live in an exported variable or in
+// gcloud/ADC state (GH: Vertex AI) resolves for the user and not for the
+// daemon.
+//
+// Deliberately NOT the task path's hint (annotateHermesProviderUnconfigured in
+// the daemon): that one is about a per-task HERMES_HOME overlay, and discovery
+// builds no overlay. Sending someone to set HERMES_HOME in an agent's
+// custom_env would be actively wrong here — discovery is per-runtime and never
+// reads any agent's custom_env, so that edit cannot put a single model in this
+// picker.
+//
+// Fixed prose, no interpolation, for the same reason the task hint is: this
+// text is error copy, and nothing user-controlled belongs in a string other
+// code may match on.
+const hermesDiscoveryUnconfiguredHint = " [multica] this is what hermes reported to the daemon, " +
+	"which runs `hermes acp` with its OWN environment — not your login shell. " +
+	"Credentials exported only from a shell rc file are invisible to it. " +
+	"Reproduce with `env -i HOME=\"$HOME\" PATH=\"$PATH\" hermes model`: if that fails while a plain " +
+	"`hermes model` succeeds, restart the daemon from a shell that already has those variables. " +
+	"Setting HERMES_HOME or custom_env on an agent will not populate this picker — " +
+	"model discovery is per-runtime and reads neither."
+
+// annotateHermesDiscoveryUnconfigured appends the hint above when, and only
+// when, the discovery failure is Hermes resolving no provider at all. Every
+// other failure (binary missing, handshake timeout, a rejected credential)
+// passes through untouched — the environment story would misdirect there, and
+// a rejected credential in particular means the config WAS found.
+func annotateHermesDiscoveryUnconfigured(err error) error {
+	if err == nil || !taskfailure.ProviderUnconfigured(err.Error()) {
+		return err
+	}
+	return fmt.Errorf("%w%s", err, hermesDiscoveryUnconfiguredHint)
 }
 
 // discoverKimiModels combines Kimi's ACP model catalog with the structured
@@ -1517,7 +1626,7 @@ func discoverKimiProviderThinking(ctx context.Context, runtimeCmd Command) (map[
 	cmd := runtimeCmd.exec(runCtx, "provider", "list", "--json")
 	hideAgentWindow(cmd)
 	cmd.Stderr = io.Discard
-	raw, err := cmd.Output()
+	raw, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil {
 		return nil, fmt.Errorf("kimi provider list: %w", err)
 	}
@@ -1721,6 +1830,23 @@ func discoverQoderModels(ctx context.Context, runtimeCmd Command, defaultBin str
 	})
 }
 
+// acpDiscoveryDefaultTimeout bounds an ACP discovery handshake unless the
+// provider overrides it. Discovery is a foreground UI request, so the ceiling
+// is what a user will wait for a picker to populate, not what a CLI might
+// eventually manage.
+const acpDiscoveryDefaultTimeout = 15 * time.Second
+
+// hermesDiscoveryTimeout is sized to hermes' failure path, not its success
+// path. See acpDiscoveryProvider.timeout: a configured hermes returns its
+// catalog in ~2s, but one that cannot resolve its provider — the case that
+// actually needs to be reported — spends ~25s getting there. At the default 15s
+// the user would be told "context deadline exceeded" instead of the exact
+// command hermes wants them to run.
+//
+// Kept well below the server's 60s modelListRunningTimeout so discovery leaves
+// time for report delivery and retry backoffs before the request closes.
+const hermesDiscoveryTimeout = 40 * time.Second
+
 // acpDiscoveryProvider configures how discoverACPModels launches an
 // ACP-speaking agent CLI. The shared helper drives every CLI in
 // the same way (initialize → optional authenticate → session/new → parse
@@ -1752,6 +1878,17 @@ type acpDiscoveryProvider struct {
 	// ignores. CodeBuddy uses it to read its effort catalog out of the same
 	// handshake, which is why it needs no separate discovery call at all.
 	annotate func([]Model, json.RawMessage)
+	// timeout bounds the whole handshake — spawn, initialize, session/new.
+	// Zero means acpDiscoveryDefaultTimeout.
+	//
+	// It is per-provider because a CLI's UNHAPPY path is what has to fit, and
+	// that is the path with no shared shape: hermes answers a healthy
+	// session/new in ~2s but takes ~25s to conclude it cannot resolve a
+	// provider, because it re-probes before giving up (measured against hermes
+	// 0.20.0 — MUL-6606). A budget sized for the happy path turns every such
+	// diagnosis into "context deadline exceeded", which is the one failure text
+	// that tells the user nothing.
+	timeout time.Duration
 	// inspectInit receives the raw initialize result before any session is
 	// created. It is for reading capability facts the handshake already
 	// carries — Kimi reads `agentInfo.version` to gate a feature on the CLI
@@ -1780,7 +1917,11 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
 		return fail("executable lookup", err)
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	timeout := p.timeout
+	if timeout <= 0 {
+		timeout = acpDiscoveryDefaultTimeout
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var isolatedStateDir string
 	if p.isolatedStateEnv != "" {
@@ -1815,14 +1956,17 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	// Discard stderr; noisy logs here don't help us and we don't
 	// want them bleeding into the daemon log every 60s.
 	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, runtimeCmd.logger); err != nil {
 		return fail("process start", err)
 	}
-	// Ensure the child process is always reaped.
+	// Ensure the child process and everything it spawned are always reaped.
+	// This probe runs on a discovery schedule, so a leaked ACP server here
+	// accumulates rather than showing up once.
 	defer func() {
 		_ = stdin.Close()
-		_ = cmd.Process.Kill()
+		signalProcessGroup(cmd, syscall.SIGKILL)
 		_, _ = cmd.Process.Wait()
+		releaseProcessGroup(cmd)
 	}()
 
 	scanner := bufio.NewScanner(stdout)
@@ -2182,7 +2326,7 @@ func discoverAntigravityModels(ctx context.Context, runtimeCmd Command) ([]Model
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "models")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
+	out, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil && len(out) == 0 {
 		return nil, nil
 	}
@@ -2235,6 +2379,7 @@ func discoverGrokModels(ctx context.Context, runtimeCmd Command) (Catalog, error
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-grok-discovery-",
 		acpArgs:      []string{"--no-auto-update", "agent", "--always-approve", "stdio"},
+		annotate:     annotateGrokThinkingFromACP,
 		selectAuthMethod: func(initResult json.RawMessage, childEnv []string) (string, error) {
 			return selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY"))
 		},
@@ -2251,15 +2396,16 @@ func discoverGrokModels(ctx context.Context, runtimeCmd Command) (Catalog, error
 			models[i].Provider = "xai"
 		}
 	}
-	annotateGrokThinking(models)
 	return Catalog{Models: models}, nil
 }
 
 // grokStaticModels is the offline fallback catalog for the Grok Build CLI.
 // IDs match a typical signed-in `session/new` / `grok models` listing.
+// Grok 4.6 is the current Grok Build default (xAI, 2026-08-12).
 func grokStaticModels() []Model {
 	models := []Model{
-		{ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai", Default: true},
+		{ID: "grok-4.6", Label: "Grok 4.6", Provider: "xai", Default: true},
+		{ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai"},
 		{ID: "grok-composer-2.5-fast", Label: "Grok Composer 2.5 Fast", Provider: "xai"},
 	}
 	annotateGrokThinking(models)
@@ -2267,19 +2413,94 @@ func grokStaticModels() []Model {
 }
 
 // annotateGrokThinking attaches only capabilities confirmed by xAI's
-// per-model reasoning documentation. session/new does not advertise effort
-// catalogs, so unknown and composer models deliberately keep Thinking nil
-// instead of exposing values that may fail at runtime.
+// per-model reasoning documentation and Grok Build's `--effort` flag.
+// Unknown and composer models deliberately keep Thinking nil instead of
+// exposing values that may fail at runtime. Successful discovery replaces
+// these fallback catalogs with the installed CLI's advertised values.
+//
+// grok-4.6 documents and accepts `xhigh` (docs.x.ai/developers/grok-4-6,
+// grok 1.0.5 `--effort`). grok-4.5 does not; the server's dynamic literal
+// gate lets the token through and ValidateThinkingLevel still fails it closed
+// for 4.5 using the per-model catalog.
 func annotateGrokThinking(models []Model) {
 	for i := range models {
-		if models[i].ID != "grok-4.5" {
+		switch models[i].ID {
+		case "grok-4.6":
+			models[i].Thinking = grokThinkingCatalog(true)
+		case "grok-4.5":
+			models[i].Thinking = grokThinkingCatalog(false)
+		}
+	}
+}
+
+func grokThinkingCatalog(includeXHigh bool) *ModelThinking {
+	levels := []ThinkingLevel{
+		{Value: "low", Label: "Low"},
+		{Value: "medium", Label: "Medium"},
+		{Value: "high", Label: "High"},
+	}
+	if includeXHigh {
+		levels = append(levels, ThinkingLevel{Value: "xhigh", Label: "Extra high"})
+	}
+	return &ModelThinking{SupportedLevels: levels}
+}
+
+// annotateGrokThinkingFromACP fills in each model's effort catalog from the
+// xAI vendor `_meta` block on its `session/new` entry:
+//
+//	{"modelId": "grok-4.6", "_meta": {"supportsReasoningEffort": true,
+//	  "reasoningEfforts": [{"value": "high", "label": "High Effort", "default": true}, ...]}}
+//
+// This extension is outside the core ACP schema, so the parse stays narrow:
+// models whose entry does not advertise it keep Thinking nil, which hides the
+// picker instead of offering levels the CLI may reject.
+func annotateGrokThinkingFromACP(models []Model, sessionResult json.RawMessage) {
+	var resp struct {
+		Models struct {
+			AvailableModels []struct {
+				ModelID string `json:"modelId"`
+				Meta    struct {
+					SupportsReasoningEffort bool `json:"supportsReasoningEffort"`
+					ReasoningEfforts        []struct {
+						Value   string `json:"value"`
+						Label   string `json:"label"`
+						Default bool   `json:"default"`
+					} `json:"reasoningEfforts"`
+				} `json:"_meta"`
+			} `json:"availableModels"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(sessionResult, &resp); err != nil {
+		return
+	}
+	thinkingByModel := map[string]*ModelThinking{}
+	for _, entry := range resp.Models.AvailableModels {
+		if !entry.Meta.SupportsReasoningEffort {
 			continue
 		}
-		models[i].Thinking = &ModelThinking{SupportedLevels: []ThinkingLevel{
-			{Value: "low", Label: "Low"},
-			{Value: "medium", Label: "Medium"},
-			{Value: "high", Label: "High"},
-		}}
+		thinking := &ModelThinking{}
+		seen := map[string]bool{}
+		for _, effort := range entry.Meta.ReasoningEfforts {
+			value := strings.TrimSpace(effort.Value)
+			if value == "" || seen[value] || !isValidDynamicThinkingValue(value) {
+				continue
+			}
+			seen[value] = true
+			label := strings.TrimSpace(effort.Label)
+			if label == "" {
+				label = value
+			}
+			thinking.SupportedLevels = append(thinking.SupportedLevels, ThinkingLevel{Value: value, Label: label})
+			if effort.Default {
+				thinking.DefaultLevel = value
+			}
+		}
+		if len(thinking.SupportedLevels) > 0 {
+			thinkingByModel[strings.TrimSpace(entry.ModelID)] = thinking
+		}
+	}
+	for i := range models {
+		models[i].Thinking = thinkingByModel[models[i].ID]
 	}
 }
 
@@ -2303,7 +2524,7 @@ func discoverCursorModels(ctx context.Context, runtimeCmd Command) (Catalog, err
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "--list-models")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
+	out, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil && len(out) == 0 {
 		return Catalog{Models: cursorStaticModels(), Fallback: true}, nil
 	}
@@ -2393,6 +2614,17 @@ func discoverOpenclawAgents(ctx context.Context, runtimeCmd Command) ([]Model, e
 
 	// Try JSON modes first. Different openclaw builds expose the
 	// flag under different names; trying a couple is cheap.
+	//
+	// outputOwned, and this loop already has the salvage built in: a lingering
+	// `openclaw-config` helper makes Wait report exec.ErrWaitDelay with the
+	// catalog in the buffer, and `err != nil && len(out) == 0` lets a populated
+	// buffer through to the parse. The parse is the real gate — a truncated list
+	// does not unmarshal, so a short catalog cannot be mistaken for the real one.
+	//
+	// Not the collector in run_collect_quiet.go: it returns on the direct child's
+	// exit, and a wrapper that exits before the real CLI has printed would have
+	// its catalog killed mid-write. Pipe EOF is the signal that no more output is
+	// coming. See detectCLIVersion.
 	for _, jsonArgs := range [][]string{
 		{"agents", "list", "--json"},
 		{"agents", "list", "--output", "json"},
@@ -2400,7 +2632,7 @@ func discoverOpenclawAgents(ctx context.Context, runtimeCmd Command) ([]Model, e
 	} {
 		cmd := runtimeCmd.exec(runCtx, jsonArgs...)
 		hideAgentWindow(cmd)
-		out, err := cmd.Output()
+		out, err := outputOwned(cmd, runtimeCmd.logger)
 		if err != nil && len(out) == 0 {
 			continue
 		}
@@ -2414,7 +2646,7 @@ func discoverOpenclawAgents(ctx context.Context, runtimeCmd Command) ([]Model, e
 	// the wrong tokens produces nonsense entries like "Identity:".
 	cmd := runtimeCmd.exec(runCtx, "agents", "list")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
+	out, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil && len(out) == 0 {
 		return []Model{}, nil
 	}

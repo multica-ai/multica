@@ -9,20 +9,9 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { AgentNameField } from "./agent-configuration-panel";
-import { CreateMethodChooser } from "./choose-create-method-page";
 import { CreateAgentFooter } from "./create-agent-footer";
 import { draftPreview } from "./unfinished-drafts";
 import { classifyAgentCreateError } from "./use-create-agent-submit";
-import { NavigationProvider, type NavigationAdapter } from "../../navigation";
-
-const TEST_NAVIGATION: NavigationAdapter = {
-  push: vi.fn(),
-  replace: vi.fn(),
-  back: vi.fn(),
-  pathname: "/acme/agents/new",
-  searchParams: new URLSearchParams(),
-  getShareableUrl: (path: string) => path,
-};
 
 vi.mock("../../i18n", () => ({
   useT: () => ({
@@ -274,29 +263,5 @@ describe("Unfinished draft preview", () => {
     expect(
       draftPreview({ last_message_role: "", last_message_content: "" }),
     ).toBe("");
-  });
-});
-
-describe("Agent creation method chooser", () => {
-  it("always offers AI-assisted creation", () => {
-    render(
-      createElement(NavigationProvider, {
-        value: TEST_NAVIGATION,
-        children: createElement(CreateMethodChooser, {
-          blankHref: "/acme/agents/new/manual",
-          aiHref: "/acme/agents/new/ai",
-        }),
-      }),
-    );
-
-    expect(screen.getByText("Start blank")).toBeInTheDocument();
-    expect(screen.getByText("Build with AI")).toBeInTheDocument();
-    expect(
-      screen.getByText("Start blank").closest("a"),
-    ).toHaveAttribute("href", "/acme/agents/new/manual");
-    expect(screen.getByText("Build with AI").closest("a")).toHaveAttribute(
-      "href",
-      "/acme/agents/new/ai",
-    );
   });
 });

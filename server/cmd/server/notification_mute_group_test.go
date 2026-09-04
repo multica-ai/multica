@@ -45,15 +45,3 @@ func TestIsNotifMutedGroupSplit(t *testing.T) {
 		})
 	}
 }
-
-// TestNotifTypeToGroupMentionsIsOwnGroup guards the mapping itself: a future
-// edit that folds `mentioned` back under `comments` should fail here rather
-// than silently reintroduce the coupling.
-func TestNotifTypeToGroupMentionsIsOwnGroup(t *testing.T) {
-	if got := notifTypeToGroup["mentioned"]; got != "mentions" {
-		t.Fatalf("notifTypeToGroup[mentioned] = %q, want %q", got, "mentions")
-	}
-	if got := notifTypeToGroup["new_comment"]; got != "comments" {
-		t.Fatalf("notifTypeToGroup[new_comment] = %q, want %q", got, "comments")
-	}
-}

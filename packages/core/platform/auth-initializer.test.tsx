@@ -13,6 +13,10 @@ import {
 } from "../auth";
 import type { StorageAdapter, User, Workspace } from "../types";
 import { workspaceKeys } from "../workspace/queries";
+import {
+  registerDraftCleanup,
+  __clearDraftCleanupRegistryForTest,
+} from "../drafts/cleanup-registry";
 import { AuthInitializer } from "./auth-initializer";
 
 const logger = vi.hoisted(() => ({
@@ -55,6 +59,7 @@ function makeStorage(initial: Record<string, string> = {}): StorageAdapter & {
     removeItem: (key) => {
       delete values[key];
     },
+    keys: () => Object.keys(values),
     snapshot: () => ({ ...values }),
   };
 }
@@ -96,7 +101,6 @@ function renderInitializer({
         cookieAuth={cookieAuth}
         identity={{ platform }}
         onLogin={onLogin}
-        onLogout={onLogout}
         storage={storage}
       >
         <div>child</div>
@@ -109,6 +113,7 @@ function renderInitializer({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  __clearDraftCleanupRegistryForTest();
 });
 
 afterEach(() => {
@@ -269,6 +274,117 @@ describe("AuthInitializer recovery", () => {
       await vi.advanceTimersByTimeAsync(60_000);
     });
     expect(getConfig).toHaveBeenCalledTimes(3);
+  });
+
+  // A → 401 → B, where B shares a workspace with A so the post-login stale-tab
+  // validator prunes nothing. B must find none of A's client state. What
+  // exactly gets cleared is pinned in platform/session-cleanup.test.ts; this
+  // asserts the 401 is wired to it at all.
+  it("erases the previous user's client state when a live session is rejected", async () => {
+    const shared = "acme";
+    const storage = makeStorage({
+      multica_token: "token-1",
+      "multica_comment_drafts:acme": '{"issue-1":"A private draft"}',
+      multica_tabs: '[{"path":"/acme/issues/secret"}]',
+    });
+    const resetInMemory = vi.fn();
+    registerDraftCleanup({
+      storageKey: "multica_comment_drafts",
+      workspaceScoped: true,
+      resetInMemory,
+    });
+    const api = makeApi({
+      listWorkspaces: vi
+        .fn()
+        .mockResolvedValue([{ id: "ws-1", slug: shared }] as Workspace[]),
+    });
+    const { queryClient } = renderInitializer({ api, storage });
+
+    await waitFor(() => {
+      expect(useAuthStore.getState().status).toBe("authenticated");
+    });
+    await waitFor(() => {
+      expect(queryClient.getQueryData(workspaceKeys.list())).toHaveLength(1);
+    });
+    queryClient.setQueryData(["issues", "ws-1"], [{ id: "i-1" }]);
+
+    act(() => {
+      useAuthStore.getState().sessionExpired();
+    });
+
+    await waitFor(() => {
+      expect(queryClient.getQueryData(["issues", "ws-1"])).toBeUndefined();
+    });
+    expect(storage.snapshot()).toEqual({});
+    expect(resetInMemory).toHaveBeenCalled();
+    expect(useAuthStore.getState().expired).toBe(true);
+  });
+
+  // Elon's cold-start repro: A closes the app, the token expires while it is
+  // shut, and the next launch is rejected at the identity probe. This never
+  // passes through `authenticated`, and there is no workspace list to
+  // enumerate slugs from — so both the trigger and the sweep have to work
+  // without either.
+  // The failure mode that must never happen: a laptop with no connectivity
+  // gets signed out and asked for credentials it cannot verify. Only a 401
+  // ends a session — everything else waits.
+  it.each([
+    ["offline", new TypeError("fetch failed")],
+    ["server error", new ApiError("boom", 500, "Internal Server Error")],
+    ["gateway timeout", new ApiError("slow", 504, "Gateway Timeout")],
+  ])("keeps the session and every draft when getMe fails: %s", async (_label, error) => {
+    const before = {
+      multica_token: "token-1",
+      "multica_comment_drafts:acme": '{"issue-1":"unsent work"}',
+      multica_tabs: '[{"path":"/acme/issues/1"}]',
+    };
+    const storage = makeStorage(before);
+    const resetInMemory = vi.fn();
+    registerDraftCleanup({
+      storageKey: "multica_comment_drafts",
+      workspaceScoped: true,
+      resetInMemory,
+    });
+    const api = makeApi({ getMe: vi.fn().mockRejectedValue(error) });
+    renderInitializer({ api, storage });
+
+    await waitFor(() => {
+      expect(useAuthStore.getState().status).toBe("recovering");
+    });
+
+    expect(useAuthStore.getState().status).not.toBe("unauthenticated");
+    expect(storage.snapshot()).toEqual(before);
+    expect(resetInMemory).not.toHaveBeenCalled();
+  });
+
+  it("erases the previous session on a cold start with a stale token", async () => {
+    const storage = makeStorage({
+      multica_token: "stale-token",
+      "multica_comment_drafts:acme": '{"issue-1":"A private draft"}',
+      "multica:chat:activeSessionId:acme": "session-1",
+      multica_tabs: '[{"path":"/acme/issues/secret"}]',
+      multica_locale: "zh-Hans",
+    });
+    registerDraftCleanup({
+      storageKey: "multica_comment_drafts",
+      workspaceScoped: true,
+      resetInMemory: vi.fn(),
+    });
+    const api = makeApi({
+      getMe: vi
+        .fn()
+        .mockRejectedValue(new ApiError("unauthorized", 401, "Unauthorized")),
+    });
+    const { queryClient } = renderInitializer({ api, storage });
+
+    await waitFor(() => {
+      expect(useAuthStore.getState().status).toBe("unauthenticated");
+    });
+    await waitFor(() => {
+      // Only the device preference survives.
+      expect(storage.snapshot()).toEqual({ multica_locale: "zh-Hans" });
+    });
+    expect(queryClient.getQueryData(workspaceKeys.list())).toBeUndefined();
   });
 
   it("publishes a definitive logout for a genuine 401", async () => {

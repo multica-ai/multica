@@ -31,7 +31,7 @@ Unticking an agent skips this one trigger only — you don't need to delete its 
 
 ![Trigger preview before sending: lists the agents that will start working once the comment is sent](/images/docs/mention-trigger-preview.webp)
 
-Once the comment is posted, an online runtime usually claims the task right away; if the runtime is offline, the task waits in the queue.
+Once the comment is posted, an online runtime usually claims the run right away; if the runtime is offline, the run waits in the queue.
 
 ## Automatic routing of replies
 
@@ -47,9 +47,9 @@ When a reply triggers an agent other than the assignee, Multica schedules a dela
 
 ## Coalescing consecutive comments
 
-When the same agent already has a waiting task on the issue, new consecutive comments merge into the pending task; if the agent is already running, later comments wait for the current run to finish and merge into a single follow-up run. You can keep adding information without waiting for the agent to reply.
+When the same agent already has a waiting run on the issue, new consecutive comments merge into the pending run; if the agent is already running, later comments wait for the current run to finish and merge into a single follow-up run. You can keep adding information without waiting for the agent to reply.
 
-When one comment @-mentions several different agents, each agent gets its own task; multiple mentions resolving to the same agent keep only one.
+When one comment @-mentions several different agents, each agent gets its own run; multiple mentions resolving to the same agent keep only one.
 
 ## Comments that don't trigger agents
 

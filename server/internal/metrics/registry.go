@@ -12,18 +12,12 @@ import (
 )
 
 type RegistryOptions struct {
-	Pool     *pgxpool.Pool
-	Realtime *realtime.Metrics
-	DaemonWS *daemonws.Metrics
-	Version  string
-	Commit   string
-
-	// BusinessSampler, when non-nil, opts the registry into the
-	// scrape-time SQL sampler from PR4 (MUL-2947). It is intentionally
-	// separate from Pool so existing tests (and any deployment without
-	// METRICS_ADDR) cannot accidentally start hitting the database on
-	// every /metrics scrape.
-	BusinessSampler *BusinessSamplerOptions
+	Pool        *pgxpool.Pool
+	ReplicaPool *pgxpool.Pool
+	Realtime    *realtime.Metrics
+	DaemonWS    *daemonws.Metrics
+	Version     string
+	Commit      string
 }
 
 type Registry struct {
@@ -33,10 +27,7 @@ type Registry struct {
 	ChannelMedia *ChannelMediaReconcilerMetrics
 	ChannelLease *ChannelLeaseMetrics
 	Wecom        *WecomMetrics
-	// Sampler is non-nil only when RegistryOptions.BusinessSampler was
-	// supplied with a valid Pool. Exposed so the cmd/server entrypoint
-	// can plumb the same instance into health checks if it ever wants to.
-	Sampler *BusinessSamplerCollector
+	DBRouting    *DBRoutingMetrics
 }
 
 func NewRegistry(opts RegistryOptions) *Registry {
@@ -65,20 +56,17 @@ func NewRegistry(opts RegistryOptions) *Registry {
 
 	wecomMetrics := NewWecomMetrics()
 	reg.MustRegister(wecomMetrics.Collectors()...)
+	dbRoutingMetrics := NewDBRoutingMetrics()
+	reg.MustRegister(dbRoutingMetrics.Collectors()...)
 
 	if opts.Pool != nil {
-		reg.MustRegister(NewDBCollector(opts.Pool))
+		reg.MustRegister(NewDBCollector(opts.Pool, opts.ReplicaPool))
 	}
 	if opts.Realtime != nil {
 		reg.MustRegister(NewRealtimeCollector(opts.Realtime))
 	}
 	if opts.DaemonWS != nil {
 		reg.MustRegister(NewDaemonWSCollector(opts.DaemonWS))
-	}
-
-	sampler := NewBusinessSamplerCollector(opts.BusinessSampler)
-	if sampler != nil {
-		reg.MustRegister(sampler.Collectors()...)
 	}
 
 	return &Registry{
@@ -88,7 +76,7 @@ func NewRegistry(opts RegistryOptions) *Registry {
 		ChannelMedia: channelMedia,
 		ChannelLease: channelLease,
 		Wecom:        wecomMetrics,
-		Sampler:      sampler,
+		DBRouting:    dbRoutingMetrics,
 	}
 }
 

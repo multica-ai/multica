@@ -240,3 +240,67 @@ SELECT EXISTS(
     WHERE issue_id = $1 AND user_type = $2 AND user_id = $3
       AND unsubscribed_at IS NULL
 ) AS subscribed;
+
+-- name: GetDelegatedSubscriptionFacts :one
+-- Loads the two facts the delegated-subscriber rule needs about the run that
+-- filed an issue: the human that run carried, and HOW the delegation chain the
+-- run belongs to acquired that human (MUL-5483, MUL-7051). One walk, so one
+-- round trip and one tenant guard rather than two.
+--
+-- WHY the second fact is needed. Attribution COPIES the originator across every
+-- agent hop instead of chaining it (MUL-4302 §3.2), so originator_user_id alone
+-- cannot say why a chain has a human: a member's own comment and an autopilot
+-- trigger somebody armed months ago leave an identical value on every
+-- descendant run. Until MUL-6951 the difference did not have to be read —
+-- direct_human was the only root that left an originator at all, so "has an
+-- originator" WAS "a human asked for this". An armed trigger now carries its
+-- creator's authorization too, and that equivalence is what silently turned the
+-- rule into "subscribe whoever armed the automation" (MUL-7051).
+--
+-- Only originator_source separates the two, and every hop relabels itself
+-- 'delegation' / 'comment_source' — so it is the chain ROOT's label that has to
+-- be read. delegated_from_task_id is the link back to the run a hop copied its
+-- human from: follow it while the label is still a hop label and the walk lands
+-- on the run that actually resolved the human.
+--
+-- Tenancy: every hop re-joins agent and re-checks workspace_id — the same guard
+-- GetAgentTaskInWorkspace applies to a single task (MUL-4252) — so a foreign
+-- delegated_from_task_id can never pull a row from another tenant. Both hops
+-- carry it: the anchor's predicate is the one an issue pointing straight at a
+-- foreign run exercises, the recursive one is what stops a local run from
+-- claiming a parent outside the workspace.
+--
+-- The 32-hop stop is a REAL product limit, not just cycle protection (a run can
+-- only reference an older run, so the lineage cannot cycle anyway): a chain
+-- deeper than that reports the hop label it stopped on and its human is not
+-- subscribed. Accepted deliberately — no observed chain comes close, and this
+-- read is on the issue-create path — see DelegatedSubscriber for the contract
+-- and what removing the limit would take.
+--
+-- A lineage truncated by a deleted ancestor, or by that limit, reports the hop
+-- label it stopped on, never a root label, so the caller reads it as "not
+-- proven" instead of assuming a human asked.
+WITH RECURSIVE lineage AS (
+    SELECT atq.id, atq.originator_user_id, atq.originator_source, atq.delegated_from_task_id, 0 AS depth
+    FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id
+    WHERE atq.id = sqlc.arg(origin_task_id) AND a.workspace_id = sqlc.arg(workspace_id)
+
+    UNION ALL
+
+    SELECT parent.id, parent.originator_user_id, parent.originator_source,
+           parent.delegated_from_task_id, child.depth + 1
+    FROM lineage child
+    JOIN agent_task_queue parent ON parent.id = child.delegated_from_task_id
+    JOIN agent parent_agent ON parent_agent.id = parent.agent_id
+    WHERE child.originator_source IN ('delegation', 'comment_source')
+      AND parent_agent.workspace_id = sqlc.arg(workspace_id)
+      AND child.depth < 32
+),
+chain_root AS (
+    SELECT originator_source FROM lineage ORDER BY depth DESC LIMIT 1
+)
+SELECT origin.originator_user_id, chain_root.originator_source AS root_source
+FROM lineage origin
+CROSS JOIN chain_root
+WHERE origin.depth = 0;

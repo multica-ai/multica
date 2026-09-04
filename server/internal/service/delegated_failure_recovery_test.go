@@ -15,15 +15,16 @@ import (
 )
 
 type delegatedFailureFixture struct {
-	pool        *pgxpool.Pool
-	workspaceID string
-	userID      string
-	issueID     string
-	workerIssue string
-	runtimeID   string
-	coordinator string
-	worker      string
-	sourceTask  string
+	pool          *pgxpool.Pool
+	workspaceID   string
+	userID        string
+	issueID       string
+	workerIssue   string
+	runtimeID     string
+	coordinator   string
+	worker        string
+	sourceTrigger string
+	sourceTask    string
 }
 
 func seedDelegatedFailureFixture(t *testing.T) (*delegatedFailureFixture, *TaskService) {
@@ -60,27 +61,36 @@ func seedDelegatedFailureFixture(t *testing.T) (*delegatedFailureFixture, *TaskS
 		t.Fatalf("seed worker issue: %v", err)
 	}
 
+	var sourceTriggerID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
+		VALUES ($1, $2, 'member', $3, 'coordinate delegated work')
+		RETURNING id`, workspaceID, issueID, userID).Scan(&sourceTriggerID); err != nil {
+		t.Fatalf("seed source trigger comment: %v", err)
+	}
+
 	var sourceTaskID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority,
-			originator_user_id, accountable_user_id, originator_source
+			trigger_comment_id, originator_user_id, accountable_user_id, originator_source
 		)
-		VALUES ($1, $2, $3, 'completed', 0, $4, $4, 'direct_human')
-		RETURNING id`, coordinatorID, runtimeID, issueID, userID).Scan(&sourceTaskID); err != nil {
+		VALUES ($1, $2, $3, 'completed', 0, $4, $5, $5, 'direct_human')
+		RETURNING id`, coordinatorID, runtimeID, issueID, sourceTriggerID, userID).Scan(&sourceTaskID); err != nil {
 		t.Fatalf("seed source task: %v", err)
 	}
 
 	return &delegatedFailureFixture{
-		pool:        pool,
-		workspaceID: workspaceID,
-		userID:      userID,
-		issueID:     issueID,
-		workerIssue: workerIssueID,
-		runtimeID:   runtimeID,
-		coordinator: coordinatorID,
-		worker:      workerID,
-		sourceTask:  sourceTaskID,
+		pool:          pool,
+		workspaceID:   workspaceID,
+		userID:        userID,
+		issueID:       issueID,
+		workerIssue:   workerIssueID,
+		runtimeID:     runtimeID,
+		coordinator:   coordinatorID,
+		worker:        workerID,
+		sourceTrigger: sourceTriggerID,
+		sourceTask:    sourceTaskID,
 	}, NewTaskService(db.New(pool), pool, nil, events.New())
 }
 
@@ -139,15 +149,18 @@ func TestFailTaskFinalDelegatedFailureWakesCoordinatorOnce(t *testing.T) {
 	}
 
 	var commentCount int
-	var content string
+	var content, parentID string
 	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*), COALESCE(max(content), '') FROM comment
+		SELECT count(*), COALESCE(max(content), ''), COALESCE(max(parent_id::text), '') FROM comment
 		WHERE issue_id = $1 AND author_type = 'system' AND type = 'progress_update' AND source_task_id = $2`, f.issueID, failedID).
-		Scan(&commentCount, &content); err != nil {
+		Scan(&commentCount, &content, &parentID); err != nil {
 		t.Fatalf("read recovery comment: %v", err)
 	}
 	if commentCount != 1 {
 		t.Fatalf("recovery comment count = %d, want 1", commentCount)
+	}
+	if parentID != f.sourceTrigger {
+		t.Fatalf("recovery comment parent_id = %q, want source trigger %s", parentID, f.sourceTrigger)
 	}
 	if strings.Contains(content, secret) || !strings.Contains(content, "[REDACTED API KEY]") {
 		t.Fatalf("recovery comment did not redact error: %q", content)
@@ -246,6 +259,46 @@ func TestPendingDelegatedFailureSweepRepairsCommittedCommentWithoutTask(t *testi
 	}
 	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
 		t.Fatalf("second recovery sweep = %+v, %v; want zero result, nil", result, err)
+	}
+}
+
+func TestPendingDelegatedFailureSweepSkipsCustomTerminalSourceIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET failure_reason = 'agent_error.process_failure', error = 'worker exited', completed_at = now()
+		WHERE id = $1`, failedID); err != nil {
+		t.Fatalf("stamp failed task: %v", err)
+	}
+	if target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID); err != nil || target == nil || !created {
+		t.Fatalf("ensure recovery comment = target %v created %v err %v", target != nil, created, err)
+	}
+
+	const customDone = "recovery_verified"
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO issue_status (
+			workspace_id, key, name, description, category, color, is_system, position
+		) VALUES ($1, $2, 'Recovery verified', '', 'done', '#22c55e', false, 1)`,
+		f.workspaceID, customDone); err != nil {
+		t.Fatalf("insert custom done status: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, customDone); err != nil {
+		t.Fatalf("move source issue to custom done status: %v", err)
+	}
+
+	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
+		t.Fatalf("terminal-source recovery sweep = %+v, %v; want zero result, nil", result, err)
+	}
+	var recoveryTasks int
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&recoveryTasks); err != nil {
+		t.Fatalf("count recovery tasks: %v", err)
+	}
+	if recoveryTasks != 0 {
+		t.Fatalf("recovery tasks = %d, want none for a custom terminal source issue", recoveryTasks)
 	}
 }
 
@@ -509,16 +562,19 @@ func TestDelegatedFailureRecoveryStopsAfterBoundedUndeliveredAttempts(t *testing
 	}
 
 	var exhaustionComments int
-	var exhaustionContent string
+	var exhaustionContent, exhaustionParentID string
 	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*), COALESCE(max(content), '')
+		SELECT count(*), COALESCE(max(content), ''), COALESCE(max(parent_id::text), '')
 		FROM comment
 		WHERE issue_id = $1 AND author_type = 'system' AND type = 'system' AND source_task_id = $2`, f.issueID, failedID).
-		Scan(&exhaustionComments, &exhaustionContent); err != nil {
+		Scan(&exhaustionComments, &exhaustionContent, &exhaustionParentID); err != nil {
 		t.Fatalf("read exhaustion comment: %v", err)
 	}
 	if exhaustionComments != 1 || !strings.Contains(exhaustionContent, "stopped after 3") {
 		t.Fatalf("exhaustion comment = count %d content %q, want one visible bounded-stop explanation", exhaustionComments, exhaustionContent)
+	}
+	if exhaustionParentID != f.sourceTrigger {
+		t.Fatalf("exhaustion comment parent_id = %q, want source trigger %s", exhaustionParentID, f.sourceTrigger)
 	}
 	var inboxItems int
 	var inboxSeverity, inboxBody string

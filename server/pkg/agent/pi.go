@@ -226,6 +226,16 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	if err := ensurePiSessionFile(sessionPath); err != nil {
 		return nil, fmt.Errorf("%s session file: %w", label, err)
 	}
+	sessionLock, locked, err := tryLockPiSessionFile(sessionPath)
+	if err != nil {
+		return nil, fmt.Errorf("%s session lock: %w", label, err)
+	}
+	if !locked {
+		if opts.ResumeSessionID != "" {
+			return piSessionBusyResult(label, sessionPath), nil
+		}
+		return nil, fmt.Errorf("%s session file %q is already in use", label, sessionPath)
+	}
 
 	runCtx, cancel := runContext(ctx, timeout)
 
@@ -241,6 +251,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		releasePiSessionFileLock(sessionLock)
 		cancel()
 		return nil, fmt.Errorf("%s stdout pipe: %w", label, err)
 	}
@@ -251,6 +262,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	// Pi has been observed to wait indefinitely when stdin never reaches EOF.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		releasePiSessionFileLock(sessionLock)
 		cancel()
 		return nil, fmt.Errorf("%s stdin pipe: %w", label, err)
 	}
@@ -258,8 +270,9 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "["+label+":stderr] ")
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
+		releasePiSessionFileLock(sessionLock)
 		cancel()
 		return nil, fmt.Errorf("start %s: %w", label, err)
 	}
@@ -289,6 +302,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	}()
 
 	go func() {
+		defer func() { releasePiSessionFileLock(sessionLock) }()
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
@@ -415,6 +429,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		}
 
 		waitErr := cmd.Wait()
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
 		// Wait closes the process pipes, so a prompt write still blocked when the
@@ -429,7 +444,20 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			finalError = "execution cancelled"
 		} else if waitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("%s exited with error: %v", label, waitErr)
+			// Prefer the turn's provider message over the process exit code.
+			// Pi (and pi-print-clean-exit) exits 1 after stopReason=error, so
+			// Wait() wins this branch and used to drop lastTurnError. The
+			// classifier then saw only "exit status 1" and filed the run as
+			// non-retryable process_failure — even when the turn was a
+			// transient LiteLLM/OpenAI "Connection error." / "Request timed
+			// out." Keep the exit status as a suffix so a genuine crash is
+			// still visible (same shape as the OpenCode empty-step+exit
+			// composite).
+			if lastTurnError != "" {
+				finalError = fmt.Sprintf("%s; %s exited with error: %v", lastTurnError, label, waitErr)
+			} else {
+				finalError = fmt.Sprintf("%s exited with error: %v", label, waitErr)
+			}
 		} else if writeErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("%s prompt write failed: %v", label, writeErr)
@@ -443,6 +471,12 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 		b.cfg.Logger.Info(label+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
+		// Publish the terminal result only after the transcript is available to
+		// a follow-up run. The result channel is buffered, so relying on a defer
+		// would let the receiver race ahead and spuriously treat the session as
+		// still busy after Pi had already exited.
+		releasePiSessionFileLock(sessionLock)
+		sessionLock = nil
 		resCh <- Result{
 			Status:     finalStatus,
 			Output:     output.String(),
@@ -454,6 +488,19 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func piSessionBusyResult(label, sessionPath string) *Session {
+	msgCh := make(chan Message)
+	close(msgCh)
+	resCh := make(chan Result, 1)
+	resCh <- Result{
+		Status:                  "failed",
+		Error:                   fmt.Sprintf("%s session file %q is already in use by another execution", label, sessionPath),
+		ResumeRejectedTransient: true,
+	}
+	close(resCh)
+	return &Session{Messages: msgCh, Result: resCh}
 }
 
 // ── Pi event types ──

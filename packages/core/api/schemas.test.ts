@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
-  ChildIssueProgressResponseSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
   RedeemWecomBindingTokenResponseSchema,
@@ -27,11 +26,14 @@ import {
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
   ChatPendingTaskSchema,
+  ChatSessionListSchema,
+  ChatSessionSchema,
   PrioritizeQueuedChatTaskResponseSchema,
   CreateFeedbackResponseSchema,
   DuplicateIssueErrorBodySchema,
   EMPTY_CHAT_DRAFT_RESTORES,
   EMPTY_CHAT_PENDING_TASK,
+  EMPTY_CHAT_SESSION,
   EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   EMPTY_INBOX_ITEMS,
@@ -53,6 +55,7 @@ import {
   SendChatMessageResponseSchema,
   SquadListSchema,
   SquadSchema,
+  SourceContextPreviewSchema,
   TimelineEntriesSchema,
   UserSchema,
   PluginInstallationSchema,
@@ -95,41 +98,177 @@ const baseIssue = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
-describe("ChildIssueProgressResponseSchema", () => {
-  it("keeps older server responses compatible when visibility fields are absent", () => {
-    const parsed = ChildIssueProgressResponseSchema.parse({
-      progress: [{ parent_issue_id: "parent-1", total: 3, done: 1 }],
+describe("ChatSessionSchema", () => {
+  const baseSession = {
+    id: "chat-1",
+    workspace_id: "ws-1",
+    agent_id: "agent-1",
+    creator_id: "user-1",
+    title: "Channel chat",
+    status: "active",
+    has_unread: false,
+    created_at: "2026-08-18T00:00:00Z",
+    updated_at: "2026-08-18T00:00:00Z",
+  };
+
+  it("accepts channel route metadata and leaves it absent for first-party Chats", () => {
+    expect(ChatSessionSchema.parse(baseSession).channel_source).toBeUndefined();
+
+    const parsed = ChatSessionSchema.parse({
+      ...baseSession,
+      channel_source: {
+        channel_type: "slack",
+        installation_id: "installation-1",
+        route_revision: 3,
+      },
+      is_current_channel_route: false,
     });
-    expect(parsed.progress[0]).toEqual({ parent_issue_id: "parent-1", total: 3, done: 1 });
+    expect(parsed.channel_source).toEqual({
+      channel_type: "slack",
+      installation_id: "installation-1",
+      route_revision: 3,
+    });
+    expect(parsed.is_current_channel_route).toBe(false);
   });
 
-  it("parses full and visible progress independently", () => {
-    const parsed = ChildIssueProgressResponseSchema.parse({
-      progress: [{
-        parent_issue_id: "parent-1",
-        total: 10,
-        done: 3,
-        visible_total: 4,
-        visible_done: 3,
-        hidden_total: 6,
-      }],
+  it("degrades malformed session metadata without dropping the Chat", () => {
+    const parsed = ChatSessionSchema.parse({
+      ...baseSession,
+      channel_source: { channel_type: 42 },
+      is_current_channel_route: "yes",
     });
-    expect(parsed.progress[0]?.hidden_total).toBe(6);
-    expect(parsed.progress[0]?.visible_total).toBe(4);
+    expect(parsed.channel_source).toBeUndefined();
+    expect(parsed.is_current_channel_route).toBeUndefined();
+    expect(parsed.id).toBe("chat-1");
+
+    expect(parseWithFallback({ id: 42 }, ChatSessionSchema, EMPTY_CHAT_SESSION, {
+      endpoint: "GET /api/chat/sessions/:id",
+    })).toEqual(EMPTY_CHAT_SESSION);
   });
 
-  it("falls back instead of exposing malformed progress to installed clients", () => {
-    const fallback = { progress: [] };
-    expect(parseWithFallback(
-      { progress: [{ parent_issue_id: "parent-1", total: "many", done: 1 }] },
-      ChildIssueProgressResponseSchema,
-      fallback,
-      { endpoint: "GET /api/issues/child-progress" },
-    )).toEqual(fallback);
+  it("drops one malformed list item without hiding the other Chats", () => {
+    const parsed = ChatSessionListSchema.parse([
+      baseSession,
+      { ...baseSession, id: 42 },
+      {
+        ...baseSession,
+        id: "onboarding-chat",
+        last_message: {
+          content: "Welcome",
+          role: "assistant",
+          created_at: "2026-08-18T00:00:00Z",
+          message_kind: "onboarding_opening",
+        },
+      },
+    ]);
+
+    expect(parsed.map((session) => session.id)).toEqual(["chat-1", "onboarding-chat"]);
+    expect(parsed[1]?.last_message?.message_kind).toBe("onboarding_opening");
   });
 });
-
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  // A custom status key can be derived rather than readable — "客户确认" becomes
+  // `in_review_2` — so the display name travels with it. The field has to
+  // survive a server that predates it, since an issue that fails validation
+  // degrades to a stub rather than losing one field. (MUL-6749)
+  it("carries a custom status's display name", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, status: "in_review_2", status_name: "客户确认" }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.status_name).toBe("客户确认");
+  });
+  it("drops only a malformed status_name, keeping the issue and the list", () => {
+    for (const bad of [42, { name: "x" }, ["x"], true]) {
+      const parsed = ListIssuesResponseSchema.parse({
+        issues: [{ ...baseIssue, status: "in_review_2", status_name: bad }],
+        total: 1,
+      });
+      expect(parsed.issues).toHaveLength(1);
+      expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+      expect(parsed.issues[0]?.status).toBe("in_review_2");
+      expect(parsed.issues[0]?.status_name).toBeUndefined();
+    }
+  });
+  it("still parses an issue from a server that does not send status_name", () => {
+    const { status_name: _omitted, ...withoutName } = { ...baseIssue, status_name: "x" };
+    const parsed = ListIssuesResponseSchema.parse({ issues: [withoutName], total: 1 });
+    expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+    expect(parsed.issues[0]?.status_name).toBeUndefined();
+  });
+  it("keeps the issue while independently dropping a malformed source context", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, source_context: { snapshot: "bad" } }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+    expect(parsed.issues[0]?.source_context).toBeUndefined();
+  });
+  it("parses source-context change reasons without requiring them from older servers", () => {
+    const sourceContext = {
+      id: "context-1",
+      version: 1,
+      usage: "read_only_historical_background",
+      captured_at: "2026-08-21T12:00:00Z",
+      display_state: "changed",
+      source_issue_state: "changed",
+      comment_thread_state: "unchanged",
+      anchor_comment_state: "available",
+      can_open_current_source: true,
+      change_reasons: ["issue_description_attachments"],
+      change_details: {
+        changed_comment_ids: ["comment-1"],
+        added_comments: [{
+          id: "comment-2", parent_id: "comment-1", type: "comment", content: "new reply",
+          author: { type: "member", id: "user-2", name: "Bob" },
+          created_at: "later", updated_at: "later", revision: 1, attachments: [],
+        }],
+        removed_comment_ids: ["comment-3"],
+        description_attachment_changes: [{
+          kind: "removed", attachment_id: "attachment-1", filename: "old.txt",
+        }],
+      },
+      snapshot: {
+        source_issue: {
+          id: "issue-1", identifier: "MUL-1", number: 1, title: "Source",
+          description: null, created_at: "now", updated_at: "now", revision: 1,
+          attachments: [],
+        },
+        comment_thread: [{
+          id: "comment-1", parent_id: null, type: "comment", content: "history",
+          author: { type: "member", id: "user-1", name: "Alice" },
+          created_at: "now", updated_at: "now", revision: 1, attachments: [],
+        }],
+        anchor_comment_id: "comment-1",
+      },
+    };
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, source_context: sourceContext }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.source_context?.change_reasons).toEqual(["issue_description_attachments"]);
+    expect(parsed.issues[0]?.source_context?.change_details).toEqual(sourceContext.change_details);
+
+    const { change_reasons: _reasonsOmitted, change_details: _detailsOmitted, ...legacyContext } = sourceContext;
+    const legacy = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, source_context: legacyContext }],
+      total: 1,
+    });
+    expect(legacy.issues[0]?.source_context?.change_reasons).toBeUndefined();
+    expect(legacy.issues[0]?.source_context?.change_details).toBeUndefined();
+
+    const malformed = ListIssuesResponseSchema.parse({
+      issues: [{
+        ...baseIssue,
+        source_context: {
+          ...sourceContext,
+          change_details: { ...sourceContext.change_details, added_comments: [{ id: 42 }] },
+        },
+      }],
+      total: 1,
+    });
+    expect(malformed.issues[0]?.source_context).toBeUndefined();
+  });
   it("accepts null activity during backfill and rejects malformed activity", () => {
     const parsed = ListIssuesResponseSchema.parse({
       issues: [{ ...baseIssue, last_activity_at: null }],
@@ -233,6 +372,50 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
   });
 });
 
+describe("SourceContextPreviewSchema", () => {
+  it("parses a thread-history preview and rejects a missing token", () => {
+    const preview = {
+      source_issue: {
+        id: "issue-1", identifier: "MUL-1", number: 1, title: "Source",
+        description: null, created_at: "now", updated_at: "now", revision: 1,
+        attachments: [],
+      },
+      comment_thread: [{
+        id: "comment-1", parent_id: null, type: "comment", content: "history",
+        author: { type: "member", id: "user-1", name: "Alice" },
+        created_at: "now", updated_at: "now", revision: 1, attachments: [],
+      }],
+      anchor_comment_id: "comment-1",
+      capture_token: "sha256:token",
+      limits: { comment_count: 1, text_bytes: 7, attachment_count: 0, attachment_bytes: 0 },
+    };
+    expect(SourceContextPreviewSchema.parse(preview).comment_thread).toHaveLength(1);
+    expect(() => SourceContextPreviewSchema.parse({ ...preview, capture_token: "" })).toThrow();
+  });
+
+  it("normalizes null attachment lists from early source-context servers", () => {
+    const preview = {
+      source_issue: {
+        id: "issue-1", identifier: "MUL-1", number: 1, title: "Source",
+        description: null, created_at: "now", updated_at: "now", revision: 1,
+        attachments: null,
+      },
+      comment_thread: [{
+        id: "comment-1", parent_id: null, type: "comment", content: "history",
+        author: { type: "member", id: "user-1", name: "Alice" },
+        created_at: "now", updated_at: "now", revision: 1, attachments: null,
+      }],
+      anchor_comment_id: "comment-1",
+      capture_token: "sha256:token",
+      limits: { comment_count: 1, text_bytes: 7, attachment_count: 0, attachment_bytes: 0 },
+    };
+
+    const parsed = SourceContextPreviewSchema.parse(preview);
+    expect(parsed.source_issue.attachments).toEqual([]);
+    expect(parsed.comment_thread[0]?.attachments).toEqual([]);
+  });
+});
+
 describe("IssuePropertySchema (via ListPropertiesResponseSchema)", () => {
   const baseProperty = {
     id: "22222222-2222-2222-2222-222222222222",
@@ -295,14 +478,14 @@ describe("IssueTriggerPreviewSchema", () => {
   it("parses a well-formed response", () => {
     const parsed = IssueTriggerPreviewSchema.parse({
       triggers: [
-        { issue_id: "i1", agent_id: "a1", source: "assign", handoff_supported: true },
-        { issue_id: "i2", agent_id: "a2", source: "status", handoff_supported: false },
+        { issue_id: "i1", agent_id: "a1", source: "assign" },
+        { issue_id: "i2", agent_id: "a2", source: "status" },
       ],
       total_count: 2,
     });
     expect(parsed.total_count).toBe(2);
     expect(parsed.triggers).toHaveLength(2);
-    expect(parsed.triggers[0]).toMatchObject({ issue_id: "i1", agent_id: "a1", source: "assign", handoff_supported: true });
+    expect(parsed.triggers[0]).toMatchObject({ issue_id: "i1", agent_id: "a1", source: "assign" });
   });
 
   it("defaults missing top-level fields (empty / older backend)", () => {
@@ -317,7 +500,6 @@ describe("IssueTriggerPreviewSchema", () => {
       issue_id: "i1",
       agent_id: "",
       source: "",
-      handoff_supported: false,
     });
   });
 
@@ -373,6 +555,26 @@ describe("TimelineEntriesSchema", () => {
     ]);
 
     expect(parsed[0]?.source_task_id).toBe("task-1");
+  });
+
+  it("preserves server-hydrated historical actor identity", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "member",
+        actor_id: "former-user-1",
+        actor_name: "Former Member",
+        actor_avatar_url: "https://profiles.example.com/former.png",
+        created_at: "2026-01-01T00:00:00Z",
+        content: "Authored before leaving",
+      },
+    ]);
+
+    expect(parsed[0]?.actor_name).toBe("Former Member");
+    expect(parsed[0]?.actor_avatar_url).toBe(
+      "https://profiles.example.com/former.png",
+    );
   });
 });
 
@@ -961,6 +1163,26 @@ describe("AppConfigSchema local_worktree_supported drift", () => {
   });
 });
 
+describe("AppConfigSchema agent_conversation_starters_supported drift", () => {
+  it("defaults to false when the server predates the persistence contract", () => {
+    expect(AppConfigSchema.parse({}).agent_conversation_starters_supported).toBe(false);
+  });
+
+  it("coerces a malformed declaration to false", () => {
+    expect(
+      AppConfigSchema.parse({ agent_conversation_starters_supported: "yes" })
+        .agent_conversation_starters_supported,
+    ).toBe(false);
+  });
+
+  it("carries a genuine declaration through", () => {
+    expect(
+      AppConfigSchema.parse({ agent_conversation_starters_supported: true })
+        .agent_conversation_starters_supported,
+    ).toBe(true);
+  });
+});
+
 describe("AppConfigSchema cdn_signed drift", () => {
   it("defaults cdn_signed to false when the server omits it (pre-MUL-3254 servers)", () => {
     const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });
@@ -1066,13 +1288,23 @@ describe("InboxItemListSchema", () => {
 
   it("parses a well-formed archived list and tolerates extra fields", () => {
     const parsed = parseWithFallback(
-      [row({ issue_status: "in_progress", details: { comment_id: "c-1" }, future_field: 1 })],
+      [row({
+        issue_status: "in_progress",
+        issue_priority: "high",
+        details: { comment_id: "c-1" },
+        future_field: 1,
+      })],
       InboxItemListSchema,
       EMPTY_INBOX_ITEMS,
       ENDPOINT,
     );
     expect(parsed).toHaveLength(1);
-    expect(parsed[0]).toMatchObject({ id: "inbox-1", archived: true });
+    expect(parsed[0]).toMatchObject({
+      id: "inbox-1",
+      archived: true,
+      issue_status: "in_progress",
+      issue_priority: "high",
+    });
   });
 
   it("keeps a notification type this client doesn't know yet", () => {
@@ -1094,6 +1326,17 @@ describe("InboxItemListSchema", () => {
     expect(
       parseWithFallback([withoutOptionals], InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
     ).toHaveLength(1);
+  });
+
+  it("returns the empty fallback when an issue projection is wrong-typed", () => {
+    expect(
+      parseWithFallback(
+        [row({ issue_priority: 3 })],
+        InboxItemListSchema,
+        EMPTY_INBOX_ITEMS,
+        ENDPOINT,
+      ),
+    ).toBe(EMPTY_INBOX_ITEMS);
   });
 
   it("returns the empty fallback for a non-array body", () => {
@@ -1313,6 +1556,7 @@ describe("RuntimeModelListRequestSchema", () => {
           default_level: "low",
         },
         service_tiers: [{ id: "fast", name: "Fast" }],
+        supports_explicit_standard_service_tier: true,
       },
     ],
   };
@@ -1331,6 +1575,9 @@ describe("RuntimeModelListRequestSchema", () => {
       { value: "high", label: "High" },
     ]);
     expect(parsed.models?.[0]?.service_tiers).toEqual([{ id: "fast", name: "Fast" }]);
+    expect(
+      parsed.models?.[0]?.supports_explicit_standard_service_tier,
+    ).toBe(true);
     expect(parsed.cached).toBeUndefined();
   });
 
@@ -1360,6 +1607,66 @@ describe("RuntimeModelListRequestSchema", () => {
     expect(parsed.cached).toBeUndefined();
   });
 
+  // MUL-6961: models the runtime cannot run arrive in their OWN list. The
+  // separation is the compatibility contract — a client that never learned the
+  // field reads `models` and therefore cannot offer one — so the schema must
+  // keep them apart rather than folding them together.
+  it("parses unavailable models without letting them into the selectable list", () => {
+    const parsed = parseWithFallback(
+      {
+        ...completed,
+        unavailable_models: [
+          {
+            id: "cc-update-required-1",
+            label: "Fable 5.1 (disabled)",
+            reason: "Update to 2.1.255+ to use Fable 5.1",
+          },
+        ],
+      },
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.unavailable_models?.[0]?.id).toBe("cc-update-required-1");
+    expect(parsed.unavailable_models?.[0]?.reason).toBe(
+      "Update to 2.1.255+ to use Fable 5.1",
+    );
+    expect(parsed.models?.map((m) => m.id)).not.toContain(
+      "cc-update-required-1",
+    );
+  });
+
+  // An older daemon or server sends no such key. The picker then shows no
+  // unavailable section, which is exactly the pre-MUL-6961 behaviour.
+  it("tolerates a backend that omits unavailable models entirely", () => {
+    const parsed = parseWithFallback(
+      completed,
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.unavailable_models).toBeUndefined();
+    expect(parsed.models?.length).toBe(1);
+  });
+
+  it("treats an older daemon that omits explicit-standard support as unsupported", () => {
+    const model = completed.models[0]!;
+    const {
+      supports_explicit_standard_service_tier: _omitted,
+      ...oldDaemonModel
+    } = model;
+    const parsed = parseWithFallback(
+      { ...completed, models: [oldDaemonModel] },
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+
+    expect(
+      parsed.models?.[0]?.supports_explicit_standard_service_tier,
+    ).toBeUndefined();
+  });
+
   it("passes an unknown status through instead of failing the whole response", () => {
     const parsed = parseWithFallback(
       { ...completed, status: "superseded" },
@@ -1384,6 +1691,15 @@ describe("RuntimeModelListRequestSchema", () => {
       { ...completed, supported: "yes" },
       { ...completed, models: "nope" },
       { ...completed, models: [{ label: "no id" }] },
+      {
+        ...completed,
+        models: [
+          {
+            ...completed.models[0],
+            supports_explicit_standard_service_tier: "yes",
+          },
+        ],
+      },
     ]) {
       const parsed = parseWithFallback(
         malformed,
@@ -1669,6 +1985,33 @@ describe("Plugin schemas", () => {
     expect(parsed.installed).toBe(true);
     expect(parsed.installed_version).toBe("1.0.0");
     expect(parsed.added_scopes).toEqual(["comments:write"]);
+  });
+
+  it("preserves automatic schedules on both consent and installed Plugin payloads", () => {
+    const schedule = { cron: "*/5 * * * *", timezone: "Asia/Shanghai" };
+    const preview = PluginPreviewSchema.parse({
+      manifest: {
+        key: "com.example.digest",
+        name: "Digest",
+        version: "1.0.0",
+        author: { name: "example" },
+        contributes: {
+          hooks: [{ key: "digest", name: "Digest", triggers: ["schedule"], schedule }],
+        },
+      },
+    });
+    expect(preview.manifest.contributes?.hooks?.[0]?.schedule).toEqual(schedule);
+
+    const installation = PluginInstallationSchema.parse({
+      id: "installation-1",
+      hooks: [{
+        key: "digest",
+        name: "Digest",
+        triggers: ["schedule"],
+        schedule: { ...schedule, next_run_at: "2026-08-23T10:15:00Z" },
+      }],
+    });
+    expect(installation.hooks[0]?.schedule?.next_run_at).toBe("2026-08-23T10:15:00Z");
   });
 });
 

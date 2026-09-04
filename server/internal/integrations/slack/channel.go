@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/slack-go/slack"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // TypeSlack is the channel discriminator for the Slack adapter. It is defined
@@ -37,6 +39,14 @@ type slackSender struct {
 // SendResult carries every posted chunk timestamp and keeps MessageID as the
 // timestamp of the last chunk for existing callers.
 func (c *slackSender) Send(ctx context.Context, out channel.OutboundMessage) (channel.SendResult, error) {
+	return c.send(ctx, out, slack.SlackMetadata{})
+}
+
+func (c *slackSender) SendWithMetadata(ctx context.Context, out channel.OutboundMessage, metadata slack.SlackMetadata) (channel.SendResult, error) {
+	return c.send(ctx, out, metadata)
+}
+
+func (c *slackSender) send(ctx context.Context, out channel.OutboundMessage, metadata slack.SlackMetadata) (channel.SendResult, error) {
 	if c.api == nil {
 		return channel.SendResult{}, errors.New("slack: api client not configured")
 	}
@@ -50,6 +60,9 @@ func (c *slackSender) Send(ctx context.Context, out channel.OutboundMessage) (ch
 			slack.MsgOptionText(chunk, false),
 			slack.MsgOptionDisableLinkUnfurl(),
 		}
+		if metadata.EventType != "" {
+			opts = append(opts, slack.MsgOptionMetadata(metadata))
+		}
 		if threadTS != "" {
 			opts = append(opts, slack.MsgOptionTS(threadTS))
 		}
@@ -61,6 +74,14 @@ func (c *slackSender) Send(ctx context.Context, out channel.OutboundMessage) (ch
 		messageIDs = append(messageIDs, ts)
 	}
 	return channel.SendResult{MessageID: lastTS, MessageIDs: messageIDs}, nil
+}
+
+const slackOutboundMetadataEvent = "multica_channel_outbound"
+
+func outboundMetadata(bindingID pgtype.UUID, routeRevision int64, kind string) slack.SlackMetadata {
+	return slack.SlackMetadata{EventType: slackOutboundMetadataEvent, EventPayload: map[string]any{
+		"binding_id": util.UUIDToString(bindingID), "route_revision": routeRevision, "kind": kind,
+	}}
 }
 
 // newSlackSender builds a Send-only client from decoded credentials and a

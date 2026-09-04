@@ -165,7 +165,7 @@ type InboundMessage struct {
 	AddressedToBot bool
 
 	// ForceFresh asks the core to start a fresh agent session for this message
-	// instead of resuming the prior one. Router recognizes the shared /new text
+	// instead of resuming the prior one. Router recognizes the shared /clear text
 	// command; adapters may also set this flag for a native platform affordance.
 	ForceFresh bool
 

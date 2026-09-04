@@ -12,6 +12,8 @@
 // This module owns no React and no fetching, so it is unit-testable in
 // isolation and independent of whichever list shell renders the events.
 
+import { truncateWithEllipsis } from "@multica/core/utils";
+
 export interface TraceEvent {
   seq?: number;
   type: string;
@@ -89,7 +91,10 @@ export function stripShellWrapper(command: string): string {
 }
 
 function clip(value: string, max: number): string {
-  return value.length > max ? value.slice(0, max) + "..." : value;
+  // Delegate to the shared helper so truncation is code-point-safe and uses the
+  // standard single-character ellipsis. `max` here is a content-character budget,
+  // so pass `max + 1` — the helper counts the ellipsis toward its own budget.
+  return truncateWithEllipsis(value, max + 1);
 }
 
 /**

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -43,9 +44,9 @@ func issueTableQueryWithoutFacet(input issueTableQuerySpec, facet issueTableFace
 	output := input
 	output.Filters = input.Filters
 	if input.Filters.Properties != nil {
-		output.Filters.Properties = make(map[string][]string, len(input.Filters.Properties))
+		output.Filters.Properties = make(map[string][]json.RawMessage, len(input.Filters.Properties))
 		for propertyID, values := range input.Filters.Properties {
-			output.Filters.Properties[propertyID] = append([]string(nil), values...)
+			output.Filters.Properties[propertyID] = append([]json.RawMessage(nil), values...)
 		}
 	}
 
@@ -250,6 +251,14 @@ GROUP BY a.id`, compiled.where)
 			// Unset issues count under the "__none__" bucket so the filter menu's
 			// "No value" option carries a real count (issues without the key).
 			query = fmt.Sprintf(`SELECT COALESCE(i.properties ->> %s, '__none__'), COUNT(*)::bigint FROM issue i WHERE %s AND (jsonb_typeof(i.properties -> %s) = 'string' OR NOT (i.properties ? %s)) GROUP BY 1`, propertyKey, compiled.where, propertyKey, propertyKey)
+		case "text", "url", "date", "number":
+			// Scalar values are free-form, so grouping by distinct value would
+			// return one row per observed value with no bound. The filter menu
+			// only reads the "__none__" bucket for these types, so compute just
+			// the two bounded buckets instead of pulling the whole value space.
+			// Key existence is exact for "no value": stored values can never be
+			// null or empty, so a present key is always a set value.
+			query = fmt.Sprintf(`SELECT CASE WHEN i.properties ? %s THEN '__set__' ELSE '__none__' END, COUNT(*)::bigint FROM issue i WHERE %s GROUP BY 1`, propertyKey, compiled.where)
 		case "multi_select", "multi_actor":
 			query = fmt.Sprintf(`SELECT COALESCE(property_value.value, '__none__'), COUNT(DISTINCT i.id)::bigint FROM issue i JOIN LATERAL (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(i.properties -> %s) = 'array' THEN i.properties -> %s ELSE '[]'::jsonb END) AS value UNION ALL SELECT NULL WHERE NOT (i.properties ? %s)) property_value(value) ON TRUE WHERE %s GROUP BY 1`, propertyKey, propertyKey, propertyKey, compiled.where)
 		case "checkbox":

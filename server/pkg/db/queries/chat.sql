@@ -23,27 +23,18 @@ WHERE id = $1 AND workspace_id = $2;
 -- A channel command is a durable control-plane record, not a public chat turn.
 -- Channel-created sessions therefore become public only after they contain a
 -- non-command message. Empty first-party sessions stay public so the member can
--- open a newly-created Web Chat and send its first message. channel_ingested is
--- the immutable fallback when a channel binding has since been removed.
+-- open a newly-created Web Chat and send its first message. The explicit marker
+-- is durable, so removing an installation cannot change list visibility.
 SELECT cs.* FROM chat_session AS cs
 WHERE cs.id = $1
   AND cs.workspace_id = $2
   AND (
+    cs.explicitly_created_at IS NOT NULL
+    OR
     EXISTS (
       SELECT 1 FROM chat_message AS public_message
       WHERE public_message.chat_session_id = cs.id
         AND public_message.message_kind != 'channel_command'
-    )
-    OR (
-      NOT EXISTS (
-        SELECT 1 FROM channel_chat_session_binding AS binding
-        WHERE binding.chat_session_id = cs.id
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM chat_message AS channel_message
-        WHERE channel_message.chat_session_id = cs.id
-          AND channel_message.channel_ingested
-      )
     )
   );
 
@@ -72,18 +63,9 @@ LEFT JOIN LATERAL (
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
   AND (
+    cs.explicitly_created_at IS NOT NULL
+    OR
     lm.created_at IS NOT NULL
-    OR (
-      NOT EXISTS (
-        SELECT 1 FROM channel_chat_session_binding AS binding
-        WHERE binding.chat_session_id = cs.id
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM chat_message AS channel_message
-        WHERE channel_message.chat_session_id = cs.id
-          AND channel_message.channel_ingested
-      )
-    )
   )
 ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
@@ -118,18 +100,9 @@ LEFT JOIN LATERAL (
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
   AND (
+    cs.explicitly_created_at IS NOT NULL
+    OR
     lm.created_at IS NOT NULL
-    OR (
-      NOT EXISTS (
-        SELECT 1 FROM channel_chat_session_binding AS binding
-        WHERE binding.chat_session_id = cs.id
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM chat_message AS channel_message
-        WHERE channel_message.chat_session_id = cs.id
-          AND channel_message.channel_ingested
-      )
-    )
   )
 ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
@@ -196,6 +169,63 @@ ORDER BY COALESCE(lm.created_at, d.updated_at, cs.updated_at) DESC;
 -- name: UpdateChatSessionTitle :one
 UPDATE chat_session SET title = $2, updated_at = now()
 WHERE id = $1
+RETURNING *;
+
+-- name: MarkChatSessionExplicitlyCreated :one
+UPDATE chat_session
+SET explicitly_created_at = COALESCE(explicitly_created_at, now())
+WHERE id = $1
+RETURNING *;
+
+-- name: InitializeChatSessionTitle :one
+UPDATE chat_session AS session
+SET title = @title
+WHERE session.id = @id
+  AND session.title = ''
+  AND NOT EXISTS (
+    SELECT 1 FROM chat_message AS message
+    WHERE message.chat_session_id = session.id
+      AND message.role = 'user'
+      AND message.message_kind != 'channel_command'
+  )
+RETURNING *;
+
+-- name: ReplaceImplicitChatSessionTitle :one
+-- Hidden channel sessions were not user-visible or manually renameable before
+-- their first ordinary turn. Replace the legacy platform-generic title (or the
+-- new empty placeholder) under the append transaction's route fence. An empty
+-- title deliberately prepares a media-only first turn for attachment naming.
+UPDATE chat_session AS session
+SET title = @title
+WHERE session.id = @id
+  AND session.explicitly_created_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM chat_message AS message
+    WHERE message.chat_session_id = session.id
+      AND message.role = 'user'
+      AND message.message_kind != 'channel_command'
+  )
+RETURNING *;
+
+-- name: InitializeChatSessionMediaTitle :one
+UPDATE chat_session AS session
+SET title = @title
+WHERE session.id = @id
+  AND session.title = ''
+  AND EXISTS (
+    SELECT 1 FROM chat_message AS message
+    WHERE message.id = @message_id
+      AND message.chat_session_id = session.id
+      AND message.role = 'user'
+      AND message.message_kind != 'channel_command'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM chat_message AS other_message
+    WHERE other_message.chat_session_id = session.id
+      AND other_message.role = 'user'
+      AND other_message.message_kind != 'channel_command'
+      AND other_message.id != @message_id
+  )
 RETURNING *;
 
 -- name: UpdateChatSessionProject :one
@@ -1406,6 +1436,14 @@ SELECT EXISTS (
     SELECT 1 FROM chat_message
     WHERE chat_session_id = $1 AND role = 'user'
 ) AS has_user_message;
+
+-- name: ChatSessionHasPublicUserMessage :one
+SELECT EXISTS (
+    SELECT 1 FROM chat_message
+    WHERE chat_session_id = $1
+      AND role = 'user'
+      AND message_kind != 'channel_command'
+) AS has_public_user_message;
 
 -- name: CreateChatDraftRestore :one
 -- Persists the deferred-cancellation draft restore (#5219) in the same tx

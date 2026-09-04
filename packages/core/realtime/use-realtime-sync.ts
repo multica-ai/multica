@@ -116,6 +116,7 @@ import type {
   ChatPendingTask,
   ChatMessagesPage,
   ChatSession,
+  ChatSessionCreatedPayload,
   InvitationCreatedPayload,
 } from "../types";
 
@@ -837,6 +838,10 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+          // Shared agents may carry a redacted runtime liveness projection;
+          // refetch it when a daemon changes state even if its private runtime
+          // is absent from this member's runtime list.
+          qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
           // Runtime online/offline transitions move the derived status
           // for every agent that hosts on this runtime, which shifts the
           // working/idle/offline pill on the squad page.
@@ -964,7 +969,7 @@ export function useRealtimeSync(
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
-      "chat:session_deleted", "chat:session_updated",
+      "chat:session_created", "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -1644,6 +1649,13 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
+    const unsubChatSessionCreated = ws.on("chat:session_created", (p) => {
+      const payload = p as ChatSessionCreatedPayload;
+      chatWsLogger.info("chat:session_created (global)", payload);
+      if (payload.workspace_id !== getCurrentWsId()) return;
+      invalidateSessionLists();
+    });
+
     // chat:session_updated fires after the creator renames, pins, or archives
     // a session in any tab/device. Patch the cached row inline so the dropdown
     // and badges reflect the change without a full sessions-list refetch — see
@@ -1724,6 +1736,7 @@ export function useRealtimeSync(
       unsubTaskCompleted();
       unsubTaskFailed();
       unsubChatSessionRead();
+      unsubChatSessionCreated();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();
       if (taskMessageFlushTimer) clearTimeout(taskMessageFlushTimer);

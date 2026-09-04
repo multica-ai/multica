@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -19,7 +20,6 @@ func newAutopilotCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().String("agent", "", "")
 	cmd.Flags().String("mode", "", "")
-	cmd.Flags().String("priority", "none", "")
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().String("issue-title-template", "", "")
 	cmd.Flags().StringArray("subscriber", nil, "")
@@ -33,7 +33,6 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().String("agent", "", "")
 	cmd.Flags().String("project", "", "")
-	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("mode", "", "")
 	cmd.Flags().String("issue-title-template", "", "")
@@ -41,6 +40,22 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("clear-subscribers", false, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+func TestAutopilotCommandsRejectRemovedPriorityFlag(t *testing.T) {
+	for name, cmd := range map[string]*cobra.Command{
+		"create": autopilotCreateCmd,
+		"update": autopilotUpdateCmd,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if cmd.Flags().Lookup("priority") != nil {
+				t.Fatalf("autopilot %s still exposes the removed --priority flag", name)
+			}
+			if err := cmd.ParseFlags([]string{"--priority", "high"}); err == nil {
+				t.Fatalf("autopilot %s silently accepted the removed --priority flag", name)
+			}
+		})
+	}
 }
 
 func newAutopilotGetTestCmd() *cobra.Command {
@@ -727,5 +742,161 @@ func TestUUIDRegexp(t *testing.T) {
 		if got := uuidRegexp.MatchString(tt.in); got != tt.want {
 			t.Errorf("uuidRegexp.MatchString(%q) = %v, want %v", tt.in, got, tt.want)
 		}
+	}
+}
+
+func newAutopilotTriggerListTestCmd(output string) *cobra.Command {
+	cmd := &cobra.Command{Use: "trigger-list"}
+	cmd.Flags().String("output", output, "")
+	cmd.Flags().Bool("full-id", false, "")
+	return cmd
+}
+
+// TestRunAutopilotTriggerListSurfacesIDs covers MUL-6680: the trigger ids that
+// trigger-update / trigger-delete / trigger-rotate-url require must be readable
+// from a command of their own, not only by knowing that `get --output json`
+// returns "triggers" as a sibling of "autopilot".
+func TestRunAutopilotTriggerListSurfacesIDs(t *testing.T) {
+	const (
+		autopilotID = "11111111-1111-1111-1111-111111111111"
+		triggerID   = "22222222-2222-2222-2222-222222222222"
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots/"+autopilotID {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"autopilot": map[string]any{"id": autopilotID, "title": "Deploy"},
+			"triggers": []map[string]any{
+				{
+					"id":              triggerID,
+					"kind":            "schedule",
+					"enabled":         true,
+					"cron_expression": "0 9 * * 1-5",
+					"timezone":        "America/New_York",
+					"label":           "weekday morning",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	// A task-scoped mat_ token so the test also passes inside an agent workdir,
+	// where a daemon task marker makes newAPIClient reject a plain token.
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	out, err := captureStdout(t, func() error {
+		return runAutopilotTriggerList(newAutopilotTriggerListTestCmd("table"), []string{autopilotID})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotTriggerList: %v", err)
+	}
+	// The short id prefix is what trigger-update accepts, so it must be visible.
+	for _, want := range []string{triggerID[:8], "schedule", "0 9 * * 1-5", "weekday morning"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table output missing %q:\n%s", want, out)
+		}
+	}
+
+	out, err = captureStdout(t, func() error {
+		return runAutopilotTriggerList(newAutopilotTriggerListTestCmd("json"), []string{autopilotID})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotTriggerList (json): %v", err)
+	}
+	var got struct {
+		Triggers []map[string]any `json:"triggers"`
+		Total    int              `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("json output is not valid JSON: %v\n%s", err, out)
+	}
+	if got.Total != 1 || len(got.Triggers) != 1 {
+		t.Fatalf("expected exactly one trigger, got total=%d triggers=%v", got.Total, got.Triggers)
+	}
+	if got.Triggers[0]["id"] != triggerID {
+		t.Errorf("id = %#v, want %q", got.Triggers[0]["id"], triggerID)
+	}
+}
+
+// Webhook triggers carry a URL that grants the ability to fire the autopilot,
+// so trigger-list must redact it the same way `get` does.
+func TestRunAutopilotTriggerListRedactsWebhookCredentials(t *testing.T) {
+	const (
+		autopilotID  = "11111111-1111-1111-1111-111111111111"
+		webhookToken = "awt_super-secret-7890"
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots/"+autopilotID {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"autopilot": map[string]any{"id": autopilotID},
+			"triggers": []map[string]any{
+				{
+					"id":            "22222222-2222-2222-2222-222222222222",
+					"kind":          "webhook",
+					"enabled":       true,
+					"webhook_token": webhookToken,
+					"webhook_path":  "/api/webhooks/autopilots/" + webhookToken,
+					"webhook_url":   "https://hooks.example.com/api/webhooks/autopilots/" + webhookToken,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	// A task-scoped mat_ token so the test also passes inside an agent workdir,
+	// where a daemon task marker makes newAPIClient reject a plain token.
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	out, err := captureStdout(t, func() error {
+		return runAutopilotTriggerList(newAutopilotTriggerListTestCmd("json"), []string{autopilotID})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotTriggerList: %v", err)
+	}
+	if strings.Contains(out, webhookToken) {
+		t.Fatalf("trigger-list leaked webhook credential:\n%s", out)
+	}
+}
+
+func TestRelativeTimestampAt(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	at := func(d time.Duration) string {
+		return now.Add(d).Format(time.RFC3339)
+	}
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		// An autopilot with no schedule must read as visibly different from
+		// one that is scheduled — that ambiguity is the MUL-6680 misdiagnosis.
+		{"empty", "", "—"},
+		{"unparseable", "not-a-timestamp", "—"},
+		{"seconds ahead", at(30 * time.Second), "in 30s"},
+		{"minutes ahead", at(45 * time.Minute), "in 45m"},
+		{"hours ahead", at(2 * time.Hour), "in 2h"},
+		{"days ahead", at(72 * time.Hour), "in 3d"},
+		{"minutes past", at(-45 * time.Minute), "45m ago"},
+		{"hours past", at(-2 * time.Hour), "2h ago"},
+		{"days past", at(-72 * time.Hour), "3d ago"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := relativeTimestampAt(tc.in, now); got != tc.want {
+				t.Errorf("relativeTimestampAt(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }

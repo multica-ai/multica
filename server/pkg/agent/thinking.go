@@ -177,7 +177,7 @@ func loadClaudeThinkingByModel(ctx context.Context, cmd Command) map[string]*Mod
 func claudeEffortSuperset(ctx context.Context, runtimeCmd Command) []string {
 	cmd := runtimeCmd.exec(ctx, "--help")
 	hideAgentWindow(cmd)
-	out, err := cmd.CombinedOutput()
+	out, err := combinedOutputOwned(cmd, runtimeCmd.logger)
 	if err != nil {
 		return append([]string(nil), claudeStaticEffortFallback...)
 	}
@@ -282,7 +282,12 @@ var codexEffortLabel = map[string]string{
 	"ultra":   "Ultra",
 }
 
-const minCodexDebugModelsVersion = "0.122.0"
+const (
+	minCodexDebugModelsVersion = "0.122.0"
+	// Codex 0.133.0 is the first stable release containing the request-only
+	// `default` sentinel added by openai/codex#23537.
+	minCodexExplicitStandardServiceTierVersion = "0.133.0"
+)
 
 // codexDebugModelsResponse mirrors the JSON shape emitted by
 // `codex debug models --bundled` (Codex 0.122.0+). Only the fields we
@@ -320,31 +325,53 @@ func discoverCodexModels(ctx context.Context, cmd Command) []Model {
 		cmd.Path = "codex"
 	}
 	version, err := DetectVersion(ctx, cmd)
-	if err != nil || !codexSupportsDebugModels(version) {
+	if err != nil {
 		return codexStaticModels()
+	}
+	supportsExplicitStandard := codexSupportsExplicitStandardServiceTier(version)
+	if !codexSupportsDebugModels(version) {
+		return annotateCodexExplicitStandardServiceTier(codexStaticModels(), supportsExplicitStandard)
 	}
 
 	raw, err := runCodexDebugModels(ctx, cmd)
 	if err != nil {
-		return codexStaticModels()
+		return annotateCodexExplicitStandardServiceTier(codexStaticModels(), supportsExplicitStandard)
 	}
 	models, err := parseCodexModelCatalog(raw)
 	if err != nil || len(models) == 0 {
-		return codexStaticModels()
+		return annotateCodexExplicitStandardServiceTier(codexStaticModels(), supportsExplicitStandard)
 	}
-	return models
+	return annotateCodexExplicitStandardServiceTier(models, supportsExplicitStandard)
 }
 
 func codexSupportsDebugModels(version string) bool {
+	return codexVersionAtLeast(version, minCodexDebugModelsVersion)
+}
+
+func codexSupportsExplicitStandardServiceTier(version string) bool {
+	return codexVersionAtLeast(version, minCodexExplicitStandardServiceTierVersion)
+}
+
+func codexVersionAtLeast(version, minimumVersion string) bool {
 	parsed, err := parseSemver(version)
 	if err != nil {
 		return false
 	}
-	minimum, err := parseSemver(minCodexDebugModelsVersion)
+	minimum, err := parseSemver(minimumVersion)
 	if err != nil {
 		return false
 	}
 	return !parsed.lessThan(minimum)
+}
+
+func annotateCodexExplicitStandardServiceTier(models []Model, supported bool) []Model {
+	if !supported {
+		return models
+	}
+	for i := range models {
+		models[i].SupportsExplicitStandardServiceTier = true
+	}
+	return models
 }
 
 // codexDebugModelsArgs is the argv we pass to discover the local Codex
@@ -358,7 +385,7 @@ var codexDebugModelsArgs = []string{"debug", "models", "--bundled"}
 func runCodexDebugModels(ctx context.Context, runtimeCmd Command) ([]byte, error) {
 	cmd := runtimeCmd.exec(ctx, codexDebugModelsArgs...)
 	hideAgentWindow(cmd)
-	return cmd.Output()
+	return outputOwned(cmd, runtimeCmd.logger)
 }
 
 // parseCodexModelCatalog projects the CLI's raw catalog into the daemon wire
@@ -676,7 +703,13 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 		}
 	}
 	for _, m := range models {
-		if m.ID != target {
+		// Normalise the catalog side too, not just the requested model. Claude
+		// discovery reports what the CLI would really run, and that includes
+		// the context-window tag (`claude-opus-5[1m]`), while target has
+		// already had it stripped. Comparing raw IDs would miss every tagged
+		// entry and fail the level closed, silently dropping the user's
+		// --effort (MUL-6961).
+		if modelIDForCapabilityLookup(providerType, m.ID) != target {
 			continue
 		}
 		if m.Thinking == nil {
@@ -694,8 +727,10 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 
 // ValidateServiceTier reports whether value is advertised by the current
 // Codex catalog for the explicit model. An empty value is always valid and
-// means "inherit runtime configuration". An empty Codex model fails closed:
-// its effective model comes from config.toml and may not support the tier.
+// means "inherit runtime configuration". Codex's "default" sentinel is valid
+// only when the daemon's installed CLI reports support for explicit standard
+// routing. An empty Codex model otherwise fails closed because its effective
+// model comes from config.toml and may not support the requested tier.
 func ValidateServiceTier(ctx context.Context, providerType string, cmd Command, model, value string) (bool, error) {
 	return ValidateServiceTierWith(catalogLoader(ctx, providerType, cmd), providerType, model, value)
 }
@@ -706,12 +741,23 @@ func ValidateServiceTierWith(loadCatalog func() (Catalog, error), providerType, 
 	if value == "" {
 		return true, nil
 	}
-	if providerType != "codex" || model == "" {
+	if providerType != "codex" {
+		return false, nil
+	}
+	if value != codexStandardServiceTier && model == "" {
 		return false, nil
 	}
 	catalog, err := loadCatalog()
 	if err != nil {
 		return false, err
+	}
+	if value == codexStandardServiceTier {
+		for _, candidate := range catalog.Models {
+			if candidate.SupportsExplicitStandardServiceTier {
+				return true, nil
+			}
+		}
+		return false, nil
 	}
 	for _, m := range catalog.Models {
 		if m.ID != model {
@@ -773,13 +819,6 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 	},
-	// Grok 4.5's documented --effort levels. It cannot disable reasoning and
-	// does not accept none, minimal, or xhigh.
-	"grok": {
-		"low":    true,
-		"medium": true,
-		"high":   true,
-	},
 	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
 	// the exact subset supported by each model before execution.
 	"pi": {
@@ -798,8 +837,12 @@ var providerThinkingEnums = map[string]map[string]bool{
 // server accepts any well-formed token for them and lets the daemon's
 // per-model check decide before execution.
 var thinkingDynamicCatalogProviders = map[string]bool{
-	"codex":    true,
-	"dsh":      true,
+	"codex": true,
+	"dsh":   true,
+	// Grok advertises each model's effort catalog through session/new, so the
+	// server does not maintain a provider-wide fixed enum. The daemon applies
+	// the selected effort with `--effort`, not session/set_config_option.
+	"grok":     true,
 	"opencode": true,
 	"kimi":     true,
 }

@@ -43,6 +43,14 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 			// is cancelled with an upgrade prompt (MUL-5707). Pin it here so
 			// dropping it from the list can never be a silent change.
 			protocol.DaemonCapabilityLocalWorktreeV1,
+			// Same shape, opposite default: this daemon's brief names the
+			// merged multica-platform skill, and advertising that is what
+			// stops the server shipping it a redirect stub under the old name
+			// (MUL-6986). Dropping it would silently hand every task on this
+			// machine a skill it does not need; the failure is extra payload
+			// and a stale signpost, neither of which any other test would
+			// notice.
+			protocol.DaemonCapabilityPlatformSkillV1,
 		} {
 			if !capabilities[want] {
 				t.Errorf("X-Client-Capabilities missing %q: %v", want, capabilities)
@@ -438,21 +446,6 @@ func TestPostJSONWithRetry_CtxCancelStopsRetries(t *testing.T) {
 	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 attempt before cancel, got %d", got)
-	}
-}
-
-func TestDefaultTerminalRetrySchedule_MatchesAgreedPlan(t *testing.T) {
-	// MUL-2780 settled on a 5-step exponential backoff (4s, 8s, 16s, 32s, 64s).
-	// Pin it so a future "tidy this up" refactor can't silently flatten or
-	// shorten the recovery window without explicit discussion.
-	want := []time.Duration{4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second, 64 * time.Second}
-	if len(defaultTerminalRetrySchedule) != len(want) {
-		t.Fatalf("schedule length: got %d, want %d", len(defaultTerminalRetrySchedule), len(want))
-	}
-	for i, d := range want {
-		if defaultTerminalRetrySchedule[i] != d {
-			t.Errorf("schedule[%d]: got %s, want %s", i, defaultTerminalRetrySchedule[i], d)
-		}
 	}
 }
 

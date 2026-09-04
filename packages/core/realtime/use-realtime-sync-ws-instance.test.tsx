@@ -9,6 +9,7 @@ import type { WSClient } from "../api/ws-client";
 import { defaultStorage } from "../platform/storage";
 import { issueKeys } from "../issues/queries";
 import { chatKeys } from "../chat/queries";
+import { runtimeKeys } from "../runtimes/queries";
 import { workspaceWorkingAgentsKeys } from "../agents/queries";
 import { workspaceKeys } from "../workspace/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
@@ -159,6 +160,31 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(issueStatusKeys.all("ws-1"));
   });
 
+  it("invalidates agent projections when a daemon changes liveness", () => {
+    vi.useFakeTimers();
+    try {
+      const ws = createMockWs();
+      renderHook(() => useRealtimeSync(ws, stores), {
+        wrapper: createWrapper(qc),
+      });
+      const onAny = vi.mocked(ws.onAny).mock.calls[0]?.[0];
+      expect(onAny).toBeDefined();
+
+      invalidateSpy.mockClear();
+      onAny!({ type: "daemon:register", payload: {} } as never);
+      vi.advanceTimersByTime(100);
+
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: runtimeKeys.all("ws-1"),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: workspaceKeys.agents("ws-1"),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("invalidates per-issue caches (no wsId in key) on ws instance change", () => {
     // These keys are not under the ["issues", wsId] prefix, so they need
     // their own invalidation on recovery — otherwise events missed while
@@ -274,6 +300,33 @@ describe("useRealtimeSync — ws instance change", () => {
     onAny!({ type: "dingtalk_group_route:updated", payload: {} } as never);
 
     expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+
+  it("invalidates the current workspace chat list when a channel creates a session", () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const sessionCreated = vi
+      .mocked(ws.on)
+      .mock.calls.find(([event]) => event === "chat:session_created")?.[1];
+    expect(sessionCreated).toBeDefined();
+
+    (sessionCreated as (payload: unknown) => void)({
+      workspace_id: "ws-1",
+      chat_session_id: "channel-session-1",
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: chatKeys.sessions("ws-1"),
+    });
+
+		invalidateSpy.mockClear();
+		(sessionCreated as (payload: unknown) => void)({
+			workspace_id: "ws-2",
+			chat_session_id: "other-workspace-session",
+		});
+		expect(invalidateSpy).not.toHaveBeenCalled();
   });
 });
 

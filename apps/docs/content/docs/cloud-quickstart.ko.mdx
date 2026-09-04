@@ -1,6 +1,6 @@
 ---
 title: 빠른 시작
-description: 컴퓨터를 연결하고 첫 에이전트를 만든 뒤 첫 태스크를 완료하게 합니다.
+description: 컴퓨터를 연결하고 첫 에이전트를 만든 뒤 첫 작업을 완료하게 합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -60,23 +60,23 @@ Web([multica.ai](https://multica.ai)) 또는 [Multica Desktop](https://multica.a
 
 ![에이전트 생성 시작 방법 선택: Start blank와 Build with AI](/images/docs/quickstart-new-agent.webp)
 
-## 4. 첫 이슈 맡기기
+## 4. 첫 태스크 맡기기
 
-사이드바 위쪽의 **새 이슈**를 클릭하거나 단축키 `C`를 누릅니다. 기본 에이전트 모드에서 다음과 같이 진행합니다.
+사이드바 위쪽의 **새 태스크**를 클릭하거나 단축키 `C`를 누릅니다. 기본 에이전트 모드에서 다음과 같이 진행합니다.
 
 1. **생성자**에서 방금 만든 에이전트를 선택합니다.
 2. "이 워크스페이스를 어떻게 활용할 수 있는지 소개해 줘"처럼 할 일을 한두 문장으로 설명합니다.
-3. 제출합니다. Multica가 이슈를 만들고 에이전트를 담당자로 지정한 뒤 즉시 실행을 시작합니다.
+3. 제출합니다. Multica가 태스크를 만들고 에이전트를 담당자로 지정한 뒤 즉시 실행을 시작합니다.
 
-![새 이슈 팝업의 에이전트 모드: Created by에 Multica Assistant가 선택된 모습](/images/docs/quickstart-new-issue.webp)
+![새 태스크 팝업의 에이전트 모드: Created by에 Multica Assistant가 선택된 모습](/images/docs/quickstart-new-issue.webp)
 
 ## 5. 진행 상황과 결과 확인
 
-제출 후 해당 이슈를 엽니다. 실행 로그에는 실행 상태가 표시되고 에이전트의 진행 상황과 답변은 타임라인에 나타납니다.
+제출 후 해당 태스크를 엽니다. 실행 로그에는 실행 상태가 표시되고 에이전트의 진행 상황과 답변은 타임라인에 나타납니다.
 
 **성공 기준**: 실행 로그 상태가 "완료됨"으로 바뀌고 타임라인에 에이전트의 답변이 나타납니다. 전체 과정을 확인하려면 "트랜스크립트 보기"를 클릭하세요.
 
-![이슈의 에이전트 답변과 완료된 실행 로그](/images/docs/quickstart-run-result.webp)
+![태스크의 에이전트 답변과 완료된 실행 로그](/images/docs/quickstart-run-result.webp)
 
 ## 자주 묻는 문제
 
@@ -84,12 +84,12 @@ Web([multica.ai](https://multica.ai)) 또는 [Multica Desktop](https://multica.a
 |---|---|
 | 런타임을 찾지 못함 | AI 코딩 도구가 설치되어 있고 터미널에서 실행되는지 확인합니다. Desktop에서는 "새로고침"을 클릭하고 CLI 방식에서는 `multica setup`을 다시 실행합니다. |
 | 런타임이 오프라인으로 표시됨 | Desktop을 계속 열어 둡니다. CLI 방식에서는 `multica daemon status`를 실행하고 시작되지 않았다면 `multica daemon start`를 실행합니다. |
-| 이슈가 계속 큐에서 대기함 | 에이전트가 사용하는 런타임이 온라인인지 확인합니다. 런타임이 동시 실행 상한에 도달하면 새 태스크는 계속 대기합니다. |
+| 태스크가 계속 큐에서 대기함 | 에이전트가 사용하는 런타임이 온라인인지 확인합니다. 런타임이 동시 실행 상한에 도달하면 새 실행은 계속 대기합니다. |
 
 더 많은 경우는 [문제 해결](/troubleshooting)을 참고하세요.
 
 ## 다음 단계
 
 - [핵심 개념](/concepts) — 3분 안에 Multica의 모든 핵심 객체를 알아봅니다.
-- [Multica의 작동 방식](/how-multica-works) — 이슈, 에이전트, 런타임, 각 실행의 관계를 이해합니다.
+- [Multica의 작동 방식](/how-multica-works) — 태스크, 에이전트, 런타임, 각 실행의 관계를 이해합니다.
 - [에이전트에게 작업 맡기기](/triggering-agents) — 할당 외에 @댓글, 대화, 오토파일럿으로 트리거하는 세 가지 방법을 알아봅니다.

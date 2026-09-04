@@ -203,6 +203,43 @@ func TestRunBatchPollerClaimsAcrossRuntimes(t *testing.T) {
 	taskWG.Wait()
 }
 
+func TestTaskClaimPollIntervalTracksWSRPCAvailability(t *testing.T) {
+	t.Parallel()
+
+	d := New(Config{PollInterval: 30 * time.Second, WSClaimPollInterval: 3 * time.Minute}, slog.Default())
+	if got := d.taskClaimPollInterval(claimTasksResult{}); got != 30*time.Second {
+		t.Fatalf("interval without websocket = %v, want 30s", got)
+	}
+
+	generation := d.wsRPC.attach(func([]byte) (*wsOutbound, error) { return nil, nil })
+	if got := d.taskClaimPollInterval(claimTasksResult{}); got != 30*time.Second {
+		t.Fatalf("interval before rpc-v1 negotiation = %v, want 30s", got)
+	}
+
+	d.wsRPC.markRPCV1Supported(generation)
+	if got := d.taskClaimPollInterval(claimTasksResult{}); got != 30*time.Second {
+		t.Fatalf("interval without a server hint = %v, want 30s", got)
+	}
+	if got := d.taskClaimPollInterval(claimTasksResult{ClaimPollHintSupported: true}); got != 30*time.Second {
+		t.Fatalf("interval after HTTP fallback = %v, want 30s", got)
+	}
+
+	hinted := claimTasksResult{ClaimPollHintSupported: true, ClaimedOverWS: true}
+	if got := d.taskClaimPollInterval(hinted); got < 150*time.Second || got > 165*time.Second {
+		t.Fatalf("jittered interval with a hint = %v, want 2m30s..2m45s", got)
+	}
+
+	hinted.NextDeferredTaskAfterMillis = 4200
+	if got := d.taskClaimPollInterval(hinted); got != 4200*time.Millisecond {
+		t.Fatalf("interval with deferred task = %v, want 4.2s", got)
+	}
+
+	d.wsRPC.attach(nil)
+	if got := d.taskClaimPollInterval(hinted); got != 30*time.Second {
+		t.Fatalf("interval after websocket disconnect = %v, want 30s", got)
+	}
+}
+
 // TestRunBatchPollerWakesAfterTaskExit guards the gap where a queued task is
 // temporarily unclaimable (for example, because the same agent/issue task is
 // still running), the batch claim returns empty, and the poller goes to sleep

@@ -23,9 +23,9 @@ artifact, serves the panel script from it, and binds your installation to that
 one immutable version.
 
 `ui/main.js` is one file with no `import`. That is the contract, not a
-simplification for the example: the host inlines the entry into the sandboxed
-document it generates, so there is no origin a module specifier could resolve
-against. Bundle your dependencies in.
+simplification for the example: Multica serves the entry inside one generated
+document with no module graph, so a bare module specifier has nowhere to
+resolve. Bundle your dependencies in.
 
 While you are iterating, `MULTICA_PLUGIN_DIR` publishes straight from disk
 instead of asking you to zip and upload after every edit. It still produces an

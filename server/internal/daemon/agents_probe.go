@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -161,6 +162,30 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_OPENCODE_PATH", "opencode", "MULTICA_OPENCODE_MODEL"); ok {
 		agents["opencode"] = e
 	}
+	if e, ok := probe("MULTICA_CODEARTS_PATH", "codearts", "MULTICA_CODEARTS_MODEL"); ok {
+		agents["codearts"] = e
+	} else if strings.TrimSpace(os.Getenv("MULTICA_CODEARTS_PATH")) == "" {
+		// The native CodeArts installer may update PATH only for future
+		// terminals. A GUI-launched daemon can still discover its stable
+		// user-level launcher. An explicit but invalid override remains a hard
+		// miss and never falls back here.
+		home, err := os.UserHomeDir()
+		if err == nil {
+			for _, name := range []string{"codearts.cmd", "codearts"} {
+				candidate := filepath.Join(home, ".codeartsdoer", "installers", name)
+				path, resolveErr := resolveAgentExecutablePath(candidate)
+				if resolveErr != nil {
+					continue
+				}
+				agents["codearts"] = AgentEntry{
+					Path:    path,
+					Command: "codearts",
+					Model:   strings.TrimSpace(os.Getenv("MULTICA_CODEARTS_MODEL")),
+				}
+				break
+			}
+		}
+	}
 	if e, ok := probe("MULTICA_DEVECO_PATH", "deveco", "MULTICA_DEVECO_MODEL"); ok {
 		agents["deveco"] = e
 	}
@@ -268,6 +293,15 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// Model selection is owned by the MCode runtime, so there is no model env.
 	if e, ok := probe("MULTICA_MCODE_PATH", "mcode", ""); ok {
 		agents["mcode"] = e
+	}
+	// ZeroClaw (`zeroclaw`) is a Rust-based generic agent CLI, driven over
+	// ACP via `zeroclaw acp`. It takes no model env var: its ACP server has no
+	// `session/set_model` and no handler reads a model param, so the model
+	// comes from ZeroClaw's own agent profile and ExecOptions.Model can never
+	// be applied — see ModelSelectionSupported. Reading one here would only
+	// advertise a knob that silently does nothing.
+	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
+		agents["zeroclaw"] = e
 	}
 	return agents
 }

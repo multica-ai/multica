@@ -8,6 +8,7 @@ import {
   type AgentDraft,
   type AgentPermissionScope,
 } from "@multica/core/agents";
+import { useConfigStore } from "@multica/core/config";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
@@ -26,6 +27,7 @@ import { ThinkingSettingField } from "../components/inspector/thinking-prop-row"
 import { ModelDropdown } from "../components/model-dropdown";
 import { RuntimePicker } from "../components/runtime-picker";
 import { SkillMultiSelect } from "../components/skill-multi-select";
+import { ConversationStartersEditor } from "../components/conversation-starters-editor";
 
 const PERMISSION_SCOPES: AgentPermissionScope[] = [
   "private",
@@ -66,6 +68,9 @@ export function AgentConfigurationPanel({
   runtimeSwitchInFlight?: boolean;
 }) {
   const { t } = useT("agents");
+  const conversationStartersSupported = useConfigStore(
+    (state) => state.agentConversationStartersSupported,
+  );
   const selectedRuntime =
     runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
   const set = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) =>
@@ -170,6 +175,14 @@ export function AgentConfigurationPanel({
               className="min-h-44 resize-y font-mono text-label leading-6"
             />
           </DraftFieldRow>
+          {conversationStartersSupported ? (
+            <div className="px-4 py-4">
+              <ConversationStartersEditor
+                value={draft.conversationStarters}
+                onChange={(value) => set("conversationStarters", value)}
+              />
+            </div>
+          ) : null}
           <div className="px-4 py-4">
             <SkillMultiSelect
               selectedIds={draft.skillIds}

@@ -9,6 +9,7 @@ export type ShortcutActionId =
   | "openSearch"
   | "createIssue"
   | "toggleSidebar"
+  | "toggleRightSidebar"
   | "toggleChat"
   | "findInIssue"
   | "openThreadNav"
@@ -80,6 +81,12 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
   { id: "openSearch", category: "general", defaultShortcut: primary("K"), allowInEditable: true },
   { id: "createIssue", category: "general", defaultShortcut: createShortcutChord("C"), allowInEditable: false },
   { id: "toggleSidebar", category: "general", defaultShortcut: primary("B"), allowInEditable: false },
+  {
+    id: "toggleRightSidebar",
+    category: "general",
+    defaultShortcut: primary("/"),
+    allowInEditable: false,
+  },
   // Mod+J follows the "toggle a docked panel" convention, and is one of the few
   // letters this module's own policy leaves free on every platform and runtime:
   // it is neither app-owned (PRIMARY_RESERVED_KEYS) nor browser-owned
@@ -306,6 +313,11 @@ const PRIMARY_RESERVED_KEYS = new Set([
   "A", "C", "V", "X", "Y", "Z",
   // Zoom accelerators: fixed app shortcuts on desktop, browser zoom on web.
   "Equals", "Plus", "Minus", "Underscore", "0",
+  // Browser-style direct tab selection: browsers own these on web and the
+  // desktop main process owns them for product tabs. Keeping them reserved
+  // also sanitizes any conflicting shortcut override persisted by an older
+  // app version.
+  "1", "2", "3", "4", "5", "6", "7", "8", "9",
 ]);
 
 // Accelerators owned by the browser UI around a tab: print, address bar,

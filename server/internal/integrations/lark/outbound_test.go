@@ -23,6 +23,8 @@ type fakePatcherQueries struct {
 	taskChannelIngested bool
 	binding             ChatSessionBinding
 	bindingErr          error
+	delivery            db.ChannelTaskDelivery
+	deliveryErr         error
 	installation        Installation
 	installationErr     error
 	agent               db.Agent
@@ -39,6 +41,21 @@ func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (
 }
 func (f *fakePatcherQueries) TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error) {
 	return f.taskChannelIngested, nil
+}
+func (f *fakePatcherQueries) GetChannelTaskDelivery(context.Context, pgtype.UUID) (db.ChannelTaskDelivery, error) {
+	if f.bindingErr != nil {
+		return db.ChannelTaskDelivery{}, f.bindingErr
+	}
+	if f.delivery.ChannelType == "" && f.binding.InstallationID.Valid {
+		return db.ChannelTaskDelivery{
+			BindingID: f.binding.ID, InstallationID: f.binding.InstallationID,
+			ChannelType: channelTypeFeishu, ChannelChatID: f.binding.ChannelChatID,
+			ChatType:         f.binding.ChatType,
+			ChannelMessageID: f.binding.LastMessageID, ChannelThreadID: f.binding.LastThreadID,
+			Config: f.binding.Config,
+		}, f.deliveryErr
+	}
+	return f.delivery, f.deliveryErr
 }
 func (f *fakePatcherQueries) GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error) {
 	return db.ChatSession{}, nil

@@ -232,6 +232,7 @@ func seedChannelChatSession(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, id)
 	})
+	seedChannelTaskBinding(t, pool, id)
 	return id
 }
 

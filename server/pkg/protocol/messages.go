@@ -20,12 +20,34 @@ const (
 	// unblocked, which let exactly such a daemon through (MUL-5707). A daemon
 	// that implements the mode says so; one that does not, cannot.
 	DaemonCapabilityLocalWorktreeV1 = "local-worktree-v1"
+	// DaemonCapabilitySourceContextQuickCreateV1 advertises support for the
+	// two-section quick-create prompt that keeps a new instruction separate
+	// from immutable historical source context.
+	DaemonCapabilitySourceContextQuickCreateV1 = "source_context_quick_create_v1"
 
 	// DaemonCapabilityRPCV1 advertises that the daemon can carry
 	// request/response RPCs over the WebSocket control connection (MUL-4257).
 	// Gated so only daemons+servers that both support it route claim over WS;
 	// everyone else keeps using the HTTP claim endpoint.
 	DaemonCapabilityRPCV1 = "rpc-v1"
+	// DaemonCapabilityClaimPollHintsV1 advertises that the daemon understands
+	// the batch-claim response's safety-poll metadata. The server only performs
+	// the extra deferred-task lookup for clients that opt in, and an older
+	// server's missing fields make a newer daemon retain its short fallback.
+	DaemonCapabilityClaimPollHintsV1 = "claim-poll-hints-v1"
+
+	// DaemonCapabilityPlatformSkillV1 advertises that the daemon's runtime
+	// brief names the merged `multica-platform` skill instead of the
+	// per-domain built-ins it replaced (MUL-6986).
+	//
+	// The brief is assembled by the daemon, so a backend upgrade does not
+	// rewrite it: a daemon released before that merge still tells the agent to
+	// "read the `multica-working-on-issues` skill", a name this server no
+	// longer ships. Without this gate the pointer dangles and the agent is left
+	// hunting for a skill that is not installed. When it is absent the server
+	// ships a redirect stub under the old name; when it is present it ships
+	// nothing extra, so the stub retires itself as daemons update.
+	DaemonCapabilityPlatformSkillV1 = "platform-skill-v1"
 
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:
@@ -113,7 +135,9 @@ type WorkspacesChangedPayload struct{}
 // heartbeat, which claims whatever is queued) — so an unknown value from a
 // newer server stays safe on an older daemon.
 const (
-	PendingWorkKindModelList = "model_list"
+	PendingWorkKindModelList        = "model_list"
+	PendingWorkKindLocalSkills      = "local_skills"
+	PendingWorkKindLocalSkillImport = "local_skill_import"
 )
 
 // PendingWorkPayload is sent from server to daemon as a wakeup hint when a
@@ -289,6 +313,22 @@ type ChatCancelFinalizedPayload struct {
 // Fires to other devices so their unread counts stay in sync.
 type ChatSessionReadPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
+}
+
+type ChatSessionCreatedPayload struct {
+	WorkspaceID           string                   `json:"workspace_id"`
+	ChatSessionID         string                   `json:"chat_session_id"`
+	AgentID               string                   `json:"agent_id"`
+	CreatorID             string                   `json:"creator_id"`
+	Title                 string                   `json:"title"`
+	ChannelSource         ChatSessionChannelSource `json:"channel_source"`
+	IsCurrentChannelRoute bool                     `json:"is_current_channel_route"`
+}
+
+type ChatSessionChannelSource struct {
+	ChannelType    string `json:"channel_type"`
+	InstallationID string `json:"installation_id"`
+	RouteRevision  int64  `json:"route_revision"`
 }
 
 // ChatSessionDeletedPayload is broadcast when a chat session is hard-deleted

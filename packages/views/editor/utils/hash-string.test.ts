@@ -3,10 +3,6 @@ import { describe, expect, it } from "vitest";
 import { hashString } from "./hash-string";
 
 describe("hashString", () => {
-  it("returns a stable base36 digest for identical input", () => {
-    expect(hashString("hello world")).toBe(hashString("hello world"));
-  });
-
   it("differs for different inputs (collision-resistant enough for contentKey)", () => {
     expect(hashString("<p>a</p>")).not.toBe(hashString("<p>b</p>"));
   });

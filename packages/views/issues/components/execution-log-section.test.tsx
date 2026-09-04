@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -87,23 +87,6 @@ describe("ActiveTaskRow", () => {
     expect(screen.getByText("Includes 3 comments")).toBeInTheDocument();
     expect(screen.getByText("View transcript")).toBeInTheDocument();
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
-  });
-
-  it("does not make transcript actions depend on hover-only rendering", () => {
-    renderWithI18n(<ActiveTaskRow task={makeTask()} issueId="issue-1" />);
-
-    const transcriptButton = screen.getByRole("button", { name: "View transcript" });
-    const status = screen.getByText("5m 04s");
-
-    expect(status.parentElement?.className).toContain("flex h-7");
-    expect(status.parentElement?.className).toContain(
-      "[@media(hover:hover)]:group-hover/execution-log-row:hidden",
-    );
-    expect(transcriptButton.parentElement?.className).toContain("flex h-7");
-    expect(transcriptButton.parentElement?.className).toContain("[@media(hover:hover)]:hidden");
-    expect(transcriptButton.parentElement?.className).toContain(
-      "[@media(hover:hover)]:group-hover/execution-log-row:flex",
-    );
   });
 });
 
@@ -227,6 +210,56 @@ describe("TaskCommentCoverage", () => {
   });
 });
 
+describe("execution log failure reasons", () => {
+  function failedLogClient() {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(issueKeys.tasks("issue-1"), [
+      makeTask({
+        status: "failed",
+        completed_at: "2026-06-08T08:04:00Z",
+        error: "provider returned 402",
+        failure_reason: "agent_error.provider_quota_limit",
+      }),
+    ]);
+    return queryClient;
+  }
+
+  it("renders a failed run's reason in the active locale", () => {
+    renderWithI18n(
+      <QueryClientProvider client={failedLogClient()}>
+        <ExecutionLogSection issueId="issue-1" />
+      </QueryClientProvider>,
+      { locale: "zh-Hans" },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "显示历史运行（1）" }));
+    expect(screen.getByText(/提供商配额已用尽/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Provider quota exhausted/),
+    ).not.toBeInTheDocument();
+  });
+
+  // #7411: the raw `task.error` is English prose the server writes for logs
+  // and classification. It used to be concatenated into the status tooltip,
+  // which put untranslated text — and absolute worktree paths — in front of
+  // every non-English workspace. The localized reason is the whole hover text
+  // now; the raw diagnostic lives in the transcript's Run details.
+  it("keeps the raw server error out of the status tooltip", () => {
+    renderWithI18n(
+      <QueryClientProvider client={failedLogClient()}>
+        <ExecutionLogSection issueId="issue-1" />
+      </QueryClientProvider>,
+      { locale: "zh-Hans" },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "显示历史运行（1）" }));
+    expect(screen.queryByTitle(/provider returned 402/)).not.toBeInTheDocument();
+    expect(screen.getByTitle("提供商配额已用尽")).toBeInTheDocument();
+  });
+});
+
 // claude-opus-5 at 5 / 25 / 0.50 / 6.25 per million.
 function usageSlice(overrides: Partial<TaskUsage> = {}): TaskUsage {
   return {
@@ -296,17 +329,6 @@ describe("execution log header geometry", () => {
     status: "completed",
     completed_at: "2026-06-08T08:04:00Z",
     usage: [usageSlice()],
-  });
-
-  it("keeps the section label on one line", () => {
-    renderSection([completed]);
-
-    const label = screen.getByText("Execution log");
-    // The label is the only header item allowed to shrink, so it is the one
-    // that must carry nowrap + ellipsis. A heading that reflows mid-phrase
-    // reads as broken; an ellipsis reads as a narrow column.
-    expect(label.className).toContain("truncate");
-    expect(label.closest("button")?.className).toContain("whitespace-nowrap");
   });
 
   it("tiers on the sidebar's width, not the viewport's", () => {

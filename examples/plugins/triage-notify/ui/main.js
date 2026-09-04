@@ -11,38 +11,22 @@
 // that it happened at all.
 
 const pending = new Map();
-let port = null;
+const port = globalThis.__multicaPluginBridgePortV2;
 let sequence = 0;
 
-window.addEventListener("message", (event) => {
-  const data = event.data;
-  if (!data || data.type !== "multica:plugin-bridge-init" || !event.ports[0]) return;
-  // Only the embedder may hand this frame a port, and only once. Sibling frames
-  // are mutually opaque but `parent.frames[i]` is an allowed cross-origin
-  // access, so another plugin on this page could otherwise deliver its own port
-  // and become this surface's "host". Origin is useless here — a sandboxed
-  // frame sees "null" — so identity is the window reference.
-  if (event.source !== window.parent || port) return;
-  port = event.ports[0];
-  port.onmessage = (message) => {
-    const payload = message.data;
-    if (payload?.kind === "theme") return applyTheme(payload.theme);
-    const entry = pending.get(payload?.id);
-    if (!entry) return;
-    pending.delete(payload.id);
-    if (payload.ok) entry.resolve(payload.data);
-    else entry.reject(Object.assign(new Error(payload.error), { status: payload.status }));
-  };
-  port.start();
-  applyTheme(data.theme);
-  boot();
-});
-
-(function announce(attempts) {
-  if (port || attempts > 50) return;
-  window.parent.postMessage({ type: "multica:plugin-surface-ready" }, "*");
-  setTimeout(() => announce(attempts + 1), 120);
-})(0);
+if (!(port instanceof MessagePort)) throw new Error("Multica surface bridge is unavailable");
+delete globalThis.__multicaPluginBridgePortV2;
+port.onmessage = (message) => {
+  const payload = message.data;
+  if (payload?.kind === "theme") return applyTheme(payload.theme);
+  const entry = pending.get(payload?.id);
+  if (!entry) return;
+  pending.delete(payload.id);
+  if (payload.ok) entry.resolve(payload.data);
+  else entry.reject(Object.assign(new Error(payload.error), { status: payload.status }));
+};
+port.start();
+boot();
 
 function applyTheme(theme) {
   for (const [name, value] of Object.entries(theme ?? {})) {

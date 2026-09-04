@@ -76,7 +76,7 @@
     "rename": "重命名机器",
     "rename_dialog": {
       "title": "重命名机器",
-      "description": "给这台机器起一个你能认出来的名字。会应用到这台机器上的所有运行时，并在给 agent 选择运行时时显示。",
+      "description": "给这台机器起一个你能认出来的名字。会应用到这台机器上的所有运行时，并在给智能体选择运行时时显示。",
       "placeholder": "例如：我的 MacBook",
       "hint": "留空则使用设备的默认名称。",
       "cancel": "取消",
@@ -90,7 +90,7 @@
   "health": {
     "online": {
       "label": "在线",
-      "description": "最近 45 秒内收到心跳。可以派发 task。"
+      "description": "最近 45 秒内收到心跳。可以派发运行。"
     },
     "recently_lost": {
       "label": "最近失联",
@@ -100,9 +100,9 @@
       "label": "离线",
       "description": "5 分钟以上没有心跳。请重启守护进程或排查主机。"
     },
-    "about_to_gc": {
-      "label": "即将清理",
-      "description": "离线 6 天以上。如不重连，将在 7 天时自动删除。"
+    "long_offline": {
+      "label": "长期离线",
+      "description": "6 天以上没有心跳。如果这台主机不会恢复，请将关联智能体改绑到其他运行时，或删除此运行时。"
     }
   },
   "detail": {
@@ -149,11 +149,11 @@
       },
       "cascade": {
         "title_other": "解绑 {{count}} 个智能体并删除该运行时？",
-        "description": "删除\"{{name}}\"。下列智能体会保留——其指令、聊天记录和 task 历史都不会丢失——但它们将被解绑，在重新绑定运行时之前无法运行。其排队中或运行中的 task 会被取消，随后运行时本身会被删除。",
-        "warning": "排队中和运行中的 task 会被取消；在重新绑定运行时之前，这些智能体无法接受新 task。",
+        "description": "删除\"{{name}}\"。下列智能体会保留——其指令、聊天记录和运行历史都不会丢失——但会与该运行时解绑，在重新绑定前无法接受新工作。排队中或进行中的运行会被取消，然后删除运行时。",
+        "warning": "排队中和进行中的运行会被取消；这些智能体重新绑定运行时之前，无法接受新工作。",
         "notice_runtime_has_active_agents": "自打开此弹窗后，又有新的活动智能体加入。请确认新方案后继续。",
         "notice_runtime_delete_plan_changed": "在弹窗打开期间，活动智能体集合发生了变化。请确认新方案后继续。",
-        "checkbox_other": "我已了解：这 {{count}} 个智能体将被解绑，在重新绑定运行时之前无法运行，其排队中或运行中的 task 会被取消。",
+        "checkbox_other": "我已了解：这 {{count}} 个智能体会与该运行时解绑，在重新绑定前无法接受新工作；其排队中或进行中的运行会被取消。",
         "cancel": "取消",
         "confirm_other": "解绑 {{count}} 个智能体并删除运行时",
         "submitting": "正在解绑并删除...",
@@ -205,7 +205,7 @@
     "copy_aria": "复制",
     "cancel": "取消",
     "success_title": "电脑已连接",
-    "success_description": "电脑已经上线就绪。创建一个智能体，task 就可以派发到这里运行。",
+    "success_description": "电脑已经上线就绪。创建一个智能体，运行就可以派发到这里。",
     "view_runtime": "查看运行时",
     "create_agent": "创建智能体"
   },

@@ -26,7 +26,8 @@
 //     queued_expired, runtime_offline, runtime_reconnect_timeout,
 //     runtime_recovery, timeout, iteration_limit, agent_blocked,
 //     api_invalid_request, skill_bundle_unavailable,
-//     runtime_cli_timeout, invalid_task_identity, issue_window_restricted
+//     runtime_cli_timeout, environment_prepare_failed,
+//     invalid_task_identity
 //
 //   - 14 agent-side values (with `agent_error.` prefix) produced by
 //     Classify(rawError) when the agent process surfaced an error string.
@@ -131,18 +132,49 @@ const (
 	// taskRunFailureReason in daemon/daemon.go.
 	ReasonRuntimeCLITimeout Reason = "runtime_cli_timeout"
 
+	// ReasonEnvironmentPrepareFailed: the daemon could not build or re-open
+	// the task's execution environment on this host, so the agent process was
+	// never launched.
+	//
+	// That phase is everything execenv.Prepare / Reuse does before launch —
+	// the workspace directory and its overlay homes, AND the per-provider
+	// local config written or validated inside it (Codex home, Hermes
+	// overlay, Cursor MCP, OpenClaw config, which fails closed on a config
+	// the CLI cannot read). So the causes are wider than a disk fault: a full
+	// volume, a read-only or permission-denied workspaces root, a directory
+	// another process still holds open (Windows) and an I/O error all land
+	// here, and so does a malformed local runtime config. What they share is
+	// the machine — every one is fixed on the host running the daemon, and
+	// the raw error is what names which step failed.
+	//
+	// Copy that narrows this to "check your disk" therefore sends the user
+	// past half the real causes, which is the same defect in miniature that
+	// this reason exists to fix. Read the wording in the chat bundles and the
+	// docs failure-reason table as part of the contract.
+	//
+	// Platform-side, and that is the point (#7913). Before this reason
+	// existed the wrapped OS error went through Classify — a classifier
+	// written to read agent and provider output — and landed somewhere in
+	// agent_error.*: today the catchall, historically provider_server_error,
+	// which sent one report's diagnosis at an LLM vendor for hours. The task
+	// never reached an agent, so no value in that namespace can be correct,
+	// and any fleet health read grouping by the agent_error.* prefix
+	// over-reports agent problems by exactly these rows.
+	//
+	// Deliberately NOT retryable: a full disk or a denied permission
+	// reproduces identically on the next attempt, and preparation already
+	// waits out the one transient case it knows about (a prior run still
+	// holding the directory) before it fails. Written by
+	// taskRunFailureReason in daemon/daemon.go; resume-safe, because no
+	// session was touched.
+	ReasonEnvironmentPrepareFailed Reason = "environment_prepare_failed"
+
 	// ReasonInvalidTaskIdentity: the daemon refused a claimed task because
 	// the task row's authoritative agent_id was absent or disagreed with the
 	// nested agent payload. The agent process is never launched. This is
 	// deliberately non-retryable: retrying the same contradictory claim would
 	// only repeat an isolation failure.
 	ReasonInvalidTaskIdentity Reason = "invalid_task_identity"
-
-	// ReasonIssueWindowRestricted: an entitlement change made the task's issue
-	// unavailable before a daemon claimed it. The agent process is never
-	// launched and retrying the same issue remains non-actionable until the
-	// workspace policy changes.
-	ReasonIssueWindowRestricted Reason = "issue_window_restricted"
 
 	// Agent process side: failure surfaced by the agent CLI / SDK as
 	// an error string. Classify(rawError) is responsible for picking
@@ -240,8 +272,8 @@ var allReasons = []Reason{
 	ReasonAPIInvalidRequest,
 	ReasonSkillBundleUnavailable,
 	ReasonRuntimeCLITimeout,
+	ReasonEnvironmentPrepareFailed,
 	ReasonInvalidTaskIdentity,
-	ReasonIssueWindowRestricted,
 
 	// Agent process side: provider errors.
 	ReasonAgentProviderAuthOrAccess,

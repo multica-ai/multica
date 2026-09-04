@@ -10,13 +10,14 @@ import {
   SettingsSection,
   SettingsTab,
 } from "@multica/views/settings";
+import { useT } from "@multica/views/i18n";
 import { reauthenticateDaemon } from "../platform/daemon-reauth";
 import type { DaemonPrefs, DaemonStatus } from "../../../shared/daemon-types";
 import {
   DAEMON_STATE_COLORS,
-  DAEMON_STATE_LABELS,
   formatUptime,
 } from "../../../shared/daemon-types";
+import { daemonStateLabel } from "./daemon-i18n";
 
 // One row inside the diagnostics block. Values that are likely to be
 // long IDs / URLs render as monospaced + truncated with a tooltip.
@@ -46,6 +47,7 @@ function DiagnosticsRow({
 }
 
 export function DaemonSettingsTab() {
+  const { t } = useT("settings");
   const [prefs, setPrefs] = useState<DaemonPrefs>({ autoStart: true, autoStop: false });
   const [cliInstalled, setCliInstalled] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
@@ -61,9 +63,9 @@ export function DaemonSettingsTab() {
 
   const handleReauth = useCallback(async () => {
     setReauthLoading(true);
-    await reauthenticateDaemon();
+    await reauthenticateDaemon(t);
     setReauthLoading(false);
-  }, []);
+  }, [t]);
 
   const updatePref = useCallback(
     async (key: keyof DaemonPrefs, value: boolean) => {
@@ -71,16 +73,20 @@ export function DaemonSettingsTab() {
       try {
         const updated = await window.daemonAPI.setPrefs({ [key]: value });
         setPrefs(updated);
-        toast.success("Daemon settings saved", { id: "settings-auto-save" });
+        toast.success(t(($) => $.desktop.daemon.settings_saved), {
+          id: "settings-auto-save",
+        });
       } catch (error) {
         toast.error(
-          error instanceof Error ? error.message : "Failed to save daemon settings",
+          error instanceof Error
+            ? error.message
+            : t(($) => $.desktop.daemon.settings_save_failed),
         );
       } finally {
         setSaving(false);
       }
     },
-    [],
+    [t],
   );
 
   // The daemon runs somewhere the app can't drive (e.g. inside WSL2 behind a
@@ -91,8 +97,8 @@ export function DaemonSettingsTab() {
 
   return (
     <SettingsTab
-      title="Daemon"
-      description="Configure how the local agent daemon behaves with the desktop app."
+      title={t(($) => $.desktop.daemon.title)}
+      description={t(($) => $.desktop.daemon.description)}
     >
 
       {status.state === "auth_expired" && (
@@ -100,11 +106,10 @@ export function DaemonSettingsTab() {
           <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
           <div className="min-w-0 flex-1">
             <p className="text-body font-medium text-destructive">
-              Sign-in expired
+              {t(($) => $.desktop.daemon.signin_expired)}
             </p>
             <p className="mt-0.5 text-body text-muted-foreground">
-              The local daemon couldn&apos;t authenticate, so this device
-              can&apos;t take tasks. Sign in again to restore it.
+              {t(($) => $.desktop.daemon.signin_expired_description)}
             </p>
           </div>
           <Button
@@ -114,7 +119,7 @@ export function DaemonSettingsTab() {
             disabled={reauthLoading}
           >
             <LogIn className="size-3.5 mr-1.5" />
-            Sign in again
+            {t(($) => $.desktop.daemon.signin_again)}
           </Button>
         </div>
       )}
@@ -123,19 +128,18 @@ export function DaemonSettingsTab() {
         <div className="mt-4 flex items-start gap-3 rounded-lg border bg-muted/30 px-4 py-3">
           <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <p className="min-w-0 text-body text-muted-foreground">
-            This device&apos;s daemon runs outside the app — for example inside
-            WSL2 — so the app can&apos;t start or stop it. Start or stop it from
-            that environment with{" "}
+            {t(($) => $.desktop.daemon.external_description_before)}{" "}
             <code className="font-mono text-caption">multica daemon start</code> /{" "}
-            <code className="font-mono text-caption">multica daemon stop</code>.
+            <code className="font-mono text-caption">multica daemon stop</code>
+            {t(($) => $.desktop.daemon.external_description_after)}
           </p>
         </div>
       )}
 
       <SettingsCard>
         <SettingsRow
-          label="Auto-start on launch"
-          description="Automatically start the daemon when the app opens and you are logged in."
+          label={t(($) => $.desktop.daemon.auto_start_title)}
+          description={t(($) => $.desktop.daemon.auto_start_description)}
         >
           <Switch
             checked={prefs.autoStart}
@@ -145,8 +149,8 @@ export function DaemonSettingsTab() {
         </SettingsRow>
 
         <SettingsRow
-          label="Auto-stop on quit"
-          description="Stop the daemon when the desktop app is closed. Disable this to keep the daemon running in the background."
+          label={t(($) => $.desktop.daemon.auto_stop_title)}
+          description={t(($) => $.desktop.daemon.auto_stop_description)}
         >
           <Switch
             checked={prefs.autoStop}
@@ -156,13 +160,13 @@ export function DaemonSettingsTab() {
         </SettingsRow>
 
         <SettingsRow
-          label="CLI Status"
+          label={t(($) => $.desktop.daemon.cli_status)}
           description={
             cliInstalled === null
-              ? "Checking…"
+              ? t(($) => $.desktop.daemon.cli_checking)
               : cliInstalled
-                ? "multica CLI is installed and available in PATH."
-                : "multica CLI not found. Install it to enable daemon management."
+                ? t(($) => $.desktop.daemon.cli_installed)
+                : t(($) => $.desktop.daemon.cli_missing)
           }
         >
           {cliInstalled === false && (
@@ -175,7 +179,7 @@ export function DaemonSettingsTab() {
                 )
               }
             >
-              Installation Guide
+              {t(($) => $.desktop.daemon.installation_guide)}
             </Button>
           )}
           {cliInstalled !== false && <span />}
@@ -186,13 +190,13 @@ export function DaemonSettingsTab() {
           on logs. These fields matter for support tickets and bug reports,
           not for everyday use. */}
       <SettingsSection
-        title="Diagnostics"
-        description="Identification and connection details. Useful when filing a bug report or investigating why a runtime isn't showing up."
+        title={t(($) => $.desktop.daemon.diagnostics_title)}
+        description={t(($) => $.desktop.daemon.diagnostics_description)}
       >
         <SettingsCard>
           <div className="px-4 py-2">
           <DiagnosticsRow
-            label="State"
+            label={t(($) => $.desktop.daemon.state)}
             value={
               <span className="inline-flex items-center gap-1.5">
                 <span
@@ -201,12 +205,12 @@ export function DaemonSettingsTab() {
                     DAEMON_STATE_COLORS[status.state],
                   )}
                 />
-                {DAEMON_STATE_LABELS[status.state]}
+                {daemonStateLabel(status.state, t)}
               </span>
             }
           />
           <DiagnosticsRow
-            label="Uptime"
+            label={t(($) => $.desktop.daemon.uptime)}
             value={status.uptime ? formatUptime(status.uptime) : "—"}
           />
           <DiagnosticsRow
@@ -215,25 +219,25 @@ export function DaemonSettingsTab() {
             mono={!!status.pid}
           />
           <DiagnosticsRow
-            label="Daemon ID"
+            label={t(($) => $.desktop.daemon.daemon_id)}
             value={status.daemonId ?? "—"}
             mono={!!status.daemonId}
           />
           <DiagnosticsRow
-            label="Profile"
+            label={t(($) => $.desktop.daemon.profile)}
             value={status.profile || "default"}
           />
           <DiagnosticsRow
-            label="Server URL"
+            label={t(($) => $.desktop.daemon.server_url)}
             value={status.serverUrl ?? "—"}
             mono={!!status.serverUrl}
           />
           <DiagnosticsRow
-            label="Device name"
+            label={t(($) => $.desktop.daemon.device_name)}
             value={status.deviceName ?? "—"}
           />
           <DiagnosticsRow
-            label="Workspaces"
+            label={t(($) => $.desktop.daemon.workspaces)}
             value={
               typeof status.workspaceCount === "number"
                 ? status.workspaceCount

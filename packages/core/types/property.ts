@@ -62,6 +62,29 @@ export function isActorPropertyType(type: string): boolean {
   return type === "actor" || type === "multi_actor";
 }
 
+/**
+ * Types the issue filter menu exposes for value + "No value" filtering.
+ * Kept as an explicit enumeration (rather than delegating to
+ * isKnownPropertyType) so a future property type must opt into filtering —
+ * it should never become filterable by default.
+ */
+export function isFilterablePropertyType(type: string): boolean {
+  return (
+    type === "select" ||
+    type === "multi_select" ||
+    type === "checkbox" ||
+    isScalarPropertyType(type) ||
+    isActorPropertyType(type)
+  );
+}
+
+/** Single-valued scalar properties: text / number / date / url. */
+export type ScalarIssuePropertyType = Extract<IssuePropertyType, "text" | "number" | "date" | "url">;
+
+export function isScalarPropertyType(type: string): type is ScalarIssuePropertyType {
+  return type === "text" || type === "url" || type === "number" || type === "date";
+}
+
 export function formatActorRef(kind: IssuePropertyActorKind, id: string): string {
   return `${kind}:${id}`;
 }
@@ -155,6 +178,96 @@ export interface IssueProperty {
 
 export type IssuePropertyValue = string | number | boolean | string[];
 export type IssuePropertyValues = Record<string, IssuePropertyValue>;
+
+/**
+ * Structured operators for scalar property filters (#7692). A plain string
+ * member still means exact equality — every pre-operator saved view, URL, and
+ * API call keeps its meaning. Operators ride alongside as objects:
+ *
+ * - `contains` — case-insensitive substring match (text / url)
+ * - `gt` / `gte` / `lt` / `lte` — numeric comparison (number)
+ * - `before` / `after` — lexicographic date comparison (date, "YYYY-MM-DD")
+ *
+ * Within one definition all members still OR, so an operator member composes
+ * with observed values and "No value" like any other alternative.
+ */
+export type PropertyFilterOp =
+  | "contains"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "before"
+  | "after";
+
+export const PROPERTY_FILTER_OPS: readonly PropertyFilterOp[] = [
+  "contains",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "before",
+  "after",
+];
+
+/** Mathematical symbols shared by the scalar filter picker and active chips. */
+export const PROPERTY_FILTER_OP_SYMBOLS: Partial<Record<PropertyFilterOp, string>> = {
+  gt: ">",
+  gte: "≥",
+  lt: "<",
+  lte: "≤",
+};
+
+export function isKnownPropertyFilterOp(op: string): op is PropertyFilterOp {
+  return (PROPERTY_FILTER_OPS as readonly string[]).includes(op);
+}
+
+export interface PropertyOperatorFilter {
+  op: PropertyFilterOp;
+  /** Raw user input; the server interprets it per op. */
+  value: string;
+}
+
+/** One OR-alternative of a property filter: equality (bare string), the
+ *  "No value" sentinel, or a structured operator. */
+export type PropertyFilterValue = string | PropertyOperatorFilter;
+
+/**
+ * Canonical membership key for one filter member, so equality strings and
+ * operator objects can live in `Set<string>`-shaped lookups (saved-view
+ * baselines, chip deltas) without stringifying objects ad hoc.
+ */
+export function propertyFilterValueKey(value: PropertyFilterValue): string {
+  return typeof value === "string" ? value : `${value.op}\u0000${value.value}`;
+}
+
+export function isPropertyOperatorFilter(value: unknown): value is PropertyOperatorFilter {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as PropertyOperatorFilter).op === "string" &&
+    typeof (value as PropertyOperatorFilter).value === "string"
+  );
+}
+
+/**
+ * Ops the filter menu offers per scalar property type, in display order.
+ * "is" (equality) is not in the list — it is the default and commits a bare
+ * string, so every pre-operator flow stays untouched. Non-scalar entries are
+ * intentionally empty: keeping the record exhaustive forces each future
+ * property type to make an explicit operator decision.
+ */
+export const PROPERTY_FILTER_OPS_BY_TYPE: Record<IssuePropertyType, readonly PropertyFilterOp[]> = {
+  text: ["contains"],
+  number: ["gt", "gte", "lt", "lte"],
+  select: [],
+  multi_select: [],
+  date: ["before", "after"],
+  checkbox: [],
+  url: ["contains"],
+  actor: [],
+  multi_actor: [],
+};
 
 export interface CreatePropertyRequest {
   name: string;

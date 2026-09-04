@@ -296,6 +296,13 @@ INSERT INTO channel_media_pending_object (
 )
 VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
 `, pendingObjectKey, wsID)
+	const sourceContextObjectKey = "workspace-delete-source-context-object"
+	dbfx.Exec(t, `
+INSERT INTO issue_source_context_object_intent (
+	storage_key, workspace_id, source_context_id, attachment_id, object_url
+)
+VALUES ($1, $2, gen_random_uuid(), gen_random_uuid(), 's3://workspace-delete/source-context-object')
+`, sourceContextObjectKey, wsID)
 
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1`, wsID)
@@ -303,16 +310,23 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, runtimeProfileID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot_rule_version WHERE id = $1`, ruleVersionID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_media_pending_object WHERE storage_key = $1`, pendingObjectKey)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue_source_context_object_intent WHERE storage_key = $1`, sourceContextObjectKey)
 	})
 
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
 	req = withURLParam(req, "id", wsID)
-	testutil.Call(t, testHandler.DeleteWorkspace, req).Want(http.StatusNoContent)
+	notifier := &recordingRuntimeGoneNotifier{}
+	h := *testHandler
+	h.DaemonRuntimeGone = notifier
+	testutil.Call(t, h.DeleteWorkspace, req).Want(http.StatusNoContent)
 
 	var exists bool
 	dbfx.QueryRow(t, `SELECT EXISTS (SELECT 1 FROM workspace WHERE id = $1)`, wsID).Scan(&exists)
 	if exists {
 		t.Fatal("workspace still exists after owner DELETE")
+	}
+	if len(notifier.runtimeIDs) != 1 || notifier.runtimeIDs[0] != runtimeID {
+		t.Fatalf("runtime-gone notifications = %v, want [%s]", notifier.runtimeIDs, runtimeID)
 	}
 
 	var pendingCount int
@@ -354,6 +368,16 @@ WHERE storage_key = $1
 `, pendingObjectKey).Scan(&pendingObjectState)
 	if pendingObjectState != "deleting" {
 		t.Fatalf("pending channel media object state = %q, want deleting", pendingObjectState)
+	}
+
+	var sourceContextIntentState string
+	dbfx.QueryRow(t, `
+SELECT state
+FROM issue_source_context_object_intent
+WHERE storage_key = $1
+`, sourceContextObjectKey).Scan(&sourceContextIntentState)
+	if sourceContextIntentState != "pending" {
+		t.Fatalf("source context object intent state = %q, want pending durable retry ledger", sourceContextIntentState)
 	}
 }
 
@@ -662,6 +686,66 @@ VALUES ($1, $2, 'owner')
 	}
 }
 
+// recordingWorkspaceRefreshNotifier captures the daemon wakeups a workspace
+// write fans out to its members.
+type recordingWorkspaceRefreshNotifier struct {
+	userIDs []string
+}
+
+func (n *recordingWorkspaceRefreshNotifier) NotifyWorkspacesChanged(userID string) {
+	n.userIDs = append(n.userIDs, userID)
+}
+
+// Daemons cache workspace settings and read the GitHub master switch and the
+// Co-authored-by toggle from them. A settings edit that does not wake them
+// leaves the old verdict live until the workspace's next repo checkout, which
+// is how a disabled Co-authored-by trailer kept landing in commits (MUL-6921).
+func TestUpdateWorkspace_NotifiesDaemonsOnSettingsChange(t *testing.T) {
+	ctx := context.Background()
+
+	const slug = "handler-tests-settings-notify"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":        "Handler Test Settings Notify",
+		"slug":        slug,
+		"description": "UpdateWorkspace settings notification test",
+	})
+
+	dbfx.Exec(t, `
+INSERT INTO member (workspace_id, user_id, role)
+VALUES ($1, $2, 'owner')
+`, wsID, testUserID)
+
+	notifier := &recordingWorkspaceRefreshNotifier{}
+	previous := testHandler.DaemonWorkspaceRefresh
+	testHandler.DaemonWorkspaceRefresh = notifier
+	t.Cleanup(func() { testHandler.DaemonWorkspaceRefresh = previous })
+
+	req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"settings": map[string]any{"co_authored_by_enabled": false},
+	})
+	req = withURLParam(req, "id", wsID)
+	testutil.Call(t, testHandler.UpdateWorkspace, req).Want(http.StatusOK)
+
+	if len(notifier.userIDs) != 1 || notifier.userIDs[0] != testUserID {
+		t.Fatalf("settings update notified %v, want exactly the workspace member %s", notifier.userIDs, testUserID)
+	}
+
+	// An edit that touches neither the name nor the settings has nothing for
+	// daemons to re-read.
+	notifier.userIDs = nil
+	req2 := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"description": "new description",
+	})
+	req2 = withURLParam(req2, "id", wsID)
+	testutil.Call(t, testHandler.UpdateWorkspace, req2).Want(http.StatusOK)
+
+	if len(notifier.userIDs) != 0 {
+		t.Fatalf("description-only update notified %v, want no daemon wakeup", notifier.userIDs)
+	}
+}
+
 func TestUpdateWorkspace_ReposValidation(t *testing.T) {
 	ctx := context.Background()
 
@@ -938,6 +1022,102 @@ VALUES ($1, $2, $3, 'feishu', $4)
 		`SELECT EXISTS (SELECT 1 FROM channel_user_binding WHERE channel_user_id = $1)`, keepOpenID).Scan(&keepExists)
 	if !keepExists {
 		t.Fatal("remaining member's channel_user_binding was wrongly pruned")
+	}
+}
+
+// TestDeleteMember_PrunesAutopilotSubscribers verifies the application-layer
+// cleanup for the FK-free autopilot_subscriber table. DeleteMember and
+// LeaveWorkspace both use revokeAndRemoveMember, so this pins their shared
+// transaction while also proving the delete is scoped to the departed user.
+func TestDeleteMember_PrunesAutopilotSubscribers(t *testing.T) {
+	fx := setupRevocationFixture(t, "handler-tests-revoke-autopilot-subscriber", "daemon-revoke-autopilot-subscriber")
+
+	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":    fx.WorkspaceID,
+		"title":           "Revocation autopilot subscriber",
+		"assignee_type":   "agent",
+		"assignee_id":     fx.AgentID,
+		"status":          "active",
+		"execution_mode":  "run_only",
+		"created_by_type": "member",
+		"created_by_id":   testUserID,
+	})
+	dbfx.Exec(t, `
+INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
+VALUES ($1, 'member', $2), ($1, 'member', $3)
+`, autopilotID, fx.TargetUserID, testUserID)
+
+	// The same person belongs to another workspace and subscribes there too.
+	// Removing them from fx.WorkspaceID must not cross this tenant boundary.
+	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Revocation subscriber other workspace",
+		"slug":         fmt.Sprintf("handler-tests-revoke-autopilot-subscriber-other-%d", time.Now().UnixNano()),
+		"description":  "tenant-scope regression fixture",
+		"issue_prefix": "RAO",
+	})
+	dbfx.Insert(t, "member", testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+		"user_id":      fx.TargetUserID,
+		"role":         "owner",
+	})
+	otherRuntimeID := dbfx.Runtime(t, "Other workspace runtime", testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+		"daemon_id":    "daemon-revoke-autopilot-subscriber-other",
+		"runtime_mode": "local",
+		"provider":     "multica_daemon",
+		"owner_id":     fx.TargetUserID,
+	})
+	otherAgentID := dbfx.Agent(t, "Other workspace agent", otherRuntimeID, testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+		"runtime_mode": "local",
+		"visibility":   "workspace",
+		"owner_id":     fx.TargetUserID,
+	})
+	otherAutopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":    otherWorkspaceID,
+		"title":           "Other workspace autopilot subscriber",
+		"assignee_type":   "agent",
+		"assignee_id":     otherAgentID,
+		"status":          "active",
+		"execution_mode":  "run_only",
+		"created_by_type": "member",
+		"created_by_id":   fx.TargetUserID,
+	})
+	dbfx.Exec(t, `
+INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
+VALUES ($1, 'member', $2)
+`, otherAutopilotID, fx.TargetUserID)
+
+	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
+	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
+	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
+
+	var removedCount int
+	dbfx.QueryRow(t, `
+SELECT count(*) FROM autopilot_subscriber
+WHERE autopilot_id = $1 AND user_id = $2
+`, autopilotID, fx.TargetUserID).Scan(&removedCount)
+	if removedCount != 0 {
+		t.Fatalf("departed member autopilot subscribers = %d, want 0", removedCount)
+	}
+
+	var remainingCount int
+	dbfx.QueryRow(t, `
+SELECT count(*) FROM autopilot_subscriber
+WHERE autopilot_id = $1 AND user_id = $2
+`, autopilotID, testUserID).Scan(&remainingCount)
+	if remainingCount != 1 {
+		t.Fatalf("remaining member autopilot subscribers = %d, want 1", remainingCount)
+	}
+
+	var otherWorkspaceCount int
+	dbfx.QueryRow(t, `
+SELECT count(*) FROM autopilot_subscriber
+WHERE autopilot_id = $1 AND user_id = $2
+`, otherAutopilotID, fx.TargetUserID).Scan(&otherWorkspaceCount)
+	if otherWorkspaceCount != 1 {
+		t.Fatalf("other workspace autopilot subscribers = %d, want 1", otherWorkspaceCount)
 	}
 }
 

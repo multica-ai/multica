@@ -1,4 +1,5 @@
 import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
+import type { PropertyFilterValue } from "./property";
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
 
@@ -21,6 +22,30 @@ export interface CreateIssueRequest {
    *  Unknown or non-issue ids are rejected by the server with 400. */
   label_ids?: string[];
 }
+
+export interface CreateCommentSubIssueManualRequest {
+  mode: "manual";
+  capture_token: string;
+  issue: CreateIssueRequest;
+}
+
+export interface CreateCommentSubIssueAgentRequest {
+  mode: "agent";
+  capture_token: string;
+  quick_create: {
+    agent_id?: string;
+    squad_id?: string;
+    prompt: string;
+    priority?: IssuePriority;
+    due_date?: string;
+    project_id?: string | null;
+    attachment_ids?: string[];
+  };
+}
+
+export type CreateCommentSubIssueRequest =
+  | CreateCommentSubIssueManualRequest
+  | CreateCommentSubIssueAgentRequest;
 
 export interface UpdateIssueRequest {
   /** Legacy aggregate compare-and-swap token. New text editors use field
@@ -52,10 +77,6 @@ export interface UpdateIssueRequest {
    *  MUL-3375). The assignee/status change still applies. Control field —
    *  strip from optimistic cache patches; never written onto the Issue. */
   suppress_run?: boolean;
-  /** Free-text handoff instruction injected into the started run's opening
-   *  context (MUL-3375). Only consumed when a run actually starts. Control
-   *  field — strip from optimistic cache patches. */
-  handoff_note?: string;
 }
 
 /**
@@ -87,14 +108,11 @@ export interface IssueTriggerPreviewParams {
 }
 
 /** One issue that WILL start a run under the prospective write. `agent_id` is
- *  the runnable agent (squad leader for squads). `handoff_supported` is the
- *  soft-gate signal: false when the target runtime is too old to render a
- *  handoff note (gray the note box; the assignment still works). */
+ *  the runnable agent (squad leader for squads). */
 export interface IssueTriggerPreviewItem {
   issue_id: string;
   agent_id: string;
   source: string;
-  handoff_supported: boolean;
 }
 
 export interface IssueTriggerPreview {
@@ -161,8 +179,9 @@ export interface ListIssuesParams {
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
   /** Custom-property filter: definition id → accepted values (option ids or
-   *  "true"/"false" for checkbox). OR within a definition, AND across. */
-  properties?: Record<string, string[]>;
+   *  "true"/"false" for checkbox; a plain string is exact equality, an
+   *  operator object narrows it). OR within a definition, AND across. */
+  properties?: Record<string, PropertyFilterValue[]>;
   open_only?: boolean;
   /**
    * Restrict the result to issues with at least one of `start_date` /
@@ -210,8 +229,9 @@ export interface ListGroupedIssuesParams {
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
   /** Custom-property filter: definition id → accepted values (option ids or
-   *  "true"/"false" for checkbox). OR within a definition, AND across. */
-  properties?: Record<string, string[]>;
+   *  "true"/"false" for checkbox; a plain string is exact equality, an
+   *  operator object narrows it). OR within a definition, AND across. */
+  properties?: Record<string, PropertyFilterValue[]>;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];
@@ -275,7 +295,9 @@ export interface IssueTableFilters {
   project_ids?: string[];
   include_no_project?: boolean;
   label_ids?: string[];
-  properties?: Record<string, string[]>;
+  /** Same shape as `ListIssuesParams.properties`: bare strings are exact
+   *  equality / "No value", operator objects narrow scalar matches. */
+  properties?: Record<string, PropertyFilterValue[]>;
   date?: {
     field: "created_at" | "updated_at";
     start: string;
@@ -494,7 +516,6 @@ export interface SearchIssueResult extends Issue {
 
 export interface SearchIssuesResponse {
   issues: SearchIssueResult[];
-  total: number;
 }
 
 export interface SearchProjectResult extends Project {
@@ -504,7 +525,6 @@ export interface SearchProjectResult extends Project {
 
 export interface SearchProjectsResponse {
   projects: SearchProjectResult[];
-  total: number;
 }
 
 export interface UpdateMeRequest {

@@ -48,7 +48,7 @@ const viewState = vi.hoisted(() => ({
     startDate: true,
     dueDate: true,
     project: false,
-    childProgress: true,
+    childProgress: false,
     labels: false,
   },
   cardPropertyIds: [],
@@ -67,10 +67,8 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 }));
 
 vi.mock("../../i18n", () => ({
-  useT: () => ({
-    t: (_selector: unknown, options?: { count?: number }) =>
-      options?.count === undefined ? "Translated" : `${options.count} restricted`,
-  }),
+  useLocale: () => "en",
+  useT: () => ({ t: () => "Translated" }),
   useTimeAgo: () => () => "now",
 }));
 
@@ -100,6 +98,7 @@ const navigation: NavigationAdapter = {
   back: vi.fn(),
   pathname: "/acme/issues",
   searchParams: new URLSearchParams(),
+  hash: "",
   getShareableUrl: (path) => `https://app.example${path}`,
 };
 
@@ -163,28 +162,4 @@ describe("BoardCardContent assignee picker", () => {
       expect(navigation.push).not.toHaveBeenCalled();
     },
   );
-
-  it("shows the full progress and the number of restricted children", () => {
-    const issue = makeIssue("member");
-    render(
-      <NavigationProvider value={navigation}>
-        <IssueSurfaceActionsProvider actions={actions}>
-          <AppLink href={`/acme/issues/${issue.id}`}>
-            <BoardCardContent
-              issue={issue}
-              childProgress={{
-                done: 3,
-                total: 10,
-                visibleDone: 3,
-                visibleTotal: 4,
-                hiddenTotal: 6,
-              }}
-            />
-          </AppLink>
-        </IssueSurfaceActionsProvider>
-      </NavigationProvider>,
-    );
-    expect(screen.getByText("3/10")).toBeInTheDocument();
-    expect(screen.getByText("6 restricted")).toBeInTheDocument();
-  });
 });

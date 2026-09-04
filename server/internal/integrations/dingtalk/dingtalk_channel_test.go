@@ -27,7 +27,8 @@ func TestNewDingTalkFactory_DecryptsAndBuilds(t *testing.T) {
 		AppSecretEncrypted: base64.StdEncoding.EncodeToString(sealed),
 	})
 
-	factory := newDingTalkFactory(ChannelDeps{Decrypt: box.Open})
+	botNames := NewBotNameResolver(nil, nil)
+	factory := newDingTalkFactory(ChannelDeps{Decrypt: box.Open, BotNames: botNames})
 	built, err := factory(channel.Config{Type: TypeDingTalk, Raw: cfg, Handler: noopHandler})
 	if err != nil {
 		t.Fatalf("factory: %v", err)
@@ -41,6 +42,9 @@ func TestNewDingTalkFactory_DecryptsAndBuilds(t *testing.T) {
 	}
 	if dc.appSecret != "plain-secret" {
 		t.Errorf("app secret = %q, want decrypted plain-secret", dc.appSecret)
+	}
+	if dc.botNames != botNames {
+		t.Fatal("factory did not wire the shared BotNameResolver into the channel")
 	}
 	if dc.Type() != TypeDingTalk {
 		t.Errorf("Type() = %q", dc.Type())
@@ -130,6 +134,80 @@ func TestDingTalkChannel_DisconnectClosesOnlyCurrentCancelledGeneration(t *testi
 	third := thirdBuilt.(*dingtalkChannel)
 	if third.dispatch == second.dispatch {
 		t.Fatal("factory reused a closed dispatcher")
+	}
+}
+
+func TestDingTalkChannel_DisconnectReleasesClosedDispatcherSlot(t *testing.T) {
+	cfg, _ := json.Marshal(installConfig{
+		AppID:              "appkey-release",
+		AppSecretEncrypted: base64.StdEncoding.EncodeToString([]byte("secret")),
+	})
+	slots := newDispatchSlotRegistry()
+	factory := newDingTalkFactoryWithRegistry(ChannelDeps{}, slots)
+	built, err := factory(channel.Config{Type: TypeDingTalk, Raw: cfg, Handler: noopHandler})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if got := slots.size(); got != 1 {
+		t.Fatalf("registered dispatcher slots = %d, want 1", got)
+	}
+
+	c := built.(*dingtalkChannel)
+	c.stopDispatch.Store(true)
+	if err := c.Disconnect(context.Background()); err != nil {
+		t.Fatalf("disconnect: %v", err)
+	}
+	if got := slots.size(); got != 0 {
+		t.Fatalf("registered dispatcher slots after lifecycle stop = %d, want 0", got)
+	}
+}
+
+func TestDingTalkChannel_DisconnectTimeoutReleasesSlotAfterWorkerExits(t *testing.T) {
+	cfg, _ := json.Marshal(installConfig{
+		AppID:              "appkey-release-after-timeout",
+		AppSecretEncrypted: base64.StdEncoding.EncodeToString([]byte("secret")),
+	})
+	started := make(chan struct{})
+	release := make(chan struct{})
+	slots := newDispatchSlotRegistry()
+	factory := newDingTalkFactoryWithRegistry(ChannelDeps{}, slots)
+	built, err := factory(channel.Config{
+		Type: TypeDingTalk,
+		Raw:  cfg,
+		Handler: func(context.Context, channel.InboundMessage) error {
+			close(started)
+			<-release
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	c := built.(*dingtalkChannel)
+	c.dispatch.enqueue("conv-A", dispatchMsg("conv-A", "first"))
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("dispatch worker did not start")
+	}
+
+	c.stopDispatch.Store(true)
+	disconnectCtx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	if err := c.Disconnect(disconnectCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("disconnect error = %v, want deadline exceeded", err)
+	}
+	if got := slots.size(); got != 1 {
+		t.Fatalf("registered dispatcher slots before worker exit = %d, want 1", got)
+	}
+	close(release)
+
+	deadline := time.Now().Add(time.Second)
+	for slots.size() != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := slots.size(); got != 0 {
+		t.Fatalf("registered dispatcher slots after worker exit = %d, want 0", got)
 	}
 }
 
@@ -293,6 +371,70 @@ func TestOnMessage_ReturnsWithoutWaitingForHandler(t *testing.T) {
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("the queued job never ran")
+	}
+}
+
+func TestOnMessage_ReturnsBeforeBotNameLookupAndQueuesCallbackSnapshot(t *testing.T) {
+	lookupStarted := make(chan struct{})
+	releaseLookup := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == accessTokenPath {
+			_, _ = w.Write([]byte(`{"accessToken":"tok","expireIn":7200}`))
+			return
+		}
+		close(lookupStarted)
+		<-releaseLookup
+		_, _ = w.Write([]byte(`{"chatbotInstanceVOList":[{"robotCode":"robot-1","name":"Multica Bot - Local"}]}`))
+	}))
+	defer srv.Close()
+
+	handled := make(chan channel.InboundMessage, 1)
+	client := NewClient(nil, srv.URL)
+	c := &dingtalkChannel{
+		appID: "appkey-1", robotCode: "robot-1", appKey: "appkey-1", appSecret: "secret",
+		client: client, botNames: NewBotNameResolver(client, nil), logger: slog.Default(),
+		handler: func(_ context.Context, msg channel.InboundMessage) error {
+			handled <- msg
+			return nil
+		},
+	}
+	c.dispatch = newDispatcher(c.runInbound, c.logger)
+	data := &botCallbackData{
+		ConversationId: "cid-1", ConversationType: convTypeGroup, IsInAtList: true,
+		SenderStaffId: "staff-1", MsgId: "msg-1", Msgtype: "text",
+		Text: botCallbackText{Content: "@Multica Bot - Local /new inspect this"},
+	}
+	returned := make(chan struct{})
+	go func() {
+		_ = c.onMessage(context.Background(), data)
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("onMessage waited for Bot-name resolution instead of returning for ACK")
+	}
+	select {
+	case <-lookupStarted:
+	case <-time.After(time.Second):
+		t.Fatal("queued worker did not start Bot-name resolution")
+	}
+
+	// The Stream decoder owns data only for the callback. A queued job must not
+	// retain aliases to mutable slices from that object.
+	data.Text.Content = "mutated after enqueue"
+	data.AtUsers = append(data.AtUsers, botCallbackAtUser{StaffId: "mutated"})
+	data.Content = append(data.Content, []byte("mutated")...)
+	close(releaseLookup)
+
+	select {
+	case msg := <-handled:
+		if msg.Text != "/new inspect this" || msg.CommandText != msg.Text {
+			t.Fatalf("queued callback snapshot normalized to %q/%q", msg.Text, msg.CommandText)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued callback was not handled after Bot-name resolution")
 	}
 }
 

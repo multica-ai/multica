@@ -29,6 +29,7 @@ import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
 import type { InboxItem, Issue, IssueReaction } from "../types";
 import type {
+  CreateCommentSubIssueManualRequest,
   CreateIssueRequest,
   ListIssuesCache,
   MoveIssueRequest,
@@ -75,11 +76,13 @@ export type UpdateIssueMutationInput = {
 // Issue CRUD
 // ---------------------------------------------------------------------------
 
-export function useCreateIssue() {
+function useIssueCreateMutation<TVariables>(
+  mutationFn: (variables: TVariables) => Promise<Issue>,
+) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (data: CreateIssueRequest) => api.createIssue(data),
+    mutationFn,
     onSuccess: (newIssue) => {
       for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
         if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, newIssue));
@@ -105,6 +108,20 @@ export function useCreateIssue() {
   });
 }
 
+export function useCreateIssue() {
+  return useIssueCreateMutation((data: CreateIssueRequest) => api.createIssue(data));
+}
+
+export function useCreateCommentSubIssue() {
+  return useIssueCreateMutation(({
+    anchorCommentId,
+    data,
+  }: {
+    anchorCommentId: string;
+    data: CreateCommentSubIssueManualRequest;
+  }) => api.createCommentSubIssue(anchorCommentId, data));
+}
+
 export function useUpdateIssue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -115,15 +132,14 @@ export function useUpdateIssue() {
       return api.moveIssue(id, { ...target, ...moveIntent });
     },
     onMutate: ({ id, move_intent: _moveIntent, ...data }) => {
-      // suppress_run / handoff_note are write-time control fields, not Issue
-      // columns. description_base is merge metadata, while description itself
+      // suppress_run is a write-time control field, not an Issue column.
+      // description_base is merge metadata, while description itself
       // is resolved against that base on the server and therefore is not safe
       // to predict optimistically. Keep the authoritative raw description in
       // cache so hidden channel-media markers remain available as the base for
       // a rapid follow-up edit. mutationFn still sends the full payload.
       const {
         suppress_run: _suppressRun,
-        handoff_note: _handoffNote,
         description: _description,
         description_base: _descriptionBase,
         title_base: _titleBase,
@@ -138,8 +154,8 @@ export function useUpdateIssue() {
       qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
       qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) });
       qc.cancelQueries({ queryKey: issueKeys.tableAll(wsId) });
-      if (patch.status !== undefined) {
-        qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      if (patch.status !== undefined || patch.priority !== undefined) {
+        qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
       }
       const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
       // The coordinator owns the cross-cache rules: surgical patch/rebucket
@@ -234,7 +250,6 @@ export function useUpdateIssue() {
       // is the plain surgical patch it always was.
       const {
         suppress_run: _suppressRun,
-        handoff_note: _handoffNote,
         description_base: _descriptionBase,
         move_intent: _moveIntent,
         id: _id,
@@ -428,7 +443,6 @@ export function useBatchUpdateIssues() {
       // until a refetch returns the committed result.
       const {
         suppress_run: _suppressRun,
-        handoff_note: _handoffNote,
         description: _description,
         description_base: _descriptionBase,
         ...patch
@@ -437,8 +451,8 @@ export function useBatchUpdateIssues() {
       await qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
       await qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) });
       await qc.cancelQueries({ queryKey: issueKeys.tableAll(wsId) });
-      if (patch.status !== undefined) {
-        await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      if (patch.status !== undefined || patch.priority !== undefined) {
+        await qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
       }
 
       // Run every issue through the coordinator — the same rules table the
@@ -455,6 +469,7 @@ export function useBatchUpdateIssues() {
       >();
       const prevDetailById = new Map<string, Issue>();
       let prevInboxList: InboxItem[] | undefined;
+      let prevArchivedInboxList: InboxItem[] | undefined;
       const staleKeys: QueryKey[] = [];
       for (const id of ids) {
         const base = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
@@ -481,6 +496,12 @@ export function useBatchUpdateIssues() {
         if (change.prevDetail) prevDetailById.set(id, change.prevDetail);
         if (prevInboxList === undefined && change.prevInboxList !== undefined) {
           prevInboxList = change.prevInboxList;
+        }
+        if (
+          prevArchivedInboxList === undefined &&
+          change.prevArchivedInboxList !== undefined
+        ) {
+          prevArchivedInboxList = change.prevArchivedInboxList;
         }
         staleKeys.push(...change.staleKeys);
       }
@@ -510,6 +531,7 @@ export function useBatchUpdateIssues() {
         prevTableRows: [...prevTableRowByHash.values()],
         prevDetailById,
         prevInboxList,
+        prevArchivedInboxList,
         staleKeys,
         prevChildren,
         affectedParentIds,
@@ -538,6 +560,12 @@ export function useBatchUpdateIssues() {
       }
       if (ctx?.prevInboxList !== undefined) {
         qc.setQueryData(inboxKeys.list(wsId), ctx.prevInboxList);
+      }
+      if (ctx?.prevArchivedInboxList !== undefined) {
+        qc.setQueryData(
+          inboxKeys.archived(wsId),
+          ctx.prevArchivedInboxList,
+        );
       }
       if (ctx?.prevChildren) {
         for (const [parentId, snapshot] of ctx.prevChildren) {

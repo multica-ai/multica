@@ -17,7 +17,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { useTimeAgo } from "../../i18n";
+import { useLocale, useT, useTimeAgo } from "../../i18n";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "./pickers";
@@ -29,10 +29,8 @@ import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
-import { useT } from "../../i18n";
-
-function formatDate(date: string): string {
-  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
+function formatDate(date: string, locale: string): string {
+  return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
 
 /** Stops event from bubbling to Link/drag handlers */
@@ -60,6 +58,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   project?: Project;
 }) {
   const { t } = useT("issues");
+  const locale = useLocale();
   const timeAgo = useTimeAgo();
   const storeProperties = useViewStore((s) => s.cardProperties);
   const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
@@ -246,7 +245,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                       trigger={
                         <span className="flex items-center gap-1 text-caption text-muted-foreground">
                           <CalendarClock className="size-3" />
-                          {formatDate(issue.start_date!)}
+                          {formatDate(issue.start_date!, locale)}
                         </span>
                       }
                     />
@@ -254,7 +253,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                 ) : (
                   <span className="flex shrink-0 items-center gap-1 text-caption text-muted-foreground">
                     <CalendarClock className="size-3" />
-                    {formatDate(issue.start_date!)}
+                    {formatDate(issue.start_date!, locale)}
                   </span>
                 )
               )}
@@ -273,7 +272,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                           }`}
                         >
                           <CalendarDays className="size-3" />
-                          {formatDate(issue.due_date!)}
+                          {formatDate(issue.due_date!, locale)}
                         </span>
                       }
                     />
@@ -287,21 +286,16 @@ export const BoardCardContent = memo(function BoardCardContent({
                     }`}
                   >
                     <CalendarDays className="size-3" />
-                    {formatDate(issue.due_date!)}
+                    {formatDate(issue.due_date!, locale)}
                   </span>
                 )
               )}
               {showChildProgress && (
-                <div className="inline-flex shrink-0 items-center gap-1.5">
+                <div className="inline-flex shrink-0 items-center gap-1">
                   <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
                   <span className="text-micro text-muted-foreground tabular-nums font-medium">
                     {childProgress!.done}/{childProgress!.total}
                   </span>
-                  {(childProgress!.hiddenTotal ?? 0) > 0 && (
-                    <span className="text-micro text-warning tabular-nums font-medium">
-                      {t(($) => $.card.child_progress_restricted, { count: childProgress!.hiddenTotal ?? 0 })}
-                    </span>
-                  )}
                 </div>
               )}
               {showUpdatedHint && (

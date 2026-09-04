@@ -171,6 +171,102 @@ func TestRuntimeOfflineRetryWaitsForHealthyRuntime(t *testing.T) {
 	}
 }
 
+func TestMaybeRetryFailedTaskCopiesChannelDelivery(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+
+	var runtimeID, sessionID, installationID, bindingID, parentID string
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("read agent runtime: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
+		VALUES ($1, $2, $3, 'channel retry') RETURNING id
+	`, workspaceID, agentID, userID).Scan(&sessionID); err != nil {
+		t.Fatalf("insert chat session: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, status, installer_user_id)
+		VALUES ($1, $2, 'slack', '{}'::jsonb, 'active', $3) RETURNING id
+	`, workspaceID, agentID, userID).Scan(&installationID); err != nil {
+		t.Fatalf("insert channel installation: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO channel_chat_session_binding (
+			chat_session_id, installation_id, channel_type, channel_chat_id, chat_type,
+			last_message_id, last_thread_id, route_revision, config
+		) VALUES ($1, $2, 'slack', 'D123', 'p2p', '171.001', '171.001', 4, '{"channel_id":"D123"}'::jsonb)
+		RETURNING id
+	`, sessionID, installationID).Scan(&bindingID); err != nil {
+		t.Fatalf("insert channel binding: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, chat_session_id, status, priority, attempt,
+			max_attempts, failure_reason, originator_user_id, accountable_user_id, originator_source
+		) VALUES ($1, $2, $3, 'failed', 0, 1, 3, 'timeout', $4, $4, 'direct_human')
+		RETURNING id
+	`, agentID, runtimeID, sessionID, userID).Scan(&parentID); err != nil {
+		t.Fatalf("insert failed channel task: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO channel_task_delivery (
+			task_id, binding_id, installation_id, channel_type, channel_chat_id, chat_type,
+			channel_message_id, channel_thread_id, route_revision, config
+		) VALUES ($1, $2, $3, 'slack', 'D123', 'p2p', '171.001', '171.001', 4, '{"channel_id":"D123"}'::jsonb)
+	`, parentID, bindingID, installationID); err != nil {
+		t.Fatalf("insert parent delivery: %v", err)
+	}
+
+	parent, err := q.GetAgentTask(ctx, util.MustParseUUID(parentID))
+	if err != nil {
+		t.Fatalf("load parent: %v", err)
+	}
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	child, err := svc.MaybeRetryFailedTask(ctx, parent)
+	if err != nil {
+		t.Fatalf("MaybeRetryFailedTask: %v", err)
+	}
+	if child == nil {
+		t.Fatal("expected retry child")
+	}
+	delivery, err := q.GetChannelTaskDelivery(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("load retry delivery: %v", err)
+	}
+	if util.UUIDToString(delivery.BindingID) != bindingID ||
+		util.UUIDToString(delivery.InstallationID) != installationID ||
+		delivery.ChannelType != "slack" || delivery.ChannelChatID != "D123" ||
+		delivery.RouteRevision != 4 || delivery.ChannelMessageID.String != "171.001" {
+		t.Fatalf("retry delivery drifted from parent: %+v", delivery)
+	}
+
+	// Exercise the independent FailTask retry path as well. It creates the
+	// child inside the same transaction that marks this attempt failed, and its
+	// delivery copy must commit atomically with that child.
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running' WHERE id = $1`, child.ID); err != nil {
+		t.Fatalf("mark retry running: %v", err)
+	}
+	if _, err := svc.FailTask(ctx, child.ID, "runtime timed out", "", "", "", "timeout", false, "", ""); err != nil {
+		t.Fatalf("FailTask: %v", err)
+	}
+	var grandchildID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT id FROM agent_task_queue WHERE parent_task_id = $1 ORDER BY created_at DESC LIMIT 1
+	`, child.ID).Scan(&grandchildID); err != nil {
+		t.Fatalf("load FailTask retry child: %v", err)
+	}
+	grandchildDelivery, err := q.GetChannelTaskDelivery(ctx, grandchildID)
+	if err != nil {
+		t.Fatalf("load FailTask retry delivery: %v", err)
+	}
+	if util.UUIDToString(grandchildDelivery.BindingID) != bindingID || grandchildDelivery.RouteRevision != 4 {
+		t.Fatalf("FailTask retry delivery drifted from parent: %+v", grandchildDelivery)
+	}
+}
+
 // TestFailTaskProviderNetworkBudget is the end-to-end guard for Elon's must-fix
 // (MUL-4910): FailTask must (1) grant provider_network its raised budget and
 // persist a self-consistent child (attempt=3, max_attempts=3), and (2) still

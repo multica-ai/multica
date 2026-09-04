@@ -123,6 +123,7 @@ function renderPage(searchParams = new URLSearchParams()) {
     back: vi.fn(),
     pathname: "/acme/skills/skill-1",
     searchParams,
+    hash: "",
     getShareableUrl: (path) => path,
   };
   render(
@@ -167,11 +168,6 @@ describe("SkillDetailPage tabs", () => {
     expect(
       screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected"),
     ).toBe("true");
-  });
-
-  it("shows resource labels in Overview without a release flag", async () => {
-    renderPage();
-    expect(await screen.findByTestId("labels")).toBeTruthy();
   });
 
   it("mirrors the active tab into ?view= so the pane survives a reload", async () => {

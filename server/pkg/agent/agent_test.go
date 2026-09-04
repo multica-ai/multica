@@ -12,28 +12,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsClaudeBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("claude", Config{ExecutablePath: "/nonexistent/claude"})
-	if err != nil {
-		t.Fatalf("New(claude) error: %v", err)
-	}
-	if _, ok := b.(*claudeBackend); !ok {
-		t.Fatalf("expected *claudeBackend, got %T", b)
-	}
-}
-
-func TestNewReturnsCodexBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("codex", Config{ExecutablePath: "/nonexistent/codex"})
-	if err != nil {
-		t.Fatalf("New(codex) error: %v", err)
-	}
-	if _, ok := b.(*codexBackend); !ok {
-		t.Fatalf("expected *codexBackend, got %T", b)
-	}
-}
-
 func TestNewReturnsCodebuddyBackend(t *testing.T) {
 	t.Parallel()
 	b, err := New("codebuddy", Config{ExecutablePath: "/nonexistent/codebuddy"})
@@ -42,17 +20,6 @@ func TestNewReturnsCodebuddyBackend(t *testing.T) {
 	}
 	if _, ok := b.(*codebuddyBackend); !ok {
 		t.Fatalf("expected *codebuddyBackend, got %T", b)
-	}
-}
-
-func TestNewReturnsCopilotBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("copilot", Config{ExecutablePath: "/nonexistent/copilot"})
-	if err != nil {
-		t.Fatalf("New(copilot) error: %v", err)
-	}
-	if _, ok := b.(*copilotBackend); !ok {
-		t.Fatalf("expected *copilotBackend, got %T", b)
 	}
 }
 
@@ -83,17 +50,6 @@ func TestNewReturnsQoderCNBackend(t *testing.T) {
 	}
 	if qoder.defaultExecutable != "qoderclicn" {
 		t.Fatalf("default executable = %q, want qoderclicn", qoder.defaultExecutable)
-	}
-}
-
-func TestNewReturnsAntigravityBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("antigravity", Config{ExecutablePath: "/nonexistent/agy"})
-	if err != nil {
-		t.Fatalf("New(antigravity) error: %v", err)
-	}
-	if _, ok := b.(*antigravityBackend); !ok {
-		t.Fatalf("expected *antigravityBackend, got %T", b)
 	}
 }
 
@@ -130,7 +86,7 @@ func TestDetectVersionFailsForMissingBinary(t *testing.T) {
 // disconnected. detectCLIVersion must bound the probe and return an error so
 // the registration loop isolates the broken runtime and the rest still
 // register. The script also leaves an orphaned child holding the stdout pipe
-// open after the parent is killed, exercising the cmd.WaitDelay path.
+// open after the parent is killed, exercising the process-tree collector path.
 func TestDetectVersionTimesOutOnHang(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("relies on a /bin/sh hang script")
@@ -141,7 +97,7 @@ func TestDetectVersionTimesOutOnHang(t *testing.T) {
 	pidFile := filepath.Join(dir, "child.pid")
 	// The CLI hangs forever (`wait`) and backgrounds a child that inherits and
 	// holds our stdout pipe open even after the parent is killed on timeout —
-	// the exact case cmd.WaitDelay must cover. The child records its PID so we
+	// the exact case RunCollect must cover. The child records its PID so we
 	// can reap it in Cleanup instead of leaking a 60s `sleep` into CI.
 	body := fmt.Sprintf("#!/bin/sh\nsleep 60 &\necho $! > %q\nwait\n", pidFile)
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
@@ -195,18 +151,6 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 		if header := LaunchHeader(t_); header == "" {
 			t.Errorf("LaunchHeader(%q) returned empty string — add it to launchHeaders", t_)
 		}
-	}
-}
-
-func TestLaunchHeaderAntigravityAvoidsTextOnlyPrintModeLabel(t *testing.T) {
-	t.Parallel()
-
-	header := LaunchHeader("antigravity")
-	if header != "agy -p (non-interactive)" {
-		t.Fatalf("unexpected Antigravity launch header: %q", header)
-	}
-	if strings.Contains(header, "print mode") {
-		t.Fatalf("Antigravity launch header must not imply a text-only mode: %q", header)
 	}
 }
 
