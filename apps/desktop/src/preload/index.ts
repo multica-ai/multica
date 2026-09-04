@@ -5,6 +5,7 @@ import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
   ManualUpdateCheckResult,
   UpdaterPreferences,
+  UpdateInstallState,
 } from "../shared/updater-types";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
@@ -301,6 +302,7 @@ const daemonAPI = {
 };
 
 const updaterAPI = {
+  installRequiresStoppedRuntime: process.platform === "win32",
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
     const handler = (_: unknown, info: { version: string; releaseNotes?: string }) => callback(info);
     ipcRenderer.on("updater:update-available", handler);
@@ -320,7 +322,13 @@ const updaterAPI = {
     return () => ipcRenderer.removeListener("updater:update-downloaded", handler);
   },
   downloadUpdate: () => ipcRenderer.invoke("updater:download"),
-  installUpdate: () => ipcRenderer.invoke("updater:install"),
+  installUpdate: (): Promise<UpdateInstallState> => ipcRenderer.invoke("updater:install"),
+  getInstallState: (): Promise<UpdateInstallState> => ipcRenderer.invoke("updater:get-install-state"),
+  onInstallStateChanged: (callback: (state: UpdateInstallState) => void) => {
+    const handler = (_: unknown, state: UpdateInstallState) => callback(state);
+    ipcRenderer.on("updater:install-state", handler);
+    return () => ipcRenderer.removeListener("updater:install-state", handler);
+  },
   getPreferences: (): Promise<UpdaterPreferences> =>
     ipcRenderer.invoke("updater:get-preferences"),
   setAutomaticUpdates: (enabled: boolean): Promise<UpdaterPreferences> =>
