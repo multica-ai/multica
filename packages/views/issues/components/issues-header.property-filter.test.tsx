@@ -337,6 +337,18 @@ describe("IssueFilterMenu scalar property filter", () => {
     expect(store.getState().propertyFilters).toEqual({});
   });
 
+  it("counts missing scalar properties as No value in the local fallback", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", {}),
+      issueWithProperties("i-2", { [PROP]: "alpha" }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    expect(screen.getByRole("menuitemcheckbox", { name: /No value/ })).toHaveTextContent("1");
+    expect(screen.getByRole("menuitemcheckbox", { name: /alpha/ })).toHaveTextContent("1");
+    expect(store.getState().propertyFilters).toEqual({});
+  });
+
   it("renders observed values from server facets and ignores the legacy __set__ bucket", async () => {
     // A new menu against an OLD backend receives the pre-per-value shape: the
     // two-bucket "__set__"/"__none__" response. "__set__" must not surface as
@@ -364,6 +376,21 @@ describe("IssueFilterMenu scalar property filter", () => {
     // Toggling a server-facet value commits the same bare equality member.
     await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha"] });
+  });
+
+  it("keeps a pending operator when an observed value is toggled before typing", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", { [PROP]: "alpha" }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    await userEvent.click(screen.getByRole("radio", { name: "contains" }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
+    await userEvent.type(screen.getByRole("textbox"), "custom{Enter}");
+
+    expect(store.getState().propertyFilters).toEqual({
+      [PROP]: [{ op: "contains", value: "custom" }, "alpha"],
+    });
   });
 
   it("picking contains with an empty draft, then typing commits an operator object", async () => {

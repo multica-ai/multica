@@ -274,11 +274,23 @@ function useIssueCounts(
         }
       }
 
-      for (const [propertyId, value] of Object.entries(issue.properties ?? {})) {
-        const propertyType = propertyTypes?.get(propertyId);
+      const issueProperties = issue.properties ?? {};
+      for (const [propertyId, propertyType] of propertyTypes ?? []) {
+        if (!Object.prototype.hasOwnProperty.call(issueProperties, propertyId)) {
+          let perOption = property.get(propertyId);
+          if (!perOption) {
+            perOption = new Map<string, number>();
+            property.set(propertyId, perOption);
+          }
+          perOption.set(NO_PROPERTY_VALUE, (perOption.get(NO_PROPERTY_VALUE) ?? 0) + 1);
+          continue;
+        }
+
+        const value = issueProperties[propertyId];
         const optionKeys =
           (propertyType === "text" || propertyType === "url" || propertyType === "date") &&
-          typeof value === "string"
+          typeof value === "string" &&
+          value !== NO_PROPERTY_VALUE
             ? [value]
             : propertyType === "number" && typeof value === "number" && Number.isFinite(value)
               ? // Number facet key: String() is already canonical in JS for
@@ -764,6 +776,13 @@ function PropertyFilterOptions({
       ? ""
       : propertyFilterValueKey(committedMember);
   const [draft, setDraft] = useState(committedScalar);
+  // Operator picked in the open menu but not yet committed; null defers to the
+  // committed member (equality when there is none).
+  const [pendingOp, setPendingOp] = useState<PropertyFilterOp | "is" | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const pendingOpRef = useRef(pendingOp);
+  pendingOpRef.current = pendingOp;
   // Keep track of whether the input currently represents the first committed
   // member. Observed checkboxes are additional OR members, so editing the
   // input must replace only this member and leave the others intact.
@@ -771,15 +790,20 @@ function PropertyFilterOptions({
   const inputMemberKeyRef = useRef(committedKey);
   useEffect(() => {
     if (draftDirtyRef.current) return;
+    // An operator selected for an empty draft must survive a checkbox toggle;
+    // the next input commit still needs to use that operator.
+    if (pendingOpRef.current !== null && draftRef.current === "") return;
     setDraft(committedScalar);
     inputMemberKeyRef.current = committedKey;
   }, [committedKey, committedScalar]);
-  // Operator picked in the open menu but not yet committed; null defers to the
-  // committed member (equality when there is none). Resets whenever the
-  // committed member changes — including right after this menu commits — so a
-  // value rewritten elsewhere can't inherit a stale operator.
-  const [pendingOp, setPendingOp] = useState<PropertyFilterOp | "is" | null>(null);
-  useEffect(() => setPendingOp(null), [committedKey]);
+  // Resets whenever the committed member changes — including right after this
+  // menu commits — so a value rewritten elsewhere can't inherit a stale
+  // operator. A pending operator with an empty draft is intentionally kept
+  // while observed values or "No value" are toggled.
+  useEffect(() => {
+    if (pendingOpRef.current !== null && draftRef.current === "") return;
+    setPendingOp(null);
+  }, [committedKey]);
   const options = [
     ...(actorProperty
       ? actorOptions.map((option) => ({
@@ -993,7 +1017,9 @@ function PropertyFilterOptions({
               key={value}
               checked={checked}
               disabled={locked}
-              onCheckedChange={() => onToggle(value)}
+              onCheckedChange={() => {
+                onToggle(value);
+              }}
               className={FILTER_ITEM_CLASS}
             >
               <HoverCheck checked={checked} />
