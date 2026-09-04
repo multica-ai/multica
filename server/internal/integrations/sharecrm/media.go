@@ -23,12 +23,23 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
+// ShareCRM inbound images arrive as short-lived signed HTTP(S) URLs. Keep the
+// adapter's memory budget below the shared Router media deadline: at most eight
+// 10 MiB downloads, fetched one at a time.
 const (
 	maxShareCRMImagesPerMessage = 8
 	maxShareCRMImageBytes       = 10 << 20
 	shareCRMImageFetchTimeout   = 15 * time.Second
 	maxShareCRMImageRedirects   = 3
 )
+
+var allowedShareCRMImageTypes = map[string]string{
+	"image/png":  ".png",
+	"image/jpeg": ".jpg",
+	"image/gif":  ".gif",
+	"image/webp": ".webp",
+	"image/bmp":  ".bmp",
+}
 
 type mediaStorage interface {
 	Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error)
@@ -67,17 +78,17 @@ func (r *sharecrmMediaResolver) ResolveMedia(ctx context.Context, inst engine.Re
 		return msg
 	}
 	if r.storage == nil || r.ledger == nil {
-		r.logger.Warn("sharecrm media ingest skipped: no storage configured", "message_id", msg.MessageID)
+		r.logWarn(msg, errors.New("media dependency missing"))
 		return msg
 	}
 	if len(raw.Images) > maxShareCRMImagesPerMessage {
-		r.logger.Warn("sharecrm media ingest skipped: too many images", "message_id", msg.MessageID, "count", len(raw.Images))
+		r.logWarn(msg, fmt.Errorf("%d images exceed the limit of %d", len(raw.Images), maxShareCRMImagesPerMessage))
 		return msg
 	}
 	for i, image := range raw.Images {
 		ref, err := r.ingestOne(ctx, inst, chatMessageID, msg.MessageID, i, image)
 		if err != nil {
-			r.logger.Warn("sharecrm media ingest failed", "message_id", msg.MessageID, "index", i, "err", err)
+			r.logWarn(msg, err)
 			continue
 		}
 		msg.MediaRefs = append(msg.MediaRefs, ref)
@@ -86,10 +97,6 @@ func (r *sharecrmMediaResolver) ResolveMedia(ctx context.Context, inst engine.Re
 }
 
 func (r *sharecrmMediaResolver) ingestOne(ctx context.Context, inst engine.ResolvedInstallation, chatMessageID pgtype.UUID, messageID string, index int, image botImageRef) (channel.MediaRef, error) {
-	filename := strings.TrimSpace(image.Filename)
-	if filename == "" {
-		filename = fmt.Sprintf("image-%d.png", index+1)
-	}
 	key := sharecrmMediaObjectKey(inst, chatMessageID, messageID, index)
 	link := r.storage.ObjectURL(key)
 	owned, err := r.ledger.RecordPendingMediaObject(ctx, engine.RecordPendingMediaObjectParams{
@@ -105,20 +112,27 @@ func (r *sharecrmMediaResolver) ingestOne(ctx context.Context, inst engine.Resol
 	if !owned {
 		return channel.MediaRef{}, errors.New("media key owned by reconciler")
 	}
-	body, contentType, err := downloadShareCRMImage(ctx, r.http, image.URL)
+	body, contentType, err := r.fetchBytes(ctx, image.URL)
 	if err != nil {
 		return channel.MediaRef{}, err
+	}
+	ext := allowedShareCRMImageTypes[contentType]
+	filename := strings.TrimSpace(image.Filename)
+	if filename == "" {
+		filename = fmt.Sprintf("sharecrm-image-%d%s", index+1, ext)
 	}
 	if _, err := r.storage.Upload(ctx, key, body, contentType, filename); err != nil {
 		return channel.MediaRef{}, fmt.Errorf("upload image: %w", err)
 	}
 	return channel.MediaRef{
-		Type:       channel.MsgTypeImage,
-		StorageKey: key,
-		StorageURL: link,
-		Filename:   filename,
-		MimeType:   contentType,
-		SizeBytes:  int64(len(body)),
+		Type:              channel.MsgTypeImage,
+		StorageKey:        key,
+		StorageURL:        link,
+		Filename:          filename,
+		MimeType:          contentType,
+		SizeBytes:         int64(len(body)),
+		InlinePlaceholder: sharecrmImagePlaceholder,
+		InlineIndex:       index,
 	}, nil
 }
 
@@ -133,107 +147,186 @@ func sharecrmMediaObjectKey(inst engine.ResolvedInstallation, chatMessageID pgty
 	)
 }
 
+// Signed image URLs are untrusted egress input: resolve the host ourselves,
+// reject every non-public answer, and dial the validated IP directly so DNS
+// rebinding cannot redirect the connection into the local network. Proxy use
+// is disabled because a proxy would resolve the target again and bypass this
+// guarantee. The query string is a short-lived bearer credential, so Referer
+// must never leak across redirects.
 func newShareCRMMediaHTTPClient() *http.Client {
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(address)
-			if err != nil {
-				return nil, err
-			}
-			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-			if err != nil {
-				return nil, err
-			}
-			var last error
-			for _, ip := range ips {
-				addr, ok := netip.AddrFromSlice(ip.IP)
-				if !ok || !isPublicShareCRMMediaAddr(addr) {
-					last = errors.New("sharecrm: media host resolves to a non-public address")
-					continue
-				}
-				conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
-				if err == nil {
-					return conn, nil
-				}
-				last = err
-			}
-			if last == nil {
-				last = errors.New("sharecrm: media host resolves to a non-public address")
-			}
-			return nil, last
-		},
-	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = (&publicDownloadDialer{
+		resolver: net.DefaultResolver,
+		dialer:   &net.Dialer{Timeout: shareCRMImageFetchTimeout},
+	}).DialContext
 	return &http.Client{
-		Timeout: shareCRMImageFetchTimeout,
+		Timeout:   shareCRMImageFetchTimeout,
 		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= maxShareCRMImageRedirects {
-				return errors.New("sharecrm: too many media redirects")
+				return errors.New("too many redirects")
 			}
-			if req.URL.Scheme != "https" && req.URL.Scheme != "http" {
-				return errors.New("sharecrm: media redirect scheme not allowed")
+			req.Header.Del("Referer")
+			if err := validateDownloadURL(req.URL); err != nil {
+				return err
+			}
+			previous := via[len(via)-1].URL
+			if strings.EqualFold(previous.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "https") {
+				return errors.New("disallowed HTTPS download redirect downgrade")
+			}
+			if strings.EqualFold(req.URL.Scheme, "http") && !sameDownloadOrigin(previous, req.URL) {
+				return errors.New("disallowed cross-origin HTTP download redirect")
 			}
 			return nil
 		},
 	}
 }
 
-func isPublicShareCRMMediaAddr(addr netip.Addr) bool {
-	if !addr.IsValid() || addr.IsUnspecified() || addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsMulticast() {
+type publicDownloadDialer struct {
+	resolver *net.Resolver
+	dialer   *net.Dialer
+}
+
+func (d *publicDownloadDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, errors.New("invalid download target address")
+	}
+	addrs, err := d.lookup(ctx, host)
+	if err != nil || len(addrs) == 0 {
+		return nil, errors.New("resolve download target failed")
+	}
+	for _, addr := range addrs {
+		if !isPublicDownloadAddress(addr) {
+			return nil, errors.New("blocked non-public download target")
+		}
+	}
+	for _, addr := range addrs {
+		conn, err := d.dialer.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+	}
+	return nil, errors.New("connect to download target failed")
+}
+
+func (d *publicDownloadDialer) lookup(ctx context.Context, host string) ([]netip.Addr, error) {
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return []netip.Addr{addr.Unmap()}, nil
+	}
+	addrs, err := d.resolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return nil, err
+	}
+	for i := range addrs {
+		addrs[i] = addrs[i].Unmap()
+	}
+	return addrs, nil
+}
+
+var nonPublicDownloadPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001::/32"),
+	netip.MustParsePrefix("2001:2::/48"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2001:10::/28"),
+	netip.MustParsePrefix("2001:20::/28"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("3fff::/20"),
+}
+
+var wellKnownNAT64Prefix = netip.MustParsePrefix("64:ff9b::/96")
+
+func isPublicDownloadAddress(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	if !addr.IsValid() || !addr.IsGlobalUnicast() || addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() {
 		return false
 	}
-	if addr.Is4() {
-		v4 := addr.As4()
-		if v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 {
-			return false
-		}
-		if v4[0] == 169 && v4[1] == 254 {
+	if wellKnownNAT64Prefix.Contains(addr) {
+		raw := addr.As16()
+		return isPublicDownloadAddress(netip.AddrFrom4([4]byte(raw[12:16])))
+	}
+	for _, prefix := range nonPublicDownloadPrefixes {
+		if prefix.Contains(addr) {
 			return false
 		}
 	}
 	return true
 }
 
-func downloadShareCRMImage(ctx context.Context, hc *http.Client, rawURL string) ([]byte, string, error) {
+func sameDownloadOrigin(a, b *url.URL) bool {
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
+}
+
+func validateDownloadURL(parsed *url.URL) error {
+	if parsed == nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+		return errors.New("invalid image download URL shape")
+	}
+	if !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https") {
+		return fmt.Errorf("invalid image download URL scheme %q", parsed.Scheme)
+	}
+	return nil
+}
+
+func (r *sharecrmMediaResolver) fetchBytes(ctx context.Context, rawURL string) ([]byte, string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || parsed.Host == "" {
-		return nil, "", errors.New("sharecrm: invalid image url")
-	}
-	if parsed.Scheme != "https" && parsed.Scheme != "http" {
-		return nil, "", errors.New("sharecrm: image url scheme not allowed")
-	}
-	if parsed.User != nil {
-		return nil, "", errors.New("sharecrm: image url must not include userinfo")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
+		return nil, "", errors.New("invalid image download URL")
+	}
+	if err := validateDownloadURL(parsed); err != nil {
 		return nil, "", err
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, shareCRMImageFetchTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return nil, "", errors.New("build image download request failed")
 	}
 	req.Header.Set("Accept", "image/*,*/*;q=0.8")
-	resp, err := hc.Do(req)
+	resp, err := r.http.Do(req)
 	if err != nil {
-		return nil, "", err
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			return nil, "", fmt.Errorf("download image request failed: %w", urlErr.Err)
+		}
+		return nil, "", errors.New("download image request failed")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, "", fmt.Errorf("sharecrm: image download failed (%d)", resp.StatusCode)
+		return nil, "", fmt.Errorf("download image: http %d", resp.StatusCode)
 	}
-	if resp.ContentLength > maxShareCRMImageBytes {
-		return nil, "", errors.New("sharecrm: image exceeds size limit")
-	}
-	limited := io.LimitReader(resp.Body, maxShareCRMImageBytes+1)
-	body, err := io.ReadAll(limited)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxShareCRMImageBytes+1))
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("read image: %w", err)
 	}
-	if int64(len(body)) > maxShareCRMImageBytes {
-		return nil, "", errors.New("sharecrm: image exceeds size limit")
+	if len(data) > maxShareCRMImageBytes {
+		return nil, "", fmt.Errorf("image exceeds the %d MB limit", maxShareCRMImageBytes>>20)
 	}
-	contentType := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
-	if !strings.HasPrefix(contentType, "image/") {
-		contentType = "image/png"
+	sniff := data
+	if len(sniff) > 512 {
+		sniff = sniff[:512]
 	}
-	return body, contentType, nil
+	contentType := http.DetectContentType(sniff)
+	if semi := strings.IndexByte(contentType, ';'); semi >= 0 {
+		contentType = strings.TrimSpace(contentType[:semi])
+	}
+	if _, ok := allowedShareCRMImageTypes[contentType]; !ok {
+		return nil, "", fmt.Errorf("disallowed content type %q", contentType)
+	}
+	return data, contentType, nil
+}
+
+func (r *sharecrmMediaResolver) logWarn(msg channel.InboundMessage, err error) {
+	r.logger.Warn("sharecrm media resolve skipped", "message_id", msg.MessageID, "error", err)
 }
