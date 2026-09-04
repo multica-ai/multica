@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-09-01
+// Snapshot: 2026-09-04
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -17,6 +17,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
 }>> = {
   "claude-3-5-haiku": { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 },
   "claude-fable-5": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+  "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
   "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   "claude-opus-4-1": { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
   "claude-opus-4-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
@@ -70,6 +71,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "gemini-3.5-live-translate-preview": { input: 3.5, output: 21, cacheRead: 3.5, cacheWrite: 3.5 },
   "gemini-3.6-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   "gemini-3.7-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
+  "gemini-3.8-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   "gemini-embedding-001": { input: 0.15, output: 0, cacheRead: 0.15, cacheWrite: 0.15 },
   "gemini-embedding-2": { input: 0.2, output: 0, cacheRead: 0.2, cacheWrite: 0.2 },
   "gemini-flash-latest": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
@@ -167,12 +169,14 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "minimax-m3": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.3 },
   "muse-spark-1.2": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 1.25 },
   "muse-spark-1.2-contributor": { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0.1 },
+  "muse-spark-1.3-contributor": { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0.1 },
   "o1": { input: 15, output: 60, cacheRead: 7.5, cacheWrite: 15 },
   "o1-pro": { input: 150, output: 600, cacheRead: 150, cacheWrite: 150 },
   "o3": { input: 2, output: 8, cacheRead: 0.5, cacheWrite: 2 },
   "o3-mini": { input: 1.1, output: 4.4, cacheRead: 0.55, cacheWrite: 1.1 },
   "o3-pro": { input: 20, output: 80, cacheRead: 20, cacheWrite: 20 },
   "o4-mini": { input: 1.1, output: 4.4, cacheRead: 0.275, cacheWrite: 1.1 },
+  "omen-alpha": { input: 0.2, output: 0.66, cacheRead: 0.04, cacheWrite: 0.2 },
   "openai/gpt-4o-2024-05-13": { input: 5, output: 15, cacheRead: 5, cacheWrite: 5 },
   "openai/gpt-5.2-chat-latest": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
   "openai/gpt-5.3-chat-latest": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
@@ -190,6 +194,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "opencode/deepseek-v4-pro": { input: 1.74, output: 3.84, cacheRead: 0.145, cacheWrite: 1.74 },
   "opencode/gemini-3.6-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 1.5 },
   "opencode/gemini-3.7-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 1.5 },
+  "opencode/gemini-3.8-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 1.5 },
   "opencode/glm-4.6": { input: 0.6, output: 2.2, cacheRead: 0.1, cacheWrite: 0.6 },
   "opencode/glm-4.7": { input: 0.6, output: 2.2, cacheRead: 0.1, cacheWrite: 0.6 },
   "opencode/glm-5": { input: 1, output: 3.2, cacheRead: 0.2, cacheWrite: 1 },
