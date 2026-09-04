@@ -1,0 +1,12 @@
+-- Not reversible, by decision rather than by oversight. Reversing would mean
+-- restoring which retired name each occurrence of `multica-platform` used to
+-- be, and the up migration keeps no pre-image to read that from. A backup
+-- table was considered and declined: the rows it would protect are pointers to
+-- a skill that no longer exists, and rolling this one rewrite back on its own
+-- -- while leaving the merged skill in place -- would only reintroduce names
+-- that resolve to nothing.
+--
+-- Rewriting `multica-platform` back to any single retired name would be worse
+-- than doing nothing: it would corrupt rows that always said `multica-platform`
+-- and rows this migration never touched.
+SELECT 1;
