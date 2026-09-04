@@ -218,11 +218,14 @@ func hasRequesterMention(content, requesterID string) bool {
 // acknowledgement phrases are exempt; an answer that adds analysis, a plan,
 // evidence, or a substantive decision must carry the requester mention.
 func isAcknowledgement(content string) bool {
-	// Remove canonical links before token normalization so an agent may
-	// acknowledge and mention in one short message without being gated. Do it
-	// after removing code spans: a copied example in backticks is not a real
-	// mention and must not affect either admission or acknowledgement parsing.
-	normalized := strings.ToLower(strings.TrimSpace(util.MentionRe.ReplaceAllString(stripCodeSpans(content), " ")))
+	// A block of delivered code is substantive by construction; a short
+	// acknowledgement has no need to be fenced or indented as code. Keep code
+	// in the measured content so a longer inline-code response is substantive,
+	// while removing canonical links because they are not prose.
+	if stripBlockCode(content) != content {
+		return false
+	}
+	normalized := strings.ToLower(strings.TrimSpace(util.MentionRe.ReplaceAllString(content, " ")))
 	var b strings.Builder
 	for _, r := range normalized {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {

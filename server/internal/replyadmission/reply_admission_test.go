@@ -74,6 +74,22 @@ func TestEvaluateClassifiesAcknowledgementWithoutRequirement(t *testing.T) {
 	}
 }
 
+func TestEvaluateTreatsDeliveredCodeAsSubstantive(t *testing.T) {
+	requesterID := "46464646-4646-4464-8464-464646464646"
+	response := "```md\n" + strings.Repeat("Substantive finding remains unresolved and requires a decision. ", 10) + "\n```\n\nNoted."
+	decision := Evaluate(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Could you review this implementation and tell me what you think?",
+	}, response)
+	if decision.Admitted {
+		t.Fatal("substantive content in a delivered code block was admitted as an acknowledgement")
+	}
+	if decision.Classification != ClassificationSubstantive {
+		t.Fatalf("classification = %q, want %q", decision.Classification, ClassificationSubstantive)
+	}
+}
+
 func TestCheckAllowsMentionedSubstantiveOpinionReply(t *testing.T) {
 	requesterID := "22222222-2222-4222-8222-222222222222"
 	err := Check(Parent{
