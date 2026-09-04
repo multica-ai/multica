@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/handler"
 )
 
 // stderrCapture redirects os.Stderr through a pipe so a test can assert on
@@ -2928,6 +2929,7 @@ func newIssueListTestCmd() *cobra.Command {
 	cmd.Flags().Int("offset", 0, "")
 	cmd.Flags().String("sort", "", "")
 	cmd.Flags().String("direction", "", "")
+	cmd.Flags().String("fields", "", "")
 	return cmd
 }
 
@@ -3264,6 +3266,254 @@ func TestRunIssueListRejectsDirectionWithoutDirectionalSort(t *testing.T) {
 				t.Fatalf("error = %q, want it to list the valid directional sort columns", err)
 			}
 		})
+	}
+}
+
+// sampleIssueResponse returns a handler.IssueResponse populated the way the
+// /api/issues list endpoint actually populates one (ListIssues in
+// server/internal/handler/issue.go) — every field a real "issue list
+// --output json" row carries. Reactions, Attachments, and SourceContext are
+// left zero-valued on purpose: they are `omitempty` and ListIssues never
+// sets them (detail-only), so a real list payload never carries those keys.
+// This is the single source of truth for both fullTestIssue (the --fields
+// filtering fixture) and the drift guard below, so the two can't diverge
+// from each other the way the whitelist once diverged from the real API.
+func sampleIssueResponse() handler.IssueResponse {
+	desc := "a very long description"
+	assigneeType := "member"
+	assigneeID := "user-1"
+	parentID := "parent-1"
+	projectID := "proj-1"
+	stage := int32(1)
+	startDate := "2024-01-01"
+	dueDate := "2024-01-02"
+	lastActivity := "2024-01-01T00:00:00Z"
+	labels := []handler.LabelResponse{}
+
+	return handler.IssueResponse{
+		ID:             "iss-1",
+		WorkspaceID:    "ws-1",
+		Number:         42,
+		Identifier:     "MUL-42",
+		Title:          "Test issue",
+		Description:    &desc,
+		Status:         "in_progress",
+		StatusCategory: "active",
+		StatusName:     "In Progress",
+		Priority:       "high",
+		AssigneeType:   &assigneeType,
+		AssigneeID:     &assigneeID,
+		CreatorType:    "member",
+		CreatorID:      "user-2",
+		ParentIssueID:  &parentID,
+		ProjectID:      &projectID,
+		Position:       1,
+		Stage:          &stage,
+		StartDate:      &startDate,
+		DueDate:        &dueDate,
+		CreatedAt:      "2024-01-01T00:00:00Z",
+		UpdatedAt:      "2024-01-01T00:00:00Z",
+		Revision:       1,
+		LastActivityAt: &lastActivity,
+		Metadata:       map[string]any{},
+		Properties:     map[string]any{},
+		Labels:         &labels,
+	}
+}
+
+// fullTestIssue returns a JSON-decoded issue map carrying every field a real
+// "issue list --output json" row exposes (see sampleIssueResponse), so
+// --fields tests can assert on a realistic full payload rather than a
+// hand-picked subset.
+func fullTestIssue(t *testing.T) map[string]any {
+	t.Helper()
+	return issueResponseJSONMap(t, sampleIssueResponse())
+}
+
+func keysOf(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func issueResponseJSONMap(t *testing.T, resp handler.IssueResponse) map[string]any {
+	t.Helper()
+	b, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal handler.IssueResponse: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal handler.IssueResponse: %v", err)
+	}
+	return m
+}
+
+// TestValidIssueFieldsMatchListEndpointShape guards validIssueFields (the
+// --fields whitelist) against drifting from what /api/issues actually
+// returns for `issue list`. It caught a real bug: the whitelist was modeled
+// on publicapi/v1.Issue, which the list endpoint never serializes — the real
+// response is handler.IssueResponse, which also emits status_name and
+// labels that the whitelist rejected as invalid field names.
+func TestValidIssueFieldsMatchListEndpointShape(t *testing.T) {
+	realKeys := keysOf(fullTestIssue(t))
+
+	valid := make(map[string]bool, len(validIssueFields))
+	for _, f := range validIssueFields {
+		valid[f] = true
+	}
+	real := make(map[string]bool, len(realKeys))
+	for _, k := range realKeys {
+		real[k] = true
+	}
+
+	for _, k := range realKeys {
+		if !valid[k] {
+			t.Errorf("validIssueFields is missing %q, which a real issue list JSON response emits", k)
+		}
+	}
+	for _, f := range validIssueFields {
+		if !real[f] {
+			t.Errorf("validIssueFields has %q, which a real issue list JSON response never emits", f)
+		}
+	}
+}
+
+// TestRunIssueListFieldsFiltersJSONOutput guards that --fields whitelists
+// exactly the requested top-level keys on each returned issue, so an agent
+// asking for id/title/status/priority never pays for the description field
+// that makes up most of a typical issue payload.
+func TestRunIssueListFieldsFiltersJSONOutput(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name   string
+		fields string
+		want   []string
+	}{
+		{"id, title, status, priority", "id,title,status,priority", []string{"id", "title", "status", "priority"}},
+		{"assignee pair", "assignee_type,assignee_id", []string{"assignee_type", "assignee_id"}},
+		{"single field", "identifier", []string{"identifier"}},
+		{"description explicitly requested", "id,description", []string{"id", "description"}},
+		{"whitespace around names", " id , title ", []string{"id", "title"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set("output", "json")
+			_ = cmd.Flags().Set("fields", tc.fields)
+
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+
+			var resp struct {
+				Issues []map[string]any `json:"issues"`
+			}
+			if err := json.Unmarshal([]byte(out), &resp); err != nil {
+				t.Fatalf("unmarshal output: %v\noutput: %s", err, out)
+			}
+			if len(resp.Issues) != 1 {
+				t.Fatalf("issues = %d, want 1", len(resp.Issues))
+			}
+			got := resp.Issues[0]
+			if len(got) != len(tc.want) {
+				t.Fatalf("issue keys = %v, want exactly %v", keysOf(got), tc.want)
+			}
+			for _, f := range tc.want {
+				if _, ok := got[f]; !ok {
+					t.Fatalf("issue missing field %q; got keys %v", f, keysOf(got))
+				}
+			}
+		})
+	}
+}
+
+// TestRunIssueListDefaultKeepsFullIssueUnchanged guards backward
+// compatibility: omitting --fields must return the full issue object,
+// description included, exactly as before this flag existed.
+func TestRunIssueListDefaultKeepsFullIssueUnchanged(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+
+	out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+	var resp struct {
+		Issues []map[string]any `json:"issues"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	got := resp.Issues[0]
+	if len(got) != len(issue) {
+		t.Fatalf("issue keys = %v, want all %d original fields", keysOf(got), len(issue))
+	}
+	if _, ok := got["description"]; !ok {
+		t.Fatalf("expected description to remain in default (no --fields) output, got %v", got)
+	}
+}
+
+// TestRunIssueListRejectsInvalidFields guards that a typo'd or non-existent
+// field name fails fast with the valid list, instead of silently returning
+// an issue object missing the field the caller expected.
+func TestRunIssueListRejectsInvalidFields(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	_ = cmd.Flags().Set("fields", "id,bogus_field")
+	err := runIssueList(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueList: expected error for invalid --fields")
+	}
+	if !strings.Contains(err.Error(), `invalid --fields value "bogus_field"`) {
+		t.Fatalf("error = %q, want it to mention the invalid field name", err)
+	}
+}
+
+// TestRunIssueListIgnoresFieldsWithTableOutput guards that --output table
+// (the default) is completely unaffected by --fields, matching how
+// issue comment list's --compact/--summary are JSON-only no-ops for table.
+func TestRunIssueListIgnoresFieldsWithTableOutput(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("fields", "id") // table output; --fields must not error or change behavior
+	if err := runIssueList(cmd, nil); err != nil {
+		t.Fatalf("runIssueList: %v", err)
 	}
 }
 

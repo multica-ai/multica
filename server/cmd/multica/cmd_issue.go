@@ -405,6 +405,23 @@ var validIssueSortColumns = []string{
 	"position", "title", "created_at", "start_date", "due_date", "priority",
 }
 
+// validIssueFields are the top-level keys /api/issues actually emits for
+// `issue list` — i.e. the JSON tags of handler.IssueResponse
+// (server/internal/handler/issue.go), minus reactions/attachments/
+// source_context, which are omitempty and never set by the list endpoint
+// (detail-only). TestValidIssueFieldsMatchListEndpointShape guards this
+// against drifting from that struct. There is no plain "assignee" field —
+// it is split into assignee_type/assignee_id — so that name is rejected
+// rather than silently ignored.
+var validIssueFields = []string{
+	"id", "workspace_id", "number", "identifier", "title", "description",
+	"status", "status_category", "status_name", "priority", "assignee_type",
+	"assignee_id", "creator_type", "creator_id", "parent_issue_id",
+	"project_id", "position", "stage", "start_date", "due_date", "created_at",
+	"updated_at", "revision", "last_activity_at", "metadata", "properties",
+	"labels",
+}
+
 // directionalIssueSortColumns are the sort keys for which --direction is
 // meaningful: every valid column except "position". Derived from
 // validIssueSortColumns so the two stay in sync.
@@ -499,6 +516,7 @@ func init() {
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
 	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority, or property:<name-or-id> to sort by a custom property (select properties sort by option order)")
 	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column or a property sort (position is always ascending)")
+	issueListCmd.Flags().String("fields", "", "JSON output only: comma-separated list of issue fields to include (e.g. id,title,status,priority). Filtering happens client-side after the full response is fetched, so this shrinks CLI output size and agent context cost, not network/server-side cost. Omit for the full issue object (default, unchanged). Valid fields: "+strings.Join(validIssueFields, ", "))
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -733,6 +751,21 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		params.Set("direction", d)
 	}
 
+	var fields []string
+	if v, _ := cmd.Flags().GetString("fields"); v != "" {
+		valid := make(map[string]bool, len(validIssueFields))
+		for _, f := range validIssueFields {
+			valid[f] = true
+		}
+		for _, f := range strings.Split(v, ",") {
+			f = strings.TrimSpace(f)
+			if !valid[f] {
+				return fmt.Errorf("invalid --fields value %q; valid values: %s", f, strings.Join(validIssueFields, ", "))
+			}
+			fields = append(fields, f)
+		}
+	}
+
 	path := "/api/issues"
 	if len(params) > 0 {
 		path += "?" + params.Encode()
@@ -747,6 +780,9 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
+		if len(fields) > 0 {
+			filterIssueFields(issuesRaw, fields)
+		}
 		total, _ := result["total"].(float64)
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
@@ -2959,6 +2995,27 @@ func formatAssignee(issue map[string]any, actors actorDisplayLookup) string {
 		return ""
 	}
 	return actors.actor(aType, aID)
+}
+
+// filterIssueFields keeps only the requested top-level keys on each issue,
+// dropping everything else — including description, which makes up most of
+// a typical issue payload. Opt-in via --fields on JSON output only.
+func filterIssueFields(issuesRaw []any, fields []string) {
+	keep := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		keep[f] = true
+	}
+	for _, raw := range issuesRaw {
+		issue, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		for k := range issue {
+			if !keep[k] {
+				delete(issue, k)
+			}
+		}
+	}
 }
 
 func truncateID(id string) string {
