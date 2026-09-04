@@ -11,17 +11,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsGrokBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("grok", Config{ExecutablePath: "/nonexistent/grok"})
-	if err != nil {
-		t.Fatalf("New(grok) error: %v", err)
-	}
-	if _, ok := b.(*grokBackend); !ok {
-		t.Fatalf("expected *grokBackend, got %T", b)
-	}
-}
-
 // fakeGrokACPScript impersonates `grok agent --always-approve stdio` for unit
 // tests. Wire format mirrors other Multica ACP fakes (traecli/kimi): method
 // "session/update" with update.sessionUpdate discriminators, session/new

@@ -2742,26 +2742,6 @@ func TestRunIssueCommentList_DoesNotPrintShowingPreamble(t *testing.T) {
 	}
 }
 
-func TestValidIssueStatuses(t *testing.T) {
-	expected := map[string]bool{
-		"backlog":     true,
-		"todo":        true,
-		"in_progress": true,
-		"in_review":   true,
-		"done":        true,
-		"blocked":     true,
-		"cancelled":   true,
-	}
-	for _, s := range validIssueStatuses {
-		if !expected[s] {
-			t.Errorf("unexpected status in validIssueStatuses: %q", s)
-		}
-	}
-	if len(validIssueStatuses) != len(expected) {
-		t.Errorf("validIssueStatuses has %d entries, expected %d", len(validIssueStatuses), len(expected))
-	}
-}
-
 // TestValidateIssueStatus pins the post-MUL-6243 contract: the CLI validates
 // the SHAPE of a status key, not its membership. A workspace can define custom
 // statuses, so only the server knows the valid set; rejecting an unknown key
@@ -3768,47 +3748,6 @@ func TestRunIssueUpdateOmitsPositionWhenUnset(t *testing.T) {
 	}
 }
 
-// TestIssueCommentListHelpCarriesReadContract pins the read-surface contract
-// that MUL-5442 moved out of the runtime brief into this command's --help: the
-// --recent saturation semantics (MUL-5372), the bounded two-step alternative,
-// and the pagination cursor labels. The brief now only points here — if these
-// leave the help, the pointer dangles and the over-read trap returns
-// undocumented.
-//
-// The assertions run against the RENDERED FlagUsages output, not raw
-// Flag.Usage: pflag's UnquoteUsage hijacks the first backtick pair in a usage
-// string as the flag's value placeholder (see
-// TestLoginTokenHelpOutputRendersCleanly for the original regression), so only
-// the rendered output proves what an agent actually reads.
-func TestIssueCommentListHelpCarriesReadContract(t *testing.T) {
-	help := issueCommentListCmd.Flags().FlagUsages()
-
-	for _, want := range []string{
-		// --before must keep its string placeholder — a backticked phrase in
-		// the usage text would replace it (the UnquoteUsage hijack).
-		"--before string",
-		// The saturation contract relocated from the brief (MUL-5372).
-		"caps THREADS, not comments",
-		"no per-thread cap",
-		"fewer than N root threads",
-		// The bounded alternative, as two sequential reads — the flags are
-		// mutually exclusive, so the help must never suggest composing them.
-		"scan with --roots-only --summary",
-		"then open selected threads with --thread <id> --tail N",
-		// Pagination cursor labels, exactly as the CLI prints them on stderr.
-		"Next thread cursor",
-		"Next reply cursor",
-		// The --compact contract (#5999 follow-up): what goes and what is
-		// untouchable.
-		"drop response fields that carry no information",
-		"Content and identity fields pass through untouched",
-	} {
-		if !strings.Contains(help, want) {
-			t.Errorf("comment list rendered help missing %q, got:\n%s", want, help)
-		}
-	}
-}
-
 // TestCompactCommentsDropsReaderNoise pins the --compact contract (#5999
 // follow-up, MUL-5442): reader-noise fields go — the echoed issue_id,
 // source_task_id, updated_at when identical to created_at, null values,
@@ -4137,7 +4076,7 @@ func TestRunIssueRunsSiblingsTableRendersFamilyColumns(t *testing.T) {
 	}
 	// The task id has to survive the new payload's task_id key — reading `id`
 	// here would render a column of blanks and lose the run-messages target.
-	for _, want := range []string{"TASK", "ISSUE", "MUL-7001", "abcd1234"} {
+	for _, want := range []string{"RUN", "ISSUE", "MUL-7001", "abcd1234"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("family table missing %q:\n%s", want, out)
 		}

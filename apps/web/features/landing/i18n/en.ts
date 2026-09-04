@@ -294,6 +294,35 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.39",
+        date: "2026-09-03",
+        title: "Tab-switching shortcuts, server performance, and Autopilot identity authorization",
+        changes: [],
+        features: [
+          "Refresh the model list yourself and get what your runtime supports right now.",
+          "WeCom brings a failed run back to the chat you started it from.",
+          "Switch desktop tabs with number shortcuts.",
+          "Filter and sort Issues by custom properties from the command line.",
+          "Find Issues where a custom property has no value yet.",
+        ],
+        improvements: [
+          "Assigning an Issue takes fewer steps, and you can still hold off starting the run.",
+          "Self-hosted servers do less background work to keep runtimes connected.",
+          "Deleting a runtime takes effect right away, with no stale connection left behind.",
+        ],
+        fixes: [
+          "Replying to a squad leader stays with that leader, keeping the briefing, folder, and session.",
+          "Long Issue identifiers no longer cover the title in lists and tables.",
+          "Sign-in, error, and not-found pages follow the language you picked.",
+          "Signing in still works after you switch languages part way through.",
+          "Hermes keeps the model provider you picked instead of switching back on its own.",
+          "OpenClaw's managed MCP servers start, and your own MCP settings stay untouched.",
+          "Scheduled and webhook Autopilot runs use the permissions of whoever created the trigger.",
+          "An older trigger whose creator can't be confirmed stops instead of running.",
+          "Members who left the workspace keep their name in activity history.",
+        ],
+      },
+      {
         version: "0.4.38",
         date: "2026-09-02",
         title: "Claude Code model discovery, property filter operators, session continuity, and steadier providers",

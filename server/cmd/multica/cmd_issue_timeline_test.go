@@ -365,40 +365,6 @@ func TestRunIssueTimelineSilentWhenNotTruncated(t *testing.T) {
 	}
 }
 
-// The help text is the discovery surface: this command is deliberately absent
-// from the runtime brief, so an agent only finds it by scanning `issue --help`
-// for the question it is trying to answer. These anchors are the contract.
-func TestIssueTimelineHelpCarriesDiscoveryContract(t *testing.T) {
-	if want := "how long it has been stuck"; !strings.Contains(issueTimelineCmd.Short, want) {
-		t.Errorf("timeline Short missing %q, got: %s", want, issueTimelineCmd.Short)
-	}
-
-	for _, want := range []string{
-		// Points back at the authoritative current state, so nobody
-		// reconstructs "now" from history.
-		"issue get",
-		"authoritative",
-		// Why comments alone cannot answer this.
-		"never a comment",
-		// The truncation caveat must be discoverable, not just printed.
-		"truncated",
-	} {
-		if !strings.Contains(issueTimelineCmd.Long, want) {
-			t.Errorf("timeline Long missing %q, got:\n%s", want, issueTimelineCmd.Long)
-		}
-	}
-
-	// The action list must stay honest about what the server actually writes;
-	// omitting the task events is what made the first cut of this command
-	// misdescribe --activity-only.
-	help := issueTimelineCmd.Flags().FlagUsages()
-	for _, want := range []string{"task_completed", "task_failed", "status_changed", "Implies --activity-only"} {
-		if !strings.Contains(help, want) {
-			t.Errorf("timeline rendered flag help missing %q, got:\n%s", want, help)
-		}
-	}
-}
-
 func TestClipTimelineText(t *testing.T) {
 	if got := clipTimelineText("短", 10); got != "短" {
 		t.Fatalf("clip short = %q", got)

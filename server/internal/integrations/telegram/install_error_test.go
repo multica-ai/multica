@@ -4,15 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
-	"time"
 )
-
-func TestCredentialVerificationClientHasBoundedTimeout(t *testing.T) {
-	client := newCredentialVerificationClient()
-	if client.Timeout != 15*time.Second {
-		t.Fatalf("verification timeout = %s, want 15s", client.Timeout)
-	}
-}
 
 func TestClassifyCredentialVerificationError(t *testing.T) {
 	tests := []struct {

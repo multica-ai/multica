@@ -2584,7 +2584,12 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 	case commentTriggerSourceThreadParent, commentTriggerSourceConversation:
 		var task db.AgentTaskQueue
 		var err error
-		if trigger.Source == commentTriggerSourceConversation && trigger.Squad != nil {
+		// Squad is set on these two sources only when the routing already
+		// proved a leader role to continue: the thread root's prior task for
+		// the conversation path, the replied-to comment's own authoring task
+		// for the thread-parent path. Gating on the source as well would keep
+		// the thread-parent path demoted for no reason (MUL-7006).
+		if trigger.Squad != nil {
 			task, err = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID)
 		} else {
 			task, err = h.TaskService.EnqueueTaskForThreadParent(ctx, issue, trigger.Agent.ID, triggerCommentID)
@@ -2752,7 +2757,61 @@ func (h *Handler) routeReplyToParentAuthor(ctx context.Context, issue db.Issue, 
 	if err != nil {
 		return commentAgentTrigger{}, false
 	}
-	return commentAgentTrigger{Agent: agent, Source: commentTriggerSourceThreadParent, AlreadyPending: hasPending}, true
+	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceThreadParent, AlreadyPending: hasPending}
+	if squad, ok := h.squadLeaderRoleOfAuthoringTask(ctx, issue, *parent, agent); ok {
+		trigger.Squad = squad
+	}
+	return trigger, true
+}
+
+// squadLeaderRoleOfAuthoringTask reports the squad a reply should continue
+// under, when the comment being replied to was itself written by a run of that
+// squad's leader acting IN the leader role.
+//
+// Without it, replying directly to a leader's comment demoted the next run to
+// a generic direct-agent task (MUL-4024's thread-parent gap): no squad
+// briefing at claim time, `multica squad activity` rejected, and — on a
+// project with a local_directory resource — the coordinator dragged into the
+// user's own directory, queued behind its path mutex and stripped of the
+// prior session it was still holding a workdir for (MUL-7006). Replying to a
+// MEMBER comment in the same thread already restores the role this way
+// (routeConversationOwnersForRoot); this closes the asymmetry.
+//
+// The role is read from the replied-to comment's OWN authoring run
+// (source_task_id), not from the agent's latest task on the issue. An agent
+// that is both leader and worker of the same squad posts in both roles, and a
+// reply continues the role of the comment it answers — the latest-task read
+// would hand a reply to a worker comment the leader's coordinator role.
+//
+// Fails closed to today's direct-agent routing on every uncertainty: a comment
+// with no recorded authoring run (pre-migration-120 rows, or an agent write
+// without the X-Task-ID header), a task that did not run as leader, a squad
+// since deleted, or leadership that has moved to another agent. The claim
+// handler downgrades the wire role again if the briefing cannot be injected,
+// so an is_leader_task row whose squad went missing later still cannot deliver
+// a leader run.
+//
+// Deleting a squad ARCHIVES it (DeleteSquad soft-archives after transferring
+// its issues to the leader agent), so its rows and the leader's old comments
+// both outlive the deletion. GetSquadInWorkspace does not filter archived_at —
+// reviving a deleted squad from a stale comment would be a role this issue no
+// longer has any assignment for — so the archived check belongs here.
+func (h *Handler) squadLeaderRoleOfAuthoringTask(ctx context.Context, issue db.Issue, parent db.Comment, agent db.Agent) (*db.Squad, bool) {
+	if !parent.SourceTaskID.Valid {
+		return nil, false
+	}
+	task, err := h.Queries.GetAgentTask(ctx, parent.SourceTaskID)
+	if err != nil || !task.IsLeaderTask || !task.SquadID.Valid {
+		return nil, false
+	}
+	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID:          task.SquadID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || squad.ArchivedAt.Valid || uuidToString(squad.LeaderID) != uuidToString(agent.ID) {
+		return nil, false
+	}
+	return &squad, true
 }
 
 type conversationRoutedAgentInfo struct {

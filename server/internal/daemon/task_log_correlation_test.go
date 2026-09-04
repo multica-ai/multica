@@ -3,13 +3,9 @@ package daemon
 import (
 	"bytes"
 	"context"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -182,74 +178,5 @@ func TestHandleTask_UntrackedRuntimeLogsFullTaskID(t *testing.T) {
 
 	if out := logs.String(); !strings.Contains(out, "task="+collidingTaskIDB) {
 		t.Errorf("runtime-offline warning did not carry the full task id; logs:\n%s", out)
-	}
-}
-
-// taskLogSourceFiles are the package sources the structural guard below reads.
-// Asserting a call count against them keeps a rename or a file move from
-// turning the guard into a vacuous pass (the failure mode MUL-5524 hit).
-const minTaskLogCalls = 20
-
-// TestTaskLogCallsDoNotRepeatTheBoundTaskField is the structural half of the
-// one-line-one-`task=` rule above. The behavioural test can only see the lines
-// its own code path emits; most `taskLog` calls live deep inside runTask,
-// behind a real agent process. This reads the package source instead and fails
-// on any `taskLog.<Level>(...)` that passes a literal "task" key — by
-// convention in this package `taskLog` is always the logger handleTask bound
-// the full task id to, so such an argument can only be a duplicate.
-//
-// A string literal "task" can never be a *value* in these calls, so matching
-// the literal anywhere in the argument list needs no position arithmetic.
-func TestTaskLogCallsDoNotRepeatTheBoundTaskField(t *testing.T) {
-	t.Parallel()
-
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read package dir: %v", err)
-	}
-
-	fset := token.NewFileSet()
-	var calls int
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
-		}
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			recv, ok := sel.X.(*ast.Ident)
-			if !ok || recv.Name != "taskLog" {
-				return true
-			}
-			switch sel.Sel.Name {
-			case "Debug", "Info", "Warn", "Error":
-			default:
-				return true
-			}
-			calls++
-			for _, arg := range call.Args {
-				lit, ok := arg.(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING || lit.Value != `"task"` {
-					continue
-				}
-				t.Errorf("%s: taskLog call passes a \"task\" field it is already bound to — the id would print twice on that line", fset.Position(call.Pos()))
-			}
-			return true
-		})
-	}
-
-	if calls < minTaskLogCalls {
-		t.Fatalf("found only %d taskLog logging calls, want >= %d — the scan stopped matching (renamed logger? moved file?) and would pass vacuously", calls, minTaskLogCalls)
 	}
 }

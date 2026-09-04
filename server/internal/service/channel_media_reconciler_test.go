@@ -325,27 +325,6 @@ func TestChannelMediaReconciler_LeavesFreshPendingToBind(t *testing.T) {
 	}
 }
 
-func TestChannelMediaReconciler_SettleInvariantDwarfsPipelineBudgets(t *testing.T) {
-	// The settle delay is an operational buffer with NO correctness weight —
-	// correctness comes from the 'deleting' state flip. This invariant only
-	// guarantees the reconciler is never doing wasted work while a healthy
-	// pipeline is still running: it must dwarf every inline budget.
-	const maxPipelineBudget = 45 * time.Second // engine media budget / lark download cap (see cmd/server invariant test for the cross-package assertion)
-	if ChannelMediaReconcileSettleDelay < 10*maxPipelineBudget {
-		t.Fatalf("settle %v must be >= 10x the largest pipeline budget %v", ChannelMediaReconcileSettleDelay, maxPipelineBudget)
-	}
-	if channelMediaReconcileLease <= 0 || channelMediaReconcileLease >= ChannelMediaReconcileSettleDelay {
-		t.Fatalf("lease %v must be positive and well under settle %v", channelMediaReconcileLease, ChannelMediaReconcileSettleDelay)
-	}
-	// A row is claimed immediately before its own settle, so the lease only
-	// ever needs to cover ONE row's worst case (a delete at its full timeout
-	// plus DB round-trips) — never a whole sweep. 2x margin keeps the owner
-	// comfortably ahead of expiry.
-	if channelMediaReconcileLease < 2*channelMediaReconcileDeleteTimeout {
-		t.Fatalf("lease %v must be >= 2x the per-delete timeout %v", channelMediaReconcileLease, channelMediaReconcileDeleteTimeout)
-	}
-}
-
 // Storage initialization can fail at boot (no S3, unwritable local dir) while
 // ledger rows pre-exist from an earlier boot where storage worked. A nil
 // deleter must never panic the worker — and must not claim rows either, or

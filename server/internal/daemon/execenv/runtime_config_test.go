@@ -1915,6 +1915,74 @@ func firstBriefDiff(want, got string) string {
 		"\n--- variant ---\n" + got[lo:hiG]
 }
 
+// TestAutopilotBriefByteIdenticalAcrossRunScopedFields is the invariant
+// MUL-6984 actually moved, and the one TestBriefByteIdenticalAcrossRunsForEveryKind
+// cannot see: its autopilot row pins run-1 / ap-1 and its variants only mutate
+// the generic resume / initiator / connected-app fields, so reinserting the
+// autopilot title, source, payload or description into the brief would leave
+// it green.
+//
+// Every field below identifies ONE run. The brief lands in messages[0], ahead
+// of the whole conversation, so a per-run value here throws away the prompt
+// cache for the entire history on resume (MUL-5377) — and it also gives a
+// second hand-maintained copy somewhere to drift from the per-turn one, which
+// is how MUL-5696 happened. Two runs of the same autopilot, and two runs of
+// different autopilots, must all produce the same bytes.
+func TestAutopilotBriefByteIdenticalAcrossRunScopedFields(t *testing.T) {
+	t.Parallel()
+
+	base := TaskContextForEnv{AgentID: "a-1", AgentName: "Eve", AutopilotRunID: "run-1", AutopilotID: "ap-1"}
+
+	runs := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{"baseline", base},
+		{"second run of the same autopilot", func() TaskContextForEnv {
+			c := base
+			c.AutopilotRunID = "run-2"
+			c.AutopilotTitle = "Nightly dependency sweep"
+			c.AutopilotSource = "schedule"
+			c.AutopilotDescription = "Check dependencies and report outdated packages."
+			c.AutopilotTriggerPayload = `{"schedule":"0 3 * * *"}`
+			return c
+		}()},
+		{"run of a different autopilot", func() TaskContextForEnv {
+			c := base
+			c.AutopilotRunID = "run-3"
+			c.AutopilotID = "ap-2"
+			c.AutopilotTitle = "Triage inbound issues"
+			c.AutopilotSource = "webhook"
+			c.AutopilotDescription = "Read the payload and file one issue per report."
+			c.AutopilotTriggerPayload = `{"action":"opened","issue":{"number":7,"title":"crash on start"}}`
+			return c
+		}()},
+	}
+
+	want := buildMetaSkillContent("claude", runs[0].ctx)
+	for _, r := range runs[1:] {
+		if got := buildMetaSkillContent("claude", r.ctx); got != want {
+			t.Errorf("autopilot brief changed for %q — a per-run value reached the cache prefix\n%s",
+				r.name, firstBriefDiff(want, got))
+		}
+	}
+
+	// Byte-identity alone would also hold if the brief rendered none of these
+	// AND the values never reached the agent at all. Pin the other half here:
+	// the brief must not carry them, and daemon.TestBuildPromptAutopilotRunOnly
+	// pins the per-turn message as the surface that does.
+	for _, banned := range []string{
+		"run-1", "ap-1", "Nightly dependency sweep", "Triage inbound issues",
+		"schedule", "webhook", "Check dependencies", "0 3 * * *", "crash on start",
+	} {
+		for _, r := range runs {
+			if strings.Contains(buildMetaSkillContent("claude", r.ctx), banned) {
+				t.Errorf("autopilot brief (%s) carries the run-scoped value %q; the per-turn message owns it", r.name, banned)
+			}
+		}
+	}
+}
+
 // TestBriefByteIdenticalAcrossRunsForEveryKind extends the MUL-5377 guarantee
 // past issue runs.
 //

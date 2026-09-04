@@ -94,7 +94,7 @@
     "prompt_hint": "そのまま送られます。タスクの内容は既に読めます。",
     "template_not_supported": "変数はまだサポートされていません。{{token}} を削除してください。エージェントはこのタスクを既に読めます。",
     "delete_title": "このクイックアクションを削除しますか？",
-    "delete_description": "すべてのタスクのサイドバーから消えます。過去の実行は実行ログに残ります。後で使う可能性があればアーカイブを選んでください。"
+    "delete_description": "すべてのタスクのサイドバーから消えます。過去の記録は実行ログに残ります。後で使う可能性があればアーカイブを選んでください。"
   },
   "auto_save": {
     "saving": "保存中…",
@@ -257,6 +257,8 @@
       "description": "ウィンドウとアクセシビリティのショートカットは信頼性のため固定されています。ズームとタブ操作はデスクトップアプリに適用されます。",
       "open_settings": "設定を開く",
       "close_tab": "アクティブなタブを閉じる",
+      "select_tab_1_to_8": "1〜8番目のタブを選択",
+      "select_last_tab": "最後のタブを選択",
       "zoom_in": "拡大",
       "zoom_out": "縮小",
       "reset_zoom": "ズームをリセット",
@@ -297,7 +299,7 @@
     "disabled_badge": "無効",
     "admin_only_note": "共有 MCP サーバーを変更できるのはワークスペースの owner と admin のみです。",
     "delete_title": "共有サーバーを削除しますか？",
-    "delete_description": "{{name}} はライブラリからも、割り当てられている全エージェントからも削除され、各エージェントの次の作業から反映されます。",
+    "delete_description": "{{name}} はライブラリからも、割り当てられている全エージェントからも削除され、各エージェントの次の実行から反映されます。",
     "delete_confirm": "削除",
     "cancel": "キャンセル",
     "added_toast": "共有 MCP サーバーを追加しました",
@@ -392,8 +394,8 @@
       "issues_write": "タスクを作成・編集する",
       "comments_read": "コメントを読み取る",
       "comments_write": "コメントを投稿する",
-      "tasks_read": "agent task を読み取る",
-      "tasks_write": "agent task を開始・更新する",
+      "tasks_read": "エージェントの実行を読み取る",
+      "tasks_write": "エージェントの実行を開始・更新する",
       "agents_read": "agent 一覧を読み取る",
       "members_read": "メンバー一覧を読み取る",
       "storage_user": "メンバーごとにデータを保存する",
@@ -583,7 +585,7 @@
       },
       "agent_activity": {
         "label": "エージェントのアクティビティ",
-        "description": "エージェントの作業が完了または失敗したとき"
+        "description": "エージェントの実行が完了または失敗したとき"
       }
     },
     "system": {
@@ -1152,7 +1154,7 @@
       "settings_saved": "デーモン設定を保存しました",
       "settings_save_failed": "デーモン設定を保存できませんでした",
       "signin_expired": "ログインの有効期限が切れました",
-      "signin_expired_description": "ローカルデーモンを認証できないため、このデバイスは作業を受け取れません。再度ログインしてください。",
+      "signin_expired_description": "ローカルデーモンを認証できないため、このデバイスは実行を受け取れません。再度ログインしてください。",
       "signin_again": "再度ログイン",
       "external_description_before": "このデバイスのデーモンはアプリの外部（WSL2 など）で実行されているため、アプリから起動や停止はできません。その環境で次を実行してください：",
       "external_description_after": "。",
@@ -1193,8 +1195,8 @@
       "stop": "停止",
       "start": "起動",
       "retry_setup": "セットアップを再試行",
-      "stop_confirm_title_other": "実行中の作業 {{count}} 件を中断してデーモンを停止しますか？",
-      "stop_confirm_description_other": "このデバイスで {{count}} 件の作業が実行中です。今停止すると作業は中断され、タイムアウト後に失敗としてマークされます。デーモンは自動再起動しません。",
+      "stop_confirm_title_other": "進行中の実行 {{count}} 件を中断してデーモンを停止しますか？",
+      "stop_confirm_description_other": "このデバイスで {{count}} 件の実行が進行中です。今停止すると実行は中断され、タイムアウト後に失敗としてマークされます。デーモンは自動再起動しません。",
       "cancel": "キャンセル",
       "stop_daemon": "デーモンを停止",
       "logs_title": "ローカルデーモンのログ",

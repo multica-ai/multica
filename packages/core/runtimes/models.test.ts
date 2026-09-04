@@ -3,6 +3,7 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import {
   LIVE_MODELS_STALE_TIME_MS,
   resolveRuntimeModels,
+  refreshRuntimeModels,
   runtimeModelsKeys,
   runtimeModelsOptions,
   staleTimeFor,
@@ -14,7 +15,10 @@ const getListModelsResult = vi.fn();
 
 vi.mock("../api", () => ({
   api: {
-    initiateListModels: (runtimeId: string) => initiateListModels(runtimeId),
+    initiateListModels: (
+      runtimeId: string,
+      options?: { force?: boolean },
+    ) => initiateListModels(runtimeId, options),
     getListModelsResult: (runtimeId: string, requestId: string) =>
       getListModelsResult(runtimeId, requestId),
   },
@@ -275,6 +279,30 @@ describe("runtimeModelsOptions", () => {
     expect(options.gcTime).toBeGreaterThanOrEqual(LIVE_MODELS_STALE_TIME_MS);
     expect(options.queryKey).toEqual(["runtimes", "models", "rt-1"]);
     expect(options.enabled).toBe(true);
+  });
+
+  it("force-refreshes the canonical cache instead of serving a cached catalog", async () => {
+    initiateListModels.mockResolvedValue(
+      request({ status: "completed", models: refreshedCatalog }),
+    );
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    client.setQueryData(runtimeModelsKeys.forRuntime("rt-1"), {
+      models: catalog,
+      supported: true,
+      cached: true,
+    });
+
+    await refreshRuntimeModels(client, "rt-1");
+
+    expect(initiateListModels).toHaveBeenCalledWith("rt-1", { force: true });
+    expect(client.getQueryData(runtimeModelsKeys.forRuntime("rt-1"))).toMatchObject({
+      models: refreshedCatalog,
+      cached: false,
+    });
+    client.clear();
   });
 
   it("resolves freshness from the served answer, not a fixed window", () => {

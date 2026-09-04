@@ -5,6 +5,8 @@ description: Multica의 클라이언트, Go 서비스, 실행 데몬, 공유 프
 
 Multica는 Go backend, 여러 클라이언트, 실행 컴퓨터에서 동작하는 데몬으로 구성됩니다. PostgreSQL이 협업 데이터를 저장하고 데몬이 작업을 가져가 로컬 AI 코딩 도구를 호출합니다.
 
+이 페이지는 구현을 다루므로 본문의 **task**는 제품의 **Run**(실행)을 지원하는 내부 스케줄러, API, 데이터베이스 엔터티를 뜻합니다. UI와 제품 문서에서는 Run이라고 부르며, `TaskService`, `task_id` 같은 식별자는 호환성을 위해 그대로 유지합니다.
+
 ```text
 Web / Desktop / Mobile / CLI
              │

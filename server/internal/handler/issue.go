@@ -3138,10 +3138,9 @@ type UpdateIssueRequest struct {
 	// the issue can be run later via manual run/rerun. Optional; omitted or
 	// false keeps today's behavior. Mirrors comment suppress_agent_ids.
 	SuppressRun bool `json:"suppress_run,omitempty"`
-	// HandoffNote is an optional free-text instruction injected into the run's
-	// opening context when this write starts an agent/squad run ("交接说明" —
-	// MUL-3375). Only consumed when a run actually starts: SuppressRun=true or
-	// a parked/non-triggering write drops it. Never fabricates a comment.
+	// HandoffNote is retained at the API boundary for installed clients that
+	// predate the handoff UI removal. It is consumed only when this write starts
+	// a run and is never stored on the issue itself.
 	HandoffNote string `json:"handoff_note,omitempty"`
 }
 

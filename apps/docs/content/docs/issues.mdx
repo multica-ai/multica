@@ -16,7 +16,7 @@ An issue is Multica's basic unit for organizing work: a feature, a bug, an inves
 | **Assignee** | A workspace member, an agent, or a squad. |
 | **Dates, labels, and custom properties** | Planning, categorization, and your team's own fields. |
 | **Project and parent-child relationships** | Fits into a larger body of work, or splits into sub-issues. |
-| **Activity and execution log** | Comments, status changes, tasks, and results returned by agents. |
+| **Activity and execution log** | Comments, status changes, runs, and results returned by agents. |
 
 ![Issue detail: description, discussion, properties on the right, and the execution log](/images/docs/quickstart-run-result.webp)
 
@@ -30,11 +30,11 @@ Each issue has a number, such as `MUL-123`. The digits increment within the work
 
 | Assignee | Effect |
 |---|---|
-| **Member** | That member owns the follow-up; no task is created. |
-| **Agent** | A task is created for that agent. |
+| **Member** | That member owns the follow-up; no run is created. |
+| **Agent** | A run is created for that agent. |
 | **Squad** | The squad leader receives it and decides who handles it. |
 
-When assigned to an agent or a squad, the issue enqueues immediately unless it is in `backlog`; if the runtime is offline, the task waits in the queue. Archived agents and squads cannot be assigned.
+When assigned to an agent or a squad, the issue enqueues immediately unless it is in `backlog`; if the runtime is offline, the run waits in the queue. Archived agents and squads cannot be assigned.
 
 Assignment does not bypass an agent's Access; when assigning to a squad, the leader's Access is what gets checked. See [Assign issues to agents](/assigning-issues).
 
@@ -44,7 +44,7 @@ Every workspace starts with seven built-in statuses. They are also the seven **c
 
 | Status | Meaning |
 |---|---|
-| `backlog` | Not starting yet. An issue assigned to an agent only creates a task after it leaves `backlog`. |
+| `backlog` | Not starting yet. An issue assigned to an agent only creates a run after it leaves `backlog`. |
 | `todo` | Scoped and waiting to start. |
 | `in_progress` | Being worked on. |
 | `in_review` | Has a result waiting for review. |
@@ -54,7 +54,7 @@ Every workspace starts with seven built-in statuses. They are also the seven **c
 
 There is no fixed flow between statuses — members and agents can change them directly.
 
-Agents write the status the issue is in as their work changes it: starting work on what the issue asks for — in whatever form, research, design, or a review the issue itself requests — moves it to `in_progress` right away, so the board shows the work while it runs; delivering moves it to `in_review`; work that continues beyond the turn keeps it `in_progress`; a turn that produces nothing of the issue's own deliverable — answering questions, consulting on work owned elsewhere — leaves the status untouched throughout. These updates are written explicitly by the agent through the Multica CLI during the run — the server does not flip issue status when a task starts or completes (apart from the two system exceptions below). `done` is usually a human confirmation, or an integration such as a PR with close intent that merges.
+Agents write the status the issue is in as their work changes it: starting work on what the issue asks for — in whatever form, research, design, or a review the issue itself requests — moves it to `in_progress` right away, so the board shows the work while it runs; delivering moves it to `in_review`; work that continues beyond the turn keeps it `in_progress`; a turn that produces nothing of the issue's own deliverable — answering questions, consulting on work owned elsewhere — leaves the status untouched throughout. These updates are written explicitly by the agent through the Multica CLI during the run — the server does not flip issue status when a run starts or completes (apart from the two system exceptions below). `done` is usually a human confirmation, or an integration such as a PR with close intent that merges.
 
 <Callout type="info">
 Two changes are made by the system:
@@ -90,9 +90,9 @@ Four things follow from that model:
 
 Built-in statuses are translated into the interface language; a custom status always shows the name you typed. The API and the CLI address it by its key: `multica issue status MUL-42 code_review`. The settings page derives that key from the name; the API accepts an explicit one and only falls back to deriving it. Either way the key is fixed at creation — renaming the status later does not change it.
 
-## Issues and tasks
+## Issues and runs
 
-An issue is the persistent record of a piece of work; a [task](/tasks) is one concrete run by an agent. One issue can produce several tasks over time — a first implementation, follow-up changes, another check. A completed task only means that run ended; whether the issue is finished is determined by the issue's status.
+An issue is the persistent record of a piece of work; a [run](/tasks) is one concrete run by an agent. One issue can produce several runs over time — a first implementation, follow-up changes, another check. A completed run only means that run ended; whether the issue is finished is determined by the issue's status.
 
 ## Projects and sub-issues
 
@@ -111,7 +111,7 @@ The Issues page offers five views — list, board, table, Gantt, and swimlane �
 Any workspace member can delete an issue.
 
 <Callout type="warning">
-Deletion cannot be undone: the issue with its comments, attachments, and linked records is permanently removed, and unfinished tasks are cancelled. When the work is simply no longer pursued, set the status to `cancelled` instead — the discussion and results stay available.
+Deletion cannot be undone: the issue with its comments, attachments, and linked records is permanently removed, and unfinished runs are cancelled. When the work is simply no longer pursued, set the status to `cancelled` instead — the discussion and results stay available.
 </Callout>
 
 ## Next steps
@@ -119,4 +119,4 @@ Deletion cannot be undone: the issue with its comments, attachments, and linked 
 - [Projects](/projects) — organize work that takes multiple issues to finish.
 - [Comments](/comments) — discuss, reply, and @mention around an issue.
 - [Assign issues to agents](/assigning-issues) — hand work to an agent and start the first run.
-- [Tasks](/tasks) — learn about queuing, running, retries, and cancellation.
+- [Runs](/tasks) — learn about queuing, running, retries, and cancellation.

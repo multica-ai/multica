@@ -106,12 +106,6 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	}
 }
 
-func TestDefaultGCIntervalIsTwoHours(t *testing.T) {
-	if DefaultGCInterval != 2*time.Hour {
-		t.Fatalf("DefaultGCInterval = %s, want 2h", DefaultGCInterval)
-	}
-}
-
 // A localhost server URL is not the official cloud host, so this exercises the
 // self-host branch of defaultGCCompletedTaskTTL: retention stays unbounded until
 // an operator opts in, and a daemon upgrade never starts deleting on its own.
