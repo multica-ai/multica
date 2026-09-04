@@ -70,10 +70,14 @@ type BusinessMetrics struct {
 	entitlementVersionRegression   prometheus.Counter
 	autopilotQuotaDecision         *prometheus.CounterVec
 
-	// agentRuntimeLookup counts single-row agent_runtime reads by product
-	// source. Every source shares one SQL fingerprint, so this is the only
-	// place the split between daemon heartbeats, browser polling, and
-	// readiness gates is observable. See labels.go for the closed enum.
+	// agentRuntimeLookup counts logical agent_runtime lookups by product
+	// source — one increment per requested runtime id, whether that id was
+	// resolved by its own point read or as one element of a batch query, so
+	// the counter is a lookup rate and NOT a database-query QPS. Point reads
+	// share one SQL fingerprint and batch reads use another; this counter adds
+	// the product-source attribution that neither query shape exposes on its
+	// own, including daemon heartbeats, browser polling, and readiness gates.
+	// See labels.go for the closed enum.
 	agentRuntimeLookup *prometheus.CounterVec
 
 	activeMu    sync.Mutex
@@ -273,7 +277,7 @@ func NewBusinessMetrics() *BusinessMetrics {
 		}, metricLabels("multica_autopilot_quota_decision_total")),
 		agentRuntimeLookup: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "agent_runtime", Name: "lookup_total",
-			Help: "Total single-row agent_runtime reads by product source and outcome.",
+			Help: "Total logical agent_runtime lookups by product source and outcome (one per requested id, not per SQL query).",
 		}, metricLabels("multica_agent_runtime_lookup_total")),
 		activeTasks: map[string]activeTaskLabels{},
 		events:      newBusinessEventMetrics(),
@@ -358,7 +362,10 @@ func (m *BusinessMetrics) RecordEntitlementDecision(gate, action, reason string)
 	}
 }
 
-// RecordAgentRuntimeLookup counts one single-row agent_runtime read.
+// RecordAgentRuntimeLookup counts one logical agent_runtime lookup — one
+// requested runtime id resolved, whether by a point read or as one element of
+// a batch query. It is therefore a lookup rate, not a SQL-query count: a single
+// batch read that resolves N ids increments this N times.
 //
 // Call it from service.RuntimeLookup and nowhere else: the point of the metric
 // is that every read is attributed, and a second entry point is how a call site
