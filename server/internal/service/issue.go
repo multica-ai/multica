@@ -481,6 +481,10 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	var assignedTaskID pgtype.UUID
 	if !opts.AssignedAgentRunFireAt.IsZero() {
 		assignedTaskID = assignedTask.ID
+		// The task was inserted through transaction-bound Queries, whose
+		// TaskService intentionally has no Redis dependencies. Publish the
+		// deferred deadline only after the issue+task commit is durable.
+		s.TaskService.trackTaskForDeferredPromotion(assignedTask)
 		if assignedTaskID.Valid {
 			// The deferred task became durable with the issue at commit. Refresh the
 			// daemon's schedule only now so a wakeup can never race uncommitted data.

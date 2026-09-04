@@ -1270,6 +1270,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// verdict cannot represent a claim response lost after commit. Missing or
 	// failed Redis state keeps the historical PostgreSQL fallback.
 	h.TaskService.ReclaimCheck = service.NewReclaimCheckCache(rdb)
+	// Deferred promotion follows the same advisory-schedule pattern: Redis can
+	// skip impossible work, while missing/error state preserves DB promotion.
+	h.TaskService.DeferredPromotionCheck = service.NewDeferredPromotionCheckCache(rdb)
 
 	// Wire WS heartbeat after stores are finalized so the WS path uses the
 	// same (possibly Redis-backed) stores as the HTTP path.
