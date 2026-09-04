@@ -308,7 +308,7 @@ function useIssueCounts(
     }
 
     return { status, priority, assignee, creator, noAssignee, project, noProject, label, property };
-  }, [allIssues, serverFacets]);
+  }, [allIssues, propertyTypes, serverFacets]);
 }
 
 // ---------------------------------------------------------------------------
@@ -979,11 +979,11 @@ function PropertyFilterOptions({
         </div>
         {/* Observed values toggle exactly like select options: each one is a
             bare-string member of the same OR-set as the input's value and
-            "No value". A value commit from the input replaces the committed
-            scalar members wholesale — checkbox state updates visibly in this
-            menu; an unchanged blur/Enter commit is a no-op (see commitValue)
-            so checkbox selections are never dropped silently. The counts stay
-            clickable discovery rather than a separate filter mode. */}
+            "No value". Editing the input replaces only its own member and
+            preserves the other observed selections; an unchanged blur/Enter
+            commit is a no-op (see commitValue) so checkbox selections are
+            never dropped silently. The counts stay clickable discovery rather
+            than a separate filter mode. */}
         {observedValues.map(([value, count]) => {
           const checked = selected.some(
             (member) => typeof member === "string" && member === value,
