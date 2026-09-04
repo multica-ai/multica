@@ -26,6 +26,7 @@ function makeStorage(
     removeItem: (key) => {
       delete values[key];
     },
+    keys: () => Object.keys(values),
     snapshot: () => ({ ...values }),
   };
 }
@@ -119,11 +120,26 @@ describe("clearClientSessionData", () => {
     expect(storage.snapshot()["multica_issue_draft:acme"]).toBeUndefined();
   });
 
-  it("survives a session that never resolved a workspace list", () => {
-    const storage = makeStorage({ multica_tabs: "[]" });
+  // A cold start rejected at the identity probe has an empty Query cache, so
+  // there is no workspace list to read slugs from. Asserting only the global
+  // `multica_tabs` here would pass while every per-workspace key survived —
+  // the exact hole that let a stale-token launch leak A's drafts to B.
+  it("clears workspace-scoped keys even with no workspace list to enumerate", () => {
+    const storage = makeStorage({
+      "multica_comment_drafts:acme": '{"issue-1":"A private draft"}',
+      "multica:chat:activeSessionId:acme": "session-1",
+      multica_tabs: "[]",
+    });
+    registerDraftCleanup({
+      storageKey: "multica_comment_drafts",
+      workspaceScoped: true,
+      resetInMemory: vi.fn(),
+    });
     const queryClient = new QueryClient();
+    expect(queryClient.getQueryData(workspaceKeys.list())).toBeUndefined();
 
-    expect(() => clearClientSessionData(queryClient, storage)).not.toThrow();
-    expect(storage.snapshot().multica_tabs).toBeUndefined();
+    clearClientSessionData(queryClient, storage);
+
+    expect(storage.snapshot()).toEqual({});
   });
 });

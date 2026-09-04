@@ -339,27 +339,40 @@ export function AuthInitializer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retryGeneration]);
 
-  // An involuntary session end (401 → sessionExpired) leaves the whole client
-  // side of that session behind: a warmed query cache whose every entry has
-  // `staleTime: Infinity`, per-workspace drafts and chat selection, the
-  // desktop tab layout. The screen it lands on offers a login form, and the
-  // next person to use it is not guaranteed to be the one who was just signed
-  // in — on a shared machine a colleague would inherit all of it, and sharing
-  // a workspace with them means the tab validator finds nothing to drop.
+  // A session that ends leaves its whole client side behind: a warmed query
+  // cache whose every entry has `staleTime: Infinity`, per-workspace drafts
+  // and chat selection, the desktop tab layout. The screen it lands on offers
+  // a login form, and the next person to use it is not guaranteed to be the
+  // one who was just signed in — on a shared machine a colleague would inherit
+  // all of it, and sharing a workspace with them means the tab validator finds
+  // nothing to drop. So an expiry erases exactly what a logout erases; only
+  // the auth teardown differs (the auth store's `sessionExpired`), plus what
+  // belongs to a process outliving the session — Desktop's daemon.
   //
-  // So an expiry erases exactly what an explicit logout erases. Only the auth
-  // teardown itself differs (see the auth store's `sessionExpired`), plus
-  // anything owned by a process that outlives the session — Desktop's daemon.
-  // The effect runs after the commit that unmounted the shell on `user: null`,
-  // so nothing is left observing the queries it drops.
+  // Keyed on being unauthenticated rather than on a transition out of
+  // `authenticated`, because the case that leaks worst never passes through
+  // `authenticated` at all: the app starts, the stale token on disk is
+  // rejected at the identity probe, and the previous session's drafts sit
+  // there waiting for whoever signs in next.
+  //
+  // This cannot sign anyone out. Reaching `unauthenticated` IS the decision to
+  // end the session, and only two things reach it: a 401 on a credential we
+  // presented, or having no credential at all. A client that cannot reach the
+  // server — offline, DNS down, 5xx — settles on `recovering` and keeps both
+  // its token and everything below (see `attempt`'s catch, which narrows to
+  // `ApiError` with status 401 before rejecting anything).
   const authStatus = useAuthStore((state) => state.status);
-  const previousAuthStatus = useRef(authStatus);
+  const clearedForThisSession = useRef(false);
   useEffect(() => {
-    const previous = previousAuthStatus.current;
-    previousAuthStatus.current = authStatus;
-    if (previous === "authenticated" && authStatus === "unauthenticated") {
-      clearClientSessionData(qc, storage);
+    if (authStatus === "authenticated") {
+      clearedForThisSession.current = false;
+      return;
     }
+    if (authStatus !== "unauthenticated" || clearedForThisSession.current) {
+      return;
+    }
+    clearedForThisSession.current = true;
+    clearClientSessionData(qc, storage);
   }, [authStatus, qc, storage]);
 
   return <>{children}</>;

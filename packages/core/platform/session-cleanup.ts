@@ -4,7 +4,10 @@ import type { StorageAdapter } from "../types/storage";
 import type { Workspace } from "../types";
 import { workspaceKeys } from "../workspace/queries";
 import { defaultStorage } from "./storage";
-import { clearWorkspaceStorage } from "./storage-cleanup";
+import {
+  clearAllWorkspaceStorage,
+  clearWorkspaceStorage,
+} from "./storage-cleanup";
 
 /**
  * Erase everything the finished session left on this client: in-memory draft
@@ -36,14 +39,21 @@ export function clearClientSessionData(
   // user's draft after the next login.
   resetAllRegisteredDrafts();
 
-  // Then clear workspace-scoped storage for every workspace this user had
-  // access to, BEFORE clearing the React Query cache (which holds the
-  // workspace list). Otherwise per-workspace drafts/chat/etc would leak to
-  // the next user on this device.
-  const cachedWorkspaces =
-    queryClient.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
-  for (const ws of cachedWorkspaces) {
-    clearWorkspaceStorage(storage, ws.slug);
+  // Then clear workspace-scoped storage, BEFORE clearing the React Query cache
+  // (which holds the workspace list). Otherwise per-workspace drafts/chat/etc
+  // would leak to the next user on this device.
+  //
+  // Enumerating the stored keys rather than the workspace list is what makes
+  // this work on a cold start: a session rejected at the identity probe never
+  // loaded a workspace list, so there would be no slugs to iterate and every
+  // per-workspace key would survive. Adapters that cannot list keys get the
+  // narrower sweep over whatever workspaces this process did resolve.
+  if (!clearAllWorkspaceStorage(storage)) {
+    const cachedWorkspaces =
+      queryClient.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
+    for (const ws of cachedWorkspaces) {
+      clearWorkspaceStorage(storage, ws.slug);
+    }
   }
 
   // Clear the last-workspace-slug cookie. Otherwise on a shared device the
