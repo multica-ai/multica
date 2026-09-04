@@ -101,8 +101,11 @@ func TestInboundFromEvent_ImageUsesSignedURL(t *testing.T) {
 	if msg.Type != channel.MsgTypeImage {
 		t.Fatalf("type = %q", msg.Type)
 	}
-	if msg.Text != "![a.jpg]" {
+	if msg.Text != sharecrmImagePlaceholder {
 		t.Fatalf("text = %q", msg.Text)
+	}
+	if msg.CommandText != "" {
+		t.Fatalf("command text = %q, want empty for a pure image", msg.CommandText)
 	}
 	var raw sharecrmRawEvent
 	if err := json.Unmarshal(msg.Raw, &raw); err != nil {
@@ -131,8 +134,14 @@ func TestInboundFromEvent_MixedKeepsCaptionAndImage(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok")
 	}
-	if msg.Text != "图文测试\n![b.png]" {
+	if msg.Text != "图文测试\n"+sharecrmImagePlaceholder {
 		t.Fatalf("text = %q", msg.Text)
+	}
+	if msg.CommandText != "图文测试" {
+		t.Fatalf("command text = %q", msg.CommandText)
+	}
+	if msg.Type != channel.MsgTypeText {
+		t.Fatalf("mixed caption+image type = %q", msg.Type)
 	}
 }
 
