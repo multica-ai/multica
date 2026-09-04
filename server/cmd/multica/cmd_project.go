@@ -329,7 +329,7 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 		if resolveErr != nil {
 			return fmt.Errorf("resolve lifecycle references: %w", resolveErr)
 		}
-		body["lifecycle"] = spec
+		body["issue_lifecycle"] = spec
 	}
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v

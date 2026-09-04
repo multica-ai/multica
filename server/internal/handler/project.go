@@ -111,7 +111,7 @@ type CreateProjectRequest struct {
 	StartDate   *string                               `json:"start_date"`
 	DueDate     *string                               `json:"due_date"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
-	Lifecycle   *issueLifecycleSpecRequest            `json:"lifecycle,omitempty"`
+	Lifecycle   *issueLifecycleSpecRequest            `json:"issue_lifecycle,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but

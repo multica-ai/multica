@@ -500,7 +500,7 @@ func TestCreateProjectWithLifecycleSpecCommitsOneMaterializedDefinition(t *testi
 	failureTitle := "Rolled back lifecycle project " + time.Now().Format("150405.000000000")
 	testutil.Call(t, testHandler.CreateProject,
 		newRequest(http.MethodPost, "/api/projects", map[string]any{
-			"title": failureTitle, "lifecycle": lifecyclePayload,
+			"title": failureTitle, "issue_lifecycle": lifecyclePayload,
 			"resources": []map[string]any{
 				{"resource_type": "github_repo", "resource_ref": map[string]any{"url": "https://github.com/multica-ai/multica"}},
 				{"resource_type": "github_repo", "resource_ref": map[string]any{"url": "https://github.com/multica-ai/multica"}},
@@ -520,8 +520,8 @@ func TestCreateProjectWithLifecycleSpecCommitsOneMaterializedDefinition(t *testi
 	}
 	testutil.Call(t, testHandler.CreateProject,
 		newRequest(http.MethodPost, "/api/projects", map[string]any{
-			"title":     "Atomic lifecycle project " + time.Now().Format("150405.000000000"),
-			"lifecycle": lifecyclePayload,
+			"title":           "Atomic lifecycle project " + time.Now().Format("150405.000000000"),
+			"issue_lifecycle": lifecyclePayload,
 		})).Want(http.StatusCreated).JSON(&response)
 	if response.ID == "" || response.IssueLifecycle == nil || response.IssueLifecycle.Mode != "custom" || len(response.IssueLifecycle.Statuses) != 2 {
 		t.Fatalf("project create lifecycle response = %#v", response)
