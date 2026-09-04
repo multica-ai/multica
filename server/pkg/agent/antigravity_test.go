@@ -364,6 +364,174 @@ exit 0
 `
 }
 
+func fakeAgyInvocationRecorderScript(recordPath string) string {
+	return `#!/bin/sh
+printf '%s\n' "$1" >> "` + recordPath + `"
+if [ "$1" = "models" ]; then
+  printf 'gemini-3.6-flash-high\tGemini 3.6 Flash (High)\n'
+  exit 0
+fi
+printf 'task completed\n'
+`
+}
+
+func fakeAgyTransientAuthScript() string {
+	return `#!/bin/sh
+printf 'run\n' >> "$MULTICA_TEST_AGY_INVOCATIONS"
+count=$(wc -l < "$MULTICA_TEST_AGY_INVOCATIONS")
+if [ "$count" -eq 1 ]; then
+  printf 'Error: authentication timed out.\n' >&2
+  exit 1
+fi
+log=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) log="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ -n "$log" ]; then
+  printf 'I0905 01:41:50.000000 1 printmode.go:156] Print mode: conversation=44a57718-801c-41e7-9691-3225be2b1cb8, sending message\n' >> "$log"
+fi
+printf 'retry completed\n'
+`
+}
+
+func fakeAgyPartialAuthFailureScript() string {
+	return `#!/bin/sh
+printf 'run\n' >> "$MULTICA_TEST_AGY_INVOCATIONS"
+printf 'partial reply already emitted\n'
+printf 'Error: authentication timed out.\n' >&2
+exit 1
+`
+}
+
+func readInvocationCount(t *testing.T, path string) int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read invocation record: %v", err)
+	}
+	return len(strings.Fields(string(data)))
+}
+
+func awaitAntigravityResult(t *testing.T, session *Session) Result {
+	t.Helper()
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		return result
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+		return Result{}
+	}
+}
+
+func TestAntigravityBackendDoesNotProbeModelsBeforeTask(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	fakePath := filepath.Join(dir, "agy")
+	recordPath := filepath.Join(dir, "invocations")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyInvocationRecorderScript(recordPath)))
+
+	backend, err := New("antigravity", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"MULTICA_TEST_AGY_INVOCATIONS": recordPath},
+		Logger:         quietAntigravityLogger(),
+	})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{Model: "gemini-3.6-flash-high"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	result := awaitAntigravityResult(t, session)
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if got := readInvocationCount(t, recordPath); got != 1 {
+		t.Fatalf("task execution must not launch a preceding `agy models` process: got %d invocations, want 1", got)
+	}
+}
+
+func TestAntigravityBackendRetriesZeroOutputAuthTimeoutOnce(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	fakePath := filepath.Join(dir, "agy")
+	recordPath := filepath.Join(dir, "invocations")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyTransientAuthScript()))
+
+	backend, err := New("antigravity", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"MULTICA_TEST_AGY_INVOCATIONS": recordPath},
+		Logger:         quietAntigravityLogger(),
+	})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	result := awaitAntigravityResult(t, session)
+	if result.Status != "completed" {
+		t.Fatalf("expected retry to complete, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "retry completed" {
+		t.Fatalf("unexpected retry output: %q", result.Output)
+	}
+	if result.SessionID != "44a57718-801c-41e7-9691-3225be2b1cb8" {
+		t.Fatalf("unexpected retry session id: %q", result.SessionID)
+	}
+	if got := readInvocationCount(t, recordPath); got != 2 {
+		t.Fatalf("expected exactly one retry, got %d invocations", got)
+	}
+}
+
+func TestAntigravityBackendDoesNotRetryAuthTimeoutAfterOutput(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	fakePath := filepath.Join(dir, "agy")
+	recordPath := filepath.Join(dir, "invocations")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyPartialAuthFailureScript()))
+
+	backend, err := New("antigravity", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"MULTICA_TEST_AGY_INVOCATIONS": recordPath},
+		Logger:         quietAntigravityLogger(),
+	})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	result := awaitAntigravityResult(t, session)
+	if result.Status != "failed" {
+		t.Fatalf("expected partial-output failure to remain failed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Output, "partial reply already emitted") {
+		t.Fatalf("expected partial output to be preserved, got %q", result.Output)
+	}
+	if got := readInvocationCount(t, recordPath); got != 1 {
+		t.Fatalf("an attempt that emitted output must not be retried: got %d invocations", got)
+	}
+}
+
 // TestAntigravityBackendPrintTimeoutSurfacesAsTimeout is the end-to-end guard for
 // MUL-3570: agy aborts a long turn by printing its timeout sentinel and exiting
 // 0, so the backend must classify the result as a timeout (not a truncated
@@ -458,12 +626,10 @@ func TestAntigravityBackendProviderErrorSurfacesAsFailed(t *testing.T) {
 }
 
 // TestAntigravityModelError is the regression guard for the silent-no-op fix:
-// agy exits 0 with empty output on an unrecognised --model, so Execute must
-// reject a non-empty model that isn't in the `agy models` catalog instead of
-// letting it run to a fake "completed + empty" success. This covers the same
-// validation regardless of whether opts.Model originated from agent.model, a
-// persisted/API value, or the daemon-wide MULTICA_ANTIGRAVITY_MODEL default —
-// they all collapse to opts.Model before Execute runs this check.
+// agy exits 0 with empty output on an unrecognised --model, so Execute uses
+// this check whenever normal model discovery has already cached a live
+// `agy models` catalog. opts.Model is the same input whether it originated
+// from agent.model, a persisted/API value, or the daemon-wide default.
 func TestAntigravityModelError(t *testing.T) {
 	t.Parallel()
 

@@ -41,6 +41,10 @@ type antigravityBackend struct {
 }
 
 func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+	return b.execute(ctx, prompt, opts, true)
+}
+
+func (b *antigravityBackend) execute(ctx context.Context, prompt string, opts ExecOptions, allowAuthRetry bool) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
 		execPath = "agy"
@@ -51,18 +55,21 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 	// Guard against agy's silent no-op on an unrecognised --model: it exits 0
 	// with empty output, which would otherwise surface as a "completed" but
-	// empty task. opts.Model is the single funnel for both agent.model and the
-	// daemon-wide MULTICA_ANTIGRAVITY_MODEL default (resolved in daemon.go), so
-	// validating it here covers every source — UI free-text, API, a persisted
-	// value, and the env default alike. Reject a non-empty model the installed
-	// CLI definitively does not advertise, with an actionable error. Validation
-	// is fail-OPEN: if the `agy models` catalog can't be discovered we let agy
-	// resolve the value itself rather than blocking the run on a discovery
-	// hiccup (see antigravityModelError).
+	// empty task. opts.Model is the single funnel for agent.model and the
+	// daemon-wide MULTICA_ANTIGRAVITY_MODEL default (resolved in daemon.go).
+	// Validate any source when the normal discovery path already cached a live
+	// catalog, but never refresh that catalog here: starting `agy models`
+	// immediately before `agy -p`
+	// intermittently makes agy 1.1.26 on WSL/file credential storage ignore a
+	// valid token and enter its 60s OAuth flow (google-antigravity/
+	// antigravity-cli#944). On a cache miss, fail open and let agy resolve the
+	// model rather than putting a second agy process on the task's launch path.
 	if opts.Model != "" {
-		catalog, _ := ListModels(ctx, "antigravity", b.cfg.commandAt(execPath))
-		if err := antigravityModelError(opts.Model, catalog.Models); err != nil {
-			return nil, err
+		key := discoveryCacheKey("antigravity", b.cfg.commandAt(execPath))
+		if catalog, ok := cachedDiscoveryOnly(key); ok {
+			if err := antigravityModelError(opts.Model, catalog.Models); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -208,6 +215,28 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 		b.cfg.Logger.Info("agy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
+		if allowAuthRetry && runCtx.Err() == nil && antigravityAuthTimeoutRetrySafe(finalStatus, finalOutput, sessionID, stderrBuf.Tail()) {
+			// agy can intermittently ignore a valid file credential on WSL and
+			// enter an OAuth flow that times out. No stdout and no conversation id
+			// prove the prompt was not dispatched, so one retry cannot duplicate
+			// model output, tool calls, or file edits. Never retry after either
+			// signal appears: that attempt may already have caused side effects.
+			b.cfg.Logger.Warn("agy authentication timed out before dispatch; retrying once", "pid", cmd.Process.Pid)
+			retrySession, retryErr := b.execute(runCtx, prompt, opts, false)
+			if retryErr == nil {
+				for msg := range retrySession.Messages {
+					trySend(msgCh, msg)
+				}
+				if retryResult, ok := <-retrySession.Result; ok {
+					retryResult.DurationMs += duration.Milliseconds()
+					resCh <- retryResult
+					return
+				}
+				retryErr = fmt.Errorf("result channel closed without a value")
+			}
+			finalError = fmt.Sprintf("%s; agy authentication retry failed: %v", finalError, retryErr)
+		}
+
 		resCh <- Result{
 			Status:     finalStatus,
 			Output:     finalOutput,
@@ -222,6 +251,17 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// antigravityAuthTimeoutRetrySafe identifies the one agy failure that can be
+// repeated without duplicating work. The exact timeout marker alone is not
+// enough: empty output and an absent conversation id are the evidence that agy
+// never dispatched the prompt or began a turn.
+func antigravityAuthTimeoutRetrySafe(status, output, sessionID, stderr string) bool {
+	return status == "failed" &&
+		strings.TrimSpace(output) == "" &&
+		sessionID == "" &&
+		strings.Contains(strings.ToLower(stderr), "error: authentication timed out")
 }
 
 // antigravityConversationIDRe matches the glog line printmode.go writes when
