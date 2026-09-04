@@ -22,8 +22,12 @@
 // - While following, displacement not attributed to the reader is pinned
 //   straight back to the live end (`onScroll` / `onResize` return the
 //   verdict) — immediately, with no intent-window timer for a final event to
-//   hide behind — but never during an active touch or while the mouse is held
-//   down (text selection autoscroll must not be fought).
+//   hide behind — but never during an active touch, while the mouse is held
+//   down (text selection autoscroll must not be fought), or while a reader
+//   gesture is still in flight: a pin mid-flight cancels the browser's wheel
+//   scroll animation and reverts the tick. A pin a staged-but-unconfirmed
+//   claim deferred is re-judged when the wiring discards that claim at the
+//   frame boundary, so it fires one frame late rather than never.
 // - Arriving back within the edge zone re-engages the follow.
 //
 // The state machine is direction-agnostic: callers feed it away-positive
@@ -59,8 +63,13 @@ export interface LiveEndFollow {
    * budget the surface's own scroll can attribute displacement against.
    */
   input(delta: number): void;
-  /** Discards input the surface did not consume during its rendering frame. */
-  endInputFrame(): void;
+  /**
+   * Discards input the surface did not consume during its rendering frame.
+   * Returns whether a pin was deferred by an in-flight gesture since the
+   * previous frame boundary — the wiring must re-judge (via `onResize`) so a
+   * deferred pin fires one frame late rather than never.
+   */
+  endInputFrame(): boolean;
   /** An active touch prevents pinning while drag displacement is confirmed. */
   touchStart(): void;
   /** Ends the held state; confirmed momentum may continue within the settle window. */
@@ -116,8 +125,47 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
   const withinCarry = (amount: number) =>
     amount <= motionCarry + Math.max(1, motionCarry) * 1e-9;
 
-  const pinVerdict = (distance: number): boolean =>
-    following && !mouseHeld && !scrollbarDrag && !touchHeld && distance > 0;
+  // A reader gesture the surface has not finished answering: a claim staged
+  // this frame still awaiting its first confirming scroll, or a wheel/key
+  // scroll ANIMATION still spending its claim. A mouse wheel tick delivers
+  // its input at once but the browser animates the displacement over many
+  // frames, and a pin issued mid-flight cancels that animation — reverting
+  // the tick, so a wheel user could never accumulate a release against a
+  // stream or Virtuoso's re-measure resizes while a touchpad (which confirms
+  // per event) escaped easily. Deferring the pin lets the gesture finish;
+  // an unconsumed claim's deferral ends when the wiring discards the claim
+  // at the frame boundary and re-judges (see stick-to-bottom.ts).
+  //
+  // Carry residue is the bounded cost: if the browser delivers less
+  // displacement than the claim (scroll extent reached, delta scaling off),
+  // the carry never drains and pins stay deferred until the settle window
+  // expires — at most MOTION_SETTLE_WINDOW_MS with the live end off-screen,
+  // corrected by the next scroll or resize after that.
+  const gestureInFlight = () =>
+    (inputFresh() && (awayBudget > 0 || towardBudget > 0)) ||
+    (motionFresh() && motionSource === "input" && motionCarry > 0);
+
+  // Whether a wanted pin was suppressed by an in-flight gesture since the
+  // last frame boundary; endInputFrame reports and clears it so the wiring
+  // re-judges only pins that were actually deferred — an unconditional
+  // frame-boundary re-judge would snap back sub-threshold reader scrolls the
+  // latch had deliberately left alone.
+  let pinDeferred = false;
+
+  const pinVerdict = (distance: number): boolean => {
+    const wanted =
+      following && !mouseHeld && !scrollbarDrag && !touchHeld && distance > 0;
+    if (wanted && gestureInFlight()) {
+      pinDeferred = true;
+      return false;
+    }
+    // Judged for real: whatever was deferred is settled, so a later frame
+    // boundary must not inherit it — a deferral stranded by a gesture with
+    // no input frame left would otherwise be consumed by the next unrelated
+    // gesture and snap it back.
+    pinDeferred = false;
+    return wanted;
+  };
 
   return {
     setActive(a: boolean) {
@@ -136,6 +184,7 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
       motionSource = null;
       motionCarry = 0;
       lastMotionAt = -MOTION_SETTLE_WINDOW_MS;
+      pinDeferred = false;
     },
     isFollowing: () => active && following,
     disengage() {
@@ -156,6 +205,9 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
     endInputFrame() {
       awayBudget = 0;
       towardBudget = 0;
+      const deferred = pinDeferred;
+      pinDeferred = false;
+      return deferred;
     },
     touchStart() {
       if (active) touchHeld = true;
@@ -263,6 +315,11 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
             towardBudget = 0;
             awayTaken = 0;
             motionDirection = 0;
+            // Clear the carry too: an over-claimed toward gesture (End stages
+            // the whole scrollHeight) would otherwise defer pins for the rest
+            // of the settle window right after the follow re-engaged.
+            motionSource = null;
+            motionCarry = 0;
           }
           return false;
         }
