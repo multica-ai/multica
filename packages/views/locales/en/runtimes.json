@@ -94,7 +94,7 @@
   "health": {
     "online": {
       "label": "Online",
-      "description": "Heartbeat received in the last 45s. Ready to dispatch tasks."
+      "description": "Heartbeat received in the last 45s. Ready to dispatch runs."
     },
     "recently_lost": {
       "label": "Recently lost",
@@ -155,12 +155,12 @@
       "cascade": {
         "title_one": "Unbind {{count}} agent and delete this Runtime?",
         "title_other": "Unbind {{count}} agents and delete this Runtime?",
-        "description": "Delete \"{{name}}\". The agents below are kept — their instructions, chats and task history stay intact — but they will be unbound and cannot run until you bind them to another runtime. Their queued or running tasks will be cancelled, and then the Runtime will be deleted.",
-        "warning": "Queued and running tasks will be cancelled, and these agents cannot be assigned new work until they are bound to a runtime.",
+        "description": "Delete \"{{name}}\". The agents below are kept — their instructions, chats and run history stay intact — but they will be unbound and cannot run until you bind them to another runtime. Their queued or in-progress runs will be cancelled, and then the Runtime will be deleted.",
+        "warning": "Queued and in-progress runs will be cancelled, and these agents cannot be assigned new work until they are bound to a runtime.",
         "notice_runtime_has_active_agents": "Active agents were added since you opened this dialog. Review the new plan and confirm.",
         "notice_runtime_delete_plan_changed": "The active agent set changed while this dialog was open. Review the new plan and confirm.",
-        "checkbox_one": "I understand this {{count}} agent will be unbound and cannot run until I bind it to a runtime, and that any queued or running tasks will be cancelled.",
-        "checkbox_other": "I understand these {{count}} agents will be unbound and cannot run until I bind them to a runtime, and that any queued or running tasks will be cancelled.",
+        "checkbox_one": "I understand this {{count}} agent will be unbound and cannot run until I bind it to a runtime, and that any queued or in-progress runs will be cancelled.",
+        "checkbox_other": "I understand these {{count}} agents will be unbound and cannot run until I bind them to a runtime, and that any queued or in-progress runs will be cancelled.",
         "cancel": "Cancel",
         "confirm_one": "Unbind {{count}} agent and delete runtime",
         "confirm_other": "Unbind {{count}} agents and delete runtime",
@@ -217,7 +217,7 @@
     "copy_aria": "Copy",
     "cancel": "Cancel",
     "success_title": "Computer connected",
-    "success_description": "Your computer is online and ready. Create an agent and it can start picking up tasks here.",
+    "success_description": "Your computer is online and ready. Create an agent and it can start picking up runs here.",
     "view_runtime": "View runtime",
     "create_agent": "Create an agent"
   },

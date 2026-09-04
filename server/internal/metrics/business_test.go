@@ -18,7 +18,7 @@ func TestBusinessMetricsLifecycleCountersAndGauge(t *testing.T) {
 
 	m.RecordTaskEnqueued("issue", "local")
 	for i := 0; i < 100; i++ {
-		m.RecordTaskDispatched("task-"+strconv.Itoa(i), "issue", "local", 2.5)
+		m.RecordTaskDispatched("task-"+strconv.Itoa(i), "issue", "local", 2.5, 0.5)
 	}
 	m.RecordTaskStarted("issue", "local", "codex")
 	m.RecordTaskTerminal("task-0", "issue", "local", "completed", 10, 20, 1)
@@ -43,6 +43,9 @@ func TestBusinessMetricsLifecycleCountersAndGauge(t *testing.T) {
 	}
 	if got := testutil.CollectAndCount(m.taskQueueWait); got != 1 {
 		t.Fatalf("queue wait series count = %d, want 1", got)
+	}
+	if got := testutil.CollectAndCount(m.taskClaimableWait); got != 1 {
+		t.Fatalf("claimable wait series count = %d, want 1", got)
 	}
 	if got := testutil.CollectAndCount(m.taskRunSeconds); got != 1 {
 		t.Fatalf("run seconds series count = %d, want 1", got)
@@ -126,7 +129,7 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	registry.MustRegister(m.Collectors()...)
 
 	m.RecordTaskEnqueued("issue", "local")
-	m.RecordTaskDispatched("task-1", "issue", "local", 1)
+	m.RecordTaskDispatched("task-1", "issue", "local", 1, 0.25)
 	m.RecordTaskStarted("issue", "local", "codex")
 	m.RecordTaskTerminal("task-1", "issue", "local", "completed", 2, 3, 1)
 	m.RecordTaskFailed("issue", "local", taskfailure.ReasonTimeout.String())

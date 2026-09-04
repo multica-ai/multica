@@ -102,8 +102,8 @@
     },
     "stop_dialog": {
       "title": "停止这次运行？",
-      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体 task。已产生的内容会保留在对话里。",
-      "description_default": "这会取消当前智能体 task。已产生的内容会保留在对话里。",
+      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体运行。已产生的内容会保留在对话里。",
+      "description_default": "这会取消当前智能体运行。已产生的内容会保留在对话里。",
       "cancel": "继续运行",
       "confirm": "停止运行",
       "confirming": "停止中..."
@@ -156,7 +156,7 @@
     },
     "first_task": {
       "label": "建议第一个任务",
-      "prompt": "建议三个适合交给你的实用任务。"
+      "prompt": "建议三个适合分配给你的实用任务。"
     },
     "recommend": {
       "label": "推荐一个操作",

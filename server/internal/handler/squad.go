@@ -585,6 +585,29 @@ type SquadMemberStatusListResponse struct {
 	Members []SquadMemberStatusResponse `json:"members"`
 }
 
+// deriveRuntimeAvailability owns the shared three-state runtime reachability
+// policy. Agent projections use these values directly; squad presence maps an
+// online runtime to its user-facing "idle" bucket after workload precedence.
+func deriveRuntimeAvailability(
+	runtimeStatus pgtype.Text,
+	lastSeen pgtype.Timestamptz,
+	now time.Time,
+) string {
+	if !runtimeStatus.Valid {
+		return "offline"
+	}
+	if runtimeStatus.String == "online" {
+		return "online"
+	}
+	if !lastSeen.Valid {
+		return "offline"
+	}
+	if now.Sub(lastSeen.Time) < 5*time.Minute {
+		return "unstable"
+	}
+	return "offline"
+}
+
 // deriveSquadMemberStatus collapses runtime + task signals into the five
 // status buckets used by the squad UI. Mirrors the workload+availability
 // split in packages/core/agents/derive-presence.ts: working wins over
@@ -616,19 +639,11 @@ func deriveSquadMemberStatus(
 	if hasWorkingTask {
 		return "working"
 	}
-	if !runtimeStatus.Valid {
-		return "offline"
-	}
-	if runtimeStatus.String == "online" {
+	availability := deriveRuntimeAvailability(runtimeStatus, lastSeen, now)
+	if availability == "online" {
 		return "idle"
 	}
-	if !lastSeen.Valid {
-		return "offline"
-	}
-	if now.Sub(lastSeen.Time) < 5*time.Minute {
-		return "unstable"
-	}
-	return "offline"
+	return availability
 }
 
 // ListSquadMemberStatus returns one entry per squad member with derived

@@ -23,9 +23,9 @@ When you assign to a squad, the squad becomes the issue's assignee and the squad
 
 ## Execution after assignment
 
-Multica creates a [task](/tasks) for the agent. Once an online runtime claims the task, it invokes the AI coding tool on that machine; progress, comments, and results then appear in the issue.
+Multica creates a [run](/tasks) for the agent. Once an online runtime claims the run, it invokes the AI coding tool on that machine; progress, comments, and results then appear in the issue.
 
-If the runtime is temporarily offline, the task waits in the queue; a task is bound to its runtime and never moves to another machine.
+If the runtime is temporarily offline, the run waits in the queue; a run is bound to its runtime and never moves to another machine.
 
 While executing, the agent can:
 
@@ -36,13 +36,13 @@ While executing, the agent can:
 
 What it can actually do is still limited by the agent's configuration, the runtime environment, and your permission to run it.
 
-During the run, the agent manages the issue's status by judging what its work changes: starting on the issue's own ask moves it to `in_progress` right away, delivery moves it to `in_review`, work continuing beyond the turn keeps it `in_progress`, and consultation or discussion leaves the status untouched — these actions appear under the agent's identity in the timeline. Task lifecycle and issue status are separate: a task completing does not by itself change the issue status.
+During the run, the agent manages the issue's status by judging what its work changes: starting on the issue's own ask moves it to `in_progress` right away, delivery moves it to `in_review`, work continuing beyond the turn keeps it `in_progress`, and consultation or discussion leaves the status untouched — these actions appear under the agent's identity in the timeline. Run lifecycle and issue status are separate: a run completing does not by itself change the issue status.
 
 When the assignee is a [squad](/squads), the same rule applies: Multica enqueues the leader, and dispatching members is not delivery — a dispatch turn leaves the parent issue `in_progress`, and the leader only moves it to `in_review` once the overall goal is met.
 
 ## Assign without starting
 
-**Don't start yet** in the confirmation dialog saves the assignee without creating a task for this run. Use it to settle ownership first and start once the background or dependencies are ready.
+**Don't start yet** in the confirmation dialog saves the assignee without creating a run this time. Use it to settle ownership first and start once the background or dependencies are ready.
 
 `backlog` doesn't start a run on assignment either. Execution only follows after you move the issue out of `backlog`, or ask the assignee for something in a follow-up comment.
 
@@ -62,10 +62,10 @@ Workspace owners and admins can manage agents, but being able to see one doesn't
 
 ## Change or remove the assignee
 
-Switching the assignee to another agent starts a new run for the new assignee; picking a member only changes the assignee and doesn't invoke any AI coding tool. Removing the assignee doesn't create a task either.
+Switching the assignee to another agent starts a new run for the new assignee; picking a member only changes the assignee and doesn't invoke any AI coding tool. Removing the assignee doesn't create a run either.
 
 <Callout type="warning">
-Changing the assignee, unassigning, or changing the issue status doesn't stop a run that has already started. To interrupt it, stop the corresponding task in the execution log.
+Changing the assignee, unassigning, or changing the issue status doesn't stop a run that has already started. To interrupt it, stop the corresponding run in the execution log.
 </Callout>
 
 ## Use the CLI
@@ -79,10 +79,10 @@ multica issue assign MUL-42 --unassign
 
 In scripts, use `--to-id <uuid>` to avoid matching the wrong object with the same name. Look up UUIDs with `multica agent list --output json` or `multica workspace member list --output json`.
 
-Use `--no-start` when the assignment should record ownership without creating a new task — for example, when the same agent is already handling the issue from another run. The same flag is available on `issue update` and `issue status`. If an ownership-only flow changes both assignment and status, pass it to both commands; suppressing the assignment does not suppress a later status-triggered run.
+Use `--no-start` when the assignment should record ownership without creating a new run — for example, when the same agent is already handling the issue from another run. The same flag is available on `issue update` and `issue status`. If an ownership-only flow changes both assignment and status, pass it to both commands; suppressing the assignment does not suppress a later status-triggered run.
 
 ## Next steps
 
 - [@-mention agents in comments](/mentioning-agents) — handle a new question without changing the assignee.
-- [Tasks](/tasks) — queueing, retry, and stop rules.
+- [Runs](/tasks) — queueing, retry, and stop rules.
 - [Squads](/squads) — have a leader coordinate multiple agents.

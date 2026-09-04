@@ -12,11 +12,12 @@ import (
 )
 
 type RegistryOptions struct {
-	Pool     *pgxpool.Pool
-	Realtime *realtime.Metrics
-	DaemonWS *daemonws.Metrics
-	Version  string
-	Commit   string
+	Pool        *pgxpool.Pool
+	ReplicaPool *pgxpool.Pool
+	Realtime    *realtime.Metrics
+	DaemonWS    *daemonws.Metrics
+	Version     string
+	Commit      string
 }
 
 type Registry struct {
@@ -26,6 +27,7 @@ type Registry struct {
 	ChannelMedia *ChannelMediaReconcilerMetrics
 	ChannelLease *ChannelLeaseMetrics
 	Wecom        *WecomMetrics
+	DBRouting    *DBRoutingMetrics
 }
 
 func NewRegistry(opts RegistryOptions) *Registry {
@@ -54,9 +56,11 @@ func NewRegistry(opts RegistryOptions) *Registry {
 
 	wecomMetrics := NewWecomMetrics()
 	reg.MustRegister(wecomMetrics.Collectors()...)
+	dbRoutingMetrics := NewDBRoutingMetrics()
+	reg.MustRegister(dbRoutingMetrics.Collectors()...)
 
 	if opts.Pool != nil {
-		reg.MustRegister(NewDBCollector(opts.Pool))
+		reg.MustRegister(NewDBCollector(opts.Pool, opts.ReplicaPool))
 	}
 	if opts.Realtime != nil {
 		reg.MustRegister(NewRealtimeCollector(opts.Realtime))
@@ -72,6 +76,7 @@ func NewRegistry(opts RegistryOptions) *Registry {
 		ChannelMedia: channelMedia,
 		ChannelLease: channelLease,
 		Wecom:        wecomMetrics,
+		DBRouting:    dbRoutingMetrics,
 	}
 }
 

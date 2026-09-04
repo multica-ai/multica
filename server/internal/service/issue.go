@@ -587,15 +587,20 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 
 	assignedTaskID := assignedTask.ID
 	if !opts.AssignedAgentRunFireAt.IsZero() {
-		if assignedTaskID.Valid && !lifecycleEntryTask {
-			if err := s.TaskService.hydrateDeferredChannelIssueTaskOverlay(ctx, assignedTask); err != nil {
-				// Runtime overlays are best-effort on every enqueue path. The task is
-				// already durable and safely deferred, so an optional integration
-				// failure must not turn a committed issue into a retry duplicate.
-				slog.Warn("hydrate deferred channel issue task overlay failed",
-					"issue_id", util.UUIDToString(issue.ID),
-					"task_id", util.UUIDToString(assignedTask.ID),
-					"error", err)
+		if assignedTaskID.Valid {
+			if !lifecycleEntryTask {
+				// The deferred task became durable with the issue at commit. Refresh the
+				// daemon's schedule only now so a wakeup can never race uncommitted data.
+				s.TaskService.notifyRuntimeMayHaveWork(assignedTask.RuntimeID, "")
+				if err := s.TaskService.hydrateDeferredChannelIssueTaskOverlay(ctx, assignedTask); err != nil {
+					// Runtime overlays are best-effort on every enqueue path. The task is
+					// already durable and safely deferred, so an optional integration
+					// failure must not turn a committed issue into a retry duplicate.
+					slog.Warn("hydrate deferred channel issue task overlay failed",
+						"issue_id", util.UUIDToString(issue.ID),
+						"task_id", util.UUIDToString(assignedTask.ID),
+						"error", err)
+				}
 			}
 		} else if s.shouldEnqueueSquadLeaderOnAssign(ctx, issue) {
 			// AssignedAgentRunFireAt currently belongs to channel /issue, which

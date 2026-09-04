@@ -1981,6 +1981,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"workspaces_root", d.cfg.WorkspacesRoot,
 		"health_port", d.cfg.HealthPort,
 		"poll_interval", d.cfg.PollInterval,
+		"ws_claim_poll_interval", d.cfg.WSClaimPollInterval,
 		"heartbeat_interval", d.cfg.HeartbeatInterval,
 		"agent_timeout", d.cfg.AgentTimeout,
 		"idle_watchdog", d.cfg.AgentIdleWatchdog,
@@ -5100,7 +5101,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			continue
 		}
 
-		tasks, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
+		claimResult, err := d.claimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
 		if err != nil {
 			d.exitClaim()
 			releaseSlots(slots)
@@ -5112,6 +5113,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			}
 			continue
 		}
+		tasks := claimResult.Tasks
 
 		// Dispatch each claimed task into a slot. activeTasks is incremented for
 		// every dispatched task BEFORE exitClaim so the auto-update barrier never
@@ -5159,14 +5161,54 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 		}
 
 		// If we filled every slot, more work may be queued — loop immediately.
-		// Otherwise wait for the next wakeup / poll interval.
+		// Otherwise wait for the next wakeup / poll interval. A connection that
+		// negotiated WS RPC receives task-available pushes, so this poll is only
+		// a missed-event safety net and can run less often. Claim errors retain
+		// the configured fallback cadence above.
 		if dispatched > 0 && dispatched == len(slots) {
 			continue
 		}
-		if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+		if err := sleepWithContextOrWakeup(pollerCtx, d.taskClaimPollInterval(claimResult), wakeup); err != nil {
 			return
 		}
 	}
+}
+
+// taskClaimPollInterval returns the next missed-event safety poll. The longer
+// cadence is only safe when this exact claim response came from a server that
+// opted into scheduling hints; a missing hint covers old servers and uncertain
+// WS claims, both of which retain the normal fallback cadence. Downward-only
+// jitter keeps the default below the server's 3-minute empty-claim cache TTL
+// while preventing an idle fleet from polling in lockstep.
+func (d *Daemon) taskClaimPollInterval(result claimTasksResult) time.Duration {
+	if !d.wsRPC.supportsRPCV1() || !result.ClaimedOverWS || !result.ClaimPollHintSupported {
+		if d.cfg.PollInterval > 0 {
+			return d.cfg.PollInterval
+		}
+		return DefaultPollInterval
+	}
+	upperBound := d.cfg.WSClaimPollInterval
+	if upperBound <= 0 {
+		upperBound = DefaultWSClaimPollInterval
+	}
+	interval := downwardJitterDuration(upperBound)
+	if result.NextDeferredTaskAfterMillis > 0 {
+		untilDeferred := time.Duration(result.NextDeferredTaskAfterMillis) * time.Millisecond
+		if untilDeferred < interval {
+			interval = untilDeferred
+		}
+	}
+	return interval
+}
+
+func downwardJitterDuration(interval time.Duration) time.Duration {
+	minReduction := interval / 12
+	maxReduction := interval / 6
+	if minReduction <= 0 || maxReduction <= minReduction {
+		return interval
+	}
+	reduction := minReduction + time.Duration(rand.Int63n(int64(maxReduction-minReduction)+1))
+	return interval - reduction
 }
 
 func signalPollerWakeup(wakeup chan<- struct{}) {
@@ -5340,7 +5382,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		if err := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
-			errorMessage:  "runtime went offline before the task started",
+			errorMessage:  "runtime went offline before the run started",
 			failureReason: taskfailure.ReasonRuntimeOffline.String(),
 		}); err != nil {
 			d.logger.Error("fail task callback failed", "task", task.ID, "error", err)

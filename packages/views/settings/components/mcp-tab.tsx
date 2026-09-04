@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Loader2, Pencil, Plus, Server, Trash2 } from "lucide-react";
+import { Loader2, Plus, Server } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -27,6 +27,7 @@ import {
 import type { WorkspaceMcpServer } from "@multica/core/types";
 import { McpServerDialog } from "../../agents/components/tabs/mcp-server-dialog";
 import type { ManagedMcpServer } from "../../agents/components/tabs/mcp-config-model";
+import { McpServerRow } from "../../common/mcp-server-row";
 import { useT } from "../../i18n";
 import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
 
@@ -41,9 +42,9 @@ import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
  *    agent implicitly.
  *  - The stored configuration is WRITE-ONLY. The API returns names and
  *    transports, never urls / commands / headers / env, so there is no
- *    "current value" to prefill and editing a server means supplying its
- *    configuration again. The UI says so rather than pretending the empty form
- *    is the saved state.
+ *    "current value" to prefill and replacing a server means supplying its
+ *    complete configuration again. Renaming stays separate and never touches
+ *    the write-only entry.
  */
 export function McpTab() {
   const { t } = useT("settings");
@@ -58,7 +59,7 @@ export function McpTab() {
   const updateServer = useUpdateWorkspaceMcpServer(wsId);
   const deleteServer = useDeleteWorkspaceMcpServer(wsId);
 
-  const servers = serversQuery.data ?? [];
+  const servers = useMemo(() => serversQuery.data ?? [], [serversQuery.data]);
   const existingNames = useMemo(
     () => new Set(servers.map((server) => server.name)),
     [servers],
@@ -68,6 +69,11 @@ export function McpTab() {
   const [editingServer, setEditingServer] = useState<WorkspaceMcpServer | null>(
     null,
   );
+  const [renamingServer, setRenamingServer] =
+    useState<WorkspaceMcpServer | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [renamePending, setRenamePending] = useState(false);
   const [deletingServer, setDeletingServer] = useState<WorkspaceMcpServer | null>(
     null,
   );
@@ -76,17 +82,21 @@ export function McpTab() {
   // entry to prefill. Here there is nothing to prefill — an edit always
   // starts from an empty form and REPLACES the entry. The transport still
   // comes from the safe summary so the form opens on the right one.
-  const dialogServer: ManagedMcpServer | null = editingServer
-    ? {
-        name: editingServer.name,
-        config: {},
-        container: "mcpServers",
-        transport: editingServer.transport,
-        // The library has no per-agent toggle; this field only feeds the
-        // dialog's shape.
-        enabled: true,
-      }
-    : null;
+  const dialogServer: ManagedMcpServer | null = useMemo(
+    () =>
+      editingServer
+        ? {
+            name: editingServer.name,
+            config: {},
+            container: "mcpServers",
+            transport: editingServer.transport,
+            // The library has no per-agent toggle; this field only feeds the
+            // dialog's shape.
+            enabled: true,
+          }
+        : null,
+    [editingServer],
+  );
 
   const handleSaveServer = async (
     name: string,
@@ -94,9 +104,7 @@ export function McpTab() {
   ) => {
     try {
       if (editingServer) {
-        // Renaming is safe here: assignments key off the server id, so an
-        // agent that uses this server keeps using it.
-        await updateServer.mutateAsync({ serverId: editingServer.id, name, config });
+        await updateServer.mutateAsync({ serverId: editingServer.id, config });
       } else {
         await createServer.mutateAsync({ name, config });
       }
@@ -112,6 +120,59 @@ export function McpTab() {
           : t(($) => $.mcp.save_failed_toast),
       );
       throw error;
+    }
+  };
+
+  const startRename = (server: WorkspaceMcpServer) => {
+    if (renamePending) return;
+    setRenamingServer(server);
+    setRenameDraft(server.name);
+    setRenameError("");
+  };
+
+  const cancelRename = () => {
+    if (renamePending) return;
+    setRenamingServer(null);
+    setRenameDraft("");
+    setRenameError("");
+  };
+
+  const handleRename = async () => {
+    if (!renamingServer || renamePending) return;
+    const name = renameDraft.trim();
+    if (name === "") {
+      setRenameError(t(($) => $.mcp.rename_required));
+      return;
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+      setRenameError(t(($) => $.mcp.rename_invalid));
+      return;
+    }
+    if (name !== renamingServer.name && existingNames.has(name)) {
+      setRenameError(t(($) => $.mcp.rename_duplicate));
+      return;
+    }
+    if (name === renamingServer.name) {
+      cancelRename();
+      return;
+    }
+
+    setRenamePending(true);
+    try {
+      await updateServer.mutateAsync({ serverId: renamingServer.id, name });
+      toast.success(t(($) => $.mcp.renamed_toast));
+      setRenamingServer(null);
+      setRenameDraft("");
+      setRenameError("");
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : t(($) => $.mcp.rename_failed_toast);
+      setRenameError(message);
+      toast.error(message);
+    } finally {
+      setRenamePending(false);
     }
   };
 
@@ -142,7 +203,9 @@ export function McpTab() {
           canManage ? (
             <Button
               size="sm"
+              disabled={renamePending}
               onClick={() => {
+                cancelRename();
                 setEditingServer(null);
                 setEditorOpen(true);
               }}
@@ -173,13 +236,53 @@ export function McpTab() {
               {servers.map((server) => (
                 <McpServerRow
                   key={server.name}
-                  server={server}
+                  name={server.name}
+                  transport={server.transport}
+                  status={
+                    server.enabled === false ? (
+                      <Badge variant="secondary">
+                        {t(($) => $.mcp.disabled_badge)}
+                      </Badge>
+                    ) : undefined
+                  }
                   canManage={canManage}
-                  onEdit={() => {
+                  actionsDisabled={renamePending}
+                  rename={
+                    renamingServer?.id === server.id
+                      ? {
+                          draft: renameDraft,
+                          error: renameError,
+                          pending: renamePending,
+                          onChange: (value) => {
+                            setRenameDraft(value);
+                            setRenameError("");
+                          },
+                          onCancel: cancelRename,
+                          onSubmit: () => void handleRename(),
+                        }
+                      : undefined
+                  }
+                  labels={{
+                    rename: t(($) => $.mcp.rename_action),
+                    renameAria: t(($) => $.mcp.rename_server),
+                    renameSave: t(($) => $.mcp.rename_save),
+                    renameCancel: t(($) => $.mcp.rename_cancel),
+                    configure: t(($) => $.mcp.replace_config),
+                    configureAria: t(($) => $.mcp.replace_config),
+                    remove: t(($) => $.mcp.remove_action),
+                    removeAria: t(($) => $.mcp.remove_server),
+                  }}
+                  configureKind="replace"
+                  onRenameStart={() => startRename(server)}
+                  onConfigure={() => {
+                    cancelRename();
                     setEditingServer(server);
                     setEditorOpen(true);
                   }}
-                  onDelete={() => setDeletingServer(server)}
+                  onRemove={() => {
+                    cancelRename();
+                    setDeletingServer(server);
+                  }}
                 />
               ))}
             </ul>
@@ -196,6 +299,7 @@ export function McpTab() {
         open={editorOpen}
         server={dialogServer}
         existingNames={existingNames}
+        replacementMode={editingServer !== null}
         onOpenChange={setEditorOpen}
         onSave={handleSaveServer}
       />
@@ -234,70 +338,4 @@ export function McpTab() {
       </AlertDialog>
     </SettingsTab>
   );
-}
-
-function McpServerRow({
-  server,
-  canManage,
-  onEdit,
-  onDelete,
-}: {
-  server: WorkspaceMcpServer;
-  canManage: boolean;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const { t } = useT("settings");
-  return (
-    <li className="flex items-center gap-3 px-4 py-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-body font-medium">{server.name}</span>
-          {server.enabled === false ? (
-            <Badge variant="secondary">{t(($) => $.mcp.disabled_badge)}</Badge>
-          ) : null}
-        </div>
-        <p className="mt-0.5 text-caption text-muted-foreground">
-          {transportLabel(server.transport)}
-        </p>
-      </div>
-      {canManage ? (
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onEdit}
-            aria-label={t(($) => $.mcp.edit_server)}
-          >
-            <Pencil className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onDelete}
-            aria-label={t(($) => $.mcp.remove_server)}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-      ) : null}
-    </li>
-  );
-}
-
-/**
- * `transport` is a server-driven string, so an unknown value from a newer
- * backend renders as itself instead of disappearing.
- */
-function transportLabel(transport: string): string {
-  switch (transport) {
-    case "stdio":
-      return "stdio";
-    case "http":
-      return "HTTP";
-    case "sse":
-      return "SSE";
-    default:
-      return transport || "unknown";
-  }
 }
