@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -837,26 +838,81 @@ const (
 // order by the server, and a passed-but-ignored flag is a footgun in scripts.
 var issueSortablePropertyTypes = []string{"select", "number", "date", "text", "url"}
 
-// buildPropertiesFilterQueryParam converts repeated `--property Name=Value`
-// flags into the JSON object passed as the `properties` query parameter to
-// /api/issues. Each flag carries exactly one value; repeating the same
-// property ORs its values (server semantics: OR within a definition, AND
-// across definitions), keyed by the RESOLVED definition id so name and UUID
-// addressing aggregate into one entry.
-func buildPropertiesFilterQueryParam(ctx context.Context, client *cli.APIClient, properties []propertyDTO, pairs []string) (string, error) {
-	filter := make(map[string][]string, len(pairs))
-	for _, pair := range pairs {
-		name, rawValue, found := strings.Cut(pair, "=")
-		if !found || strings.TrimSpace(name) == "" {
-			return "", fmt.Errorf(`--property %q must be in "Name=Value" form`, pair)
+// propertyFilterMember is one OR-alternative of a properties filter: a plain
+// value (equality, or the __none__ sentinel) or a server comparison.
+type propertyFilterMember struct {
+	Op    string
+	Value string
+}
+
+func (m propertyFilterMember) MarshalJSON() ([]byte, error) {
+	if m.Op == "" {
+		return json.Marshal(m.Value)
+	}
+	return json.Marshal(map[string]string{"op": m.Op, "value": m.Value})
+}
+
+// propertyFilterOperators maps each --property comparison spelling to the
+// server op per property type, mirroring PROPERTY_FILTER_OPS_BY_TYPE in
+// packages/core/types/property.ts. A known type without entries is
+// equality-only; a type missing here belongs to a newer backend.
+var propertyFilterOperators = map[string]map[string]string{
+	"number":       {">": "gt", ">=": "gte", "<": "lt", "<=": "lte"},
+	"date":         {">": "after", "<": "before"},
+	"text":         {"~=": "contains"},
+	"url":          {"~=": "contains"},
+	"select":       {},
+	"multi_select": {},
+	"checkbox":     {},
+	"actor":        {},
+	"multi_actor":  {},
+}
+
+// propertyFilterSpellings orders the comparison forms for error messages.
+var propertyFilterSpellings = []string{">", ">=", "<", "<=", "~="}
+
+// splitPropertyFilter cuts one --property flag into name, operator and value.
+// With an "=", the name is everything before the first one, minus a trailing
+// <, >, ! or ~ that makes it >=, <=, != or ~=. Without one, the first < or >
+// is a strict comparison. A name that carries those characters in those
+// positions has to be given by UUID.
+func splitPropertyFilter(pair string) (name, op, value string, ok bool) {
+	if name, value, found := strings.Cut(pair, "="); found {
+		name = strings.TrimSpace(name)
+		for _, c := range []string{">", "<", "!", "~"} {
+			if strings.HasSuffix(name, c) {
+				return strings.TrimSpace(strings.TrimSuffix(name, c)), c + "=", value, true
+			}
 		}
-		// Reserved so scripts never come to depend on "Impact>" resolving as a
-		// property name once >=, <=, != mean comparison filters.
-		if n := strings.TrimSpace(name); strings.HasSuffix(n, "<") || strings.HasSuffix(n, ">") || strings.HasSuffix(n, "!") {
-			return "", fmt.Errorf(`--property %q: comparison operators are not supported yet; only "Name=Value" is accepted`, pair)
+		return name, "=", value, true
+	}
+	if i := strings.IndexAny(pair, "<>"); i >= 0 {
+		return strings.TrimSpace(pair[:i]), pair[i : i+1], pair[i+1:], true
+	}
+	return "", "", "", false
+}
+
+// buildPropertiesFilterQueryParam converts repeated `--property` flags into
+// the JSON object passed as the `properties` query parameter to /api/issues.
+// Each flag carries exactly one member, an equality value or a comparison;
+// repeating the same property ORs its members (server semantics: OR within a
+// definition, AND across definitions), keyed by the RESOLVED definition id so
+// name and UUID addressing aggregate into one entry.
+func buildPropertiesFilterQueryParam(ctx context.Context, client *cli.APIClient, properties []propertyDTO, pairs []string) (string, error) {
+	filter := make(map[string][]propertyFilterMember, len(pairs))
+	for _, pair := range pairs {
+		name, op, rawValue, found := splitPropertyFilter(pair)
+		if !found || name == "" {
+			return "", fmt.Errorf(`--property %q must be in "Name=Value" form, or a comparison such as "Score>=3" (see --help)`, pair)
+		}
+		if op == "!=" {
+			return "", fmt.Errorf("--property %q: != is not supported; the server has no not-equal filter", pair)
 		}
 		if strings.TrimSpace(rawValue) == "" {
-			return "", fmt.Errorf("--property %s: value cannot be empty (use %s to match issues where the property is unset)", name, propertyNoValueSentinel)
+			if op == "=" {
+				return "", fmt.Errorf("--property %s: value cannot be empty (use %s to match issues where the property is unset)", name, propertyNoValueSentinel)
+			}
+			return "", fmt.Errorf("--property %s: value after %s cannot be empty", name, op)
 		}
 		property, err := resolvePropertyRef(properties, name)
 		if err != nil {
@@ -865,19 +921,17 @@ func buildPropertiesFilterQueryParam(ctx context.Context, client *cli.APIClient,
 		if property.Archived {
 			return "", fmt.Errorf("property %q is archived; archived properties are hidden from filtering (matching the web UI) — restore it with `multica property unarchive` if you need it", property.Name)
 		}
-		value, err := resolvePropertyFilterValue(ctx, client, property, rawValue)
+		var member propertyFilterMember
+		if op == "=" {
+			member.Value, err = resolvePropertyFilterValue(ctx, client, property, rawValue)
+		} else {
+			member, err = resolvePropertyFilterOperator(property, name, op, rawValue)
+		}
 		if err != nil {
 			return "", err
 		}
-		duplicate := false
-		for _, existing := range filter[property.ID] {
-			if existing == value {
-				duplicate = true
-				break
-			}
-		}
-		if !duplicate {
-			filter[property.ID] = append(filter[property.ID], value)
+		if !slices.Contains(filter[property.ID], member) {
+			filter[property.ID] = append(filter[property.ID], member)
 		}
 	}
 	buf, err := json.Marshal(filter)
@@ -885,6 +939,92 @@ func buildPropertiesFilterQueryParam(ctx context.Context, client *cli.APIClient,
 		return "", fmt.Errorf("encode properties filter: %w", err)
 	}
 	return string(buf), nil
+}
+
+// resolvePropertyFilterOperator turns a comparison flag into the {op, value}
+// member the server matches with. ref is the name or UUID as typed, so a
+// suggested rewrite stays addressable. The server checks the value shape but
+// not the op against the definition's type, so an op the type cannot honour
+// is rejected here instead of being sent to match nothing. Value rules mirror
+// validatePropertyFilterOperator in internal/handler/property.go.
+func resolvePropertyFilterOperator(property propertyDTO, ref, spelling, raw string) (propertyFilterMember, error) {
+	ops, known := propertyFilterOperators[property.Type]
+	if !known { // a property type only a newer backend knows about
+		return propertyFilterMember{}, fmt.Errorf("--property %s: this CLI does not know how to filter %s properties; update with `multica update`", property.Name, property.Type)
+	}
+	op, ok := ops[spelling]
+	if !ok {
+		if property.Type == "date" && (spelling == ">=" || spelling == "<=") {
+			// The server only compares dates strictly. Values are whole days,
+			// so the inclusive bound is the strict one shifted by a day.
+			day, err := dateFilterValue(property, raw)
+			if err != nil {
+				return propertyFilterMember{}, err
+			}
+			shift := -1
+			if spelling == "<=" {
+				shift = 1
+			}
+			strict := ref + spelling[:1] + day.AddDate(0, 0, shift).Format("2006-01-02")
+			return propertyFilterMember{}, fmt.Errorf("--property %s: %s is not available on a date property (the server only compares dates strictly); use %q", property.Name, spelling, strict)
+		}
+		var supported []string
+		for _, s := range propertyFilterSpellings {
+			if _, ok := ops[s]; ok {
+				supported = append(supported, s)
+			}
+		}
+		if len(supported) == 0 {
+			return propertyFilterMember{}, fmt.Errorf("--property %s: %s is not available on a %s property; %s properties only support =", property.Name, spelling, property.Type, property.Type)
+		}
+		return propertyFilterMember{}, fmt.Errorf("--property %s: %s is not available on a %s property; %s properties support %s", property.Name, spelling, property.Type, property.Type, strings.Join(supported, ", "))
+	}
+	switch op {
+	case "gt", "gte", "lt", "lte":
+		value, err := numberFilterValue(property, raw)
+		return propertyFilterMember{Op: op, Value: value}, err
+	case "before", "after":
+		if _, err := dateFilterValue(property, raw); err != nil {
+			return propertyFilterMember{}, err
+		}
+		return propertyFilterMember{Op: op, Value: strings.TrimSpace(raw)}, nil
+	}
+	// contains: the needle is matched as typed, so it is sent as typed. The
+	// server caps it in runes; a url needle past the url store cap could
+	// never match either.
+	if utf8.RuneCountInString(raw) > maxPropertyTextValueLen {
+		return propertyFilterMember{}, fmt.Errorf("--property %s: value must be %d characters or fewer", property.Name, maxPropertyTextValueLen)
+	}
+	if property.Type == "url" && len(raw) > maxPropertyURLValueLen {
+		return propertyFilterMember{}, fmt.Errorf("--property %s: value must be %d characters or fewer", property.Name, maxPropertyURLValueLen)
+	}
+	return propertyFilterMember{Op: op, Value: raw}, nil
+}
+
+// numberFilterValue validates a number filter value and returns it trimmed.
+func numberFilterValue(property propertyDTO, raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	num, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil {
+		return "", fmt.Errorf("--property %s: value %q is not a valid number", property.Name, trimmed)
+	}
+	if math.IsNaN(num) || math.IsInf(num, 0) {
+		// NaN and infinity have no JSON spelling, so the server never
+		// builds a numeric match for them and the filter would come
+		// back empty for the wrong reason.
+		return "", fmt.Errorf("--property %s: value %q is not a finite number", property.Name, trimmed)
+	}
+	return trimmed, nil
+}
+
+// dateFilterValue validates a YYYY-MM-DD filter value.
+func dateFilterValue(property propertyDTO, raw string) (time.Time, error) {
+	trimmed := strings.TrimSpace(raw)
+	day, err := time.Parse("2006-01-02", trimmed)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("--property %s: value %q is not a date in YYYY-MM-DD form", property.Name, trimmed)
+	}
+	return day, nil
 }
 
 // resolvePropertyFilterValue turns one human-facing filter value into the
@@ -914,20 +1054,10 @@ func resolvePropertyFilterValue(ctx context.Context, client *cli.APIClient, prop
 	case "actor", "multi_actor":
 		return resolveActorPropertyRef(ctx, client, trimmed)
 	case "number":
-		num, err := strconv.ParseFloat(trimmed, 64)
-		if err != nil {
-			return "", fmt.Errorf("--property %s: value %q is not a valid number", property.Name, trimmed)
-		}
-		if math.IsNaN(num) || math.IsInf(num, 0) {
-			// NaN and infinity have no JSON spelling, so the server never
-			// builds a numeric match for them and the filter would come
-			// back empty for the wrong reason.
-			return "", fmt.Errorf("--property %s: value %q is not a finite number", property.Name, trimmed)
-		}
-		return trimmed, nil
+		return numberFilterValue(property, raw)
 	case "date":
-		if _, err := time.Parse("2006-01-02", trimmed); err != nil {
-			return "", fmt.Errorf("--property %s: value %q is not a date in YYYY-MM-DD form", property.Name, trimmed)
+		if _, err := dateFilterValue(property, raw); err != nil {
+			return "", err
 		}
 		return trimmed, nil
 	case "url":
