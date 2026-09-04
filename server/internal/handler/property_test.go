@@ -1449,6 +1449,22 @@ func TestParsePropertiesFilterValueCap(t *testing.T) {
 	}
 }
 
+func TestParsePropertiesFilterAggregateAlternativeCap(t *testing.T) {
+	memberValues := func(n int) string {
+		parts := make([]string, n)
+		for i := range parts {
+			parts[i] = fmt.Sprintf(`"%d"`, i)
+		}
+		return strings.Join(parts, ",")
+	}
+	first, second := uuid.NewString(), uuid.NewString()
+	raw := fmt.Sprintf(`{"%s":[%s],"%s":[%s]}`, first, memberValues(52), second, memberValues(52))
+	groups, ok := parsePropertiesFilterParam(httptest.NewRecorder(), raw)
+	if !ok || len(groups) != 2 {
+		t.Fatalf("two full scalar definitions should fit the aggregate cap: ok=%v groups=%d", ok, len(groups))
+	}
+}
+
 // TestIssuePropertyFacetScalarBounded pins the facet's upper bound: a free-form
 // text property holding more distinct values than the limit returns exactly
 // scalarPropertyFacetLimit value rows (ties broken by key) plus "__none__",

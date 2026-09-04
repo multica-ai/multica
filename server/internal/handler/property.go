@@ -1085,6 +1085,12 @@ const (
 	// checking every offered checkbox cannot build a filter the server then
 	// rejects on every issues query.
 	maxPropertiesFilterValues = 64
+	// Plain string members can expand to three containment alternatives (string,
+	// array element, and numeric/boolean forms). Bound the aggregate at the
+	// maximum across every allowed definition while retaining the per-definition
+	// cap above, so a valid UI selection cannot be rejected by a smaller global
+	// fan-out limit.
+	maxPropertiesFilterAlternatives = maxPropertiesFilterDefinitions * maxPropertiesFilterValues * 3
 	// noPropertyValue is the filter value that means "unset" — it compiles to a
 	// key-absence predicate instead of a jsonb containment pattern. The string
 	// cannot collide with a real option id (select option ids are UUIDs and
@@ -1332,7 +1338,7 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 	}
 	// Bound the OR fan-out: each alternative becomes one bind parameter in
 	// the SQL below, and a runaway filter would bloat the statement.
-	if totalAlternatives > 256 {
+	if totalAlternatives > maxPropertiesFilterAlternatives {
 		writeError(w, http.StatusBadRequest, "properties filter is too large")
 		return nil, false
 	}
