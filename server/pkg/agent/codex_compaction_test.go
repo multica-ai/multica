@@ -88,10 +88,12 @@ func TestCodexRetiredCompactionError(t *testing.T) {
 //
 // The remedy text is a constant, so it cannot know which source turned the
 // setting off — which makes "is an argument even a real source?" a claim the
-// code has to back. It is: codexBlockedArgs blocks only --listen, and the only
-// feature-conflict stripping in this package is scoped to fast_mode under an
-// explicit service tier. So both spellings survive normalization from every
-// argv region a user can write into, and the file is not the only place to look.
+// code has to back. It is: codexBlockedArgs blocks only --listen, and every
+// feature-conflict filter here is scoped to fast_mode or the managed
+// mcp_servers namespace. So both spellings survive from all three argv regions
+// the hint names — an agent's custom args, a daemon's extra args, and a custom
+// runtime profile's fixed args — and the config file is not the only place to
+// look.
 //
 // If a future change starts stripping these — the #8019 override, say — this
 // test fails, which is the signal to drop that half of the hint rather than
@@ -140,11 +142,33 @@ func TestCodexLaunchArgsCanSelectTheRetiredCompactionRoute(t *testing.T) {
 				CustomArgs:  tc.args,
 				ServiceTier: codexFastServiceTier,
 			}, nil)
-			if !slices.ContainsFunc(effective, func(arg string) bool {
-				return strings.Contains(arg, "remote_compaction_v2")
-			}) {
+			if !mentionsRemoteCompactionV2(effective) {
 				t.Errorf("priority tier stripped an unrelated setting: %q", effective)
+			}
+
+			// The third argv region the hint names: a custom runtime profile's
+			// fixed args. It reaches the child through the launch prefix, not
+			// through NormalizeCodexLaunchArgs, so it has its own filters —
+			// all three of which the setting has to survive for the hint to be
+			// telling the truth about where to look.
+			prefix := FilterLaunchPrefix("codex", tc.args, nil)
+			if !mentionsRemoteCompactionV2(prefix) {
+				t.Errorf("launch prefix filter dropped the setting: %q", prefix)
+			}
+			if got := filterCodexCustomConfigOverrides(prefix, nil); !mentionsRemoteCompactionV2(got) {
+				t.Errorf("managed mcp_config prefix filter dropped the setting: %q", got)
+			}
+			if got := stripCodexFastModeConflicts(prefix, nil); !mentionsRemoteCompactionV2(got) {
+				t.Errorf("priority tier prefix filter dropped the setting: %q", got)
 			}
 		})
 	}
+}
+
+// mentionsRemoteCompactionV2 reports whether the setting survived in any of its
+// spellings — as a standalone --disable value, an inline one, or a -c override.
+func mentionsRemoteCompactionV2(args []string) bool {
+	return slices.ContainsFunc(args, func(arg string) bool {
+		return strings.Contains(arg, "remote_compaction_v2")
+	})
 }

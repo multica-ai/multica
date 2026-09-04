@@ -40,6 +40,16 @@ func TestAnnotateCodexRetiredCompaction(t *testing.T) {
 				t.Errorf("hint must mention %q, got: %s", want, got)
 			}
 		}
+		// Having sent people to look at Multica-side launch arguments, the
+		// hint must not then tell them nothing on the Multica side needs
+		// changing. The only target it can safely exclude is the generated
+		// per-task copy, which is rebuilt from the shared config every run.
+		if strings.Contains(strings.ToLower(got), "nothing needs changing") {
+			t.Errorf("hint contradicts its own instruction to check launch arguments, got: %s", got)
+		}
+		if !strings.Contains(got, "per-task codex config") {
+			t.Errorf("hint must name the copy that is regenerated, got: %s", got)
+		}
 	})
 
 	t.Run("leaves unrelated failures alone", func(t *testing.T) {

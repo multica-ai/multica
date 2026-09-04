@@ -9627,14 +9627,23 @@ func annotateHermesProviderUnconfigured(errMsg, provider string, overlayActive b
 // fast_mode gets that treatment, and only when a service tier is selected.
 // Naming just the file would send anyone in that case to edit a line that is
 // not there, which is the failure mode this hint exists to prevent.
+//
+// For the same reason the closing line excludes only the generated per-task
+// copy, rather than claiming nothing on the Multica side needs changing. Once
+// the hint sends people to look at custom_args, a daemon's extra args, or a
+// profile's fixed args, "nothing to change here" contradicts the instruction
+// directly above it and strands exactly the users the argument half was added
+// for. The per-task copy is the one target that is genuinely wrong to edit: it
+// is rebuilt from the shared config every run, so an edit there is discarded.
 const codexRetiredCompactionHint = " [multica] codex could not compact this conversation: it called a " +
 	"compaction endpoint OpenAI has retired. That route is selected by turning `remote_compaction_v2` " +
 	"off, so look in both places it can be off: `[features]` in the codex config this agent uses " +
 	"(~/.codex/config.toml by default), and the codex launch arguments on the agent, the daemon, or a " +
 	"custom runtime profile (`--disable remote_compaction_v2`, `-c features.remote_compaction_v2=false`). " +
-	"Remove it wherever it appears — or set it to true — and run this task again. Nothing needs changing " +
-	"on the multica side: the per-task codex config is re-copied from your shared one between runs, and a " +
-	"thread stuck this way continues where it left off once compaction works."
+	"Remove it wherever it appears — or set it to true — and run this task again; both sources are re-read " +
+	"on the next run. The one place not to edit is the per-task codex config this run used: it is " +
+	"regenerated from your shared one every run, so a change there is lost. A thread stuck this way " +
+	"continues where it left off once compaction works."
 
 // annotateCodexRetiredCompaction explains a retired-route compaction failure
 // that Codex itself cannot explain.
