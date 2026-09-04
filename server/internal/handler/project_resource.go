@@ -990,6 +990,11 @@ func (h *Handler) DeleteProjectResource(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "project resource not found")
 		return
 	}
+	if resource.ResourceType == "task_config" {
+		if _, ok := h.requireWorkspaceRole(w, r, uuidToString(project.WorkspaceID), "project not found", "owner", "admin"); !ok {
+			return
+		}
+	}
 	if err := h.Queries.DeleteProjectResource(r.Context(), resource.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project resource")
 		return

@@ -10,8 +10,74 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestDeleteTaskConfigResourceRequiresOwnerOrAdmin(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Task config delete authorization",
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	t.Cleanup(func() {
+		r := newRequest("DELETE", "/api/projects/"+project.ID, nil)
+		r = withURLParam(r, "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), r)
+	})
+
+	var memberID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO "user" (name, email)
+		VALUES ('Task Config Delete Member', 'task-config-delete-member@multica.test')
+		RETURNING id
+	`).Scan(&memberID); err != nil {
+		t.Fatalf("create member user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, memberID)
+	})
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, memberID); err != nil {
+		t.Fatalf("add plain member: %v", err)
+	}
+
+	resource, err := testHandler.Queries.CreateProjectResource(context.Background(), db.CreateProjectResourceParams{
+		ProjectID:    util.MustParseUUID(project.ID),
+		WorkspaceID:  util.MustParseUUID(testWorkspaceID),
+		ResourceType: "task_config",
+		ResourceRef:  []byte(`{"provider":"aws_secrets_manager","provider_ref":"approved/ref","version":"v1","path":"deploy/terraform/backend.hcl","mode":384,"repo":"repo","target":"main","account":"acct","region":"ap-southeast-2"}`),
+		Label:        pgtype.Text{},
+		CreatedBy:    util.MustParseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("create task_config resource: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequestAs(memberID, "DELETE", "/api/projects/"+project.ID+"/resources/"+util.UUIDToString(resource.ID), nil)
+	req = withURLParams(req, "id", project.ID, "resourceId", util.UUIDToString(resource.ID))
+	testHandler.DeleteProjectResource(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("DeleteProjectResource as member: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, err := testHandler.Queries.GetProjectResource(context.Background(), resource.ID); err != nil {
+		t.Fatalf("task_config resource was deleted by member: %v", err)
+	}
+}
 
 func TestProjectResourceLifecycle(t *testing.T) {
 	// Create a project to attach resources to.
