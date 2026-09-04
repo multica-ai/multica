@@ -87,3 +87,28 @@ func TestCleanupTaskConfigManifestsRejectsTamperedAbsolutePaths(t *testing.T) {
 		t.Fatalf("outside file was affected: %v", err)
 	}
 }
+
+func TestCleanupTaskConfigManifestsRejectsTamperedWorkDirOutsideEnvRoot(t *testing.T) {
+	root := t.TempDir()
+	envRoot := filepath.Join(root, "workspace", "task")
+	outsideWork := filepath.Join(root, "outside-work")
+	outsideFile := filepath.Join(outsideWork, "backend.hcl")
+	if err := os.MkdirAll(outsideWork, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outsideFile, []byte("must survive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(envRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(envRoot, taskConfigIntentFile), []byte(`{"task_id":"task-1","work_dir":"`+outsideWork+`","paths":["backend.hcl"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CleanupTaskConfigManifests(root); err == nil {
+		t.Fatal("tampered workdir intent was accepted")
+	}
+	if _, err := os.Stat(outsideFile); err != nil {
+		t.Fatalf("outside file was affected: %v", err)
+	}
+}

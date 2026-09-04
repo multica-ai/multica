@@ -34,10 +34,7 @@ type ProjectResourceResponse struct {
 }
 
 func projectResourceToResponse(r db.ProjectResource) ProjectResourceResponse {
-	ref := json.RawMessage(r.ResourceRef)
-	if len(ref) == 0 {
-		ref = json.RawMessage("{}")
-	}
+	ref := safeProjectResourceRef(r.ResourceType, json.RawMessage(r.ResourceRef))
 	return ProjectResourceResponse{
 		ID:           uuidToString(r.ID),
 		ProjectID:    uuidToString(r.ProjectID),
@@ -49,6 +46,24 @@ func projectResourceToResponse(r db.ProjectResource) ProjectResourceResponse {
 		CreatedAt:    timestampToString(r.CreatedAt),
 		CreatedBy:    uuidToPtr(r.CreatedBy),
 	}
+}
+
+// safeProjectResourceRef keeps secret-bearing fields out of every API and
+// daemon claim projection, including rows written before task_config had a
+// schema validator. Invalid legacy bindings become an empty ref so the daemon
+// fails closed instead of receiving an untrusted JSON object.
+func safeProjectResourceRef(resourceType string, ref json.RawMessage) json.RawMessage {
+	if len(ref) == 0 {
+		return json.RawMessage("{}")
+	}
+	if resourceType != "task_config" {
+		return ref
+	}
+	normalized, err := validateTaskConfigRef(ref)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return normalized
 }
 
 // CreateProjectResourceRequest is the body for POST /api/projects/{id}/resources.
@@ -1054,10 +1069,7 @@ func projectResourcesForClaim(rows []db.ProjectResource) ([]ProjectResourceData,
 		if row.Label.Valid {
 			label = row.Label.String
 		}
-		ref := json.RawMessage(row.ResourceRef)
-		if len(ref) == 0 {
-			ref = json.RawMessage("{}")
-		}
+		ref := safeProjectResourceRef(row.ResourceType, json.RawMessage(row.ResourceRef))
 		resources = append(resources, ProjectResourceData{
 			ID:           uuidToString(row.ID),
 			ResourceType: row.ResourceType,

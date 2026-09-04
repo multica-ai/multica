@@ -40,8 +40,11 @@ func TestValidateTaskConfigRefRejectsUnsafeOrInvalidReferences(t *testing.T) {
 }
 
 func TestMaterializeTaskConfigIsAtomic0600AndCleansOnFailure(t *testing.T) {
-	workDir := t.TempDir()
 	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	ref := taskConfigRef{Provider: "aws_secrets_manager", ProviderRef: "ref", Version: "v1", Path: "deploy/terraform/backend.hcl", Mode: 0o600, Repo: "repo", Target: "main", Account: "acct", Region: "ap-southeast-2"}
 	secret := []byte("unique-backend-sentinel")
 
@@ -87,8 +90,11 @@ func TestMaterializeTaskConfigIsAtomic0600AndCleansOnFailure(t *testing.T) {
 }
 
 func TestPreflightTaskConfigFailsClosedForIdentityTupleAndCollision(t *testing.T) {
-	workDir := t.TempDir()
 	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	ref := taskConfigRef{Provider: "aws_secrets_manager", ProviderRef: "ref", Version: "v1", Path: "deploy/terraform/backend.hcl", Mode: 0o600, Repo: "repo", Target: "main", Account: "acct", Region: "ap-southeast-2"}
 	m, err := materializeTaskConfig(context.Background(), "task-1", envRoot, workDir, ref, func(context.Context) ([]byte, error) { return []byte("bytes"), nil })
 	if err != nil {
@@ -110,8 +116,11 @@ func TestPreflightTaskConfigFailsClosedForIdentityTupleAndCollision(t *testing.T
 }
 
 func TestMaterializeTaskConfigRejectsSymlinkAndDestinationCollision(t *testing.T) {
-	workDir := t.TempDir()
 	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	ref := taskConfigRef{Provider: "aws_secrets_manager", ProviderRef: "ref", Version: "v1", Path: "deploy/terraform/backend.hcl", Mode: 0o600, Repo: "repo", Target: "main", Account: "acct", Region: "ap-southeast-2"}
 	if err := os.MkdirAll(filepath.Join(workDir, "deploy", "terraform"), 0o700); err != nil {
 		t.Fatal(err)

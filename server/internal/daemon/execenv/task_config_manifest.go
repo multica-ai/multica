@@ -12,7 +12,9 @@ import (
 const taskConfigIntentFile = ".multica_task_config_intent.json"
 
 type taskConfigIntent struct {
-	TaskID  string   `json:"task_id"`
+	TaskID string `json:"task_id"`
+	// WorkDir is relative to the env root. Restart recovery never accepts an
+	// absolute path from this file.
 	WorkDir string   `json:"work_dir"`
 	Paths   []string `json:"paths"`
 }
@@ -22,14 +24,23 @@ type taskConfigIntent struct {
 // record is safe to use during restart recovery because paths are re-derived
 // and checked against the recorded workdir before removal.
 func RegisterTaskConfigIntent(envRoot, taskID, workDir string, paths ...string) error {
-	root, err := filepath.Abs(workDir)
-	if err != nil || root == "" || taskID == "" || len(paths) == 0 {
+	envRoot, err := filepath.Abs(envRoot)
+	root, rootErr := filepath.Abs(workDir)
+	workRel, relErr := filepath.Rel(envRoot, root)
+	if err != nil || rootErr != nil || relErr != nil || envRoot == "" || root == "" || !safeIntentTaskID(taskID) || !safeIntentRelativePath(workRel) || len(paths) == 0 {
 		return errors.New("execenv: invalid task config intent")
 	}
-	intent := taskConfigIntent{TaskID: taskID, WorkDir: root}
+	if !safeIntentParents(envRoot, workRel) {
+		return errors.New("execenv: task config intent workdir is unsafe")
+	}
+	if info, statErr := os.Lstat(root); statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("execenv: task config intent workdir is unsafe")
+	}
+	intent := taskConfigIntent{TaskID: taskID, WorkDir: filepath.ToSlash(workRel)}
 	for _, path := range paths {
-		rel, err := filepath.Rel(root, path)
-		if err != nil || !safeIntentRelativePath(rel) {
+		absolutePath, absErr := filepath.Abs(path)
+		rel, err := filepath.Rel(root, absolutePath)
+		if absErr != nil || err != nil || !safeIntentRelativePath(rel) {
 			return errors.New("execenv: task config intent escapes workdir")
 		}
 		intent.Paths = append(intent.Paths, filepath.ToSlash(rel))
@@ -63,9 +74,25 @@ func CleanupTaskConfigIntent(envRoot string) ([]string, error) {
 	if json.Unmarshal(data, &intent) != nil {
 		return nil, errors.New("execenv: parse task config intent failed")
 	}
-	root, err := filepath.Abs(intent.WorkDir)
-	if err != nil || root == "" || intent.TaskID == "" || len(intent.Paths) == 0 {
+	envRoot, err = filepath.Abs(envRoot)
+	if err != nil || envRoot == "" || !safeIntentTaskID(intent.TaskID) || len(intent.Paths) == 0 || !safeIntentRelativePath(intent.WorkDir) {
 		return nil, errors.New("execenv: invalid task config intent")
+	}
+	if !safeIntentParents(envRoot, intent.WorkDir) {
+		return nil, errors.New("execenv: task config intent workdir is unsafe")
+	}
+	root := filepath.Join(envRoot, filepath.FromSlash(intent.WorkDir))
+	if info, statErr := os.Lstat(root); statErr == nil {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return nil, errors.New("execenv: task config intent workdir is unsafe")
+		}
+	} else if !errors.Is(statErr, fs.ErrNotExist) {
+		return nil, errors.New("execenv: task config intent workdir is unsafe")
+	}
+	if owner, ownerErr := ReadEnvRootOwner(envRoot); ownerErr != nil {
+		return nil, errors.New("execenv: task config intent owner is unreadable")
+	} else if owner.TaskID != "" && owner.TaskID != intent.TaskID {
+		return nil, errors.New("execenv: task config intent owner mismatch")
 	}
 	paths := make([]string, 0, len(intent.Paths))
 	for _, rel := range intent.Paths {
@@ -102,6 +129,10 @@ func safeIntentRelativePath(path string) bool {
 		}
 	}
 	return filepath.Clean(path) == filepath.FromSlash(path)
+}
+
+func safeIntentTaskID(taskID string) bool {
+	return taskID != "" && taskID != "." && taskID != ".." && filepath.Base(taskID) == taskID && !strings.ContainsAny(taskID, `/\\`)
 }
 
 func safeIntentParents(root, rel string) bool {

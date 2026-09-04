@@ -16,4 +16,3 @@
 4. Implement sidecar reservation/targeted cleanup and daemon materializer integration before `StartTask`; keep config bytes out of `TaskResult`, metadata, env, and logs.
 5. Add lifecycle/restart/concurrency/leak regression tests and wire startup/orphan recovery to clean manifest-owned config remnants.
 6. Run gofmt, focused tests, race/vet checks, inspect the diff, commit, push, and open a PR titled with `AERIS-1308` (without a closing keyword).
-

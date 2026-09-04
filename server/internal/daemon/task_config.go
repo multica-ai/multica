@@ -133,10 +133,12 @@ func materializeTaskConfig(ctx context.Context, taskID, envRoot, workDir string,
 		}
 	}()
 
-	f, err := os.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	writer, err := openTaskConfigWriter(envRoot, workDir, ref.Path, target, tempPath)
 	if err != nil {
-		return nil, errors.New("task_config: create temporary destination failed")
+		return nil, err
 	}
+	defer writer.Close()
+	f := writer.file
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
 		return nil, errors.New("task_config: set destination mode failed")
@@ -152,16 +154,9 @@ func materializeTaskConfig(ctx context.Context, taskID, envRoot, workDir string,
 	if err := f.Close(); err != nil {
 		return nil, errors.New("task_config: close destination failed")
 	}
-	if err := validateExistingParents(workDir, ref.Path); err != nil {
+	writer.file = nil
+	if err := writer.Publish(); err != nil {
 		return nil, err
-	}
-	// Link is the portable no-replace publish primitive available here: unlike
-	// Rename it cannot clobber a target that appeared after the initial probe.
-	if err := os.Link(tempPath, target); err != nil {
-		return nil, errors.New("task_config: publish destination failed")
-	}
-	if err := os.Remove(tempPath); err != nil {
-		return nil, errors.New("task_config: remove temporary destination failed")
 	}
 	cleanOnError = false
 	return &taskConfigMaterialization{

@@ -89,7 +89,7 @@ func (p *SecretsManagerTaskConfigProvider) Resolve(ctx context.Context, req Task
 	if p == nil || p.client == nil {
 		return nil, errors.New("provider unavailable")
 	}
-	if req.Provider != "aws_secrets_manager" || req.ProviderRef == "" || req.Version == "" {
+	if err := validateTaskConfigResolveRequest(req); err != nil {
 		return nil, errors.New("invalid provider binding")
 	}
 	out, err := p.client.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
@@ -109,6 +109,19 @@ func (p *SecretsManagerTaskConfigProvider) Resolve(ctx context.Context, req Task
 		return append([]byte(nil), out.SecretBinary...), nil
 	}
 	return nil, errors.New("provider returned empty value")
+}
+
+func validateTaskConfigResolveRequest(req TaskConfigResolveRequest) error {
+	if req.Provider != "aws_secrets_manager" || strings.TrimSpace(req.ProviderRef) == "" || strings.TrimSpace(req.Version) == "" {
+		return errors.New("provider reference is incomplete")
+	}
+	if strings.TrimSpace(req.WorkspaceID) == "" || strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.RuntimeID) == "" || strings.TrimSpace(req.AgentID) == "" {
+		return errors.New("task identity is incomplete")
+	}
+	if strings.TrimSpace(req.Selectors.Repo) == "" || strings.TrimSpace(req.Selectors.Target) == "" || strings.TrimSpace(req.Selectors.Account) == "" || strings.TrimSpace(req.Selectors.Region) == "" {
+		return errors.New("selector tuple is incomplete")
+	}
+	return nil
 }
 
 type taskConfigResolvePayload struct {

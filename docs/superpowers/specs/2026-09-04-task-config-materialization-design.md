@@ -22,4 +22,3 @@ Preflight requires the attestation, `control_plane_managed`, exact tuple, a regu
 - All identity checks are server-side and task-scoped; cross-workspace, wrong-runtime, and selector mismatch requests fail closed.
 - Destination paths are relative, inside the prepared workdir, non-symlinked, collision-free, and `0600`.
 - Errors and logs expose only stable error codes and redacted presence/tuple fields.
-
