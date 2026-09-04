@@ -326,9 +326,8 @@ function useIssueCounts(
           value !== NO_PROPERTY_VALUE
             ? [value]
             : propertyType === "number" && typeof value === "number" && Number.isFinite(value)
-              ? // Number facet key: String() is already canonical in JS for
-                // ordinary values. The server-backed facet remains the source
-                // of truth for large exponent values.
+              ? // Match trim_scale((::numeric))::text, including values that
+                // JavaScript would otherwise render in exponent notation.
                 [canonicalNumberFacetKey(value)]
               : (propertyType === "select" || propertyType === "actor") &&
                   typeof value === "string"
