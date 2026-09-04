@@ -401,8 +401,8 @@ func TestResumedCommentsHintSkipsDefaultThreadRead(t *testing.T) {
 	if strings.Contains(hint, "scoped to the triggering thread") {
 		t.Errorf("resumed/no-delta hint must not claim the delta is thread-scoped, got:\n%s", hint)
 	}
-	if strings.Contains(hint, "starts a fresh session on this issue") {
-		t.Errorf("resumed/no-delta hint must not use the fresh-session wording, got:\n%s", hint)
+	if strings.Contains(hint, "in place of `--thread ... --tail 30`") {
+		t.Errorf("resumed/no-delta hint must not render the reconstruction (cold) hint, got:\n%s", hint)
 	}
 }
 

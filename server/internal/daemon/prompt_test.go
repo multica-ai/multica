@@ -1214,8 +1214,8 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 	if strings.Contains(out, "scoped to the triggering thread") {
 		t.Errorf("resumed/no-delta prompt must not claim the delta is thread-scoped, got:\n%s", out)
 	}
-	if strings.Contains(out, "starts a fresh session on this issue") {
-		t.Errorf("resumed/no-delta prompt must not use the fresh-session wording, got:\n%s", out)
+	if strings.Contains(out, "in place of `--thread ... --tail 30`") {
+		t.Errorf("resumed/no-delta prompt must not render the reconstruction (cold) hint, got:\n%s", out)
 	}
 }
 
@@ -1240,7 +1240,6 @@ func TestBuildPromptDroppedResumeWithNewCommentsTakesFreshPath(t *testing.T) {
 	}
 	out := BuildPrompt(task, "claude")
 	for _, want := range []string{
-		"starts a fresh session on this issue",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 		"`--roots-only --summary` in place of `--thread ... --tail 30`",
 		"## Session Continuity Notice",
@@ -1259,7 +1258,7 @@ func TestBuildPromptDroppedResumeWithNewCommentsTakesFreshPath(t *testing.T) {
 	}
 }
 
-// TestBuildPromptOlderFallbackSessionTakesFreshPath is the other half of the
+// TestBuildPromptOlderFallbackSessionRequiresReconstruction is the other half of the
 // dropped-resume contract, and the half a PriorSessionID != "" check cannot
 // see.
 //
@@ -1269,7 +1268,13 @@ func TestBuildPromptDroppedResumeWithNewCommentsTakesFreshPath(t *testing.T) {
 // perfectly well — it is simply not the turn this run continues from. Treating
 // it as a warm resume would let the run skip the full trigger-thread read and,
 // on an empty delta, the scan too, on the strength of context it does not have.
-func TestBuildPromptOlderFallbackSessionTakesFreshPath(t *testing.T) {
+//
+// The prompt must also not call the session fresh. The daemon resumes that
+// older session — ResumeSessionID is not gated on the flag — so the agent may
+// well hold earlier turns' memory; what is true is only that the LATEST turn
+// did not come back. The hint says nothing about the session and the
+// continuity notice says the run "does not continue" the lost one.
+func TestBuildPromptOlderFallbackSessionRequiresReconstruction(t *testing.T) {
 	const issueID = "issue-fallback-1"
 	task := Task{
 		IssueID:               issueID,
@@ -1288,7 +1293,6 @@ func TestBuildPromptOlderFallbackSessionTakesFreshPath(t *testing.T) {
 	out := BuildPrompt(task, "claude")
 
 	for _, want := range []string{
-		"starts a fresh session on this issue",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 		"`--roots-only --summary` in place of `--thread ... --tail 30`",
 		"## Session Continuity Notice",
@@ -1300,9 +1304,11 @@ func TestBuildPromptOlderFallbackSessionTakesFreshPath(t *testing.T) {
 	for _, banned := range []string{
 		"You're resuming the prior session",
 		"new comment(s) on this issue since your last run",
+		"fresh session",
+		"fresh one",
 	} {
 		if strings.Contains(out, banned) {
-			t.Errorf("older-fallback prompt claims a warm resume (%q)\n--- output ---\n%s", banned, out)
+			t.Errorf("older-fallback prompt claims a warm resume or a fresh session (%q)\n--- output ---\n%s", banned, out)
 		}
 	}
 }

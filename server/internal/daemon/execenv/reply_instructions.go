@@ -130,9 +130,14 @@ func BuildResumedUnknownDeltaCommentsHint(issueID, triggerCommentID, triggerThre
 	)
 }
 
-// BuildColdCommentsHint returns the comment-reading pointer for a run that
-// starts a FRESH provider session on this issue — its first run, a resume the
-// daemon had to drop, or an explicitly fresh rerun. Instead of dumping the
+// BuildColdCommentsHint returns the comment-reading pointer for a run whose
+// latest turn on this issue did not come back — its first run, a resume the
+// daemon had to drop, an explicitly fresh rerun, or a MUL-5305 older-fallback
+// session, where the server hands back an OLDER session with the continuity
+// gap flagged and the daemon does resume it. The hint therefore states nothing
+// about the provider session: "fresh" is false for the fallback case, and no
+// decision depends on it — every one of these runs reconstructs from the issue
+// record with the same two reads (MUL-6984 review). Instead of dumping the
 // whole flat timeline (oldest-first, server cap 2000), point the agent at the
 // triggering CONVERSATION: `--thread <trigger> --tail 30` returns that thread's
 // root plus its 30 newest replies (root is always included, even at --tail 0)
@@ -156,7 +161,7 @@ func BuildColdCommentsHint(issueID, triggerCommentID, triggerThreadID string) st
 	// a second full command: the duplicate restated the issue UUID for no
 	// routing value (MUL-5721 OPT-1).
 	return fmt.Sprintf(
-		"This run starts a fresh session on this issue. Triggering thread: "+
+		"Triggering thread: "+
 			"`multica issue comment list %s --thread %s --tail 30 --compact --output json` "+
 			"(that thread's root + its 30 newest replies). "+
 			"The scan workflow step 2 requires is the same command with `--roots-only --summary` in place of `--thread ... --tail 30`.\n\n",

@@ -442,7 +442,9 @@ func buildCommentPrompt(task Task, provider string) string {
 	// delta — never by the delta alone.
 	//
 	// "Resumes" means the LATEST turn's context came back. Two states fail that
-	// and both must take the fresh path. A run with no prior session is the
+	// and both must take the reconstruction path (the cold hint; the prompt
+	// makes no claim about the provider session, because in the second state
+	// the daemon does resume the older one). A run with no prior session is the
 	// obvious one. The other is PriorSessionResumeUnavailable: the server
 	// withheld a more recent Codex session whose rollout was missing and handed
 	// back an OLDER fallback session instead (MUL-5305), so PriorSessionID is
