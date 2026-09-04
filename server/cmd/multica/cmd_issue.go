@@ -405,17 +405,21 @@ var validIssueSortColumns = []string{
 	"position", "title", "created_at", "start_date", "due_date", "priority",
 }
 
-// validIssueFields are the top-level keys of the Issue JSON object
-// (server/pkg/publicapi/v1/types.go) that --fields is allowed to select.
-// There is no "assignee" or "labels" field on an issue — assignee is split
-// into assignee_type/assignee_id, and labels are a separate resource — so
-// those names are rejected rather than silently ignored.
+// validIssueFields are the top-level keys /api/issues actually emits for
+// `issue list` — i.e. the JSON tags of handler.IssueResponse
+// (server/internal/handler/issue.go), minus reactions/attachments/
+// source_context, which are omitempty and never set by the list endpoint
+// (detail-only). TestValidIssueFieldsMatchListEndpointShape guards this
+// against drifting from that struct. There is no plain "assignee" field —
+// it is split into assignee_type/assignee_id — so that name is rejected
+// rather than silently ignored.
 var validIssueFields = []string{
 	"id", "workspace_id", "number", "identifier", "title", "description",
-	"status", "status_category", "priority", "assignee_type", "assignee_id",
-	"creator_type", "creator_id", "parent_issue_id", "project_id", "position",
-	"stage", "start_date", "due_date", "created_at", "updated_at", "revision",
-	"last_activity_at", "metadata", "properties",
+	"status", "status_category", "status_name", "priority", "assignee_type",
+	"assignee_id", "creator_type", "creator_id", "parent_issue_id",
+	"project_id", "position", "stage", "start_date", "due_date", "created_at",
+	"updated_at", "revision", "last_activity_at", "metadata", "properties",
+	"labels",
 }
 
 // directionalIssueSortColumns are the sort keys for which --direction is
@@ -512,7 +516,7 @@ func init() {
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
 	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority, or property:<name-or-id> to sort by a custom property (select properties sort by option order)")
 	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column or a property sort (position is always ascending)")
-	issueListCmd.Flags().String("fields", "", "JSON output only: comma-separated list of issue fields to include (e.g. id,title,status,priority). Omit for the full issue object (default, unchanged) — description alone is typically most of the payload, so requesting only the fields you need cuts token/bandwidth cost. No effect on --output table. Valid fields: "+strings.Join(validIssueFields, ", "))
+	issueListCmd.Flags().String("fields", "", "JSON output only: comma-separated list of issue fields to include (e.g. id,title,status,priority). Filtering happens client-side after the full response is fetched, so this shrinks CLI output size and agent context cost, not network/server-side cost. Omit for the full issue object (default, unchanged). Valid fields: "+strings.Join(validIssueFields, ", "))
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")

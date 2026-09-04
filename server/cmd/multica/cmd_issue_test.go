@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/handler"
 )
 
 // stderrCapture redirects os.Stderr through a pipe so a test can assert on
@@ -3288,37 +3289,65 @@ func TestRunIssueListRejectsDirectionWithoutDirectionalSort(t *testing.T) {
 	}
 }
 
-// fullTestIssue returns a JSON-decoded issue map carrying every field the
-// Issue struct (server/pkg/publicapi/v1/types.go) exposes, so --fields tests
-// can assert on a realistic full payload rather than a hand-picked subset.
-func fullTestIssue() map[string]any {
-	return map[string]any{
-		"id":               "iss-1",
-		"workspace_id":     "ws-1",
-		"number":           float64(42),
-		"identifier":       "MUL-42",
-		"title":            "Test issue",
-		"description":      "a very long description",
-		"status":           "in_progress",
-		"status_category":  "active",
-		"priority":         "high",
-		"assignee_type":    "member",
-		"assignee_id":      "user-1",
-		"creator_type":     "member",
-		"creator_id":       "user-2",
-		"parent_issue_id":  nil,
-		"project_id":       "proj-1",
-		"position":         float64(1),
-		"stage":            nil,
-		"start_date":       nil,
-		"due_date":         nil,
-		"created_at":       "2024-01-01T00:00:00Z",
-		"updated_at":       "2024-01-01T00:00:00Z",
-		"revision":         float64(1),
-		"last_activity_at": nil,
-		"metadata":         map[string]any{},
-		"properties":       map[string]any{},
+// sampleIssueResponse returns a handler.IssueResponse populated the way the
+// /api/issues list endpoint actually populates one (ListIssues in
+// server/internal/handler/issue.go) — every field a real "issue list
+// --output json" row carries. Reactions, Attachments, and SourceContext are
+// left zero-valued on purpose: they are `omitempty` and ListIssues never
+// sets them (detail-only), so a real list payload never carries those keys.
+// This is the single source of truth for both fullTestIssue (the --fields
+// filtering fixture) and the drift guard below, so the two can't diverge
+// from each other the way the whitelist once diverged from the real API.
+func sampleIssueResponse() handler.IssueResponse {
+	desc := "a very long description"
+	assigneeType := "member"
+	assigneeID := "user-1"
+	parentID := "parent-1"
+	projectID := "proj-1"
+	stage := int32(1)
+	startDate := "2024-01-01"
+	dueDate := "2024-01-02"
+	lastActivity := "2024-01-01T00:00:00Z"
+	labels := []handler.LabelResponse{}
+
+	return handler.IssueResponse{
+		ID:             "iss-1",
+		WorkspaceID:    "ws-1",
+		Number:         42,
+		Identifier:     "MUL-42",
+		Title:          "Test issue",
+		Description:    &desc,
+		Status:         "in_progress",
+		StatusCategory: "active",
+		StatusName:     "In Progress",
+		Priority:       "high",
+		AssigneeType:   &assigneeType,
+		AssigneeID:     &assigneeID,
+		CreatorType:    "member",
+		CreatorID:      "user-2",
+		ParentIssueID:  &parentID,
+		ProjectID:      &projectID,
+		Position:       1,
+		Stage:          &stage,
+		StartDate:      &startDate,
+		DueDate:        &dueDate,
+		CreatedAt:      "2024-01-01T00:00:00Z",
+		UpdatedAt:      "2024-01-01T00:00:00Z",
+		Revision:       1,
+		LastActivityAt: &lastActivity,
+		Metadata:       map[string]any{},
+		Properties:     map[string]any{},
+		Labels:         &labels,
 	}
+}
+
+// fullTestIssue returns a JSON-decoded issue map carrying every field a real
+// "issue list --output json" row exposes (see sampleIssueResponse), so
+// --fields tests can assert on a realistic full payload rather than a
+// hand-picked subset.
+func fullTestIssue(t *testing.T) map[string]any {
+	t.Helper()
+	return issueResponseJSONMap(t, sampleIssueResponse())
 }
 
 func keysOf(m map[string]any) []string {
@@ -3329,12 +3358,55 @@ func keysOf(m map[string]any) []string {
 	return keys
 }
 
+func issueResponseJSONMap(t *testing.T, resp handler.IssueResponse) map[string]any {
+	t.Helper()
+	b, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal handler.IssueResponse: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal handler.IssueResponse: %v", err)
+	}
+	return m
+}
+
+// TestValidIssueFieldsMatchListEndpointShape guards validIssueFields (the
+// --fields whitelist) against drifting from what /api/issues actually
+// returns for `issue list`. It caught a real bug: the whitelist was modeled
+// on publicapi/v1.Issue, which the list endpoint never serializes — the real
+// response is handler.IssueResponse, which also emits status_name and
+// labels that the whitelist rejected as invalid field names.
+func TestValidIssueFieldsMatchListEndpointShape(t *testing.T) {
+	realKeys := keysOf(fullTestIssue(t))
+
+	valid := make(map[string]bool, len(validIssueFields))
+	for _, f := range validIssueFields {
+		valid[f] = true
+	}
+	real := make(map[string]bool, len(realKeys))
+	for _, k := range realKeys {
+		real[k] = true
+	}
+
+	for _, k := range realKeys {
+		if !valid[k] {
+			t.Errorf("validIssueFields is missing %q, which a real issue list JSON response emits", k)
+		}
+	}
+	for _, f := range validIssueFields {
+		if !real[f] {
+			t.Errorf("validIssueFields has %q, which a real issue list JSON response never emits", f)
+		}
+	}
+}
+
 // TestRunIssueListFieldsFiltersJSONOutput guards that --fields whitelists
 // exactly the requested top-level keys on each returned issue, so an agent
 // asking for id/title/status/priority never pays for the description field
 // that makes up most of a typical issue payload.
 func TestRunIssueListFieldsFiltersJSONOutput(t *testing.T) {
-	issue := fullTestIssue()
+	issue := fullTestIssue(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
 	}))
@@ -3392,7 +3464,7 @@ func TestRunIssueListFieldsFiltersJSONOutput(t *testing.T) {
 // compatibility: omitting --fields must return the full issue object,
 // description included, exactly as before this flag existed.
 func TestRunIssueListDefaultKeepsFullIssueUnchanged(t *testing.T) {
-	issue := fullTestIssue()
+	issue := fullTestIssue(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
 	}))
@@ -3448,7 +3520,7 @@ func TestRunIssueListRejectsInvalidFields(t *testing.T) {
 // (the default) is completely unaffected by --fields, matching how
 // issue comment list's --compact/--summary are JSON-only no-ops for table.
 func TestRunIssueListIgnoresFieldsWithTableOutput(t *testing.T) {
-	issue := fullTestIssue()
+	issue := fullTestIssue(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
 	}))
