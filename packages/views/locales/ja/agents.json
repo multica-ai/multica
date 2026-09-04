@@ -435,6 +435,7 @@
       "dialog_name_locked": "ここでは名前を変更できません。変更すると別のサーバーが追加され、元のサーバーが残ります。削除してから追加し直してください。",
       "workspace_overridden_badge": "上書き",
       "workspace_disabled_badge": "無効",
+      "workspace_probe_failed": "{{runtime}} での前回のプローブに失敗しました",
       "runtime_title": "ランタイムから継承",
       "runtime_title_named": "{{runtime}} から継承",
       "refresh_action": "更新",

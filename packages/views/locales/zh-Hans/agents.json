@@ -542,6 +542,7 @@
       "dialog_name_locked": "这里不能改名——改名会新增一个服务并把原来的留在那里。请改用移除后重新添加。",
       "workspace_overridden_badge": "已覆盖",
       "workspace_disabled_badge": "已禁用",
+      "workspace_probe_failed": "上次探测在 {{runtime}} 上失败",
       "runtime_title": "从运行时继承",
       "runtime_title_named": "从 {{runtime}} 继承",
       "refresh_action": "刷新",

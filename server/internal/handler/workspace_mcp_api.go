@@ -22,13 +22,14 @@ import (
 // `Enabled` is only meaningful on the agent-scoped list, where it reflects the
 // binding's toggle; it is omitted on the workspace library listing.
 type WorkspaceMcpServerResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Transport   string `json:"transport"`
-	Enabled     *bool  `json:"enabled,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID          string                 `json:"id"`
+	WorkspaceID string                 `json:"workspace_id"`
+	Name        string                 `json:"name"`
+	Transport   string                 `json:"transport"`
+	Enabled     *bool                  `json:"enabled,omitempty"`
+	LastProbe   *WorkspaceMcpLastProbe `json:"last_probe,omitempty"`
+	CreatedAt   string                 `json:"created_at"`
+	UpdatedAt   string                 `json:"updated_at"`
 }
 
 // mcpTransportOf classifies a server entry for display, and — because the
@@ -76,6 +77,7 @@ func workspaceMcpServerToResponse(server db.WorkspaceMcpServer) WorkspaceMcpServ
 		WorkspaceID: uuidToString(server.WorkspaceID),
 		Name:        server.Name,
 		Transport:   mcpTransportOf(server.Config),
+		LastProbe:   decodeWorkspaceMcpLastProbe(server.LastProbe),
 		CreatedAt:   timestampToString(server.CreatedAt),
 		UpdatedAt:   timestampToString(server.UpdatedAt),
 	}
@@ -339,6 +341,7 @@ func (h *Handler) ListAgentMcpServers(w http.ResponseWriter, r *http.Request) {
 			Name:        row.Name,
 			Transport:   mcpTransportOf(row.Config),
 			Enabled:     &enabled,
+			LastProbe:   decodeWorkspaceMcpLastProbe(row.LastProbe),
 			CreatedAt:   timestampToString(row.CreatedAt),
 			UpdatedAt:   timestampToString(row.UpdatedAt),
 		})
@@ -522,6 +525,7 @@ func (h *Handler) writeAgentMcpServers(w http.ResponseWriter, r *http.Request, a
 			Name:        row.Name,
 			Transport:   mcpTransportOf(row.Config),
 			Enabled:     &enabled,
+			LastProbe:   decodeWorkspaceMcpLastProbe(row.LastProbe),
 			CreatedAt:   timestampToString(row.CreatedAt),
 			UpdatedAt:   timestampToString(row.UpdatedAt),
 		})

@@ -306,7 +306,14 @@
     "updated_toast": "Shared MCP server updated",
     "removed_toast": "Shared MCP server removed",
     "save_failed_toast": "Could not save the shared MCP server",
-    "remove_failed_toast": "Could not remove the shared MCP server"
+    "remove_failed_toast": "Could not remove the shared MCP server",
+    "test_connection": "Test connection",
+    "probe_runtime_label": "Runtime to probe on",
+    "probe_runtime_placeholder": "Choose a runtime",
+    "probe_ok": "Last probe: ok on \"{{runtime}}\" {{time}} · {{count}} tools",
+    "probe_fail": "Last probe: fail on \"{{runtime}}\" {{time}} · {{error}}",
+    "probe_ok_toast": "Connection succeeded",
+    "probe_failed_toast": "Connection failed"
   },
   "page": {
     "title": "Settings",

@@ -52,7 +52,7 @@ import type {
   Workspace,
   WorkspaceRepo,
   WorkspaceMcpServer,
-  MemberWithUser,
+  WorkspaceMcpProbeRequest,  MemberWithUser,
   User,
   Skill,
   SkillSummary,
@@ -422,6 +422,7 @@ import {
   EMPTY_ISSUE_VIEW_PREFERENCE,
   EMPTY_PLUGIN_INSTALLATION,
   EMPTY_WORKSPACE_MCP_SERVER,
+  EMPTY_WORKSPACE_MCP_PROBE,
   EMPTY_PLUGIN_INSTALLATION_LIST,
   EMPTY_PLUGIN_PREVIEW,
   EMPTY_PLUGIN_PACKAGE,
@@ -439,6 +440,7 @@ import {
   PluginPreviewSchema,
   WorkspaceMcpServerListSchema,
   WorkspaceMcpServerSchema,
+  WorkspaceMcpProbeRequestSchema,
   ShareLinkSchema,
   ShareLinkListResponseSchema,
   ShareLinkInfoSchema,
@@ -2621,6 +2623,36 @@ export class ApiClient {
     );
     return parseWithFallback(raw, WorkspaceMcpServerSchema, EMPTY_WORKSPACE_MCP_SERVER, {
       endpoint: "PUT /api/workspaces/{id}/mcp-servers/{serverId}",
+    });
+  }
+
+  async probeWorkspaceMcpServer(
+    workspaceId: string,
+    serverId: string,
+    runtimeId?: string,
+  ): Promise<WorkspaceMcpProbeRequest> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/mcp-servers/${encodeURIComponent(serverId)}/probe`,
+      {
+        method: "POST",
+        body: JSON.stringify(runtimeId ? { runtime_id: runtimeId } : {}),
+      },
+    );
+    return parseWithFallback(raw, WorkspaceMcpProbeRequestSchema, EMPTY_WORKSPACE_MCP_PROBE, {
+      endpoint: "POST /api/workspaces/{id}/mcp-servers/{serverId}/probe",
+    });
+  }
+
+  async getWorkspaceMcpProbe(
+    workspaceId: string,
+    serverId: string,
+    requestId: string,
+  ): Promise<WorkspaceMcpProbeRequest> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/mcp-servers/${encodeURIComponent(serverId)}/probes/${encodeURIComponent(requestId)}`,
+    );
+    return parseWithFallback(raw, WorkspaceMcpProbeRequestSchema, EMPTY_WORKSPACE_MCP_PROBE, {
+      endpoint: "GET /api/workspaces/{id}/mcp-servers/{serverId}/probes/{requestId}",
     });
   }
 

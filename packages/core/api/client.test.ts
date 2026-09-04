@@ -2425,9 +2425,18 @@ describe("ApiClient workspace MCP servers", () => {
   // The write-only boundary is enforced on the client too: a server that
   // regressed to returning the stored entry must not have it land in the
   // parsed object or the query cache.
-  it("strips secret-bearing fields the server should never have sent", async () => {
+  it("keeps last_probe and strips secret-bearing fields", async () => {
     stubJSON([{
       ...server,
+      last_probe: {
+        status: "ok",
+        probed_at: "2026-08-19T00:00:00Z",
+        runtime_id: "rt-1",
+        runtime_name: "home-mbp",
+        elapsed_ms: 120,
+        tools: ["search"],
+        config: { headers: { Authorization: "Bearer sk-live-probe" } },
+      },
       config: { headers: { Authorization: "Bearer sk-live-doc" } },
       url: "https://mcp.example/sk-live-url",
       headers: { Authorization: "Bearer sk-live-header" },
@@ -2437,7 +2446,17 @@ describe("ApiClient workspace MCP servers", () => {
       .listWorkspaceMcpServers("ws-1");
 
     expect(JSON.stringify(result)).not.toContain("sk-live");
-    expect(result[0]).toEqual(server);
+    expect(result[0]).toEqual({
+      ...server,
+      last_probe: {
+        status: "ok",
+        probed_at: "2026-08-19T00:00:00Z",
+        runtime_id: "rt-1",
+        runtime_name: "home-mbp",
+        elapsed_ms: 120,
+        tools: ["search"],
+      },
+    });
   });
 
   it("keeps an unknown transport rather than dropping the server", async () => {

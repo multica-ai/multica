@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Loader2, Pencil, Plus, Server, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Plus, Server, Trash2, Unplug } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -22,9 +22,13 @@ import { workspaceMcpServersOptions } from "@multica/core/workspace/queries";
 import {
   useCreateWorkspaceMcpServer,
   useDeleteWorkspaceMcpServer,
+  useProbeWorkspaceMcpServer,
   useUpdateWorkspaceMcpServer,
 } from "@multica/core/workspace/mutations";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
+import { runtimeDisplayName } from "@multica/core/runtimes";
 import type { WorkspaceMcpServer } from "@multica/core/types";
+import { useTimeAgo } from "../../i18n/use-time-ago";
 import { McpServerDialog } from "../../agents/components/tabs/mcp-server-dialog";
 import type { ManagedMcpServer } from "../../agents/components/tabs/mcp-config-model";
 import { useT } from "../../i18n";
@@ -57,6 +61,16 @@ export function McpTab() {
   const createServer = useCreateWorkspaceMcpServer(wsId);
   const updateServer = useUpdateWorkspaceMcpServer(wsId);
   const deleteServer = useDeleteWorkspaceMcpServer(wsId);
+  const probeServer = useProbeWorkspaceMcpServer(wsId);
+  const runtimesQuery = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: canManage && wsId !== "",
+  });
+  const onlineRuntimes = (runtimesQuery.data ?? []).filter(
+    (runtime) => runtime.status === "online",
+  );
+  const [probeRuntimeId, setProbeRuntimeId] = useState("");
+  const [probingServerId, setProbingServerId] = useState<string | null>(null);
 
   const servers = serversQuery.data ?? [];
   const existingNames = useMemo(
@@ -175,6 +189,41 @@ export function McpTab() {
                   key={server.name}
                   server={server}
                   canManage={canManage}
+                  probing={probingServerId === server.id}
+                  onlineRuntimes={onlineRuntimes.map((runtime) => ({
+                    id: runtime.id,
+                    name: runtimeDisplayName(runtime),
+                  }))}
+                  selectedRuntimeId={probeRuntimeId}
+                  onRuntimeChange={setProbeRuntimeId}
+                  onProbe={async () => {
+                    setProbingServerId(server.id);
+                    try {
+                      const runtimeId =
+                        onlineRuntimes.length > 1
+                          ? probeRuntimeId || undefined
+                          : onlineRuntimes[0]?.id;
+                      const result = await probeServer.mutateAsync({
+                        serverId: server.id,
+                        runtimeId,
+                      });
+                      if (result.status === "completed") {
+                        toast.success(t(($) => $.mcp.probe_ok_toast));
+                      } else {
+                        toast.error(
+                          result.error || t(($) => $.mcp.probe_failed_toast),
+                        );
+                      }
+                    } catch (error) {
+                      toast.error(
+                        error instanceof Error && error.message
+                          ? error.message
+                          : t(($) => $.mcp.probe_failed_toast),
+                      );
+                    } finally {
+                      setProbingServerId(null);
+                    }
+                  }}
                   onEdit={() => {
                     setEditingServer(server);
                     setEditorOpen(true);
@@ -239,15 +288,26 @@ export function McpTab() {
 function McpServerRow({
   server,
   canManage,
+  probing,
+  onlineRuntimes,
+  selectedRuntimeId,
+  onRuntimeChange,
+  onProbe,
   onEdit,
   onDelete,
 }: {
   server: WorkspaceMcpServer;
   canManage: boolean;
+  probing: boolean;
+  onlineRuntimes: Array<{ id: string; name: string }>;
+  selectedRuntimeId: string;
+  onRuntimeChange: (id: string) => void;
+  onProbe: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const { t } = useT("settings");
+  const timeAgo = useTimeAgo();
   return (
     <li className="flex items-center gap-3 px-4 py-3">
       <div className="min-w-0 flex-1">
@@ -260,9 +320,50 @@ function McpServerRow({
         <p className="mt-0.5 text-caption text-muted-foreground">
           {transportLabel(server.transport)}
         </p>
+        {server.last_probe?.status === "ok" ? (
+          <p className="mt-0.5 text-caption text-muted-foreground">
+            {t(($) => $.mcp.probe_ok, {
+              runtime: server.last_probe.runtime_name,
+              time: timeAgo(server.last_probe.probed_at),
+              count: server.last_probe.tools?.length ?? 0,
+            })}
+          </p>
+        ) : server.last_probe ? (
+          <p className="mt-0.5 text-caption text-muted-foreground">
+            {t(($) => $.mcp.probe_fail, {
+              runtime: server.last_probe.runtime_name,
+              time: timeAgo(server.last_probe.probed_at),
+              error: server.last_probe.error_code || server.last_probe.error || "",
+            })}
+          </p>
+        ) : null}
       </div>
       {canManage ? (
         <div className="flex shrink-0 items-center gap-1">
+          {onlineRuntimes.length > 1 ? (
+            <select
+              aria-label={t(($) => $.mcp.probe_runtime_label)}
+              className="h-8 max-w-36 rounded-md border border-input bg-background px-2 text-caption"
+              value={selectedRuntimeId}
+              onChange={(event) => onRuntimeChange(event.target.value)}
+            >
+              <option value="">{t(($) => $.mcp.probe_runtime_placeholder)}</option>
+              {onlineRuntimes.map((runtime) => (
+                <option key={runtime.id} value={runtime.id}>
+                  {runtime.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={probing || (onlineRuntimes.length > 1 && selectedRuntimeId === "")}
+            onClick={onProbe}
+          >
+            {probing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unplug className="h-4 w-4" />}
+            {t(($) => $.mcp.test_connection)}
+          </Button>
           <Button
             variant="ghost"
             size="icon"
