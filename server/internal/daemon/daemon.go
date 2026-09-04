@@ -7263,6 +7263,45 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ConnectedApps:                    task.ConnectedApps,
 	}
 
+	// A local_directory task gets a fresh CODEX_HOME but mounts the same
+	// per-conversation sessions store as the task it replaces. Codex scopes its
+	// own thread writer lock to CODEX_HOME, so those two processes otherwise use
+	// different locks while appending to the same rollout. Hold a store-scoped,
+	// cross-process lock for the complete task lifetime. Take it before the env
+	// root claim so shutdown releases that claim first; the next task can then
+	// safely reuse the prior environment after it acquires this lock.
+	if provider == "codex" {
+		if store := execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx); store != "" {
+			// Mark before waiting so the session-store GC cannot remove the store
+			// between this task being queued behind its predecessor and mounting it.
+			d.markActiveStore(store)
+			defer d.unmarkActiveStore(store)
+
+			waitCtx, waitCancel := context.WithCancel(prepareCtx)
+			var cancelledByPoll <-chan struct{}
+			writerLock, lockErr := execenv.AcquireCodexSessionWriterLock(waitCtx, store, func() {
+				taskLog.Info("codex: waiting for prior task to release conversation session writer")
+				pollInterval := d.cancelPollInterval
+				if pollInterval == 0 {
+					pollInterval = 5 * time.Second
+				}
+				cancelledByPoll = d.watchTaskCancellation(waitCtx, task.ID, pollInterval, taskLog)
+				go func() {
+					select {
+					case <-cancelledByPoll:
+						waitCancel()
+					case <-waitCtx.Done():
+					}
+				}()
+			})
+			waitCancel()
+			if lockErr != nil {
+				return TaskResult{}, fmt.Errorf("acquire Codex conversation session writer: %w", lockErr)
+			}
+			defer writerLock.Release()
+		}
+	}
+
 	// Mark candidate env roots as active before any env work so the GC loop
 	// can't reclaim artifacts inside them mid-execution. We mark both the
 	// stable root for a fresh Prepare and the prior root for Reuse — they
@@ -7504,16 +7543,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var reasonixEnv map[string]string
 	if provider == "reasonix" {
 		reasonixEnv = sanitizeAgentEnv(agentEnvOverrides)
-	}
-	// Guard this task's per-issue Codex session store from the GC for the whole
-	// task, starting before Prepare/Reuse mounts it — so a prune that samples the
-	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
-	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
-	if provider == "codex" {
-		if store := execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx); store != "" {
-			d.markActiveStore(store)
-			defer d.unmarkActiveStore(store)
-		}
 	}
 	envReused := false
 	priorClaim, priorWorkDir, lockedPriorInfo, reusable, reuseErr := d.lockReusablePriorEnvRoot(ctx, task, localAssignment, envClaim.RootDir())
