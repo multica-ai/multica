@@ -2599,8 +2599,15 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					resp.PriorWorkDir = src.WorkDir.String
 				}
 				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
-					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = src.SessionID.String
+					src.SessionID.Valid {
+					if src.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = src.SessionID.String
+					} else {
+						// MUL-6920: the source has a resumable session, it just
+						// is not reachable from this runtime. Same silent-drop
+						// as the follow-up branch below — say so.
+						resp.PriorSessionResumeUnavailable = true
+					}
 				}
 				// MUL-5305: if the source task withheld its Codex session because
 				// the rollout was missing, this rerun has nothing resumable from it
@@ -2631,6 +2638,15 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}); err == nil && prior.SessionID.Valid {
 				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
+				} else {
+					// MUL-6920: the runtime gate above drops a session that
+					// really exists — the conversation moved to a different
+					// machine, where that provider session is not reachable.
+					// Dropping it silently is what makes the next turn answer
+					// as if the earlier turns never happened; disclosing it
+					// routes the run through the continuity notice, which tells
+					// it to read the record back instead of assuming.
+					resp.PriorSessionResumeUnavailable = true
 				}
 				if prior.WorkDir.Valid {
 					resp.PriorWorkDir = prior.WorkDir.String
@@ -2713,6 +2729,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		projectCtx.applyTo(&resp)
+		// MUL-6920: a session pointer this claim SAW but could not hand back.
+		// Both resume sources below are runtime-gated, so a chat that moved to
+		// another runtime resolves to no PriorSessionID while the conversation
+		// it belongs to is very much still there. Recording that the candidate
+		// existed is what separates "this chat has no history yet" (nothing to
+		// disclose) from "the history is unreachable from here" (the run must
+		// be told, or it answers the next message as a brand-new conversation).
+		chatResumeCandidateExists := false
 		if !task.ForceFreshSession && !task.ChannelContextRevision.Valid {
 			// Resume chat sessions only when the stored pointer was produced
 			// by the same runtime as the claiming task. When the chat_session
@@ -2722,8 +2746,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// otherwise a single failed turn would silently drop the entire
 			// conversation memory on the next message. The fallback also
 			// requires runtime to match.
-			if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
-				resp.PriorSessionID = cs.SessionID.String
+			if cs.SessionID.Valid {
+				chatResumeCandidateExists = true
+				if cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
+					resp.PriorSessionID = cs.SessionID.String
+				}
 			}
 			if cs.WorkDir.Valid {
 				resp.PriorWorkDir = cs.WorkDir.String
@@ -2793,6 +2820,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				switch {
 				case err == nil && prior.SessionID.Valid:
 					h.Metrics.RecordChatClaimSessionFallbackHit()
+					chatResumeCandidateExists = true
 					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
 						resp.PriorSessionID = prior.SessionID.String
 					}
@@ -2820,6 +2848,26 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			})
 			h.Metrics.ObserveChatClaimRolloutMissingQuery(time.Since(started).Seconds())
 			if err == nil && missing {
+				resp.PriorSessionResumeUnavailable = true
+			}
+
+			// MUL-6920: both resume sources above were runtime-gated, so a
+			// candidate that survived every poison filter can still end up
+			// unusable purely because the chat moved runtimes. Judge the
+			// OUTCOME rather than re-testing each gate: whatever dropped it,
+			// this turn starts fresh on a conversation that does have history,
+			// and the continuity notice is the only thing that says so — and
+			// names the read-back command for this surface.
+			//
+			// Fires at most once per move: the first turn on the new runtime
+			// writes its own session_id + runtime_id back via
+			// UpdateChatSessionSession, so the next claim matches and stays
+			// quiet. A user who explicitly asked for a fresh start never gets
+			// here — ForceFreshSession short-circuits the whole block — and a
+			// rotated channel context only ever considers candidates from its
+			// own generation, so the rotation itself is never reported as a
+			// loss.
+			if resp.PriorSessionID == "" && chatResumeCandidateExists {
 				resp.PriorSessionResumeUnavailable = true
 			}
 		}

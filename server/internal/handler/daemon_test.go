@@ -3052,6 +3052,9 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 		if task.PriorSessionID != "safe-session" {
 			t.Fatalf("PriorSessionID = %q, want safe-session (transient failure resumes)", task.PriorSessionID)
 		}
+		if task.PriorSessionResumeUnavailable {
+			t.Fatal("a rerun that resumed its source session must not disclose a gap")
+		}
 	})
 
 	t.Run("poisoned_reason_same_runtime_reuses_workdir_fresh_session", func(t *testing.T) {
@@ -3085,6 +3088,13 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 		}
 		if task.PriorSessionID != "" {
 			t.Fatalf("PriorSessionID = %q, want empty (cross-runtime session cannot resolve)", task.PriorSessionID)
+		}
+		// MUL-6920: the source session was resume-SAFE — only the machine is
+		// wrong. Nothing else in the response distinguishes that from "the
+		// source never had a session", so the disclosure is the only signal
+		// the rerun gets that it is not continuing what the user clicked on.
+		if !task.PriorSessionResumeUnavailable {
+			t.Fatal("cross-runtime rerun must disclose the session it could not reach")
 		}
 	})
 
@@ -3160,6 +3170,13 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	if task.PriorWorkDir != "/tmp/old-chat-workdir" {
 		t.Fatalf("chat runtime mismatch: expected PriorWorkDir='/tmp/old-chat-workdir', got %q", task.PriorWorkDir)
 	}
+	// MUL-6920: dropping the pointer is correct; dropping it SILENTLY is the
+	// bug. The chat's transcript is intact and readable, so the run has to be
+	// told its own memory of it is not — otherwise it answers the next message
+	// as a brand-new conversation and the user has to notice and say so.
+	if !task.PriorSessionResumeUnavailable {
+		t.Fatal("chat runtime mismatch: expected the claim to disclose the dropped session")
+	}
 	dbfx.Exec(t, `
 		UPDATE agent_task_queue
 		SET status = 'completed', completed_at = now()
@@ -3187,6 +3204,13 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	}
 	if task.PriorWorkDir != "/tmp/same-chat-workdir" {
 		t.Fatalf("chat runtime match: expected PriorWorkDir='/tmp/same-chat-workdir', got %q", task.PriorWorkDir)
+	}
+	// The other half of MUL-6920: a resume that actually worked must stay
+	// quiet. This is what bounds the notice to one appearance per move —
+	// after the first turn on the new runtime writes its pointer back, every
+	// later claim lands here.
+	if task.PriorSessionResumeUnavailable {
+		t.Fatal("chat runtime match: a successful resume must not disclose a continuity gap")
 	}
 }
 
