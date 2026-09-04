@@ -9,8 +9,6 @@ Connect any [agent](/agents) to a ShareCRM bot and your team can work with it fr
 
 ShareCRM support is [community-maintained](/community-maintained): it ships in every release, but it carries no official support SLA. Report problems in [GitHub issues](https://github.com/multica-ai/multica/issues).
 
-Inbound image and mixed image+text messages require ShareCRM IM Gateway protocol **1.4.0**. The adapter receives signed download URLs; outbound replies remain plain text.
-
 ShareCRM uses a **bring-your-own-app (BYO)** model: a workspace admin creates bot credentials on the ShareCRM open platform and pastes them into Multica. Each agent gets **its own** ShareCRM bot — so several agents can each have a distinct, separately @-mentionable bot in the same organization. (This differs from [Lark](/lark-bot-integration), where binding is a scan-to-install flow.)
 
 The whole setup is below and takes about five minutes. You'll end up with two credentials to paste into Multica:
@@ -67,8 +65,8 @@ Setting this up for **multiple agents**? Repeat the whole flow once per agent �
 | **Agent → Integrations** | Owners and admins see **Connect ShareCRM**; once connected it flips to a **Connected to ShareCRM** badge with a **Disconnect** control. |
 | **DM the bot** | A workspace member messages the bot in a 1:1 chat. The conversation becomes a Multica [chat](/chat) session with the agent; every message is read. |
 | **@-mention in a group** | Add the bot to the group and @-mention it. Only messages that ShareCRM delivers to the bot are read — the bot does not listen to the whole group. |
-| **Text only** | ShareCRM handles text messages today. Images, files, and voice are not passed to the agent. |
-| **`/issue` command** | Starting a message with `/issue <title>` creates a Multica issue directly from your input, attributed to you, and posts the issue ID and title back into the same conversation. Put the description on following lines. The command itself does not appear in Multica Chat; the created issue is the result recorded in Multica. |
+| **Images** | Direct messages and group chats can include images (PNG, JPEG, GIF, WebP, BMP). Files and voice are not passed to the agent. |
+| **`/issue` command** | Starting a message with `/issue <title>` creates a Multica issue directly from your input, attributed to you, and posts the issue ID and title back into the same conversation. Put the description on following lines. Images in the same message are also added to the issue as attachments. The command itself does not appear in Multica Chat; the created issue is the result recorded in Multica. |
 | **`/new` command** | Send `/new` to create a new empty Multica Chat and route later ShareCRM messages to it. Send `/new <your message>` to create the Chat and use that message as its first turn. The previous Chat remains stored and usable in Multica. |
 | **`/clear` command** | Send `/clear` to keep the current Multica Chat while applying a fresh agent-visible context to the next message. Send `/clear <your message>` to use that message as the first turn after the boundary. The complete Chat history remains visible in Multica. |
 | **Reply** | The agent's answer is posted back into the same 1:1 chat or group as plain text (Markdown is stripped for delivery). |
@@ -89,7 +87,8 @@ Only **members of the workspace** can use the bot. If you aren't a member, or yo
 
 - **In a group** — add the bot to the group, then `@your-bot <your message>`. Re-mention it for each follow-up (the bot only receives messages ShareCRM routes to it).
 - **In a 1:1 chat** — open the bot and message it directly; no mention needed, every message is read.
-- **File an issue** — send `/issue the login redirect is broken on Safari`; add the description on following lines if needed. Multica creates the issue synchronously and posts its ID and title back into the chat.
+- **Send images** — attach PNG, JPEG, GIF, WebP, or BMP images in a DM or group @-mention (up to 8 images, 10 MB each). Files and voice are not supported. Agent replies stay plain text.
+- **File an issue** — send `/issue the login redirect is broken on Safari`; add the description on following lines if needed. Images in the same message are attached to the issue. Multica creates the issue synchronously and posts its ID and title back into the chat.
 - **Start a new Chat** — send `/new` to create a new empty Multica Chat and route later ShareCRM messages to it, or `/new <your message>` to use that message as the first turn. The previous Chat remains stored and usable in Multica.
 - **Clear context** — send `/clear` to keep the current Multica Chat while applying a fresh agent-visible context to the next message, or `/clear <your message>` to use that message as the first turn after the boundary. The complete Chat history remains visible in Multica.
 
