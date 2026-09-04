@@ -1020,6 +1020,14 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ModelPricingCatalog struct {
+	ID          bool               `json:"id"`
+	Document    []byte             `json:"document"`
+	CheckedAt   pgtype.Timestamptz `json:"checked_at"`
+	SucceededAt pgtype.Timestamptz `json:"succeeded_at"`
+	LastError   string             `json:"last_error"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -1550,6 +1558,14 @@ type WorkspaceMcpServer struct {
 	Config      []byte             `json:"config"`
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkspaceModelPricing struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Overrides   []byte             `json:"overrides"`
+	Revision    int64              `json:"revision"`
+	UpdatedBy   pgtype.UUID        `json:"updated_by"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 

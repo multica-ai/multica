@@ -1,5 +1,7 @@
 "use client";
 
+import { modelPricingKey } from "../runtimes/pricing-queries";
+
 import { useEffect, useRef } from "react";
 import { useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import type { WSClient } from "../api/ws-client";
@@ -650,6 +652,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: modelPricingKey(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
@@ -837,7 +840,8 @@ export function useRealtimeSync(
       daemon: () => {
         const wsId = getCurrentWsId();
         if (wsId) {
-          qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: modelPricingKey(wsId) });
+    qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
           // Runtime online/offline transitions move the derived status
           // for every agent that hosts on this runtime, which shifts the
           // working/idle/offline pill on the squad page.
@@ -1234,6 +1238,11 @@ export function useRealtimeSync(
       }
     };
 
+    const unsubPricing = ws.on("model_pricing:updated", (p) => {
+      if (p && typeof p === "object" && "workspace_id" in p && typeof p.workspace_id === "string" && p.workspace_id) {
+        void qc.invalidateQueries({ queryKey: modelPricingKey(p.workspace_id) });
+      }
+    });
     const unsubWsUpdated = ws.on("workspace:updated", (p) => {
       applyWorkspaceUpdatedToCache(qc, p as WorkspaceUpdatedPayload);
     });
@@ -1711,6 +1720,7 @@ export function useRealtimeSync(
       unsubIssueReactionRemoved();
       unsubSubscriberAdded();
       unsubSubscriberRemoved();
+      unsubPricing();
       unsubWsUpdated();
       unsubWsDeleted();
       unsubMemberRemoved();

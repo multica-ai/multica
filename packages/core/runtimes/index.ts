@@ -9,5 +9,6 @@ export * from "./derive-health";
 export * from "./display";
 export * from "./use-runtime-health";
 export * from "./cli-version";
-export * from "./custom-pricing-store";
+export * from "./pricing";
+export * from "./pricing-queries";
 export * from "./cloud-runtime";

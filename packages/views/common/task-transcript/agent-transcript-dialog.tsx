@@ -1,5 +1,6 @@
 "use client";
 
+import { useWorkspaceId } from "@multica/core/hooks";
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, forwardRef } from "react";
 import { Virtuoso, type VirtuosoHandle, type Components } from "react-virtuoso";
 import {
@@ -53,7 +54,7 @@ import {
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { runtimeDisplayName, providerDisplayName } from "@multica/core/runtimes";
-import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { useModelPricing } from "@multica/core/runtimes/pricing-queries";
 import { redactSecrets } from "./redact";
 import {
   createLiveEndFollow,
@@ -306,6 +307,7 @@ export function AgentTranscriptDialog({
   isLive = false,
   headerSlot,
 }: AgentTranscriptDialogProps) {
+  const { pricing: pricings } = useModelPricing(useWorkspaceId());
   const { t } = useT("agents");
   const locale = useLocale();
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
@@ -816,11 +818,7 @@ export function AgentTranscriptDialog({
   // execution log (the endpoint that hydrates usage); absent elsewhere, where
   // the chip and the usage rows below simply don't render.
   //
-  // `summarizeTaskUsage` prices through the custom-rate store, which it reads
-  // imperatively — subscribing here is what makes a saved rate change reach
-  // this figure, same as on the other usage surfaces.
-  useCustomPricingStore((s) => s.pricings);
-  const usage = summarizeTaskUsage(task.usage);
+  const usage = summarizeTaskUsage(task.usage, pricings);
   // Two separate things, deliberately not one string (#7411):
   //   • `reasonLabel` — the localized reason, derived from the stable
   //     `failure_reason` enum. This is the user-facing explanation.

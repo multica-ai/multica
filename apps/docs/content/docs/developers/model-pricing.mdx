@@ -1,0 +1,133 @@
+---
+title: Model pricing
+description: Shared reference rates, workspace overrides, and the meaning of usage costs.
+---
+
+Multica combines provider-reported cost with an API reference estimate for tokens
+whose cost was not reported. A subscription's estimated usage remains visible so
+members can compare the API value of their usage with their subscription price.
+It is not a bill, an additional charge, or an allocation of the monthly fee.
+
+## Reading usage cost
+
+- Provider-reported monetary cost takes precedence for the tokens it covers.
+- Uncosted tokens use workspace overrides, then the shared reference catalog.
+- Input, output, cache reads, and cache writes are priced separately in USD per
+  million tokens. A missing cache rate in an external feed defaults to its input rate.
+- Usage reports recalculate past estimates from recorded tokens at current rates.
+  Backend counters use the rates available when usage is recorded. Recorded
+  monetary cost and token counts stay unchanged.
+- Models without a reference price or workspace override remain unpriced. Zero
+  rates in recognized subscription listings do not replace the corresponding API
+  reference rates. Explicitly free APIs and zero workspace overrides remain valid.
+
+The `uncosted_*` token fields mean that the provider did not supply a monetary
+amount for those tokens. They do not, by themselves, mean that price lookup failed.
+An estimate can be available even when all tokens are uncosted.
+
+Reference estimates may differ from invoices because of account discounts, regional
+rates, batch processing, context tiers, or other billing rules that a single rate
+per model does not represent.
+
+## Maintaining prices
+
+Open an existing runtime from **Runtimes**, then select **Model prices** in its
+usage area, even when no usage has been recorded. Select or type a model to see
+its prices immediately. Viewing prices does not save any changes.
+
+All workspace members can browse prices. Owners and admins can select **Customize**
+for a model or **Edit prices** for existing custom prices. **Save changes** becomes
+available when a price changes. Removing a custom price falls back to the reference
+rate, if available, after saving; **Cancel** discards the draft. Changes apply to the workspace
+across updated Web and Desktop clients.
+
+The unit appears beside the prices. Expand **Pricing details** for the update
+schedule, full update time, and manual refresh. **Learn more** explains estimates
+and their limits.
+
+![Workspace model prices showing public reference rates and the subscription API-value explanation](/images/model-pricing/after.png)
+
+Saving uses a revision check. If another admin saves first, the editor retains the
+draft and offers **Discard drafts and reload**. Reloading replaces the draft with
+the latest prices; review them before editing again. Workspace deletion removes
+its overrides in the same transaction.
+
+If old browser-local prices exist, an admin can use **Preview local prices** and
+review the draft before saving it. Existing workspace overrides win conflicts.
+Only successfully imported, unchanged local entries are removed from local storage;
+canceling the preview leaves them intact.
+
+## Catalog synchronization
+
+The server schedules public-data synchronization for midnight in the configured
+deployment timezone. The scheduler checks immediately at startup and every 30
+seconds afterward, so a missed daily run starts on the next check. It uses LiteLLM as the
+primary rate source and Models.dev for supplementary rates and model identities.
+Neither download requires a provider API key. A manual refresh is available to
+workspace owners and admins, with a one-minute cooldown.
+
+| Environment variable | Default / purpose |
+| --- | --- |
+| `MODEL_PRICING_TIMEZONE` | Falls back to `TZ`, then `UTC` |
+| `MODEL_PRICING_LITELLM_URL` | Optional mirror of the original LiteLLM JSON feed |
+| `MODEL_PRICING_MODELS_URL` | Optional mirror of the original Models.dev JSON feed |
+
+The shared scheduler and a database advisory lock coordinate replicas. Downloads
+use timeouts, size limits, ETags, and numeric validation. Both feeds must succeed
+before a new catalog replaces the previous snapshot atomically. Failures preserve
+the last successful catalog and record the check time and error. A checked-in
+bundle supports first startup without network access.
+
+A daily plan permits four attempts, with retry delays of two, ten, and thirty
+minutes. A failed check does not satisfy the day's synchronization. The one-minute
+cooldown preserves the failure state until a retry can run; after the plan exhausts
+its attempts, an admin can refresh manually or wait for the next daily plan.
+
+No usage records, credentials, or workspace overrides are sent to these public
+sources. Mirrors are deployment configuration, not a workspace-supplied fetch URL.
+
+The catalog retains explicit serving-provider identities. Only first-party model
+rates become default unqualified aliases; reseller and regional variants retain
+their qualified rates. Known subscription model identities can resolve to an
+equivalent API SKU. Resolution does not select the cheapest or newest similarly
+named model, and this change does not add an arbitrary user-editable alias map.
+
+## Implementation and maintenance
+
+`server/internal/pricing` owns parsing, resolution, persistence, and synchronization.
+The database stores the deployment catalog in `model_pricing_catalog` and workspace
+overrides in `workspace_model_pricing`. The workspace-scoped API is:
+
+- `GET /api/workspaces/{id}/model-pricing`
+- `PUT /api/workspaces/{id}/model-pricing` with the last observed revision
+- `POST /api/workspaces/{id}/model-pricing/refresh`
+
+HTTP price fields use `cache_read`, `cache_write`, and `source_url`. Snapshot
+metadata includes `can_manage`, `checked_at`, `succeeded_at`, `last_error`, and
+`timezone`. The API client maps these wire fields to camelCase. The offline catalog
+document retains `cacheRead` and `cacheWrite`; it is not the HTTP payload.
+
+Frontend server state belongs to TanStack Query with a workspace-scoped key.
+`model_pricing:updated` invalidates that cache; reconnect and refocus also reload it.
+Runtime usage, dashboards, issue usage, execution logs, and backend cost metrics
+consume the shared catalog and overrides.
+
+The offline bundle's single editable source is
+`packages/core/runtimes/pricing.json`. After changing it, run:
+
+```bash
+node scripts/generate-pricing-bundle.mjs
+node scripts/generate-pricing-bundle.mjs --check
+```
+
+The second command also runs in CI to prevent frontend/backend bundle drift.
+Daily synchronization only changes database data; it does not create code commits.
+
+Migrations 450–452 introduce the tables and separate concurrent unique indexes.
+The migration runner removes an invalid index left by an interrupted build before
+retrying its corresponding migration. Roll back in reverse order. Catalog and
+override tables are required runtime state: restore them from backup if lost,
+then refresh the catalog; public sources cannot reconstruct workspace overrides.
+
+Sources: [LiteLLM model pricing](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json)
+and [Models.dev](https://models.dev/).

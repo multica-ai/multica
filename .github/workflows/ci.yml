@@ -57,6 +57,8 @@ jobs:
               - 'knip.jsonc'
               - '.github/workflows/ci.yml'
               - 'scripts/generate-reserved-slugs.mjs'
+              - 'scripts/generate-pricing-bundle.mjs'
+              - 'server/internal/pricing/bundled_generated.go'
               - 'server/internal/handler/reserved_slugs.json'
               - 'scripts/check-ui-wildcard-exports.mjs'
               - 'scripts/check-ui-wildcard-exports.test.sh'
@@ -271,6 +273,10 @@ jobs:
         run: |
           pnpm generate:reserved-slugs
           git diff --exit-code -- packages/core/paths/reserved-slugs.ts
+
+      - name: Verify shared model pricing bundle
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: node scripts/generate-pricing-bundle.mjs --check
 
       - name: Build, type check, and lint
         if: ${{ needs.changes.outputs.frontend == 'true' }}

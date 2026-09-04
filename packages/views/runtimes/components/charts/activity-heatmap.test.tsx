@@ -1,20 +1,12 @@
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import type { RuntimeUsage } from "@multica/core/types";
 import { renderWithI18n } from "../../../test/i18n";
 
-vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
-  const pricingState = { pricings: {} };
-  const useCustomPricingStore = Object.assign(
-    (selector?: (state: typeof pricingState) => unknown) =>
-      selector ? selector(pricingState) : pricingState,
-    { getState: () => pricingState },
-  );
-
-  return {
-    useCustomPricingStore,
-    getCustomPricing: () => undefined,
-  };
+vi.mock("@multica/core/runtimes/pricing-queries", async () => {
+ const { BUNDLED_PRICING } = await import("@multica/core/runtimes/pricing");
+ return { useModelPricing: () => ({ pricing: { ...BUNDLED_PRICING, overrides: {} } }) };
 });
 
 import { ActivityHeatmap } from "./activity-heatmap";

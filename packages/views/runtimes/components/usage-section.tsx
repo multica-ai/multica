@@ -17,7 +17,8 @@ import {
   runtimeUsageOptions,
   runtimeUsageByAgentOptions,
 } from "@multica/core/runtimes/queries";
-import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { useModelPricing } from "@multica/core/runtimes/pricing-queries";
+import type { PricingContext } from "@multica/core/runtimes/pricing";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import {
   formatTokens,
@@ -129,6 +130,7 @@ function Segmented<T extends string | number>({
 // ---------------------------------------------------------------------------
 
 export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
+  const { pricing: pricings } = useModelPricing(useWorkspaceId());
   const { t, i18n } = useT("runtimes");
   const runtimeId = runtime.id;
   // Reports render in the viewer's timezone — the backend slices the UTC
@@ -140,14 +142,15 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   );
   const [dim, setDim] = useState<Exclude<WhenTab, "heatmap">>("daily");
   const [days, setDays] = useState<TimeRange>(30);
-  // Subscribe so the KPI cards (which call estimateCost at render-time, not
-  // through a memo) re-evaluate when the user saves a custom rate. The
-  // aggregate sub-components (WhenChart, CostByBlock, ActivityHeatmap) each
-  // subscribe on their own and pass pricings as a memo dep there.
-  useCustomPricingStore((s) => s.pricings);
-
   if (loading) return <UsageSkeleton />;
-  if (usage.length === 0) return <UsageEmpty />;
+  if (usage.length === 0) {
+    return (
+      <div className="space-y-5">
+        <CustomPricingBar usage={usage} />
+        <UsageEmpty />
+      </div>
+    );
+  }
 
   // Slice the cached 180-day window into the user's selected sub-window AND
   // the immediately prior window of equal length. The KPI delta ("+18% vs
@@ -166,8 +169,8 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
       setDays(DEFAULT_DAYS_BY_DIM[next]);
     }
   };
-  const totals = computeTotals(filtered);
-  const prevTotals = computeTotals(prevFiltered);
+  const totals = computeTotals(filtered, pricings);
+  const prevTotals = computeTotals(prevFiltered, pricings);
 
   const tokensTotal =
     totals.input + totals.output + totals.cacheRead + totals.cacheWrite;
@@ -339,19 +342,17 @@ function WhenChart({
   dim: Dim;
   tz: string;
 }) {
+  const { pricing: pricings } = useModelPricing(useWorkspaceId());
   const { t } = useT("runtimes");
   // Heatmap is the "independent" sibling — toggled here, not part of the
   // page-level dimension segmented (per the RFC).
   const [showHeatmap, setShowHeatmap] = useState(false);
   // Daily and Weekly share a Cost-vs-Tokens metric toggle.
   const [chartMetric, setChartMetric] = useState<DailyMetric>("cost");
-  // Memo dep — the aggregates below run `estimateCost`, which now consults
-  // the user override store. Without listing pricings here the memos cache
-  // pre-override totals when query data hasn't changed.
-  const pricings = useCustomPricingStore((s) => s.pricings);
+  // Recompute aggregates when either usage or the workspace price snapshot changes.
 
   const { dailyCostStack, dailyTokens } = useMemo(
-    () => aggregateByDate(filtered),
+    () => aggregateByDate(filtered, pricings),
     [filtered, pricings],
   );
   // Weekly aggregation builds exactly N trailing calendar weeks anchored at
@@ -361,7 +362,7 @@ function WhenChart({
   // aggregate surfaced old populated weeks instead of in-range empty ones.
   const weekCount = Math.max(1, Math.ceil(days / 7));
   const { weeklyTokens, weeklyCostStack } = useMemo(
-    () => aggregateByWeek(usage, tz, weekCount),
+    () => aggregateByWeek(usage, tz, weekCount, pricings),
     [usage, tz, weekCount, pricings],
   );
 
@@ -497,17 +498,18 @@ function WeeklyTab({
 //   1. No tokens at all → "no usage" (genuinely nothing happened).
 //   2. Tokens present but cost is $0 → almost always means the model name
 //      reported by the daemon isn't in our pricing table. List the offenders
-//      so a developer can update MODEL_PRICING in one go.
+//      so the workspace can supply the missing reference rates.
 // ---------------------------------------------------------------------------
 
 function EmptyChartState({ usage }: { usage: RuntimeUsage[] }) {
+  const { pricing: pricings } = useModelPricing(useWorkspaceId());
   const { t } = useT("runtimes");
   const hasTokens = usage.some(
     (u) =>
       u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens >
       0,
   );
-  const unmapped = collectUnmappedModels(usage);
+  const unmapped = collectUnmappedModels(usage, pricings);
 
   return (
     <div className="flex aspect-[3/1] flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-muted/20 p-6 text-center">
@@ -540,30 +542,15 @@ function EmptyChartState({ usage }: { usage: RuntimeUsage[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// CustomPricingBar — the only entry point into the custom-pricing dialog,
-// rendered above the KPI grid. Two states:
-//
-//   1. The window contains unpriced models → warning banner. Covers the
-//      partial-unmapping case where the chart still renders (so
-//      EmptyChartState never fires) but some tokens silently contribute $0.
-//   2. Everything resolves, but the user has saved overrides → a quiet row
-//      that still offers the dialog. Gating the whole bar on "something is
-//      unmapped" used to hide it the moment the last override was saved:
-//      the override made the model resolve, the banner disappeared, and the
-//      saved rates could no longer be corrected or removed from the UI.
-//
-// Hidden entirely when nothing is unmapped and nothing is overridden.
+// Workspace prices remain accessible even when every model is priced.
 // ---------------------------------------------------------------------------
 
 function CustomPricingBar({ usage }: { usage: RuntimeUsage[] }) {
+  const wsId = useWorkspaceId();
+  const { pricing: pricings } = useModelPricing(wsId);
   const { t } = useT("runtimes");
   const [dialogOpen, setDialogOpen] = useState(false);
-  // Boolean (not the object) so the selector stays referentially stable.
-  const hasOverrides = useCustomPricingStore(
-    (s) => Object.keys(s.pricings).length > 0,
-  );
-  const unmapped = collectUnmappedModels(usage);
-  if (unmapped.length === 0 && !hasOverrides) return null;
+  const unmapped = collectUnmappedModels(usage, pricings);
 
   const hasGap = unmapped.length > 0;
   return (
@@ -602,6 +589,7 @@ function CustomPricingBar({ usage }: { usage: RuntimeUsage[] }) {
           : t(($) => $.usage.custom_pricing.edit_button)}
       </Button>
       <CustomPricingDialog
+        wsId={wsId}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         unmappedModels={unmapped}
@@ -658,11 +646,11 @@ function CostByBlock({
   usage: RuntimeUsage[];
   tz: string;
 }) {
+  const wsId = useWorkspaceId();
+  const { pricing: pricings } = useModelPricing(wsId);
   const { t } = useT("runtimes");
   const [tab, setTab] = useState<"agent" | "model">("agent");
-  // Memo dep — same reason as WhenChart: aggregateCostBy{Agent,Model} call
-  // estimateCost, which now reads the override store.
-  const pricings = useCustomPricingStore((s) => s.pricings);
+  // All cost views consume the same workspace price snapshot.
 
   // by-agent is server-side aggregation (fetched lazily on tab activation).
   // by-model derives from the daily cache the parent already has — free.
@@ -671,15 +659,14 @@ function CostByBlock({
     enabled: tab === "agent",
   });
 
-  const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
 
   const byAgent = useMemo(
-    () => aggregateCostByAgent(byAgentRows),
+    () => aggregateCostByAgent(byAgentRows, pricings),
     [byAgentRows, pricings],
   );
   const byModel = useMemo(
-    () => aggregateCostByModel(usage),
+    () => aggregateCostByModel(usage, pricings),
     [usage, pricings],
   );
 
@@ -908,15 +895,15 @@ interface UsageTotals {
   cacheSavings: number;
 }
 
-function computeTotals(rows: RuntimeUsage[]): UsageTotals {
+function computeTotals(rows: RuntimeUsage[], priceContext?: PricingContext): UsageTotals {
   return rows.reduce<UsageTotals>(
     (acc, u) => ({
       input: acc.input + u.input_tokens,
       output: acc.output + u.output_tokens,
       cacheRead: acc.cacheRead + u.cache_read_tokens,
       cacheWrite: acc.cacheWrite + u.cache_write_tokens,
-      cost: acc.cost + estimateCost(u),
-      cacheSavings: acc.cacheSavings + estimateCacheSavings(u),
+      cost: acc.cost + estimateCost(u, priceContext),
+      cacheSavings: acc.cacheSavings + estimateCacheSavings(u, priceContext),
     }),
     { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheSavings: 0 },
   );

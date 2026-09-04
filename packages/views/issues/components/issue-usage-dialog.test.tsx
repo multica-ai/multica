@@ -5,6 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask, TaskUsage } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/runtimes/pricing-queries", async () => {
+  const { BUNDLED_PRICING } = await import("@multica/core/runtimes/pricing");
+  return { useModelPricing: () => ({ pricing: BUNDLED_PRICING }) };
+});
+
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));

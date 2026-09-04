@@ -67,15 +67,15 @@ func TestPriceForModelAliasCodexGPT56(t *testing.T) {
 	}{
 		{
 			model: "gpt-5.6-sol",
-			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 6.25, OutputPerM: 30},
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 4, CacheReadPerM: 0.4, CacheWritePerM: 5, OutputPerM: 20},
 		},
 		{
 			model: "openai:gpt-5.6-terra",
-			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.5, CacheReadPerM: 0.25, CacheWritePerM: 3.125, OutputPerM: 15},
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 12},
 		},
 		{
 			model: "openai/gpt-5.6-luna",
-			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1, CacheReadPerM: 0.1, CacheWritePerM: 1.25, OutputPerM: 6},
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 0.2, CacheReadPerM: 0.02, CacheWritePerM: 0.25, OutputPerM: 1.2},
 		},
 	}
 
@@ -249,10 +249,6 @@ func TestPriceForModelAliasAlibabaMoonshotVolcengine(t *testing.T) {
 			want:  ModelPrice{Provider: "alibaba", Model: "qwen3.8-max", InputPerM: 2.00, CacheReadPerM: 0.17, CacheWritePerM: 2.50, OutputPerM: 6.00},
 		},
 		{
-			model: "custom:qwen3.8-max-preview[1m]",
-			want:  ModelPrice{Provider: "alibaba", Model: "qwen3.8-max-preview", InputPerM: 0, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 0},
-		},
-		{
 			model: "kimi-coding:kimi-k3",
 			want:  ModelPrice{Provider: "moonshotai", Model: "kimi-k3", InputPerM: 3.0, CacheReadPerM: 0.30, CacheWritePerM: 3.0, OutputPerM: 15.0},
 		},
@@ -312,8 +308,6 @@ func TestPriceForModelAliasNoFalseBorrowing(t *testing.T) {
 		model     string
 		wantModel string
 	}{
-		{"qwen3.8-max-preview[1m]", "qwen3.8-max-preview"},
-		{"qwen3.8-max-preview[context]", "qwen3.8-max-preview"},
 		{"qwen3.8-max[1m]", "qwen3.8-max"},
 	} {
 		got, ok := PriceForModelAlias(tc.model)
@@ -323,6 +317,10 @@ func TestPriceForModelAliasNoFalseBorrowing(t *testing.T) {
 	}
 
 	for _, model := range []string{
+		// Token Plan credits have no trustworthy conversion to API USD/token.
+		"qwen3.8-max-preview",
+		"qwen3.8-max-preview[1m]",
+		"custom:qwen3.8-max-preview[context]",
 		"qwen3.8-max-extra",
 		"kimi-k3-1",
 		"qwen3.7-plus-extra",
@@ -360,7 +358,7 @@ func TestPriceForModelAliasContextTagStripping(t *testing.T) {
 		},
 		{
 			model: "gpt-5.6-luna[1m]",
-			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 6.00},
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 0.2, CacheReadPerM: 0.02, CacheWritePerM: 0.25, OutputPerM: 1.2},
 		},
 		{
 			model: "kimi-k3[1m]",

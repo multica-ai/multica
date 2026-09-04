@@ -14,6 +14,12 @@ import type { TimelineItem } from "./build-timeline";
 
 const copyTextMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/runtimes/pricing-queries", async () => {
+  const { BUNDLED_PRICING } = await import("@multica/core/runtimes/pricing");
+  return { useModelPricing: () => ({ pricing: BUNDLED_PRICING }) };
+});
+
 vi.mock("@multica/core/api", () => ({
   api: {
     getAgent: vi.fn().mockResolvedValue(null),

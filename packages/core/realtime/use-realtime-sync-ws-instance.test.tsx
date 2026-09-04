@@ -87,6 +87,19 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
+  it("invalidates the workspace named by a price update, including another device's updates", () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), { wrapper: createWrapper(qc) });
+    const callback = vi.mocked(ws.on).mock.calls.find(([event]) => event === "model_pricing:updated")?.[1];
+    expect(callback).toBeDefined();
+    callback?.({ workspace_id: "ws-2" });
+    expect(invalidateSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: ["model-pricing", "ws-2"] });
+    invalidateSpy.mockClear();
+    callback?.(null);
+    callback?.({ workspace_id: 42 });
+    expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+
   it("does not invalidate when ws goes from instance to null", () => {
     const ws1 = createMockWs();
     const { rerender } = renderHook(
@@ -119,8 +132,9 @@ describe("useRealtimeSync — ws instance change", () => {
     // (16 workspace-scoped [incl. property definitions] + 6 per-issue
     // prefixes + the workspace working-agents projection + 5 per-chat
     // prefixes + 1 workspaceKeys.list() + 1 cross-workspace inbox unread
-    // summary = 31 calls)
-    expect(invalidateSpy).toHaveBeenCalledTimes(31);
+    // summary + workspace model prices = 32 calls)
+    expect(invalidateSpy).toHaveBeenCalledTimes(32);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["model-pricing", "ws-1"] });
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {

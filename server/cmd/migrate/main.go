@@ -139,6 +139,8 @@ var issuePropertiesBigramOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
+	"451_model_pricing_catalog_unique":                          "model_pricing_catalog_singleton",
+	"452_workspace_model_pricing_unique":                        "workspace_model_pricing_workspace",
 	"035_task_queue_issue_id_index":                             "idx_agent_task_queue_issue_id",
 	"067_task_queue_claim_candidate_index":                      "idx_agent_task_queue_claim_candidates",
 	"074_task_usage_updated_at_index":                           "idx_task_usage_updated_at",

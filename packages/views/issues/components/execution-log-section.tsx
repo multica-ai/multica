@@ -1,12 +1,13 @@
 "use client";
 
+import { useWorkspaceId } from "@multica/core/hooks";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Loader2, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api, dispatchReasonCode } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
-import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { useModelPricing } from "@multica/core/runtimes/pricing-queries";
 import type { AgentTask } from "@multica/core/types";
 import { useTimeAgo } from "../../i18n";
 import {
@@ -239,14 +240,11 @@ export function IssueUsageTotal({
   alone: boolean;
   onOpen: () => void;
 }) {
+  const { pricing: pricings } = useModelPricing(useWorkspaceId());
   const { t } = useT("issues");
-  // Custom rates are read imperatively inside `estimateCost`, so a saved rate
-  // change does not re-render this on its own — subscribe and make the memo
-  // depend on the snapshot, or the header total keeps quoting the old price
-  // until the task list refetches.
-  const pricings = useCustomPricingStore((s) => s.pricings);
+  // Reprice the recorded usage whenever the shared workspace snapshot changes.
   const total = useMemo(
-    () => summarizeTaskUsageAcross(tasks.map((task) => task.usage)),
+    () => summarizeTaskUsageAcross(tasks.map((task) => task.usage), pricings),
     [tasks, pricings],
   );
   if (!total) return null;
@@ -426,6 +424,7 @@ export function ActiveTaskRow({
 // ─── Past row ──────────────────────────────────────────────────────────────
 
 function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+  const { pricing: pricings } = useModelPricing(useWorkspaceId());
   const { t } = useT("issues");
   const { t: tAgents } = useT("agents");
   const timeAgo = useTimeAgo();
@@ -461,7 +460,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   //
   // `null` (no usage recorded) renders an em dash, never 0: a run from before
   // usage reporting was not free, we simply have no figure for it.
-  const usage = summarizeTaskUsage(task.usage);
+  const usage = summarizeTaskUsage(task.usage, pricings);
   const rowTitle = [
     time,
     task.started_at && task.completed_at
