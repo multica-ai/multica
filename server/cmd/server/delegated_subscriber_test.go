@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -29,17 +32,29 @@ func firstFixtureAgent(t *testing.T) (agentID, runtimeID string) {
 }
 
 // createAgentTaskWithOriginator inserts a queued task attributed to the given
-// human, standing in for the run an agent is executing when it files an issue.
-// An invalid originator models an unattributed / autopilot-rooted chain.
+// human by that human's own action, standing in for the run an agent is
+// executing when it files an issue. An invalid originator models an
+// unattributed chain.
 func createAgentTaskWithOriginator(t *testing.T, agentID, runtimeID string, originator pgtype.UUID) pgtype.UUID {
+	t.Helper()
+	return createAgentTaskInChain(t, agentID, runtimeID, originator, "direct_human", pgtype.UUID{})
+}
+
+// createAgentTaskInChain is the same insert with the attribution lineage spelled
+// out: the waterfall level that resolved the human, and the parent run the human
+// was copied from on a delegation hop. Both matter to the delegated rule since
+// MUL-7051 — the originator alone no longer says whether a human asked for the
+// work, only that the run carries one.
+func createAgentTaskInChain(t *testing.T, agentID, runtimeID string, originator pgtype.UUID, source string, delegatedFrom pgtype.UUID) pgtype.UUID {
 	t.Helper()
 	ctx := context.Background()
 	var taskID pgtype.UUID
 	err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, originator_user_id, accountable_user_id)
-		VALUES ($1, $2, 'queued', 0, $3, $3)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, originator_user_id, accountable_user_id,
+		                              originator_source, delegated_from_task_id)
+		VALUES ($1, $2, 'queued', 0, $3, $3, $4, $5)
 		RETURNING id
-	`, agentID, runtimeID, originator).Scan(&taskID)
+	`, agentID, runtimeID, originator, source, delegatedFrom).Scan(&taskID)
 	if err != nil {
 		t.Fatalf("create agent task: %v", err)
 	}
@@ -168,6 +183,107 @@ func TestDelegatedSubscribe_UnattributedOriginSubscribesNobody(t *testing.T) {
 
 	if isSubscribed(t, queries, issueID, "member", testUserID) {
 		t.Fatal("an unattributed origin task must not subscribe any member")
+	}
+}
+
+// TestDelegatedSubscribe_ArmedTriggerRunSubscribesNobody is MUL-7051 as the user
+// met it: an autopilot fires on its schedule, its agent files issues all day,
+// and the member who armed the trigger months ago is subscribed to every one.
+//
+// The task row here is the shape MUL-6951 introduced and the reason a unit test
+// of the rule is not enough — a real trigger_owner run carries a real member as
+// originator, so nothing about the row it hands the listener looks degraded.
+func TestDelegatedSubscribe_ArmedTriggerRunSubscribesNobody(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, testPool)
+
+	agentID, runtimeID := firstFixtureAgent(t)
+	task := createAgentTaskInChain(t, agentID, runtimeID, util.MustParseUUID(testUserID), "trigger_owner", pgtype.UUID{})
+	issueID := createAgentOriginIssue(t, agentID, "agent_create", task, pgtype.UUID{})
+
+	publishAgentIssueCreated(bus, issueID, agentID)
+
+	if isSubscribed(t, queries, issueID, "member", testUserID) {
+		t.Fatal("an issue filed inside an autopilot run must not subscribe the member who armed the trigger")
+	}
+}
+
+// TestDelegatedSubscribe_ChainRootDecidesBelowTheFirstHop: the fix cannot read
+// the origin run's own label, because a hop overwrites it with 'delegation'. One
+// agent handing work to another is the ordinary way an autopilot run grows, and
+// at that depth the delegated run is indistinguishable from a human-triggered
+// one by anything except the chain it came from.
+//
+// Both directions are asserted together: the same shape, differing only in what
+// started the chain, must reach opposite answers — otherwise a fix that simply
+// stopped subscribing below the first hop would pass.
+func TestDelegatedSubscribe_ChainRootDecidesBelowTheFirstHop(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, testPool)
+
+	agentID, runtimeID := firstFixtureAgent(t)
+	human := util.MustParseUUID(testUserID)
+
+	for _, tc := range []struct {
+		name string
+		root string
+		want bool
+	}{
+		{"member asked, two agents deep", "direct_human", true},
+		{"schedule fired, two agents deep", "trigger_owner", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The originator is copied, not chained, so it is the SAME member on
+			// both runs either way (MUL-4302 §3.2).
+			root := createAgentTaskInChain(t, agentID, runtimeID, human, tc.root, pgtype.UUID{})
+			hop := createAgentTaskInChain(t, agentID, runtimeID, human, "delegation", root)
+			issueID := createAgentOriginIssue(t, agentID, "agent_create", hop, pgtype.UUID{})
+
+			publishAgentIssueCreated(bus, issueID, agentID)
+
+			if got := isSubscribed(t, queries, issueID, "member", testUserID); got != tc.want {
+				t.Fatalf("subscribed = %v, want %v for a chain rooted at %s", got, tc.want, tc.root)
+			}
+		})
+	}
+}
+
+// TestDelegatedSubscribe_ForeignOriginTaskResolvesNobody pins the tenant guard
+// (MUL-4252) across the read that now performs it. origin_id is a bare UUID on
+// the issue row with nothing scoping it, so an id belonging to another
+// workspace's run must resolve no human at all — not the one that run carries.
+//
+// The walk has to hold this at every hop, not just the first, which is why the
+// guard is worth a test of its own now that it is spread over a recursive
+// lineage instead of a single WHERE.
+func TestDelegatedSubscribe_ForeignOriginTaskResolvesNobody(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, testPool)
+
+	// A whole run in a workspace this issue has nothing to do with, attributed
+	// to a member of THIS one — the shape a foreign origin_id would exploit.
+	slug := fmt.Sprintf("mul7051-foreign-%d", time.Now().UnixNano())
+	unbound := testutil.New(testPool, "", testUserID)
+	foreign := testutil.New(testPool, unbound.Workspace(t, "MUL-7051 foreign", slug), testUserID)
+	foreignRuntime := foreign.Runtime(t, slug+"-runtime")
+	foreignAgent := foreign.Agent(t, slug+"-agent", foreignRuntime)
+	foreignTask := foreign.Task(t, foreignAgent, testutil.Cols{
+		"runtime_id":          foreignRuntime,
+		"originator_user_id":  testUserID,
+		"accountable_user_id": testUserID,
+		"originator_source":   "direct_human",
+	})
+
+	agentID, _ := firstFixtureAgent(t)
+	issueID := createAgentOriginIssue(t, agentID, "agent_create", util.MustParseUUID(foreignTask), pgtype.UUID{})
+
+	publishAgentIssueCreated(bus, issueID, agentID)
+
+	if isSubscribed(t, queries, issueID, "member", testUserID) {
+		t.Fatal("an origin id pointing into another workspace must not resolve a subscriber")
 	}
 }
 
