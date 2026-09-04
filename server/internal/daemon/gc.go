@@ -917,6 +917,9 @@ const linkedDirModes = os.ModeSymlink | os.ModeIrregular
 //   - patterns are basename-only; entries with a path separator are dropped.
 //   - .git subtrees are never descended into, so the agent's git history stays
 //     intact even if a pattern would otherwise match.
+//   - a matched directory containing Git-tracked files is retained. Artifact
+//     names are conventions, not proof that the repository treats the content
+//     as regenerable; deleting tracked output mutates the agent's checkout.
 //   - linked directories are skipped entirely — neither the link nor its
 //     target is touched, so a malicious or stale link can't redirect the GC
 //     outside the workdir. See linkedDirModes for what counts as a link.
@@ -1058,6 +1061,17 @@ func (d *Daemon) cleanTaskArtifactsMatching(taskDir string, matcher artifactMatc
 		if !ok {
 			return nil
 		}
+		tracked, trackedErr := artifactDirectoryContainsTrackedFiles(absRoot, path)
+		if trackedErr != nil {
+			// Fail closed. A malformed or temporarily unreadable checkout is not
+			// evidence that a matched directory is safe to remove.
+			d.logger.Warn("gc: artifact retained because git tracking could not be determined", "path", path, "error", trackedErr)
+			return filepath.SkipDir
+		}
+		if tracked {
+			d.logger.Info("gc: tracked artifact directory retained", "path", path, "pattern", pattern)
+			return filepath.SkipDir
+		}
 		size := dirSize(path)
 		if rmErr := os.RemoveAll(path); rmErr != nil {
 			d.logger.Warn("gc: artifact remove failed", "path", path, "error", rmErr)
@@ -1074,6 +1088,68 @@ func (d *Daemon) cleanTaskArtifactsMatching(taskDir string, matcher artifactMatc
 		d.logger.Warn("gc: artifact walk failed", "dir", taskDir, "error", walkErr)
 	}
 	return
+}
+
+// artifactDirectoryContainsTrackedFiles reports whether artifactPath is inside
+// a Git checkout and contains at least one path recorded in that checkout's
+// index. It intentionally examines the index rather than git status: a clean
+// checkout containing a committed .next or dist directory is exactly the case
+// artifact GC must preserve.
+func artifactDirectoryContainsTrackedFiles(taskRoot, artifactPath string) (bool, error) {
+	absRoot, err := filepath.Abs(taskRoot)
+	if err != nil {
+		return false, err
+	}
+	absArtifact, err := filepath.Abs(artifactPath)
+	if err != nil {
+		return false, err
+	}
+	if !isPathWithin(absRoot, absArtifact) {
+		return false, fmt.Errorf("artifact path escapes task root")
+	}
+
+	repoRoot, ok := containingGitCheckout(absRoot, filepath.Dir(absArtifact))
+	if !ok {
+		return false, nil
+	}
+	rel, err := filepath.Rel(repoRoot, absArtifact)
+	if err != nil {
+		return false, fmt.Errorf("resolve artifact path relative to git checkout: %w", err)
+	}
+	if rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return false, fmt.Errorf("artifact path is not below git checkout")
+	}
+	out, err := runGitGCCommand(repoRoot, "ls-files", "--", filepath.ToSlash(rel))
+	if err != nil {
+		return false, fmt.Errorf("list tracked files below %s: %w", rel, err)
+	}
+	return out != "", nil
+}
+
+// containingGitCheckout returns the nearest ancestor carrying Git worktree
+// metadata without walking above taskRoot. Linked worktrees use a .git file;
+// ordinary clones use a .git directory, so either shape is authoritative.
+func containingGitCheckout(taskRoot, start string) (string, bool) {
+	current := filepath.Clean(start)
+	for isPathWithin(taskRoot, current) {
+		if _, err := os.Lstat(filepath.Join(current, ".git")); err == nil {
+			return current, true
+		}
+		if current == taskRoot {
+			break
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+	return "", false
+}
+
+func isPathWithin(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 // dirSize returns the total size of all regular files under root, in bytes.
