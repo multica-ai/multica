@@ -14,14 +14,21 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { Label } from "@multica/ui/components/ui/label";
 import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+} from "@multica/ui/components/ui/tabs";
+import {
   InputOTP,
   InputOTPGroup,
   InputOTPSlot,
 } from "@multica/ui/components/ui/input-otp";
+import type { Tabs as TabsPrimitive } from "@base-ui/react/tabs";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import type { User } from "@multica/core/types";
+import type { TFunction } from "i18next";
 import { useT } from "../i18n";
 
 // ---------------------------------------------------------------------------
@@ -33,6 +40,13 @@ interface GoogleAuthConfig {
   redirectUri: string;
   /** Opaque state passed through Google OAuth (e.g. "platform:desktop"). */
   state?: string;
+}
+
+interface LdapAuthConfig {
+  /** Whether the connected server offers directory login. False (or the whole
+   *  config omitted) renders no tab at all, matching how `google` works: the
+   *  server decides availability, the UI never guesses. */
+  enabled: boolean;
 }
 
 interface CliCallbackConfig {
@@ -50,6 +64,9 @@ interface LoginPageProps {
   onSuccess: () => void;
   /** Google OAuth config. Omit to disable Google login. */
   google?: GoogleAuthConfig;
+  /** Corporate directory (LDAP) login. Omit or pass enabled: false to keep the
+   *  sign-in card as the email-code form alone. */
+  ldap?: LdapAuthConfig;
   /** CLI callback config for authorizing CLI tools. */
   cliCallback?: CliCallbackConfig;
   /** Called after a token is obtained (e.g. to set cookies). */
@@ -93,6 +110,23 @@ export function validateCliCallback(cliCallback: string): boolean {
   }
 }
 
+// Directory failures arrive as ApiError with a status that already carries the
+// distinction the server drew: 401 "your credentials", 502 "the directory",
+// 503 "not configured". Mapping on status rather than reading the message keeps
+// the copy stable and stops the server's internal wording (and anything a
+// future refactor puts in it) from landing in the UI.
+//
+function ldapErrorMessage(err: unknown, t: TFunction<"auth">): string {
+  if (err instanceof ApiError) {
+    if (err.status === 401) return t(($) => $.errors.ldap_invalid_credentials);
+    if (err.status === 502 || err.status === 504) return t(($) => $.errors.ldap_unavailable);
+    // 403 (disabled account) and 429 (rate limited) already say what happened
+    // in a form the user can act on, so pass the server's wording through.
+    if (err.message) return err.message;
+  }
+  return err instanceof Error ? err.message : t(($) => $.errors.ldap_unavailable);
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -101,6 +135,7 @@ export function LoginPage({
   logo,
   onSuccess,
   google,
+  ldap,
   cliCallback,
   onTokenObtained,
   onGoogleLogin,
@@ -109,6 +144,19 @@ export function LoginPage({
   const { t } = useT("auth");
   const qc = useQueryClient();
   const [step, setStep] = useState<"email" | "code" | "cli_confirm">("email");
+  // Which credential form the first screen shows. This is deliberately NOT a
+  // `step` value: `code` and `cli_confirm` are sequential sub-states you reach
+  // *through* a method, whereas the two tabs are parallel, mutually exclusive
+  // entrances to step === "email" (the reviewed prototype's shape). Keeping it
+  // separate means submitting an email code still lands on the code screen
+  // regardless of which tab is highlighted, and the back button restores the
+  // tab the user came from.
+  const [activeTab, setActiveTab] = useState<"email" | "ldap">("email");
+  const [ldapUsername, setLdapUsername] = useState("");
+  const [ldapPassword, setLdapPassword] = useState("");
+  // Both fields are state, not DOM, on purpose: the panels unmount when you
+  // switch tabs, so a value held only in the input would vanish on a tab round
+  // trip. Neither is cleared after a failed submit, see handleLdapLogin.
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -226,6 +274,65 @@ export function LoginPage({
     },
     [email, onSuccess, cliCallback, onTokenObtained, qc, t],
   );
+
+  // Directory (LDAP) sign-in. Mirrors handleVerify branch for branch: the CLI
+  // handoff needs a bearer token to put in the redirect URL, so it calls the
+  // API client directly; everything else goes through the auth store so the
+  // session lands in the same place an email-code session would.
+  const handleLdapLogin = useCallback(
+    async (e?: React.FormEvent) => {
+      e?.preventDefault();
+      const username = ldapUsername.trim();
+      if (!username || !ldapPassword) {
+        setError(t(($) => $.ldap.fields_required));
+        return;
+      }
+      setLoading(true);
+      setError("");
+      try {
+        if (cliCallback) {
+          const { token } = await api.loginWithLdap(username, ldapPassword);
+          localStorage.setItem("multica_token", token);
+          api.setToken(token);
+          onTokenObtained?.();
+          redirectToCliCallback(cliCallback.url, token, cliCallback.state);
+          return;
+        }
+
+        await useAuthStore.getState().loginWithLdap(username, ldapPassword);
+        // Same seeding as handleVerify: onSuccess reads the workspace list
+        // synchronously to decide where to send the user.
+        const wsList = await api.listWorkspaces();
+        qc.setQueryData(workspaceKeys.list(), wsList);
+        onTokenObtained?.();
+        onSuccess();
+      } catch (err) {
+        setError(ldapErrorMessage(err, t));
+        // Deliberately keeps both fields. A wrong password is a typo, and
+        // making someone retype their directory username to try again is the
+        // difference between a shrug and a support ticket.
+        setLoading(false);
+        return;
+      }
+      setLoading(false);
+    },
+    [ldapUsername, ldapPassword, cliCallback, onTokenObtained, onSuccess, qc, t],
+  );
+
+  // Directory login is offered only when the server said so AND only on the
+  // first screen. `code` / `cli_confirm` are mid-flow states with their own
+  // layout, and offering to switch credential method from inside a pending
+  // code entry would strand that flow.
+  const showTabs = ldap?.enabled === true && step === "email";
+  const ldapActive = showTabs && activeTab === "ldap";
+
+  const handleTabChange = useCallback((value: TabsPrimitive.Tab.Value) => {
+    const next = value === "ldap" ? "ldap" : "email";
+    setActiveTab(next);
+    // Each panel's error says something about that panel. Carrying one over is
+    // how an LDAP message ends up printed under the email field.
+    setError("");
+  }, []);
 
   const handleResend = async () => {
     if (cooldown > 0) return;
@@ -415,41 +522,116 @@ export function LoginPage({
             {t(($) => $.signin.title)}
           </CardTitle>
           <CardDescription>
-            {t(($) => $.signin.description)}
+            {ldapActive ? t(($) => $.ldap.subtitle) : t(($) => $.signin.description)}
           </CardDescription>
         </CardHeader>
+        {showTabs && (
+          <CardContent className="pb-0">
+            <Tabs value={activeTab} onValueChange={handleTabChange}>
+              <TabsList className="w-full">
+                <TabsTrigger value="email" className="flex-1">
+                  {t(($) => $.tabs.email_code)}
+                </TabsTrigger>
+                <TabsTrigger value="ldap" className="flex-1">
+                  {t(($) => $.tabs.ldap)}
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </CardContent>
+        )}
         <CardContent>
-          <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="login-email">{t(($) => $.common.email)}</Label>
-              <Input
-                id="login-email"
-                type="email"
-                placeholder={t(($) => $.common.email_placeholder)}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoFocus
-                required
-              />
-            </div>
-            {error && (
-              <p className="text-body text-destructive">{error}</p>
-            )}
-          </form>
+          {ldapActive ? (
+            /* Directory panel. Its own <form> with its own id, mirroring the
+               email panel rather than sharing it: the two submit handlers do
+               different things, and one form can only have one onSubmit. */
+            <form id="ldap-login-form" onSubmit={handleLdapLogin} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="ldap-username">{t(($) => $.ldap.username)}</Label>
+                <Input
+                  id="ldap-username"
+                  type="text"
+                  placeholder={t(($) => $.ldap.username_placeholder)}
+                  autoComplete="username"
+                  value={ldapUsername}
+                  onChange={(e) => setLdapUsername(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ldap-password">{t(($) => $.ldap.password)}</Label>
+                <Input
+                  id="ldap-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={ldapPassword}
+                  onChange={(e) => setLdapPassword(e.target.value)}
+                  required
+                />
+              </div>
+              {error && (
+                <p className="text-body text-destructive" role="alert">
+                  {error}
+                </p>
+              )}
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.ldap.description)}
+              </p>
+            </form>
+          ) : (
+            <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="login-email">{t(($) => $.common.email)}</Label>
+                <Input
+                  id="login-email"
+                  type="email"
+                  placeholder={t(($) => $.common.email_placeholder)}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </div>
+              {/* The shared `error` state renders for whichever panel is
+                  showing; a directory failure cannot happen while the email
+                  form is up, and vice versa, so there is nothing to misattribute. */}
+              {error && (
+                <p className="text-body text-destructive" role="alert">
+                  {error}
+                </p>
+              )}
+            </form>
+          )}
         </CardContent>
         <CardFooter className="flex flex-col gap-3">
-          <Button
-            type="submit"
-            form="login-form"
-            className="w-full"
-            size="lg"
-            disabled={!email || loading}
-          >
-            {loading
-              ? t(($) => $.signin.sending)
-              : t(($) => $.signin.continue)}
-          </Button>
-          {(google || onGoogleLogin) && (
+          {ldapActive ? (
+            <Button
+              type="submit"
+              form="ldap-login-form"
+              className="w-full"
+              size="lg"
+              disabled={!ldapUsername.trim() || !ldapPassword || loading}
+            >
+              {loading ? t(($) => $.ldap.signing_in) : t(($) => $.ldap.submit)}
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              form="login-form"
+              className="w-full"
+              size="lg"
+              disabled={!email || loading}
+            >
+              {loading
+                ? t(($) => $.signin.sending)
+                : t(($) => $.signin.continue)}
+            </Button>
+          )}
+          {/* Google stays with the email panel: it is another way to satisfy
+              "who are you" for the browser account, not for the directory
+              account, and rendering it under the LDAP form would put three
+              submit affordances in one card. */}
+          {!ldapActive && (google || onGoogleLogin) && (
             <Button
               type="button"
               variant="outline"

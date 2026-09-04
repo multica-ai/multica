@@ -104,6 +104,25 @@ primary와 복제본의 연결 한도는 서로 독립적입니다. 모든 API �
 | `GOOGLE_CLIENT_SECRET` | 비어 있음 | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Google Console의 callback 주소와 완전히 같아야 함 |
 
+### 기업 디렉터리(LDAP)
+
+읽기 전용 디렉터리 로그인입니다. `LDAP_ENABLED=true`일 때만 로그인 페이지에 계정·비밀번호 탭이 표시됩니다. 설정하지 않으면 기능이 아예 나타나지 않습니다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `LDAP_ENABLED` | `false` | 유일한 스위치. `false`이면 아래 변수는 모두 무시됩니다 |
+| `LDAP_URL` | 비어 있음 | `ldap://`, `ldaps://`, `ldapi://` 접속 주소. 예: `ldaps://openldap.corp.example.com:636` |
+| `LDAP_BASE_DN` | 비어 있음 | 사용자 검색을 시작하는 하위 트리. 예: `ou=people,dc=corp,dc=example,dc=com` |
+| `LDAP_BIND_DN` | 비어 있음 | 사용자 본인 bind 전에 항목을 찾는 서비스 계정. 읽기/검색 권한만 필요합니다 |
+| `LDAP_BIND_PASSWORD` | 비어 있음 | 위 서비스 계정의 비밀번호. 로그에 남지 않습니다 |
+| `LDAP_USER_FILTER` | `(uid=%s)` | `%s`는 정확히 하나이며 RFC 4515로 이스케이프된 사용자 이름으로 대체됩니다. AD는 `(sAMAccountName=%s)` |
+| `LDAP_EMAIL_ATTR` | `mail` | 로그인 이메일이 담긴 속성. Multica는 이 값으로 계정을 대조하므로 속성이 없는 항목은 로그인할 수 없습니다 |
+| `LDAP_NAME_ATTR` | `displayName` | 처음 로그인할 때 표시 이름을 채우는 데 사용하는 속성 |
+| `LDAP_TLS_INSECURE` | `false` | 인증서 검증을 건너뜁니다. `ldaps://`/`ldapi://`에서만 사용하며 신뢰할 수 있는 내부 네트워크에서만 임시로 쓰세요 |
+| `LDAP_TIMEOUT` | `5s` | 연결 + 검색 + bind 전체에 주어지는 시간. Go duration 형식(`5s`, `1m` 등) |
+
+디렉터리 로그인은 `ALLOW_SIGNUP`, `ALLOWED_EMAILS`, `ALLOWED_EMAIL_DOMAINS`를 참조하지 않습니다. bind가 성공하는 것 자체가 로그인 허용 판단입니다. 자세한 내용은 [로그인과 가입](/auth-setup#기업-디렉터리ldap-로그인)을 참고하세요.
+
 ### 가입 범위
 
 | 변수 | 기본값 | 설명 |
@@ -157,7 +176,7 @@ allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입
 |---|---|---|
 | `REDIS_URL` | 비어 있음 | 공유 rate limit, 실시간 이벤트, token cache에 사용. 설정하지 않으면 실시간 이벤트와 초대 제한은 프로세스 메모리로 fallback하고 인증 rate limit은 비활성화 |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 관리형 Redis가 `CLIENT SETNAME`을 금지하면 `true`로 설정 |
-| `RATE_LIMIT_AUTH` | `5` | IP당 1분에 인증 코드 전송 또는 Google 로그인 시작 허용 횟수 |
+| `RATE_LIMIT_AUTH` | `5` | IP당 1분에 인증 코드 전송, Google 로그인 시작 또는 디렉터리 계정 로그인 허용 횟수 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | IP당 1분에 인증 코드 검증 허용 횟수 |
 | `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | 초대자별 10분 슬라이딩 윈도 내 워크스페이스 초대 생성 횟수. `0`이면 이 제한을 비활성화 |
 | `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | 워크스페이스의 모든 관리자가 24시간 슬라이딩 윈도 내 생성할 수 있는 총 초대 수. `0`이면 이 제한을 비활성화 |

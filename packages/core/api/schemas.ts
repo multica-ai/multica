@@ -741,6 +741,12 @@ export interface AppConfigResponse {
    * (self-host only; off on the managed cloud). Absent/false hides the whole
    * Settings → Integrations "Git providers" section. */
   vcs_integration_available?: boolean;
+  /** Whether this deployment offers corporate-directory (LDAP) login, so the
+   * sign-in screen can render the account/password tab. Omitted when false,
+   * exactly like vcs_integration_available: the managed cloud never configures a
+   * directory, and an absent field must read as "not available" rather than a
+   * guess about a server too old to have said anything. */
+  ldap_enabled?: boolean;
   feature_flags?: Record<string, boolean>;
   /** Whether this server understands local_directory `execution_mode` and
    * gates worktree mode at save time. Absent on every server that predates this
@@ -949,6 +955,7 @@ export const AppConfigSchema = z.object({
   daemon_app_url: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
   vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
+  ldap_enabled: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
   local_worktree_supported: BooleanWithDefaultSchema(false),
   agent_conversation_starters_supported: BooleanWithDefaultSchema(false),
@@ -964,6 +971,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_app_url: "",
   workspace_creation_disabled: false,
   vcs_integration_available: false,
+  ldap_enabled: false,
   // Fail closed: an unreadable config must not look like a server that
   // validates execution_mode.
   local_worktree_supported: false,
@@ -2359,6 +2367,22 @@ export const UserSchema = z.object({
   timezone: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
+}).loose();
+
+/**
+ * POST /auth/ldap/login (and, in shape, every other login endpoint): the JWT
+ * plus the account it belongs to.
+ *
+ * This schema exists because a login response is the one payload where a
+ * contract drift has no graceful fallback: reading `token` off an
+ * unvalidated object means a server that renamed the field hands the caller
+ * `undefined` as a bearer token, and the failure surfaces much later as an
+ * unexplained 401. The two older login endpoints still parse their responses
+ * without a schema; new ones do not repeat that.
+ */
+export const LoginResponseSchema = z.object({
+  token: z.string(),
+  user: UserSchema,
 }).loose();
 
 export const EMPTY_USER: User = {

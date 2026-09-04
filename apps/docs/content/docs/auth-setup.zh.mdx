@@ -97,6 +97,69 @@ MULTICA_DEV_VERIFICATION_CODE=888888
 
 Google Console 与 `GOOGLE_REDIRECT_URI` 中的地址必须完全一致，包括协议、端口和结尾斜杠。配置生效后，登录页会出现 Google 登录按钮；前端镜像不需要重新构建。
 
+## 企业目录（LDAP）登录
+
+自托管的 Multica 可以直接使用企业内网 OpenLDAP 或 Active Directory 的账号密码登录。它是与邮箱验证码、Google 登录并列的第三条登录入口：成功后走的是同一套会话流程，下游（工作区、邀请、token、CLI）完全不知道用户从哪个入口进来。
+
+1. 把 `LDAP_*` 指向目录服务。两个边界要记住：服务账号只需要 `LDAP_BASE_DN` 上的读/搜索权限，`LDAP_USER_FILTER` 里有且只有一个 `%s`。
+
+ ```dotenv
+ LDAP_ENABLED=true
+ LDAP_URL=ldaps://openldap.corp.example.com:636
+ LDAP_BASE_DN=ou=people,dc=corp,dc=example,dc=com
+ LDAP_BIND_DN=cn=lookup,dc=corp,dc=example,dc=com
+ LDAP_BIND_PASSWORD=lookup-only-password
+ LDAP_USER_FILTER=(uid=%s)
+ ```
+
+2. 按目录类型调整过滤条件和属性：OpenLDAP 用 `uid`，AD 用 `sAMAccountName`。
+
+ ```dotenv
+ # OpenLDAP
+ LDAP_USER_FILTER=(uid=%s)
+
+ # Active Directory
+ LDAP_USER_FILTER=(sAMAccountName=%s)
+ ```
+
+3. 重启 API 服务。
+
+和 `GOOGLE_CLIENT_ID` 一样，前端在运行时通过 `/api/config` 得知是否启用了目录登录，登录页会直接出现对应的 Tab，前端镜像不需要重新构建。
+
+### 行为
+
+- 登录名是目录自己的标识（`uid` / `sAMAccountName`），不是邮箱。请求体里没有邮箱字段，调用方无法靠填写某个邮箱来认领别人的账号。
+- Multica 以 `users.email` 匹配账号。从 `LDAP_EMAIL_ATTR` 取到的值会先转成小写再匹配：已有账号沿用原有身份，首次目录登录会创建账号。`LDAP_NAME_ATTR` 只在全新账号上预填显示名，也不会覆盖已有账号的邮箱。
+- 密码错误与用户名不存在返回完全相同的 `401` 和相同文案，因此这个接口不能被用来枚举目录账号。一个登录名匹配到多条条目时同样按 `401` 处理，服务端日志会提示你到目录里消除重复，而不是随机挑一条。
+- 目录登录不调用注册范围检查。`ALLOW_SIGNUP`、`ALLOWED_EMAILS`、`ALLOWED_EMAIL_DOMAINS` 在这里都不生效：Bind 成功本身就是准入判断，所以即使关闭了注册，已有账号依然能登录。
+- 不做 LDAP 组到 Multica 角色的映射。新账号没有任何工作区成员身份，和普通人一样需要被邀请。
+- 用户密码和服务账号密码都不会写入日志，目录返回的错误文本也会被归纳后再记录。登录名替换进 `LDAP_USER_FILTER` 前会做 RFC 4515 转义，其中的特殊字符只会按字面匹配，不会扩大查询范围。
+- 该接口与发送验证码、Google 登录共用同一档限流（`RATE_LIMIT_AUTH`，默认每个 IP 每分钟 5 次），而不是更宽松的 verify-code 额度。
+
+### 失败情况
+
+用户看到的和服务端日志里记录的，是刻意分开的：
+
+| 状态 | 含义 |
+|---|---|
+| `400` | 未填写用户名或密码 |
+| `401` | 目录拒绝了这组凭证，或没有匹配到唯一条目 |
+| `403` | Multica 账号处于临时禁用状态 |
+| `502` | 无法连接目录服务，或配置不完整 |
+| `503` | `LDAP_ENABLED` 不是 `true`，该集成未开启 |
+
+如果密码确定没错却拿到 `502`，就该去看日志：服务账号 Bind 失败、`LDAP_USER_FILTER` 无法解析、条目的 `LDAP_EMAIL_ATTR` 为空，这三种都是部署侧的问题，不是登录者的问题。
+
+目录登录不新增数据库迁移，也不新增表：账号匹配复用现有的 `users.email` 唯一键。
+
+`LDAP_TLS_INSECURE=true` 会跳过证书校验，使目录流量（包括服务账号密码）存在被截获的风险，因此只应作为可信内网中的临时联调手段：
+
+<Callout type="warning">
+请改为把目录服务的 CA 加入容器信任库。`LDAP_TLS_INSECURE=true` 只接受 `ldaps://`（或 `ldapi://`）地址：明文 `ldap://` 根本没有证书可校验，密码也会明文传输，服务端会直接拒绝这种组合，而不是带着半保护状态启动。
+</Callout>
+
+全部变量与默认值见[环境变量](/environment-variables#企业目录ldap)。
+
 ## 注册范围控制
 
 三个变量共同决定新账号能否创建：

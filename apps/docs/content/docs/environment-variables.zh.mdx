@@ -104,6 +104,25 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `GOOGLE_CLIENT_SECRET` | 空 | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | 必须与 Google Console 中的回调地址完全一致 |
 
+### 企业目录（LDAP）
+
+只读的目录登录。`LDAP_ENABLED=true` 时登录页才会出现「账号密码」Tab；不设置则该功能完全不可见。
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `LDAP_ENABLED` | `false` | 唯一的开关；为 `false` 时下面所有变量都不生效 |
+| `LDAP_URL` | 空 | `ldap://`、`ldaps://` 或 `ldapi://` 地址，例如 `ldaps://openldap.corp.example.com:636` |
+| `LDAP_BASE_DN` | 空 | 用户搜索的起始子树，例如 `ou=people,dc=corp,dc=example,dc=com` |
+| `LDAP_BIND_DN` | 空 | 在用户本人 Bind 之前负责查条目的服务账号；只需要读/搜索权限 |
+| `LDAP_BIND_PASSWORD` | 空 | 上述服务账号的密码；不会写入日志 |
+| `LDAP_USER_FILTER` | `(uid=%s)` | 有且只有一个 `%s`，替换为经过 RFC 4515 转义的登录名；AD 用 `(sAMAccountName=%s)` |
+| `LDAP_EMAIL_ATTR` | `mail` | 存放登录邮箱的属性；Multica 以它匹配账号，没有该属性的条目无法登录 |
+| `LDAP_NAME_ATTR` | `displayName` | 首次登录时用于预填显示名的属性 |
+| `LDAP_TLS_INSECURE` | `false` | 跳过证书校验；只适用于 `ldaps://`/`ldapi://`，且只应在可信内网中临时使用 |
+| `LDAP_TIMEOUT` | `5s` | 整次「连接 + 搜索 + Bind」的时间预算；Go duration，如 `5s`、`1m` |
+
+目录登录不读取 `ALLOW_SIGNUP`、`ALLOWED_EMAILS`、`ALLOWED_EMAIL_DOMAINS`：Bind 成功本身就是准入判断。细节见[登录与注册](/auth-setup#企业目录ldap登录)。
+
 ### 注册范围
 
 | 变量 | 默认值 | 说明 |
@@ -157,7 +176,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 |---|---|---|
 | `REDIS_URL` | 空 | 用于共享限流、实时事件和 token cache；未设置时实时事件和邀请限流回退到进程内存，认证限流不生效 |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 托管 Redis 禁止 `CLIENT SETNAME` 时设为 `true` |
-| `RATE_LIMIT_AUTH` | `5` | 单 IP 每分钟发送验证码或发起 Google 登录的次数 |
+| `RATE_LIMIT_AUTH` | `5` | 单 IP 每分钟发送验证码、发起 Google 登录或目录账号登录的次数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 单 IP 每分钟验证验证码的次数 |
 | `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | 每位邀请人在 10 分钟滑动窗口内可创建的工作区邀请数；设为 `0` 可关闭此项限流 |
 | `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | 同一工作区内所有管理员在 24 小时滑动窗口内可创建的邀请总数；设为 `0` 可关闭此项限流 |

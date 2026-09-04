@@ -172,10 +172,23 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 }
 
 // findOrCreateUser returns the existing user for an email, or creates one if
-// none exists. isNew reports whether this call created the user — the signup
-// event fires on that edge, covering both the verification-code and Google
-// OAuth entry points.
-func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.User, isNew bool, err error) {
+// none exists, applying the deployment signup gate. isNew reports whether this
+// call created the user — the signup event fires on that edge, covering
+// the verification-code, Google OAuth and directory (LDAP) entry points.
+func (h *Handler) findOrCreateUser(ctx context.Context, email string) (db.User, bool, error) {
+	return h.findOrCreateUserGate(ctx, email, h.checkSignupAllowed)
+}
+
+// findOrCreateUserGate is findOrCreateUser with the signup gate injected.
+//
+// The gate parameter exists because a corporate-directory login carries its
+// own admission decision: ALLOW_SIGNUP / ALLOWED_EMAILS / ALLOWED_EMAIL_DOMAINS
+// restrict who may *register*, but an LDAP bind already proved the caller's
+// identity to the directory the deployment chose to trust, so re-running the
+// registration allowlist over it would silently lock out accounts the
+// directory owns. Passing nil means "no gate"; every existing entry point
+// (verification code, Google) keeps passing checkSignupAllowed unchanged.
+func (h *Handler) findOrCreateUserGate(ctx context.Context, email string, gate func(email string, isNewUser bool) error) (user db.User, isNew bool, err error) {
 	if auth.IsTemporarilyDisabledUserEmail(email) {
 		return db.User{}, false, auth.ErrTemporarilyDisabledUser
 	}
@@ -189,8 +202,10 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 		return db.User{}, false, auth.ErrTemporarilyDisabledUser
 	}
 
-	if err := h.checkSignupAllowed(email, isNew); err != nil {
-		return db.User{}, false, err
+	if gate != nil {
+		if err := gate(email, isNew); err != nil {
+			return db.User{}, false, err
+		}
 	}
 
 	if !isNew {
@@ -497,6 +512,126 @@ type googleUserInfo struct {
 	Email   string `json:"email"`
 	Name    string `json:"name"`
 	Picture string `json:"picture"`
+}
+
+// LDAPLoginRequest is the directory login payload. `username` is the
+// directory's own login name (uid / sAMAccountName), not an email: the email
+// Multica matches accounts on comes back from the directory, so a caller
+// cannot claim an address it does not own by putting it in this request.
+type LDAPLoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// LDAPLogin authenticates against the corporate directory and then joins the
+// existing session pipeline at exactly the point every other login does:
+// findOrCreateUser -> issueJWT -> SetAuthCookies. Nothing downstream of here
+// (Auth() middleware, PATs, workspace membership) learns that LDAP exists, so
+// this is a third parallel front door rather than a new kind of session.
+//
+// It deliberately does NOT call checkSignupAllowed: see
+// findOrCreateUserGate for why a directory bind is its own admission decision.
+func (h *Handler) LDAPLogin(w http.ResponseWriter, r *http.Request) {
+	var req LDAPLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	username := strings.TrimSpace(req.Username)
+	if username == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "username and password are required")
+		return
+	}
+
+	// 503 rather than 401: an unconfigured integration is not the caller's
+	// credential failing, and the UI must not show "wrong password".
+	if h.LDAPAuth == nil {
+		writeError(w, http.StatusServiceUnavailable, "LDAP login is not configured")
+		return
+	}
+
+	ldapUser, err := h.LDAPAuth.Authenticate(r.Context(), username, req.Password)
+	if err != nil {
+		switch {
+		case errors.Is(err, auth.ErrLDAPInvalidCredentials):
+			// One message for "no such user" and "wrong password" alike, so the
+			// endpoint cannot be used to enumerate directory accounts.
+			writeError(w, http.StatusUnauthorized, "invalid username or password")
+		case errors.Is(err, auth.ErrLDAPUnavailable):
+			writeError(w, http.StatusBadGateway, "directory service unavailable")
+		default:
+			slog.Warn("ldap login failed with an unexpected error", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusBadGateway, "directory service unavailable")
+		}
+		return
+	}
+
+	email := strings.ToLower(strings.TrimSpace(ldapUser.Email))
+	if email == "" {
+		// Defensive: the authenticator rejects a directory entry with no email,
+		// so reaching here means a different implementation is wired in. Fail as
+		// unavailable rather than creating an account with a blank key.
+		slog.Error("ldap: authenticator returned a user with no email", "username", username)
+		writeError(w, http.StatusBadGateway, "directory service unavailable")
+		return
+	}
+
+	user, isNew, err := h.findOrCreateUserGate(r.Context(), email, nil)
+	if err != nil {
+		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
+			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+			return
+		}
+		slog.Warn("ldap login: user lookup failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+		writeError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+	if isNew {
+		// findOrCreateUser names a fresh account after the email prefix. The
+		// directory already knows the person's name, so use it — exactly what
+		// GoogleLogin does with the Google profile. Best effort: a failed rename
+		// must not undo an authenticated login.
+		if ldapUser.DisplayName != "" {
+			if updated, err := h.Queries.UpdateUser(r.Context(), db.UpdateUserParams{
+				ID:        user.ID,
+				Name:      ldapUser.DisplayName,
+				AvatarUrl: user.AvatarUrl,
+			}); err == nil {
+				user = updated
+			}
+		}
+		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
+		evt.Properties["auth_method"] = "ldap"
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, evt)
+	}
+
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
+			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+			return
+		}
+		slog.Warn("ldap login: token signing failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("failed to set auth cookies", "error", err)
+	}
+
+	if h.CFSigner != nil {
+		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(auth.AuthTokenTTL())) {
+			http.SetCookie(w, cookie)
+		}
+	}
+
+	slog.Info("user logged in via ldap", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	writeJSON(w, http.StatusOK, LoginResponse{
+		Token: tokenString,
+		User:  h.userToResponse(user),
+	})
 }
 
 func writeGoogleLoginActionableError(w http.ResponseWriter, err error) bool {

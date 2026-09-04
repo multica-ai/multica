@@ -100,7 +100,7 @@ func uuidArgLen(args []any, i int) int {
 func newSpyHandler(t *testing.T, spy *skillQuerySpy) *Handler {
 	t.Helper()
 	return New(db.New(spy), testPool, testHandler.Hub, testHandler.Bus, testHandler.EmailService,
-		nil, nil, analytics.NoopClient{}, Config{})
+		nil, nil, nil, analytics.NoopClient{}, Config{})
 }
 
 // resolveScopeFixture creates a runtime, a dispatched task, and an agent
