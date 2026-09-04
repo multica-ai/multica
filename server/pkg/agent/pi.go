@@ -15,23 +15,46 @@ import (
 	"time"
 )
 
+// piSessionMode selects the session-persistence strategy a pi-family runtime
+// speaks. They are not interchangeable: pi pre-creates a transcript file and
+// reuses it with --session, while its forks may own the session directory and
+// resume by id. The mode is fixed by the runtime, never negotiated per turn.
+type piSessionMode int
+
+const (
+	// piSessionModeFile is pi's contract: the daemon pre-creates a JSONL
+	// transcript file, passes it via --session, and reuses the path as the
+	// opaque SessionID / ResumeSessionID. The file lock serialises turns.
+	piSessionModeFile piSessionMode = iota
+	// piSessionModeDir is prime-agent's contract: the daemon passes a
+	// --session-dir and lets prime create/name the JSONL. Resumption is by
+	// --resume <id>, where <id> is the session event's id (not the filename).
+	// prime refuses --session outright (verified against v0.8.0).
+	piSessionModeDir
+)
+
 // piBackend implements Backend by spawning the Pi CLI in non-interactive
 // JSON mode (`pi -p --mode json --session <path>`) and parsing its event
 // stream on stdout.
 //
-// It also backs the "omp" (oh-my-pi) provider — omp is a separate CLI
-// (https://omp.sh) that is a drop-in fork of pi and speaks the same JSON
-// event protocol. The daemon probes a separate `omp` binary and registers
-// it under the "omp" key; piBackend uses defaultExecutable so the fallback
-// binary name matches the provider key (pi → "pi", omp → "omp") when
+// It also backs the "omp" (oh-my-pi) and "prime" providers — separate CLIs
+// that are drop-in forks of pi and speak the same JSON event protocol. The
+// daemon probes a separate binary for each and registers it under its own
+// key; piBackend uses defaultExecutable so the fallback binary name matches
+// the provider key (pi → "pi", omp → "omp", prime → "prime-agent") when
 // cfg.ExecutablePath is empty.
 type piBackend struct {
 	cfg               Config
 	defaultExecutable string
 	// providerLabel is the human-facing name used in log messages and error
-	// strings ("pi" or "omp"). Defaults to "pi" when empty so existing callers
-	// that construct piBackend directly (tests) keep their original output.
+	// strings ("pi", "omp" or "prime"). Defaults to "pi" when empty so existing
+	// callers that construct piBackend directly (tests) keep their original
+	// output.
 	providerLabel string
+	// sessionMode is the session-persistence strategy for this runtime. Zero
+	// value (piSessionModeFile) preserves pi/omp behaviour; the prime variant
+	// is selected by the BuiltinRuntime descriptor.
+	sessionMode piSessionMode
 }
 
 var (
@@ -212,34 +235,57 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 	timeout := opts.Timeout
 
-	// Pi's --session flag expects a file path where events are appended.
-	// The path doubles as our opaque session identifier: we return it as
-	// SessionID and expect it back as ResumeSessionID on the next turn.
-	sessionPath := opts.ResumeSessionID
-	if sessionPath == "" {
-		p, err := newPiSessionPath()
+	// Session model depends on the runtime family (pi session mode).
+	// - piSessionModeFile (pi, omp): the daemon pre-creates a JSONL transcript
+	//   file, passes it via --session, and reuses the path as the opaque
+	//   SessionID / ResumeSessionID. A file lock serialises turns.
+	// - piSessionModeDir (prime): the daemon points prime at a --session-dir
+	//   and lets prime create/name the JSONL. Resumption is by --resume <id>,
+	//   where <id> is the session event's id. prime manages its own
+	//   concurrency (it refuses to resume an already-active session).
+	sessionValue := opts.ResumeSessionID
+	sessionLock := (*os.File)(nil)
+	if b.sessionMode == piSessionModeDir {
+		dir, err := piSessionDir()
 		if err != nil {
-			return nil, fmt.Errorf("%s session path: %w", label, err)
+			return nil, fmt.Errorf("%s session dir: %w", label, err)
 		}
-		sessionPath = p
-	}
-	if err := ensurePiSessionFile(sessionPath); err != nil {
-		return nil, fmt.Errorf("%s session file: %w", label, err)
-	}
-	sessionLock, locked, err := tryLockPiSessionFile(sessionPath)
-	if err != nil {
-		return nil, fmt.Errorf("%s session lock: %w", label, err)
-	}
-	if !locked {
-		if opts.ResumeSessionID != "" {
-			return piSessionBusyResult(label, sessionPath), nil
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("%s session dir: %w", label, err)
 		}
-		return nil, fmt.Errorf("%s session file %q is already in use", label, sessionPath)
+		sessionValue = dir
+	} else {
+		if sessionValue == "" {
+			p, err := newPiSessionPath()
+			if err != nil {
+				return nil, fmt.Errorf("%s session path: %w", label, err)
+			}
+			sessionValue = p
+		}
+		if err := ensurePiSessionFile(sessionValue); err != nil {
+			return nil, fmt.Errorf("%s session file: %w", label, err)
+		}
+		var locked bool
+		sessionLock, locked, err = tryLockPiSessionFile(sessionValue)
+		if err != nil {
+			return nil, fmt.Errorf("%s session lock: %w", label, err)
+		}
+		if !locked {
+			if opts.ResumeSessionID != "" {
+				return piSessionBusyResult(label, sessionValue), nil
+			}
+			return nil, fmt.Errorf("%s session file %q is already in use", label, sessionValue)
+		}
 	}
 
 	runCtx, cancel := runContext(ctx, timeout)
 
-	args := buildPiArgs(sessionPath, opts, b.cfg.Logger)
+	var args []string
+	if b.sessionMode == piSessionModeDir {
+		args = buildPrimeArgs(sessionValue, opts, b.cfg.Logger)
+	} else {
+		args = buildPiArgs(sessionValue, opts, b.cfg.Logger)
+	}
 	cmd, _, _ := b.cfg.commandAt(execName).execVia(runCtx, choosePiInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
@@ -313,6 +359,9 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		var finalError string
 		var lastTurnError string
 		usage := make(map[string]TokenUsage)
+		// For piSessionModeDir (prime) the resumable session id is emitted in
+		// the leading `session` event; in file mode the path is the id.
+		resumableSessionID := sessionValue
 
 		// Pi message_update events can be large (they embed the full message
 		// partial on each delta); the shared stream bound covers that.
@@ -330,6 +379,15 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			}
 
 			switch evt.Type {
+			case "session":
+				// prime emits a leading `session` event carrying the resumable
+				// session id (distinct from the on-disk filename). In dir mode
+				// this id is what --resume needs on a later turn.
+				if b.sessionMode == piSessionModeDir && evt.ID != "" {
+					resumableSessionID = evt.ID
+				}
+				trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
+
 			case "agent_start":
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 
@@ -482,7 +540,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			Output:     output.String(),
 			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
-			SessionID:  sessionPath,
+			SessionID:  resumableSessionID,
 			Usage:      usage,
 		}
 	}()
@@ -511,6 +569,12 @@ func piSessionBusyResult(label, sessionPath string) *Session {
 // demand by the switch arms.
 type piStreamEvent struct {
 	Type string `json:"type"`
+
+	// session: the first event emitted in print/JSON mode. Its `id` is the
+	// runtime-owned session id. In piSessionModeDir (prime) this id — NOT the
+	// filename on disk — is the value to hand back for --resume, so we capture
+	// it and surface it as Result.SessionID.
+	ID string `json:"id,omitempty"`
 
 	// message_update
 	AssistantMessageEvent *piAssistantMessageEvent `json:"assistantMessageEvent,omitempty"`
@@ -594,11 +658,13 @@ func decodePiResult(raw json.RawMessage) string {
 // overridden by user-configured custom_args. Overriding these would
 // break the daemon↔Pi communication protocol.
 var piBlockedArgs = map[string]blockedArgMode{
-	"-p":         blockedStandalone, // non-interactive mode
-	"--print":    blockedStandalone, // alias for -p
-	"--mode":     blockedWithValue,  // "json" event stream protocol
-	"--session":  blockedWithValue,  // daemon manages the session path
-	"--thinking": blockedWithValue,  // owned by agent.thinking_level
+	"-p":            blockedStandalone, // non-interactive mode
+	"--print":       blockedStandalone, // alias for -p
+	"--mode":        blockedWithValue,  // "json" event stream protocol
+	"--session":     blockedWithValue,  // daemon manages the session path
+	"--session-dir": blockedWithValue,  // prime: daemon manages the session dir
+	"--resume":      blockedWithValue,  // prime: daemon manages resume (session id)
+	"--thinking":    blockedWithValue,  // owned by agent.thinking_level
 }
 
 // piCustomArgModes mirrors Pi 0.83's built-in parser closely enough to
@@ -706,6 +772,34 @@ func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []st
 	// Pi loads the per-task AGENTS.md the daemon writes into the workdir, so
 	// inlining the same runtime brief would duplicate it on every turn.
 	// Verified against Pi 0.67.2 (MUL-5392).
+	args = append(args, filterPiCustomArgs(opts.CustomArgs, logger)...)
+	return args
+}
+
+// buildPrimeArgs assembles argv for a Prime Agent one-shot run. It is pi's
+// JSON protocol with the session flags prime actually accepts: prime removed
+// `--session` (v0.8.0: "Error: Unknown option: --session") and instead owns a
+// session directory (`--session-dir`), resuming a prior conversation via
+// `--resume <id>` where <id> is the session event's id. The rest (model,
+// thinking, tool registry, custom args) matches buildPiArgs so the same
+// filtered custom-args handling applies.
+func buildPrimeArgs(sessionDir string, opts ExecOptions, logger *slog.Logger) []string {
+	args := []string{
+		"-p",
+		"--mode", "json",
+	}
+	if sessionDir != "" {
+		args = append(args, "--session-dir", sessionDir)
+		if resume := strings.TrimSpace(opts.ResumeSessionID); resume != "" {
+			args = append(args, "--resume", resume)
+		}
+	}
+	if model := strings.TrimSpace(opts.Model); model != "" {
+		args = append(args, "--model", model)
+	}
+	if opts.ThinkingLevel != "" {
+		args = append(args, "--thinking", opts.ThinkingLevel)
+	}
 	args = append(args, filterPiCustomArgs(opts.CustomArgs, logger)...)
 	return args
 }
