@@ -194,7 +194,7 @@ Notes:
 - **External dispatch**: no `MCP` tools for `gh`, `docker`, `cloudflared` → add `mcp: github-gh`, `docker-mcp` to `agent` `Workflow` for autonomous PR/migration.
 - **Blocked deps API**: `issue_dependency` `blocked_by` edges have no API — insert via SQL until handler lands.
 
-### Cross-workspace model control (proposed 404, pricing shifts)
+### Cross-workspace model control (proposed 432, pricing shifts)
 
 **Goal**: 1 row flip controls 40 agents across 4 workspaces — price jump needs no per-agent `UPDATE`.
 
@@ -207,7 +207,7 @@ workspace_id set → override that workspace only
 resolver: concrete = workspace_map[tier] ?? global_map[tier] ?? tier
 ```
 
-**Migration 404**: `CREATE TABLE model_tier_map (...)` 3 global rows `cheap/balanced/premium` initially `mimo/muse-spark/qwen`. `ALTER` not needed, new table additive, no FK besides `workspace_id` cascade.
+**Migration 432**: `CREATE TABLE model_tier_map (...)` 3 global rows `cheap/balanced/premium` initially `mimo/muse-spark/qwen`. `ALTER` not needed, new table additive, no FK besides `workspace_id` cascade. (404=`agent_starter_prompts`; landed set is 432/434/435/437 — no 436.)
 
 **Handler**:
 - `PATCH /api/model-map` `{global:{cheap:"...",balanced:"...",premium:"..."}}` → `UPSERT` `NULL` rows
@@ -228,4 +228,4 @@ if m, ok := workspaceMap[tier]; ok { concrete = m } else if g, ok := globalMap[t
 
 **Ops**: `costUSDTicks` alert → `PATCH /api/model-map` 1 call → next `ClaimAgentTask` resolves new concrete, no restart. `soft_drops_total` + `disk_free_percent` watch for capacity.
 
-**Status**: not yet migrated — `agent.model` still concrete (`mimo/x-preview/big-pickle` 33 pinned, 7 `NULL`). Until 404 lands, control via direct `UPDATE agent SET model='tier'` (40 rows) or `docker exec psql UPDATE model_tier_map` stub via `.env` `MULTICA_MODEL_MAP_CHEAP` fallback (needs `launchctl kickstart`).
+**Status**: not yet migrated — `agent.model` still concrete (`mimo/x-preview/big-pickle` 33 pinned, 7 `NULL`). Until 432 lands, control via direct `UPDATE agent SET model='tier'` (40 rows) or `docker exec psql UPDATE model_tier_map` stub via `.env` `MULTICA_MODEL_MAP_CHEAP` fallback (needs `launchctl kickstart`).

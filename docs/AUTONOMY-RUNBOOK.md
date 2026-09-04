@@ -116,6 +116,13 @@ If `needs` points at a missing `custom_env` secret, set `MULTICA_ENV_ENC_KEY` on
 the server first (see `SELF_HOSTING_ADVANCED.md`) so the secret is stored
 encrypted at rest.
 
+### Help digest (rollup)
+
+Open `agent_requested_help` items roll up into one `agent_help_digest` per
+`(workspace, recipient)` via `server/internal/scheduler/jobs_help_digest.go`
+(15m cadence, registered `server/cmd/server/main.go:692`). Reconcile upserts
+the digest and clears stale digests with no open items left.
+
 ## Quick reference
 
 | Symptom | Action |
