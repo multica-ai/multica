@@ -14,6 +14,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -507,5 +508,105 @@ func TestOutboundMediaValidate_RejectsUnsendableMedia(t *testing.T) {
 	}
 	if err := (outboundMedia{Kind: mediaTypeFile, Filename: "  "}).validate(); err == nil {
 		t.Error("media with no filename was accepted — the name is the only format hint WeCom gets")
+	}
+}
+
+// errTestWithdrawn is what the permission hook answers once the person has
+// taken the connection back.
+var errTestWithdrawn = errors.New("wecom test: the installation was withdrawn")
+
+// The permission verdict has to be taken by the goroutine that writes, not by
+// the loop that dispatches. errgroup.Go blocks while the group is at its
+// limit, so a verdict taken before the dispatch is a yes that then sits in
+// that wait for as long as the slowest chunk ahead of it — and a withdrawal
+// landing inside the wait still gets its chunk on the wire.
+func TestUploadMediaChunks_AWithdrawalDuringTheSlotWaitStopsTheNextChunk(t *testing.T) {
+	t.Parallel()
+	conn := newMediaConn()
+	arrived, release := conn.holdChunks()
+	sender := conn.newSender()
+
+	var revoked atomic.Bool
+	// Five chunks run three at a time (the ladder's middle step), so the
+	// fourth and fifth are the ones that have to wait for a slot.
+	data := make([]byte, mediaChunkBytes*4+1)
+	done := make(chan error, 1)
+	go func() {
+		_, err := sender.uploadMedia(context.Background(), outboundMedia{
+			Kind: mediaTypeFile, Filename: "big.bin", Data: data,
+			BeforeChunk: func(context.Context) error {
+				if revoked.Load() {
+					return errTestWithdrawn
+				}
+				return nil
+			},
+		})
+		done <- err
+	}()
+
+	for i := 0; i < 3; i++ {
+		select {
+		case <-arrived:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("only %d chunks reached the socket, want 3 in flight", i)
+		}
+	}
+	// The group is at its limit and the settle is the window this is about:
+	// long enough for the dispatch loop to have run whatever it runs for the
+	// fourth chunk while the wire holds still.
+	select {
+	case <-arrived:
+		t.Fatal("a fourth chunk went out with three unanswered")
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	revoked.Store(true) // the person takes the connection back
+	release()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, errTestWithdrawn) {
+			t.Fatalf("uploadMedia = %v, want the withdrawal", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("uploadMedia never finished")
+	}
+	if n := len(conn.cmdFrames(cmdUploadMediaChunk)); n != 3 {
+		t.Errorf("chunk frames = %d, want 3 — a chunk went on the wire after the withdrawal", n)
+	}
+	if n := len(conn.cmdFrames(cmdUploadMediaFinish)); n != 0 {
+		t.Errorf("finish frames = %d, want 0 — a stopped upload must not be sealed", n)
+	}
+}
+
+// The other wait a stale yes survives, and it is on the far side of the
+// dispatch entirely: a lost verdict buys a second offer one ackTimeout later,
+// and nothing between the two frames asks again.
+func TestUploadMediaChunk_AWithdrawalBeforeTheRetryStopsTheSecondOffer(t *testing.T) {
+	t.Parallel()
+	conn := newMediaConn()
+	conn.dropAcks[cmdUploadMediaChunk] = 1 // the first offer is never answered
+	sender := conn.newSender()
+
+	_, err := sender.uploadMedia(context.Background(), outboundMedia{
+		Kind: mediaTypeFile, Filename: "small.txt", Data: []byte("hello"),
+		// Keyed on the wire: the moment the first frame exists the answer is
+		// no, which puts the withdrawal inside the ackTimeout the retry waits
+		// out — whatever order the checks upstream settle on.
+		BeforeChunk: func(context.Context) error {
+			if len(conn.cmdFrames(cmdUploadMediaChunk)) > 0 {
+				return errTestWithdrawn
+			}
+			return nil
+		},
+	})
+	if !errors.Is(err, errTestWithdrawn) {
+		t.Fatalf("uploadMedia = %v, want the withdrawal", err)
+	}
+	if n := len(conn.cmdFrames(cmdUploadMediaChunk)); n != 1 {
+		t.Errorf("chunk frames = %d, want 1 — the retry went out after the withdrawal", n)
+	}
+	if n := len(conn.cmdFrames(cmdUploadMediaFinish)); n != 0 {
+		t.Errorf("finish frames = %d, want 0", n)
 	}
 }
