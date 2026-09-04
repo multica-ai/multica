@@ -193,6 +193,9 @@ const DATE_FIELD_LABEL_KEY: Record<IssueDateField, "date_field_created" | "date_
 /** Feeding this to useIssueCounts hides every per-option badge (badges only
  *  render at count > 0) without touching the option lists themselves. */
 const NO_COUNT_ISSUES: Issue[] = [];
+// Keep the local fallback's observed-value list aligned with the server facet
+// contract: highest count first, ties by key, at most 50 rows.
+const MAX_OBSERVED_SCALAR_VALUES = 50;
 
 function useIssueCounts(
   allIssues: Issue[],
@@ -841,9 +844,10 @@ function PropertyFilterOptions({
     // same per-value counts derive from the loaded issues. "__set__" is the
     // legacy pre-per-value server bucket — a new menu must ignore it exactly
     // the way an old client ignores the per-value rows.
-    const observedValues = [...(counts?.entries() ?? [])].filter(
-      ([key]) => key !== NO_PROPERTY_VALUE && key !== "__set__",
-    );
+    const observedValues = [...(counts?.entries() ?? [])]
+      .filter(([key]) => key !== NO_PROPERTY_VALUE && key !== "__set__")
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, MAX_OBSERVED_SCALAR_VALUES);
     // A saved view locks this dimension: the value (with its operator) AND
     // "No value" are both part of the view's identity, so neither can be
     // edited in place.

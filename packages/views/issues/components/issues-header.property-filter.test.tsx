@@ -349,6 +349,20 @@ describe("IssueFilterMenu scalar property filter", () => {
     expect(store.getState().propertyFilters).toEqual({});
   });
 
+  it("caps local observed scalar values at the server's deterministic top 50", async () => {
+    const scopedIssues = Array.from({ length: 55 }, (_, index) =>
+      issueWithProperties(`i-${index}`, { [PROP]: `value-${String(index).padStart(2, "0")}` }),
+    );
+    renderFilterMenu([textProperty(PROP, "Note")], scopedIssues);
+    await openPropertySubmenu("Note");
+
+    // Fifty observed rows plus the No value row; equal-count ties are ordered
+    // by key, so value-50 and above fall outside the server-compatible list.
+    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(51);
+    expect(screen.getByRole("menuitemcheckbox", { name: /value-00/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitemcheckbox", { name: /value-50/ })).toBeNull();
+  });
+
   it("renders observed values from server facets and ignores the legacy __set__ bucket", async () => {
     // A new menu against an OLD backend receives the pre-per-value shape: the
     // two-bucket "__set__"/"__none__" response. "__set__" must not surface as
