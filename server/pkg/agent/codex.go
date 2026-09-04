@@ -232,6 +232,15 @@ var codexCompactNotFoundWitnesses = []string{"status 404", "404 not found"}
 // once the flag is gone compaction succeeds and the same conversation
 // continues, so retiring the session here would throw away exactly the context
 // the fix restores. Text only.
+//
+// Delete once no Codex old enough to select the retired route is still in use.
+// Upstream intends to mark the flag Stage::Removed or fall back on the 404,
+// and under either fix this predicate simply stops matching: it overrides no
+// config and stands between nobody and a flag they may legitimately want off,
+// so it costs one substring check on an already-failing path until then and
+// comes out in a single commit. That is the difference from forcing
+// `--enable remote_compaction_v2`, which was declined for the opposite reason
+// (GH #8019) — an override outlives the defect and blocks the legitimate case.
 func CodexRetiredCompactionError(errText string) bool {
 	if errText == "" {
 		return false
