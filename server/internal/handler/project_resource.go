@@ -598,6 +598,13 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusForbidden, "task_config provider reference is not approved")
 		return
 	}
+	if conflict, err := h.findTaskConfigConflict(r.Context(), project.ID, req.ResourceType, pgtype.UUID{}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
+		return
+	} else if conflict {
+		writeError(w, http.StatusConflict, "only one task_config can be attached to a project")
+		return
+	}
 	if conflict, err := h.findTaskConfigLocalDirectoryConflict(r.Context(), project.ID, req.ResourceType, pgtype.UUID{}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
 		return
@@ -737,6 +744,14 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 		return
 	} else if conflict {
 		writeError(w, http.StatusConflict, "task_config cannot coexist with local_directory on the same project")
+		return
+	}
+
+	if conflict, err := h.findTaskConfigConflict(r.Context(), project.ID, existing.ResourceType, existing.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
+		return
+	} else if conflict {
+		writeError(w, http.StatusConflict, "only one task_config can be attached to a project")
 		return
 	}
 
@@ -940,6 +955,29 @@ func taskConfigProviderRefAllowedFromRef(ref json.RawMessage, prefixes []string)
 		return false
 	}
 	return taskConfigProviderRefAllowed(binding.ProviderRef, prefixes)
+}
+
+// findTaskConfigConflict enforces the project-level task_config singleton.
+// Multiple bindings would make the daemon reject every task after claim, so
+// surface the conflict when the resource is written instead.
+func (h *Handler) findTaskConfigConflict(ctx context.Context, projectID pgtype.UUID, resourceType string, excludeID pgtype.UUID) (bool, error) {
+	if resourceType != "task_config" {
+		return false, nil
+	}
+	rows, err := h.Queries.ListProjectResources(ctx, projectID)
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if row.ResourceType != "task_config" {
+			continue
+		}
+		if excludeID.Valid && row.ID == excludeID {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 // findTaskConfigLocalDirectoryConflict enforces the execution boundary for

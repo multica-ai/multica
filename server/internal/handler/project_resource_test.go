@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -77,6 +78,46 @@ func TestDeleteTaskConfigResourceRequiresOwnerOrAdmin(t *testing.T) {
 	if _, err := testHandler.Queries.GetProjectResource(context.Background(), resource.ID); err != nil {
 		t.Fatalf("task_config resource was deleted by member: %v", err)
 	}
+}
+
+func TestCreateTaskConfigResourceRejectsDuplicateBinding(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	originalPrefixes := testHandler.cfg.TaskConfigProviderRefPrefixes
+	testHandler.cfg.TaskConfigProviderRefPrefixes = []string{"approved/task-config/"}
+	t.Cleanup(func() { testHandler.cfg.TaskConfigProviderRefPrefixes = originalPrefixes })
+
+	project := testutil.Decode[ProjectResponse](t, testHandler.CreateProject,
+		newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+			"title": "Duplicate task config binding",
+		}), http.StatusCreated)
+	t.Cleanup(func() {
+		req := withURLParam(newRequest("DELETE", "/api/projects/"+project.ID, nil), "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), req)
+	})
+
+	create := func(providerRef string) *testutil.Response {
+		req := newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
+			"resource_type": "task_config",
+			"resource_ref": map[string]any{
+				"provider":     "aws_secrets_manager",
+				"provider_ref": providerRef,
+				"version":      "version-1",
+				"path":         "deploy/terraform/backend.hcl",
+				"mode":         0o600,
+				"repo":         "github.com/example/infrastructure",
+				"target":       "main",
+				"account":      "123456789012",
+				"region":       "ap-southeast-2",
+			},
+		})
+		return testutil.Call(t, testHandler.CreateProjectResource, withURLParam(req, "id", project.ID))
+	}
+
+	create("approved/task-config/one").Want(http.StatusCreated)
+	create("approved/task-config/two").Want(http.StatusConflict)
 }
 
 func TestProjectResourceLifecycle(t *testing.T) {
