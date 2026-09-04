@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -25,6 +27,20 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
+
+type daemonWorkspaceReadRoute struct {
+	business string
+	role     string
+	reason   string
+}
+
+type daemonWorkspaceReadRecorder struct {
+	routes []daemonWorkspaceReadRoute
+}
+
+func (r *daemonWorkspaceReadRecorder) RecordReadRoute(business, role, reason string) {
+	r.routes = append(r.routes, daemonWorkspaceReadRoute{business: business, role: role, reason: reason})
+}
 
 // slowProbeLocalSkillListStore wraps a LocalSkillListStore but blocks inside
 // HasPending until the provided context is cancelled. PopPending delegates
@@ -152,6 +168,46 @@ func TestListDaemonWorkspaces_DaemonTokenIsWorkspaceScoped(t *testing.T) {
 	w.JSON(&workspaces)
 	if len(workspaces) != 1 || workspaces[0].ID != testWorkspaceID {
 		t.Fatalf("daemon-token workspaces = %+v, want only %s", workspaces, testWorkspaceID)
+	}
+}
+
+func TestListDaemonWorkspacesUsesReplicaForBothAuthScopes(t *testing.T) {
+	tests := []struct {
+		name string
+		req  func() *http.Request
+	}{
+		{
+			name: "user token",
+			req: func() *http.Request {
+				return newRequest(http.MethodGet, "/api/daemon/workspaces", nil)
+			},
+		},
+		{
+			name: "daemon token",
+			req: func() *http.Request {
+				return newDaemonTokenRequest(http.MethodGet, "/api/daemon/workspaces", nil, testWorkspaceID, "daemon-test")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := &daemonWorkspaceReadRecorder{}
+			h := *testHandler
+			queries := db.New(testPool)
+			h.ReadSelector = dbreader.New(queries, queries, recorder)
+
+			testutil.Call(t, h.ListDaemonWorkspaces, tt.req()).Want(http.StatusOK)
+
+			want := []daemonWorkspaceReadRoute{{
+				business: "daemon_workspaces",
+				role:     "replica",
+				reason:   "replica_selected",
+			}}
+			if !reflect.DeepEqual(recorder.routes, want) {
+				t.Fatalf("read routes = %+v, want %+v", recorder.routes, want)
+			}
+		})
 	}
 }
 
