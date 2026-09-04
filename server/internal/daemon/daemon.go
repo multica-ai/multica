@@ -9611,35 +9611,46 @@ func annotateHermesProviderUnconfigured(errMsg, provider string, overlayActive b
 }
 
 // codexRetiredCompactionHint is appended verbatim to a Codex compaction
-// failure against the retired endpoint. Like hermesProviderUnconfiguredHint
+// failure against the retired route. Like hermesProviderUnconfiguredHint
 // above it is a CONSTANT, for the same correctness reason — see
 // annotateCodexRetiredCompaction — and is worded to stay clear of every
 // phrase the resume guards and taskfailure.Classify match, since it is
 // persisted in agent_task_queue.error and re-scanned there indefinitely.
 // TestCodexCompactionAnnotationCannotChangeMachineDecisions pins that.
-const codexRetiredCompactionHint = " [multica] codex could not compact this conversation: it called a " +
-	"compaction endpoint OpenAI has retired. That route is selected by `remote_compaction_v2 = false` " +
-	"under `[features]` in your codex config (~/.codex/config.toml by default) — delete that line, or " +
-	"set it to true, and run this task again. Nothing needs changing on the multica side: the per-task " +
-	"codex config is re-copied from your shared one between runs, and a thread stuck this way continues " +
-	"where it left off once compaction works."
-
-// annotateCodexRetiredCompaction explains a compaction 404 that Codex itself
-// cannot explain.
 //
-// Codex reports the failing URL and status and stops there. The line that
-// chose that URL — `remote_compaction_v2 = false` — appears nowhere in the
-// text, so the error names no file, no key, and no remedy; the reporter in
-// GH #8000 had to open an issue to find out the fix was deleting one line.
-// Nor does the failure resolve on its own: the conversation stays above the
-// auto-compact threshold, so every following turn retries the same retired
-// call.
+// It names every place the setting can be off, because being a constant means
+// it cannot know which one applied. The shared config is the common case and
+// the only one the upstream reports mention, but the launch arguments reach
+// the same state: nothing strips `--disable remote_compaction_v2` or
+// `-c features.remote_compaction_v2=false` out of an agent's custom args, a
+// daemon's extra args, or a custom runtime profile's launch prefix — only
+// fast_mode gets that treatment, and only when a service tier is selected.
+// Naming just the file would send anyone in that case to edit a line that is
+// not there, which is the failure mode this hint exists to prevent.
+const codexRetiredCompactionHint = " [multica] codex could not compact this conversation: it called a " +
+	"compaction endpoint OpenAI has retired. That route is selected by turning `remote_compaction_v2` " +
+	"off, so look in both places it can be off: `[features]` in the codex config this agent uses " +
+	"(~/.codex/config.toml by default), and the codex launch arguments on the agent, the daemon, or a " +
+	"custom runtime profile (`--disable remote_compaction_v2`, `-c features.remote_compaction_v2=false`). " +
+	"Remove it wherever it appears — or set it to true — and run this task again. Nothing needs changing " +
+	"on the multica side: the per-task codex config is re-copied from your shared one between runs, and a " +
+	"thread stuck this way continues where it left off once compaction works."
+
+// annotateCodexRetiredCompaction explains a retired-route compaction failure
+// that Codex itself cannot explain.
+//
+// Codex reports the failing URL and status and stops there. The setting that
+// chose that URL — `remote_compaction_v2` — appears nowhere in the text, so the
+// error names no file, no key and no remedy; the reporter in GH #8000 had to
+// open an issue to learn the fix was deleting one line. Nor does the failure
+// resolve on its own: the conversation stays above the auto-compact threshold,
+// so every following turn retries the same retired call.
 //
 // Text only. This changes no reason, status, or control flow — in particular
 // it does NOT retire the session. That is a deliberate choice, not an
 // omission: unlike the resume-unsafe failures classified above, this thread is
-// recoverable, and it recovers by itself once the flag is gone. Dropping the
-// session pointer would discard the conversation the one-line fix brings back.
+// recoverable, and it recovers by itself once the setting is right. Dropping
+// the session pointer would discard the conversation the fix brings back.
 //
 // Scoped to the codex provider, which is exactly the set of runs that can
 // produce this text (only "codex" resolves to codexBackend), so the check

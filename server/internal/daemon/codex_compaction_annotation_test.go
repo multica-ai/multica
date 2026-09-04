@@ -25,9 +25,17 @@ func TestAnnotateCodexRetiredCompaction(t *testing.T) {
 		if !strings.Contains(got, "Error running remote compact task") {
 			t.Errorf("the runtime's own message must be preserved, got: %s", got)
 		}
-		// The hint has to name the thing Codex's own error never mentions:
-		// which key, in which file, and what to do with it.
-		for _, want := range []string{"remote_compaction_v2", "config.toml", "delete that line"} {
+		// The hint has to name what Codex's own error never mentions: the
+		// setting, and every place it can be turned off. Being a constant, it
+		// cannot know which source applied — so naming only the config file
+		// would send anyone who set it in launch arguments to edit a line that
+		// is not there, the same dead end this hint exists to prevent.
+		for _, want := range []string{
+			"remote_compaction_v2",
+			"config.toml",
+			"--disable remote_compaction_v2",
+			"-c features.remote_compaction_v2=false",
+		} {
 			if !strings.Contains(got, want) {
 				t.Errorf("hint must mention %q, got: %s", want, got)
 			}
@@ -44,12 +52,26 @@ func TestAnnotateCodexRetiredCompaction(t *testing.T) {
 			// Only the codex backend can emit this text; a lookalike from
 			// another runtime must not be sent to edit ~/.codex.
 			{"other provider", codexRetiredCompactionError, "claude"},
-			// A compaction failure the remedy does not fix — the v2 route is
-			// already in use and the config key is not the problem.
+			// Compaction failures on the v2 route. They carry the same
+			// "Error running remote compact task" prefix and can carry the
+			// same status, so firing here would tell a user whose setting is
+			// already correct to go turn it off.
 			{
-				"transient compaction failure",
-				`Error running remote compact task: unexpected status 503 Service Unavailable, ` +
+				"v2 route returning the same status",
+				`Error running remote compact task: unexpected status 404 Not Found: {"detail":"Not Found"}, ` +
 					`url: https://chatgpt.com/backend-api/codex/responses`,
+				"codex",
+			},
+			{
+				"v2 route failing some other way",
+				`Error running remote compact task: remote compaction v2 stream closed before response.completed`,
+				"codex",
+			},
+			// No url tail, so nothing identifies the route — see
+			// CodexRetiredCompactionError for why that stays a false negative.
+			{
+				"no url tail",
+				`Error running remote compact task: unexpected status 404 Not Found: {"detail":"Not Found"}`,
 				"codex",
 			},
 			{"unrelated codex failure", "codex turn/start failed: broken pipe", "codex"},
