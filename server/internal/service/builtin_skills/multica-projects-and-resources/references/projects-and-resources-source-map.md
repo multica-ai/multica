@@ -3,6 +3,9 @@
 - `server/cmd/multica/cmd_project.go` registers project `list`, `get`, `create`, `update`, `delete`, and `status`.
 - The same file registers `project resource list/add/update/remove`.
 - `project create --repo` attaches `github_repo` resources during project creation.
+- `server/cmd/multica/cmd_project_lifecycle.go` owns lifecycle file decoding, actor-ref resolution, export/apply/use-default, and lifecycle-native issue status commands; `cmd_project.go` adds the atomic `project create --lifecycle-file` surface.
+- `server/internal/handler/issue_lifecycle_spec.go` validates and applies complete lifecycle specs under the lifecycle row lock. `server/internal/handler/project.go` calls the same apply function inside project + resource creation.
+- `server/migrations/466_issue_lifecycle_spec_fields.up.sql` adds the stable status `spec_key` and lifecycle `initial_status_id`; migration 467 enforces per-lifecycle key uniqueness concurrently.
 - `project create` / `project update` accept `--start-date` / `--due-date` (calendar days, `YYYY-MM-DD`), mapping to the project `start_date` / `due_date` columns (migration `166_project_dates`); an empty `--start-date ""`/`--due-date ""` on update clears the date, mirroring the issue date flags in `cmd_issue.go`.
 - `project resource add` supports shortcuts for `github_repo` (`--url`, non-JSON `--ref` for checkout ref, `--default-branch-hint`) and `local_directory` (`--local-path`, `--daemon-id`, `--ref-label`, `--execution-mode`), or generic JSON `--ref '<json>'`.
 - `local_directory.execution_mode` is validated in `server/internal/handler/project_resource.go` (`validateLocalDirectoryRef`); the daemon reads it in `server/internal/daemon/local_directory.go` (`localDirectoryAssignment.UsesWorktree`) and builds the per-task worktree in `server/internal/daemon/execenv/local_worktree.go`.

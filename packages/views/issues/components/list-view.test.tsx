@@ -273,6 +273,7 @@ describe("ListView project lifecycle status nodes", () => {
       id: "node-implementation",
       lifecycle_id: "lifecycle-1",
       legacy_status_key: "todo",
+      spec_key: "implementation",
       name: "Implementation",
       description: "",
       color: "#2563eb",

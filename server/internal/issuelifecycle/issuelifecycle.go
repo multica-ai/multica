@@ -42,6 +42,26 @@ func LegacyCategoryPhase(category string) (phase string, outcome pgtype.Text, er
 	}
 }
 
+// LegacyProjection keeps issue.status usable by older clients while
+// lifecycle_status_id remains the source of truth for lifecycle-native nodes.
+func LegacyProjection(status db.IssueLifecycleStatus) string {
+	if status.LegacyStatusKey.Valid {
+		return status.LegacyStatusKey.String
+	}
+	switch status.Phase {
+	case PhaseBacklog:
+		return "backlog"
+	case PhaseUnstarted:
+		return "todo"
+	case PhaseCompleted:
+		return "done"
+	case PhaseCancelled:
+		return "cancelled"
+	default:
+		return "in_progress"
+	}
+}
+
 // Querier is the transaction-bound query surface used by lifecycle bootstrap
 // and transition recording.
 type Querier interface {
@@ -52,6 +72,7 @@ type Querier interface {
 	SetProjectIssueLifecycle(context.Context, db.SetProjectIssueLifecycleParams) (db.Project, error)
 	ClearProjectIssueLifecycle(context.Context, db.ClearProjectIssueLifecycleParams) (db.Project, error)
 	SyncDefaultIssueLifecycleStatuses(context.Context, db.SyncDefaultIssueLifecycleStatusesParams) error
+	SetDefaultIssueLifecycleInitialStatus(context.Context, db.SetDefaultIssueLifecycleInitialStatusParams) error
 	GetDefaultIssueLifecycle(context.Context, pgtype.UUID) (db.IssueLifecycle, error)
 	GetEffectiveIssueLifecycle(context.Context, db.GetEffectiveIssueLifecycleParams) (db.IssueLifecycle, error)
 	GetIssueLifecycleByID(context.Context, db.GetIssueLifecycleByIDParams) (db.IssueLifecycle, error)
@@ -59,6 +80,7 @@ type Querier interface {
 	CountIssueLifecycleStatuses(context.Context, db.CountIssueLifecycleStatusesParams) (int64, error)
 	CloneIssueLifecycleStatuses(context.Context, db.CloneIssueLifecycleStatusesParams) (int64, error)
 	GetIssueLifecycleStatusByLegacyKey(context.Context, db.GetIssueLifecycleStatusByLegacyKeyParams) (db.IssueLifecycleStatus, error)
+	GetIssueLifecycleStatusByID(context.Context, db.GetIssueLifecycleStatusByIDParams) (db.IssueLifecycleStatus, error)
 	BindIssueToDefaultLifecycle(context.Context, db.BindIssueToDefaultLifecycleParams) (db.Issue, error)
 	BindIssueToLifecycleStatus(context.Context, db.BindIssueToLifecycleStatusParams) (db.Issue, error)
 	InsertIssueTransition(context.Context, db.InsertIssueTransitionParams) (int64, error)
@@ -108,10 +130,19 @@ func CustomizeProject(ctx context.Context, q Querier, workspaceID, projectID pgt
 			return db.IssueLifecycle{}, fmt.Errorf("clone workspace lifecycle statuses: %w", err)
 		}
 	}
+	if err := q.SetDefaultIssueLifecycleInitialStatus(ctx, db.SetDefaultIssueLifecycleInitialStatusParams{
+		WorkspaceID: workspaceID, LifecycleID: custom.ID,
+	}); err != nil {
+		return db.IssueLifecycle{}, fmt.Errorf("set project lifecycle initial status: %w", err)
+	}
 	if _, err := q.SetProjectIssueLifecycle(ctx, db.SetProjectIssueLifecycleParams{
 		ProjectID: projectID, WorkspaceID: workspaceID, LifecycleID: custom.ID,
 	}); err != nil {
 		return db.IssueLifecycle{}, fmt.Errorf("set project issue lifecycle: %w", err)
+	}
+	custom, err = q.GetIssueLifecycleByID(ctx, db.GetIssueLifecycleByIDParams{ID: custom.ID, WorkspaceID: workspaceID})
+	if err != nil {
+		return db.IssueLifecycle{}, fmt.Errorf("reload project issue lifecycle: %w", err)
 	}
 	return custom, nil
 }
@@ -145,6 +176,17 @@ func EnsureDefault(ctx context.Context, q Querier, workspaceID pgtype.UUID) (db.
 	}); err != nil {
 		return db.IssueLifecycle{}, fmt.Errorf("sync default issue lifecycle statuses: %w", err)
 	}
+	if err := q.SetDefaultIssueLifecycleInitialStatus(ctx, db.SetDefaultIssueLifecycleInitialStatusParams{
+		WorkspaceID: workspaceID, LifecycleID: lifecycle.ID,
+	}); err != nil {
+		return db.IssueLifecycle{}, fmt.Errorf("set default issue lifecycle initial status: %w", err)
+	}
+	lifecycle, err = q.GetIssueLifecycleByID(ctx, db.GetIssueLifecycleByIDParams{
+		ID: lifecycle.ID, WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return db.IssueLifecycle{}, fmt.Errorf("reload default issue lifecycle: %w", err)
+	}
 	return lifecycle, nil
 }
 
@@ -163,6 +205,11 @@ func SyncDefault(ctx context.Context, q Querier, workspaceID pgtype.UUID) error 
 		WorkspaceID: workspaceID, LifecycleID: lifecycle.ID,
 	}); err != nil {
 		return fmt.Errorf("sync default issue lifecycle statuses: %w", err)
+	}
+	if err := q.SetDefaultIssueLifecycleInitialStatus(ctx, db.SetDefaultIssueLifecycleInitialStatusParams{
+		WorkspaceID: workspaceID, LifecycleID: lifecycle.ID,
+	}); err != nil {
+		return fmt.Errorf("set default issue lifecycle initial status: %w", err)
 	}
 	if _, err := q.BumpIssueLifecycleRevision(ctx, db.BumpIssueLifecycleRevisionParams{
 		ID: lifecycle.ID, WorkspaceID: workspaceID,
@@ -239,14 +286,13 @@ func RecordTransition(
 	if err != nil {
 		return db.Issue{}, db.IssueTransition{}, false, fmt.Errorf("load issue lifecycle: %w", err)
 	}
-	toStatus, err := q.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
-		WorkspaceID: current.WorkspaceID, LifecycleID: current.LifecycleID,
-		LegacyStatusKey: pgtype.Text{String: current.Status, Valid: true},
+	toStatus, err := q.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
+		WorkspaceID: current.WorkspaceID, LifecycleID: current.LifecycleID, ID: current.LifecycleStatusID,
 	})
 	if err != nil {
-		return db.Issue{}, db.IssueTransition{}, false, fmt.Errorf("resolve lifecycle status %q: %w", current.Status, err)
+		return db.Issue{}, db.IssueTransition{}, false, fmt.Errorf("resolve lifecycle status: %w", err)
 	}
-	if current.LifecycleStatusID != toStatus.ID {
+	if current.Status != LegacyProjection(toStatus) {
 		return db.Issue{}, db.IssueTransition{}, false, errors.New("issue lifecycle status projection is inconsistent")
 	}
 

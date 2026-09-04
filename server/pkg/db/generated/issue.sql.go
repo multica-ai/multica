@@ -224,42 +224,31 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, now(), COALESCE($17::uuid, gen_random_uuid()),
-    COALESCE(
-        (SELECT default_issue_lifecycle_id FROM project WHERE id = $15 AND workspace_id = $1),
-        (SELECT default_issue_lifecycle_id FROM workspace WHERE id = $1)
-    ),
-    (
-        SELECT s.id
-        FROM workspace AS w
-        LEFT JOIN project AS p ON p.id = $15 AND p.workspace_id = w.id
-        JOIN issue_lifecycle_status AS s
-          ON s.lifecycle_id = COALESCE(p.default_issue_lifecycle_id, w.default_issue_lifecycle_id)
-        WHERE w.id = $1
-          AND s.workspace_id = $1
-          AND s.legacy_status_key = $4
-          AND s.archived_at IS NULL
-    )
+    $18::uuid,
+    $19::uuid
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, lifecycle_id, lifecycle_status_id, last_transition_id
 `
 
 type CreateIssueParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	Title         string      `json:"title"`
-	Description   pgtype.Text `json:"description"`
-	Status        string      `json:"status"`
-	Priority      string      `json:"priority"`
-	AssigneeType  pgtype.Text `json:"assignee_type"`
-	AssigneeID    pgtype.UUID `json:"assignee_id"`
-	CreatorType   string      `json:"creator_type"`
-	CreatorID     pgtype.UUID `json:"creator_id"`
-	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
-	Position      float64     `json:"position"`
-	StartDate     pgtype.Date `json:"start_date"`
-	DueDate       pgtype.Date `json:"due_date"`
-	Number        int32       `json:"number"`
-	ProjectID     pgtype.UUID `json:"project_id"`
-	Stage         pgtype.Int4 `json:"stage"`
-	ID            pgtype.UUID `json:"id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	Title             string      `json:"title"`
+	Description       pgtype.Text `json:"description"`
+	Status            string      `json:"status"`
+	Priority          string      `json:"priority"`
+	AssigneeType      pgtype.Text `json:"assignee_type"`
+	AssigneeID        pgtype.UUID `json:"assignee_id"`
+	CreatorType       string      `json:"creator_type"`
+	CreatorID         pgtype.UUID `json:"creator_id"`
+	ParentIssueID     pgtype.UUID `json:"parent_issue_id"`
+	Position          float64     `json:"position"`
+	StartDate         pgtype.Date `json:"start_date"`
+	DueDate           pgtype.Date `json:"due_date"`
+	Number            int32       `json:"number"`
+	ProjectID         pgtype.UUID `json:"project_id"`
+	Stage             pgtype.Int4 `json:"stage"`
+	ID                pgtype.UUID `json:"id"`
+	LifecycleID       pgtype.UUID `json:"lifecycle_id"`
+	LifecycleStatusID pgtype.UUID `json:"lifecycle_status_id"`
 }
 
 func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error) {
@@ -281,6 +270,8 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		arg.ProjectID,
 		arg.Stage,
 		arg.ID,
+		arg.LifecycleID,
+		arg.LifecycleStatusID,
 	)
 	var i Issue
 	err := row.Scan(
@@ -328,44 +319,33 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17, $18, now(), COALESCE($19::uuid, gen_random_uuid()),
-    COALESCE(
-        (SELECT default_issue_lifecycle_id FROM project WHERE id = $15 AND workspace_id = $1),
-        (SELECT default_issue_lifecycle_id FROM workspace WHERE id = $1)
-    ),
-    (
-        SELECT s.id
-        FROM workspace AS w
-        LEFT JOIN project AS p ON p.id = $15 AND p.workspace_id = w.id
-        JOIN issue_lifecycle_status AS s
-          ON s.lifecycle_id = COALESCE(p.default_issue_lifecycle_id, w.default_issue_lifecycle_id)
-        WHERE w.id = $1
-          AND s.workspace_id = $1
-          AND s.legacy_status_key = $4
-          AND s.archived_at IS NULL
-    )
+    $20::uuid,
+    $21::uuid
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, lifecycle_id, lifecycle_status_id, last_transition_id
 `
 
 type CreateIssueWithOriginParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	Title         string      `json:"title"`
-	Description   pgtype.Text `json:"description"`
-	Status        string      `json:"status"`
-	Priority      string      `json:"priority"`
-	AssigneeType  pgtype.Text `json:"assignee_type"`
-	AssigneeID    pgtype.UUID `json:"assignee_id"`
-	CreatorType   string      `json:"creator_type"`
-	CreatorID     pgtype.UUID `json:"creator_id"`
-	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
-	Position      float64     `json:"position"`
-	StartDate     pgtype.Date `json:"start_date"`
-	DueDate       pgtype.Date `json:"due_date"`
-	Number        int32       `json:"number"`
-	ProjectID     pgtype.UUID `json:"project_id"`
-	OriginType    pgtype.Text `json:"origin_type"`
-	OriginID      pgtype.UUID `json:"origin_id"`
-	Stage         pgtype.Int4 `json:"stage"`
-	ID            pgtype.UUID `json:"id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	Title             string      `json:"title"`
+	Description       pgtype.Text `json:"description"`
+	Status            string      `json:"status"`
+	Priority          string      `json:"priority"`
+	AssigneeType      pgtype.Text `json:"assignee_type"`
+	AssigneeID        pgtype.UUID `json:"assignee_id"`
+	CreatorType       string      `json:"creator_type"`
+	CreatorID         pgtype.UUID `json:"creator_id"`
+	ParentIssueID     pgtype.UUID `json:"parent_issue_id"`
+	Position          float64     `json:"position"`
+	StartDate         pgtype.Date `json:"start_date"`
+	DueDate           pgtype.Date `json:"due_date"`
+	Number            int32       `json:"number"`
+	ProjectID         pgtype.UUID `json:"project_id"`
+	OriginType        pgtype.Text `json:"origin_type"`
+	OriginID          pgtype.UUID `json:"origin_id"`
+	Stage             pgtype.Int4 `json:"stage"`
+	ID                pgtype.UUID `json:"id"`
+	LifecycleID       pgtype.UUID `json:"lifecycle_id"`
+	LifecycleStatusID pgtype.UUID `json:"lifecycle_status_id"`
 }
 
 func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWithOriginParams) (Issue, error) {
@@ -389,6 +369,8 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		arg.OriginID,
 		arg.Stage,
 		arg.ID,
+		arg.LifecycleID,
+		arg.LifecycleStatusID,
 	)
 	var i Issue
 	err := row.Scan(

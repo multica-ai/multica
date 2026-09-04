@@ -15,6 +15,7 @@ function node(
     id,
     lifecycle_id: lifecycleId,
     legacy_status_key: "todo",
+    spec_key: name.toLowerCase().replaceAll(" ", "_"),
     name,
     description: "",
     color: "#2563eb",

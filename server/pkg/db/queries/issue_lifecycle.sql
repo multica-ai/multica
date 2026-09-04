@@ -13,12 +13,13 @@ WHERE id = $1
 
 -- name: SyncDefaultIssueLifecycleStatuses :exec
 INSERT INTO issue_lifecycle_status (
-    workspace_id, lifecycle_id, legacy_status_key, name, description, color,
+    workspace_id, lifecycle_id, legacy_status_key, spec_key, name, description, color,
     position, phase, outcome, archived_at, created_at, updated_at
 )
 SELECT
     s.workspace_id,
     sqlc.arg('lifecycle_id')::uuid,
+    s.key,
     s.key,
     s.name,
     s.description,
@@ -58,6 +59,7 @@ FROM issue_status AS s
 WHERE s.workspace_id = sqlc.arg('workspace_id')::uuid
 ON CONFLICT (lifecycle_id, legacy_status_key) WHERE legacy_status_key IS NOT NULL
 DO UPDATE SET
+    spec_key = EXCLUDED.spec_key,
     name = EXCLUDED.name,
     description = EXCLUDED.description,
     color = EXCLUDED.color,
@@ -66,6 +68,18 @@ DO UPDATE SET
     outcome = EXCLUDED.outcome,
     archived_at = EXCLUDED.archived_at,
     updated_at = EXCLUDED.updated_at;
+
+-- name: SetDefaultIssueLifecycleInitialStatus :exec
+UPDATE issue_lifecycle AS lifecycle
+SET initial_status_id = status.id
+FROM issue_lifecycle_status AS status
+WHERE lifecycle.id = sqlc.arg('lifecycle_id')::uuid
+  AND lifecycle.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND status.lifecycle_id = lifecycle.id
+  AND status.workspace_id = lifecycle.workspace_id
+  AND status.legacy_status_key = 'todo'
+  AND status.archived_at IS NULL
+  AND lifecycle.initial_status_id IS DISTINCT FROM status.id;
 
 -- name: GetDefaultIssueLifecycle :one
 SELECT l.*
@@ -86,6 +100,16 @@ JOIN issue_lifecycle AS l
 WHERE w.id = sqlc.arg('workspace_id')::uuid
   AND (sqlc.narg('project_id')::uuid IS NULL OR p.id IS NOT NULL);
 
+-- name: LockProjectForIssueLifecycleApply :one
+-- Serializes the inherited/custom pointer check with first materialization, so
+-- two concurrent CAS applies cannot both validate against the same inherited
+-- revision and then silently overwrite one another.
+SELECT *
+FROM project
+WHERE id = sqlc.arg('project_id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+FOR UPDATE;
+
 -- name: EnsureProjectIssueLifecycle :one
 INSERT INTO issue_lifecycle (workspace_id, scope_type, scope_id, name)
 SELECT p.workspace_id, 'project', p.id, p.title
@@ -98,7 +122,7 @@ RETURNING *;
 
 -- name: CloneIssueLifecycleStatuses :execrows
 INSERT INTO issue_lifecycle_status (
-    workspace_id, lifecycle_id, legacy_status_key, name, description, color,
+    workspace_id, lifecycle_id, legacy_status_key, spec_key, name, description, color,
     position, phase, outcome, entry_policy, entry_policy_revision, archived_at,
     created_at, updated_at
 )
@@ -106,6 +130,7 @@ SELECT
     sqlc.arg('workspace_id')::uuid,
     sqlc.arg('target_lifecycle_id')::uuid,
     source.legacy_status_key,
+    source.spec_key,
     source.name,
     source.description,
     source.color,
@@ -190,6 +215,74 @@ FROM issue_lifecycle_status
 WHERE workspace_id = $1
   AND lifecycle_id = $2
   AND id = $3;
+
+-- name: LockActiveIssueLifecycleStatus :one
+SELECT *
+FROM issue_lifecycle_status
+WHERE workspace_id = $1
+  AND lifecycle_id = $2
+  AND id = $3
+  AND archived_at IS NULL
+FOR SHARE;
+
+-- name: GetIssueLifecycleStatusBySpecKey :one
+SELECT *
+FROM issue_lifecycle_status
+WHERE workspace_id = $1
+  AND lifecycle_id = $2
+  AND spec_key = $3;
+
+-- name: CreateIssueLifecycleStatus :one
+INSERT INTO issue_lifecycle_status (
+    id, workspace_id, lifecycle_id, legacy_status_key, spec_key, name,
+    description, color, position, phase, outcome, entry_policy,
+    entry_policy_revision, archived_at
+) VALUES (
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
+    sqlc.arg('workspace_id')::uuid,
+    sqlc.arg('lifecycle_id')::uuid,
+    sqlc.narg('legacy_status_key')::text,
+    sqlc.arg('spec_key')::text,
+    sqlc.arg('name')::text,
+    sqlc.arg('description')::text,
+    sqlc.arg('color')::text,
+    sqlc.arg('position')::double precision,
+    sqlc.arg('phase')::text,
+    sqlc.narg('outcome')::text,
+    sqlc.arg('entry_policy')::jsonb,
+    1,
+    sqlc.narg('archived_at')::timestamptz
+)
+RETURNING *;
+
+-- name: UpdateIssueLifecycleStatusFromSpec :one
+UPDATE issue_lifecycle_status
+SET name = sqlc.arg('name')::text,
+    description = sqlc.arg('description')::text,
+    color = sqlc.arg('color')::text,
+    position = sqlc.arg('position')::double precision,
+    phase = sqlc.arg('phase')::text,
+    outcome = sqlc.narg('outcome')::text,
+    entry_policy = sqlc.arg('entry_policy')::jsonb,
+    entry_policy_revision = entry_policy_revision + CASE
+        WHEN sqlc.arg('bump_entry_policy_revision')::boolean THEN 1 ELSE 0
+    END,
+    archived_at = NULL,
+    updated_at = now()
+WHERE id = sqlc.arg('status_id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND lifecycle_id = sqlc.arg('lifecycle_id')::uuid
+RETURNING *;
+
+-- name: SetIssueLifecycleDefinitionFromSpec :one
+UPDATE issue_lifecycle
+SET name = sqlc.arg('name')::text,
+    initial_status_id = sqlc.arg('initial_status_id')::uuid,
+    revision = revision + CASE WHEN sqlc.arg('bump_revision')::boolean THEN 1 ELSE 0 END,
+    updated_at = CASE WHEN sqlc.arg('bump_revision')::boolean THEN now() ELSE updated_at END
+WHERE id = sqlc.arg('lifecycle_id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+RETURNING *;
 
 -- name: UpdateIssueLifecycleStatusDefinition :one
 UPDATE issue_lifecycle_status
@@ -276,7 +369,13 @@ RETURNING *;
 
 -- name: UpdateIssueLifecycleStatus :one
 UPDATE issue AS i
-SET status = s.legacy_status_key,
+SET status = COALESCE(s.legacy_status_key, CASE s.phase
+        WHEN 'backlog' THEN 'backlog'
+        WHEN 'unstarted' THEN 'todo'
+        WHEN 'completed' THEN 'done'
+        WHEN 'cancelled' THEN 'cancelled'
+        ELSE 'in_progress'
+    END),
     lifecycle_status_id = s.id,
     revision = i.revision + 1,
     updated_at = now()
@@ -286,7 +385,6 @@ WHERE i.id = sqlc.arg('issue_id')::uuid
   AND s.id = sqlc.arg('lifecycle_status_id')::uuid
   AND s.workspace_id = i.workspace_id
   AND s.lifecycle_id = i.lifecycle_id
-  AND s.legacy_status_key IS NOT NULL
   AND s.archived_at IS NULL
 RETURNING i.*;
 
@@ -295,7 +393,13 @@ RETURNING i.*;
 -- node. The caller has already resolved "keep" to the current persisted
 -- assignee, so nullable values here mean an explicitly unassigned issue.
 UPDATE issue AS i
-SET status = s.legacy_status_key,
+SET status = COALESCE(s.legacy_status_key, CASE s.phase
+        WHEN 'backlog' THEN 'backlog'
+        WHEN 'unstarted' THEN 'todo'
+        WHEN 'completed' THEN 'done'
+        WHEN 'cancelled' THEN 'cancelled'
+        ELSE 'in_progress'
+    END),
     lifecycle_status_id = s.id,
     assignee_type = sqlc.narg('assignee_type')::text,
     assignee_id = sqlc.narg('assignee_id')::uuid,
@@ -307,7 +411,6 @@ WHERE i.id = sqlc.arg('issue_id')::uuid
   AND s.id = sqlc.arg('lifecycle_status_id')::uuid
   AND s.workspace_id = i.workspace_id
   AND s.lifecycle_id = i.lifecycle_id
-  AND s.legacy_status_key IS NOT NULL
   AND s.archived_at IS NULL
 RETURNING i.*;
 
@@ -440,7 +543,13 @@ SELECT
          AND s.workspace_id = i.workspace_id
         WHERE i.workspace_id = w.id
           AND i.lifecycle_status_id IS NOT NULL
-          AND (s.id IS NULL OR s.legacy_status_key IS DISTINCT FROM i.status)
+          AND (s.id IS NULL OR COALESCE(s.legacy_status_key, CASE s.phase
+                  WHEN 'backlog' THEN 'backlog'
+                  WHEN 'unstarted' THEN 'todo'
+                  WHEN 'completed' THEN 'done'
+                  WHEN 'cancelled' THEN 'cancelled'
+                  ELSE 'in_progress'
+              END) IS DISTINCT FROM i.status)
     ) AS issues_with_status_mismatch,
     (
         SELECT count(*)::bigint
@@ -480,7 +589,13 @@ SELECT
          AND s.workspace_id = i.workspace_id
         WHERE i.workspace_id = w.id
           AND i.lifecycle_status_id IS NOT NULL
-          AND (s.id IS NULL OR s.legacy_status_key IS DISTINCT FROM i.status)
+          AND (s.id IS NULL OR COALESCE(s.legacy_status_key, CASE s.phase
+                  WHEN 'backlog' THEN 'backlog'
+                  WHEN 'unstarted' THEN 'todo'
+                  WHEN 'completed' THEN 'done'
+                  WHEN 'cancelled' THEN 'cancelled'
+                  ELSE 'in_progress'
+              END) IS DISTINCT FROM i.status)
     ) AS issues_with_status_mismatch,
     (
         SELECT count(*)::bigint

@@ -2789,18 +2789,19 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
-	Title         string   `json:"title"`
-	Description   *string  `json:"description"`
-	Status        string   `json:"status"`
-	Priority      string   `json:"priority"`
-	AssigneeType  *string  `json:"assignee_type"`
-	AssigneeID    *string  `json:"assignee_id"`
-	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
-	Stage         *int32   `json:"stage,omitempty"`
-	StartDate     *string  `json:"start_date"`
-	DueDate       *string  `json:"due_date"`
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	Title             string   `json:"title"`
+	Description       *string  `json:"description"`
+	Status            string   `json:"status"`
+	LifecycleStatusID *string  `json:"lifecycle_status_id,omitempty"`
+	Priority          string   `json:"priority"`
+	AssigneeType      *string  `json:"assignee_type"`
+	AssigneeID        *string  `json:"assignee_id"`
+	ParentIssueID     *string  `json:"parent_issue_id"`
+	ProjectID         *string  `json:"project_id"`
+	Stage             *int32   `json:"stage,omitempty"`
+	StartDate         *string  `json:"start_date"`
+	DueDate           *string  `json:"due_date"`
+	AttachmentIDs     []string `json:"attachment_ids,omitempty"`
 	// LabelIDs are issue-scoped labels to attach to the new issue in the same
 	// transaction as the create. Unknown or non-issue ids are rejected with
 	// 400 (service.ErrIssueLabelNotFound) rather than silently dropped.
@@ -2844,17 +2845,20 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status := req.Status
-	if status == "" {
-		status = "todo"
+	if req.Status != "" && req.LifecycleStatusID != nil {
+		writeError(w, http.StatusBadRequest, "status and lifecycle_status_id are mutually exclusive")
+		return
 	}
+	status := req.Status
 	priority := req.Priority
 	if priority == "" {
 		priority = "none"
 	}
-	status, ok = h.resolveIssueStatusKey(w, r, wsUUID, status)
-	if !ok {
-		return
+	if status != "" {
+		status, ok = h.resolveIssueStatusKey(w, r, wsUUID, status)
+		if !ok {
+			return
+		}
 	}
 	if !validateIssueEnum(w, "priority", priority, validIssuePriorities) {
 		return
@@ -2879,6 +2883,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var parentIssueID pgtype.UUID
 	var projectID pgtype.UUID
+	var lifecycleStatusID pgtype.UUID
+	if req.LifecycleStatusID != nil {
+		id, ok := parseUUIDOrBadRequest(w, *req.LifecycleStatusID, "lifecycle_status_id")
+		if !ok {
+			return
+		}
+		lifecycleStatusID = id
+	}
 	if req.ParentIssueID != nil {
 		id, ok := parseUUIDOrBadRequest(w, *req.ParentIssueID, "parent_issue_id")
 		if !ok {
@@ -3036,25 +3048,26 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
-		WorkspaceID:    wsUUID,
-		Title:          req.Title,
-		Description:    ptrToText(req.Description),
-		Status:         status,
-		Priority:       priority,
-		AssigneeType:   assigneeType,
-		AssigneeID:     assigneeID,
-		CreatorType:    creatorType,
-		CreatorID:      parseUUID(actualCreatorID),
-		ParentIssueID:  parentIssueID,
-		ProjectID:      projectID,
-		StartDate:      startDate,
-		DueDate:        dueDate,
-		OriginType:     originType,
-		OriginID:       originID,
-		Stage:          ptrToInt4(req.Stage),
-		AttachmentIDs:  attachmentIDs,
-		LabelIDs:       labelIDs,
-		AllowDuplicate: req.AllowDuplicate,
+		WorkspaceID:       wsUUID,
+		Title:             req.Title,
+		Description:       ptrToText(req.Description),
+		Status:            status,
+		LifecycleStatusID: lifecycleStatusID,
+		Priority:          priority,
+		AssigneeType:      assigneeType,
+		AssigneeID:        assigneeID,
+		CreatorType:       creatorType,
+		CreatorID:         parseUUID(actualCreatorID),
+		ParentIssueID:     parentIssueID,
+		ProjectID:         projectID,
+		StartDate:         startDate,
+		DueDate:           dueDate,
+		OriginType:        originType,
+		OriginID:          originID,
+		Stage:             ptrToInt4(req.Stage),
+		AttachmentIDs:     attachmentIDs,
+		LabelIDs:          labelIDs,
+		AllowDuplicate:    req.AllowDuplicate,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,

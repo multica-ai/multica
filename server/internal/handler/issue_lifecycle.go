@@ -19,20 +19,22 @@ import (
 )
 
 type issueLifecycleDefinitionResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	ScopeType   string `json:"scope_type"`
-	ScopeID     string `json:"scope_id"`
-	Name        string `json:"name"`
-	Revision    int64  `json:"revision"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID              string  `json:"id"`
+	WorkspaceID     string  `json:"workspace_id"`
+	ScopeType       string  `json:"scope_type"`
+	ScopeID         string  `json:"scope_id"`
+	Name            string  `json:"name"`
+	Revision        int64   `json:"revision"`
+	InitialStatusID *string `json:"initial_status_id"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 type issueLifecycleStatusResponse struct {
 	ID                  string                     `json:"id"`
 	LifecycleID         string                     `json:"lifecycle_id"`
 	LegacyStatusKey     *string                    `json:"legacy_status_key"`
+	SpecKey             string                     `json:"spec_key"`
 	Name                string                     `json:"name"`
 	Description         string                     `json:"description"`
 	Color               string                     `json:"color"`
@@ -86,14 +88,15 @@ func automationExecutionToResponse(execution db.AutomationExecution) automationE
 
 func lifecycleDefinitionToResponse(lifecycle db.IssueLifecycle) issueLifecycleDefinitionResponse {
 	return issueLifecycleDefinitionResponse{
-		ID:          uuidToString(lifecycle.ID),
-		WorkspaceID: uuidToString(lifecycle.WorkspaceID),
-		ScopeType:   lifecycle.ScopeType,
-		ScopeID:     uuidToString(lifecycle.ScopeID),
-		Name:        lifecycle.Name,
-		Revision:    lifecycle.Revision,
-		CreatedAt:   timestampToString(lifecycle.CreatedAt),
-		UpdatedAt:   timestampToString(lifecycle.UpdatedAt),
+		ID:              uuidToString(lifecycle.ID),
+		WorkspaceID:     uuidToString(lifecycle.WorkspaceID),
+		ScopeType:       lifecycle.ScopeType,
+		ScopeID:         uuidToString(lifecycle.ScopeID),
+		Name:            lifecycle.Name,
+		Revision:        lifecycle.Revision,
+		InitialStatusID: uuidToPtr(lifecycle.InitialStatusID),
+		CreatedAt:       timestampToString(lifecycle.CreatedAt),
+		UpdatedAt:       timestampToString(lifecycle.UpdatedAt),
 	}
 }
 
@@ -106,6 +109,7 @@ func lifecycleStatusToResponse(status db.IssueLifecycleStatus) issueLifecycleSta
 		ID:                  uuidToString(status.ID),
 		LifecycleID:         uuidToString(status.LifecycleID),
 		LegacyStatusKey:     textToPtr(status.LegacyStatusKey),
+		SpecKey:             status.SpecKey,
 		Name:                status.Name,
 		Description:         status.Description,
 		Color:               status.Color,
@@ -220,7 +224,11 @@ func (h *Handler) GetIssueLifecycle(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateProjectIssueLifecycleRequest struct {
-	Mode string `json:"mode"`
+	Mode             string                     `json:"mode"`
+	Spec             *issueLifecycleSpecRequest `json:"spec,omitempty"`
+	ExpectedRevision *int64                     `json:"expected_revision,omitempty"`
+	AllowArchive     bool                       `json:"allow_archive,omitempty"`
+	DryRun           bool                       `json:"dry_run,omitempty"`
 }
 
 // UpdateProjectIssueLifecycle switches a project between inherited and custom
@@ -257,6 +265,22 @@ func (h *Handler) UpdateProjectIssueLifecycle(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "mode must be default or custom")
 		return
 	}
+	if req.Mode == "default" && req.Spec != nil {
+		writeError(w, http.StatusBadRequest, "spec is only valid when mode is custom")
+		return
+	}
+	if req.ExpectedRevision != nil && *req.ExpectedRevision <= 0 {
+		writeError(w, http.StatusBadRequest, "expected_revision must be a positive integer")
+		return
+	}
+	var normalizedSpec normalizedLifecycleSpec
+	if req.Spec != nil {
+		var valid bool
+		normalizedSpec, valid = h.normalizeLifecycleSpec(w, r, workspaceID, *req.Spec)
+		if !valid {
+			return
+		}
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -265,36 +289,69 @@ func (h *Handler) UpdateProjectIssueLifecycle(w http.ResponseWriter, r *http.Req
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
-	if req.Mode == "custom" {
+	var plan issueLifecycleApplyPlan
+	var statuses []db.IssueLifecycleStatus
+	var lifecycle db.IssueLifecycle
+	if req.Mode == "custom" && req.Spec != nil {
+		lifecycle, statuses, plan, err = applyLifecycleSpec(r.Context(), qtx, wsUUID, projectID, normalizedSpec, req.ExpectedRevision, req.AllowArchive)
+	} else if req.Mode == "custom" {
 		_, err = issuelifecycle.CustomizeProject(r.Context(), qtx, wsUUID, projectID)
 	} else {
 		err = issuelifecycle.UseWorkspaceDefault(r.Context(), qtx, wsUUID, projectID)
 	}
 	if err != nil {
+		var conflict lifecycleApplyConflictError
+		if errors.As(err, &conflict) {
+			writeError(w, http.StatusConflict, conflict.Error())
+			return
+		}
 		slog.Warn("update project issue lifecycle failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to update project lifecycle")
 		return
 	}
-	lifecycle, err := issuelifecycle.Effective(r.Context(), qtx, wsUUID, projectID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to reload project lifecycle")
-		return
+	if req.Spec == nil {
+		lifecycle, err = issuelifecycle.Effective(r.Context(), qtx, wsUUID, projectID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reload project lifecycle")
+			return
+		}
+		statuses, err = qtx.ListIssueLifecycleStatuses(r.Context(), db.ListIssueLifecycleStatusesParams{
+			WorkspaceID: wsUUID, LifecycleID: lifecycle.ID, IncludeArchived: true,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reload lifecycle statuses")
+			return
+		}
 	}
-	statuses, err := qtx.ListIssueLifecycleStatuses(r.Context(), db.ListIssueLifecycleStatusesParams{
-		WorkspaceID: wsUUID, LifecycleID: lifecycle.ID, IncludeArchived: true,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to reload lifecycle statuses")
+	response := buildIssueLifecycleResponse(lifecycle, statuses, projectID)
+	if req.DryRun {
+		writeJSON(w, http.StatusOK, issueLifecycleApplyResponse{
+			Lifecycle: response.Lifecycle, Statuses: response.Statuses, Mode: response.Mode,
+			Plan: plan, DryRun: true,
+		})
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit project lifecycle")
 		return
 	}
-	h.publish(protocol.EventIssueStatusChanged, workspaceID, "member", requestUserID(r), map[string]any{
-		"action": "lifecycle_mode_changed", "project_id": uuidToString(projectID),
-	})
-	writeJSON(w, http.StatusOK, buildIssueLifecycleResponse(lifecycle, statuses, projectID))
+	if req.Spec == nil || plan.Changed {
+		action := "lifecycle_mode_changed"
+		if req.Spec != nil {
+			action = "lifecycle_definition_applied"
+		}
+		h.publish(protocol.EventIssueStatusChanged, workspaceID, "member", requestUserID(r), map[string]any{
+			"action": action, "project_id": uuidToString(projectID),
+		})
+	}
+	if req.Spec != nil {
+		writeJSON(w, http.StatusOK, issueLifecycleApplyResponse{
+			Lifecycle: response.Lifecycle, Statuses: response.Statuses, Mode: response.Mode,
+			Plan: plan, DryRun: false,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 type transitionIssueStatusNodeRequest struct {

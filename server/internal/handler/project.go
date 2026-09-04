@@ -111,6 +111,7 @@ type CreateProjectRequest struct {
 	StartDate   *string                               `json:"start_date"`
 	DueDate     *string                               `json:"due_date"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	Lifecycle   *issueLifecycleSpecRequest            `json:"lifecycle,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -303,6 +304,17 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var lifecycleSpec normalizedLifecycleSpec
+	if req.Lifecycle != nil {
+		if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
+			return
+		}
+		var valid bool
+		lifecycleSpec, valid = h.normalizeLifecycleSpec(w, r, workspaceID, *req.Lifecycle)
+		if !valid {
+			return
+		}
+	}
 
 	// start_date / due_date are optional calendar days; an absent or empty
 	// value leaves the column NULL. Mirrors CreateIssue's date handling.
@@ -384,7 +396,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Without resources, keep the simple non-tx path.
-	if len(req.Resources) == 0 {
+	if len(req.Resources) == 0 && req.Lifecycle == nil {
 		project, err := h.Queries.CreateProject(r.Context(), createParams)
 		if err != nil {
 			h.writeProjectWriteError(w, r, err, "create")
@@ -409,6 +421,17 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeProjectWriteError(w, r, err, "create")
 		return
+	}
+	var lifecycleResponse *issueLifecycleResponse
+	if req.Lifecycle != nil {
+		lifecycle, statuses, _, applyErr := applyLifecycleSpec(r.Context(), qtx, wsUUID, project.ID, lifecycleSpec, nil, false)
+		if applyErr != nil {
+			slog.Warn("create project lifecycle failed", append(logger.RequestAttrs(r), "error", applyErr)...)
+			writeError(w, http.StatusInternalServerError, "failed to create project lifecycle")
+			return
+		}
+		response := buildIssueLifecycleResponse(lifecycle, statuses, project.ID)
+		lifecycleResponse = &response
 	}
 
 	creator, _ := h.parseUserUUIDOrZero(userID)
@@ -464,10 +487,12 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	// reads — GET /projects/{id} stays metadata-only with resource_count.
 	writeJSON(w, http.StatusCreated, struct {
 		ProjectResponse
-		Resources []ProjectResourceResponse `json:"resources"`
+		Resources      []ProjectResourceResponse `json:"resources"`
+		IssueLifecycle *issueLifecycleResponse   `json:"issue_lifecycle,omitempty"`
 	}{
 		ProjectResponse: resp,
 		Resources:       resourceResp,
+		IssueLifecycle:  lifecycleResponse,
 	})
 }
 

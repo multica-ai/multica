@@ -676,6 +676,39 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("refresh autopilot: %w", err)
 	}
 	projectID := currentAutopilot.ProjectID
+	lifecycle, err := issuelifecycle.Effective(ctx, qtx, ap.WorkspaceID, projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if seedErr := qtx.SeedIssueStatusEntries(ctx, ap.WorkspaceID); seedErr != nil {
+			return fmt.Errorf("seed issue status catalog: %w", seedErr)
+		}
+		if _, ensureErr := issuelifecycle.EnsureDefault(ctx, qtx, ap.WorkspaceID); ensureErr != nil {
+			return ensureErr
+		}
+		lifecycle, err = issuelifecycle.Effective(ctx, qtx, ap.WorkspaceID, projectID)
+	}
+	if err != nil {
+		return fmt.Errorf("resolve issue lifecycle: %w", err)
+	}
+	var lifecycleStatus db.IssueLifecycleStatus
+	if lifecycle.InitialStatusID.Valid {
+		lifecycleStatus, err = qtx.LockActiveIssueLifecycleStatus(ctx, db.LockActiveIssueLifecycleStatusParams{
+			WorkspaceID: ap.WorkspaceID, LifecycleID: lifecycle.ID, ID: lifecycle.InitialStatusID,
+		})
+	} else {
+		lifecycleStatus, err = qtx.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
+			WorkspaceID: ap.WorkspaceID, LifecycleID: lifecycle.ID,
+			LegacyStatusKey: pgtype.Text{String: "todo", Valid: true},
+		})
+		if err == nil {
+			lifecycleStatus, err = qtx.LockActiveIssueLifecycleStatus(ctx, db.LockActiveIssueLifecycleStatusParams{
+				WorkspaceID: ap.WorkspaceID, LifecycleID: lifecycle.ID, ID: lifecycleStatus.ID,
+			})
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("resolve initial lifecycle status: %w", err)
+	}
+	compatibilityStatus := issuelifecycle.LegacyProjection(lifecycleStatus)
 
 	if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
 		ctx, qtx, ap.WorkspaceID, ap.ID, projectID, title, autopilotRecentDuplicateWindow,
@@ -697,7 +730,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("allocate issue number: %w", err)
 	}
 
-	newPosition, err := issueposition.NextTopPosition(ctx, tx, ap.WorkspaceID, "todo")
+	newPosition, err := issueposition.NextTopPosition(ctx, tx, ap.WorkspaceID, compatibilityStatus)
 	if err != nil {
 		return fmt.Errorf("get next issue position: %w", err)
 	}
@@ -707,7 +740,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		WorkspaceID:  ap.WorkspaceID,
 		Title:        title,
 		Description:  description,
-		Status:       "todo",
+		Status:       compatibilityStatus,
 		Priority:     "none",
 		AssigneeType: pgtype.Text{String: ap.AssigneeType, Valid: true},
 		AssigneeID:   ap.AssigneeID,
@@ -716,16 +749,18 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		// is captured separately via origin_type=autopilot + origin_id. For
 		// squad-assigned autopilots, the creator is the resolved leader —
 		// the same agent the issue listener will end up enqueueing.
-		CreatorType:   "agent",
-		CreatorID:     leader.ID,
-		ParentIssueID: pgtype.UUID{},
-		Position:      newPosition,
-		StartDate:     pgtype.Date{},
-		DueDate:       pgtype.Date{},
-		Number:        issueNumber,
-		ProjectID:     projectID,
-		OriginType:    pgtype.Text{String: "autopilot", Valid: true},
-		OriginID:      ap.ID,
+		CreatorType:       "agent",
+		CreatorID:         leader.ID,
+		ParentIssueID:     pgtype.UUID{},
+		Position:          newPosition,
+		StartDate:         pgtype.Date{},
+		DueDate:           pgtype.Date{},
+		Number:            issueNumber,
+		ProjectID:         projectID,
+		OriginType:        pgtype.Text{String: "autopilot", Valid: true},
+		OriginID:          ap.ID,
+		LifecycleID:       lifecycle.ID,
+		LifecycleStatusID: lifecycleStatus.ID,
 	})
 	if err != nil {
 		return fmt.Errorf("create issue: %w", err)

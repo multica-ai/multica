@@ -2131,6 +2131,7 @@ describe("issue lifecycle schemas", () => {
     scope_id: "project-1",
     name: "Project lifecycle",
     revision: 2,
+    initial_status_id: "status-1",
     created_at: "2026-09-03T00:00:00Z",
     updated_at: "2026-09-03T00:00:00Z",
   };
@@ -2138,6 +2139,7 @@ describe("issue lifecycle schemas", () => {
     id: "status-1",
     lifecycle_id: "lifecycle-1",
     legacy_status_key: "in_progress",
+    spec_key: "building",
     name: "Building",
     description: "Agent is working",
     color: "#2563eb",
@@ -2163,6 +2165,8 @@ describe("issue lifecycle schemas", () => {
       mode: "custom",
     });
     expect(parsed.lifecycle.revision).toBe(2);
+    expect(parsed.lifecycle.initial_status_id).toBe("status-1");
+    expect(parsed.statuses[0]?.spec_key).toBe("building");
     expect(parsed.statuses[0]?.entry_policy_revision).toBe(3);
     expect(parsed.statuses[0]?.entry_policy.executor).toEqual({ type: "agent", id: "agent-1" });
     expect(parsed.statuses[1]?.phase).toBe("waiting");

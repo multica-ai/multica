@@ -90,6 +90,7 @@ export interface IssueLifecycleDefinition {
   scope_id: string;
   name: string;
   revision: number;
+  initial_status_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -114,6 +115,8 @@ export interface IssueLifecycleStatusNode {
   id: string;
   lifecycle_id: string;
   legacy_status_key: string | null;
+  /** Stable key used by lifecycle YAML/JSON definitions. */
+  spec_key: string;
   name: string;
   description: string;
   color: string;

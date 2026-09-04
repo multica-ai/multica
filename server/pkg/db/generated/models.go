@@ -824,14 +824,15 @@ type IssueLabel struct {
 }
 
 type IssueLifecycle struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	ScopeType   string             `json:"scope_type"`
-	ScopeID     pgtype.UUID        `json:"scope_id"`
-	Name        string             `json:"name"`
-	Revision    int64              `json:"revision"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ScopeType       string             `json:"scope_type"`
+	ScopeID         pgtype.UUID        `json:"scope_id"`
+	Name            string             `json:"name"`
+	Revision        int64              `json:"revision"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	InitialStatusID pgtype.UUID        `json:"initial_status_id"`
 }
 
 type IssueLifecycleStatus struct {
@@ -850,6 +851,7 @@ type IssueLifecycleStatus struct {
 	ArchivedAt          pgtype.Timestamptz `json:"archived_at"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	SpecKey             string             `json:"spec_key"`
 }
 
 type IssueProperty struct {

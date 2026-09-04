@@ -529,6 +529,7 @@ export const IssueLifecycleDefinitionSchema = z.object({
   scope_id: z.string(),
   name: z.string(),
   revision: z.number().int().positive(),
+  initial_status_id: z.string().nullable().default(null),
   created_at: z.string(),
   updated_at: z.string(),
 }).loose();
@@ -554,6 +555,7 @@ export const IssueLifecycleStatusNodeSchema = z.object({
   id: z.string(),
   lifecycle_id: z.string(),
   legacy_status_key: z.string().nullable().default(null),
+  spec_key: z.string().default(""),
   name: z.string(),
   description: z.string().default(""),
   color: z.string().default("#6b7280"),
@@ -586,6 +588,7 @@ export const EMPTY_ISSUE_LIFECYCLE_RESPONSE: IssueLifecycleResponse = {
     scope_id: "",
     name: "",
     revision: 1,
+    initial_status_id: null,
     created_at: "",
     updated_at: "",
   },

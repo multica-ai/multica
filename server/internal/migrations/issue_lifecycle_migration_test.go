@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -101,6 +102,8 @@ func TestIssueLifecycleMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 		"463_agent_task_automation_execution_index.up.sql",
 		"464_issue_lifecycle_backfill.up.sql",
 		"465_automation_execution_task_status.up.sql",
+		"466_issue_lifecycle_spec_fields.up.sql",
+		"467_issue_lifecycle_spec_key_index.up.sql",
 	}
 	for _, name := range up {
 		applyMigrationFile(t, ctx, conn.Conn(), name)
@@ -128,6 +131,19 @@ func TestIssueLifecycleMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 	if phase != "started" || legacyStatus != "human_review" || cause != "migration_backfill" || !issueBound || !projectInherits {
 		t.Fatalf("backfill = phase %q status %q cause %q issue_bound=%v project_inherits=%v", phase, legacyStatus, cause, issueBound, projectInherits)
 	}
+	var specKey string
+	var initialStatusID pgtype.UUID
+	if err := conn.QueryRow(ctx, `
+		SELECT status.spec_key, lifecycle.initial_status_id
+		FROM issue_lifecycle AS lifecycle
+		JOIN issue_lifecycle_status AS status ON status.id = lifecycle.initial_status_id
+		LIMIT 1
+	`).Scan(&specKey, &initialStatusID); err != nil {
+		t.Fatalf("read lifecycle spec fields: %v", err)
+	}
+	if specKey != "todo" || !initialStatusID.Valid {
+		t.Fatalf("lifecycle spec fields = key %q initial %v, want todo and a valid id", specKey, initialStatusID)
+	}
 	var orderedStatuses []string
 	var orderedPositions []float64
 	if err := conn.QueryRow(ctx, `
@@ -144,6 +160,8 @@ func TestIssueLifecycleMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 	}
 
 	down := []string{
+		"467_issue_lifecycle_spec_key_index.down.sql",
+		"466_issue_lifecycle_spec_fields.down.sql",
 		"465_automation_execution_task_status.down.sql",
 		"464_issue_lifecycle_backfill.down.sql",
 		"463_agent_task_automation_execution_index.down.sql",

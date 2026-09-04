@@ -65,22 +65,23 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // to IssueService.Create. The handler owns the parsing step that turns its
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
-	WorkspaceID   pgtype.UUID
-	Title         string
-	Description   pgtype.Text
-	Status        string
-	Priority      string
-	AssigneeType  pgtype.Text
-	AssigneeID    pgtype.UUID
-	CreatorType   string // "agent" or "member"
-	CreatorID     pgtype.UUID
-	ParentIssueID pgtype.UUID
-	ProjectID     pgtype.UUID
-	StartDate     pgtype.Date
-	DueDate       pgtype.Date
-	OriginType    pgtype.Text
-	OriginID      pgtype.UUID
-	AttachmentIDs []pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	Title             string
+	Description       pgtype.Text
+	Status            string
+	LifecycleStatusID pgtype.UUID
+	Priority          string
+	AssigneeType      pgtype.Text
+	AssigneeID        pgtype.UUID
+	CreatorType       string // "agent" or "member"
+	CreatorID         pgtype.UUID
+	ParentIssueID     pgtype.UUID
+	ProjectID         pgtype.UUID
+	StartDate         pgtype.Date
+	DueDate           pgtype.Date
+	OriginType        pgtype.Text
+	OriginID          pgtype.UUID
+	AttachmentIDs     []pgtype.UUID
 	// LabelIDs are the issue-scoped labels to attach to the new issue. They
 	// are validated and written inside the create transaction (see Create),
 	// so the issue is never committed with a partial or wrong label set. An
@@ -260,7 +261,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	// Re-checking under the lock is what makes the status provably active at
 	// the moment the row is written. Built-in statuses skip both — they can
 	// never be archived, so the common path is unchanged. (MUL-6243)
-	if !issuestatus.IsBuiltIn(p.Status) {
+	if !p.LifecycleStatusID.Valid && p.Status != "" && !issuestatus.IsBuiltIn(p.Status) {
 		if err := qtx.LockIssueStatusCatalogShared(ctx, p.WorkspaceID); err != nil {
 			return IssueCreateResult{}, err
 		}
@@ -305,9 +306,8 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	// The legacy request still names a status key, but the durable write is a
 	// stable lifecycle node. Resolve that node before allocating a number so an
 	// archived project-specific node is rejected instead of creating an issue
-	// with a NULL or retired lifecycle binding. The INSERT repeats the active
-	// predicate as defense in depth; RecordTransition makes a concurrent
-	// definition change fail the transaction rather than commit a partial row.
+	// with a NULL or retired lifecycle binding. The active node is share-locked
+	// below so an apply cannot archive it between validation and INSERT.
 	lifecycle, err := issuelifecycle.Effective(ctx, qtx, p.WorkspaceID, projectID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Rolling deployments and old test fixtures can encounter a workspace
@@ -324,11 +324,25 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	if err != nil {
 		return IssueCreateResult{}, err
 	}
-	lifecycleStatus, err := qtx.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
-		WorkspaceID: p.WorkspaceID, LifecycleID: lifecycle.ID,
-		LegacyStatusKey: pgtype.Text{String: p.Status, Valid: true},
-	})
-	if lifecycle.ScopeType == "workspace" && (errors.Is(err, pgx.ErrNoRows) || (err == nil && lifecycleStatus.ArchivedAt.Valid)) {
+	var lifecycleStatus db.IssueLifecycleStatus
+	if p.LifecycleStatusID.Valid {
+		lifecycleStatus, err = qtx.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
+			WorkspaceID: p.WorkspaceID, LifecycleID: lifecycle.ID, ID: p.LifecycleStatusID,
+		})
+	} else if p.Status == "" && lifecycle.InitialStatusID.Valid {
+		lifecycleStatus, err = qtx.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
+			WorkspaceID: p.WorkspaceID, LifecycleID: lifecycle.ID, ID: lifecycle.InitialStatusID,
+		})
+	} else {
+		if p.Status == "" {
+			p.Status = "todo"
+		}
+		lifecycleStatus, err = qtx.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
+			WorkspaceID: p.WorkspaceID, LifecycleID: lifecycle.ID,
+			LegacyStatusKey: pgtype.Text{String: p.Status, Valid: true},
+		})
+	}
+	if !p.LifecycleStatusID.Valid && p.Status != "" && lifecycle.ScopeType == "workspace" && (errors.Is(err, pgx.ErrNoRows) || (err == nil && lifecycleStatus.ArchivedAt.Valid)) {
 		// Until the final adapter cutover the workspace-default definition is
 		// projected from issue_status. A direct legacy write (including older
 		// binaries during a rolling deploy) may have committed between syncs;
@@ -350,6 +364,16 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	if lifecycleStatus.ArchivedAt.Valid {
 		return IssueCreateResult{}, ErrIssueStatusUnavailable
 	}
+	lifecycleStatus, err = qtx.LockActiveIssueLifecycleStatus(ctx, db.LockActiveIssueLifecycleStatusParams{
+		WorkspaceID: p.WorkspaceID, LifecycleID: lifecycle.ID, ID: lifecycleStatus.ID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return IssueCreateResult{}, ErrIssueStatusUnavailable
+		}
+		return IssueCreateResult{}, fmt.Errorf("lock issue lifecycle status: %w", err)
+	}
+	p.Status = issuelifecycle.LegacyProjection(lifecycleStatus)
 
 	// Validate labels before we increment the issue counter so a stale or
 	// wrong-scope selection fails the create cheaply. The de-duplicated rows
@@ -394,45 +418,49 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	var customLifecycleEntryPolicy bool
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   p.WorkspaceID,
-			Title:         p.Title,
-			Description:   p.Description,
-			Status:        p.Status,
-			Priority:      p.Priority,
-			AssigneeType:  p.AssigneeType,
-			AssigneeID:    p.AssigneeID,
-			CreatorType:   p.CreatorType,
-			CreatorID:     p.CreatorID,
-			ParentIssueID: p.ParentIssueID,
-			Position:      newPosition,
-			StartDate:     p.StartDate,
-			DueDate:       p.DueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-			OriginType:    p.OriginType,
-			OriginID:      p.OriginID,
-			Stage:         p.Stage,
+			ID:                dbid.NewV7(),
+			WorkspaceID:       p.WorkspaceID,
+			Title:             p.Title,
+			Description:       p.Description,
+			Status:            p.Status,
+			Priority:          p.Priority,
+			AssigneeType:      p.AssigneeType,
+			AssigneeID:        p.AssigneeID,
+			CreatorType:       p.CreatorType,
+			CreatorID:         p.CreatorID,
+			ParentIssueID:     p.ParentIssueID,
+			Position:          newPosition,
+			StartDate:         p.StartDate,
+			DueDate:           p.DueDate,
+			Number:            issueNumber,
+			ProjectID:         projectID,
+			OriginType:        p.OriginType,
+			OriginID:          p.OriginID,
+			Stage:             p.Stage,
+			LifecycleID:       lifecycle.ID,
+			LifecycleStatusID: lifecycleStatus.ID,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   p.WorkspaceID,
-			Title:         p.Title,
-			Description:   p.Description,
-			Status:        p.Status,
-			Priority:      p.Priority,
-			AssigneeType:  p.AssigneeType,
-			AssigneeID:    p.AssigneeID,
-			CreatorType:   p.CreatorType,
-			CreatorID:     p.CreatorID,
-			ParentIssueID: p.ParentIssueID,
-			Position:      newPosition,
-			StartDate:     p.StartDate,
-			DueDate:       p.DueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-			Stage:         p.Stage,
+			ID:                dbid.NewV7(),
+			WorkspaceID:       p.WorkspaceID,
+			Title:             p.Title,
+			Description:       p.Description,
+			Status:            p.Status,
+			Priority:          p.Priority,
+			AssigneeType:      p.AssigneeType,
+			AssigneeID:        p.AssigneeID,
+			CreatorType:       p.CreatorType,
+			CreatorID:         p.CreatorID,
+			ParentIssueID:     p.ParentIssueID,
+			Position:          newPosition,
+			StartDate:         p.StartDate,
+			DueDate:           p.DueDate,
+			Number:            issueNumber,
+			ProjectID:         projectID,
+			Stage:             p.Stage,
+			LifecycleID:       lifecycle.ID,
+			LifecycleStatusID: lifecycleStatus.ID,
 		})
 	}
 	if err != nil {

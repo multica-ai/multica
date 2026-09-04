@@ -359,6 +359,10 @@ func (h *Handler) ArchiveIssueLifecycleStatus(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
+	if lifecycle.InitialStatusID == current.ID {
+		writeError(w, http.StatusConflict, "the initial lifecycle status cannot be archived; choose a new initial status first")
+		return
+	}
 	active, err := qtx.ListActiveIssueLifecycleStatuses(r.Context(), db.ListActiveIssueLifecycleStatusesParams{
 		WorkspaceID: workspaceID, LifecycleID: lifecycleID,
 	})

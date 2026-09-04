@@ -150,21 +150,8 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
-    COALESCE(
-        (SELECT default_issue_lifecycle_id FROM project WHERE id = $15 AND workspace_id = $1),
-        (SELECT default_issue_lifecycle_id FROM workspace WHERE id = $1)
-    ),
-    (
-        SELECT s.id
-        FROM workspace AS w
-        LEFT JOIN project AS p ON p.id = $15 AND p.workspace_id = w.id
-        JOIN issue_lifecycle_status AS s
-          ON s.lifecycle_id = COALESCE(p.default_issue_lifecycle_id, w.default_issue_lifecycle_id)
-        WHERE w.id = $1
-          AND s.workspace_id = $1
-          AND s.legacy_status_key = $4
-          AND s.archived_at IS NULL
-    )
+    sqlc.arg('lifecycle_id')::uuid,
+    sqlc.arg('lifecycle_status_id')::uuid
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -338,21 +325,8 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
-    COALESCE(
-        (SELECT default_issue_lifecycle_id FROM project WHERE id = $15 AND workspace_id = $1),
-        (SELECT default_issue_lifecycle_id FROM workspace WHERE id = $1)
-    ),
-    (
-        SELECT s.id
-        FROM workspace AS w
-        LEFT JOIN project AS p ON p.id = $15 AND p.workspace_id = w.id
-        JOIN issue_lifecycle_status AS s
-          ON s.lifecycle_id = COALESCE(p.default_issue_lifecycle_id, w.default_issue_lifecycle_id)
-        WHERE w.id = $1
-          AND s.workspace_id = $1
-          AND s.legacy_status_key = $4
-          AND s.archived_at IS NULL
-    )
+    sqlc.arg('lifecycle_id')::uuid,
+    sqlc.arg('lifecycle_status_id')::uuid
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec

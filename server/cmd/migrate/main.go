@@ -309,6 +309,7 @@ var concurrentIndexCleanups = map[string]string{
 	"461_issue_transition_timeline_index":                       "idx_issue_transition_timeline",
 	"462_issue_lifecycle_binding_index":                         "idx_issue_lifecycle_binding",
 	"463_agent_task_automation_execution_index":                 "idx_agent_task_automation_execution",
+	"467_issue_lifecycle_spec_key_index":                        "idx_issue_lifecycle_status_spec_key",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

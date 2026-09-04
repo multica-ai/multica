@@ -169,7 +169,7 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 	if !previous.LifecycleID.Valid {
 		return IssueTransitionResult{}, ErrIssueTransitionConflict
 	}
-	target, err := qtx.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
+	target, err := qtx.LockActiveIssueLifecycleStatus(ctx, db.LockActiveIssueLifecycleStatusParams{
 		WorkspaceID: p.WorkspaceID,
 		LifecycleID: previous.LifecycleID,
 		ID:          p.LifecycleStatusID,
@@ -179,9 +179,6 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 			return IssueTransitionResult{}, ErrIssueTransitionStatusUnavailable
 		}
 		return IssueTransitionResult{}, err
-	}
-	if target.ArchivedAt.Valid || !target.LegacyStatusKey.Valid {
-		return IssueTransitionResult{}, ErrIssueTransitionStatusUnavailable
 	}
 	if previous.LifecycleStatusID == target.ID {
 		name := lifecycleStatusSnapshotName(target)
