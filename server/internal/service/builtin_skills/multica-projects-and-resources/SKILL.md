@@ -82,7 +82,7 @@ it back to the default.
 
 For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default checkout branch/tag/SHA for future tasks in that project. JSON `--ref '<json>'` remains the escape hatch for full payloads or resource types not covered by shortcuts.
 
-For `task_config`, use the generic JSON `--ref` form with the provider reference, immutable version, safe relative path, mode, and selector tuple. The server rejects this operation unless the configured provider allowlist approves the reference and the caller is an `owner` or `admin`; an empty allowlist disables the resource. Do not put configuration bytes in the JSON ref. Removing or adding a `local_directory` is rejected while the project has a `task_config` resource.
+For `task_config`, use the generic JSON `--ref` form with the provider reference, immutable version, safe relative path, mode, and selector tuple. The server rejects this operation unless the configured provider allowlist approves the reference and the caller is an `owner` or `admin`; an empty allowlist disables the resource. Do not put configuration bytes in the JSON ref. Adding a `local_directory` to a project that already has a `task_config` — or a `task_config` to a project that already has a `local_directory` — is rejected with `409`. Removing either one is always allowed, so switching a project from `local_directory` to `task_config` means removing the `local_directory` resource first, then adding the `task_config` binding.
 
 `--start-date` / `--due-date` are optional calendar days (`YYYY-MM-DD`, like issue dates). On `project update`, pass an empty string (`--start-date ""`) to clear a date; an unset flag leaves it untouched.
 
