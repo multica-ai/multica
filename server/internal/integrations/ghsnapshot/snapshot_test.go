@@ -191,3 +191,63 @@ func TestSnapshotDecided(t *testing.T) {
 		})
 	}
 }
+
+// TestFetchPRSnapshotMergeQueue covers the merge-queue signal. A queued PR is
+// still an open PR whose mergeStateStatus reads BLOCKED, so the entry state is
+// the only field that says "waiting its turn to merge".
+func TestFetchPRSnapshotMergeQueue(t *testing.T) {
+	cases := []struct {
+		name string
+		pr   string
+		want string
+	}{
+		{
+			name: "entry state is preferred",
+			pr:   `"isInMergeQueue":true,"mergeQueueEntry":{"state":"AWAITING_CHECKS"},`,
+			want: "AWAITING_CHECKS",
+		},
+		{
+			name: "unreadable entry falls back to QUEUED",
+			pr:   `"isInMergeQueue":true,"mergeQueueEntry":null,`,
+			want: "QUEUED",
+		},
+		{
+			name: "not queued",
+			pr:   `"isInMergeQueue":false,"mergeQueueEntry":null,`,
+			want: "",
+		},
+		{
+			name: "repository without a merge queue omits both fields",
+			pr:   "",
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := graphqlServer(t, func(map[string]any) string {
+				return `{"repository":{"pullRequest":{
+					"headRefOid":"sha1","mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED",` + tc.pr + `
+					"commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]}}}}`
+			})
+			defer srv.Close()
+
+			snap, err := FetchPRSnapshot(context.Background(), newTestClient(t, srv.URL), 1, "o", "r", 5)
+			if err != nil {
+				t.Fatalf("FetchPRSnapshot: %v", err)
+			}
+			if snap.MergeQueueState != tc.want {
+				t.Fatalf("MergeQueueState = %q, want %q", snap.MergeQueueState, tc.want)
+			}
+		})
+	}
+}
+
+// TestPRSnapshotQueryRequestsMergeQueueFields pins the query text: dropping
+// either field silently reverts every queued PR to an ordinary open PR.
+func TestPRSnapshotQueryRequestsMergeQueueFields(t *testing.T) {
+	for _, field := range []string{"isInMergeQueue", "mergeQueueEntry{state}"} {
+		if !strings.Contains(prSnapshotQuery, field) {
+			t.Fatalf("prSnapshotQuery is missing %q", field)
+		}
+	}
+}

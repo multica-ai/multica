@@ -12,6 +12,7 @@ import {
   GitPullRequestArrow,
   GitPullRequestClosed,
   GitPullRequestDraft,
+  ListOrdered,
   TriangleAlert,
   XCircle,
 } from "lucide-react";
@@ -42,6 +43,14 @@ const STATE_ICON: Record<
   merged: { icon: GitMerge, className: "text-violet-600 dark:text-violet-400" },
   closed: { icon: GitPullRequestClosed, className: "text-rose-600 dark:text-rose-400" },
 };
+
+const NO_MERGE_STATUS: PullRequestMergeStatus = { kind: "none" };
+
+// Merged / closed PRs are terminal: CI and mergeability are no longer
+// actionable, and the leading state icon already tells the whole story.
+function isTerminalState(state: GitHubPullRequestState): boolean {
+  return state === "merged" || state === "closed";
+}
 
 export function PullRequestList({ issueId }: { issueId: string }) {
   const { t } = useT("issues");
@@ -95,10 +104,13 @@ export function PullRequestList({ issueId }: { issueId: string }) {
 
 function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
   const { t } = useT("issues");
-  const cfg = STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
+  // A merged/closed PR can still carry the queue state from its last open
+  // snapshot, so terminal PRs never take the queue presentation.
+  const mergeStatus = isTerminalState(pr.state) ? NO_MERGE_STATUS : deriveMergeStatus(pr);
+  const cfg = getStatePresentation(pr.state, mergeStatus, t);
   const StateIcon = cfg.icon;
   const isDraft = pr.state === "draft";
-  const stateLabel = getStateLabel(pr.state, t);
+  const stateLabel = cfg.label;
 
   return (
     <a
@@ -117,16 +129,23 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
           {pr.title}
         </p>
         <p className="text-micro text-muted-foreground truncate">
-          {pr.repo_owner}/{pr.repo_name}#{pr.number} · {stateLabel}
+          {pr.repo_owner}/{pr.repo_name}#{pr.number} ·{" "}
+          <span data-testid="pull-request-state">{stateLabel}</span>
           {pr.author_login ? ` · @${pr.author_login}` : null}
         </p>
-        <PullRequestRowDetails pr={pr} />
+        <PullRequestRowDetails pr={pr} mergeStatus={mergeStatus} />
       </div>
     </a>
   );
 }
 
-function PullRequestRowDetails({ pr }: { pr: GitHubPullRequest }) {
+function PullRequestRowDetails({
+  pr,
+  mergeStatus,
+}: {
+  pr: GitHubPullRequest;
+  mergeStatus: PullRequestMergeStatus;
+}) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
 
@@ -139,9 +158,11 @@ function PullRequestRowDetails({ pr }: { pr: GitHubPullRequest }) {
   // Neither status element is shown for terminal PRs — the leading state icon
   // already conveys merged / closed, and CI / mergeability are no longer
   // actionable there.
-  const isTerminal = pr.state === "merged" || pr.state === "closed";
+  const isTerminal = isTerminalState(pr.state);
   const checksBadge = isTerminal ? null : getChecksBadge(deriveChecksStatus(pr), t);
-  const mergeBadge = isTerminal ? null : getMergeBadge(deriveMergeStatus(pr), t);
+  // `mergeStatus` is already `none` for terminal PRs — the row derives it once
+  // and passes it down so both the state label and this element agree.
+  const mergeBadge = getMergeBadge(mergeStatus, t);
 
   // A stale snapshot (GitHub outage / revoked key) greys out both elements and
   // annotates them with the snapshot age instead of hiding the last-known data.
@@ -279,6 +300,12 @@ function getMergeBadge(status: PullRequestMergeStatus, t: IssuesT): PullRequestB
         className: "text-amber-600 dark:text-amber-400",
         label: t(($) => $.detail.pull_request_merge_conflicting),
       };
+    // Both queue states are promoted to the row's own icon + state label by
+    // getStatePresentation, so this element stays silent rather than saying
+    // the same thing a second time one line below.
+    case "queued":
+    case "queued_unmergeable":
+      return null;
     case "ready":
       return {
         icon: CheckCircle2,
@@ -312,6 +339,34 @@ function getMergeBadge(status: PullRequestMergeStatus, t: IssuesT): PullRequestB
     case "none":
       return null;
   }
+}
+
+// The row's leading icon and its state word. A PR waiting in a merge queue is
+// still `state === "open"`, so reading `state` alone paints it the same green
+// "Open" as a PR nobody has touched — hiding the one fact that matters, that
+// it is on its way in. The queue therefore outranks `state` here; it is
+// already ranked above every merge_state_status verdict in deriveMergeStatus.
+function getStatePresentation(
+  state: GitHubPullRequestState,
+  merge: PullRequestMergeStatus,
+  t: IssuesT,
+): PullRequestBadgeConfig {
+  if (merge.kind === "queued") {
+    return {
+      icon: ListOrdered,
+      className: "text-blue-600 dark:text-blue-400",
+      label: t(($) => $.detail.pull_request_merge_queued),
+    };
+  }
+  if (merge.kind === "queued_unmergeable") {
+    return {
+      icon: TriangleAlert,
+      className: "text-amber-600 dark:text-amber-400",
+      label: t(($) => $.detail.pull_request_merge_queued_unmergeable),
+    };
+  }
+  const cfg = STATE_ICON[state] ?? { icon: GitPullRequest, className: "" };
+  return { ...cfg, label: getStateLabel(state, t) };
 }
 
 function getStateLabel(state: GitHubPullRequestState, t: IssuesT): string {

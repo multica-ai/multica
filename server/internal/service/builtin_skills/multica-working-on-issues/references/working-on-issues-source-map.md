@@ -39,6 +39,10 @@ fields the agent can read off each element of `pull_requests`:
   matches the current PR head (`currentGitHubSnapshotAvailable`, lines 258-265)
 - `mergeable` / `merge_state_status` (lines 90, 94) — conflict-only verdict vs
   the complete merge gate; "ready" requires `merge_state_status == "clean"`
+- `merge_queue_state` (`json:"merge_queue_state"`) — `queued`,
+  `awaiting_checks`, `mergeable`, `unmergeable`, or `locked` while the PR sits
+  in the repository's merge queue; `null` otherwise. Non-null outranks
+  `merge_state_status`, which reads `blocked` for a queued PR
 - `checks_rollup` (`json:"checks_rollup"`, line 105) and run-level
   `checks_total` / `checks_passed` / `checks_failed` / `checks_running`
   (lines 111-114), plus `failed_check_names` (line 118)

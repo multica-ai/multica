@@ -7,6 +7,8 @@ export const githubKeys = {
   repositories: (wsId: string, installationId: string) =>
     [...githubKeys.all(wsId), "installations", installationId, "repositories"] as const,
   pullRequests: (issueId: string) => ["github", "pull-requests", issueId] as const,
+  queuedPullRequests: (wsId: string) =>
+    [...githubKeys.all(wsId), "pull-requests", "queued"] as const,
 };
 
 export const githubInstallationsOptions = (wsId: string) =>
@@ -30,6 +32,19 @@ export const githubInstallationRepositoriesOptions = (
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.next_page ?? undefined,
     enabled: !!wsId && !!installationId,
+  });
+
+// One workspace-wide read backing the merge-queue indicator on every board
+// card. Deliberately not per-card: a board can hold hundreds of cards, and the
+// queued set is a handful of PRs at most. A queue entry advances on GitHub's
+// schedule rather than on any user action here, so this refetches on a timer.
+export const queuedPullRequestsOptions = (wsId: string) =>
+  queryOptions({
+    queryKey: githubKeys.queuedPullRequests(wsId),
+    queryFn: () => api.listGitHubQueuedPullRequests(wsId),
+    enabled: !!wsId,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 
 export const issuePullRequestsOptions = (issueId: string) =>

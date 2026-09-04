@@ -138,7 +138,7 @@ func (q *Queries) GetGitHubInstallationByID(ctx context.Context, id pgtype.UUID)
 }
 
 const getGitHubPullRequest = `-- name: GetGitHubPullRequest :one
-SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at FROM github_pull_request
+SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at, api_merge_queue_state FROM github_pull_request
 WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4
 `
 
@@ -186,6 +186,7 @@ func (q *Queries) GetGitHubPullRequest(ctx context.Context, arg GetGitHubPullReq
 		&i.ChecksRollupState,
 		&i.SnapshotHeadSha,
 		&i.SnapshotFetchedAt,
+		&i.ApiMergeQueueState,
 	)
 	return i, err
 }
@@ -477,7 +478,8 @@ SELECT
     pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at,
     pr.pr_updated_at, pr.head_sha, pr.mergeable_state,
     pr.additions, pr.deletions, pr.changed_files,
-    pr.api_mergeable, pr.api_merge_state_status, pr.checks_rollup_state,
+    pr.api_mergeable, pr.api_merge_state_status, pr.api_merge_queue_state,
+    pr.checks_rollup_state,
     pr.snapshot_head_sha, pr.snapshot_fetched_at,
     pr.created_at, pr.updated_at,
     COALESCE(c.total, 0)::bigint   AS checks_total,
@@ -516,6 +518,7 @@ type ListPullRequestsByIssueRow struct {
 	ChangedFiles        int32              `json:"changed_files"`
 	ApiMergeable        pgtype.Text        `json:"api_mergeable"`
 	ApiMergeStateStatus pgtype.Text        `json:"api_merge_state_status"`
+	ApiMergeQueueState  pgtype.Text        `json:"api_merge_queue_state"`
 	ChecksRollupState   pgtype.Text        `json:"checks_rollup_state"`
 	SnapshotHeadSha     string             `json:"snapshot_head_sha"`
 	SnapshotFetchedAt   pgtype.Timestamptz `json:"snapshot_fetched_at"`
@@ -571,6 +574,7 @@ func (q *Queries) ListPullRequestsByIssue(ctx context.Context, issueID pgtype.UU
 			&i.ChangedFiles,
 			&i.ApiMergeable,
 			&i.ApiMergeStateStatus,
+			&i.ApiMergeQueueState,
 			&i.ChecksRollupState,
 			&i.SnapshotHeadSha,
 			&i.SnapshotFetchedAt,
@@ -582,6 +586,62 @@ func (q *Queries) ListPullRequestsByIssue(ctx context.Context, issueID pgtype.UU
 			&i.ChecksRunning,
 			&i.FailedCheckNames,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQueuedPullRequestIssuesByWorkspace = `-- name: ListQueuedPullRequestIssuesByWorkspace :many
+SELECT DISTINCT ON (ipr.issue_id)
+    ipr.issue_id,
+    pr.api_merge_queue_state
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE pr.workspace_id = $1
+  AND NOT ipr.reference_only
+  AND pr.state IN ('open', 'draft')
+  AND pr.api_merge_queue_state IS NOT NULL
+  AND pr.snapshot_fetched_at IS NOT NULL
+  AND pr.snapshot_head_sha <> ''
+  AND pr.snapshot_head_sha = pr.head_sha
+ORDER BY ipr.issue_id, pr.pr_created_at DESC
+`
+
+type ListQueuedPullRequestIssuesByWorkspaceRow struct {
+	IssueID            pgtype.UUID `json:"issue_id"`
+	ApiMergeQueueState pgtype.Text `json:"api_merge_queue_state"`
+}
+
+// Backs the board card's merge-queue indicator (BUS-231). Returns one row per
+// issue in the workspace that has a pull request sitting in a repository merge
+// queue, carrying that PR's queue state.
+//
+// Deliberately workspace-wide and tiny rather than per-issue: a board renders
+// hundreds of cards, but only a handful of PRs are ever queued at once, so the
+// board fetches this once instead of issuing one PR request per card.
+//
+// The snapshot conditions mirror `currentGitHubSnapshotAvailable` so the board
+// and the issue detail card never disagree about the same PR: the stored queue
+// state is trusted only while the snapshot belongs to the PR's current head.
+// Terminal PRs are excluded because the column keeps whatever the PR last
+// reported while it was open. reference_only links are not working PRs.
+//
+// DISTINCT ON keeps the newest queued PR when an issue has several.
+func (q *Queries) ListQueuedPullRequestIssuesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListQueuedPullRequestIssuesByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listQueuedPullRequestIssuesByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueuedPullRequestIssuesByWorkspaceRow{}
+	for rows.Next() {
+		var i ListQueuedPullRequestIssuesByWorkspaceRow
+		if err := rows.Scan(&i.IssueID, &i.ApiMergeQueueState); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -698,7 +758,7 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     deletions     = EXCLUDED.deletions,
     changed_files = EXCLUDED.changed_files,
     updated_at = now()
-RETURNING id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at
+RETURNING id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at, api_merge_queue_state
 `
 
 type UpsertGitHubPullRequestParams struct {
@@ -792,6 +852,7 @@ func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubP
 		&i.ChecksRollupState,
 		&i.SnapshotHeadSha,
 		&i.SnapshotFetchedAt,
+		&i.ApiMergeQueueState,
 	)
 	return i, err
 }

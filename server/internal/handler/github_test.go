@@ -222,6 +222,64 @@ func TestIssuePullRequestResponseHidesUnavailableSnapshot(t *testing.T) {
 	}
 }
 
+func TestIssuePullRequestResponseMergeQueueState(t *testing.T) {
+	row := db.ListPullRequestsByIssueRow{
+		State:               "open",
+		HeadSha:             "A",
+		SnapshotHeadSha:     "A",
+		SnapshotFetchedAt:   pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		ApiMergeStateStatus: pgtype.Text{String: "BLOCKED", Valid: true},
+		ApiMergeQueueState:  pgtype.Text{String: "AWAITING_CHECKS", Valid: true},
+	}
+
+	resp := issuePullRequestRowToResponse(row, true)
+	if resp.MergeQueueState == nil || *resp.MergeQueueState != "awaiting_checks" {
+		t.Fatalf("merge queue state not exposed lowercased: %+v", resp.MergeQueueState)
+	}
+
+	// A PR that is not queued must report no queue state at all — an empty
+	// string would read as a queue entry to any client checking for presence.
+	row.ApiMergeQueueState = pgtype.Text{}
+	if resp := issuePullRequestRowToResponse(row, true); resp.MergeQueueState != nil {
+		t.Fatalf("unqueued PR reported a queue state: %q", *resp.MergeQueueState)
+	}
+
+	// The queue state is snapshot data and follows the same availability gate.
+	row.ApiMergeQueueState = pgtype.Text{String: "QUEUED", Valid: true}
+	if resp := issuePullRequestRowToResponse(row, false); resp.MergeQueueState != nil {
+		t.Fatalf("disabled snapshot feature leaked a queue state: %q", *resp.MergeQueueState)
+	}
+}
+
+func TestQueuedPullRequestRowsToResponse(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	rows := []db.ListQueuedPullRequestIssuesByWorkspaceRow{
+		{IssueID: id, ApiMergeQueueState: pgtype.Text{String: "AWAITING_CHECKS", Valid: true}},
+	}
+
+	out := queuedPullRequestRowsToResponse(rows)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(out))
+	}
+	// Lowercased so the board matches the union the issue detail card parses.
+	if out[0].MergeQueueState != "awaiting_checks" {
+		t.Fatalf("queue state not lowercased: %q", out[0].MergeQueueState)
+	}
+	if out[0].IssueID != uuidToString(id) {
+		t.Fatalf("issue id = %q, want %q", out[0].IssueID, uuidToString(id))
+	}
+
+	// Must serialize as [] rather than null: the board treats the response as
+	// the complete set of queued issues, and null would parse as "unknown".
+	empty, err := json.Marshal(queuedPullRequestRowsToResponse(nil))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(empty) != "[]" {
+		t.Fatalf("empty result marshalled as %s, want []", empty)
+	}
+}
+
 func TestVerifyWebhookSignature(t *testing.T) {
 	secret := "shared-secret"
 	body := []byte(`{"action":"opened"}`)

@@ -359,6 +359,8 @@
     "pull_request_checks_failed_named": "{{failed}}/{{total}} 失敗 · {{names}}",
     "pull_request_checks_more": "他 +{{count}} 件",
     "pull_request_merge_conflicting": "マージコンフリクトあり",
+    "pull_request_merge_queued": "マージキュー待ち",
+    "pull_request_merge_queued_unmergeable": "マージキューでブロック中",
     "pull_request_merge_ready": "マージ可能",
     "pull_request_merge_blocked": "ブロック中",
     "pull_request_merge_behind": "ベースブランチより遅れています",
@@ -660,6 +662,8 @@
     "cancel": "キャンセル"
   },
   "card": {
+    "merge_queue": "マージキュー待ち",
+    "merge_queue_blocked": "マージキューでブロック中",
     "update_failed": "タスクを更新できませんでした",
     "updated_ago": "{{time}} に更新"
   },

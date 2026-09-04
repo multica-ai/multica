@@ -362,6 +362,8 @@
     "pull_request_checks_failed_named": "{{failed}}/{{total}} failed · {{names}}",
     "pull_request_checks_more": "+{{count}} more",
     "pull_request_merge_conflicting": "Has merge conflicts",
+    "pull_request_merge_queued": "In merge queue",
+    "pull_request_merge_queued_unmergeable": "Merge queue blocked",
     "pull_request_merge_ready": "Ready to merge",
     "pull_request_merge_blocked": "Blocked",
     "pull_request_merge_behind": "Behind base",
@@ -691,6 +693,8 @@
     "cancel": "Cancel"
   },
   "card": {
+    "merge_queue": "In merge queue",
+    "merge_queue_blocked": "Merge queue blocked",
     "update_failed": "Failed to update issue",
     "updated_ago": "Updated {{time}}"
   },

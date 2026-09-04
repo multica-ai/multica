@@ -1580,6 +1580,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// the handler strips the management handle and adds a
 					// can_manage hint so the UI can gate connect/disconnect.
 					r.Get("/github/installations", h.ListGitHubInstallations)
+					// Merge-queue indicator for board cards: one small
+					// workspace-wide read instead of a PR request per card.
+					r.Get("/github/pull-requests/queued", h.ListQueuedPullRequests)
 					// VCS connections (Forgejo / Gitea / GitLab) — member-visible
 					// for the same reason as GitHub installations; connect /
 					// disconnect are admin-gated in the group below.

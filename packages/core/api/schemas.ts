@@ -61,6 +61,7 @@ import type {
   IssueTableRowsResponse,
   ListIssuesResponse,
   ListGitHubInstallationsResponse,
+  ListGitHubQueuedPullRequestsResponse,
   ListGitHubRepositoriesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
@@ -351,6 +352,20 @@ export const ListGitHubInstallationsResponseSchema = z.object({
   can_manage: z.boolean().optional().default(false),
 }).loose();
 
+export const GitHubQueuedPullRequestSchema = z.object({
+  issue_id: z.string(),
+  merge_queue_state: z.string(),
+}).loose();
+
+export const ListGitHubQueuedPullRequestsResponseSchema = z.object({
+  queued_pull_requests: z.array(GitHubQueuedPullRequestSchema).default([]),
+}).loose();
+
+// An unreadable response must mean "no queue indicators", never "unknown": the
+// board treats the payload as the complete set of queued issues.
+export const EMPTY_LIST_GITHUB_QUEUED_PULL_REQUESTS_RESPONSE: ListGitHubQueuedPullRequestsResponse =
+  { queued_pull_requests: [] };
+
 export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsResponse = {
   installations: [],
   configured: false,
@@ -409,6 +424,7 @@ export const GitHubPullRequestSchema = z.object({
   pr_updated_at: z.string(),
   mergeable: z.string().nullable().optional(),
   merge_state_status: z.string().nullable().optional(),
+  merge_queue_state: z.string().nullable().optional(),
   snapshot_available: z.boolean().optional(),
   checks_rollup: z.string().nullable().optional(),
   checks_conclusion: z.string().nullable().optional(),

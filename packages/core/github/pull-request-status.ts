@@ -2,6 +2,7 @@ import type {
   GitHubPullRequestChecksConclusion,
   GitHubPullRequestChecksRollup,
   GitHubPullRequestMergeable,
+  GitHubPullRequestMergeQueueState,
   GitHubPullRequestMergeStateStatus,
 } from "../types";
 
@@ -102,6 +103,8 @@ export function deriveChecksStatus(input: PullRequestChecksInput): PullRequestCh
 // merge_state_status) the card asserts neither "conflict" nor "ready".
 export type PullRequestMergeStatus =
   | { kind: "conflicting" }
+  | { kind: "queued" }
+  | { kind: "queued_unmergeable" }
   | { kind: "ready" }
   | { kind: "blocked" }
   | { kind: "behind" }
@@ -113,25 +116,38 @@ export interface PullRequestMergeInput {
   snapshot_available?: boolean;
   mergeable?: GitHubPullRequestMergeable | null;
   merge_state_status?: GitHubPullRequestMergeStateStatus | null;
+  merge_queue_state?: GitHubPullRequestMergeQueueState | null;
 }
 
 // Priority (high → low):
 //   1. mergeable conflicting OR merge_state dirty → conflicting
-//   2. merge_state clean                          → ready
-//   3. merge_state blocked/behind/unstable/hooks  → that faithful label
-//   4. otherwise                                  → none  (render nothing)
+//   2. merge_queue_state unmergeable              → queued_unmergeable
+//   3. any other merge_queue_state                → queued
+//   4. merge_state clean                          → ready
+//   5. merge_state blocked/behind/unstable/hooks  → that faithful label
+//   6. otherwise                                  → none  (render nothing)
 //
 // `mergeable` answers only "is there a conflict"; `merge_state_status === dirty`
 // is GitHub's other view of the same fact (an unmergeable conflict), so both
 // map to `conflicting`. "Ready" is asserted ONLY from `clean` — never inferred
 // from `mergeable === "mergeable"`, which does not account for required checks
 // or branch protection.
+//
+// Merge-queue membership outranks every merge_state_status verdict because it
+// describes something they cannot: the PR has been handed to the queue and is
+// on its way in. GitHub reports a queued PR's merge_state_status as `blocked`
+// (branch protection routes the merge through the queue), so without this
+// ordering a queued PR reads as "Blocked" — the opposite of what it is. A
+// conflict still wins: an entry GitHub is about to evict is not "on its way in".
 export function deriveMergeStatus(input: PullRequestMergeInput): PullRequestMergeStatus {
   if (input.snapshot_available === false) return { kind: "none" };
   const mergeable = input.mergeable ?? null;
   const mergeState = input.merge_state_status ?? null;
+  const queueState = input.merge_queue_state ?? null;
 
   if (mergeable === "conflicting" || mergeState === "dirty") return { kind: "conflicting" };
+  if (queueState === "unmergeable") return { kind: "queued_unmergeable" };
+  if (queueState !== null) return { kind: "queued" };
   if (mergeState === "clean") return { kind: "ready" };
   if (mergeState === "blocked") return { kind: "blocked" };
   if (mergeState === "behind") return { kind: "behind" };

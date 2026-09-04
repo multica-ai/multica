@@ -174,7 +174,8 @@ SELECT
     pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at,
     pr.pr_updated_at, pr.head_sha, pr.mergeable_state,
     pr.additions, pr.deletions, pr.changed_files,
-    pr.api_mergeable, pr.api_merge_state_status, pr.checks_rollup_state,
+    pr.api_mergeable, pr.api_merge_state_status, pr.api_merge_queue_state,
+    pr.checks_rollup_state,
     pr.snapshot_head_sha, pr.snapshot_fetched_at,
     pr.created_at, pr.updated_at,
     COALESCE(c.total, 0)::bigint   AS checks_total,
@@ -280,3 +281,33 @@ ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
 -- name: UnlinkIssueFromPullRequest :exec
 DELETE FROM issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2;
+
+-- name: ListQueuedPullRequestIssuesByWorkspace :many
+-- Backs the board card's merge-queue indicator (BUS-231). Returns one row per
+-- issue in the workspace that has a pull request sitting in a repository merge
+-- queue, carrying that PR's queue state.
+--
+-- Deliberately workspace-wide and tiny rather than per-issue: a board renders
+-- hundreds of cards, but only a handful of PRs are ever queued at once, so the
+-- board fetches this once instead of issuing one PR request per card.
+--
+-- The snapshot conditions mirror `currentGitHubSnapshotAvailable` so the board
+-- and the issue detail card never disagree about the same PR: the stored queue
+-- state is trusted only while the snapshot belongs to the PR's current head.
+-- Terminal PRs are excluded because the column keeps whatever the PR last
+-- reported while it was open. reference_only links are not working PRs.
+--
+-- DISTINCT ON keeps the newest queued PR when an issue has several.
+SELECT DISTINCT ON (ipr.issue_id)
+    ipr.issue_id,
+    pr.api_merge_queue_state
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE pr.workspace_id = sqlc.arg('workspace_id')
+  AND NOT ipr.reference_only
+  AND pr.state IN ('open', 'draft')
+  AND pr.api_merge_queue_state IS NOT NULL
+  AND pr.snapshot_fetched_at IS NOT NULL
+  AND pr.snapshot_head_sha <> ''
+  AND pr.snapshot_head_sha = pr.head_sha
+ORDER BY ipr.issue_id, pr.pr_created_at DESC;

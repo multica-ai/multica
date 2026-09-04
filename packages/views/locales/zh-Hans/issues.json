@@ -359,6 +359,8 @@
     "pull_request_checks_failed_named": "{{failed}}/{{total}} 失败 · {{names}}",
     "pull_request_checks_more": "+{{count}} 个",
     "pull_request_merge_conflicting": "存在合并冲突",
+    "pull_request_merge_queued": "在合并队列中",
+    "pull_request_merge_queued_unmergeable": "合并队列中被阻塞",
     "pull_request_merge_ready": "可以合入",
     "pull_request_merge_blocked": "被阻止",
     "pull_request_merge_behind": "落后于基础分支",
@@ -660,6 +662,8 @@
     "cancel": "取消"
   },
   "card": {
+    "merge_queue": "在合并队列中",
+    "merge_queue_blocked": "合并队列中被阻塞",
     "update_failed": "更新任务失败",
     "updated_ago": "更新于 {{time}}"
   },
