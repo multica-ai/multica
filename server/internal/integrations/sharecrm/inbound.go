@@ -34,9 +34,9 @@ type botSender struct {
 }
 
 type botTextMessage struct {
-	Type    string         `json:"type"`
-	Content string         `json:"content"`
-	Images  []botImageRef  `json:"images"`
+	Type    string        `json:"type"`
+	Content string        `json:"content"`
+	Images  []botImageRef `json:"images"`
 }
 
 type botImageRef struct {
@@ -91,13 +91,13 @@ func inboundFromEvent(data *botMessageData, appID, botFullID string) (channel.In
 	if data.Message != nil && strings.TrimSpace(data.Message.Content) != "" {
 		caption = strings.TrimSpace(data.Message.Content)
 	}
-	imageMarkdown := collectInboundImageMarkdown(data)
-	text := joinNonEmpty("\n", caption, imageMarkdown)
-	// Strip a leading @bot mention leftover in group text (OpenClaw parity).
+	// Strip a leading @bot mention leftover in group text (OpenClaw parity)
+	// before placeholders, so /issue CommandText stays the user's words.
 	if chatType == channel.ChatTypeGroup {
-		stripped := stripLeadingMention(caption, firstNonEmpty(data.BotFullID, botFullID))
-		text = joinNonEmpty("\n", stripped, imageMarkdown)
+		caption = stripLeadingMention(caption, firstNonEmpty(data.BotFullID, botFullID))
 	}
+	images := collectInboundImages(data)
+	text := joinNonEmpty("\n", caption, inboundImagePlaceholders(len(images)))
 
 	msgID := strings.TrimSpace(data.MessageID)
 	raw := sharecrmRawEvent{
@@ -107,12 +107,12 @@ func inboundFromEvent(data *botMessageData, appID, botFullID string) (channel.In
 		ReplyMessageID: data.ReplyMessageID,
 		History:        data.HistoryMessages,
 		EA:             data.EA,
-		Images:         collectInboundImages(data),
+		Images:         images,
 	}
 	rawJSON, _ := json.Marshal(raw)
 
 	msgType := channel.MsgTypeText
-	if data.Message != nil && strings.EqualFold(strings.TrimSpace(data.Message.Type), "image") && caption == "" {
+	if caption == "" && len(images) > 0 {
 		msgType = channel.MsgTypeImage
 	}
 	msg := channel.InboundMessage{
@@ -206,14 +206,18 @@ func collectInboundImages(data *botMessageData) []botImageRef {
 	return out
 }
 
-func collectInboundImageMarkdown(data *botMessageData) string {
-	images := collectInboundImages(data)
-	if len(images) == 0 {
+// sharecrmImagePlaceholder is the durable body marker the engine replaces
+// with a stored attachment link. Same token DingTalk uses, so mixed
+// caption+image messages keep a stable inline position even if one fetch fails.
+const sharecrmImagePlaceholder = "[Image]"
+
+func inboundImagePlaceholders(n int) string {
+	if n <= 0 {
 		return ""
 	}
-	parts := make([]string, 0, len(images))
-	for _, image := range images {
-		parts = append(parts, "!["+image.Filename+"]")
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = sharecrmImagePlaceholder
 	}
 	return strings.Join(parts, "\n")
 }
