@@ -80,3 +80,27 @@ func containsPath(paths []string, want string) bool {
 	}
 	return false
 }
+
+func TestPrepareOmpMcpConfigPiWritesExtension(t *testing.T) {
+	workDir := t.TempDir()
+	manifest := &sidecarManifest{}
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx"}}}`)
+
+	if err := prepareOmpMcpConfig(workDir, "pi", raw, manifest); err != nil {
+		t.Fatalf("prepareOmpMcpConfig: %v", err)
+	}
+	extensionPath, err := preparePiMcpExtension(workDir, raw, manifest)
+	if err != nil {
+		t.Fatalf("preparePiMcpExtension: %v", err)
+	}
+	content, err := os.ReadFile(extensionPath)
+	if err != nil {
+		t.Fatalf("read extension: %v", err)
+	}
+	if !strings.Contains(string(content), "registerTool") || !strings.Contains(string(content), "tools/call") {
+		t.Fatalf("extension does not implement MCP tools: %s", content)
+	}
+	if !containsPath(manifest.Files, extensionPath) {
+		t.Fatalf("manifest = %#v, want extension file", manifest)
+	}
+}

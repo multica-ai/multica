@@ -594,11 +594,12 @@ func decodePiResult(raw json.RawMessage) string {
 // overridden by user-configured custom_args. Overriding these would
 // break the daemon↔Pi communication protocol.
 var piBlockedArgs = map[string]blockedArgMode{
-	"-p":         blockedStandalone, // non-interactive mode
-	"--print":    blockedStandalone, // alias for -p
-	"--mode":     blockedWithValue,  // "json" event stream protocol
-	"--session":  blockedWithValue,  // daemon manages the session path
-	"--thinking": blockedWithValue,  // owned by agent.thinking_level
+	"-p":          blockedStandalone, // non-interactive mode
+	"--print":     blockedStandalone, // alias for -p
+	"--mode":      blockedWithValue,  // "json" event stream protocol
+	"--session":   blockedWithValue,  // daemon manages the session path
+	"--extension": blockedWithValue,  // daemon manages the task MCP extension
+	"--thinking":  blockedWithValue,  // owned by agent.thinking_level
 }
 
 // piCustomArgModes mirrors Pi 0.83's built-in parser closely enough to
@@ -695,6 +696,9 @@ func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []st
 	}
 	if opts.ThinkingLevel != "" {
 		args = append(args, "--thinking", opts.ThinkingLevel)
+	}
+	if opts.PiExtensionPath != "" {
+		args = append(args, "--extension", opts.PiExtensionPath)
 	}
 	// Note: we intentionally do NOT pass --tools here. Omitting it lets
 	// Pi use its full tool registry, including user-installed extension

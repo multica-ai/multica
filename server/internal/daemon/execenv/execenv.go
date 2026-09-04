@@ -61,7 +61,7 @@ type PrepareParams struct {
 	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
-	// via a per-task config file. Cursor, OpenClaw, and OMP consume it here;
+	// via a per-task config file. Cursor, OpenClaw, Pi, and OMP consume it here;
 	// other providers wire MCP via ExecOptions.McpConfig in the agent backend.
 	McpConfig json.RawMessage
 	// CursorMcpAuthSource is an explicit opt-in path to a Cursor mcp-auth.json
@@ -314,6 +314,9 @@ type Environment struct {
 	// exports this as CURSOR_DATA_DIR so project-level MCP approvals are
 	// isolated from the user's persistent ~/.cursor/projects state.
 	CursorDataDir string
+	// PiExtensionPath is the daemon-owned Pi extension that connects the
+	// task's MCP servers and registers their tools with Pi.
+	PiExtensionPath string
 	// HermesHome is the path to the per-task HERMES_HOME overlay (set only for
 	// the hermes provider, and only when the agent has skills bound — empty
 	// otherwise, leaving the user's real home in place). It mirrors ~/.hermes/
@@ -607,6 +610,13 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	}
 	if err := prepareOmpMcpConfig(workDir, params.Provider, params.McpConfig, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: prepare omp mcp config: %w", err)
+	}
+	if params.Provider == "pi" {
+		path, err := preparePiMcpExtension(workDir, params.McpConfig, manifest)
+		if err != nil {
+			return nil, fmt.Errorf("execenv: prepare pi mcp extension: %w", err)
+		}
+		env.PiExtensionPath = path
 	}
 
 	// Persist managed-env provenance for non-local resumable envs at Prepare time
@@ -906,6 +916,14 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if err := prepareOmpMcpConfig(params.WorkDir, params.Provider, params.McpConfig, manifest); err != nil {
 		logger.Warn("execenv: refresh omp mcp config failed; forcing fresh prepare", "error", err)
 		return nil
+	}
+	if params.Provider == "pi" {
+		path, err := preparePiMcpExtension(params.WorkDir, params.McpConfig, manifest)
+		if err != nil {
+			logger.Warn("execenv: refresh pi mcp extension failed; forcing fresh prepare", "error", err)
+			return nil
+		}
+		env.PiExtensionPath = path
 	}
 
 	// Restore CodexHome for Codex provider — the per-task codex-home directory
