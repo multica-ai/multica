@@ -259,6 +259,8 @@
       "close_tab": "Close active tab",
       "select_tab_1_to_8": "Select tab 1–8",
       "select_last_tab": "Select last tab",
+      "previous_tab": "Previous tab",
+      "next_tab": "Next tab",
       "zoom_in": "Zoom in",
       "zoom_out": "Zoom out",
       "reset_zoom": "Reset zoom",

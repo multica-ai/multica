@@ -259,6 +259,8 @@
       "close_tab": "활성 탭 닫기",
       "select_tab_1_to_8": "1~8번째 탭 선택",
       "select_last_tab": "마지막 탭 선택",
+      "previous_tab": "이전 탭",
+      "next_tab": "다음 탭",
       "zoom_in": "확대",
       "zoom_out": "축소",
       "reset_zoom": "확대/축소 재설정",
