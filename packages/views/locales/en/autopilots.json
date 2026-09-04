@@ -18,7 +18,7 @@
     "last_run_empty": "--",
     "empty": {
       "title": "No autopilots yet",
-      "hint": "Schedule recurring tasks for your AI agents. Pick a template or start from scratch."
+      "hint": "Schedule recurring work for your AI agents. Pick a template or start from scratch."
     },
     "scope_all": "All",
     "no_matches": "No automations match",
@@ -259,7 +259,7 @@
     "sr_edit": "Edit Autopilot",
     "header_create": "New autopilot",
     "header_edit": "Edit autopilot",
-    "subtitle": "A recurring AI task",
+    "subtitle": "Recurring AI work",
     "expand": "Expand",
     "collapse": "Collapse",
     "close": "Close",

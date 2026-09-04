@@ -455,8 +455,8 @@
     "due_date_removed": "마감일을 제거했습니다",
     "title_renamed": "태스크 제목을 \"{{from}}\"에서 \"{{to}}\"로 바꿨습니다",
     "description_updated": "설명을 업데이트했습니다",
-    "task_completed_other": "작업을 완료했습니다({{count}}회)",
-    "task_failed_other": "작업이 실패했습니다({{count}}회)",
+    "task_completed_other": "실행을 완료했습니다({{count}}회)",
+    "task_failed_other": "실행이 실패했습니다({{count}}회)",
     "squad_leader_evaluated": "스쿼드 트리거를 평가했습니다",
     "squad_leader_action": "평가 후 작업을 수행했습니다",
     "squad_leader_action_reason": "평가 후 작업을 수행했습니다: {{reason}}",
@@ -541,14 +541,14 @@
   },
   "agent_activity": {
     "hover_header_other": "작업 중인 에이전트 {{count}}개",
-    "hover_header_tasks_other": "실행 중인 작업 {{count}}개",
+    "hover_header_tasks_other": "진행 중인 실행 {{count}}개",
     "hover_header_queued_other": "대기 중인 에이전트 {{count}}개",
     "status_running": "작업 중",
     "status_queued": "대기 중",
     "empty_hover": "현재 작업 중인 에이전트가 없습니다",
     "unknown_hover": "작업 중인 에이전트: 아직 불러오지 않았습니다",
     "filter_active_label": "에이전트가 작업 중인 태스크만 보는 중",
-    "tasks_count_other": "task {{count}}개",
+    "tasks_count_other": "실행 {{count}}개",
     "chip_agents_working_other": "작업 중인 에이전트 {{count}}개",
     "issues_count_other": "태스크 {{count}}개",
     "chip_agents_working_unknown": "작업 중인 에이전트: —"
@@ -568,20 +568,20 @@
     "transcript_button": "트랜스크립트 보기",
     "stop_button": "중지",
     "stop_tooltip": "에이전트 중지",
-    "cancel_failed": "작업을 취소하지 못했습니다"
+    "cancel_failed": "실행을 취소하지 못했습니다"
   },
   "execution_log": {
     "section": "실행 로그",
     "show_past": "이전 실행 보기 ({{count}})",
     "hide_past": "이전 실행 숨기기 ({{count}})",
-    "cancel_task_tooltip": "작업 취소",
-    "cancel_task_aria": "작업 취소",
-    "retry_task_tooltip": "작업 다시 시도",
-    "retry_task_aria": "작업 다시 시도",
-    "retry_failed": "작업을 다시 시도하지 못했습니다",
+    "cancel_task_tooltip": "실행 취소",
+    "cancel_task_aria": "실행 취소",
+    "retry_task_tooltip": "실행 다시 시도",
+    "retry_task_aria": "실행 다시 시도",
+    "retry_failed": "실행을 다시 시도하지 못했습니다",
     "retry_blocked": "다시 시도되지 않음 — 이 에이전트를 사용할 권한이 없습니다",
     "transcript_tooltip": "트랜스크립트 보기",
-    "cancel_failed": "작업을 취소하지 못했습니다",
+    "cancel_failed": "실행을 취소하지 못했습니다",
     "trigger_retry": "다시 시도",
     "trigger_retry_attempt": "{{attempt}}번째 다시 시도",
     "trigger_retry_attempt_prefix": "{{attempt}}번째 다시 시도 · ",
@@ -638,11 +638,11 @@
     "note_estimate": "비용은 공개된 모델 요금 기준 추정치이며, 제공자가 자체 비용을 보고한 경우는 그 값을 사용합니다."
   },
   "terminate_dialog": {
-    "title": "이 작업을 중지할까요?",
-    "body": "작업이 취소되며 재개할 수 없습니다.",
-    "running_note": " 실행 중인 작업이 완전히 멈추기까지 몇 초가 걸릴 수 있습니다.",
+    "title": "이 실행을 중지할까요?",
+    "body": "실행이 취소되며 재개할 수 없습니다.",
+    "running_note": " 진행 중인 실행이 완전히 멈추기까지 몇 초가 걸릴 수 있습니다.",
     "keep": "계속 실행",
-    "confirm": "작업 중지"
+    "confirm": "실행 중지"
   },
   "batch": {
     "selected": "{{count}}개 선택됨",

@@ -98,7 +98,7 @@ request is ambiguous, ask before acting.
 
 ![聊天，Engineer 回复仓库已创建并注册](/images/docs/tutorial-chat-create-repo.webp)
 
-打开**设置 → 代码仓库** 确认：`personal-website` 已经在列表中。之后智能体 task 时，从这里选择仓库。
+打开**设置 → 代码仓库** 确认：`personal-website` 已经在列表中。之后智能体运行时，从这里选择仓库。
 
 ![设置中的代码仓库列表](/images/docs/tutorial-repo-settings.webp)
 
@@ -243,7 +243,7 @@ MUL-1 的循环跑通了，但每一次衔接都由你发起：验收后提及 R
 
 小队就是已有的分工加一名队长：
 
-- **Lead**（新建）：队长，负责管理——分配 task、推进任务状态、向你汇报交付产物，自己不动手；
+- **Lead**（新建）：队长，负责管理——分配运行、推进任务状态、向你汇报交付产物，自己不动手；
 - **Engineer**（已有）：开发；
 - **Reviewer**（已有）：审查每个 PR；
 - **你**：最终验收。
@@ -262,7 +262,7 @@ MUL-1 的循环跑通了，但每一次衔接都由你发起：验收后提及 R
 
 前面把反馈写进指令，解决的是一个智能体的问题——指令只属于它自己。要让一套方法被多个智能体共享，或者直接借用别人已经写好的方法，用 **skill**。
 
-Skill 是给智能体的知识包：一个 `SKILL.md` 加上可选的支持文件，告诉智能体遇到某类 task 该怎么想、怎么做。Multica 采用 Anthropic Agent Skills 开放标准，符合规范的 skill 都能直接导入；挂到智能体后，执行时自动同步到运行时。打开 **Skills** 页面，刚才导入的两个都在，右侧是各自挂载的智能体：
+Skill 是给智能体的知识包：一个 `SKILL.md` 加上可选的支持文件，告诉智能体遇到某类运行该怎么想、怎么做。Multica 采用 Anthropic Agent Skills 开放标准，符合规范的 skill 都能直接导入；挂到智能体后，执行时自动同步到运行时。打开 **Skills** 页面，刚才导入的两个都在，右侧是各自挂载的智能体：
 
 ![工作区的 Skills 页面](/images/docs/tutorial-skills-list.webp)
 

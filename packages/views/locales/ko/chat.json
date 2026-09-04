@@ -102,8 +102,8 @@
     },
     "stop_dialog": {
       "title": "이 실행을 중지할까요?",
-      "description_with_title": "\"{{title}}\"의 현재 에이전트 작업을 취소합니다. 이미 생성된 내용은 채팅에 남습니다.",
-      "description_default": "현재 에이전트 작업을 취소합니다. 이미 생성된 내용은 채팅에 남습니다.",
+      "description_with_title": "\"{{title}}\"의 현재 에이전트 실행을 취소합니다. 이미 생성된 내용은 채팅에 남습니다.",
+      "description_default": "현재 에이전트 실행을 취소합니다. 이미 생성된 내용은 채팅에 남습니다.",
       "cancel": "계속 실행",
       "confirm": "실행 중지",
       "confirming": "중지하는 중..."
@@ -155,8 +155,8 @@
       "prompt": "가장 잘 도울 수 있는 일을 간단히 알려 주세요."
     },
     "first_task": {
-      "label": "첫 태스크 추천",
-      "prompt": "당신에게 맡길 수 있는 유용한 태스크 세 가지를 추천해 주세요."
+      "label": "첫 이슈 추천",
+      "prompt": "당신에게 할당할 만한 유용한 이슈 세 가지를 추천해 주세요."
     },
     "recommend": {
       "label": "작업 추천",

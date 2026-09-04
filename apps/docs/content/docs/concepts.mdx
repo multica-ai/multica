@@ -3,7 +3,7 @@ title: Core concepts
 description: All of Multica's core objects and how they relate, on one page.
 ---
 
-![Multica core object diagram: inside a workspace, an issue triggers an agent via assignment or mention, the agent creates a task, the task executes on a runtime, and results are written back to the issue; chat and Autopilot are two more trigger sources, skills and squads attach to agents, projects organize issues, and notifications go to the inbox](/images/docs/concepts-core-objects.webp)
+![Multica core object diagram: inside a workspace, an issue triggers an agent via assignment or mention, the agent creates a run, the run executes on a runtime, and results are written back to the issue; chat and Autopilot are two more trigger sources, skills and squads attach to agents, projects organize issues, and notifications go to the inbox](/images/docs/concepts-core-objects.webp)
 
 ## Basic objects
 
@@ -33,9 +33,9 @@ A reusable capability package. Instructions define who an agent is; a skill desc
 
 Where execution actually happens: a computer connected to Multica and the AI coding tools on it. The agent is the identity; the runtime is the computer that executes it. See [Daemon and runtimes](/daemon-runtimes).
 
-### Task
+### Run
 
-One concrete execution record for an agent. Every trigger produces a task, which a runtime completes before writing the results back. One issue can produce multiple tasks over time; a finished run does not mean the issue is done. See [Tasks](/tasks).
+One concrete execution record for an agent. Every trigger produces a run, which a runtime completes before writing the results back. One issue can produce multiple runs over time; a finished run does not mean the issue is done. See [Runs](/tasks).
 
 ## Collaboration and automation
 
@@ -59,8 +59,8 @@ Triggers agent runs automatically on a schedule or from external events; you can
 
 - The **workspace** is the container for everything; humans and **agents** collaborate inside it.
 - An **issue** records a piece of work; related issues are organized with **projects**.
-- Assigning, @-mentioning, **chat**, or an **Autopilot** triggers an agent, producing a **task**.
-- The task completes on a **runtime**, and the results are written back to where it was triggered.
+- Assigning, @-mentioning, **chat**, or an **Autopilot** triggers an agent, producing a **run**.
+- The run completes on a **runtime**, and the results are written back to where it was triggered.
 - **Skills** let what works be reused across agents; **squads** let multiple agents work together.
 - Every notification for humans along the way goes to the **inbox**.
 

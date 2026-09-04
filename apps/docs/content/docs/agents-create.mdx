@@ -27,7 +27,7 @@ Build with AI needs an online runtime for the Builder conversation. Either way, 
 Creating an agent requires only two things:
 
 - **Name** — must be unique within the workspace.
-- **Runtime** — the environment that actually executes tasks.
+- **Runtime** — the environment that actually executes runs.
 
 Every other field can start with its default and be adjusted after creation. By default, only the creator can run a new agent.
 
@@ -76,7 +76,7 @@ If you leave the list empty, Chat shows localized general-purpose defaults. Agen
 Each runtime already maps to one AI coding tool. After picking a runtime, you can pick a model and thinking level the tool supports; some tools (such as Codex) also offer a service tier:
 
 - Left blank, the runtime or local CLI default applies.
-- With a model set, the agent uses that override for tasks it picks up afterwards.
+- With a model set, the agent uses that override for runs it picks up afterwards.
 - Some runtimes manage models themselves, so no model picker is shown.
 
 Tools differ in supported models, session resume, skills, and MCP capabilities — see [AI coding tools comparison](/providers).
@@ -101,7 +101,7 @@ On the agent's detail page you can keep adjusting:
 
 | Setting | What it does |
 |---|---|
-| **Concurrency limit** | How many tasks the agent can run at the same time. The default is 6; tasks beyond the cap keep queuing. |
+| **Concurrency limit** | How many runs the agent can run at the same time. The default is 6; runs beyond the cap keep queuing. |
 | **Environment variables** | Inject variables when the AI coding tool starts. |
 | **Custom arguments** | Appended item by item to the AI coding tool's CLI arguments. |
 | **MCP** | Provide MCP server configuration for AI coding tools that support it. |
@@ -109,7 +109,7 @@ On the agent's detail page you can keep adjusting:
 
 The daemon hosting the runtime also has a global concurrency cap (default 20); the effective concurrency is the smaller of the two.
 
-Editing configuration does not change tasks already running. Later tasks use the agent configuration saved at the time the runtime picks them up.
+Editing configuration does not change runs already running. Later runs use the agent configuration saved at the time the runtime picks them up.
 
 ## Environment variables and credentials
 

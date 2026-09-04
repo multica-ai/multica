@@ -13,9 +13,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/dbstartup"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -365,7 +367,24 @@ func main() {
 	}
 	stopStartup()
 	slog.Info("connected to database")
-	logPoolConfig(pool)
+	logPoolConfig("primary", pool)
+
+	// The replica is an optional capacity optimization, never a startup
+	// dependency. Invalid configuration preserves primary-only behavior. New
+	// replica connections are validated as read-only by the pool configuration,
+	// while request-driven fallback and a passive circuit breaker handle runtime
+	// failures without background SQL.
+	var replicaPool *pgxpool.Pool
+	if replicaURL := strings.TrimSpace(os.Getenv("DATABASE_REPLICA_URL")); replicaURL != "" {
+		replicaPool, err = newReplicaDBPool(context.Background(), replicaURL, startupSettings.ConnectTimeout)
+		if err != nil {
+			slog.Warn("database replica configuration is invalid; using primary for reads", "error", err)
+			replicaPool = nil
+		} else {
+			defer replicaPool.Close()
+			logPoolConfig("replica", replicaPool)
+		}
+	}
 
 	bus := events.New()
 	hub := realtime.NewHub()
@@ -558,19 +577,22 @@ func main() {
 	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
 	var channelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
 	var wecomMetrics *obsmetrics.WecomMetrics
+	var dbRoutingMetrics *obsmetrics.DBRoutingMetrics
 	if metricsConfig.Enabled() {
 		metricsRegistry := obsmetrics.NewRegistry(obsmetrics.RegistryOptions{
-			Pool:     pool,
-			Realtime: realtime.M,
-			DaemonWS: daemonws.M,
-			Version:  version,
-			Commit:   commit,
+			Pool:        pool,
+			ReplicaPool: replicaPool,
+			Realtime:    realtime.M,
+			DaemonWS:    daemonws.M,
+			Version:     version,
+			Commit:      commit,
 		})
 		httpMetrics = metricsRegistry.HTTP
 		businessMetrics = metricsRegistry.Business
 		channelMediaMetrics = metricsRegistry.ChannelMedia
 		channelLeaseMetrics = metricsRegistry.ChannelLease
 		wecomMetrics = metricsRegistry.Wecom
+		dbRoutingMetrics = metricsRegistry.DBRouting
 		// Forward inbound daemon WS frames into the per-kind counter so
 		// dashboards can split heartbeat / unknown / invalid traffic.
 		if daemonHub != nil {
@@ -598,6 +620,10 @@ func main() {
 		slog.Error("invalid MULTICA_LLM_MAX_RETRIES", "error", err)
 		os.Exit(1)
 	}
+	var readRecorder dbreader.Recorder
+	if dbRoutingMetrics != nil {
+		readRecorder = dbRoutingMetrics
+	}
 
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:         httpMetrics,
@@ -613,6 +639,13 @@ func main() {
 		HeartbeatScheduler:  heartbeatScheduler,
 		LLMMaxRetries:       llmMaxRetries,
 	})
+	var replicaQueries *db.Queries
+	if replicaPool != nil {
+		replicaQueries = db.New(replicaPool)
+	}
+	// Reuse the handler's primary Queries handle so replica routing does not
+	// create a second wrapper around the same primary pool.
+	h.ReadSelector = dbreader.New(h.Queries, replicaQueries, readRecorder)
 
 	srv := newMainHTTPServer(":"+port, r)
 	profilingServer := profiling.NewServer()
@@ -663,7 +696,10 @@ func main() {
 	if autopilotSvc.QuotaEnabled() {
 		go runAutopilotQuotaReconciler(autopilotCtx, autopilotSvc)
 	}
-	go runDBStatsLogger(sweepCtx, pool)
+	go runDBStatsLogger(sweepCtx, "primary", pool)
+	if replicaPool != nil {
+		go runDBStatsLogger(sweepCtx, "replica", replicaPool)
+	}
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
 	}

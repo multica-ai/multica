@@ -299,7 +299,7 @@
     "disabled_badge": "비활성화됨",
     "admin_only_note": "공유 MCP 서버는 워크스페이스 owner와 admin만 변경할 수 있습니다.",
     "delete_title": "공유 서버를 제거할까요?",
-    "delete_description": "{{name}}은(는) 라이브러리와 할당된 모든 에이전트에서 제거되며 각 에이전트의 다음 작업부터 적용됩니다.",
+    "delete_description": "{{name}}은(는) 라이브러리와 할당된 모든 에이전트에서 제거되며 각 에이전트의 다음 실행부터 적용됩니다.",
     "delete_confirm": "제거",
     "cancel": "취소",
     "added_toast": "공유 MCP 서버를 추가했습니다",
@@ -394,8 +394,8 @@
       "issues_write": "태스크 생성 및 수정",
       "comments_read": "댓글 읽기",
       "comments_write": "댓글 작성",
-      "tasks_read": "agent task 읽기",
-      "tasks_write": "agent task 시작 및 업데이트",
+      "tasks_read": "에이전트 실행 읽기",
+      "tasks_write": "에이전트 실행 시작 및 업데이트",
       "agents_read": "agent 목록 읽기",
       "members_read": "멤버 목록 읽기",
       "storage_user": "멤버별로 데이터 저장",
@@ -585,7 +585,7 @@
       },
       "agent_activity": {
         "label": "에이전트 활동",
-        "description": "에이전트 작업이 완료되거나 실패할 때"
+        "description": "에이전트 실행이 완료되거나 실패할 때"
       }
     },
     "system": {
@@ -892,7 +892,7 @@
       "settings_saved": "데몬 설정을 저장했습니다",
       "settings_save_failed": "데몬 설정을 저장하지 못했습니다",
       "signin_expired": "로그인이 만료되었습니다",
-      "signin_expired_description": "로컬 데몬을 인증할 수 없어 이 기기에서 작업을 받을 수 없습니다. 다시 로그인해 복구하세요.",
+      "signin_expired_description": "로컬 데몬을 인증할 수 없어 이 기기에서 실행을 받을 수 없습니다. 다시 로그인해 복구하세요.",
       "signin_again": "다시 로그인",
       "external_description_before": "이 기기의 데몬은 앱 외부(예: WSL2)에서 실행되므로 앱에서 시작하거나 중지할 수 없습니다. 해당 환경에서 다음 명령을 실행하세요:",
       "external_description_after": ".",
@@ -933,8 +933,8 @@
       "stop": "중지",
       "start": "시작",
       "retry_setup": "설정 재시도",
-      "stop_confirm_title_other": "활성 작업 {{count}}개를 중단하고 데몬을 중지할까요?",
-      "stop_confirm_description_other": "이 기기에서 작업 {{count}}개가 실행 중입니다. 지금 중지하면 작업이 중단되고 시간 초과 후 실패로 표시됩니다. 데몬은 자동으로 다시 시작되지 않습니다.",
+      "stop_confirm_title_other": "활성 실행 {{count}}개를 중단하고 데몬을 중지할까요?",
+      "stop_confirm_description_other": "이 기기에서 실행 {{count}}개가 진행 중입니다. 지금 중지하면 실행이 중단되고 시간 초과 후 실패로 표시됩니다. 데몬은 자동으로 다시 시작되지 않습니다.",
       "cancel": "취소",
       "stop_daemon": "데몬 중지",
       "logs_title": "로컬 데몬 로그",
