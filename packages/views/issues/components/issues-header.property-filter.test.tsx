@@ -22,7 +22,7 @@ import {
   viewStoreSlice,
 } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
-import type { IssueProperty } from "@multica/core/types";
+import type { Issue, IssueProperty, IssuePropertyValues, IssueTableFacetsResponse } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueFilterMenu } from "./issues-header";
 
@@ -44,7 +44,54 @@ function textProperty(id: string, name: string): IssueProperty {
   };
 }
 
-function renderFilterMenu(props: IssueProperty[]) {
+function propertyOf(id: string, name: string, type: IssueProperty["type"]): IssueProperty {
+  return {
+    id,
+    workspace_id: "ws-1",
+    name,
+    type,
+    config: {},
+    position: 1,
+    archived: false,
+    created_at: "",
+    updated_at: "",
+  };
+}
+
+/** Minimal issue with only the fields the local facet-count path reads. */
+function issueWithProperties(id: string, properties: IssuePropertyValues): Issue {
+  return {
+    id,
+    workspace_id: "ws-1",
+    number: 1,
+    identifier: "MUL-1",
+    title: "Test",
+    description: null,
+    status: "todo",
+    priority: "medium",
+    assignee_type: null,
+    assignee_id: null,
+    creator_type: "member",
+    creator_id: "u-1",
+    parent_issue_id: null,
+    project_id: null,
+    position: 0,
+    stage: null,
+    start_date: null,
+    due_date: null,
+    metadata: {},
+    labels: [],
+    created_at: "2025-01-01T00:00:00Z",
+    updated_at: "2025-01-01T00:00:00Z",
+    properties,
+  };
+}
+
+function renderFilterMenu(
+  props: IssueProperty[],
+  scopedIssues?: Issue[],
+  tableFacetCounts?: IssueTableFacetsResponse,
+) {
   setApiInstance({
     listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
     listProperties: async () => ({ properties: props }),
@@ -71,19 +118,25 @@ function renderFilterMenu(props: IssueProperty[]) {
   const view = renderWithI18n(
     <QueryClientProvider client={qc}>
       <ViewStoreProvider store={store}>
-        <IssueFilterMenu trigger={<button type="button">Filter</button>} />
+        <IssueFilterMenu
+          trigger={<button type="button">Filter</button>}
+          scopedIssues={scopedIssues}
+          tableFacetCounts={tableFacetCounts}
+        />
       </ViewStoreProvider>
     </QueryClientProvider>,
   );
   return { store, ...view };
 }
 
-async function openPropertySubmenu(name: string) {
+async function openPropertySubmenu(name: string, inputRole: "textbox" | "spinbutton" = "textbox") {
   fireEvent.click(screen.getByRole("button", { name: "Filter" }));
   const trigger = await screen.findByRole("menuitem", { name: new RegExp(name) });
   fireEvent.click(trigger);
+  // A number scalar renders <input type="number">, whose ARIA role is
+  // spinbutton rather than textbox.
   await waitFor(() =>
-    expect(screen.getByRole("textbox")).toBeInTheDocument(),
+    expect(screen.getByRole(inputRole)).toBeInTheDocument(),
   );
 }
 
@@ -178,6 +231,191 @@ describe("IssueFilterMenu scalar property filter", () => {
     // Enter commits the draft as another member of the OR-set.
     await userEvent.type(screen.getByRole("textbox"), "{Enter}");
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["abc", "__none__"] });
+  });
+
+  it("lists observed scalar values as checkboxes with counts and toggles them", async () => {
+    // The observed rows come from the local facet-count path over the loaded
+    // issues; the server facet path feeds the same map with the same keys.
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", { [PROP]: "alpha" }),
+      issueWithProperties("i-2", { [PROP]: "alpha" }),
+      issueWithProperties("i-3", { [PROP]: "beta" }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    const alpha = screen.getByRole("menuitemcheckbox", { name: /alpha/ });
+    expect(alpha).toHaveTextContent("2");
+    expect(screen.getByRole("menuitemcheckbox", { name: /beta/ })).toHaveTextContent("1");
+
+    // Toggling an observed value commits it as a bare equality member — the
+    // same shape the free input produces — so the two paths compose.
+    await userEvent.click(alpha);
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha"] });
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
+    expect(store.getState().propertyFilters).toEqual({});
+  });
+
+  it("lists observed number values under their canonical string key", async () => {
+    const { store } = renderFilterMenu([propertyOf(PROP, "Estimate", "number")], [
+      issueWithProperties("i-1", { [PROP]: 3.5 }),
+      issueWithProperties("i-2", { [PROP]: 3.5 }),
+    ]);
+    await openPropertySubmenu("Estimate", "spinbutton");
+
+    const threePointFive = screen.getByRole("menuitemcheckbox", { name: /3\.5/ });
+    expect(threePointFive).toHaveTextContent("2");
+    await userEvent.click(threePointFive);
+    // The committed member is the equality string, which matches the stored
+    // jsonb number on both the server and the client matcher.
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["3.5"] });
+  });
+
+  it("expands exponent-form number keys like the server numeric facet", async () => {
+    renderFilterMenu([propertyOf(PROP, "Estimate", "number")], [
+      issueWithProperties("i-1", { [PROP]: 1e21 }),
+    ]);
+    await openPropertySubmenu("Estimate", "spinbutton");
+
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: /1000000000000000000000/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("an unchanged blur or Enter commit does not drop checkbox-selected members", async () => {
+    // Regression (adversarial review): the blur commit rewrote the whole set
+    // from the draft, so checking "alpha" and "beta" and then merely clicking
+    // the input and away silently dropped "beta".
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", { [PROP]: "alpha" }),
+      issueWithProperties("i-2", { [PROP]: "alpha" }),
+      issueWithProperties("i-3", { [PROP]: "beta" }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /beta/ }));
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha", "beta"] });
+
+    // The input shows the first member ("alpha"); blurring it unchanged and
+    // pressing Enter must both be no-ops.
+    fireEvent.blur(screen.getByRole("textbox"));
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha", "beta"] });
+    await userEvent.type(screen.getByRole("textbox"), "{Enter}");
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha", "beta"] });
+  });
+
+  it("preserves other observed members when editing the input value", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", { [PROP]: "alpha" }),
+      issueWithProperties("i-2", { [PROP]: "beta" }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /beta/ }));
+    await userEvent.clear(screen.getByRole("textbox"));
+    await userEvent.type(screen.getByRole("textbox"), "gamma");
+    fireEvent.blur(screen.getByRole("textbox"));
+
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["gamma", "beta"] });
+  });
+
+  it("keeps an uncommitted draft when an observed value is toggled", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", { [PROP]: "alpha" }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    await userEvent.type(screen.getByRole("textbox"), "custom");
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
+    expect(screen.getByRole("textbox")).toHaveValue("custom");
+
+    await userEvent.type(screen.getByRole("textbox"), "{Enter}");
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["custom", "alpha"] });
+  });
+
+  it("does not expose malformed values in the local scalar facet fallback", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", { [PROP]: "alpha" }),
+      issueWithProperties("i-2", { [PROP]: 42 }),
+      issueWithProperties("i-3", { [PROP]: ["array-value"] }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    expect(screen.getByRole("menuitemcheckbox", { name: /alpha/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitemcheckbox", { name: /42/ })).toBeNull();
+    expect(screen.queryByRole("menuitemcheckbox", { name: /array-value/ })).toBeNull();
+    expect(store.getState().propertyFilters).toEqual({});
+  });
+
+  it("counts missing scalar properties as No value in the local fallback", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", {}),
+      issueWithProperties("i-2", { [PROP]: "alpha" }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    expect(screen.getByRole("menuitemcheckbox", { name: /No value/ })).toHaveTextContent("1");
+    expect(screen.getByRole("menuitemcheckbox", { name: /alpha/ })).toHaveTextContent("1");
+    expect(store.getState().propertyFilters).toEqual({});
+  });
+
+  it("caps local observed scalar values at the server's deterministic top 50", async () => {
+    const scopedIssues = Array.from({ length: 55 }, (_, index) =>
+      issueWithProperties(`i-${index}`, { [PROP]: `value-${String(index).padStart(2, "0")}` }),
+    );
+    renderFilterMenu([textProperty(PROP, "Note")], scopedIssues);
+    await openPropertySubmenu("Note");
+
+    // Fifty observed rows plus the No value row; equal-count ties are ordered
+    // by key, so value-50 and above fall outside the server-compatible list.
+    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(51);
+    expect(screen.getByRole("menuitemcheckbox", { name: /value-00/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitemcheckbox", { name: /value-50/ })).toBeNull();
+  });
+
+  it("renders observed values from server facets and ignores the legacy __set__ bucket", async () => {
+    // A new menu against an OLD backend receives the pre-per-value shape: the
+    // two-bucket "__set__"/"__none__" response. "__set__" must not surface as
+    // a row, the per-value rows must render, and the "No value" count must
+    // still come through.
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [], {
+      facets: [
+        {
+          kind: "property",
+          property_id: PROP,
+          values: [
+            { key: "__set__", count: 3 },
+            { key: "alpha", count: 2 },
+            { key: "__none__", count: 7 },
+          ],
+        },
+      ],
+    } as unknown as IssueTableFacetsResponse);
+    await openPropertySubmenu("Note");
+
+    expect(screen.getByRole("menuitemcheckbox", { name: /alpha/ })).toHaveTextContent("2");
+    expect(screen.queryByRole("menuitemcheckbox", { name: /__set__/ })).toBeNull();
+    expect(screen.getByRole("menuitemcheckbox", { name: /No value/ })).toHaveTextContent("7");
+
+    // Toggling a server-facet value commits the same bare equality member.
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha"] });
+  });
+
+  it("keeps a pending operator when an observed value is toggled before typing", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", { [PROP]: "alpha" }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    await userEvent.click(screen.getByRole("radio", { name: "contains" }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
+    await userEvent.type(screen.getByRole("textbox"), "custom{Enter}");
+
+    expect(store.getState().propertyFilters).toEqual({
+      [PROP]: [{ op: "contains", value: "custom" }, "alpha"],
+    });
   });
 
   it("picking contains with an empty draft, then typing commits an operator object", async () => {

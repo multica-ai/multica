@@ -193,10 +193,44 @@ const DATE_FIELD_LABEL_KEY: Record<IssueDateField, "date_field_created" | "date_
 /** Feeding this to useIssueCounts hides every per-option badge (badges only
  *  render at count > 0) without touching the option lists themselves. */
 const NO_COUNT_ISSUES: Issue[] = [];
+// Keep the local fallback's observed-value list aligned with the server facet
+// contract: highest count first, ties by key, at most 50 rows.
+const MAX_OBSERVED_SCALAR_VALUES = 50;
+const FACET_KEY_ENCODER = new TextEncoder();
+
+function compareFacetKeys(a: string, b: string): number {
+  const aBytes = FACET_KEY_ENCODER.encode(a);
+  const bBytes = FACET_KEY_ENCODER.encode(b);
+  const length = Math.min(aBytes.length, bBytes.length);
+  for (let index = 0; index < length; index++) {
+    const aByte = aBytes[index] ?? 0;
+    const bByte = bBytes[index] ?? 0;
+    if (aByte !== bByte) return aByte - bByte;
+  }
+  return aBytes.length - bBytes.length;
+}
+
+/** PostgreSQL numeric text uses plain decimal notation after trim_scale. */
+function canonicalNumberFacetKey(value: number): string {
+  const raw = String(value);
+  const exponentIndex = raw.search(/[eE]/);
+  if (exponentIndex < 0) return raw;
+  const coefficient = raw.slice(0, exponentIndex);
+  const exponent = Number(raw.slice(exponentIndex + 1));
+  const sign = coefficient.startsWith("-") ? "-" : "";
+  const unsigned = sign ? coefficient.slice(1) : coefficient;
+  const decimalIndex = unsigned.indexOf(".");
+  const digits = unsigned.replace(".", "");
+  const decimalPosition = (decimalIndex < 0 ? unsigned.length : decimalIndex) + exponent;
+  if (decimalPosition <= 0) return `${sign}0.${"0".repeat(-decimalPosition)}${digits}`;
+  if (decimalPosition >= digits.length) return `${sign}${digits}${"0".repeat(decimalPosition - digits.length)}`;
+  return `${sign}${digits.slice(0, decimalPosition)}.${digits.slice(decimalPosition)}`;
+}
 
 function useIssueCounts(
   allIssues: Issue[],
   serverFacets?: IssueTableFacetsResponse,
+  propertyTypes?: ReadonlyMap<string, IssueProperty["type"]>,
 ) {
   return useMemo(() => {
     const status = new Map<string, number>();
@@ -273,15 +307,38 @@ function useIssueCounts(
         }
       }
 
-      for (const [propertyId, value] of Object.entries(issue.properties ?? {})) {
+      const issueProperties = issue.properties ?? {};
+      for (const [propertyId, propertyType] of propertyTypes ?? []) {
+        if (!Object.prototype.hasOwnProperty.call(issueProperties, propertyId)) {
+          let perOption = property.get(propertyId);
+          if (!perOption) {
+            perOption = new Map<string, number>();
+            property.set(propertyId, perOption);
+          }
+          perOption.set(NO_PROPERTY_VALUE, (perOption.get(NO_PROPERTY_VALUE) ?? 0) + 1);
+          continue;
+        }
+
+        const value = issueProperties[propertyId];
         const optionKeys =
-          typeof value === "string"
+          (propertyType === "text" || propertyType === "url" || propertyType === "date") &&
+          typeof value === "string" &&
+          value !== NO_PROPERTY_VALUE
             ? [value]
-            : Array.isArray(value)
-              ? value
-              : typeof value === "boolean"
-                ? [String(value)]
-                : [];
+            : propertyType === "number" && typeof value === "number" && Number.isFinite(value)
+              ? // Match trim_scale((::numeric))::text, including values that
+                // JavaScript would otherwise render in exponent notation.
+                [canonicalNumberFacetKey(value)]
+              : (propertyType === "select" || propertyType === "actor") &&
+                  typeof value === "string"
+                ? [value]
+                : (propertyType === "multi_select" || propertyType === "multi_actor") &&
+                    Array.isArray(value) &&
+                    value.every((item): item is string => typeof item === "string")
+                  ? value
+                  : propertyType === "checkbox" && typeof value === "boolean"
+                    ? [String(value)]
+                    : [];
         if (optionKeys.length === 0) continue;
         let perOption = property.get(propertyId);
         if (!perOption) {
@@ -295,7 +352,7 @@ function useIssueCounts(
     }
 
     return { status, priority, assignee, creator, noAssignee, project, noProject, label, property };
-  }, [allIssues, serverFacets]);
+  }, [allIssues, propertyTypes, serverFacets]);
 }
 
 // ---------------------------------------------------------------------------
@@ -746,20 +803,39 @@ function PropertyFilterOptions({
   const committedOp: PropertyFilterOp | "is" =
     typeof committedMember === "object" ? committedMember.op : "is";
   const hasNoValue = selected.includes(NO_PROPERTY_VALUE);
-  const [draft, setDraft] = useState(committedScalar);
-  useEffect(() => setDraft(committedScalar), [committedScalar]);
-  // Operator picked in the open menu but not yet committed; null defers to the
-  // committed member (equality when there is none). Resets whenever the
-  // committed member changes — including right after this menu commits — so a
-  // value rewritten elsewhere can't inherit a stale operator.
-  const [pendingOp, setPendingOp] = useState<PropertyFilterOp | "is" | null>(null);
   const committedKey =
     committedMember === undefined
       ? ""
-      : typeof committedMember === "object"
-        ? `op:${committedMember.op}:${committedMember.value}`
-        : `eq:${committedMember}`;
-  useEffect(() => setPendingOp(null), [committedKey]);
+      : propertyFilterValueKey(committedMember);
+  const [draft, setDraft] = useState(committedScalar);
+  // Operator picked in the open menu but not yet committed; null defers to the
+  // committed member (equality when there is none).
+  const [pendingOp, setPendingOp] = useState<PropertyFilterOp | "is" | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const pendingOpRef = useRef(pendingOp);
+  pendingOpRef.current = pendingOp;
+  // Keep track of whether the input currently represents the first committed
+  // member. Observed checkboxes are additional OR members, so editing the
+  // input must replace only this member and leave the others intact.
+  const draftDirtyRef = useRef(false);
+  const inputMemberKeyRef = useRef(committedKey);
+  useEffect(() => {
+    if (draftDirtyRef.current) return;
+    // An operator selected for an empty draft must survive a checkbox toggle;
+    // the next input commit still needs to use that operator.
+    if (pendingOpRef.current !== null && draftRef.current === "") return;
+    setDraft(committedScalar);
+    inputMemberKeyRef.current = committedKey;
+  }, [committedKey, committedScalar]);
+  // Resets whenever the committed member changes — including right after this
+  // menu commits — so a value rewritten elsewhere can't inherit a stale
+  // operator. A pending operator with an empty draft is intentionally kept
+  // while observed values or "No value" are toggled.
+  useEffect(() => {
+    if (pendingOpRef.current !== null && draftRef.current === "") return;
+    setPendingOp(null);
+  }, [committedKey]);
   const options = [
     ...(actorProperty
       ? actorOptions.map((option) => ({
@@ -792,6 +868,15 @@ function PropertyFilterOptions({
           ? t(($) => $.pickers.custom_property.number_placeholder)
           : t(($) => $.pickers.custom_property.value_placeholder);
     const noneCount = counts?.get(NO_PROPERTY_VALUE) ?? 0;
+    // Observed values for the pick list (#7693): the server facet returns the
+    // top scalar values by count plus "__none__"; without server facets the
+    // same per-value counts derive from the loaded issues. "__set__" is the
+    // legacy pre-per-value server bucket — a new menu must ignore it exactly
+    // the way an old client ignores the per-value rows.
+    const observedValues = [...(counts?.entries() ?? [])]
+      .filter(([key]) => key !== NO_PROPERTY_VALUE && key !== "__set__")
+      .sort((a, b) => b[1] - a[1] || compareFacetKeys(a[0], b[0]))
+      .slice(0, MAX_OBSERVED_SCALAR_VALUES);
     // A saved view locks this dimension: the value (with its operator) AND
     // "No value" are both part of the view's identity, so neither can be
     // edited in place.
@@ -826,15 +911,40 @@ function PropertyFilterOptions({
       // every other property type: committing a value replaces only the value
       // member and preserves "No value" membership.
       if (value === NO_PROPERTY_VALUE) return;
+      const sameInput = value === committedScalar && op === committedOp;
+      // An unchanged commit is a no-op: blur fires when the user merely clicks
+      // elsewhere in the menu, and rewriting the set from a draft that equals
+      // the committed value would silently drop observed-value members.
+      if (sameInput) {
+        draftDirtyRef.current = false;
+        return;
+      }
       const member: PropertyFilterValue | undefined = value
         ? op === "is"
           ? value
           : { op, value }
         : undefined;
-      onSetValues([
+      const retained = selected.filter(
+        (candidate) =>
+          candidate !== NO_PROPERTY_VALUE &&
+          propertyFilterValueKey(candidate) !== inputMemberKeyRef.current,
+      );
+      const next: PropertyFilterValue[] = [];
+      const seen = new Set<string>();
+      for (const candidate of [
         ...(member ? [member] : []),
+        ...retained,
         ...(hasNoValue ? [NO_PROPERTY_VALUE] : []),
-      ]);
+      ]) {
+        const key = propertyFilterValueKey(candidate);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        next.push(candidate);
+      }
+      draftDirtyRef.current = false;
+      inputMemberKeyRef.current = member ? propertyFilterValueKey(member) : "";
+      setDraft(value);
+      onSetValues(next);
     };
     const applyOp = (op: PropertyFilterOp | "is") => {
       // An explicit click commits the current draft with the chosen op, unlike
@@ -890,7 +1000,10 @@ function PropertyFilterOptions({
             step={property.type === "number" ? "any" : undefined}
             inputMode={property.type === "number" ? "decimal" : undefined}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              draftDirtyRef.current = true;
+              setDraft(event.target.value);
+            }}
             onBlur={(event) => {
               // Clicking the "No value" menu item moves focus off the input,
               // firing blur first. That premature commit would flip the
@@ -921,6 +1034,37 @@ function PropertyFilterOptions({
             className="h-8"
           />
         </div>
+        {/* Observed values toggle exactly like select options: each one is a
+            bare-string member of the same OR-set as the input's value and
+            "No value". Editing the input replaces only its own member and
+            preserves the other observed selections; an unchanged blur/Enter
+            commit is a no-op (see commitValue) so checkbox selections are
+            never dropped silently. The counts stay clickable discovery rather
+            than a separate filter mode. */}
+        {observedValues.map(([value, count]) => {
+          const checked = selected.some(
+            (member) => typeof member === "string" && member === value,
+          );
+          return (
+            <DropdownMenuCheckboxItem
+              key={value}
+              checked={checked}
+              disabled={locked}
+              onCheckedChange={() => {
+                onToggle(value);
+              }}
+              className={FILTER_ITEM_CLASS}
+            >
+              <HoverCheck checked={checked} />
+              <span className="truncate">{value}</span>
+              {count > 0 && (
+                <span className="ml-auto text-caption text-muted-foreground">
+                  {count}
+                </span>
+              )}
+            </DropdownMenuCheckboxItem>
+          );
+        })}
         <DropdownMenuCheckboxItem
           checked={hasNoValue}
           disabled={locked}
@@ -1441,9 +1585,14 @@ export function IssueFilterMenu({
       workspaceProperties.filter((p) => isFilterablePropertyType(p.type)),
     [workspaceProperties],
   );
+  const propertyTypes = useMemo(
+    () => new Map(workspaceProperties.map((property) => [property.id, property.type])),
+    [workspaceProperties],
+  );
   const counts = useIssueCounts(
     facetCountsExact ? scopedIssues : NO_COUNT_ISSUES,
     tableFacetCounts,
+    propertyTypes,
   );
   const showDateFilter = !!onDateFilterChange;
   const effectivePropertyFilters = useMemo(() => {
