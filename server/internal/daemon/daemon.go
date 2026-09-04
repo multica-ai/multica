@@ -695,7 +695,11 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d.unavailStore = unavail
 	d.cerebraRouter = cerebra.NewRouter(
 		classifier, policy, session, unavail, logger,
-		nil,
+		func(ctx context.Context, entry cerebra.RoutingLogEntry) {
+			if d.client != nil && entry.TaskID != "" {
+				_ = d.client.ReportTaskRoutingLog(ctx, entry.TaskID, entry)
+			}
+		},
 	)
 
 	return d
@@ -8064,40 +8068,51 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if provider == "opencode" || provider == "codearts" {
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
-	if d.cerebraRouter != nil {
-		var connectedAppNames []string
-		for _, app := range task.ConnectedApps {
-			connectedAppNames = append(connectedAppNames, app.ServerName)
+	var connectedAppNames []string
+	for _, app := range task.ConnectedApps {
+		connectedAppNames = append(connectedAppNames, app.ServerName)
+	}
+	var mcpOverlayBytes []byte
+	skillsCount := 0
+	if task.Agent != nil {
+		mcpOverlayBytes = task.Agent.McpConfig
+		skillsCount = len(task.Agent.Skills) + len(task.Agent.SkillRefs)
+	}
+	cerebraMeta := cerebra.TaskMeta{
+		TaskID:          task.ID,
+		WillUseMCPTools: detectMCPUsage(mcpOverlayBytes, connectedAppNames, len(task.PluginHookTools), len(task.RemoteMCPConnections), skillsCount),
+		IssueID:         task.IssueID,
+		SessionID:       task.ChatSessionID,
+	}
+	var cerebraRuntimes []cerebra.RuntimeEntry
+	if task.RuntimeID != "" {
+		runtimeCmd := agent.NewCommand(entry.Path, profileFixedArgs)
+		cerebraRuntimes = append(cerebraRuntimes, cerebra.RuntimeEntry{
+			RuntimeID: task.RuntimeID,
+			TierMap:   deriveDynamicRuntimeTierMap(ctx, provider, runtimeCmd, d.unavailStore, task.RuntimeID),
+		})
+	}
+	routingPrompt := prompt
+	if task.ChatMessage != "" {
+		routingPrompt = task.ChatMessage + "\n" + routingPrompt
+	}
+	if task.TriggerCommentContent != "" {
+		routingPrompt = task.TriggerCommentContent + "\n" + routingPrompt
+	}
+	if task.ThreadName != "" {
+		routingPrompt = task.ThreadName + "\n" + routingPrompt
+	}
+	isCerebraActive := false
+	if task.Agent != nil {
+		for _, sk := range task.Agent.Skills {
+			if sk.Name == "cerebra-routing" {
+				isCerebraActive = true
+				break
+			}
 		}
-		var mcpOverlayBytes []byte
-		if task.Agent != nil {
-			mcpOverlayBytes = task.Agent.McpConfig
-		}
-		meta := cerebra.TaskMeta{
-			TaskID:          task.ID,
-			WillUseMCPTools: detectMCPUsage(mcpOverlayBytes, connectedAppNames, len(task.PluginHookTools), len(task.RemoteMCPConnections)),
-			IssueID:         task.IssueID,
-			SessionID:       task.ChatSessionID,
-		}
-		var runtimes []cerebra.RuntimeEntry
-		if task.RuntimeID != "" {
-			runtimeCmd := agent.NewCommand(entry.Path, profileFixedArgs)
-			runtimes = append(runtimes, cerebra.RuntimeEntry{
-				RuntimeID: task.RuntimeID,
-				TierMap:   deriveDynamicRuntimeTierMap(ctx, provider, runtimeCmd),
-			})
-		}
-		routingPrompt := prompt
-		if task.ChatMessage != "" {
-			routingPrompt = task.ChatMessage + "\n" + routingPrompt
-		}
-		if task.TriggerCommentContent != "" {
-			routingPrompt = task.TriggerCommentContent + "\n" + routingPrompt
-		}
-		if task.ThreadName != "" {
-			routingPrompt = task.ThreadName + "\n" + routingPrompt
-		}
-		model = routeBeforeDispatch(ctx, d.cerebraRouter, routingPrompt, meta, runtimes, model)
+	}
+	if isCerebraActive && d.cerebraRouter != nil {
+		model = routeBeforeDispatch(ctx, d.cerebraRouter, routingPrompt, cerebraMeta, cerebraRuntimes, model)
 	}
 	execOpts := agent.ExecOptions{
 		Cwd:                        env.WorkDir,
@@ -8203,7 +8218,67 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Shared across the resume-retry below so the retry's transcript rows
 	// keep ascending seq values for the same task.
 	var msgSeq atomic.Int32
-	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
+	var result agent.Result
+	var tools int32
+
+	const maxModelFailovers = 3
+	for failoverAttempt := 0; failoverAttempt < maxModelFailovers; failoverAttempt++ {
+		result, tools, err = d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
+		if ctx.Err() != nil {
+			break
+		}
+		isQuota, failMsg := isQuotaOrModelFailure(result, err)
+		if !isQuota || !isCerebraActive || d.cerebraRouter == nil {
+			break
+		}
+
+		failedModel := model
+		if d.unavailStore != nil {
+			d.unavailStore.MarkUnavailable(ctx, task.RuntimeID, failedModel, 0)
+			if extracted := cerebra.ExtractFailedModel(failMsg); extracted != "" {
+				d.unavailStore.MarkUnavailable(ctx, task.RuntimeID, extracted, 0)
+			}
+		}
+
+		d.cerebraRouter.InvalidateSession(ctx, task.IssueID, task.ChatSessionID)
+
+		var newRuntimes []cerebra.RuntimeEntry
+		if task.RuntimeID != "" {
+			runtimeCmd := agent.NewCommand(entry.Path, profileFixedArgs)
+			newRuntimes = append(newRuntimes, cerebra.RuntimeEntry{
+				RuntimeID: task.RuntimeID,
+				TierMap:   deriveDynamicRuntimeTierMap(ctx, provider, runtimeCmd, d.unavailStore, task.RuntimeID),
+			})
+		}
+
+		nextModel := routeBeforeDispatch(ctx, d.cerebraRouter, routingPrompt, cerebraMeta, newRuntimes, "")
+		if nextModel == "" || nextModel == failedModel {
+			taskLog.Warn("cerebra: candidate models exhausted; cannot failover further",
+				"failed_model", failedModel,
+				"error", failMsg,
+			)
+			break
+		}
+
+		taskLog.Warn("cerebra: model quota/rate-limit reached, skipping to next best available model",
+			"failed_model", failedModel,
+			"next_model", nextModel,
+			"attempt", failoverAttempt+1,
+		)
+
+		model = nextModel
+		execOpts.Model = nextModel
+		selection = resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
+			taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
+		model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
+		execOpts.Model = model
+		execOpts.ThinkingLevel = thinkingLevel
+		execOpts.ServiceTier = serviceTier
+
+		result = agent.Result{}
+		tools = 0
+		err = nil
+	}
 	if err != nil {
 		return TaskResult{}, err
 	}
@@ -8372,6 +8447,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				EnvRoot:       env.RootDir,
 				Usage:         usageEntries,
 				FailureReason: reason,
+			}, nil
+		}
+		if isQuota, _ := isQuotaOrModelFailure(result, nil); isQuota {
+			taskLog.Warn("agent finished with quota/rate-limit output, classifying as blocked",
+				"failure_reason", string(taskfailure.ReasonAgentProviderQuotaLimit),
+			)
+			if d.unavailStore != nil {
+				d.unavailStore.MarkUnavailable(ctx, task.RuntimeID, model, 0)
+				if extracted := cerebra.ExtractFailedModel(result.Output); extracted != "" {
+					d.unavailStore.MarkUnavailable(ctx, task.RuntimeID, extracted, 0)
+				}
+			}
+			return TaskResult{
+				Status:        "blocked",
+				Comment:       result.Output,
+				SessionID:     result.SessionID,
+				WorkDir:       env.WorkDir,
+				EnvRoot:       env.RootDir,
+				Usage:         usageEntries,
+				FailureReason: string(taskfailure.ReasonAgentProviderQuotaLimit),
 			}, nil
 		}
 		taskResult = TaskResult{
