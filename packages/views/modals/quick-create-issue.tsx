@@ -194,6 +194,7 @@ export function AgentCreatePanel({
   const setManual = useIssueDraftStore((s) => s.setManual);
   const setAgent = useIssueDraftStore((s) => s.setAgent);
   const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
+  const setLastProject = useIssueDraftStore((s) => s.setLastProject);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
 
   // Resolve a candidate actor against the currently-visible agents / squads.
@@ -450,6 +451,7 @@ export function AgentCreatePanel({
           });
         }
         setLastActor(actor.type, actor.id);
+        setLastProject(projectId ?? undefined);
         setLastMode("agent");
         toast.success(t(($) => $.create_issue.agent.toast_sent), {
           duration: 4000,

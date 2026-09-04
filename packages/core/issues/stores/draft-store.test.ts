@@ -146,12 +146,38 @@ describe("issue draft store — last assignee", () => {
     expect(useIssueDraftStore.getState().isolatedDraftBackup).toBeUndefined();
   });
 
-  it("clearDraft removes the persisted project selection", () => {
+  it("clearDraft yields an empty project when none has ever been remembered", () => {
     const { setShared, clearDraft } = useIssueDraftStore.getState();
 
     setShared({ projectId: "project-1" });
     clearDraft();
 
+    expect(useIssueDraftStore.getState().draft.shared.projectId).toBeUndefined();
+  });
+
+  it("clearDraft prefills the next draft with the remembered project", () => {
+    const { setShared, setLastProject, clearDraft } =
+      useIssueDraftStore.getState();
+
+    // A failed agent task retry re-opens the create form after the original
+    // create already ran clearDraft. The just-used project must survive that
+    // clear so the reopened form starts on the previously chosen project.
+    setShared({ projectId: "project-1" });
+    setLastProject("project-1");
+    clearDraft();
+
+    expect(useIssueDraftStore.getState().draft.shared.projectId).toBe("project-1");
+  });
+
+  it("setLastProject(undefined) lets the user opt back out of a default", () => {
+    const { setLastProject, clearDraft } = useIssueDraftStore.getState();
+
+    setLastProject("project-1");
+    clearDraft();
+    expect(useIssueDraftStore.getState().draft.shared.projectId).toBe("project-1");
+
+    setLastProject(undefined);
+    clearDraft();
     expect(useIssueDraftStore.getState().draft.shared.projectId).toBeUndefined();
   });
 
@@ -381,20 +407,26 @@ describe("issue draft store — logout cleanup", () => {
     setCurrentWorkspace(null, null);
   });
 
-  it("registered reset wipes the last-assignee preference, not just the draft", () => {
-    const { setManual, setLastAssignee } = useIssueDraftStore.getState();
+  it("registered reset wipes the last-assignee and last-project preferences, not just the draft", () => {
+    const { setManual, setShared, setLastAssignee, setLastProject } =
+      useIssueDraftStore.getState();
     setManual({ title: "wip", assigneeType: "member", assigneeId: "alice" });
+    setShared({ projectId: "project-1" });
     setLastAssignee("member", "alice");
+    setLastProject("project-1");
 
     resetAllRegisteredDrafts();
 
     const state = useIssueDraftStore.getState();
     expect(state.lastAssigneeType).toBeUndefined();
     expect(state.lastAssigneeId).toBeUndefined();
-    // clearDraft() would have re-seeded the manual slot from lastAssignee —
-    // the logout reset must not hand the next login a previous user's pick.
+    expect(state.lastProjectId).toBeUndefined();
+    // clearDraft() would have re-seeded the manual slot from lastAssignee and
+    // the shared slot from lastProjectId — the logout reset must not hand the
+    // next login a previous user's picks.
     expect(state.draft.manual.assigneeType).toBeUndefined();
     expect(state.draft.manual.assigneeId).toBeUndefined();
+    expect(state.draft.shared.projectId).toBeUndefined();
   });
 
   it("logout sequence (reset in-memory, then clear storage) leaves no persisted key", async () => {
