@@ -231,6 +231,11 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
+	// JetBrains Junie exposes its headless integration over ACP with
+	// `junie --acp=true`. Model ids are discovered from the live session.
+	if e, ok := probe("MULTICA_JUNIE_PATH", "junie", "MULTICA_JUNIE_MODEL"); ok {
+		agents["junie"] = e
+	}
 	if e, ok := probe("MULTICA_CODEBUDDY_PATH", "codebuddy", "MULTICA_CODEBUDDY_MODEL"); ok {
 		agents["codebuddy"] = e
 	}

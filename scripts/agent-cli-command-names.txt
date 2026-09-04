@@ -12,6 +12,7 @@ grok
 hermes
 kimi
 kiro-cli
+junie
 mcode
 omp
 openclaw

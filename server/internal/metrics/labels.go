@@ -153,6 +153,7 @@ var (
 		"grok":          "grok",
 		"hermes":        "hermes",
 		"kiro":          "kiro",
+		"junie":         "junie",
 		"kimi":          "kimi",
 		"reasonix":      "reasonix",
 		"dim":           "dim",

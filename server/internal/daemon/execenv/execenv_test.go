@@ -1907,6 +1907,31 @@ func TestWriteContextFilesKiroNativeSkills(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesJunieNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "junie-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+	if err := writeContextFiles(dir, "junie", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+	skillMD, err := os.ReadFile(filepath.Join(dir, ".junie", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read Junie native skill: %v", err)
+	}
+	if !strings.Contains(string(skillMD), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for Junie provider")
+	}
+}
+
 func TestWriteContextFilesQoderNativeSkills(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

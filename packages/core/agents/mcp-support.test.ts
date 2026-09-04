@@ -5,6 +5,9 @@ import { providerSupportsMcpConfig } from "./mcp-support";
 describe("providerSupportsMcpConfig", () => {
   it("accepts a provider whose runtime consumes mcp_config", () => {
     expect(providerSupportsMcpConfig("claude")).toBe(true);
+    // Junie consumes Multica-managed servers through ACP session/new and
+    // session/load; its own ~/.junie/mcp/mcp.json remains runtime-owned.
+    expect(providerSupportsMcpConfig("junie")).toBe(true);
   });
   it("rejects providers whose runtime ignores mcp_config", () => {
     expect(providerSupportsMcpConfig("antigravity")).toBe(false);
