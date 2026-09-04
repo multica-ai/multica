@@ -270,6 +270,17 @@ describe("IssueFilterMenu scalar property filter", () => {
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["3.5"] });
   });
 
+  it("expands exponent-form number keys like the server numeric facet", async () => {
+    renderFilterMenu([propertyOf(PROP, "Estimate", "number")], [
+      issueWithProperties("i-1", { [PROP]: 1e21 }),
+    ]);
+    await openPropertySubmenu("Estimate", "spinbutton");
+
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: /1000000000000000000000/ }),
+    ).toBeInTheDocument();
+  });
+
   it("an unchanged blur or Enter commit does not drop checkbox-selected members", async () => {
     // Regression (adversarial review): the blur commit rewrote the whole set
     // from the draft, so checking "alpha" and "beta" and then merely clicking

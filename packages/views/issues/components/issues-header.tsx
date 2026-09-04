@@ -196,6 +196,36 @@ const NO_COUNT_ISSUES: Issue[] = [];
 // Keep the local fallback's observed-value list aligned with the server facet
 // contract: highest count first, ties by key, at most 50 rows.
 const MAX_OBSERVED_SCALAR_VALUES = 50;
+const FACET_KEY_ENCODER = new TextEncoder();
+
+function compareFacetKeys(a: string, b: string): number {
+  const aBytes = FACET_KEY_ENCODER.encode(a);
+  const bBytes = FACET_KEY_ENCODER.encode(b);
+  const length = Math.min(aBytes.length, bBytes.length);
+  for (let index = 0; index < length; index++) {
+    const aByte = aBytes[index] ?? 0;
+    const bByte = bBytes[index] ?? 0;
+    if (aByte !== bByte) return aByte - bByte;
+  }
+  return aBytes.length - bBytes.length;
+}
+
+/** PostgreSQL numeric text uses plain decimal notation after trim_scale. */
+function canonicalNumberFacetKey(value: number): string {
+  const raw = String(value);
+  const exponentIndex = raw.search(/[eE]/);
+  if (exponentIndex < 0) return raw;
+  const coefficient = raw.slice(0, exponentIndex);
+  const exponent = Number(raw.slice(exponentIndex + 1));
+  const sign = coefficient.startsWith("-") ? "-" : "";
+  const unsigned = sign ? coefficient.slice(1) : coefficient;
+  const decimalIndex = unsigned.indexOf(".");
+  const digits = unsigned.replace(".", "");
+  const decimalPosition = (decimalIndex < 0 ? unsigned.length : decimalIndex) + exponent;
+  if (decimalPosition <= 0) return `${sign}0.${"0".repeat(-decimalPosition)}${digits}`;
+  if (decimalPosition >= digits.length) return `${sign}${digits}${"0".repeat(decimalPosition - digits.length)}`;
+  return `${sign}${digits.slice(0, decimalPosition)}.${digits.slice(decimalPosition)}`;
+}
 
 function useIssueCounts(
   allIssues: Issue[],
@@ -299,7 +329,7 @@ function useIssueCounts(
               ? // Number facet key: String() is already canonical in JS for
                 // ordinary values. The server-backed facet remains the source
                 // of truth for large exponent values.
-                [String(value)]
+                [canonicalNumberFacetKey(value)]
               : (propertyType === "select" || propertyType === "actor") &&
                   typeof value === "string"
                 ? [value]
@@ -846,7 +876,7 @@ function PropertyFilterOptions({
     // the way an old client ignores the per-value rows.
     const observedValues = [...(counts?.entries() ?? [])]
       .filter(([key]) => key !== NO_PROPERTY_VALUE && key !== "__set__")
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .sort((a, b) => b[1] - a[1] || compareFacetKeys(a[0], b[0]))
       .slice(0, MAX_OBSERVED_SCALAR_VALUES);
     // A saved view locks this dimension: the value (with its operator) AND
     // "No value" are both part of the view's identity, so neither can be
