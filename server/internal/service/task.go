@@ -63,6 +63,9 @@ type TaskService struct {
 	// stale dispatched task. It removes the unconditional reclaim UPDATE from
 	// idle claim polls while missing/error states preserve the DB fallback.
 	ReclaimCheck *ReclaimCheckCache
+	// DeferredPromotionCheck schedules PostgreSQL's cancel/promote-deferred
+	// pass. Missing/error state preserves the historical promote-first path.
+	DeferredPromotionCheck *DeferredPromotionCheckCache
 	// Composio computes the per-task MCP overlay (Stage 3 of the Composio
 	// epic, MUL-3721) — the integration's "current user's connected apps
 	// → MCP session URL" hook called from each Enqueue* path. Optional: a
@@ -238,6 +241,33 @@ func (s *TaskService) forgetTaskReclaim(task db.AgentTaskQueue) {
 		context.Background(),
 		util.UUIDToString(task.RuntimeID),
 		util.UUIDToString(task.ID),
+	)
+}
+
+func (s *TaskService) trackTaskForDeferredPromotion(task db.AgentTaskQueue) {
+	if task.Status != "deferred" || !task.RuntimeID.Valid || !task.ID.Valid || !task.FireAt.Valid {
+		return
+	}
+	s.DeferredPromotionCheck.Track(
+		context.Background(),
+		util.UUIDToString(task.RuntimeID),
+		util.UUIDToString(task.ID),
+		task.FireAt.Time,
+	)
+}
+
+func (s *TaskService) forgetTaskDeferredPromotion(task db.AgentTaskQueue) {
+	s.forgetDeferredPromotion(task.RuntimeID, task.ID)
+}
+
+func (s *TaskService) forgetDeferredPromotion(runtimeID, taskID pgtype.UUID) {
+	if !runtimeID.Valid || !taskID.Valid {
+		return
+	}
+	s.DeferredPromotionCheck.Forget(
+		context.Background(),
+		util.UUIDToString(runtimeID),
+		util.UUIDToString(taskID),
 	)
 }
 
@@ -1327,6 +1357,11 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
+	if fireAt.Valid {
+		// Direct callers commit with the statement. Transaction-bound callers use
+		// a cache-less TaskService and publish this hint after the outer commit.
+		s.trackTaskForDeferredPromotion(task)
+	}
 
 	slog.Info("task enqueued",
 		"task_id", util.UUIDToString(task.ID),
@@ -1530,6 +1565,7 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 		return db.AgentTaskQueue{}, fmt.Errorf("create deferred task: %w", err)
 	}
 
+	s.trackTaskForDeferredPromotion(task)
 	slog.Info("deferred fallback task enqueued",
 		"task_id", util.UUIDToString(task.ID),
 		"issue_id", util.UUIDToString(issue.ID),
@@ -2164,6 +2200,7 @@ func (s *TaskService) enqueueChatTaskTx(
 // FinalizeChatTaskEnqueue performs only post-commit effects.
 func (s *TaskService) FinalizeChatTaskEnqueue(ctx context.Context, task db.AgentTaskQueue) {
 	if task.Status == "deferred" {
+		s.trackTaskForDeferredPromotion(task)
 		slog.Info("chat task deferred for channel media",
 			"task_id", util.UUIDToString(task.ID),
 			"chat_session_id", util.UUIDToString(task.ChatSessionID),
@@ -3637,9 +3674,21 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	}()
 
 	runtimeKey := util.UUIDToString(runtimeID)
-	if err := s.PromoteDueDeferredTasksForRuntime(ctx, runtimeID); err != nil {
-		outcome = "error_promote_deferred"
-		return nil, err
+	deferredCheckStarted := time.Now()
+	deferredDue, deferredCacheReady := s.DeferredPromotionCheck.dueRuntimeIDs(ctx, []string{runtimeKey}, deferredCheckStarted)
+	if len(deferredDue) > 0 {
+		if err := s.PromoteDueDeferredTasksForRuntime(ctx, runtimeID); err != nil {
+			outcome = "error_promote_deferred"
+			return nil, err
+		}
+		if deferredCacheReady {
+			s.refreshDeferredPromotionCheck(
+				ctx,
+				[]pgtype.UUID{runtimeID},
+				[]string{runtimeKey},
+				deferredCheckStarted,
+			)
+		}
 	}
 
 	// Keep stale-response recovery before EmptyClaim because the queued-only
@@ -3827,7 +3876,9 @@ func (s *TaskService) RequeueTaskAfterClaimFailure(ctx context.Context, task db.
 // request (and one promote/reclaim/list cycle) per runtime.
 //
 // It preserves the exact per-runtime semantics, just set-ified:
-//  1. promote due deferred tasks across the set (one UPDATE);
+//  1. when its Redis schedule/backstop is due, cancel superseded retries and
+//     promote due deferred tasks across the set, then reconcile the next legacy
+//     deadline; missing/error cache state preserves this PostgreSQL path;
 //  2. reclaim up to maxTasks stale-dispatched tasks across the set (one UPDATE)
 //     — done before the empty-cache check because a lost claim response moves
 //     the task out of `queued`, which the empty-queued cache cannot represent;
@@ -3863,6 +3914,10 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	}
 
 	claimed := make([]db.AgentTaskQueue, 0, maxTasks)
+	runtimeKeys := make([]string, 0, len(uniqueIDs))
+	for _, rid := range uniqueIDs {
+		runtimeKeys = append(runtimeKeys, util.UUIDToString(rid))
+	}
 
 	// 1. Promote due deferred tasks across the whole set (promote-first, like
 	// the singular path). Replay the per-row side effects the singular service
@@ -3873,28 +3928,35 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	// MarkEmpty from a prior idle poll would short-circuit the runtime and the
 	// promoted task would sit unclaimed until the empty key's TTL. Also emits
 	// the deferred→queued UI event and the enqueue analytics sample.
-	s.cancelSupersededDeferredRetries(ctx, uniqueIDs)
-	promoted, err := s.Queries.PromoteDueDeferredTasksForRuntimes(ctx, db.PromoteDueDeferredTasksForRuntimesParams{
-		RuntimeIds:       uniqueIDs,
-		RuntimeStaleSecs: RuntimeClaimFreshnessSeconds,
-	})
-	if isDuplicatePendingTaskErr(err) {
-		// Same tolerance as the single-runtime path, and it matters more here:
-		// one contended row would otherwise fail the claim for EVERY runtime in
-		// the batch. Promote nothing this tick and let the claim continue.
-		slog.Info("promote deferred tasks (batch): slot taken by a concurrent enqueue, skipping this tick")
-		promoted = nil
-	} else if err != nil {
-		return nil, fmt.Errorf("promote deferred tasks: %w", err)
-	}
-	for _, task := range promoted {
-		slog.Info("deferred fallback task promoted (batch)",
-			"task_id", util.UUIDToString(task.ID),
-			"runtime_id", util.UUIDToString(task.RuntimeID),
-			"agent_id", util.UUIDToString(task.AgentID),
-		)
-		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
-		s.NotifyTaskEnqueued(ctx, task)
+	deferredCheckStarted := time.Now()
+	deferredDue, deferredCacheReady := s.DeferredPromotionCheck.dueRuntimeIDs(ctx, runtimeKeys, deferredCheckStarted)
+	if len(deferredDue) > 0 {
+		s.cancelSupersededDeferredRetries(ctx, uniqueIDs)
+		promoted, err := s.Queries.PromoteDueDeferredTasksForRuntimes(ctx, db.PromoteDueDeferredTasksForRuntimesParams{
+			RuntimeIds:       uniqueIDs,
+			RuntimeStaleSecs: RuntimeClaimFreshnessSeconds,
+		})
+		if isDuplicatePendingTaskErr(err) {
+			// Same tolerance as the single-runtime path, and it matters more here:
+			// one contended row would otherwise fail the claim for EVERY runtime in
+			// the batch. Promote nothing this tick and let the claim continue.
+			slog.Info("promote deferred tasks (batch): slot taken by a concurrent enqueue, skipping this tick")
+			promoted = nil
+		} else if err != nil {
+			return nil, fmt.Errorf("promote deferred tasks: %w", err)
+		}
+		for _, task := range promoted {
+			slog.Info("deferred fallback task promoted (batch)",
+				"task_id", util.UUIDToString(task.ID),
+				"runtime_id", util.UUIDToString(task.RuntimeID),
+				"agent_id", util.UUIDToString(task.AgentID),
+			)
+			s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+			s.NotifyTaskEnqueued(ctx, task)
+		}
+		if deferredCacheReady {
+			s.refreshDeferredPromotionCheck(ctx, uniqueIDs, runtimeKeys, deferredCheckStarted)
+		}
 	}
 
 	// 2. Reclaim lost-response dispatched tasks when any runtime's task schedule
@@ -3902,14 +3964,13 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	// machine-level set so per-runtime backstops stay aligned and fixed UPDATE
 	// setup/locking cost is paid at a predictable cadence. A nil/missing/failed
 	// cache preserves the historical query path.
-	runtimeKeys := make([]string, 0, len(uniqueIDs))
-	for _, rid := range uniqueIDs {
-		runtimeKeys = append(runtimeKeys, util.UUIDToString(rid))
-	}
 	checkStarted := time.Now()
 	dueKeys := s.ReclaimCheck.DueRuntimeIDs(ctx, runtimeKeys, checkStarted)
-	var reclaimed []db.AgentTaskQueue
-	var reclaimCheckAfter time.Time
+	var (
+		reclaimed         []db.AgentTaskQueue
+		err               error
+		reclaimCheckAfter time.Time
+	)
 	if len(dueKeys) > 0 {
 		reclaimCheckAfter = time.Now().Add(claimResponseRecoveryWindow + ReclaimCheckHintSafetyMargin)
 		reclaimed, err = s.Queries.ReclaimStaleDispatchedTasksForRuntimes(ctx, db.ReclaimStaleDispatchedTasksForRuntimesParams{
@@ -4051,6 +4112,7 @@ func (s *TaskService) cancelSupersededDeferredRetries(ctx context.Context, runti
 		return
 	}
 	for _, task := range cancelled {
+		s.forgetTaskDeferredPromotion(task)
 		slog.Info("deferred auto-retry cancelled: superseded by an active task",
 			"task_id", util.UUIDToString(task.ID),
 			"issue_id", util.UUIDToString(task.IssueID),
@@ -4060,6 +4122,38 @@ func (s *TaskService) cancelSupersededDeferredRetries(ctx context.Context, runti
 		s.ReconcileAgentStatus(ctx, task.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
 	}
+}
+
+// refreshDeferredPromotionCheck makes a completed DB pass safe to cache across
+// rolling deploys. The query seeds the earliest still-deferred row per runtime,
+// including rows inserted by an older server that did not publish Redis hints.
+// If reconciliation fails, no backstop is advanced and the next claim retries
+// the historical DB path.
+func (s *TaskService) refreshDeferredPromotionCheck(ctx context.Context, runtimeIDs []pgtype.UUID, runtimeKeys []string, checkedThrough time.Time) {
+	if s.DeferredPromotionCheck == nil || len(runtimeIDs) == 0 {
+		return
+	}
+	next, err := s.Queries.ListNextDeferredTasksForRuntimes(ctx, runtimeIDs)
+	if err != nil {
+		slog.Warn("refresh deferred promotion schedule failed; DB fallback remains active", "error", err)
+		return
+	}
+	for _, task := range next {
+		if !s.DeferredPromotionCheck.Track(
+			ctx,
+			util.UUIDToString(task.RuntimeID),
+			util.UUIDToString(task.ID),
+			checkedThrough.Add(task.FireAt.Time.Sub(task.DatabaseNow.Time)),
+		) {
+			return
+		}
+	}
+	s.DeferredPromotionCheck.MarkChecked(
+		ctx,
+		runtimeKeys,
+		checkedThrough,
+		time.Now().Add(DeferredPromotionCheckRetryInterval),
+	)
 }
 
 func (s *TaskService) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
@@ -4150,6 +4244,7 @@ func (s *TaskService) cancelDeferredEscalationsForTask(ctx context.Context, task
 		return
 	}
 	for _, task := range cancelled {
+		s.forgetDeferredPromotion(task.RuntimeID, task.ID)
 		slog.Info("deferred fallback task cancelled",
 			"task_id", util.UUIDToString(task.ID),
 			"primary_task_id", util.UUIDToString(taskID),
@@ -4171,6 +4266,7 @@ func (s *TaskService) CancelDeferredEscalationsForIssueAgent(ctx context.Context
 		return
 	}
 	for _, task := range cancelled {
+		s.forgetDeferredPromotion(task.RuntimeID, task.ID)
 		slog.Info("deferred fallback task cancelled",
 			"task_id", util.UUIDToString(task.ID),
 			"issue_id", util.UUIDToString(issueID),
@@ -5043,7 +5139,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			"max_attempts", retried.MaxAttempts,
 			"status", retried.Status,
 		)
-		if retried.Status == "queued" {
+		if retried.Status == "deferred" {
+			s.trackTaskForDeferredPromotion(*retried)
+		} else if retried.Status == "queued" {
 			s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, *retried)
 			s.NotifyTaskEnqueued(ctx, *retried)
 		}
@@ -5444,7 +5542,9 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// queued first, then notify the daemon — see EnqueueTaskForIssue for ordering
 	// rationale. A deferred child (backoff armed) stays inert until
 	// PromoteDueDeferredTasksForRuntime fires its queued event + wakeup.
-	if child.Status == "queued" {
+	if child.Status == "deferred" {
+		s.trackTaskForDeferredPromotion(child)
+	} else if child.Status == "queued" {
 		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, child)
 		s.NotifyTaskEnqueued(ctx, child)
 	}
@@ -6916,6 +7016,7 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 // become claimable because an agent-capacity or serialization barrier cleared.
 func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
 	s.forgetTaskReclaim(task)
+	s.forgetTaskDeferredPromotion(task)
 	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
 }
 
@@ -6929,6 +7030,7 @@ func (s *TaskService) notifyTasksFinished(tasks []db.AgentTaskQueue) {
 			continue
 		}
 		s.forgetTaskReclaim(task)
+		s.forgetTaskDeferredPromotion(task)
 		runtimeKey := util.UUIDToString(task.RuntimeID)
 		if _, ok := seen[runtimeKey]; ok {
 			continue
@@ -6946,6 +7048,7 @@ func (s *TaskService) notifyTasksFinished(tasks []db.AgentTaskQueue) {
 // otherwise the wakeup-driven claim could read the still-current
 // empty verdict and return null.
 func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
+	s.forgetTaskDeferredPromotion(task)
 	s.notifyRuntimeMayHaveWork(task.RuntimeID, util.UUIDToString(task.ID))
 }
 

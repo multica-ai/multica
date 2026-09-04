@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/redis/go-redis/v9"
 )
 
 // TestClaimTasksForRuntimes_PromotesDeferredAndEmitsQueuedEvent is the
@@ -58,6 +60,96 @@ func TestClaimTasksForRuntimes_PromotesDeferredAndEmitsQueuedEvent(t *testing.T)
 	mu.Unlock()
 	if n != 1 {
 		t.Fatalf("expected exactly one task:queued event for the promoted task, got %d", n)
+	}
+}
+
+// TestClaimTasksForRuntimes_DeferredPromotionGateRehydratesLegacyTask proves a
+// cache miss still runs the historical DB promotion pass and then discovers a
+// future row that predates Redis hint publication. The refreshed hint closes
+// the rolling-deploy hole without making Redis authoritative.
+func TestClaimTasksForRuntimes_DeferredPromotionGateRehydratesLegacyTask(t *testing.T) {
+	ctx := context.Background()
+	rdb := newRedisTestClient(t)
+	pool := newTaskClaimRacePool(t)
+	svc := NewTaskService(db.New(pool), pool, nil, events.New())
+	svc.DeferredPromotionCheck = NewDeferredPromotionCheckCache(rdb)
+
+	runtimeID, taskID := deferredBatchFixture(t, ctx, pool)
+	fireAt := time.Now().Add(time.Hour)
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET fire_at = $2 WHERE id = $1`, taskID, fireAt); err != nil {
+		t.Fatalf("move deferred task into future: %v", err)
+	}
+
+	claimed, err := svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{util.MustParseUUID(runtimeID)}, 5)
+	if err != nil {
+		t.Fatalf("batch claim: %v", err)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("claimed future deferred task: %v", claimed)
+	}
+	if score, err := rdb.ZScore(ctx, deferredPromotionCheckScheduleKey(runtimeID), taskID).Result(); err != nil {
+		t.Fatalf("legacy deferred task was not rehydrated: %v", err)
+	} else if got := time.UnixMilli(int64(score)); got.Before(fireAt.Add(-time.Second)) || got.After(fireAt.Add(time.Second)) {
+		t.Fatalf("rehydrated fire_at = %v, want approximately %v", got, fireAt)
+	}
+	if due := svc.DeferredPromotionCheck.DueRuntimeIDs(ctx, []string{runtimeID}, time.Now()); len(due) != 0 {
+		t.Fatalf("future task bypassed fresh promotion gate: %v", due)
+	}
+}
+
+func TestClaimTasksForRuntimes_DeferredPromotionGatePromotesDueHint(t *testing.T) {
+	ctx := context.Background()
+	rdb := newRedisTestClient(t)
+	pool := newTaskClaimRacePool(t)
+	svc := NewTaskService(db.New(pool), pool, nil, events.New())
+	svc.DeferredPromotionCheck = NewDeferredPromotionCheckCache(rdb)
+
+	runtimeID, taskID := deferredBatchFixture(t, ctx, pool)
+	now := time.Now()
+	svc.DeferredPromotionCheck.MarkChecked(ctx, []string{runtimeID}, now, now.Add(DeferredPromotionCheckRetryInterval))
+	if !svc.DeferredPromotionCheck.Track(ctx, runtimeID, taskID, now.Add(-time.Second)) {
+		t.Fatal("track due task")
+	}
+
+	claimed, err := svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{util.MustParseUUID(runtimeID)}, 5)
+	if err != nil {
+		t.Fatalf("batch claim: %v", err)
+	}
+	if len(claimed) != 1 || util.UUIDToString(claimed[0].ID) != taskID {
+		t.Fatalf("due hinted task %s was not promoted and claimed: %v", taskID, claimed)
+	}
+	if _, err := rdb.ZScore(ctx, deferredPromotionCheckScheduleKey(runtimeID), taskID).Result(); !errors.Is(err, redis.Nil) {
+		t.Fatalf("promoted task hint error = %v, want redis.Nil", err)
+	}
+}
+
+// TestClaimTaskForRuntime_DeferredPromotionGatePromotesDueHint covers the
+// legacy single-runtime endpoint independently from the machine-level batch
+// implementation. This is the high-volume compatibility path the gate is
+// intended to remove idle promotion SQL from.
+func TestClaimTaskForRuntime_DeferredPromotionGatePromotesDueHint(t *testing.T) {
+	ctx := context.Background()
+	rdb := newRedisTestClient(t)
+	pool := newTaskClaimRacePool(t)
+	svc := NewTaskService(db.New(pool), pool, nil, events.New())
+	svc.DeferredPromotionCheck = NewDeferredPromotionCheckCache(rdb)
+
+	runtimeID, taskID := deferredBatchFixture(t, ctx, pool)
+	now := time.Now()
+	svc.DeferredPromotionCheck.MarkChecked(ctx, []string{runtimeID}, now, now.Add(DeferredPromotionCheckRetryInterval))
+	if !svc.DeferredPromotionCheck.Track(ctx, runtimeID, taskID, now.Add(-time.Second)) {
+		t.Fatal("track due task")
+	}
+
+	claimed, err := svc.ClaimTaskForRuntime(ctx, util.MustParseUUID(runtimeID))
+	if err != nil {
+		t.Fatalf("legacy claim: %v", err)
+	}
+	if claimed == nil || util.UUIDToString(claimed.ID) != taskID {
+		t.Fatalf("due hinted task %s was not promoted and claimed: %v", taskID, claimed)
+	}
+	if _, err := rdb.ZScore(ctx, deferredPromotionCheckScheduleKey(runtimeID), taskID).Result(); !errors.Is(err, redis.Nil) {
+		t.Fatalf("promoted task hint error = %v, want redis.Nil", err)
 	}
 }
 

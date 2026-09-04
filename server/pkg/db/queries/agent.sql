@@ -2233,6 +2233,24 @@ WHERE r.runtime_id = ANY(@runtime_ids::uuid[])
   )
 RETURNING *;
 
+-- name: ListNextDeferredTasksForRuntimes :many
+-- Rehydrates the advisory deferred-promotion schedule after a periodic DB
+-- backstop. One row per runtime is sufficient: enqueue-time writes track every
+-- new task, and the next backstop/promotion pass discovers the following legacy
+-- row after this earliest one leaves deferred. The partial fire_at index serves
+-- both the runtime filter and ordering. Return a relative delay so Redis never
+-- compares the PostgreSQL host's wall clock directly with the Server's clock.
+SELECT DISTINCT ON (runtime_id)
+    id,
+    runtime_id,
+    fire_at,
+    now()::timestamptz AS database_now
+FROM agent_task_queue
+WHERE runtime_id = ANY(@runtime_ids::uuid[])
+  AND status = 'deferred'
+  AND fire_at IS NOT NULL
+ORDER BY runtime_id, fire_at, id;
+
 -- name: PromoteDueDeferredTasksForRuntime :many
 -- Promotion is fenced against the single queued/dispatched slot
 -- idx_one_pending_task_per_issue_agent_v2 allows per (issue, agent). A deferred

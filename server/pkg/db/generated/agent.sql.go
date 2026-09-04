@@ -5712,6 +5712,57 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 	return items, nil
 }
 
+const listNextDeferredTasksForRuntimes = `-- name: ListNextDeferredTasksForRuntimes :many
+SELECT DISTINCT ON (runtime_id)
+    id,
+    runtime_id,
+    fire_at,
+    now()::timestamptz AS database_now
+FROM agent_task_queue
+WHERE runtime_id = ANY($1::uuid[])
+  AND status = 'deferred'
+  AND fire_at IS NOT NULL
+ORDER BY runtime_id, fire_at, id
+`
+
+type ListNextDeferredTasksForRuntimesRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
+	FireAt      pgtype.Timestamptz `json:"fire_at"`
+	DatabaseNow pgtype.Timestamptz `json:"database_now"`
+}
+
+// Rehydrates the advisory deferred-promotion schedule after a periodic DB
+// backstop. One row per runtime is sufficient: enqueue-time writes track every
+// new task, and the next backstop/promotion pass discovers the following legacy
+// row after this earliest one leaves deferred. The partial fire_at index serves
+// both the runtime filter and ordering. Return a relative delay so Redis never
+// compares the PostgreSQL host's wall clock directly with the Server's clock.
+func (q *Queries) ListNextDeferredTasksForRuntimes(ctx context.Context, runtimeIds []pgtype.UUID) ([]ListNextDeferredTasksForRuntimesRow, error) {
+	rows, err := q.db.Query(ctx, listNextDeferredTasksForRuntimes, runtimeIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNextDeferredTasksForRuntimesRow{}
+	for rows.Next() {
+		var i ListNextDeferredTasksForRuntimesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RuntimeID,
+			&i.FireAt,
+			&i.DatabaseNow,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingDelegatedFailureRecoveries = `-- name: ListPendingDelegatedFailureRecoveries :many
 SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at
 FROM comment recovery
