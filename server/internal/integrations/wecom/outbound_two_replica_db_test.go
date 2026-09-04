@@ -337,6 +337,10 @@ type sharedDedupe struct {
 	held  map[string]bool
 	fail  bool
 	calls int
+
+	// releaseFails makes Release report failure and keep the key, the way a
+	// Redis DEL that did not go through leaves it to its TTL.
+	releaseFails bool
 }
 
 func newSharedDedupe() *sharedDedupe { return &sharedDedupe{held: map[string]bool{}} }
@@ -361,16 +365,26 @@ func (d *sharedDedupe) holds(key string) bool {
 	return d.held[key]
 }
 
+func (d *sharedDedupe) heldCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.held)
+}
+
 func (d *sharedDedupe) claimCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.calls
 }
 
-func (d *sharedDedupe) Release(_ context.Context, key string) {
+func (d *sharedDedupe) Release(_ context.Context, key string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.releaseFails {
+		return errors.New("dedupe: DEL failed")
+	}
 	delete(d.held, key)
+	return nil
 }
 
 // ClaimBudget is a fake's budget: small, because it is what sizes the outcome

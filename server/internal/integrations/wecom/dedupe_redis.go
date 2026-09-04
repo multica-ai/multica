@@ -72,11 +72,13 @@ func (d *redisDedupe) Held(ctx context.Context, key string) (bool, error) {
 // Best effort by design: a Release that fails leaves a key that expires on its
 // own, which costs one un-retried delivery in the replay window rather than a
 // duplicate in somebody's chat.
-func (d *redisDedupe) Release(ctx context.Context, key string) {
+func (d *redisDedupe) Release(ctx context.Context, key string) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.budget)
 	defer cancel()
 	if err := d.rdb.Del(ctx, key).Err(); err != nil {
 		d.log.WarnContext(ctx, "wecom relay: could not release a delivery claim",
 			"error", err, "key", key)
+		return err
 	}
+	return nil
 }
