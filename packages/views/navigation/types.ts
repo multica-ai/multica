@@ -47,6 +47,17 @@ export interface NavigationAdapter {
    */
   canGoBack?: () => boolean;
   /**
+   * Optional: draw attention to the tab the current content is already showing
+   * in, WITHOUT navigating. Used when a link resolves to the surface the user
+   * is already on — e.g. a mention of the current issue from inside that
+   * issue's own detail page: re-navigating there is a no-op that still tears
+   * the page down and back up, so the click is swallowed and this fires a brief
+   * highlight on the active tab instead. Only the desktop shell owns a tab
+   * strip to flash; web leaves it undefined and callers must invoke it via
+   * `flashActiveTab?.()`, treating absence as "nothing to flash".
+   */
+  flashActiveTab?: () => void;
+  /**
    * Optional: step forward through history, the inverse of `back()`. Web wires
    * this to `router.forward`; the desktop shell to the active tab's virtual
    * history. It is optional because not every adapter owns a forward stack: the

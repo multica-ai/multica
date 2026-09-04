@@ -156,6 +156,16 @@ interface TabStore {
   mountGeneration: number;
 
   /**
+   * A one-shot "flash this tab" pulse, or null when nothing is pending. Raised
+   * by `flashActiveTab` when a content link resolves to the surface the active
+   * tab already shows (e.g. a mention of the current issue clicked from inside
+   * that issue): there is nowhere to navigate, so the tab strip briefly
+   * highlights the tab instead. `seq` makes each request distinct so repeated
+   * clicks on the same tab replay the animation. Deliberately NOT persisted.
+   */
+  flashSignal: { tabId: string; seq: number } | null;
+
+  /**
    * Switch to a workspace.
    *   - If the group doesn't exist yet, create it with a single default tab.
    *   - If `openPath` is given, find a tab with that resourceKey and activate
@@ -241,6 +251,12 @@ interface TabStore {
    * Coordinator (it watches this counter) so this action stays pure state.
    */
   reloadActiveTab: () => void;
+  /**
+   * Fire a one-shot flash on the active tab (see `flashSignal`). No-op when no
+   * workspace/tab is active. Each call bumps `seq` so the animation replays
+   * even when the same tab is flashed twice in a row.
+   */
+  flashActiveTab: () => void;
   /**
    * Close the active tab. The always-safe escape from a route-level crash:
    * unlike reloadActiveTab (remounts the same crashing URL), closing
@@ -497,6 +513,7 @@ export const useTabStore = create<TabStore>()(
       activeWorkspaceSlug: null,
       byWorkspace: {},
       mountGeneration: 0,
+      flashSignal: null,
 
       switchWorkspace(slug, openPath) {
         // Defensive no-op if slug is empty/invalid — callers like the
@@ -862,6 +879,13 @@ export const useTabStore = create<TabStore>()(
         set({ mountGeneration: mountGeneration + 1 });
       },
 
+      flashActiveTab() {
+        const active = getActiveTab(get());
+        if (!active) return;
+        const prev = get().flashSignal;
+        set({ flashSignal: { tabId: active.id, seq: (prev?.seq ?? 0) + 1 } });
+      },
+
       closeActiveTab() {
         const { activeWorkspaceSlug, byWorkspace, closeTab } = get();
         if (!activeWorkspaceSlug) return;
@@ -975,7 +999,7 @@ export const useTabStore = create<TabStore>()(
       },
 
       reset() {
-        set({ activeWorkspaceSlug: null, byWorkspace: {}, mountGeneration: 0 });
+        set({ activeWorkspaceSlug: null, byWorkspace: {}, mountGeneration: 0, flashSignal: null });
       },
     }),
     {
@@ -1382,6 +1406,15 @@ export function useActiveTabIdentity(): { slug: string | null; tabId: string | n
 /** The active session's url as a primitive (Coordinator, providers). */
 export function useActiveTabUrl(): string | null {
   return useTabStore((s) => getActiveTab(s)?.url ?? null);
+}
+
+/**
+ * The pending flash pulse (or null). Primitive-stable: the object reference
+ * only changes when `flashActiveTab` fires, so the TabBar re-renders on a
+ * flash and nothing else.
+ */
+export function useTabFlashSignal(): { tabId: string; seq: number } | null {
+  return useTabStore((s) => s.flashSignal);
 }
 
 /**

@@ -36,7 +36,7 @@ import {
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { SIDEBAR_WRAPPER_FILL_CLASS } from "@multica/ui/components/ui/sidebar";
 import { cn } from "@multica/ui/lib/utils";
-import { useTabStore, useActiveGroup, type Tab } from "@/stores/tab-store";
+import { useTabStore, useActiveGroup, useTabFlashSignal, type Tab } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
 import {
   useTabPresentation,
@@ -183,6 +183,7 @@ function SortableTabItem({
   isOnly,
   canCloseOthers,
   isNew,
+  flashSeq,
   shouldReduceMotion,
   showSeparator,
 }: {
@@ -196,6 +197,11 @@ function SortableTabItem({
   isOnly: boolean;
   canCloseOthers: boolean;
   isNew: boolean;
+  /**
+   * A monotonic flash sequence for THIS tab, or null when it has no pending
+   * flash. Changing it replays the attention pulse (see `flashActiveTab`).
+   */
+  flashSeq: number | null;
   shouldReduceMotion: boolean;
   /**
    * Hairline on the tab's left edge — hidden next to the active tab, and
@@ -458,6 +464,25 @@ function SortableTabItem({
             onAnimationComplete={() => setShowAddedHighlight(false)}
           />
         )}
+        {flashSeq !== null && (
+          // Attention pulse fired when a link resolves to the surface this tab
+          // already shows (e.g. a mention of the current issue). Keyed on the
+          // sequence so a repeat click on the same tab replays it. Distinct
+          // from the added-tab highlight above: this one fades in and back out
+          // rather than starting lit, since the tab is already on screen.
+          <motion.span
+            key={flashSeq}
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1 rounded-lg bg-primary/15 ring-1 ring-inset ring-primary/30"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: shouldReduceMotion ? [0.4, 0] : [0, 0.7, 0] }}
+            transition={{
+              duration: shouldReduceMotion ? 0.3 : 0.55,
+              times: shouldReduceMotion ? [0, 1] : [0, 0.3, 1],
+              ease: "easeOut",
+            }}
+          />
+        )}
       </motion.div>
     </div>
   );
@@ -558,6 +583,7 @@ export function TabBar() {
   const group = useActiveGroup();
   const moveTab = useTabStore((s) => s.moveTab);
   const activeWorkspaceSlug = useTabStore((s) => s.activeWorkspaceSlug);
+  const flashSignal = useTabFlashSignal();
   const shouldReduceMotion = useReducedMotion() ?? false;
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const previousTabsRef = useRef<TabSnapshot | null>(null);
@@ -679,6 +705,9 @@ export function TabBar() {
                         (candidate) => candidate.id !== tab.id && !candidate.pinned,
                       )}
                       isNew={addedTabIdSet.has(tab.id)}
+                      flashSeq={
+                        flashSignal?.tabId === tab.id ? flashSignal.seq : null
+                      }
                       shouldReduceMotion={shouldReduceMotion}
                       showSeparator={
                         !!previousTab &&

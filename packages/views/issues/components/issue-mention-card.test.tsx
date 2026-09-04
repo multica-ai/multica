@@ -152,4 +152,48 @@ describe("IssueMentionCard", () => {
 
     expect(screen.getByTestId("issue-chip")).toHaveAttribute("data-current", "false");
   });
+
+  it("swallows a plain click on the current issue and flashes the active tab instead of navigating", () => {
+    const push = vi.fn();
+    const flashActiveTab = vi.fn();
+    renderCard(makeAdapter({ push, flashActiveTab }), {
+      id: "issue-1",
+      identifier: "MUL-7",
+    });
+
+    fireEvent.click(screen.getByTestId("issue-chip"));
+
+    expect(push).not.toHaveBeenCalled();
+    expect(flashActiveTab).toHaveBeenCalledOnce();
+  });
+
+  it("still opens the current issue in a new tab on a modifier click (desktop)", () => {
+    const push = vi.fn();
+    const openInNewTab = vi.fn();
+    const flashActiveTab = vi.fn();
+    renderCard(makeAdapter({ push, openInNewTab, flashActiveTab }), {
+      id: "issue-1",
+      identifier: "MUL-7",
+    });
+
+    fireEvent.click(screen.getByTestId("issue-chip"), { metaKey: true });
+
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/issues/issue-1", "MUL-7");
+    expect(flashActiveTab).not.toHaveBeenCalled();
+  });
+
+  it("navigates in place for a different issue even while a current issue is set", () => {
+    const push = vi.fn();
+    const flashActiveTab = vi.fn();
+    renderCard(
+      makeAdapter({ push, flashActiveTab }),
+      { id: "issue-2", identifier: "MUL-8" },
+      "issue-1",
+    );
+
+    fireEvent.click(screen.getByTestId("issue-chip"));
+
+    expect(push).toHaveBeenCalledWith("/acme/issues/issue-1");
+    expect(flashActiveTab).not.toHaveBeenCalled();
+  });
 });
