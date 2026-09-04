@@ -622,6 +622,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"metadata only",
 				"Adding a `local_directory` to a project that already has a `task_config`",
 				"Removing either one is always allowed",
+				"`task_config` reference plus its selector tuple",
 				"Project resources are durable and affect future tasks",
 				"github_repo.resource_ref.url",
 				"resource_ref.ref",

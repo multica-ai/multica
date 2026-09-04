@@ -159,7 +159,8 @@ is task-local checkout state.
 1. `multica project get <project-id> --output json`.
 2. `multica project resource list <project-id> --output json`.
 3. Check `github_repo.resource_ref.url`, optional `ref`, `default_branch_hint`,
-   and `local_directory.resource_ref.daemon_id`.
+   `local_directory.resource_ref.daemon_id`, and the metadata-only `task_config`
+   reference plus its selector tuple.
 4. Updating resources is a durable mutation. After an update, listing the
    resource is the verification path.
 5. If resources match the expected task context, inspect runtime/repo checkout
