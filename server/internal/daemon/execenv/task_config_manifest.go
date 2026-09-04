@@ -9,7 +9,10 @@ import (
 	"strings"
 )
 
-const taskConfigIntentFile = ".multica_task_config_intent.json"
+const (
+	taskConfigIntentFile = ".multica_task_config_intent.json"
+	taskConfigWorkDirRel = "workdir"
+)
 
 type taskConfigIntent struct {
 	TaskID string `json:"task_id"`
@@ -27,7 +30,7 @@ func RegisterTaskConfigIntent(envRoot, taskID, workDir string, paths ...string) 
 	envRoot, err := filepath.Abs(envRoot)
 	root, rootErr := filepath.Abs(workDir)
 	workRel, relErr := filepath.Rel(envRoot, root)
-	if err != nil || rootErr != nil || relErr != nil || envRoot == "" || root == "" || !safeIntentTaskID(taskID) || !safeIntentRelativePath(workRel) || len(paths) == 0 {
+	if err != nil || rootErr != nil || relErr != nil || envRoot == "" || root == "" || filepath.ToSlash(workRel) != taskConfigWorkDirRel || !safeIntentRelativePath(workRel) || !safeIntentTaskID(taskID) || len(paths) == 0 {
 		return errors.New("execenv: invalid task config intent")
 	}
 	if !safeIntentParents(envRoot, workRel) {
@@ -75,7 +78,7 @@ func CleanupTaskConfigIntent(envRoot string) ([]string, error) {
 		return nil, errors.New("execenv: parse task config intent failed")
 	}
 	envRoot, err = filepath.Abs(envRoot)
-	if err != nil || envRoot == "" || !safeIntentTaskID(intent.TaskID) || len(intent.Paths) == 0 || !safeIntentRelativePath(intent.WorkDir) {
+	if err != nil || envRoot == "" || filepath.ToSlash(intent.WorkDir) != taskConfigWorkDirRel || !safeIntentTaskID(intent.TaskID) || len(intent.Paths) == 0 || !safeIntentRelativePath(intent.WorkDir) {
 		return nil, errors.New("execenv: invalid task config intent")
 	}
 	if !safeIntentParents(envRoot, intent.WorkDir) {

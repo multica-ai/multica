@@ -112,3 +112,28 @@ func TestCleanupTaskConfigManifestsRejectsTamperedWorkDirOutsideEnvRoot(t *testi
 		t.Fatalf("outside file was affected: %v", err)
 	}
 }
+
+func TestCleanupTaskConfigManifestsRejectsTamperedSiblingWorkDir(t *testing.T) {
+	root := t.TempDir()
+	envRoot := filepath.Join(root, "workspace", "task")
+	siblingWork := filepath.Join(envRoot, "other-work")
+	siblingFile := filepath.Join(siblingWork, "backend.hcl")
+	if err := os.MkdirAll(siblingWork, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(siblingFile, []byte("must survive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(envRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(envRoot, taskConfigIntentFile), []byte(`{"task_id":"task-1","work_dir":"other-work","paths":["backend.hcl"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CleanupTaskConfigManifests(root); err == nil {
+		t.Fatal("tampered sibling workdir intent was accepted")
+	}
+	if _, err := os.Stat(siblingFile); err != nil {
+		t.Fatalf("sibling file was affected: %v", err)
+	}
+}
