@@ -1,3 +1,5 @@
+export { mcpTransportLabel } from "../../../common/mcp-transport";
+
 export type McpConfigContainer = "mcpServers" | "mcp";
 
 export type ManagedMcpServer = {
