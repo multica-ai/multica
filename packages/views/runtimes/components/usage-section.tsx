@@ -224,7 +224,11 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
           if the user has saved overrides, so those rates remain editable. */}
       <CustomPricingBar usage={filtered} />
 
-      <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
+      {/* Stacks to a single column on phones — three thirds of a ~390px
+          viewport can't hold a `text-display` KPI value like "960.1M"
+          without it spilling past the card's right edge (MUL issue #7836).
+          At `sm` and up it returns to the divided three-across row. */}
+      <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         <KpiCard
           label={t(($) => $.usage.kpi_cost_label, { days })}
           value={
