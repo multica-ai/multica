@@ -32,6 +32,12 @@
 
 name: multica
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -42,6 +48,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test:
         [
@@ -198,6 +205,7 @@ services:
       # what it records is user message content.
       MULTICA_WECOM_TRACE: ${MULTICA_WECOM_TRACE:-}
     restart: unless-stopped
+    logging: *default-logging
 
   frontend:
     image: ${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:${MULTICA_IMAGE_TAG:-latest}
@@ -212,6 +220,7 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
     restart: unless-stopped
+    logging: *default-logging
 
 volumes:
   pgdata:
