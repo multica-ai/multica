@@ -272,7 +272,6 @@ export function McpTab() {
                     remove: t(($) => $.mcp.remove_action),
                     removeAria: t(($) => $.mcp.remove_server),
                   }}
-                  configureKind="replace"
                   onRenameStart={() => startRename(server)}
                   onConfigure={() => {
                     cancelRename();
