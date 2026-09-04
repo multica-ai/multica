@@ -275,6 +275,26 @@ export interface TaskAttribution {
   rerun_of_task_id?: string;
 }
 
+/**
+ * A task's terminal product, normalized from whichever shape the backend
+ * returned. A server predating CODI-11 sends the legacy `{output}` form; the
+ * schema lifts it into this same type so UI code never branches on the
+ * backend's version.
+ *
+ * `summary` is the agent's final human-facing answer, and an empty string is a
+ * legitimate value — a tool-only turn genuinely produces no prose. Use null on
+ * the containing field (not an empty summary) to mean "no result".
+ *
+ * Notably absent: session ids, work directories, branch names. Those live in
+ * their own top-level task fields; the result envelope used to carry copies of
+ * them, which is the drift this type exists to end.
+ */
+export interface CompletionResult {
+  version: 1;
+  summary: string;
+  artifact_ids: string[];
+}
+
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -300,7 +320,7 @@ export interface AgentTask {
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
-  result: unknown;
+  result: CompletionResult | null;
   error: string | null;
   // Empty string when the task is not in a failed state (the backend uses
   // `omitempty`, so the field may also be missing on non-failed tasks).

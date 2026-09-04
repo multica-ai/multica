@@ -239,6 +239,8 @@ import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
   AgentTaskListSchema,
+  ActiveTasksForIssueSchema,
+  EMPTY_AGENT_TASK,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
@@ -301,6 +303,7 @@ import {
   ListAutopilotsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   AutopilotRunSchema,
+  ListAutopilotRunsResponseSchema,
   AutopilotQuotaUsageSchema,
   FALLBACK_AUTOPILOT_RUN,
   CronPreviewResponseSchema,
@@ -2338,7 +2341,10 @@ export class ApiClient {
   }
 
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {
-    return this.fetch(`/api/agents/${agentId}/tasks`);
+    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/tasks`);
+    return parseWithFallback<AgentTask[]>(raw, AgentTaskListSchema, [], {
+      endpoint: "GET /api/agents/:id/tasks",
+    });
   }
 
   // Workspace-scoped agent task snapshot: every active task
@@ -2347,7 +2353,10 @@ export class ApiClient {
   // derivation; one fetch backs every per-agent presence read in the app.
   // Workspace is resolved server-side from the X-Workspace-Slug header.
   async getAgentTaskSnapshot(): Promise<AgentTask[]> {
-    return this.fetch(`/api/agent-task-snapshot`);
+    const raw = await this.fetch<unknown>(`/api/agent-task-snapshot`);
+    return parseWithFallback<AgentTask[]>(raw, AgentTaskListSchema, [], {
+      endpoint: "GET /api/agent-task-snapshot",
+    });
   }
 
   // Independent workspace-level projection. Unlike the task snapshot, this
@@ -2389,7 +2398,13 @@ export class ApiClient {
   }
 
   async getActiveTasksForIssue(issueId: string): Promise<{ tasks: AgentTask[] }> {
-    return this.fetch(`/api/issues/${issueId}/active-task`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/active-task`);
+    return parseWithFallback<{ tasks: AgentTask[] }>(
+      raw,
+      ActiveTasksForIssueSchema,
+      { tasks: [] },
+      { endpoint: "GET /api/issues/:id/active-task" },
+    );
   }
 
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
@@ -2408,15 +2423,21 @@ export class ApiClient {
   }
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
-    return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
+    });
+    return parseWithFallback<AgentTask>(raw, AgentTaskSchema, EMPTY_AGENT_TASK, {
+      endpoint: "POST /api/issues/:id/tasks/:taskId/cancel",
     });
   }
 
   async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
-    return this.fetch(`/api/issues/${issueId}/rerun`, {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/rerun`, {
       method: "POST",
       body: JSON.stringify(taskId ? { task_id: taskId } : {}),
+    });
+    return parseWithFallback<AgentTask>(raw, AgentTaskSchema, EMPTY_AGENT_TASK, {
+      endpoint: "POST /api/issues/:id/rerun",
     });
   }
 
@@ -4179,14 +4200,23 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.limit) search.set("limit", params.limit.toString());
     if (params?.offset) search.set("offset", params.offset.toString());
-    return this.fetch(`/api/autopilots/${id}/runs?${search}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}/runs?${search}`);
+    return parseWithFallback<ListAutopilotRunsResponse>(
+      raw,
+      ListAutopilotRunsResponseSchema,
+      { runs: [], total: 0 },
+      { endpoint: "GET /api/autopilots/:id/runs" },
+    );
   }
 
   // Returns a single run including its full trigger_payload. List responses
   // omit trigger_payload to keep them small (a webhook envelope can be
   // up to 256 KiB × limit rows), so the detail view fetches via this route.
   async getAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/runs/${runId}`);
+    return parseWithFallback<AutopilotRun>(raw, AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, {
+      endpoint: "GET /api/autopilots/:id/runs/:runId",
+    });
   }
 
   async createAutopilotTrigger(autopilotId: string, data: CreateAutopilotTriggerRequest): Promise<AutopilotTrigger> {

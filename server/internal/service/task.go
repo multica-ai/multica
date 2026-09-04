@@ -4426,14 +4426,25 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			Since:    task.StartedAt,
 		})
 		if !suppressNoActionComment && !agentCommented {
-			var payload protocol.TaskCompletedPayload
-			if err := json.Unmarshal(result, &payload); err == nil {
-				if payload.Output != "" {
+			// Both legacy rows and v1 rows normalize through the same parser, so
+			// this fallback behaves identically whichever shape the producing
+			// daemon wrote. An unreadable row yields ok=false and no comment —
+			// the same outcome as an empty answer, which is what a row we cannot
+			// vouch for should produce.
+			parsed, ok := protocol.ReadStoredResult(result)
+			if !ok {
+				slog.Warn("issue fallback comment: unreadable completion result, skipping",
+					"task_id", util.UUIDToString(task.ID),
+					"issue_id", util.UUIDToString(task.IssueID),
+				)
+			}
+			if ok {
+				if parsed.Summary != "" {
 					// Match the CLI's --content / --description behavior: agents that
 					// emit literal `\n` 4-char sequences (Python/JSON-style) get them
 					// decoded into real newlines before the comment hits the DB. See
 					// util.UnescapeBackslashEscapes for the exact contract.
-					body := util.UnescapeBackslashEscapes(payload.Output)
+					body := util.UnescapeBackslashEscapes(parsed.Summary)
 					if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
 						slog.Warn("suppressing trivial comment-trigger fallback output",
 							"task_id", util.UUIDToString(task.ID),
@@ -4521,13 +4532,19 @@ const chatNoResponseFallback = "The agent finished this turn without a text repl
 // owner id so an auto-retry clone (which inherits chat_input_task_id) reaches
 // the same verdict as its parent — while a NULL owner marks a legacy task.
 func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, result []byte) (*db.ChatMessage, error) {
-	// result is the daemon request re-marshalled by the handler, so it is always
-	// valid JSON; an empty Output is the only case this branch cares about.
-	var payload protocol.TaskCompletedPayload
-	_ = json.Unmarshal(result, &payload)
+	// result is written by the /complete boundary, so it is always a canonical
+	// envelope; legacy rows normalize through the same parser. An unreadable
+	// row degrades to an empty answer, which this function already handles as a
+	// legitimate terminal state (the no_response path below).
+	parsed, ok := protocol.ReadStoredResult(result)
+	if !ok {
+		slog.Warn("chat completion outcome: unreadable completion result, treating as empty",
+			"task_id", util.UUIDToString(task.ID),
+		)
+	}
 	// Same unescape as the issue-comment path: literal `\n` from agent stdout
 	// becomes a real newline so the chat panel renders paragraph breaks.
-	body := util.UnescapeBackslashEscapes(payload.Output)
+	body := util.UnescapeBackslashEscapes(parsed.Summary)
 	// Strip any in-band quick-actions footer from EVERY chat completion — the
 	// reserved syntax must never reach a stored transcript. This includes the
 	// agent-initiated intro turn (chat_input_task_id NULL), which previously
@@ -7428,13 +7445,13 @@ const quickCreateOversizedFailureDetail = "Quick create failed, but the agent's 
 // so the caller falls back to a generic message; redaction is applied by
 // notifyQuickCreateFailed.
 func quickCreateFailureDetail(result []byte) string {
-	var payload protocol.TaskCompletedPayload
-	if err := json.Unmarshal(result, &payload); err != nil {
+	parsed, ok := protocol.ReadStoredResult(result)
+	if !ok {
 		return ""
 	}
 	// Same unescape as the comment-fallback path: literal `\n` sequences from
 	// agent stdout become real newlines before the reason reaches the user.
-	body := strings.TrimSpace(util.UnescapeBackslashEscapes(payload.Output))
+	body := strings.TrimSpace(util.UnescapeBackslashEscapes(parsed.Summary))
 	if body == "" {
 		return ""
 	}

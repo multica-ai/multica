@@ -3689,7 +3689,17 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 
 // CompleteTask marks a running task as completed.
 type TaskCompleteRequest struct {
-	PRURL     string `json:"pr_url"`
+	// Result is the versioned completion envelope. Absent on a legacy daemon,
+	// which reports its answer in Output instead. json.RawMessage rather than a
+	// typed field so the strict parser owns validation: decoding straight into
+	// CompletionResultV1 would silently accept a missing summary and an unknown
+	// version, which is exactly what this boundary must refuse.
+	Result json.RawMessage `json:"result,omitempty"`
+	// Output is the legacy answer field. A v1 daemon dual-writes it, identical
+	// to Result.Summary, so that a server predating v1 (which ignores the
+	// unknown `result` key — this decoder does not set DisallowUnknownFields)
+	// still records the run's answer. That one-directional compatibility is why
+	// no capability negotiation is needed here.
 	Output    string `json:"output"`
 	SessionID string `json:"session_id"` // Claude session ID for future resumption
 	WorkDir   string `json:"work_dir"`   // working directory used during execution
@@ -3712,14 +3722,17 @@ type TaskCompleteRequest struct {
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every
-// caller-supplied string on a terminal task callback. Both request types are
-// flat bags of strings, so this is exhaustive by construction — but that also
-// means a NEW string field must be added here, or it reopens GH #7098 through a
-// fresh door. The task-row columns these feed (error, work_dir,
-// durable_work_dir, branch_name, session_id) are all TEXT, and result is
-// JSONB; neither tolerates a NUL.
+// caller-supplied string on a terminal task callback. The task-row columns
+// these feed (error, work_dir, durable_work_dir, branch_name, session_id) are
+// all TEXT, and result is JSONB; neither tolerates a NUL.
+//
+// Note what is NOT scrubbed here: req.Result. It is raw JSON at this point, and
+// the bytes that actually get persisted are re-marshalled from the parsed
+// CompletionResultV1 in normalizeCompletionResult — which sanitizes Summary
+// explicitly and REJECTS (rather than rewrites) a malformed artifact id.
+// Scrubbing the raw envelope here as if it were a flat string would be both
+// wrong and useless.
 func sanitizeTaskCompleteRequest(req *TaskCompleteRequest) {
-	req.PRURL = util.SanitizeTextForPostgres(req.PRURL)
 	req.Output = util.SanitizeTextForPostgres(req.Output)
 	req.SessionID = util.SanitizeTextForPostgres(req.SessionID)
 	req.WorkDir = util.SanitizeTextForPostgres(req.WorkDir)
@@ -3736,6 +3749,42 @@ func sanitizeTaskFailRequest(req *TaskFailRequest) {
 	req.FailureReason = util.SanitizeTextForPostgres(req.FailureReason)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
+}
+
+// normalizeCompletionResult turns a /complete request into the canonical
+// envelope that gets persisted, or an error describing why the request is
+// unacceptable. The error text is caller-facing (it becomes a 400 body).
+//
+// Selection rules, deliberately per-request so they stay self-consistent under
+// a rolling deploy where consecutive calls may hit different server versions:
+//
+//   - No `result` key: legacy. Lift `output` into the canonical shape.
+//   - `result` present: parse it STRICTLY. Malformed, unknown version, missing
+//     summary, or a bad artifact id is a 400 — never a quiet fall back to
+//     legacy, which would persist a mis-read payload under a v1 label.
+//   - Both present: they must agree. A v1 daemon builds them from one string,
+//     so a mismatch is a producer bug; accepting it would mean this run reads
+//     back differently depending on which server version handled it.
+//
+// Summary is sanitized here (prose; a NUL would abort the JSONB insert per
+// GH #7098). Artifact ids are validated by the parser and rejected rather than
+// rewritten — editing an identifier changes which object it names.
+func normalizeCompletionResult(req *TaskCompleteRequest) (protocol.CompletionResultV1, error) {
+	parsed, err := protocol.ParseCompletionResult(req.Result)
+	switch {
+	case errors.Is(err, protocol.ErrLegacyCompletionResult):
+		return protocol.NewLegacyCompletionResult(req.Output), nil
+	case err != nil:
+		return protocol.CompletionResultV1{}, err
+	}
+
+	parsed.Summary = util.SanitizeTextForPostgres(parsed.Summary)
+	// req.Output was already sanitized, so compare like with like: a NUL that
+	// only one side stripped is not a real disagreement.
+	if req.Output != "" && req.Output != parsed.Summary {
+		return protocol.CompletionResultV1{}, errors.New("completion result: v1 summary and legacy output disagree")
+	}
+	return parsed, nil
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
@@ -3762,6 +3811,26 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// classifier must see exactly the text we are going to persist.
 	sanitizeTaskCompleteRequest(&req)
 
+	// Normalize BEFORE the context-exhaustion check so that check reads the
+	// canonical answer: a v1 daemon and a legacy daemon reporting the same
+	// exhausted run must be classified identically.
+	result, err := normalizeCompletionResult(&req)
+	if err != nil {
+		// A 4xx here is permanent from the daemon's perspective: it does not
+		// retry, and falls back to /fail (MUL-2946), so the run surfaces as a
+		// failure rather than a silently mis-stored success. That is the
+		// intended signal — a payload this boundary cannot vouch for must not
+		// be persisted as a result — and it is reachable only from a producer
+		// bug or a forged request, never from an older daemon, which sends no
+		// `result` key at all and takes the legacy path inside the helper.
+		slog.Error("complete task: rejecting malformed completion result",
+			"task_id", taskID,
+			"error", err,
+		)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// GH #6402: a daemon whose backend does not (yet) read the provider's
 	// structured terminal reason reports a context-exhausted run as a clean
 	// success, with the CLI's "your context window is full" notice as the
@@ -3773,13 +3842,13 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// same shared classifier, as taskfailure.NormalizeDaemonReason on the fail
 	// boundary (MUL-5370). A current daemon classifies this before it ever calls
 	// /complete, so this branch is dead weight for it — by design.
-	if taskfailure.ContextExhaustedCompletion(req.Output) {
+	if taskfailure.ContextExhaustedCompletion(result.Summary) {
 		slog.Warn("complete task: output is a provider context-exhaustion notice, recording as failed",
 			"task_id", taskID,
 			"failure_reason", taskfailure.ReasonAgentContextOverflow,
 		)
 		h.failTask(w, r, taskID, workspaceID, TaskFailRequest{
-			Error:          req.Output,
+			Error:          result.Summary,
 			FailureReason:  string(taskfailure.ReasonAgentContextOverflow),
 			SessionID:      req.SessionID,
 			WorkDir:        req.WorkDir,
@@ -3794,12 +3863,21 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, _ := json.Marshal(req)
+	// Persist ONLY the canonical envelope. The transport fields on the request
+	// keep their own columns and top-level API fields; copying them in here is
+	// what previously made result a second, unversioned source of truth for
+	// branch/work_dir and leaked session_id to every UI caller.
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		slog.Error("complete task: encoding canonical result failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to encode completion result")
+		return
+	}
 	// MUL-5305: SessionRolloutMissing is applied inside CompleteTask's terminal
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
 	// missing continuity-gap flag.
-	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), resultJSON, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
 	if err != nil {
 		// A CompleteTask error is an infrastructure failure (transaction /
 		// assistant-outcome write), not a bad request: an already-finalized

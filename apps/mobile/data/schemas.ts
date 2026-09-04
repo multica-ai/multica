@@ -18,6 +18,7 @@ import type {
   ChatMessage,
   ChatPendingTask,
   ChatSession,
+  CompletionResult,
   Comment,
   InboxItem,
   IssueLabelsResponse,
@@ -410,6 +411,49 @@ export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
 // an open string instead: its taxonomy grows on the backend's cadence, so a
 // value this build has never seen must survive parsing and degrade at render.
 
+// A task's terminal product. Mirrors CompletionResultSchema in
+// packages/core/api/schemas.ts — copied rather than imported, because mobile
+// takes only types and pure functions from core (apps/mobile/CLAUDE.md).
+//
+// Two accepted shapes: the versioned envelope (CODI-11) and the legacy
+// `{output}` from a server predating it, both normalized to CompletionResult
+// so no render path branches on which backend answered. `version` and a string
+// `output` are each branch's required discriminator; everything else degrades
+// in place, so a malformed artifact_ids cannot discard a usable summary. A
+// payload matching neither lands as null through the outer catch and renders
+// like a task that produced no result.
+const CompletionResultSchema: z.ZodType<CompletionResult | null> = z
+  .union([
+    z
+      .object({
+        version: z.literal(1),
+        summary: z.string().catch(""),
+        artifact_ids: z.array(z.string()).catch([]).default([]),
+      })
+      .loose()
+      .transform((value): CompletionResult => ({
+        version: 1,
+        summary: value.summary,
+        artifact_ids: value.artifact_ids,
+      })),
+    // `output` is deliberately not `.catch("")`: a catch would swallow the
+    // "field absent" error too, so any unrelated object would parse as a valid
+    // empty result and an unreadable payload would be indistinguishable from a
+    // silent turn. Requiring a real string is what lets the outer catch mean
+    // "nothing usable came back".
+    z
+      .object({ output: z.string() })
+      .loose()
+      .transform((value): CompletionResult => ({
+        version: 1,
+        summary: value.output,
+        artifact_ids: [],
+      })),
+  ])
+  .nullable()
+  .catch(null)
+  .default(null);
+
 export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   id: z.string(),
   agent_id: z.string().default(""),
@@ -422,7 +466,7 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   dispatched_at: z.string().nullable().default(null),
   started_at: z.string().nullable().default(null),
   completed_at: z.string().nullable().default(null),
-  result: z.unknown().default(null),
+  result: CompletionResultSchema,
   error: z.string().nullable().default(null),
   // Open string, not an enum — same contract as `failure_reason` in
   // packages/core/types/agent.ts and as the chat message schema above. The

@@ -288,9 +288,18 @@ func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
 	if r.TriggerPayload != nil {
 		json.Unmarshal(r.TriggerPayload, &payload)
 	}
+	// autopilot_run.result is a verbatim copy of the task's result, so it needs
+	// the identical treatment: parse to canonical v1, degrade an unreadable row
+	// to null rather than echoing transport fields back out.
 	var result any
-	if r.Result != nil {
-		json.Unmarshal(r.Result, &result)
+	if len(r.Result) > 0 {
+		if parsed, ok := protocol.ReadStoredResult(r.Result); ok {
+			result = parsed
+		} else {
+			slog.Warn("autopilot run response: unreadable completion result, returning null",
+				"run_id", uuidToString(r.ID),
+			)
+		}
 	}
 	return AutopilotRunResponse{
 		ID:             uuidToString(r.ID),

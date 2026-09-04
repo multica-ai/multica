@@ -1,5 +1,7 @@
 import { z } from "zod";
 import type {
+  AgentTask,
+  CompletionResult,
   AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
   AgentBuilderSessionSummary,
@@ -1727,6 +1729,44 @@ const OptionalStringArraySchema = z.preprocess(
   z.array(z.string()).optional(),
 );
 
+// A task's terminal product. The backend now returns a versioned envelope
+// (CODI-11), but an installed client can be pointed at a server that predates
+// it and still returns the legacy `{output}` shape — so both are accepted and
+// normalized to one type here rather than at each call site.
+//
+// Each branch needs one REQUIRED field to identify itself — `version: 1` here,
+// a string `output` below. Everything else degrades in place, so a malformed
+// `artifact_ids` cannot discard a usable `summary` and neither can take the
+// surrounding task row down. A payload matching no branch lands as null via the
+// outer catch, which renders the same as a task that produced no result.
+export const CompletionResultSchema = z.union([
+  z.object({
+    version: z.literal(1),
+    summary: z.string().catch(""),
+    artifact_ids: z.array(z.string()).catch([]).default([]),
+  }).loose().transform((value): CompletionResult => ({
+    version: 1,
+    summary: value.summary,
+    artifact_ids: value.artifact_ids,
+  })),
+  // Legacy server: lift `output` into the same shape so UI code never branches
+  // on which backend answered.
+  //
+  // `output` is deliberately NOT `.catch("")`. A catch here would swallow the
+  // "field is absent" error too, so ANY object — `{}`, or a shape from some
+  // unrelated endpoint — would parse as a valid result with an empty summary,
+  // and an unreadable payload would be indistinguishable from a silent turn.
+  // Requiring a real string is what lets the outer `.catch(null)` mean
+  // "nothing usable came back".
+  z.object({
+    output: z.string(),
+  }).loose().transform((value): CompletionResult => ({
+    version: 1,
+    summary: value.output,
+    artifact_ids: [],
+  })),
+]).nullable().catch(null).default(null);
+
 // One (provider, model) slice of a run's token usage. Token counts default to
 // 0 rather than failing the row: a slice missing one counter is still worth
 // pricing on the counters it does have, and the "we have no usage at all" case
@@ -1751,7 +1791,7 @@ export const AgentTaskSchema = z.object({
   dispatched_at: z.string().nullable().default(null),
   started_at: z.string().nullable().default(null),
   completed_at: z.string().nullable().default(null),
-  result: z.unknown().default(null),
+  result: CompletionResultSchema,
   error: z.string().nullable().default(null),
   failure_reason: z.string().optional(),
   created_at: z.string().default(""),
@@ -1782,6 +1822,31 @@ export const AgentTaskSchema = z.object({
 }).loose();
 
 export const AgentTaskListSchema = z.array(AgentTaskSchema);
+
+// Degraded placeholder for a single-task response that failed validation. The
+// empty id is the caller's signal that nothing usable came back; "cancelled"
+// is the inert status choice — it renders as a finished run rather than
+// implying work is still in flight.
+export const EMPTY_AGENT_TASK: AgentTask = {
+  id: "",
+  agent_id: "",
+  runtime_id: "",
+  issue_id: "",
+  status: "cancelled",
+  priority: 0,
+  dispatched_at: null,
+  started_at: null,
+  completed_at: null,
+  result: null,
+  error: null,
+  created_at: "",
+};
+
+// `GET /api/issues/:id/active-task` wraps its list. `.catch([])` on the array
+// keeps a single malformed task row from emptying the whole response.
+export const ActiveTasksForIssueSchema = z.object({
+  tasks: z.array(AgentTaskSchema).catch([]).default([]),
+}).loose();
 
 // Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
 // chat recovery. Its optional message payload must be well-formed before the
@@ -2264,7 +2329,7 @@ export const AutopilotRunSchema = z.object({
   failure_reason: z.string().nullable().default(null),
   reason_code: z.string().optional(),
   trigger_payload: z.unknown().default(null),
-  result: z.unknown().default(null),
+  result: CompletionResultSchema,
   created_at: z.string().default(""),
 }).loose();
 
@@ -2296,6 +2361,13 @@ export const FALLBACK_AUTOPILOT_RUN: AutopilotRun = {
   result: null,
   created_at: "",
 };
+
+// Run list. `.catch([])` on the array so one unreadable run row degrades to an
+// empty list rather than throwing; `total` falls back to 0.
+export const ListAutopilotRunsResponseSchema = z.object({
+  runs: z.array(AutopilotRunSchema).catch([]).default([]),
+  total: z.number().catch(0).default(0),
+}).loose();
 
 // Cron preview: the server is the authority on the next occurrences. No
 // `.default([])` here — a missing or reshaped field must fail validation so it

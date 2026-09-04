@@ -142,9 +142,13 @@ type TaskProgressPayload struct {
 }
 
 // TaskCompletedPayload is sent from daemon to server when a task finishes.
+//
+// Deprecated for reading agent_task_queue.result: that column now holds a
+// CompletionResultV1 envelope, and every consumer must go through
+// ParseCompletionResult / ReadStoredResult. This type remains only as the
+// event-bus payload shape.
 type TaskCompletedPayload struct {
 	TaskID string `json:"task_id"`
-	PRURL  string `json:"pr_url,omitempty"`
 	Output string `json:"output,omitempty"`
 }
 

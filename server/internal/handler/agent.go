@@ -737,9 +737,21 @@ type TaskAgentData struct {
 // derivation; pass "" only on daemon-facing paths that genuinely don't have
 // it, in which case RelativeWorkDir falls back to the existing WorkDir.
 func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
+	// Parse to the canonical envelope instead of echoing the stored blob. The
+	// old code unmarshalled into `any` and shipped whatever it found, which is
+	// how session_id and absolute work_dir paths reached every UI caller: the
+	// blob used to be the entire /complete request. A row we cannot parse
+	// becomes null rather than being re-read under legacy rules or passed
+	// through raw.
 	var result any
-	if t.Result != nil {
-		json.Unmarshal(t.Result, &result)
+	if len(t.Result) > 0 {
+		if parsed, ok := protocol.ReadStoredResult(t.Result); ok {
+			result = parsed
+		} else {
+			slog.Warn("task response: unreadable completion result, returning null",
+				"task_id", uuidToString(t.ID),
+			)
+		}
 	}
 	failureReason := ""
 	if t.FailureReason.Valid {

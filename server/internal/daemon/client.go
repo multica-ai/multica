@@ -494,26 +494,52 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
+// completionRequestBody is the /complete wire body. It exists so the v1
+// envelope and the legacy `output` field cannot be populated independently:
+// newCompletionRequestBody takes ONE answer string and writes it to both. A
+// mismatch between them is rejected by the server (the two would otherwise
+// persist different results depending on which server version handled the
+// call), so making divergence unrepresentable here is the actual fix — the
+// server-side check is the backstop for forged or third-party producers.
+//
+// The nested `result` key is safe to send to a server that predates it: the
+// /complete decoder does not set DisallowUnknownFields, so an old server
+// ignores `result` and consumes `output`. That one-directional compatibility is
+// why this needs no capability negotiation.
+type completionRequestBody struct {
+	Result protocol.CompletionResultV1 `json:"result"`
+	Output string                      `json:"output"`
+
+	BranchName            string `json:"branch_name,omitempty"`
+	SessionID             string `json:"session_id,omitempty"`
+	WorkDir               string `json:"work_dir,omitempty"`
+	DurableWorkDir        string `json:"durable_work_dir,omitempty"`
+	SessionRolloutMissing bool   `json:"session_rollout_missing,omitempty"`
+	RetiredSessionID      string `json:"retired_session_id,omitempty"`
+}
+
+// newCompletionRequestBody builds the body from a single answer string. Callers
+// cannot set Summary and Output separately, which is what guarantees the dual
+// write agrees.
+func newCompletionRequestBody(answer string) completionRequestBody {
+	return completionRequestBody{
+		Result: protocol.CompletionResultV1{
+			Version:     protocol.CompletionResultVersion1,
+			Summary:     answer,
+			ArtifactIDs: []string{},
+		},
+		Output: answer,
+	}
+}
+
 func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
-	body := map[string]any{"output": output}
-	if branchName != "" {
-		body["branch_name"] = branchName
-	}
-	if sessionID != "" {
-		body["session_id"] = sessionID
-	}
-	if workDir != "" {
-		body["work_dir"] = workDir
-	}
-	if durableWorkDir != "" {
-		body["durable_work_dir"] = durableWorkDir
-	}
-	if sessionRolloutMissing {
-		body["session_rollout_missing"] = true
-	}
-	if retiredSessionID != "" {
-		body["retired_session_id"] = retiredSessionID
-	}
+	body := newCompletionRequestBody(output)
+	body.BranchName = branchName
+	body.SessionID = sessionID
+	body.WorkDir = workDir
+	body.DurableWorkDir = durableWorkDir
+	body.SessionRolloutMissing = sessionRolloutMissing
+	body.RetiredSessionID = retiredSessionID
 	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil, defaultTerminalRetrySchedule)
 }
 
