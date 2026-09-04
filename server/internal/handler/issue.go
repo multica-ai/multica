@@ -615,154 +615,193 @@ type searchResult struct {
 	matchedCommentContent string
 }
 
-// buildSearchQuery builds a dynamic SQL query for issue search.
-// It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
-// Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
-// LIKE patterns are pre-built in Go (e.g. "%html%") so pg_bigm can extract bigrams from a single parameter value.
+// buildSearchQuery builds a two-stage, workspace-scoped candidate pipeline for issue search.
+// Search patterns are lowercased and escaped in Go so every flag uses the same
+// case-insensitive LIKE semantics as the legacy query.
 func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
-	for i, t := range terms {
-		terms[i] = strings.ToLower(t)
+	for i, term := range terms {
+		terms[i] = strings.ToLower(term)
 	}
 
-	// Parameter index tracker
-	argIdx := 1
 	args := []any{}
-	nextArg := func(val any) string {
-		args = append(args, val)
-		s := fmt.Sprintf("$%d", argIdx)
-		argIdx++
-		return s
+	nextArg := func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
 	}
 
 	escapedPhrase := escapeLike(phrase)
-	// $1: exact phrase (for exact title match)
-	phraseParam := nextArg(escapedPhrase)
-	// $2: "%phrase%" (contains pattern — pre-built for pg_bigm index usage)
-	phraseContainsParam := nextArg("%" + escapedPhrase + "%")
-	// $3: "phrase%" (starts-with pattern)
-	phraseStartsWithParam := nextArg(escapedPhrase + "%")
+	phraseParam := nextArg(escapedPhrase)                     // $1: exact title
+	phraseContainsParam := nextArg("%" + escapedPhrase + "%") // $2: contains
+	phraseStartsWithParam := nextArg(escapedPhrase + "%")     // $3: starts with
+	wsParam := nextArg(nil)                                   // $4: workspace_id, filled by caller
 
-	wsParam := nextArg(nil) // $4 — workspace_id, will be filled by caller position
-
-	// Build per-term LIKE conditions only for multi-word search.
 	var termContainsParams []string
 	if len(terms) > 1 {
-		for _, t := range terms {
-			et := escapeLike(t)
-			termContainsParams = append(termContainsParams, nextArg("%"+et+"%"))
+		for _, term := range terms {
+			termContainsParams = append(termContainsParams, nextArg("%"+escapeLike(term)+"%"))
 		}
 	}
 
-	// --- WHERE clause ---
-	var whereParts []string
-
-	// Full phrase match: title, description, or comment.
-	//
-	// The comment EXISTS subquery is deliberately correlated on BOTH
-	// c.issue_id = i.id AND c.workspace_id = wsParam. The workspace_id
-	// filter is not strictly necessary for correctness (comment.workspace_id
-	// is FK-consistent with its issue's workspace), but it is critical for
-	// the planner. Without it, Postgres rewrites the correlated EXISTS
-	// into a hashed subplan that materializes every comment in the entire
-	// `comment` table matching the LIKE — for common tokens like "search"
-	// this can be hundreds of thousands of rows, blowing out work_mem into
-	// a lossy bitmap and taking 30+ seconds. With the workspace_id
-	// constant duplicated into the subquery, the hashed set collapses to
-	// this workspace's comments and the plan uses the supporting
-	// idx_comment_workspace (migration 135). See MUL-4059 EXPLAIN reports.
-	phraseMatch := fmt.Sprintf(
-		"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND c.workspace_id = %s AND LOWER(c.content) LIKE %s))",
-		phraseContainsParam, phraseContainsParam, wsParam, phraseContainsParam,
-	)
-	whereParts = append(whereParts, phraseMatch)
-
-	// Multi-word AND match (each term must appear somewhere). Same
-	// workspace_id-in-subquery contract as above.
-	if len(termContainsParams) > 1 {
-		var termConditions []string
-		for _, tp := range termContainsParams {
-			termConditions = append(termConditions, fmt.Sprintf(
-				"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND c.workspace_id = %s AND LOWER(c.content) LIKE %s))",
-				tp, tp, wsParam, tp,
-			))
-		}
-		whereParts = append(whereParts, "("+strings.Join(termConditions, " AND ")+")")
-	}
-
-	// Number match
 	numParam := ""
 	if hasNum {
 		numParam = nextArg(queryNum)
-		whereParts = append(whereParts, fmt.Sprintf("i.number = %s", numParam))
 	}
 
-	whereClause := "(" + strings.Join(whereParts, " OR ") + ")"
-
+	terminalStatusesParam := ""
 	if !includeClosed {
 		// Negate only known terminal keys so an unknown legacy key remains
 		// searchable instead of disappearing from the default result set.
-		terminalStatusesParam := nextArg(terminalStatusKeys)
-		whereClause += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
+		terminalStatusesParam = nextArg(terminalStatusKeys)
 	}
 
-	// --- ORDER BY clause ---
-	// Build ranking CASE with fine-grained tiers.
-	var rankCases []string
+	limitParam := nextArg(nil)
+	offsetParam := nextArg(nil)
 
-	// Tier 0: Identifier exact match
+	// Stage one scans this workspace's issues once and materializes only the
+	// narrow flags and sort fields needed to choose a page. Full issue rows are
+	// hydrated after LIMIT/OFFSET below.
+	issueFlagColumns := []string{
+		"i.id AS issue_id",
+		"i.status",
+		"i.updated_at",
+		fmt.Sprintf("LOWER(i.title) = %s AS title_exact", phraseParam),
+		fmt.Sprintf("LOWER(i.title) LIKE %s AS title_starts_with", phraseStartsWithParam),
+		fmt.Sprintf("LOWER(i.title) LIKE %s AS title_phrase", phraseContainsParam),
+		fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE %s AS description_phrase", phraseContainsParam),
+	}
 	if hasNum {
-		rankCases = append(rankCases, fmt.Sprintf("WHEN i.number = %s THEN 0", numParam))
+		issueFlagColumns = append(issueFlagColumns, fmt.Sprintf("i.number = %s AS number_exact", numParam))
+	}
+	for index, termParam := range termContainsParams {
+		issueFlagColumns = append(issueFlagColumns,
+			fmt.Sprintf("LOWER(i.title) LIKE %s AS title_term_%d", termParam, index),
+			fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE %s AS description_term_%d", termParam, index),
+		)
 	}
 
-	// Tier 1: Exact title match
-	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) = %s THEN 1", phraseParam))
+	issueWhere := "i.workspace_id = " + wsParam
+	if terminalStatusesParam != "" {
+		issueWhere += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
+	}
+	issueMatchesCTE := fmt.Sprintf(`issue_matches AS MATERIALIZED (
+		SELECT %s
+		FROM issue i
+		WHERE %s
+	)`, strings.Join(issueFlagColumns, ",\n\t\t\t"), issueWhere)
 
-	// Tier 2: Title starts with phrase
-	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) LIKE %s THEN 2", phraseStartsWithParam))
+	// Comments are also scanned once, workspace-first. Aggregation retains only
+	// per-issue flags plus the latest matching comment ID; content is fetched by
+	// primary key only after the final page is known. Per-term BOOL_OR flags keep
+	// the legacy eligibility rule where terms may be spread across comments,
+	// while comment_all_terms keeps ranking/snippet tied to one comment.
+	commentFlagColumns := []string{
+		"c.issue_id",
+		fmt.Sprintf("BOOL_OR(LOWER(c.content) LIKE %s) AS comment_phrase", phraseContainsParam),
+	}
+	commentCandidateFlags := []string{"aggregated_comments.comment_phrase"}
+	commentTerms := make([]string, 0, len(termContainsParams))
+	for index, termParam := range termContainsParams {
+		alias := fmt.Sprintf("comment_term_%d", index)
+		commentFlagColumns = append(commentFlagColumns,
+			fmt.Sprintf("BOOL_OR(LOWER(c.content) LIKE %s) AS %s", termParam, alias),
+		)
+		commentCandidateFlags = append(commentCandidateFlags, "aggregated_comments."+alias)
+		commentTerms = append(commentTerms, fmt.Sprintf("LOWER(c.content) LIKE %s", termParam))
+	}
 
-	// Tier 3: Title contains phrase
-	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) LIKE %s THEN 3", phraseContainsParam))
+	commentSnippetPredicate := fmt.Sprintf("LOWER(c.content) LIKE %s", phraseContainsParam)
+	if len(commentTerms) > 1 {
+		commentAllTerms := "(" + strings.Join(commentTerms, " AND ") + ")"
+		commentFlagColumns = append(commentFlagColumns,
+			fmt.Sprintf("BOOL_OR(%s) AS comment_all_terms", commentAllTerms),
+		)
+		commentSnippetPredicate += " OR " + commentAllTerms
+	}
+	commentFlagColumns = append(commentFlagColumns, fmt.Sprintf(
+		"(ARRAY_AGG(c.id ORDER BY c.created_at DESC) FILTER (WHERE %s))[1] AS snippet_comment_id",
+		commentSnippetPredicate,
+	))
 
-	// Tier 4: Title matches all words (multi-word only)
+	commentMatchesCTE := fmt.Sprintf(`comment_matches AS MATERIALIZED (
+		SELECT *
+		FROM (
+			SELECT %s
+			FROM comment c
+			WHERE c.workspace_id = %s
+			GROUP BY c.issue_id
+		) aggregated_comments
+		WHERE %s
+	)`,
+		strings.Join(commentFlagColumns, ",\n\t\t\t\t"),
+		wsParam,
+		strings.Join(commentCandidateFlags, " OR "),
+	)
+
+	// Stage two combines the two narrow sources, applies the legacy eligibility
+	// and ranking rules once, and materializes only the requested page.
+	eligibleParts := []string{
+		"im.title_phrase",
+		"im.description_phrase",
+		"COALESCE(cm.comment_phrase, FALSE)",
+	}
+	if len(termContainsParams) > 1 {
+		var allTerms []string
+		for index := range termContainsParams {
+			allTerms = append(allTerms, fmt.Sprintf(
+				"(im.title_term_%[1]d OR im.description_term_%[1]d OR COALESCE(cm.comment_term_%[1]d, FALSE))",
+				index,
+			))
+		}
+		eligibleParts = append(eligibleParts, "("+strings.Join(allTerms, " AND ")+")")
+	}
+	if hasNum {
+		eligibleParts = append(eligibleParts, "im.number_exact")
+	}
+	eligibleExpr := "(" + strings.Join(eligibleParts, " OR ") + ")"
+
+	rankCases := []string{}
+	if hasNum {
+		rankCases = append(rankCases, "WHEN im.number_exact THEN 0")
+	}
+	rankCases = append(rankCases,
+		"WHEN im.title_exact THEN 1",
+		"WHEN im.title_starts_with THEN 2",
+		"WHEN im.title_phrase THEN 3",
+	)
 	if len(termContainsParams) > 1 {
 		var titleTerms []string
-		for _, tp := range termContainsParams {
-			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE %s", tp))
+		for index := range termContainsParams {
+			titleTerms = append(titleTerms, fmt.Sprintf("im.title_term_%d", index))
 		}
-		rankCases = append(rankCases, fmt.Sprintf("WHEN (%s) THEN 4", strings.Join(titleTerms, " AND ")))
+		rankCases = append(rankCases, "WHEN ("+strings.Join(titleTerms, " AND ")+") THEN 4")
 	}
-
-	// Tier 5: Description contains phrase
-	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 5", phraseContainsParam))
-
-	// Tier 6: Description matches all words (multi-word only)
+	rankCases = append(rankCases, "WHEN im.description_phrase THEN 5")
 	if len(termContainsParams) > 1 {
-		var descTerms []string
-		for _, tp := range termContainsParams {
-			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE %s", tp))
+		var descriptionTerms []string
+		for index := range termContainsParams {
+			descriptionTerms = append(descriptionTerms, fmt.Sprintf("im.description_term_%d", index))
 		}
-		rankCases = append(rankCases, fmt.Sprintf("WHEN (%s) THEN 6", strings.Join(descTerms, " AND ")))
+		rankCases = append(rankCases, "WHEN ("+strings.Join(descriptionTerms, " AND ")+") THEN 6")
 	}
-
-	// Tier 7: Comment contains phrase. Same workspace_id-in-subquery
-	// contract as the WHERE clause; see the phraseMatch comment above.
-	rankCases = append(rankCases, fmt.Sprintf("WHEN EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND c.workspace_id = %s AND LOWER(c.content) LIKE %s) THEN 7", wsParam, phraseContainsParam))
-
-	// Tier 8: Comment matches all words (multi-word only)
+	rankCases = append(rankCases, "WHEN COALESCE(cm.comment_phrase, FALSE) THEN 7")
 	if len(termContainsParams) > 1 {
-		var commentTerms []string
-		for _, tp := range termContainsParams {
-			commentTerms = append(commentTerms, fmt.Sprintf("LOWER(c.content) LIKE %s", tp))
-		}
-		rankCases = append(rankCases, fmt.Sprintf("WHEN EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND c.workspace_id = %s AND (%s)) THEN 8", wsParam, strings.Join(commentTerms, " AND ")))
+		rankCases = append(rankCases, "WHEN COALESCE(cm.comment_all_terms, FALSE) THEN 8")
 	}
-
 	rankExpr := "CASE " + strings.Join(rankCases, " ") + " ELSE 9 END"
 
-	// Status priority: active issues first
-	statusRank := `CASE i.status
+	directHitParts := []string{"im.title_exact"}
+	if hasNum {
+		directHitParts = append(directHitParts, "im.number_exact")
+	}
+	// Cancelled issues sort behind every live match unless an exact title or
+	// identifier shows that the user is targeting that specific issue.
+	cancelledRank := fmt.Sprintf(
+		"CASE WHEN im.status = 'cancelled' AND NOT (%s) THEN 1 ELSE 0 END",
+		strings.Join(directHitParts, " OR "),
+	)
+	statusRank := `CASE im.status
 		WHEN 'in_progress' THEN 0
 		WHEN 'in_review' THEN 1
 		WHEN 'todo' THEN 2
@@ -773,108 +812,63 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		ELSE 7
 	END`
 
-	// Cancelled issues are abandoned work. statusRank alone cannot keep them
-	// down because it is only a tie-breaker within one relevance tier: a
-	// cancelled issue whose title matches the phrase exactly (tier 1) still
-	// outranks an in_progress issue that merely contains it (tier 3), and a
-	// workspace with many cancelled issues can fill the whole LIMIT window and
-	// push live work off the page entirely. So demote cancelled ahead of
-	// rankExpr — they sort after every other match and are the first rows the
-	// LIMIT drops. Unlike 'done', which is finished work worth referencing,
-	// cancelled work was thrown away. The exception is a direct hit: an exact
-	// identifier or exact title means the user is targeting that one issue and
-	// knows what they asked for.
-	//
-	// The title half reuses tier 1's predicate verbatim, including its quirk:
-	// phraseParam is escapeLike'd, so a title containing _ or % never compares
-	// equal and is not treated as a direct hit. Such an issue is still returned
-	// by number; keeping the two predicates identical matters more than working
-	// around an escaping bug that belongs with tier 1.
-	directHitParts := []string{fmt.Sprintf("LOWER(i.title) = %s", phraseParam)}
-	if hasNum {
-		directHitParts = append(directHitParts, fmt.Sprintf("i.number = %s", numParam))
-	}
-	cancelledRank := fmt.Sprintf(
-		"CASE WHEN i.status = 'cancelled' AND NOT (%s) THEN 1 ELSE 0 END",
-		strings.Join(directHitParts, " OR "),
-	)
-
-	// --- match_source expression ---
-	matchSourceExpr := fmt.Sprintf(`CASE
-		WHEN LOWER(i.title) LIKE %s THEN 'title'
-		WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 'description'
-		ELSE 'comment'
-	END`, phraseContainsParam, phraseContainsParam)
-
-	// For multi-word: also check if all terms match in title/description
+	matchSourceParts := []string{"WHEN im.title_phrase THEN 'title'"}
 	if len(termContainsParams) > 1 {
 		var titleTerms []string
-		var descTerms []string
-		for _, tp := range termContainsParams {
-			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE %s", tp))
-			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE %s", tp))
+		for index := range termContainsParams {
+			titleTerms = append(titleTerms, fmt.Sprintf("im.title_term_%d", index))
 		}
-		matchSourceExpr = fmt.Sprintf(`CASE
-			WHEN LOWER(i.title) LIKE %s THEN 'title'
-			WHEN (%s) THEN 'title'
-			WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 'description'
-			WHEN (%s) THEN 'description'
-			ELSE 'comment'
-		END`,
-			phraseContainsParam, strings.Join(titleTerms, " AND "),
-			phraseContainsParam, strings.Join(descTerms, " AND "),
-		)
+		matchSourceParts = append(matchSourceParts, "WHEN ("+strings.Join(titleTerms, " AND ")+") THEN 'title'")
 	}
-
-	// --- matched_comment_content subquery ---
-	// Always return matching comment content regardless of match_source,
-	// so frontend can display comment snippet alongside title/description matches.
-	// The c.workspace_id filter mirrors the WHERE clause: without it,
-	// the planner can pick a global comment scan that ignores workspace
-	// scoping.
-	commentSubquery := fmt.Sprintf(`COALESCE(
-		(SELECT c.content FROM comment c
-		 WHERE c.issue_id = i.id AND c.workspace_id = %s AND LOWER(c.content) LIKE %s
-		 ORDER BY c.created_at DESC LIMIT 1),
-		''
-	)`, wsParam, phraseContainsParam)
-
+	matchSourceParts = append(matchSourceParts, "WHEN im.description_phrase THEN 'description'")
 	if len(termContainsParams) > 1 {
-		var commentTerms []string
-		for _, tp := range termContainsParams {
-			commentTerms = append(commentTerms, fmt.Sprintf("LOWER(c.content) LIKE %s", tp))
+		var descriptionTerms []string
+		for index := range termContainsParams {
+			descriptionTerms = append(descriptionTerms, fmt.Sprintf("im.description_term_%d", index))
 		}
-		commentSubquery = fmt.Sprintf(`COALESCE(
-			(SELECT c.content FROM comment c
-			 WHERE c.issue_id = i.id AND c.workspace_id = %s AND (LOWER(c.content) LIKE %s OR (%s))
-			 ORDER BY c.created_at DESC LIMIT 1),
-			''
-		)`, wsParam, phraseContainsParam, strings.Join(commentTerms, " AND "))
+		matchSourceParts = append(matchSourceParts, "WHEN ("+strings.Join(descriptionTerms, " AND ")+") THEN 'description'")
 	}
+	matchSourceExpr := "CASE " + strings.Join(matchSourceParts, " ") + " ELSE 'comment' END"
 
-	limitParam := nextArg(nil)  // placeholder
-	offsetParam := nextArg(nil) // placeholder
+	rankedCandidatesCTE := fmt.Sprintf(`ranked_candidates AS (
+		SELECT im.issue_id, im.updated_at, cm.snippet_comment_id,
+			%s AS cancelled_rank,
+			%s AS relevance_rank,
+			%s AS status_rank,
+			%s AS match_source
+		FROM issue_matches im
+		LEFT JOIN comment_matches cm ON cm.issue_id = im.issue_id
+		WHERE %s
+	)`, cancelledRank, rankExpr, statusRank, matchSourceExpr, eligibleExpr)
 
-	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+	pageCandidatesCTE := fmt.Sprintf(`page_candidates AS MATERIALIZED (
+		SELECT issue_id, updated_at, snippet_comment_id, cancelled_rank, relevance_rank, status_rank, match_source
+		FROM ranked_candidates
+		ORDER BY cancelled_rank, relevance_rank, status_rank, updated_at DESC, issue_id ASC
+		LIMIT %s OFFSET %s
+	)`, limitParam, offsetParam)
+
+	query := fmt.Sprintf(`WITH %s,
+	%s,
+	%s,
+	%s
+	SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id,
 		i.revision,
-		%s AS match_source,
-		%s AS matched_comment_content
-	FROM issue i
-	WHERE i.workspace_id = %s AND %s
-	ORDER BY %s, %s, %s, i.updated_at DESC
-	LIMIT %s OFFSET %s`,
-		matchSourceExpr,
-		commentSubquery,
+		pc.match_source,
+		COALESCE(c.content, '') AS matched_comment_content
+	FROM page_candidates pc
+	JOIN issue i ON i.id = pc.issue_id AND i.workspace_id = %s
+	LEFT JOIN comment c ON c.id = pc.snippet_comment_id AND c.workspace_id = %s
+	ORDER BY pc.cancelled_rank, pc.relevance_rank, pc.status_rank, pc.updated_at DESC, pc.issue_id ASC`,
+		issueMatchesCTE,
+		commentMatchesCTE,
+		rankedCandidatesCTE,
+		pageCandidatesCTE,
 		wsParam,
-		whereClause,
-		cancelledRank,
-		rankExpr,
-		statusRank,
-		limitParam,
-		offsetParam,
+		wsParam,
 	)
 
 	return query, args

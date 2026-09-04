@@ -301,41 +301,58 @@ func TestBuildSearchQuery_SingleTermNoAllTermTiers(t *testing.T) {
 }
 
 // TestBuildSearchQuery_CommentSubqueryWorkspaceScope regressions the
-// MUL-4059 fix: every EXISTS / correlated subquery over `comment` MUST
-// filter by c.workspace_id = $wsParam. Without this, Postgres rewrites
-// the correlated subquery into a hashed subplan that materializes every
-// comment in the entire table matching the LIKE — on prd this was
-// 536k rows / 32.3 s for '%search%'. With the filter the hashed set
-// collapses to this workspace's comments and the plan uses the
-// idx_comment_workspace supporting btree.
+// MUL-4059 fix: the single comment scan and the final point hydration MUST
+// both filter by c.workspace_id = $wsParam. Without this, Postgres can read
+// matching comments from every workspace — on prd this was 536k rows / 32.3 s
+// for '%search%'.
 //
 // $4 is buildSearchQuery's canonical workspace_id placeholder (the
 // caller writes wsUUID into args[3] before executing).
 func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
 	singleQuery, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, []string{"done", "cancelled"})
 
-	// Every occurrence of `FROM comment c` must be followed by the
-	// c.workspace_id = $4 constraint. Counting is safer than a single
-	// substring check because the WHERE, rank CASE, matched_comment_content
-	// subqueries all touch `comment` and must each carry the filter.
+	// Candidate-first search aggregates comments in one workspace-first pass;
+	// it must not grow a second scan for eligibility, ranking, or snippets.
 	fromCount := strings.Count(singleQuery, "FROM comment c")
 	scopedCount := strings.Count(singleQuery, "c.workspace_id = $4")
-	if fromCount == 0 {
-		t.Fatalf("single-term query has no comment subquery — did buildSearchQuery drop it?")
+	if fromCount != 1 {
+		t.Fatalf("single-term query has %d comment scans, want exactly one:\n%s", fromCount, singleQuery)
 	}
-	if scopedCount < fromCount {
-		t.Errorf("single-term query has %d comment subqueries but only %d workspace_id filters — %d unscoped subquery(ies) will trigger the MUL-4059 global-hash plan",
-			fromCount, scopedCount, fromCount-scopedCount)
+	if scopedCount < 2 {
+		t.Errorf("single-term query has %d workspace_id filters, want one on aggregation and one on hydration:\n%s", scopedCount, singleQuery)
+	}
+	if !strings.Contains(singleQuery, "comment_matches AS MATERIALIZED") {
+		t.Errorf("comment aggregation is not materialized:\n%s", singleQuery)
+	}
+	if strings.Contains(singleQuery, "EXISTS (SELECT 1 FROM comment") {
+		t.Errorf("candidate-first query regressed to correlated comment EXISTS checks:\n%s", singleQuery)
 	}
 
-	// Multi-term uses one extra comment subquery in the WHERE and one in
-	// the rank CASE for the all-terms match — same invariant applies.
+	// Adding terms adds boolean aggregates, not extra comment relation scans.
 	multiQuery, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"})
 	fromCountMulti := strings.Count(multiQuery, "FROM comment c")
-	scopedCountMulti := strings.Count(multiQuery, "c.workspace_id = $4")
-	if scopedCountMulti < fromCountMulti {
-		t.Errorf("multi-term query has %d comment subqueries but only %d workspace_id filters",
-			fromCountMulti, scopedCountMulti)
+	if fromCountMulti != 1 {
+		t.Errorf("multi-term query has %d comment scans, want exactly one:\n%s", fromCountMulti, multiQuery)
+	}
+	if !strings.Contains(multiQuery, "BOOL_OR((LOWER(c.content) LIKE") || !strings.Contains(multiQuery, "AS comment_all_terms") {
+		t.Errorf("multi-term query does not retain the same-comment all-terms flag:\n%s", multiQuery)
+	}
+}
+
+func TestBuildSearchQuery_HydratesOnlyTheSelectedPage(t *testing.T) {
+	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"})
+
+	if !strings.Contains(query, "issue_matches AS MATERIALIZED") || !strings.Contains(query, "page_candidates AS MATERIALIZED") {
+		t.Fatalf("query does not materialize narrow issue flags and the selected page:\n%s", query)
+	}
+	limitAt := strings.Index(query, "LIMIT ")
+	issueHydrationAt := strings.Index(query, "JOIN issue i ON i.id = pc.issue_id")
+	commentHydrationAt := strings.Index(query, "LEFT JOIN comment c ON c.id = pc.snippet_comment_id")
+	if limitAt == -1 || issueHydrationAt < limitAt || commentHydrationAt < limitAt {
+		t.Fatalf("full issue/comment hydration must happen after LIMIT/OFFSET:\n%s", query)
+	}
+	if lastTextMatch := strings.LastIndex(query, "LOWER(c.content) LIKE"); lastTextMatch > limitAt {
+		t.Errorf("comment hydration repeats a text search after LIMIT/OFFSET:\n%s", query)
 	}
 }
 
@@ -358,28 +375,25 @@ func orderByClause(t *testing.T, query string) string {
 // already landed in the same tier, so an exactly-titled cancelled issue
 // (tier 1) would still beat an in_progress title-contains match (tier 3).
 func TestBuildSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) {
-	orderBy := orderByClause(t, buildSearchQueryForTest(t, "login bug", []string{"login", "bug"}, 0, false, true))
-
-	cancelledAt := strings.Index(orderBy, "i.status = 'cancelled' AND NOT")
-	if cancelledAt == -1 {
-		t.Fatalf("ORDER BY has no cancelled demotion:\n%s", orderBy)
+	query := buildSearchQueryForTest(t, "login bug", []string{"login", "bug"}, 0, false, true)
+	if !strings.Contains(query, "CASE WHEN im.status = 'cancelled' AND NOT (im.title_exact) THEN 1 ELSE 0 END AS cancelled_rank") {
+		t.Fatalf("ranked candidates have no cancelled demotion:\n%s", query)
 	}
 
-	// "ELSE 9 END" terminates the relevance CASE (rankExpr).
-	relevanceEndsAt := strings.Index(orderBy, "ELSE 9 END")
-	if relevanceEndsAt == -1 {
-		t.Fatalf("ORDER BY has no relevance rank CASE:\n%s", orderBy)
-	}
-	if cancelledAt > relevanceEndsAt {
-		t.Errorf("cancelled demotion sorts after the relevance tiers, so a well-matching cancelled issue still outranks live work:\n%s", orderBy)
+	orderBy := orderByClause(t, query)
+	if !strings.HasPrefix(orderBy, "pc.cancelled_rank, pc.relevance_rank, pc.status_rank") {
+		t.Errorf("cancelled demotion does not sort before relevance and status:\n%s", orderBy)
 	}
 
 	// The demotion must not replace the existing status ordering.
-	if !strings.Contains(orderBy, "WHEN 'in_progress' THEN 0") {
-		t.Errorf("statusRank was dropped from ORDER BY:\n%s", orderBy)
+	if !strings.Contains(query, "WHEN 'in_progress' THEN 0") {
+		t.Errorf("statusRank was dropped from ranked candidates:\n%s", query)
 	}
-	if !strings.Contains(orderBy, "i.updated_at DESC") {
+	if !strings.Contains(orderBy, "pc.updated_at DESC") {
 		t.Errorf("recency tie-breaker was dropped from ORDER BY:\n%s", orderBy)
+	}
+	if !strings.Contains(orderBy, "pc.issue_id ASC") {
+		t.Errorf("stable issue ID tie-breaker was dropped from ORDER BY:\n%s", orderBy)
 	}
 }
 
@@ -387,28 +401,28 @@ func TestBuildSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) {
 // the searcher already knows which issue they want, so demoting it would just
 // hide the row they asked for.
 func TestBuildSearchQuery_CancelledDirectHitExempt(t *testing.T) {
-	// $1 is the exact (non-wildcard) phrase param.
-	textOnly := orderByClause(t, buildSearchQueryForTest(t, "ship it", []string{"ship", "it"}, 0, false, true))
-	if !strings.Contains(textOnly, "i.status = 'cancelled' AND NOT (LOWER(i.title) = $1)") {
+	textOnly := buildSearchQueryForTest(t, "ship it", []string{"ship", "it"}, 0, false, true)
+	if !strings.Contains(textOnly, "im.status = 'cancelled' AND NOT (im.title_exact)") {
 		t.Errorf("exact-title hit is not exempt from the cancelled demotion:\n%s", textOnly)
 	}
-	if strings.Contains(textOnly, "i.number = ") {
+	if strings.Contains(textOnly, "number_exact") {
 		t.Errorf("non-numeric query should not reference i.number in the demotion:\n%s", textOnly)
 	}
 
-	withNumber := orderByClause(t, buildSearchQueryForTest(t, "MUL-42", []string{"MUL-42"}, 42, true, true))
-	if !strings.Contains(withNumber, "LOWER(i.title) = $1 OR i.number = ") {
+	withNumber := buildSearchQueryForTest(t, "MUL-42", []string{"MUL-42"}, 42, true, true)
+	if !strings.Contains(withNumber, "NOT (im.title_exact OR im.number_exact)") {
 		t.Errorf("identifier lookup is not exempt from the cancelled demotion, so MUL-42 sinks below every fuzzy match:\n%s", withNumber)
 	}
 }
 
 // 'done' is finished work worth referencing; only 'cancelled' is thrown away.
 func TestBuildSearchQuery_DoneNotDemotedAheadOfRelevance(t *testing.T) {
-	orderBy := orderByClause(t, buildSearchQueryForTest(t, "login", []string{"login"}, 0, false, true))
-
-	relevanceEndsAt := strings.Index(orderBy, "ELSE 9 END")
-	if doneAt := strings.Index(orderBy, "i.status = 'done'"); doneAt != -1 && doneAt < relevanceEndsAt {
-		t.Errorf("done issues were demoted ahead of relevance; only cancelled should be:\n%s", orderBy)
+	query := buildSearchQueryForTest(t, "login", []string{"login"}, 0, false, true)
+	if strings.Contains(query, "CASE WHEN im.status = 'done'") {
+		t.Errorf("done issues were demoted ahead of relevance; only cancelled should be:\n%s", query)
+	}
+	if !strings.Contains(query, "WHEN 'done' THEN 5") {
+		t.Errorf("done status tie-breaker was dropped:\n%s", query)
 	}
 }
 
