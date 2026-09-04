@@ -294,6 +294,28 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.40",
+        date: "2026-09-04",
+        title: "MCP server renames and connection swaps, steadier task starts during upgrades, cleaner sign-out on expiry, and accurate shared-agent status",
+        changes: [],
+        features: [
+          "Rename an MCP server without losing its connection details or the agents using it.",
+          "Swapping in a new connection is now a separate, deliberate step.",
+          "Saving an MCP server points you straight at the field that needs fixing.",
+        ],
+        improvements: [
+          "Each agent execution is called a run everywhere, from the apps to the docs.",
+          "Search results come back faster.",
+        ],
+        fixes: [
+          "Tasks still start while your local app and the server are on different versions.",
+          "An expired session takes you back to sign-in, with the previous account's data cleared.",
+          "Being offline no longer signs you out.",
+          "Agents shared from someone else's runtime show as available instead of offline.",
+          "Checking out a repository you have used before no longer fails.",
+        ],
+      },
+      {
         version: "0.4.39",
         date: "2026-09-03",
         title: "Tab-switching shortcuts, server performance, and Autopilot identity authorization",
