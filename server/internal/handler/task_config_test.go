@@ -259,14 +259,17 @@ func TestResolveTaskConfigEndpointUsesDatabaseAndDaemonBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal resolve request: %v", err)
 	}
-	call := func(routeRuntimeID, daemon string, body []byte) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/api/daemon/runtimes/"+routeRuntimeID+"/tasks/"+taskID+"/configs/"+resourceID+"/resolve", bytes.NewReader(body))
+	callResource := func(routeRuntimeID, daemon, routeResourceID string, body []byte) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/daemon/runtimes/"+routeRuntimeID+"/tasks/"+taskID+"/configs/"+routeResourceID+"/resolve", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req = withURLParams(req, "runtimeId", routeRuntimeID, "taskId", taskID, "resourceId", resourceID)
+		req = withURLParams(req, "runtimeId", routeRuntimeID, "taskId", taskID, "resourceId", routeResourceID)
 		req = req.WithContext(middleware.WithDaemonContext(req.Context(), testWorkspaceID, daemon))
 		w := httptest.NewRecorder()
 		h.ResolveTaskConfig(w, req)
 		return w
+	}
+	call := func(routeRuntimeID, daemon string, body []byte) *httptest.ResponseRecorder {
+		return callResource(routeRuntimeID, daemon, resourceID, body)
 	}
 
 	positive := call(runtimeID, d, requestBody)
@@ -304,6 +307,59 @@ func TestResolveTaskConfigEndpointUsesDatabaseAndDaemonBinding(t *testing.T) {
 	}
 	if got := call(otherRuntimeID, "task-config-endpoint-other-daemon", requestBody); got.Code != http.StatusNotFound {
 		t.Fatalf("cross-runtime resolve status = %d, want 404", got.Code)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls after cross-runtime rejection = %d, want 1", provider.calls)
+	}
+
+	// The operator allowlist is a runtime gate, not just a write-time check.
+	// Revoking it must reject an otherwise valid request before the provider is
+	// called, and a persisted ref that no longer matches the allowlist must also
+	// fail closed.
+	h.cfg.TaskConfigProviderRefPrefixes = nil
+	if got := call(runtimeID, d, requestBody); got.Code != http.StatusNotFound {
+		t.Fatalf("revoked provider-ref allowlist status = %d, want 404", got.Code)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls after allowlist revocation = %d, want 1", provider.calls)
+	}
+	h.cfg.TaskConfigProviderRefPrefixes = []string{refPrefix}
+
+	unapproved := ref
+	unapproved.ProviderRef = "unapproved/task-config/" + uuid.NewString()
+	unapprovedJSON, err := json.Marshal(unapproved)
+	if err != nil {
+		t.Fatalf("marshal unapproved task_config ref: %v", err)
+	}
+	fixture.Exec(t, `UPDATE project_resource SET resource_ref = $1 WHERE id = $2`, unapprovedJSON, resourceID)
+	unapprovedBody := payload
+	unapprovedBody.ProviderRef = unapproved.ProviderRef
+	unapprovedBody.Selectors = selectors
+	unapprovedRequest, err := json.Marshal(unapprovedBody)
+	if err != nil {
+		t.Fatalf("marshal unapproved resolve request: %v", err)
+	}
+	if got := call(runtimeID, d, unapprovedRequest); got.Code != http.StatusNotFound {
+		t.Fatalf("stored provider-ref allowlist revalidation status = %d, want 404", got.Code)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls after stored ref rejection = %d, want 1", provider.calls)
+	}
+	fixture.Exec(t, `UPDATE project_resource SET resource_ref = $1 WHERE id = $2`, refJSON, resourceID)
+
+	otherProjectID := fixture.Project(t, "task config endpoint other project")
+	foreignResourceID := fixture.Insert(t, "project_resource", testutil.Cols{
+		"project_id":    otherProjectID,
+		"workspace_id":  testWorkspaceID,
+		"resource_type": "task_config",
+		"resource_ref":  refJSON,
+		"created_by":    testUserID,
+	})
+	if got := callResource(runtimeID, d, foreignResourceID, requestBody); got.Code != http.StatusNotFound {
+		t.Fatalf("cross-project resource status = %d, want 404", got.Code)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls after cross-project rejection = %d, want 1", provider.calls)
 	}
 	if got := call(runtimeID, d, []byte("{}")); got.Code != http.StatusForbidden && got.Code != http.StatusBadRequest {
 		t.Fatalf("malformed binding payload status = %d, want request rejection", got.Code)
