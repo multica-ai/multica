@@ -82,6 +82,9 @@ func materializeTaskConfig(ctx context.Context, taskID, envRoot, workDir string,
 	if resolve == nil {
 		return nil, errors.New("task_config: provider unavailable")
 	}
+	if err := validateTaskConfigWorkDir(envRoot, workDir); err != nil {
+		return nil, err
+	}
 	content, err := resolve(ctx)
 	if err != nil {
 		return nil, errors.New("task_config: provider resolve failed")
@@ -95,13 +98,10 @@ func materializeTaskConfig(ctx context.Context, taskID, envRoot, workDir string,
 	if err != nil {
 		return nil, err
 	}
-	parent := filepath.Dir(target)
-	if err := os.MkdirAll(parent, 0o700); err != nil {
-		return nil, errors.New("task_config: create destination parent failed")
-	}
 	if err := validateExistingParents(workDir, ref.Path); err != nil {
 		return nil, err
 	}
+	parent := filepath.Dir(target)
 	if _, err := os.Lstat(target); err == nil {
 		return nil, errors.New("task_config: destination already exists")
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -183,6 +183,22 @@ func validateTaskConfigTarget(workDir, rel string) (string, error) {
 	return target, nil
 }
 
+func validateTaskConfigWorkDir(envRoot, workDir string) error {
+	root, err := filepath.Abs(envRoot)
+	if err != nil || root == "" {
+		return errors.New("task_config: daemon-managed workdir is required")
+	}
+	work, err := filepath.Abs(workDir)
+	if err != nil || work == "" {
+		return errors.New("task_config: daemon-managed workdir is required")
+	}
+	rel, err := filepath.Rel(root, work)
+	if err != nil || !execenv.TaskConfigManagedWorkDir(filepath.ToSlash(rel)) {
+		return errors.New("task_config: local_directory workdir is unsupported")
+	}
+	return nil
+}
+
 func validateExistingParents(workDir, rel string) error {
 	root, err := filepath.Abs(workDir)
 	if err != nil {
@@ -242,10 +258,15 @@ func cleanupTaskConfig(m *taskConfigMaterialization) error {
 		return nil
 	}
 	paths, firstErr := execenv.CleanupTaskConfigIntent(m.EnvRoot)
-	if len(paths) > 0 {
-		if err := execenv.CleanupSidecarFiles(m.EnvRoot, paths...); firstErr == nil {
-			firstErr = err
-		}
+	if len(paths) == 0 {
+		// Reused env roots can have a stale owner marker, and a torn intent can
+		// contain no validated paths. The in-memory materialization is the
+		// already-validated task-local fallback; never derive a new path from
+		// untrusted manifest bytes here.
+		paths = []string{m.Path, m.TempPath}
+	}
+	if err := execenv.CleanupSidecarFiles(m.EnvRoot, paths...); firstErr == nil {
+		firstErr = err
 	}
 	return firstErr
 }

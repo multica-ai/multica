@@ -22,6 +22,9 @@ func openTaskConfigWriter(envRoot, workDir, rel, target, tempPath string) (*task
 	if _, err := filepath.Abs(envRoot); err != nil {
 		return nil, errors.New("task_config: invalid environment root")
 	}
+	if err := os.MkdirAll(filepath.Dir(tempPath), 0o700); err != nil {
+		return nil, errors.New("task_config: create destination parent failed")
+	}
 	file, err := os.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return nil, errors.New("task_config: create temporary destination failed")

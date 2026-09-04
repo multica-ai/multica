@@ -104,6 +104,74 @@ func TestSecretsManagerTaskConfigProviderReturnsBytesWithoutEchoingFailures(t *t
 	}
 }
 
+func TestTaskConfigProviderRefRequiresConfiguredAllowlist(t *testing.T) {
+	const allowed = "arn:aws:secretsmanager:ap-southeast-2:123456789012:secret:multica/task-config/"
+	for _, tc := range []struct {
+		name   string
+		ref    string
+		prefix []string
+		want   bool
+	}{
+		{name: "approved prefix", ref: allowed + "project/backend", prefix: []string{allowed}, want: true},
+		{name: "arbitrary secret", ref: "arn:aws:secretsmanager:ap-southeast-2:123456789012:secret:unrelated", prefix: []string{allowed}},
+		{name: "empty allowlist", ref: allowed + "project/backend", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := taskConfigProviderRefAllowed(tc.ref, tc.prefix); got != tc.want {
+				t.Fatalf("taskConfigProviderRefAllowed() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTaskConfigResolveActorRequiresDaemonIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, daemon, runtime string
+		want                  bool
+	}{
+		{name: "matching daemon", daemon: "daemon-1", runtime: "daemon-1", want: true},
+		{name: "member auth has no daemon", daemon: "", runtime: "daemon-1"},
+		{name: "wrong daemon", daemon: "daemon-2", runtime: "daemon-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := taskConfigResolveActorAllowed(tc.daemon, tc.runtime); got != tc.want {
+				t.Fatalf("taskConfigResolveActorAllowed() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTaskConfigResolvePayloadRequiresCompleteBinding(t *testing.T) {
+	binding := taskConfigRef{Provider: "aws_secrets_manager", ProviderRef: "approved/ref", Version: "v1", Path: "deploy/terraform/backend.hcl", Mode: 0o600, Repo: "repo", Target: "main", Account: "acct", Region: "ap-southeast-2"}
+	payload := taskConfigResolvePayload{Provider: binding.Provider, ProviderRef: binding.ProviderRef, Version: binding.Version, Path: binding.Path, Mode: binding.Mode, Selectors: TaskConfigSelectors{Repo: binding.Repo, Target: binding.Target, Account: binding.Account, Region: binding.Region}}
+	if !taskConfigResolvePayloadMatches(payload, binding, payload.Selectors) {
+		t.Fatal("matching task_config payload was rejected")
+	}
+	payload.Selectors.Region = "wrong-region"
+	if taskConfigResolvePayloadMatches(payload, binding, TaskConfigSelectors{Repo: binding.Repo, Target: binding.Target, Account: binding.Account, Region: binding.Region}) {
+		t.Fatal("selector mismatch was accepted")
+	}
+}
+
+func TestTaskConfigResolveTaskGateBindsWorkspaceRuntimeAndStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name, taskWorkspace, runtimeWorkspace, taskRuntime, runtime, status string
+		want                                                                bool
+	}{
+		{name: "preparing matching task", taskWorkspace: "ws", runtimeWorkspace: "ws", taskRuntime: "rt", runtime: "rt", status: "dispatched", want: true},
+		{name: "wrong workspace", taskWorkspace: "other", runtimeWorkspace: "ws", taskRuntime: "rt", runtime: "rt", status: "dispatched"},
+		{name: "wrong runtime", taskWorkspace: "ws", runtimeWorkspace: "ws", taskRuntime: "other", runtime: "rt", status: "dispatched"},
+		{name: "completed task", taskWorkspace: "ws", runtimeWorkspace: "ws", taskRuntime: "rt", runtime: "rt", status: "completed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := taskConfigResolveTaskIdentityAllowed(tc.taskWorkspace, tc.runtimeWorkspace, tc.taskRuntime, tc.runtime) && taskConfigResolveStatusAllowed(tc.status)
+			if got != tc.want {
+				t.Fatalf("task gate = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func mustMarshal(v any) json.RawMessage {
 	b, err := json.Marshal(v)
 	if err != nil {

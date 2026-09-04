@@ -147,16 +147,21 @@ func (h *Handler) ResolveTaskConfig(w http.ResponseWriter, r *http.Request) {
 	// Config bytes are never available through a member PAT/JWT. Require the
 	// daemon token's executor identity and bind it to the runtime row, so a
 	// workspace member cannot resolve another machine's provider reference.
-	if daemonID := middleware.DaemonIDFromContext(r.Context()); daemonID == "" || !runtime.DaemonID.Valid || runtime.DaemonID.String != daemonID {
+	if daemonID := middleware.DaemonIDFromContext(r.Context()); !taskConfigResolveActorAllowed(daemonID, func() string {
+		if !runtime.DaemonID.Valid {
+			return ""
+		}
+		return runtime.DaemonID.String
+	}()) {
 		writeError(w, http.StatusNotFound, "task_config binding not found")
 		return
 	}
 	task, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
-	if !ok || workspaceID != uuidToString(runtime.WorkspaceID) || uuidToString(task.RuntimeID) != runtimeID {
+	if !ok || !taskConfigResolveTaskIdentityAllowed(workspaceID, uuidToString(runtime.WorkspaceID), uuidToString(task.RuntimeID), runtimeID) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}
-	if task.Status != "dispatched" && task.Status != "waiting_local_directory" {
+	if !taskConfigResolveStatusAllowed(task.Status) {
 		writeError(w, http.StatusConflict, "task is not preparing")
 		return
 	}
@@ -185,6 +190,7 @@ func (h *Handler) ResolveTaskConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var binding taskConfigRef
+	var bindingRaw json.RawMessage
 	found := false
 	for _, resource := range resources {
 		if resource.ID != resourceUUID || resource.ResourceType != "task_config" {
@@ -194,6 +200,7 @@ func (h *Handler) ResolveTaskConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "task_config binding not found")
 			return
 		}
+		bindingRaw = append(bindingRaw[:0], resource.ResourceRef...)
 		found = true
 		break
 	}
@@ -201,12 +208,21 @@ func (h *Handler) ResolveTaskConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "task_config binding not found")
 		return
 	}
+	normalized, err := validateAndNormalizeResourceRef("task_config", bindingRaw)
+	if err != nil || !taskConfigProviderRefAllowedFromRef(normalized, h.cfg.TaskConfigProviderRefPrefixes) {
+		writeError(w, http.StatusNotFound, "task_config binding not found")
+		return
+	}
+	if err := json.Unmarshal(normalized, &binding); err != nil {
+		writeError(w, http.StatusNotFound, "task_config binding not found")
+		return
+	}
 	want := TaskConfigSelectors{Repo: binding.Repo, Target: binding.Target, Account: binding.Account, Region: binding.Region}
-	if payload.Provider != binding.Provider || payload.ProviderRef != binding.ProviderRef || payload.Version != binding.Version || payload.Path != binding.Path || payload.Mode != binding.Mode || !taskConfigSelectorsEqual(payload.Selectors, want) {
+	if !taskConfigResolvePayloadMatches(payload, binding, want) {
 		writeError(w, http.StatusForbidden, "task_config selector mismatch")
 		return
 	}
-	if h.TaskConfigProvider == nil {
+	if !taskConfigProviderAvailable(h.TaskConfigProvider) {
 		writeError(w, http.StatusServiceUnavailable, "task_config provider unavailable")
 		return
 	}
@@ -232,6 +248,26 @@ func (h *Handler) ResolveTaskConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
+}
+
+func taskConfigResolveActorAllowed(daemonID, runtimeDaemonID string) bool {
+	return strings.TrimSpace(daemonID) != "" && strings.TrimSpace(runtimeDaemonID) != "" && daemonID == runtimeDaemonID
+}
+
+func taskConfigResolveTaskIdentityAllowed(taskWorkspaceID, runtimeWorkspaceID, taskRuntimeID, runtimeID string) bool {
+	return taskWorkspaceID == runtimeWorkspaceID && taskRuntimeID == runtimeID
+}
+
+func taskConfigResolveStatusAllowed(status string) bool {
+	return status == "dispatched" || status == "waiting_local_directory"
+}
+
+func taskConfigProviderAvailable(provider TaskConfigProvider) bool {
+	return provider != nil
+}
+
+func taskConfigResolvePayloadMatches(payload taskConfigResolvePayload, binding taskConfigRef, selectors TaskConfigSelectors) bool {
+	return payload.Provider == binding.Provider && payload.ProviderRef == binding.ProviderRef && payload.Version == binding.Version && payload.Path == binding.Path && payload.Mode == binding.Mode && taskConfigSelectorsEqual(payload.Selectors, selectors)
 }
 
 func taskConfigSelectorsEqual(a, b TaskConfigSelectors) bool {

@@ -6,7 +6,7 @@ NPR release tasks need `deploy/terraform/backend.hcl` without relying on an igno
 
 ## Contract
 
-`task_config` is a project resource whose JSON reference contains an adapter name, provider reference, immutable version, relative destination, mode, and repo/target/account/region selectors. The claim payload carries only that reference. A daemon-only resolve endpoint checks the task, runtime, workspace, executor, project resource, and selector tuple before returning `application/octet-stream` bytes. Provider errors use stable non-secret error bodies.
+`task_config` is a project resource whose JSON reference contains an adapter name, provider reference, immutable version, relative destination, mode, and repo/target/account/region selectors. The claim payload carries only that reference. Writes are restricted to workspace `owner`/`admin` members and the provider reference must match the operator-configured `MULTICA_TASK_CONFIG_PROVIDER_REF_PREFIXES` allowlist; an empty allowlist disables new bindings. A task_config cannot coexist with a project-level `local_directory`, because the latter may place the task outside the daemon-owned env root. A daemon-only resolve endpoint checks the task, runtime, workspace, executor, project resource, approved provider reference, and selector tuple before returning `application/octet-stream` bytes. Provider errors use stable non-secret error bodies.
 
 The first adapter is AWS Secrets Manager, injected behind a small provider interface. It uses the reference as `SecretId` and the version as `VersionId`; the secret value never enters JSON, logs, task metadata, environment variables, or the task result.
 

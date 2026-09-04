@@ -137,3 +137,31 @@ func TestCleanupTaskConfigManifestsRejectsTamperedSiblingWorkDir(t *testing.T) {
 		t.Fatalf("sibling file was affected: %v", err)
 	}
 }
+
+func TestTaskConfigIntentSupportsDaemonWorktree(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(root, "worktree")
+	if err := os.MkdirAll(worktree, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(worktree, "deploy", "terraform", "backend.hcl")
+	if err := RegisterTaskConfigIntent(root, "task-1", worktree, target); err != nil {
+		t.Fatalf("RegisterTaskConfigIntent(worktree): %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := CleanupTaskConfigIntent(root)
+	if err != nil {
+		t.Fatalf("CleanupTaskConfigIntent(worktree): %v", err)
+	}
+	if len(paths) != 1 || paths[0] != target {
+		t.Fatalf("cleanup paths = %#v, want %q", paths, target)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("worktree config survived cleanup: %v", err)
+	}
+}

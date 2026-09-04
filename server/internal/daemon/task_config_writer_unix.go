@@ -62,7 +62,13 @@ func openTaskConfigWriter(envRoot, workDir, rel, target, tempPath string) (*task
 	for _, part := range append(pathParts(workRel), pathParts(parentRel)...) {
 		next, openErr := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		if openErr != nil {
-			return nil, errors.New("task_config: open destination parent failed")
+			if openErr != unix.ENOENT || unix.Mkdirat(fd, part, 0o700) != nil {
+				return nil, errors.New("task_config: open destination parent failed")
+			}
+			next, openErr = unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+			if openErr != nil {
+				return nil, errors.New("task_config: open destination parent failed")
+			}
 		}
 		_ = unix.Close(fd)
 		fd = next

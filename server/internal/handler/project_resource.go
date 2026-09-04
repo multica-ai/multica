@@ -584,9 +584,25 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "resource_type is required")
 		return
 	}
+	if req.ResourceType == "task_config" {
+		if _, ok := h.requireWorkspaceRole(w, r, uuidToString(project.WorkspaceID), "project not found", "owner", "admin"); !ok {
+			return
+		}
+	}
 	normalizedRef, err := validateAndNormalizeResourceRef(req.ResourceType, req.ResourceRef)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ResourceType == "task_config" && !taskConfigProviderRefAllowedFromRef(normalizedRef, h.cfg.TaskConfigProviderRefPrefixes) {
+		writeError(w, http.StatusForbidden, "task_config provider reference is not approved")
+		return
+	}
+	if conflict, err := h.findTaskConfigLocalDirectoryConflict(r.Context(), project.ID, req.ResourceType, pgtype.UUID{}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
+		return
+	} else if conflict {
+		writeError(w, http.StatusConflict, "task_config cannot coexist with local_directory on the same project")
 		return
 	}
 
@@ -676,6 +692,11 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "project resource not found")
 		return
 	}
+	if existing.ResourceType == "task_config" {
+		if _, ok := h.requireWorkspaceRole(w, r, uuidToString(project.WorkspaceID), "project not found", "owner", "admin"); !ok {
+			return
+		}
+	}
 
 	// Decode into a raw map first so we can tell "field omitted" from
 	// "field present with zero value" — the label clear case in particular
@@ -706,6 +727,17 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "task_config: version is immutable")
 			return
 		}
+		if !taskConfigProviderRefAllowed(newRef.ProviderRef, h.cfg.TaskConfigProviderRefPrefixes) {
+			writeError(w, http.StatusForbidden, "task_config provider reference is not approved")
+			return
+		}
+	}
+	if conflict, err := h.findTaskConfigLocalDirectoryConflict(r.Context(), project.ID, existing.ResourceType, existing.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
+		return
+	} else if conflict {
+		writeError(w, http.StatusConflict, "task_config cannot coexist with local_directory on the same project")
+		return
 	}
 
 	if conflict, err := h.findLocalDirectoryConflict(r.Context(), project.ID, existing.ResourceType, nextRef, existing.ID); err != nil {
@@ -883,6 +915,50 @@ func (h *Handler) findLocalDirectoryConflict(ctx context.Context, projectID pgty
 		// user device); the daemon-side resolver routes each daemon to
 		// its own assignment by daemon_id.
 		if existing.DaemonID == incoming.DaemonID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func taskConfigProviderRefAllowed(ref string, prefixes []string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || len(prefixes) == 0 {
+		return false
+	}
+	for _, prefix := range prefixes {
+		if prefix = strings.TrimSpace(prefix); prefix != "" && strings.HasPrefix(ref, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func taskConfigProviderRefAllowedFromRef(ref json.RawMessage, prefixes []string) bool {
+	var binding taskConfigRef
+	if json.Unmarshal(ref, &binding) != nil {
+		return false
+	}
+	return taskConfigProviderRefAllowed(binding.ProviderRef, prefixes)
+}
+
+// findTaskConfigLocalDirectoryConflict enforces the execution boundary for
+// the project-level task_config resource. A local_directory may be outside
+// the daemon env root, so allowing both resource types would make the task
+// config lifecycle either fail or write into a user's working copy.
+func (h *Handler) findTaskConfigLocalDirectoryConflict(ctx context.Context, projectID pgtype.UUID, resourceType string, excludeID pgtype.UUID) (bool, error) {
+	if resourceType != "task_config" && resourceType != "local_directory" {
+		return false, nil
+	}
+	rows, err := h.Queries.ListProjectResources(ctx, projectID)
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if excludeID.Valid && row.ID == excludeID {
+			continue
+		}
+		if (resourceType == "task_config" && row.ResourceType == "local_directory") || (resourceType == "local_directory" && row.ResourceType == "task_config") {
 			return true, nil
 		}
 	}

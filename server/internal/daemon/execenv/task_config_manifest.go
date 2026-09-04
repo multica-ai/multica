@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	taskConfigIntentFile = ".multica_task_config_intent.json"
-	taskConfigWorkDirRel = "workdir"
+	taskConfigIntentFile     = ".multica_task_config_intent.json"
+	taskConfigWorkDirRel     = "workdir"
+	taskConfigWorktreeDirRel = "worktree"
 )
 
 type taskConfigIntent struct {
@@ -30,7 +31,7 @@ func RegisterTaskConfigIntent(envRoot, taskID, workDir string, paths ...string) 
 	envRoot, err := filepath.Abs(envRoot)
 	root, rootErr := filepath.Abs(workDir)
 	workRel, relErr := filepath.Rel(envRoot, root)
-	if err != nil || rootErr != nil || relErr != nil || envRoot == "" || root == "" || filepath.ToSlash(workRel) != taskConfigWorkDirRel || !safeIntentRelativePath(workRel) || !safeIntentTaskID(taskID) || len(paths) == 0 {
+	if err != nil || rootErr != nil || relErr != nil || envRoot == "" || root == "" || !taskConfigManagedWorkDir(filepath.ToSlash(workRel)) || !safeIntentRelativePath(workRel) || !safeIntentTaskID(taskID) || len(paths) == 0 {
 		return errors.New("execenv: invalid task config intent")
 	}
 	if !safeIntentParents(envRoot, workRel) {
@@ -78,7 +79,7 @@ func CleanupTaskConfigIntent(envRoot string) ([]string, error) {
 		return nil, errors.New("execenv: parse task config intent failed")
 	}
 	envRoot, err = filepath.Abs(envRoot)
-	if err != nil || envRoot == "" || filepath.ToSlash(intent.WorkDir) != taskConfigWorkDirRel || !safeIntentTaskID(intent.TaskID) || len(intent.Paths) == 0 || !safeIntentRelativePath(intent.WorkDir) {
+	if err != nil || envRoot == "" || !taskConfigManagedWorkDir(filepath.ToSlash(intent.WorkDir)) || !safeIntentTaskID(intent.TaskID) || len(intent.Paths) == 0 || !safeIntentRelativePath(intent.WorkDir) {
 		return nil, errors.New("execenv: invalid task config intent")
 	}
 	if !safeIntentParents(envRoot, intent.WorkDir) {
@@ -91,11 +92,6 @@ func CleanupTaskConfigIntent(envRoot string) ([]string, error) {
 		}
 	} else if !errors.Is(statErr, fs.ErrNotExist) {
 		return nil, errors.New("execenv: task config intent workdir is unsafe")
-	}
-	if owner, ownerErr := ReadEnvRootOwner(envRoot); ownerErr != nil {
-		return nil, errors.New("execenv: task config intent owner is unreadable")
-	} else if owner.TaskID != "" && owner.TaskID != intent.TaskID {
-		return nil, errors.New("execenv: task config intent owner mismatch")
 	}
 	paths := make([]string, 0, len(intent.Paths))
 	for _, rel := range intent.Paths {
@@ -119,6 +115,20 @@ func CleanupTaskConfigIntent(envRoot string) ([]string, error) {
 		return paths, errors.New("execenv: remove task config intent failed")
 	}
 	return paths, nil
+}
+
+// taskConfigManagedWorkDir identifies daemon-owned execution roots. A reused
+// env root intentionally retains the previous .task_owner marker, so the
+// task-scoped intent is the cleanup authority. local_directory paths are
+// outside this set and are rejected by the daemon before provider resolution.
+func taskConfigManagedWorkDir(rel string) bool {
+	return rel == taskConfigWorkDirRel || rel == taskConfigWorktreeDirRel || strings.HasPrefix(rel, taskConfigWorktreeDirRel+"/")
+}
+
+// TaskConfigManagedWorkDir reports whether a work directory relative to an
+// env root belongs to a daemon-managed execution layout.
+func TaskConfigManagedWorkDir(rel string) bool {
+	return taskConfigManagedWorkDir(filepath.ToSlash(rel))
 }
 
 func safeIntentRelativePath(path string) bool {

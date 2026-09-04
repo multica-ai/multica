@@ -149,6 +149,11 @@ type Config struct {
 	// Surfaced through /api/config so self-hosted operators can confirm which
 	// server build is deployed. Empty in dev builds.
 	ServerVersion string
+	// TaskConfigProviderRefPrefixes is the operator-owned allowlist for secret
+	// references that a control-plane daemon may resolve. Empty means the
+	// task_config write path is disabled; a workspace member must never be able
+	// to turn the control-plane IAM role into an arbitrary secret reader.
+	TaskConfigProviderRefPrefixes []string
 }
 
 type cloudRuntimeProxy interface {

@@ -89,6 +89,33 @@ func TestMaterializeTaskConfigIsAtomic0600AndCleansOnFailure(t *testing.T) {
 	}
 }
 
+func TestCleanupTaskConfigAllowsReusedEnvRootOwner(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ref := taskConfigRef{Provider: "aws_secrets_manager", ProviderRef: "ref", Version: "v1", Path: "deploy/terraform/backend.hcl", Mode: 0o600, Repo: "repo", Target: "main", Account: "acct", Region: "ap-southeast-2"}
+	m, err := materializeTaskConfig(context.Background(), "task-new", envRoot, workDir, ref, func(context.Context) ([]byte, error) {
+		return []byte("bytes"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// LockEnvRootForReuse deliberately preserves the previous task's owner
+	// marker. Cleanup must trust the task-scoped intent, not reject a valid
+	// continuation because the reusable root has an older owner.
+	if err := os.WriteFile(filepath.Join(envRoot, ".task_owner"), []byte(`{"workspace_id":"ws","task_id":"task-old"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanupTaskConfig(m); err != nil {
+		t.Fatalf("cleanupTaskConfig: %v", err)
+	}
+	if _, err := os.Stat(m.Path); !os.IsNotExist(err) {
+		t.Fatalf("reused-root config survived cleanup: %v", err)
+	}
+}
+
 func TestPreflightTaskConfigFailsClosedForIdentityTupleAndCollision(t *testing.T) {
 	envRoot := t.TempDir()
 	workDir := filepath.Join(envRoot, "workdir")
@@ -147,5 +174,40 @@ func TestMaterializeTaskConfigRejectsSymlinkAndDestinationCollision(t *testing.T
 	}
 	if _, err := materializeTaskConfig(context.Background(), "task-2", envRoot, workDir, ref, func(context.Context) ([]byte, error) { return []byte("bytes"), nil }); err == nil {
 		t.Fatal("materializer followed a symlink parent")
+	}
+}
+
+func TestMaterializeTaskConfigDoesNotCreateThroughSymlinkParent(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	outside := t.TempDir()
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(workDir, "deploy")); err != nil {
+		t.Fatal(err)
+	}
+	ref := taskConfigRef{Provider: "aws_secrets_manager", ProviderRef: "ref", Version: "v1", Path: "deploy/terraform/backend.hcl", Mode: 0o600, Repo: "repo", Target: "main", Account: "acct", Region: "ap-southeast-2"}
+	if _, err := materializeTaskConfig(context.Background(), "task-1", envRoot, workDir, ref, func(context.Context) ([]byte, error) { return []byte("bytes"), nil }); err == nil {
+		t.Fatal("materializer followed a symlink parent")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "terraform")); !os.IsNotExist(err) {
+		t.Fatalf("materializer created an intermediate directory outside workdir: %v", err)
+	}
+}
+
+func TestMaterializeTaskConfigRejectsUnmanagedWorkdirBeforeProvider(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := t.TempDir()
+	ref := taskConfigRef{Provider: "aws_secrets_manager", ProviderRef: "ref", Version: "v1", Path: "deploy/terraform/backend.hcl", Mode: 0o600, Repo: "repo", Target: "main", Account: "acct", Region: "ap-southeast-2"}
+	called := false
+	if _, err := materializeTaskConfig(context.Background(), "task-1", envRoot, workDir, ref, func(context.Context) ([]byte, error) {
+		called = true
+		return []byte("bytes"), nil
+	}); err == nil {
+		t.Fatal("materializer accepted an unmanaged workdir")
+	}
+	if called {
+		t.Fatal("provider was called for an unmanaged workdir")
 	}
 }
