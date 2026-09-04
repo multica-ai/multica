@@ -1,14 +1,21 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -170,6 +177,153 @@ func TestTaskConfigResolveTaskGateBindsWorkspaceRuntimeAndStatus(t *testing.T) {
 			}
 		})
 	}
+}
+
+type recordingTaskConfigProvider struct {
+	content []byte
+	err     error
+	calls   int
+}
+
+func (p *recordingTaskConfigProvider) Resolve(context.Context, TaskConfigResolveRequest) ([]byte, error) {
+	p.calls++
+	if p.err != nil {
+		return nil, p.err
+	}
+	return append([]byte(nil), p.content...), nil
+}
+
+// TestResolveTaskConfigEndpointUsesDatabaseAndDaemonBinding exercises the
+// actual HTTP handler against rows in the test database. The helper tests
+// above intentionally remain useful when PostgreSQL is unavailable; this test
+// covers the DB-backed authorization and binding checks that must protect the
+// only endpoint that returns provider bytes.
+func TestResolveTaskConfigEndpointUsesDatabaseAndDaemonBinding(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	const (
+		d         = "task-config-endpoint-daemon"
+		secret    = "unique-task-config-endpoint-sentinel"
+		refPrefix = "approved/task-config/"
+	)
+	fixture := testutil.New(testPool, testWorkspaceID, testUserID)
+	projectID := fixture.Project(t, "task config endpoint project")
+	issueID := fixture.Issue(t, "task config endpoint issue", testutil.Cols{"project_id": projectID})
+	runtimeID := fixture.Runtime(t, "task config endpoint runtime", testutil.Cols{"daemon_id": d})
+	otherRuntimeID := fixture.Runtime(t, "task config endpoint other runtime", testutil.Cols{"daemon_id": "task-config-endpoint-other-daemon"})
+	agentID := fixture.Agent(t, "task config endpoint agent", runtimeID)
+	taskID := fixture.Task(t, agentID, testutil.Cols{
+		"issue_id":   issueID,
+		"runtime_id": runtimeID,
+		"status":     "dispatched",
+	})
+	ref := taskConfigRef{
+		Provider:    "aws_secrets_manager",
+		ProviderRef: refPrefix + uuid.NewString(),
+		Version:     "version-1",
+		Path:        "deploy/terraform/backend.hcl",
+		Mode:        0o600,
+		Repo:        "github.com/example/infrastructure",
+		Target:      "main",
+		Account:     "123456789012",
+		Region:      "ap-southeast-2",
+	}
+	refJSON, err := json.Marshal(ref)
+	if err != nil {
+		t.Fatalf("marshal task_config ref: %v", err)
+	}
+	resourceID := fixture.Insert(t, "project_resource", testutil.Cols{
+		"project_id":    projectID,
+		"workspace_id":  testWorkspaceID,
+		"resource_type": "task_config",
+		"resource_ref":  refJSON,
+		"created_by":    testUserID,
+	})
+
+	provider := &recordingTaskConfigProvider{content: []byte(secret)}
+	h := *testHandler
+	h.TaskConfigProvider = provider
+	h.cfg.TaskConfigProviderRefPrefixes = []string{refPrefix}
+
+	selectors := TaskConfigSelectors{Repo: ref.Repo, Target: ref.Target, Account: ref.Account, Region: ref.Region}
+	requestBody, err := json.Marshal(taskConfigResolvePayload{
+		Provider:    ref.Provider,
+		ProviderRef: ref.ProviderRef,
+		Version:     ref.Version,
+		Path:        ref.Path,
+		Mode:        ref.Mode,
+		Selectors:   selectors,
+	})
+	if err != nil {
+		t.Fatalf("marshal resolve request: %v", err)
+	}
+	call := func(routeRuntimeID, daemon string, body []byte) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/daemon/runtimes/"+routeRuntimeID+"/tasks/"+taskID+"/configs/"+resourceID+"/resolve", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID, "resourceId", resourceID)
+		req = req.WithContext(middleware.WithDaemonContext(req.Context(), testWorkspaceID, daemon))
+		w := httptest.NewRecorder()
+		h.ResolveTaskConfig(w, req)
+		return w
+	}
+
+	positive := call(runtimeID, d, requestBody)
+	if positive.Code != http.StatusOK || positive.Header().Get("Content-Type") != "application/octet-stream" {
+		t.Fatalf("positive resolve = %d %q, want octet-stream 200", positive.Code, positive.Body.String())
+	}
+	if positive.Body.String() != secret {
+		t.Fatalf("positive resolve body = %q, want provider bytes", positive.Body.String())
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls after positive resolve = %d, want 1", provider.calls)
+	}
+
+	if got := call(runtimeID, "", requestBody); got.Code != http.StatusNotFound {
+		t.Fatalf("member-auth resolve status = %d, want 404", got.Code)
+	}
+	if got := call(runtimeID, "different-daemon", requestBody); got.Code != http.StatusNotFound {
+		t.Fatalf("wrong-daemon resolve status = %d, want 404", got.Code)
+	}
+	wrongSelectors := append([]byte(nil), requestBody...)
+	var payload taskConfigResolvePayload
+	if err := json.Unmarshal(wrongSelectors, &payload); err != nil {
+		t.Fatalf("decode request copy: %v", err)
+	}
+	payload.Selectors.Region = "us-east-1"
+	wrongSelectors, err = json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal mismatch request: %v", err)
+	}
+	if got := call(runtimeID, d, wrongSelectors); got.Code != http.StatusForbidden {
+		t.Fatalf("selector-mismatch resolve status = %d, want 403", got.Code)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls after rejected requests = %d, want 1", provider.calls)
+	}
+	if got := call(otherRuntimeID, "task-config-endpoint-other-daemon", requestBody); got.Code != http.StatusNotFound {
+		t.Fatalf("cross-runtime resolve status = %d, want 404", got.Code)
+	}
+	if got := call(runtimeID, d, []byte("{}")); got.Code != http.StatusForbidden && got.Code != http.StatusBadRequest {
+		t.Fatalf("malformed binding payload status = %d, want request rejection", got.Code)
+	}
+
+	provider.err = errors.New("upstream unavailable")
+	if got := call(runtimeID, d, requestBody); got.Code != http.StatusBadGateway || strings.Contains(got.Body.String(), secret) {
+		t.Fatalf("provider-error resolve = %d %q, want redacted 502", got.Code, got.Body.String())
+	}
+	provider.err = nil
+	h.TaskConfigProvider = nil
+	if got := call(runtimeID, d, requestBody); got.Code != http.StatusServiceUnavailable {
+		t.Fatalf("provider-unavailable resolve status = %d, want 503", got.Code)
+	}
+	h.TaskConfigProvider = provider
+	fixture.Exec(t, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, taskID)
+	if got := call(runtimeID, d, requestBody); got.Code != http.StatusConflict {
+		t.Fatalf("completed-task resolve status = %d, want 409", got.Code)
+	}
+
 }
 
 func mustMarshal(v any) json.RawMessage {
