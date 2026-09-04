@@ -190,6 +190,67 @@ func CodexResumeOverflowError(errText string) bool {
 	return strings.Contains(lower, codexResumeMarker) && strings.Contains(lower, codexLineOverflowMarker)
 }
 
+// codexRemoteCompactMarker opens the error Codex writes when the compaction
+// task it runs on the user's behalf fails, and codexRetiredCompactPath is the
+// request path only the legacy compaction route ever calls. The v2 route
+// compacts on the ordinary /responses stream instead, so this segment appears
+// only when the legacy route was selected.
+const (
+	codexRemoteCompactMarker = "remote compact task"
+	codexRetiredCompactPath  = "responses/compact"
+)
+
+// codexCompactNotFoundWitnesses are the two renderings of the 404 the retired
+// endpoint answers with. Both are HTTP status phrasings, which is what keeps
+// them safe to match: a bare "404" also occurs inside the hex request id and
+// cf-ray the same error carries, and those say nothing about the status.
+var codexCompactNotFoundWitnesses = []string{"status 404", "404 not found"}
+
+// CodexRetiredCompactionError reports whether an agent error is Codex failing
+// to compact a conversation because it called the compaction endpoint OpenAI
+// has retired, e.g.
+//
+//	Error running remote compact task: unexpected status 404 Not Found: {"detail":"Not Found"},
+//	url: https://chatgpt.com/backend-api/codex/responses/compact, cf-ray: ..., request id: ...
+//
+// The route is chosen by `remote_compaction_v2 = false` under `[features]` in
+// the user's codex config. Codex versions before 26.901 ignored that value, so
+// a line pasted years ago as a workaround for an unrelated defect starts
+// failing on upgrade without the user touching anything (GH #8000, upstream
+// openai/codex#42468). Nothing in the text names the config key, so the
+// failure is unreadable on its own — which is the whole reason this predicate
+// exists: callers use it to attach the one-line remedy.
+//
+// The compaction marker is required, and on its own is not enough: a transient
+// 5xx or a rate limit on the SAME call is a compaction failure the remedy does
+// not fix, and pointing those at the config key would send users to edit a
+// file that was never the problem. Either witness of "this route is gone"
+// settles it — the 404 status, or the legacy path itself, which is evidence of
+// the stale flag whatever status came back.
+//
+// Deliberately NOT a resume-safety predicate. The stuck thread is recoverable:
+// once the flag is gone compaction succeeds and the same conversation
+// continues, so retiring the session here would throw away exactly the context
+// the fix restores. Text only.
+func CodexRetiredCompactionError(errText string) bool {
+	if errText == "" {
+		return false
+	}
+	lower := strings.ToLower(errText)
+	if !strings.Contains(lower, codexRemoteCompactMarker) {
+		return false
+	}
+	if strings.Contains(lower, codexRetiredCompactPath) {
+		return true
+	}
+	for _, witness := range codexCompactNotFoundWitnesses {
+		if strings.Contains(lower, witness) {
+			return true
+		}
+	}
+	return false
+}
+
 // codexModelCatalogRefreshFailureSignal matches the Codex models-manager error
 // emitted when the model catalog could not be refreshed. Codex reports several
 // distinct causes under this prefix ("timeout waiting for child process to
