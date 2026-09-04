@@ -1,0 +1,53 @@
+{
+  "sessionId": "session-junie-fixture",
+  "configOptions": [
+    {
+      "type": "select",
+      "id": "mode",
+      "name": "Mode",
+      "category": "mode",
+      "currentValue": "code",
+      "options": [{"value": "code", "name": "Code"}]
+    },
+    {
+      "type": "select",
+      "id": "model",
+      "name": "Model",
+      "category": "model",
+      "currentValue": "v1:6:custom:custom:local-model",
+      "options": [
+        {
+          "group": "Local models",
+          "name": "Local models",
+          "options": [
+            {"value": "v1:6:custom:custom:local-model", "name": "Local model"},
+            {"value": "v1:6:custom:custom:alternate-model", "name": "Alternate local model"}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "select",
+      "id": "effort",
+      "name": "Thinking level",
+      "category": "thought_level",
+      "currentValue": "medium",
+      "options": [
+        {"value": "low", "name": "Low"},
+        {"value": "medium", "name": "Medium"},
+        {"value": "high", "name": "High"}
+      ]
+    },
+    {
+      "type": "select",
+      "id": "brave_mode",
+      "name": "Brave mode",
+      "currentValue": "auto",
+      "options": [
+        {"value": "auto", "name": "Auto"},
+        {"value": "on", "name": "On"},
+        {"value": "off", "name": "Off"}
+      ]
+    }
+  ]
+}

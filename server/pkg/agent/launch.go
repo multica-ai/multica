@@ -453,6 +453,7 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"hermes":      hermesBlockedArgs,
 	"kimi":        kimiBlockedArgs,
 	"kiro":        kiroBlockedArgs,
+	"junie":       junieBlockedArgs,
 	"opencode":    opencodeBlockedArgs,
 	"openclaw":    openclawBlockedArgs,
 	"pi":          piBlockedArgs,
