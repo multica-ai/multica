@@ -1043,7 +1043,7 @@ type FindChannelBindingForMemberParams struct {
 // Outbound notification lookup: given a Multica member and a channel_type,
 // return the (installation, channel_user_id) that outbound push should
 // target. The wecom smart-bot inbox-notification path uses this to decide
-// whether to deliver via the bot at all — no row means "unbound member,
+// whether to deliver via the bot at all: no row means "unbound member,
 // fall back to the legacy path (TOF/RTX)".
 //
 // If a member has bound multiple installations of the same channel_type in
@@ -1891,6 +1891,112 @@ func (q *Queries) ListChannelOutboundMessagesByIDs(ctx context.Context, arg List
 			&i.TaskID,
 			&i.OutboundKind,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFeishuNotificationTargetsForUser = `-- name: ListFeishuNotificationTargetsForUser :many
+SELECT
+    b.id AS binding_id,
+    b.workspace_id AS binding_workspace_id,
+    b.multica_user_id,
+    b.installation_id AS binding_installation_id,
+    b.channel_type AS binding_channel_type,
+    b.channel_user_id,
+    b.config AS binding_config,
+    b.bound_at,
+    ci.id AS installation_id,
+    ci.workspace_id AS installation_workspace_id,
+    ci.agent_id,
+    ci.channel_type AS installation_channel_type,
+    ci.config AS installation_config,
+    ci.status AS installation_status,
+    ci.ws_lease_token,
+    ci.ws_lease_expires_at,
+    ci.installer_user_id,
+    ci.installed_at,
+    ci.created_at,
+    ci.updated_at
+FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = $1
+  AND b.multica_user_id = $2
+  AND b.channel_type = 'feishu'
+  AND ci.channel_type = 'feishu'
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC
+`
+
+type ListFeishuNotificationTargetsForUserParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+}
+
+type ListFeishuNotificationTargetsForUserRow struct {
+	BindingID               pgtype.UUID        `json:"binding_id"`
+	BindingWorkspaceID      pgtype.UUID        `json:"binding_workspace_id"`
+	MulticaUserID           pgtype.UUID        `json:"multica_user_id"`
+	BindingInstallationID   pgtype.UUID        `json:"binding_installation_id"`
+	BindingChannelType      string             `json:"binding_channel_type"`
+	ChannelUserID           string             `json:"channel_user_id"`
+	BindingConfig           []byte             `json:"binding_config"`
+	BoundAt                 pgtype.Timestamptz `json:"bound_at"`
+	InstallationID          pgtype.UUID        `json:"installation_id"`
+	InstallationWorkspaceID pgtype.UUID        `json:"installation_workspace_id"`
+	AgentID                 pgtype.UUID        `json:"agent_id"`
+	InstallationChannelType string             `json:"installation_channel_type"`
+	InstallationConfig      []byte             `json:"installation_config"`
+	InstallationStatus      string             `json:"installation_status"`
+	WsLeaseToken            pgtype.Text        `json:"ws_lease_token"`
+	WsLeaseExpiresAt        pgtype.Timestamptz `json:"ws_lease_expires_at"`
+	InstallerUserID         pgtype.UUID        `json:"installer_user_id"`
+	InstalledAt             pgtype.Timestamptz `json:"installed_at"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Outbound notification bridge: find active Feishu user bindings for a Multica
+// member in this workspace. The bridge sends personal inbox notifications to
+// the bound open_id using the installation's bot credentials. Keep this scoped
+// to active Feishu installations and current workspace membership at the call
+// site; channel_user_binding alone is only an account link, not delivery proof.
+func (q *Queries) ListFeishuNotificationTargetsForUser(ctx context.Context, arg ListFeishuNotificationTargetsForUserParams) ([]ListFeishuNotificationTargetsForUserRow, error) {
+	rows, err := q.db.Query(ctx, listFeishuNotificationTargetsForUser, arg.WorkspaceID, arg.MulticaUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFeishuNotificationTargetsForUserRow{}
+	for rows.Next() {
+		var i ListFeishuNotificationTargetsForUserRow
+		if err := rows.Scan(
+			&i.BindingID,
+			&i.BindingWorkspaceID,
+			&i.MulticaUserID,
+			&i.BindingInstallationID,
+			&i.BindingChannelType,
+			&i.ChannelUserID,
+			&i.BindingConfig,
+			&i.BoundAt,
+			&i.InstallationID,
+			&i.InstallationWorkspaceID,
+			&i.AgentID,
+			&i.InstallationChannelType,
+			&i.InstallationConfig,
+			&i.InstallationStatus,
+			&i.WsLeaseToken,
+			&i.WsLeaseExpiresAt,
+			&i.InstallerUserID,
+			&i.InstalledAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

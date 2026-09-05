@@ -386,11 +386,47 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 	// Lark's `text` msg_type expects content = JSON-encoded {"text": "..."}.
 	// json.Marshal handles the escape of newlines / quotes / unicode so
 	// the agent's reply round-trips intact.
-	contentBytes, err := json.Marshal(map[string]string{"text": p.Text})
+	path, body := outboundMessageRequest(p.ChatID, "text", "", p.ReplyTarget)
+	content, err := textMessageContent(p.Text)
+	if err != nil {
+		return "", err
+	}
+	body["content"] = content
+	return c.sendTextBody(ctx, p.InstallationID, path, body, "send text message")
+}
+
+// SendTextToOpenID posts a plain text IM message directly to a Lark user open_id.
+func (c *httpAPIClient) SendTextToOpenID(ctx context.Context, p SendOpenIDTextParams) (string, error) {
+	if p.OpenID == "" {
+		return "", errors.New("lark http client: missing open_id")
+	}
+	if p.Text == "" {
+		return "", errors.New("lark http client: missing text")
+	}
+	content, err := textMessageContent(p.Text)
+	if err != nil {
+		return "", err
+	}
+	q := url.Values{}
+	q.Set("receive_id_type", "open_id")
+	path := "/open-apis/im/v1/messages?" + q.Encode()
+	body := map[string]any{
+		"receive_id": string(p.OpenID),
+		"msg_type":   "text",
+		"content":    content,
+	}
+	return c.sendTextBody(ctx, p.InstallationID, path, body, "send open_id text message")
+}
+
+func textMessageContent(text string) (string, error) {
+	contentBytes, err := json.Marshal(map[string]string{"text": text})
 	if err != nil {
 		return "", fmt.Errorf("lark http client: encode text content: %w", err)
 	}
-	path, body := outboundMessageRequest(p.ChatID, "text", string(contentBytes), p.ReplyTarget)
+	return string(contentBytes), nil
+}
+
+func (c *httpAPIClient) sendTextBody(ctx context.Context, creds InstallationCredentials, path string, body map[string]any, op string) (string, error) {
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -398,14 +434,14 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 			MessageID string `json:"message_id"`
 		} `json:"data"`
 	}
-	if err := c.doAuthedJSON(ctx, p.InstallationID, http.MethodPost, path, body, &resp); err != nil {
-		return "", fmt.Errorf("lark http client: send text message: %w", err)
+	if err := c.doAuthedJSON(ctx, creds, http.MethodPost, path, body, &resp); err != nil {
+		return "", fmt.Errorf("lark http client: %s: %w", op, err)
 	}
 	if resp.Code != 0 || resp.Data.MessageID == "" {
 		if isTokenError(resp.Code) {
-			c.invalidateToken(p.InstallationID.AppID)
+			c.invalidateToken(creds.AppID)
 		}
-		return "", &APIError{Op: "send text message", Code: resp.Code, Msg: resp.Msg}
+		return "", &APIError{Op: op, Code: resp.Code, Msg: resp.Msg}
 	}
 	return resp.Data.MessageID, nil
 }

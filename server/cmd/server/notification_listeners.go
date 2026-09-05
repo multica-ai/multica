@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -1019,6 +1023,145 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			issue.Title, "",
 			emptyDetails)
 	})
+}
+
+// registerFeishuInboxOutboundListener bridges Multica's in-app inbox stream to
+// Feishu DMs for users who have linked a Feishu account. It keeps the canonical
+// notification write in inbox_item and treats Feishu delivery as best-effort.
+func registerFeishuInboxOutboundListener(bus *events.Bus, store *lark.ChannelStore, credentials *lark.InstallationService, client lark.APIClient, appURL string) {
+	if store == nil || credentials == nil || client == nil || !client.IsConfigured() {
+		return
+	}
+	appURL = strings.TrimRight(appURL, "/")
+	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+		item, ok := inboxItemFromEvent(e)
+		if !ok || item.RecipientType != "member" || item.RecipientID == "" {
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		workspaceID, err := util.ParseUUID(e.WorkspaceID)
+		if err != nil {
+			slog.Warn("feishu inbox bridge: invalid workspace id", "workspace_id", e.WorkspaceID, "error", err)
+			return
+		}
+		recipientID, err := util.ParseUUID(item.RecipientID)
+		if err != nil {
+			slog.Warn("feishu inbox bridge: invalid recipient id", "recipient_id", item.RecipientID, "error", err)
+			return
+		}
+		targets, err := store.ListNotificationTargetsForUser(ctx, workspaceID, recipientID)
+		if err != nil {
+			slog.Warn("feishu inbox bridge: target lookup failed", "recipient_id", item.RecipientID, "error", err)
+			return
+		}
+		if len(targets) == 0 {
+			return
+		}
+
+		creds, err := feishuNotificationCredentials(credentials, targets[0].Installation)
+		if err != nil {
+			slog.Warn("feishu inbox bridge: credentials unavailable", "recipient_id", item.RecipientID, "error", err)
+			return
+		}
+		msgID, err := client.SendTextToOpenID(ctx, lark.SendOpenIDTextParams{
+			InstallationID: creds,
+			OpenID:         lark.OpenID(targets[0].Binding.ChannelUserID),
+			Text:           feishuInboxNotificationText(item, appURL),
+		})
+		if err != nil {
+			slog.Warn("feishu inbox bridge: send failed", "recipient_id", item.RecipientID, "inbox_item_id", item.ID, "error", err)
+			return
+		}
+		slog.Info("feishu inbox bridge: notification sent", "recipient_id", item.RecipientID, "inbox_item_id", item.ID, "message_id", msgID)
+	})
+}
+
+type inboxEventItem struct {
+	ID            string
+	RecipientType string
+	RecipientID   string
+	Type          string
+	Severity      string
+	IssueID       string
+	Title         string
+	Body          string
+}
+
+func inboxItemFromEvent(e events.Event) (inboxEventItem, bool) {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return inboxEventItem{}, false
+	}
+	raw, ok := payload["item"].(map[string]any)
+	if !ok {
+		return inboxEventItem{}, false
+	}
+	return inboxEventItem{
+		ID:            stringFromAny(raw["id"]),
+		RecipientType: stringFromAny(raw["recipient_type"]),
+		RecipientID:   stringFromAny(raw["recipient_id"]),
+		Type:          stringFromAny(raw["type"]),
+		Severity:      stringFromAny(raw["severity"]),
+		IssueID:       stringFromAny(raw["issue_id"]),
+		Title:         stringFromAny(raw["title"]),
+		Body:          stringFromAny(raw["body"]),
+	}, true
+}
+
+func stringFromAny(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case *string:
+		if x != nil {
+			return *x
+		}
+	}
+	return ""
+}
+
+func feishuNotificationCredentials(credentials *lark.InstallationService, inst lark.Installation) (lark.InstallationCredentials, error) {
+	secret, err := credentials.DecryptAppSecret(inst)
+	if err != nil {
+		return lark.InstallationCredentials{}, fmt.Errorf("decrypt app_secret: %w", err)
+	}
+	creds := lark.InstallationCredentials{
+		AppID:     inst.AppID,
+		AppSecret: secret,
+		Region:    lark.RegionOrDefault(inst.Region),
+	}
+	if inst.TenantKey.Valid {
+		creds.TenantKey = inst.TenantKey.String
+	}
+	return creds, nil
+}
+
+func feishuInboxNotificationText(item inboxEventItem, appURL string) string {
+	parts := []string{"Multica 通知"}
+	if item.Title != "" {
+		parts = append(parts, item.Title)
+	}
+	if item.Type != "" {
+		parts = append(parts, "类型："+item.Type)
+	}
+	if body := strings.TrimSpace(item.Body); body != "" {
+		parts = append(parts, truncateNotificationBody(body, 600))
+	}
+	if appURL != "" && item.IssueID != "" {
+		parts = append(parts, strings.TrimRight(appURL, "/")+"/issues/"+item.IssueID)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func truncateNotificationBody(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "..."
 }
 
 // inboxItemToResponse converts a db.InboxItem into a map suitable for
