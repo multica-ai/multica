@@ -203,6 +203,20 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				}
 
 				userID := uuidToString(pat.UserID)
+				// Workspace-scoped PATs are never valid outside their bound tenant.
+				// The workspace middleware runs later, so enforce the binding here
+				// against the request's explicit workspace selector as well.
+				if pat.WorkspaceID.Valid {
+					requested := r.Header.Get("X-Workspace-ID")
+					if requested == "" {
+						requested = r.URL.Query().Get("workspace_id")
+					}
+					if requested != "" && requested != uuidToString(pat.WorkspaceID) {
+						http.Error(w, `{"error":"token is not valid for this workspace"}`, http.StatusForbidden)
+						return
+					}
+					r.Header.Set("X-Workspace-ID", uuidToString(pat.WorkspaceID))
+				}
 				if rejectTemporarilyDisabledUser(w, r, userID, "", "pat") {
 					return
 				}
@@ -215,7 +229,12 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				if pat.ExpiresAt.Valid {
 					expiresAt = pat.ExpiresAt.Time
 				}
-				patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+				// Workspace-bound tokens carry more identity than the legacy
+				// user-only cache value; keep them on the DB path until the cache
+				// stores the complete token scope.
+				if !pat.WorkspaceID.Valid {
+					patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+				}
 
 				// Cache miss = TTL expired (or first use after revoke /
 				// process restart). Refresh last_used_at; subsequent hits
