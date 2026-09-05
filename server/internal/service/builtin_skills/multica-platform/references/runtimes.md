@@ -80,9 +80,11 @@ context:
   its output.
 - `daemon status` and `daemon disk-usage` report on the runtime hosting this
   task: `status` probes the daemon-injected health port, and `disk-usage` scans
-  the daemon-injected workspaces root. Both refuse `--profile`, `disk-usage`
-  also refuses `--all-profiles` and `--workspaces-root`, and its STATUS column
-  stays blank because filling it would spend the Owner's credential.
+  the daemon-injected workspaces root. Both refuse `--profile`; `disk-usage`
+  also refuses `--all-profiles` and `--workspaces-root`. Its STATUS and RESUME
+  columns stay blank because filling them would spend the Owner's credential,
+  while retention estimates use the hosting daemon's effective GC policy only
+  when health confirms that it owns the scanned root.
 - Human/local profile and daemon commands — including `login`, `logout`,
   `setup`, `workspace switch`, local runtime profile path mutation,
   `daemon start` / `stop` / `restart`, `daemon logs`, and

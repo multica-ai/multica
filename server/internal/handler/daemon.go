@@ -5269,6 +5269,9 @@ const (
 
 type batchIssueGCCheckRequest struct {
 	IssueIDs []string `json:"issue_ids"`
+	// TaskIDs is optional diagnostic input from `daemon disk-usage`. Older
+	// daemons omit it, so the periodic GC path keeps its existing query cost.
+	TaskIDs []string `json:"task_ids,omitempty"`
 }
 
 type batchIssueGCCheckItem struct {
@@ -5276,6 +5279,12 @@ type batchIssueGCCheckItem struct {
 	Found     bool       `json:"found"`
 	Status    string     `json:"status,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+type batchIssueTaskEnvironmentItem struct {
+	TaskID          string `json:"task_id"`
+	Found           bool   `json:"found"`
+	ResumeCandidate bool   `json:"resume_candidate,omitempty"`
 }
 
 // BatchIssueGCCheck returns one explicit result for every requested issue ID.
@@ -5301,6 +5310,10 @@ func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.IssueIDs) > maxIssueGCBatchSize {
 		writeError(w, http.StatusBadRequest, "too many issue_ids")
+		return
+	}
+	if len(req.TaskIDs) > maxIssueGCBatchSize {
+		writeError(w, http.StatusBadRequest, "too many task_ids")
 		return
 	}
 
@@ -5356,7 +5369,61 @@ func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, item)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"issues": items})
+
+	// Resume-candidate inspection is intentionally opt-in. `disk-usage` sends
+	// the task ids found in local GC metadata; the normal daemon GC request does
+	// not, so this cannot add point queries to the periodic cleanup loop.
+	// Resolve ownership and the canonical resumable workdir for every distinct
+	// (agent, issue) scope in one set-based query. Keeping the database call
+	// count constant matters because this endpoint accepts up to 500 task ids.
+	environments := make([]batchIssueTaskEnvironmentItem, 0, len(req.TaskIDs))
+	if len(req.TaskIDs) > 0 {
+		parsedTaskIDs := make([]pgtype.UUID, 0, len(req.TaskIDs))
+		canonicalTaskIDs := make([]string, 0, len(req.TaskIDs))
+		for _, taskID := range req.TaskIDs {
+			parsedID, err := util.ParseUUID(taskID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid task_id")
+				return
+			}
+			parsedTaskIDs = append(parsedTaskIDs, parsedID)
+			canonicalTaskIDs = append(canonicalTaskIDs, uuidToString(parsedID))
+		}
+
+		subjectRows, err := h.Queries.ListIssueTaskEnvironmentSubjects(r.Context(), db.ListIssueTaskEnvironmentSubjectsParams{
+			WorkspaceID: workspaceUUID,
+			TaskIds:     parsedTaskIDs,
+		})
+		if err != nil {
+			slog.Warn("list issue task environment subjects failed", "workspace_id", workspaceID, "count", len(parsedTaskIDs), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to inspect task environments")
+			return
+		}
+
+		subjects := make(map[string]db.ListIssueTaskEnvironmentSubjectsRow, len(subjectRows))
+		for _, subject := range subjectRows {
+			taskID := uuidToString(subject.ID)
+			subjects[taskID] = subject
+		}
+
+		for _, taskID := range canonicalTaskIDs {
+			subject, found := subjects[taskID]
+			item := batchIssueTaskEnvironmentItem{TaskID: taskID, Found: found}
+			if found {
+				// A durable_work_dir means this task ran in a disposable
+				// local_directory worktree that was finalized and removed. The
+				// server may still select its session/work_dir row, but the daemon
+				// deliberately starts the next local task with a fresh env root.
+				item.ResumeCandidate = !subject.DurableWorkDir.Valid &&
+					subject.WorkDir.Valid && subject.WorkDir.String != "" &&
+					subject.CanonicalWorkDir.Valid &&
+					subject.WorkDir.String == subject.CanonicalWorkDir.String
+			}
+			environments = append(environments, item)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"issues": items, "task_environments": environments})
 }
 
 // GetIssueGCCheck returns minimal issue info needed by older daemon GC loops.

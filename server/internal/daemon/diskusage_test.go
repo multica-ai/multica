@@ -44,10 +44,12 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 	writeFile(t, filepath.Join(taskA1, "workdir/main.go"), 1000)
 	writeFile(t, filepath.Join(taskA1, "workdir/node_modules/dep/index.js"), 4000)
 	mustWriteMeta(t, taskA1, execenv.GCMeta{
-		Kind:        execenv.GCKindIssue,
-		IssueID:     "issue-1",
-		WorkspaceID: wsA,
-		CompletedAt: time.Now().Add(-3 * time.Hour),
+		Kind:           execenv.GCKindIssue,
+		IssueID:        "issue-1",
+		TaskID:         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		WorkspaceID:    wsA,
+		CompletedAt:    time.Now().Add(-3 * time.Hour),
+		LocalDirectory: true,
 	})
 
 	taskA2 := filepath.Join(root, wsA, "bbbbbbbb")
@@ -102,6 +104,13 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 	if a1.WorkspaceShort != ShortID(wsA) {
 		t.Errorf("task a1 workspace_short = %q, want %q", a1.WorkspaceShort, ShortID(wsA))
 	}
+	if a1.TaskID != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" || a1.CompletedAt == nil || a1.LocalDirectory == nil || !*a1.LocalDirectory {
+		t.Errorf("task a1 lifecycle metadata = task_id:%q completed_at:%v local_directory:%v",
+			a1.TaskID, a1.CompletedAt, a1.LocalDirectory)
+	}
+	if a1.ResumeCandidate == nil || *a1.ResumeCandidate {
+		t.Errorf("local_directory resume_candidate = %v, want false", a1.ResumeCandidate)
+	}
 
 	a2 := byShort["bbbbbbbb"]
 	if a2.Kind != string(execenv.GCKindChat) {
@@ -113,6 +122,9 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 	if a2.ArtifactSizeBytes != 0 {
 		t.Errorf("task a2 artifact size = %d, want 0", a2.ArtifactSizeBytes)
 	}
+	if a2.LocalDirectory == nil || *a2.LocalDirectory {
+		t.Errorf("managed task local_directory = %v, want false", a2.LocalDirectory)
+	}
 
 	b1 := byShort["cccccccc"]
 	if b1.Kind != DiskUsageKindUnknown {
@@ -123,6 +135,9 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 	}
 	if b1.AgeSeconds < 60 {
 		t.Errorf("task b1 age_seconds = %d, want >= 60 (mtime backdated 2h)", b1.AgeSeconds)
+	}
+	if b1.LocalDirectory != nil {
+		t.Errorf("metadata-free task local_directory = %v, want unknown", b1.LocalDirectory)
 	}
 
 	if report.TotalSizeBytes != a1.SizeBytes+a2.SizeBytes+b1.SizeBytes {
@@ -190,7 +205,12 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"kind"`,
+		`"task_id"`,
 		`"parent_status"`,
+		`"completed_at"`,
+		`"local_directory"`,
+		`"resume_candidate"`,
+		`"retention_reason"`,
 		`"age_seconds"`,
 		`"size_bytes"`,
 		`"artifact_size_bytes"`,
@@ -296,6 +316,12 @@ func TestScanDiskUsage_ReadableActiveRootUsesOwnerIdentityWithoutGCMeta(t *testi
 	wantTaskSegment := filepath.Base(env.RootDir)
 	if usage.TaskShort != wantTaskSegment {
 		t.Fatalf("task_short = %q, want physical directory segment %q", usage.TaskShort, wantTaskSegment)
+	}
+	if usage.TaskID != taskID {
+		t.Fatalf("task_id = %q, want owner identity %q", usage.TaskID, taskID)
+	}
+	if usage.LocalDirectory != nil {
+		t.Fatalf("local_directory = %v, want unknown without completion metadata", usage.LocalDirectory)
 	}
 	if len(report.Workspaces) != 1 || report.Workspaces[0].WorkspaceID != workspaceID {
 		t.Fatalf("workspace aggregate = %+v, want authoritative workspace %q", report.Workspaces, workspaceID)
@@ -571,9 +597,18 @@ func issueTask(wsID, taskShort, issueID string) TaskDiskUsage {
 	return TaskDiskUsage{
 		WorkspaceID: wsID,
 		TaskShort:   taskShort,
+		TaskID:      taskShort,
 		Kind:        string(execenv.GCKindIssue),
 		ParentID:    issueID,
 	}
+}
+
+func foundIssueResults(statuses map[string]string) map[string]IssueGCCheckResult {
+	results := make(map[string]IssueGCCheckResult, len(statuses))
+	for id, status := range statuses {
+		results[id] = IssueGCCheckResult{ID: id, Found: true, Status: status}
+	}
+	return results
 }
 
 // TestResolveParentStatuses_FillsIssueTasks covers the main path: statuses land
@@ -595,20 +630,24 @@ func TestResolveParentStatuses_FillsIssueTasks(t *testing.T) {
 	}}
 
 	asked := map[string][]string{}
-	fetch := func(_ context.Context, workspaceID string, issueIDs []string) (map[string]string, error) {
+	fetch := func(_ context.Context, workspaceID string, issueIDs, taskIDs []string) (map[string]IssueGCCheckResult, map[string]TaskEnvironmentGCCheckResult, error) {
 		asked[workspaceID] = append(asked[workspaceID], issueIDs...)
-		out := map[string]string{}
+		statuses := map[string]string{}
 		for _, id := range issueIDs {
 			switch id {
 			case "issue-1":
-				out[id] = "done"
+				statuses[id] = "done"
 			case "issue-2":
-				out[id] = "in_progress"
+				statuses[id] = "in_progress"
 			case "issue-3":
-				out[id] = "cancelled"
+				statuses[id] = "cancelled"
 			}
 		}
-		return out, nil
+		candidates := make(map[string]TaskEnvironmentGCCheckResult, len(taskIDs))
+		for _, id := range taskIDs {
+			candidates[id] = TaskEnvironmentGCCheckResult{TaskID: id, Found: true, ResumeCandidate: id == "aaaa2222"}
+		}
+		return foundIssueResults(statuses), candidates, nil
 	}
 
 	if err := ResolveParentStatuses(context.Background(), report, fetch); err != nil {
@@ -621,6 +660,12 @@ func TestResolveParentStatuses_FillsIssueTasks(t *testing.T) {
 			t.Errorf("task[%d] (%s) parent_status = %q, want %q",
 				i, report.Tasks[i].TaskShort, got, wantStatus)
 		}
+	}
+	if got := report.Tasks[0].ResumeCandidate; got == nil || *got {
+		t.Errorf("first issue-1 task resume_candidate = %v, want false", got)
+	}
+	if got := report.Tasks[1].ResumeCandidate; got == nil || !*got {
+		t.Errorf("second issue-1 task resume_candidate = %v, want true", got)
 	}
 
 	if len(asked[wsA]) != 2 {
@@ -643,8 +688,11 @@ func TestResolveParentStatuses_UnresolvedStaysBlank(t *testing.T) {
 		issueTask(wsID, "aaaa2222", "issue-missing"),
 	}}
 
-	fetch := func(_ context.Context, _ string, _ []string) (map[string]string, error) {
-		return map[string]string{"issue-known": "todo"}, nil
+	fetch := func(_ context.Context, _ string, _ []string, _ []string) (map[string]IssueGCCheckResult, map[string]TaskEnvironmentGCCheckResult, error) {
+		return map[string]IssueGCCheckResult{
+			"issue-known":   {ID: "issue-known", Found: true, Status: "todo"},
+			"issue-missing": {ID: "issue-missing", Found: false},
+		}, nil, nil
 	}
 
 	if err := ResolveParentStatuses(context.Background(), report, fetch); err != nil {
@@ -655,6 +703,9 @@ func TestResolveParentStatuses_UnresolvedStaysBlank(t *testing.T) {
 	}
 	if report.Tasks[1].ParentStatus != "" {
 		t.Errorf("missing issue status = %q, want empty", report.Tasks[1].ParentStatus)
+	}
+	if report.Tasks[1].parentFound == nil || *report.Tasks[1].parentFound {
+		t.Errorf("missing issue parentFound = %v, want false", report.Tasks[1].parentFound)
 	}
 }
 
@@ -673,13 +724,13 @@ func TestResolveParentStatuses_ChunksLargeWorkspaces(t *testing.T) {
 	report := &DiskUsageReport{Tasks: tasks}
 
 	var chunkSizes []int
-	fetch := func(_ context.Context, _ string, issueIDs []string) (map[string]string, error) {
+	fetch := func(_ context.Context, _ string, issueIDs, _ []string) (map[string]IssueGCCheckResult, map[string]TaskEnvironmentGCCheckResult, error) {
 		chunkSizes = append(chunkSizes, len(issueIDs))
 		out := make(map[string]string, len(issueIDs))
 		for _, id := range issueIDs {
 			out[id] = "done"
 		}
-		return out, nil
+		return foundIssueResults(out), nil, nil
 	}
 
 	if err := ResolveParentStatuses(context.Background(), report, fetch); err != nil {
@@ -712,11 +763,11 @@ func TestResolveParentStatuses_PartialFailureKeepsOtherWorkspaces(t *testing.T) 
 		issueTask(wsBad, "bbbb1111", "issue-bad"),
 	}}
 
-	fetch := func(_ context.Context, workspaceID string, _ []string) (map[string]string, error) {
+	fetch := func(_ context.Context, workspaceID string, _ []string, _ []string) (map[string]IssueGCCheckResult, map[string]TaskEnvironmentGCCheckResult, error) {
 		if workspaceID == wsBad {
-			return nil, errors.New("boom")
+			return nil, nil, errors.New("boom")
 		}
-		return map[string]string{"issue-good": "done"}, nil
+		return foundIssueResults(map[string]string{"issue-good": "done"}), nil, nil
 	}
 
 	err := ResolveParentStatuses(context.Background(), report, fetch)
@@ -746,12 +797,157 @@ func TestResolveParentStatuses_NoFetcherIsNoOp(t *testing.T) {
 	if report.Tasks[0].ParentStatus != "" {
 		t.Errorf("parent_status = %q, want empty", report.Tasks[0].ParentStatus)
 	}
-	if err := ResolveParentStatuses(context.Background(), nil, func(context.Context, string, []string) (map[string]string, error) {
+	if err := ResolveParentStatuses(context.Background(), nil, func(context.Context, string, []string, []string) (map[string]IssueGCCheckResult, map[string]TaskEnvironmentGCCheckResult, error) {
 		t.Fatal("fetcher must not run for a nil report")
-		return nil, nil
+		return nil, nil, nil
 	}); err != nil {
 		t.Fatalf("nil report should be a no-op, got %v", err)
 	}
+}
+
+func TestResolveParentStatuses_MissingManagedWorkDirCannotResume(t *testing.T) {
+	t.Parallel()
+
+	task := issueTask("11111111-1111-1111-1111-111111111111", "aaaa1111", "issue-1")
+	task.managedWorkDirSeen = boolPointer(false)
+	report := &DiskUsageReport{Tasks: []TaskDiskUsage{task}}
+	fetch := func(_ context.Context, _ string, issueIDs, taskIDs []string) (map[string]IssueGCCheckResult, map[string]TaskEnvironmentGCCheckResult, error) {
+		return foundIssueResults(map[string]string{issueIDs[0]: "todo"}), map[string]TaskEnvironmentGCCheckResult{
+			taskIDs[0]: {TaskID: taskIDs[0], Found: true, ResumeCandidate: true},
+		}, nil
+	}
+
+	if err := ResolveParentStatuses(context.Background(), report, fetch); err != nil {
+		t.Fatalf("ResolveParentStatuses: %v", err)
+	}
+	if got := report.Tasks[0].ResumeCandidate; got == nil || *got {
+		t.Fatalf("resume_candidate = %v, want false when the managed workdir is gone", got)
+	}
+}
+
+func TestApplyDiskUsageRetentionPolicy(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
+	basePolicy := &GCPolicySnapshot{
+		Enabled:                 true,
+		TTLSeconds:              int64((72 * time.Hour) / time.Second),
+		CompletedTaskTTLSeconds: int64((14 * 24 * time.Hour) / time.Second),
+		OrphanTTLSeconds:        int64((7 * 24 * time.Hour) / time.Second),
+	}
+	completedRecent := now.Add(-24 * time.Hour)
+	completedOld := now.Add(-15 * 24 * time.Hour)
+	terminalRecent := now.Add(-24 * time.Hour)
+	parentMissing := false
+
+	tests := []struct {
+		name          string
+		task          TaskDiskUsage
+		policy        *GCPolicySnapshot
+		wantReason    string
+		wantCleanupAt *time.Time
+	}{
+		{
+			name:       "policy unavailable",
+			task:       issueTask("ws", "task", "issue"),
+			policy:     nil,
+			wantReason: RetentionPolicyUnavailable,
+		},
+		{
+			name:       "gc disabled",
+			task:       issueTask("ws", "task", "issue"),
+			policy:     &GCPolicySnapshot{},
+			wantReason: RetentionGCDisabled,
+		},
+		{
+			name:       "local directory is never fully removed",
+			task:       TaskDiskUsage{Kind: string(execenv.GCKindIssue), ParentID: "issue", LocalDirectory: boolPointer(true)},
+			policy:     nil,
+			wantReason: RetentionLocalDirectory,
+		},
+		{
+			name:          "unknown metadata uses orphan mtime estimate",
+			task:          TaskDiskUsage{Kind: DiskUsageKindUnknown, AgeSeconds: int64((6 * 24 * time.Hour) / time.Second), orphanAgeSeconds: int64((6 * 24 * time.Hour) / time.Second), orphanAgeKnown: true},
+			policy:        basePolicy,
+			wantReason:    RetentionMetadataUnavailable,
+			wantCleanupAt: timePtr(now.Add(24 * time.Hour)),
+		},
+		{
+			name:          "inaccessible parent past orphan ttl is eligible",
+			task:          TaskDiskUsage{Kind: string(execenv.GCKindIssue), ParentID: "issue", AgeSeconds: int64((20 * 24 * time.Hour) / time.Second), orphanAgeSeconds: int64((8 * 24 * time.Hour) / time.Second), orphanAgeKnown: true, parentFound: &parentMissing},
+			policy:        basePolicy,
+			wantReason:    RetentionCleanupEligible,
+			wantCleanupAt: timePtr(now.Add(-24 * time.Hour)),
+		},
+		{
+			name:       "offline parent status is fail closed",
+			task:       issueTask("ws", "task", "issue"),
+			policy:     basePolicy,
+			wantReason: RetentionParentStatusUnavailable,
+		},
+		{
+			name:          "open issue uses completed task bound",
+			task:          TaskDiskUsage{Kind: string(execenv.GCKindIssue), ParentID: "issue", ParentStatus: "in_progress", CompletedAt: &completedRecent},
+			policy:        basePolicy,
+			wantReason:    RetentionCompletedTaskGrace,
+			wantCleanupAt: timePtr(completedRecent.Add(14 * 24 * time.Hour)),
+		},
+		{
+			name:          "terminal issue uses terminal grace",
+			task:          TaskDiskUsage{Kind: string(execenv.GCKindIssue), ParentID: "issue", ParentStatus: "done", ParentUpdatedAt: &terminalRecent, CompletedAt: &completedRecent},
+			policy:        basePolicy,
+			wantReason:    RetentionTerminalParentGrace,
+			wantCleanupAt: timePtr(terminalRecent.Add(72 * time.Hour)),
+		},
+		{
+			name:          "earliest full cleanup policy wins",
+			task:          TaskDiskUsage{Kind: string(execenv.GCKindIssue), ParentID: "issue", ParentStatus: "done", ParentUpdatedAt: timePtr(now.Add(-time.Hour)), CompletedAt: timePtr(now.Add(-13*24*time.Hour - 23*time.Hour))},
+			policy:        basePolicy,
+			wantReason:    RetentionCompletedTaskGrace,
+			wantCleanupAt: timePtr(now.Add(time.Hour)),
+		},
+		{
+			name:          "completed task past bound is eligible",
+			task:          TaskDiskUsage{Kind: string(execenv.GCKindIssue), ParentID: "issue", ParentStatus: "todo", CompletedAt: &completedOld},
+			policy:        basePolicy,
+			wantReason:    RetentionCleanupEligible,
+			wantCleanupAt: timePtr(completedOld.Add(14 * 24 * time.Hour)),
+		},
+		{
+			name:       "non issue policy remains explicit",
+			task:       TaskDiskUsage{Kind: string(execenv.GCKindChat), ParentID: "chat"},
+			policy:     basePolicy,
+			wantReason: RetentionKindPolicyUnavailable,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			report := &DiskUsageReport{GeneratedAt: now, Tasks: []TaskDiskUsage{tc.task}}
+			ApplyDiskUsageRetentionPolicy(report, tc.policy, now)
+			got := report.Tasks[0]
+			if got.RetentionReason != tc.wantReason {
+				t.Errorf("retention_reason = %q, want %q", got.RetentionReason, tc.wantReason)
+			}
+			if tc.wantReason == RetentionLocalDirectory && (got.ResumeCandidate == nil || *got.ResumeCandidate) {
+				t.Errorf("local_directory resume_candidate = %v, want false", got.ResumeCandidate)
+			}
+			if tc.wantCleanupAt == nil {
+				if got.EstimatedCleanupAt != nil {
+					t.Errorf("estimated_cleanup_at = %s, want nil", got.EstimatedCleanupAt)
+				}
+			} else if got.EstimatedCleanupAt == nil || !got.EstimatedCleanupAt.Equal(*tc.wantCleanupAt) {
+				t.Errorf("estimated_cleanup_at = %v, want %v", got.EstimatedCleanupAt, tc.wantCleanupAt)
+			}
+			if report.GCPolicy != tc.policy {
+				t.Error("report did not retain the effective policy snapshot")
+			}
+		})
+	}
+}
+
+func boolPointer(value bool) *bool {
+	return &value
 }
 
 // TestScanDiskUsage_ReportsRepoCacheSeparately pins the accounting split: the

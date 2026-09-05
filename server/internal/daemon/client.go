@@ -780,8 +780,19 @@ type IssueGCCheckResult struct {
 	Err       error     `json:"-"`
 }
 
+// TaskEnvironmentGCCheckResult reports whether a locally discovered task
+// environment is the server's current resumable workdir for its (agent, issue)
+// scope. Found=false covers stale metadata and cross-workspace task ids without
+// exposing which one occurred.
+type TaskEnvironmentGCCheckResult struct {
+	TaskID          string `json:"task_id"`
+	Found           bool   `json:"found"`
+	ResumeCandidate bool   `json:"resume_candidate,omitempty"`
+}
+
 type issueGCBatchResponse struct {
-	Issues []IssueGCCheckResult `json:"issues"`
+	Issues           []IssueGCCheckResult           `json:"issues"`
+	TaskEnvironments []TaskEnvironmentGCCheckResult `json:"task_environments,omitempty"`
 }
 
 // isIssueGCBatchUnsupported distinguishes chi's unmatched-route response on an
@@ -802,29 +813,51 @@ func isIssueGCBatchUnsupported(err error) bool {
 // endpoint. Other batch failures are returned without fan-out so a transient
 // server problem cannot amplify request volume.
 func (c *Client) GetIssueGCChecks(ctx context.Context, workspaceID string, issueIDs []string) (map[string]IssueGCCheckResult, error) {
+	issues, _, err := c.inspectIssueTaskEnvironments(ctx, workspaceID, issueIDs, nil)
+	return issues, err
+}
+
+// InspectIssueTaskEnvironments enriches the normal issue GC status batch with
+// optional resume-candidate answers for local task ids. Current servers answer
+// both in one request. Older servers ignore task_ids and safely return an empty
+// environment map; servers predating the batch endpoint use the existing
+// per-issue fallback and likewise leave resume state unknown.
+func (c *Client) InspectIssueTaskEnvironments(ctx context.Context, workspaceID string, issueIDs, taskIDs []string) (map[string]IssueGCCheckResult, map[string]TaskEnvironmentGCCheckResult, error) {
+	return c.inspectIssueTaskEnvironments(ctx, workspaceID, issueIDs, taskIDs)
+}
+
+func (c *Client) inspectIssueTaskEnvironments(ctx context.Context, workspaceID string, issueIDs, taskIDs []string) (map[string]IssueGCCheckResult, map[string]TaskEnvironmentGCCheckResult, error) {
 	c.issueGCBatchMu.Lock()
 	defer c.issueGCBatchMu.Unlock()
 
 	if c.legacyIssueGCBatchEnabled {
-		return c.getLegacyIssueGCChecks(ctx, issueIDs), nil
+		return c.getLegacyIssueGCChecks(ctx, issueIDs), nil, nil
 	}
 
 	path := fmt.Sprintf("/api/daemon/workspaces/%s/issues/gc-check", workspaceID)
 	var resp issueGCBatchResponse
-	err := c.postJSON(ctx, path, map[string]any{"issue_ids": issueIDs}, &resp)
+	body := map[string]any{"issue_ids": issueIDs}
+	if len(taskIDs) > 0 {
+		body["task_ids"] = taskIDs
+	}
+	err := c.postJSON(ctx, path, body, &resp)
 	if err != nil {
 		if !isIssueGCBatchUnsupported(err) {
-			return nil, err
+			return nil, nil, err
 		}
 		c.legacyIssueGCBatchEnabled = true
-		return c.getLegacyIssueGCChecks(ctx, issueIDs), nil
+		return c.getLegacyIssueGCChecks(ctx, issueIDs), nil, nil
 	}
 
 	results := make(map[string]IssueGCCheckResult, len(resp.Issues))
 	for _, result := range resp.Issues {
 		results[result.ID] = result
 	}
-	return results, nil
+	environments := make(map[string]TaskEnvironmentGCCheckResult, len(resp.TaskEnvironments))
+	for _, result := range resp.TaskEnvironments {
+		environments[result.TaskID] = result
+	}
+	return results, environments, nil
 }
 
 func (c *Client) getLegacyIssueGCChecks(ctx context.Context, issueIDs []string) map[string]IssueGCCheckResult {

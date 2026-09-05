@@ -320,6 +320,73 @@ func TestIsIssueGCBatchUnsupported(t *testing.T) {
 	}
 }
 
+func TestClientInspectIssueTaskEnvironments(t *testing.T) {
+	t.Parallel()
+
+	updatedAt := time.Date(2026, time.August, 26, 10, 0, 0, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Path; got != "/api/daemon/workspaces/ws-1/issues/gc-check" {
+			t.Errorf("path = %q", got)
+		}
+		var body struct {
+			IssueIDs []string `json:"issue_ids"`
+			TaskIDs  []string `json:"task_ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Join(body.IssueIDs, ",") != "issue-1" || strings.Join(body.TaskIDs, ",") != "task-1,task-2" {
+			t.Errorf("request body = issues:%v tasks:%v", body.IssueIDs, body.TaskIDs)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issues": []map[string]any{{"id": "issue-1", "found": true, "status": "todo", "updated_at": updatedAt}},
+			"task_environments": []map[string]any{
+				{"task_id": "task-1", "found": true, "resume_candidate": true},
+				{"task_id": "task-2", "found": true, "resume_candidate": false},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	issues, environments, err := NewClient(srv.URL).InspectIssueTaskEnvironments(
+		context.Background(), "ws-1", []string{"issue-1"}, []string{"task-1", "task-2"})
+	if err != nil {
+		t.Fatalf("InspectIssueTaskEnvironments: %v", err)
+	}
+	if got := issues["issue-1"]; !got.Found || got.Status != "todo" || !got.UpdatedAt.Equal(updatedAt) {
+		t.Errorf("issue result = %+v", got)
+	}
+	if got := environments["task-1"]; !got.Found || !got.ResumeCandidate {
+		t.Errorf("task-1 result = %+v", got)
+	}
+	if got := environments["task-2"]; !got.Found || got.ResumeCandidate {
+		t.Errorf("task-2 result = %+v", got)
+	}
+}
+
+func TestClientInspectIssueTaskEnvironments_OlderBatchServerLeavesResumeUnknown(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issues":[{"id":"issue-1","found":true,"status":"todo"}]}`))
+	}))
+	defer srv.Close()
+
+	issues, environments, err := NewClient(srv.URL).InspectIssueTaskEnvironments(
+		context.Background(), "ws-1", []string{"issue-1"}, []string{"task-1"})
+	if err != nil {
+		t.Fatalf("InspectIssueTaskEnvironments: %v", err)
+	}
+	if !issues["issue-1"].Found {
+		t.Fatalf("issue result = %+v, want found", issues["issue-1"])
+	}
+	if len(environments) != 0 {
+		t.Fatalf("environment results = %+v, want empty for an older server", environments)
+	}
+}
+
 func TestPostJSONWithRetry_TransientThenSuccess(t *testing.T) {
 	defer noSleepRetry(t)()
 

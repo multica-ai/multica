@@ -74,8 +74,14 @@ type HealthResponse struct {
 	// version change on disk but hasn't restarted into it yet — it was busy at
 	// the last barrier check and will retry when idle. Omitted when empty, so
 	// older consumers see no change. Diagnostic only: nothing keys off it.
-	ReloadPendingReason string            `json:"reload_pending_reason,omitempty"`
-	Workspaces          []healthWorkspace `json:"workspaces"`
+	ReloadPendingReason string           `json:"reload_pending_reason,omitempty"`
+	GCPolicy            GCPolicySnapshot `json:"gc_policy"`
+	// WorkspacesRoot is the normalized root this running daemon actually owns.
+	// Local diagnostics compare it with the directory they scanned before
+	// applying this daemon's GC policy; profile config and process environment
+	// can change independently after the daemon starts.
+	WorkspacesRoot string            `json:"workspaces_root"`
+	Workspaces     []healthWorkspace `json:"workspaces"`
 }
 
 type healthWorkspace struct {
@@ -341,7 +347,15 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			SkippedAgents:         d.skippedAgentsSnapshot(),
 
 			ReloadPendingReason: d.reloadPending(),
-			Workspaces:          wsList,
+			WorkspacesRoot:      normalizedHealthWorkspacesRoot(d.cfg.WorkspacesRoot),
+			GCPolicy: GCPolicySnapshot{
+				Enabled:                 d.cfg.GCEnabled,
+				TTLSeconds:              int64(d.cfg.GCTTL / time.Second),
+				CompletedTaskTTLSeconds: int64(d.cfg.GCCompletedTaskTTL / time.Second),
+				OrphanTTLSeconds:        int64(d.cfg.GCOrphanTTL / time.Second),
+				ArtifactTTLSeconds:      int64(d.cfg.GCArtifactTTL / time.Second),
+			},
+			Workspaces: wsList,
 		}
 		if reporter, ok := d.repoCache.(interface{ Activity() repocache.Activity }); ok {
 			activity := reporter.Activity()
@@ -352,6 +366,18 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}
+}
+
+func normalizedHealthWorkspacesRoot(root string) string {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return filepath.Clean(root)
+	}
+	return filepath.Clean(abs)
 }
 
 // shutdownHandler triggers a graceful daemon shutdown by cancelling the
