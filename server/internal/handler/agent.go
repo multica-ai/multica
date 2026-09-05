@@ -515,9 +515,9 @@ type AgentTaskResponse struct {
 	Attribution *TaskAttribution `json:"attribution,omitempty"`
 	// Usage is this run's own token consumption, one entry per (provider, model)
 	// it used — the same grain `task_usage` stores and the same grain the client
-	// prices at. Hydrated only on the issue-facing execution-log endpoint
-	// (ListTasksByIssue); the daemon claim path leaves it nil so the claim
-	// payload does not carry accounting the agent has no use for.
+	// prices at. Hydrated on issue execution logs and explicit agent-history
+	// accounting requests; normal UI history and daemon claims leave it nil so
+	// those payloads do not carry accounting they do not use.
 	//
 	// nil and [] are both "no usage recorded" and the UI renders an em dash for
 	// them — a run that predates usage reporting, or one that died before any
@@ -2541,6 +2541,16 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	includeUsage := false
+	switch raw := strings.TrimSpace(r.URL.Query().Get("include_usage")); raw {
+	case "", "false":
+	case "true":
+		includeUsage = true
+	default:
+		writeError(w, http.StatusBadRequest, "include_usage must be true or false")
+		return
+	}
+
 	tasks, err := h.Queries.ListAgentTasks(r.Context(), agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
@@ -2548,10 +2558,24 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := make([]AgentTaskResponse, len(tasks))
+	var taskIDs []pgtype.UUID
+	if includeUsage {
+		taskIDs = make([]pgtype.UUID, len(tasks))
+	}
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
+		if includeUsage {
+			taskIDs[i] = t.ID
+		}
 	}
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
+	if includeUsage {
+		if err := h.hydrateAgentTaskUsage(r.Context(), agent.ID, taskIDs, resp); err != nil {
+			slog.Warn("list agent task usage failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to list agent task usage")
+			return
+		}
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
