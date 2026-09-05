@@ -8005,6 +8005,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		profileFixedArgs, hermesOverlayCustomArgs = agent.StripHermesProfileSelectors(
 			profileFixedArgs, rawCustomArgs, d.logger)
 	}
+	// Secrets wrappers (`doppler run -- …`) overlay the grandchild env after
+	// the daemon injects the task-scoped token, so a stored mul_ MULTICA_TOKEN
+	// would otherwise win. Re-assert identity after `--` when the prefix has
+	// that wrapper shape (GH #7666). Built-in launches have no `--` and are
+	// unchanged.
+	if pinPath, err := writeTaskIdentityPin(taskTempDir, agentEnv); err != nil {
+		taskLog.Warn("could not write task-identity pin for secrets wrappers", "error", err)
+	} else if pinPath != "" {
+		pinned := insertTaskIdentityPinAfterWrapper(profileFixedArgs, pinPath)
+		if len(pinned) != len(profileFixedArgs) {
+			profileFixedArgs = pinned
+			taskLog.Info("re-asserting task identity env after secrets wrapper")
+		}
+	}
 	// Resolve the backend through the unified runtime resolver: built-in
 	// runtime identities (e.g. "omp") dispatch through NewRuntime, protocol
 	// families go through New. This is the single production boundary — the
