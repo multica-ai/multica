@@ -376,7 +376,12 @@ type Daemon struct {
 	client     *Client
 	repoCache  repoCacheBackend
 	skillCache *SkillBundleCache
+	skillTrace *SkillTraceRecorder
 	logger     *slog.Logger
+	// skillTraceTasks holds only tasks currently inside their provider run.
+	// sync.Map keeps the hot message-drain lookup independent per task while
+	// preserving a zero-value-safe Daemon for the many focused test fixtures.
+	skillTraceTasks sync.Map // task ID -> *skillInvocationTracker
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -644,6 +649,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		client:                    client,
 		repoCache:                 repocache.New(cacheRoot, logger),
 		skillCache:                NewSkillBundleCache(skillCacheRoot),
+		skillTrace:                NewSkillTraceRecorder(cfg),
 		logger:                    logger,
 		workspaces:                make(map[string]*workspaceState),
 		runtimeIndex:              make(map[string]Runtime),
@@ -7847,6 +7853,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	stopPrepareLease()
 	prepareComplete = true
 	cancelPrepare()
+	stopSkillTrace := d.trackSkillInvocations(task, skills, provider, taskLog)
+	defer stopSkillTrace()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	resumeReachable := gateResumeToReachableSession(&task, &taskCtx, provider, env.WorkDir, sessionHomeReachable(provider, env, envReused), taskLog)
@@ -8856,6 +8864,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				// slow downstream call (mu.Lock contention, batch resize)
 				// can't be misattributed to backend silence.
 				lastActivityAt.Store(time.Now().UnixNano())
+				d.observeSkillTraceMessage(taskID, msg)
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
