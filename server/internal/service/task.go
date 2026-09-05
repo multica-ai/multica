@@ -5808,13 +5808,22 @@ func (s *TaskService) RecoverOrphanedTasksForRuntime(ctx context.Context, runtim
 // CancelTasksForArchivedAgent cancels every active task belonging to an agent
 // being archived and settles their recovery receipts in the same transaction.
 //
-// Unlike CancelTasksForAgent it emits no per-task task:cancelled event: the
-// agent:archived event the caller publishes already invalidates every client's
-// active-task view, so per-row events would be redundant noise.
+// After commit, chat tasks emit task:cancelled so existing consumers can clear
+// processing indicators, release streams, and refresh chat state. The caller
+// still publishes agent:archived; non-chat tasks keep their existing behavior.
 func (s *TaskService) CancelTasksForArchivedAgent(ctx context.Context, agentID pgtype.UUID) ([]db.AgentTaskQueue, error) {
-	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+	cancelled, err := s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
 		return qtx.CancelAgentTasksByAgent(ctx, agentID)
 	})
+	if err != nil {
+		return nil, err
+	}
+	for _, task := range cancelled {
+		if task.ChatSessionID.Valid {
+			s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
+		}
+	}
+	return cancelled, nil
 }
 
 func (s *TaskService) terminateTasksInTx(ctx context.Context, fail func(*db.Queries) ([]db.AgentTaskQueue, error)) ([]db.AgentTaskQueue, error) {
