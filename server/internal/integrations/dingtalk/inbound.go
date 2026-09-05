@@ -510,13 +510,9 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 	if replied == nil {
 		return "", nil
 	}
+	// SenderId is an opaque platform identity, not a display name. A partial
+	// snapshot without SenderNick keeps its quote without an invented author.
 	sender := strings.TrimSpace(replied.SenderNick)
-	if sender == "" {
-		sender = strings.TrimSpace(replied.SenderId)
-	}
-	if sender == "" {
-		sender = "Unknown user"
-	}
 	msgType := strings.TrimSpace(replied.MsgType)
 	if msgType == "" {
 		msgType = "unknown"

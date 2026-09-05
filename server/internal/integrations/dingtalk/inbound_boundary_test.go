@@ -44,7 +44,7 @@ func TestBotCallbackRepliedContentKeepsTextWhenRichTextMalformed(t *testing.T) {
 		t.Fatalf("malformed optional nodes hid the usable summary: %+v", reply.Content)
 	}
 	block, media := renderDingTalkQuotedMessage(&reply)
-	if block != "> **Unknown user:**\n>\n> readable summary" || len(media) != 0 {
+	if block != "> readable summary" || len(media) != 0 {
 		t.Fatalf("best-effort quoted body/media = %q / %+v", block, media)
 	}
 }
@@ -92,15 +92,15 @@ func TestInboundFromCallback_QuotedFallbackKinds(t *testing.T) {
 		name, kind, senderID, want string
 		content                    botCallbackRepliedContent
 	}{
-		{name: "sender id fallback", kind: "text", senderID: "platform author", content: botCallbackRepliedContent{Text: "selected"}, want: "> **platform author:**\n>\n> selected"},
-		{name: "unknown kind with text", content: botCallbackRepliedContent{Text: "selected"}, want: "> **Unknown user:**\n>\n> selected"},
-		{name: "empty unknown", want: "> **Unknown user:**\n>\n> [empty or unsupported message]"},
-		{name: "named file", kind: "file", content: botCallbackRepliedContent{FileName: "notes.txt"}, want: "> **Unknown user:**\n>\n> [File: notes.txt]"},
-		{name: "unnamed file", kind: "file", want: "> **Unknown user:**\n>\n> [File]"},
-		{name: "recognized audio", kind: "audio", content: botCallbackRepliedContent{Recognition: "spoken words"}, want: "> **Unknown user:**\n>\n> spoken words"},
-		{name: "unrecognized audio", kind: "audio", want: "> **Unknown user:**\n>\n> [Audio message]"},
-		{name: "video", kind: "video", want: "> **Unknown user:**\n>\n> [Video message]"},
-		{name: "unavailable picture with summary", kind: "picture", content: botCallbackRepliedContent{Text: "selected caption"}, want: "> **Unknown user:**\n>\n> [Image unavailable]\n> selected caption"},
+		{name: "sender id omitted without nickname", kind: "text", senderID: "platform author", content: botCallbackRepliedContent{Text: "selected"}, want: "> selected"},
+		{name: "unknown kind with text", content: botCallbackRepliedContent{Text: "selected"}, want: "> selected"},
+		{name: "empty unknown", want: "> [empty or unsupported message]"},
+		{name: "named file", kind: "file", content: botCallbackRepliedContent{FileName: "notes.txt"}, want: "> [File: notes.txt]"},
+		{name: "unnamed file", kind: "file", want: "> [File]"},
+		{name: "recognized audio", kind: "audio", content: botCallbackRepliedContent{Recognition: "spoken words"}, want: "> spoken words"},
+		{name: "unrecognized audio", kind: "audio", want: "> [Audio message]"},
+		{name: "video", kind: "video", want: "> [Video message]"},
+		{name: "unavailable picture with summary", kind: "picture", content: botCallbackRepliedContent{Text: "selected caption"}, want: "> [Image unavailable]\n> selected caption"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cb := textCallback(convTypeP2P, false)
