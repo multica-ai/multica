@@ -16,6 +16,7 @@ import {
   estimateCost,
   estimateCostBreakdown,
   formatShortDate,
+  hasUnpricedUsage,
   todayIso,
   weekStartIso,
   type DailyTokenData,
@@ -175,12 +176,14 @@ export interface AgentCostRow {
   agentId: string;
   tokens: number;
   cost: number;
+  hasUnpricedUsage: boolean;
   taskCount: number;
 }
 
 // Fold per-(agent, model) rows into one row per agent. Cost is the sum
-// across this agent's models, which is the figure the user cares about.
-// Sort by cost desc so the heaviest spender lands first.
+// across this agent's models. `hasUnpricedUsage` travels beside that numeric
+// lower bound so presentation can distinguish an incomplete estimate from a
+// real zero. Sort by the known cost desc; unknown portions are not invented.
 export function aggregateAgentTokens(rows: DashboardUsageByAgent[]): AgentCostRow[] {
   const map = new Map<string, AgentCostRow>();
   for (const r of rows) {
@@ -188,11 +191,13 @@ export function aggregateAgentTokens(rows: DashboardUsageByAgent[]): AgentCostRo
       agentId: r.agent_id,
       tokens: 0,
       cost: 0,
+      hasUnpricedUsage: false,
       taskCount: 0,
     };
     entry.tokens +=
       r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
     entry.cost += estimateCost(r);
+    entry.hasUnpricedUsage ||= hasUnpricedUsage(r);
     entry.taskCount += r.task_count;
     map.set(r.agent_id, entry);
   }
@@ -203,6 +208,7 @@ export interface AgentDashboardRow {
   agentId: string;
   tokens: number;
   cost: number;
+  hasUnpricedUsage: boolean;
   seconds: number;
   taskCount: number;
 }
@@ -230,6 +236,7 @@ export function mergeAgentDashboardRows(
       agentId: r.agentId,
       tokens: r.tokens,
       cost: r.cost,
+      hasUnpricedUsage: r.hasUnpricedUsage,
       seconds: rt?.total_seconds ?? 0,
       taskCount: rt ? rt.task_count : r.taskCount,
     });
@@ -243,6 +250,7 @@ export function mergeAgentDashboardRows(
       agentId: r.agent_id,
       tokens: 0,
       cost: 0,
+      hasUnpricedUsage: false,
       seconds: r.total_seconds,
       taskCount: r.task_count,
     });
@@ -303,6 +311,7 @@ export function bucketUnknownAgentRows(
     agentId: DELETED_AGENTS_ROW_ID,
     tokens: 0,
     cost: 0,
+    hasUnpricedUsage: false,
     seconds: 0,
     taskCount: 0,
   };
@@ -315,6 +324,7 @@ export function bucketUnknownAgentRows(
     hasDeleted = true;
     bucket.tokens += r.tokens;
     bucket.cost += r.cost;
+    bucket.hasUnpricedUsage ||= r.hasUnpricedUsage;
   }
   return hasDeleted ? [...known, bucket] : known;
 }

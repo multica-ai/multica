@@ -92,6 +92,7 @@
     "header_agent": "Agent",
     "header_tokens": "Tokens",
     "header_cost": "Cost",
+    "cost_incomplete": "Cost excludes usage from models without pricing.",
     "header_time": "Time",
     "header_tasks": "Runs",
     "show_all": "Show all",

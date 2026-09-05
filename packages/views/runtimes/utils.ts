@@ -374,7 +374,7 @@ const MODEL_PRICING: Record<
   "cursor":                   { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
 };
 
-// Resolve a model string to its pricing tier. Exact match, with four
+// Resolve a model string to its pricing tier. Exact match, with five
 // tolerances applied in order:
 //
 //  1. Provider-prefixed IDs (`anthropic/claude-opus-4.7` from openclaw /
@@ -385,10 +385,13 @@ const MODEL_PRICING: Record<
 //     SKU, two transports. We canonicalize `claude-*` IDs to the dashed
 //     form Anthropic itself publishes. Scoped to `claude-*` because for
 //     OpenAI the separator IS semantic (`gpt-5.4` ≠ `gpt-5-4`).
-//  3. Trailing dated snapshots (`claude-sonnet-4-5-20250929`,
+//  3. Claude inference-mode suffixes (`claude-opus-4-6-thinking`) —
+//     routing CLIs expose the mode in the model ID, but Anthropic prices it
+//     under the base model SKU.
+//  4. Trailing dated snapshots (`claude-sonnet-4-5-20250929`,
 //     `gpt-5-2025-08-07`) — the family is what we price, the date is
 //     volatile, so we strip a trailing date / "latest" tag.
-//  4. Trailing context-window tag (`claude-opus-4-7[1m]`) — Anthropic's
+//  5. Trailing context-window tag (`claude-opus-4-7[1m]`) — Anthropic's
 //     1M-context beta is the same SKU at standard rates for prompts
 //     ≤200K input tokens, with a 2× surcharge above that. Aggregated
 //     usage rows don't carry per-request prompt sizes, so we price the
@@ -525,6 +528,12 @@ function canonicalCandidates(model: string): string[] {
   // semantic, so we leave `gpt-5.4` etc. alone.
   const canonAnthropic = (s: string) =>
     s.startsWith("claude-") ? s.replace(/\./g, "-") : s;
+  // Some routing CLIs append the inference mode to Claude's SKU even though
+  // Anthropic prices thinking and non-thinking requests under the same model.
+  // Strip only these exact trailing mode tokens and only for Claude IDs; model
+  // suffixes from other vendors may identify genuinely different products.
+  const stripClaudeMode = (s: string) =>
+    s.startsWith("claude-") ? s.replace(/-(thinking|non-thinking)$/, "") : s;
   // Trailing context-window tag (`claude-opus-4-7[1m]`). Same family,
   // same price tier — see resolver comment above for the 1M-context
   // pricing trade-off.
@@ -533,12 +542,16 @@ function canonicalCandidates(model: string): string[] {
   const raw = model;
   const noProvider = stripProvider(raw);
   const dashed = canonAnthropic(noProvider);
+  const noDate = stripDate(dashed);
   const noTag = stripContextTag(dashed);
 
   push(raw);
   push(noProvider);
   push(dashed);
+  push(stripClaudeMode(dashed));
+  push(stripClaudeMode(noDate));
   push(noTag);
+  push(stripClaudeMode(noTag));
   push(stripDate(raw));
   push(stripDate(noProvider));
   push(stripDate(dashed));
@@ -640,6 +653,20 @@ function uncostedTokens(usage: Priceable): {
     cacheRead: usage.uncosted_cache_read_tokens ?? 0,
     cacheWrite: usage.uncosted_cache_write_tokens ?? 0,
   };
+}
+
+// Whether this row contains tokens whose cost neither the provider nor the
+// local rate table can supply. Keep this separate from `estimateCost`: a
+// numeric zero can mean either "explicitly free" or "unknown", and callers
+// must not present those two states as the same claim.
+export function hasUnpricedUsage(usage: Priceable): boolean {
+  const uncosted = uncostedTokens(usage);
+  const needsEstimate =
+    uncosted.input > 0 ||
+    uncosted.output > 0 ||
+    uncosted.cacheRead > 0 ||
+    uncosted.cacheWrite > 0;
+  return needsEstimate && !isModelPriced(usage.model, usage.provider);
 }
 
 // Cost of a usage row: what the provider actually charged, plus a rate-table

@@ -200,6 +200,11 @@ export function Leaderboard({
                 const agent = agents.find((a) => a.id === row.agentId);
                 const value = SORT_METRIC[sortBy](row);
                 const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
+                const costLabel = row.hasUnpricedUsage
+                  ? row.cost > 0
+                    ? `$${row.cost.toFixed(2)}+`
+                    : "—"
+                  : `$${row.cost.toFixed(2)}`;
                 return (
                   <li
                     key={row.agentId}
@@ -249,8 +254,13 @@ export function Leaderboard({
                     </div>
                     <div
                       className={`text-right tabular-nums ${sortBy === "cost" ? "text-body font-medium" : "text-caption text-muted-foreground"}`}
+                      title={
+                        row.hasUnpricedUsage
+                          ? t(($) => $.leaderboard.cost_incomplete)
+                          : undefined
+                      }
                     >
-                      ${row.cost.toFixed(2)}
+                      {costLabel}
                     </div>
                     <div
                       className={`text-right text-caption tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}

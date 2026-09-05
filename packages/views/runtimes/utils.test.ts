@@ -12,6 +12,7 @@ import {
   estimateCost,
   estimateCostBreakdown,
   formatTokens,
+  hasUnpricedUsage,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
@@ -132,6 +133,21 @@ describe("estimateCost", () => {
       output_tokens: 1_000_000,
     });
     expect(cost).toBeCloseTo(5 + 25, 5);
+  });
+
+  it("prices Antigravity's Claude thinking-mode ID as the underlying Claude SKU", () => {
+    // A production Antigravity run reported `claude-opus-4-6-thinking`.
+    // The mode suffix describes inference behavior, not a separate Anthropic
+    // SKU, so its 495K+ tokens must not fall through as a $0 unknown cost.
+    const usage = {
+      ...zeroUsage,
+      provider: "antigravity",
+      model: "claude-opus-4-6-thinking",
+      input_tokens: 495_500,
+    };
+    expect(estimateCost(usage)).toBeCloseTo(2.4775, 5);
+    expect(hasUnpricedUsage(usage)).toBe(false);
+    expect(collectUnmappedModels([usage])).toEqual([]);
   });
 
   it("prices Claude Fable 5 at the Mythos-class tier", () => {
@@ -950,6 +966,25 @@ describe("collectUnmappedModels", () => {
       { ...zeroUsage, model: "fictional-model-x" },
     ];
     expect(collectUnmappedModels(rows)).toEqual(["fictional-model-x"]);
+  });
+
+  it("distinguishes an unknown model from an explicitly free model", () => {
+    const unknown = {
+      ...zeroUsage,
+      provider: "antigravity",
+      model: "gemini-3.8-flash-high",
+      input_tokens: 263_100_000,
+    };
+    const free = {
+      ...zeroUsage,
+      provider: "zhipu",
+      model: "glm-4.7-flash",
+      input_tokens: 25_700_000,
+    };
+    expect(estimateCost(unknown)).toBe(0);
+    expect(estimateCost(free)).toBe(0);
+    expect(hasUnpricedUsage(unknown)).toBe(true);
+    expect(hasUnpricedUsage(free)).toBe(false);
   });
 });
 

@@ -92,6 +92,7 @@
     "header_agent": "エージェント",
     "header_tokens": "トークン",
     "header_cost": "コスト",
+    "cost_incomplete": "料金が未設定のモデルの使用量は含まれていません。",
     "header_time": "時間",
     "header_tasks": "実行",
     "show_all": "すべて表示",

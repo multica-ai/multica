@@ -135,8 +135,41 @@ describe("aggregateAgentTokens", () => {
 
     expect(rows.map((r) => r.agentId)).toEqual(["big-spender", "small-spender"]);
     expect(rows[0]?.taskCount).toBe(5);
+    expect(rows[0]?.hasUnpricedUsage).toBe(false);
     // big-spender across two models — verify cost > small-spender's.
     expect(rows[0]!.cost).toBeGreaterThan(rows[1]!.cost);
+  });
+
+  it("marks unknown model spend without conflating it with an explicit zero rate", () => {
+    // Reproduces the real dashboard failure: 263.1M tokens from an unpriced
+    // Antigravity model rendered as the same $0.00 as a known-free Flash SKU.
+    const rows = aggregateAgentTokens([
+      {
+        agent_id: "unknown-price",
+        provider: "antigravity",
+        model: "gemini-3.8-flash-high",
+        input_tokens: 263_100_000,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        task_count: 232,
+      },
+      {
+        agent_id: "explicitly-free",
+        provider: "zhipu",
+        model: "glm-4.7-flash",
+        input_tokens: 25_700_000,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        task_count: 47,
+      },
+    ]);
+
+    const unknown = rows.find((row) => row.agentId === "unknown-price");
+    const free = rows.find((row) => row.agentId === "explicitly-free");
+    expect(unknown).toMatchObject({ cost: 0, hasUnpricedUsage: true });
+    expect(free).toMatchObject({ cost: 0, hasUnpricedUsage: false });
   });
 });
 
@@ -181,6 +214,7 @@ describe("mergeAgentDashboardRows", () => {
         agentId: "agent-a",
         tokens: 3_000_000,
         cost: 12,
+        hasUnpricedUsage: false,
         taskCount: 2, // overcounted because (model-1: 1) + (model-2: 1)
       },
     ];
@@ -204,7 +238,15 @@ describe("mergeAgentDashboardRows", () => {
     // rollup is silent on this agent. Keep the token-side estimate
     // instead of dropping the agent from the table entirely.
     const merged = mergeAgentDashboardRows(
-      [{ agentId: "agent-b", tokens: 100, cost: 0.5, taskCount: 1 }],
+      [
+        {
+          agentId: "agent-b",
+          tokens: 100,
+          cost: 0.5,
+          hasUnpricedUsage: false,
+          taskCount: 1,
+        },
+      ],
       [],
     );
     expect(merged[0]!.taskCount).toBe(1);
@@ -228,9 +270,27 @@ describe("mergeAgentDashboardRows", () => {
   it("sorts by cost desc with run-time as a tiebreaker", () => {
     const merged = mergeAgentDashboardRows(
       [
-        { agentId: "low", tokens: 100, cost: 1, taskCount: 1 },
-        { agentId: "high", tokens: 100, cost: 9, taskCount: 1 },
-        { agentId: "zero-cost-long", tokens: 0, cost: 0, taskCount: 0 },
+        {
+          agentId: "low",
+          tokens: 100,
+          cost: 1,
+          hasUnpricedUsage: false,
+          taskCount: 1,
+        },
+        {
+          agentId: "high",
+          tokens: 100,
+          cost: 9,
+          hasUnpricedUsage: false,
+          taskCount: 1,
+        },
+        {
+          agentId: "zero-cost-long",
+          tokens: 0,
+          cost: 0,
+          hasUnpricedUsage: false,
+          taskCount: 0,
+        },
       ],
       [
         { agent_id: "zero-cost-long", total_seconds: 1000, task_count: 5, failed_count: 0, cancelled_count: 0 },
@@ -241,11 +301,19 @@ describe("mergeAgentDashboardRows", () => {
 });
 
 describe("bucketUnknownAgentRows", () => {
-  const live = { agentId: "live", tokens: 100, cost: 1, seconds: 10, taskCount: 1 };
+  const live = {
+    agentId: "live",
+    tokens: 100,
+    cost: 1,
+    hasUnpricedUsage: false,
+    seconds: 10,
+    taskCount: 1,
+  };
   const archived = {
     agentId: "archived",
     tokens: 80,
     cost: 0.8,
+    hasUnpricedUsage: false,
     seconds: 8,
     taskCount: 2,
   };
@@ -253,6 +321,7 @@ describe("bucketUnknownAgentRows", () => {
     agentId: "deleted-a",
     tokens: 50,
     cost: 0.5,
+    hasUnpricedUsage: false,
     seconds: 5,
     taskCount: 1,
   };
@@ -260,6 +329,7 @@ describe("bucketUnknownAgentRows", () => {
     agentId: "deleted-b",
     tokens: 30,
     cost: 0.25,
+    hasUnpricedUsage: false,
     seconds: 3,
     taskCount: 4,
   };
@@ -326,6 +396,7 @@ describe("bucketUnknownAgentRows", () => {
       agentId: RESTRICTED_AGENTS_ROW_ID,
       tokens: 70,
       cost: 0.7,
+      hasUnpricedUsage: false,
       seconds: 42,
       taskCount: 3,
     };

@@ -92,6 +92,7 @@
     "header_agent": "智能体",
     "header_tokens": "Token",
     "header_cost": "费用",
+    "cost_incomplete": "费用未包含缺少价格的模型用量。",
     "header_time": "耗时",
     "header_tasks": "运行数",
     "show_all": "展开全部",

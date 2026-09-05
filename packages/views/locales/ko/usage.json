@@ -92,6 +92,7 @@
     "header_agent": "에이전트",
     "header_tokens": "토큰",
     "header_cost": "비용",
+    "cost_incomplete": "가격이 설정되지 않은 모델의 사용량은 포함되지 않습니다.",
     "header_time": "시간",
     "header_tasks": "실행",
     "show_all": "전체 보기",
