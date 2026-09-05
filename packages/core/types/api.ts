@@ -554,11 +554,13 @@ export interface PersonalAccessToken {
   expires_at: string | null;
   last_used_at: string | null;
   created_at: string;
+  workspace_id?: string | null;
 }
 
 export interface CreatePersonalAccessTokenRequest {
   name: string;
   expires_in_days?: number;
+  workspace_id?: string;
 }
 
 export interface CreatePersonalAccessTokenResponse extends PersonalAccessToken {

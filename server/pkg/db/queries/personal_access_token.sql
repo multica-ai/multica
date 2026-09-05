@@ -1,6 +1,6 @@
 -- name: CreatePersonalAccessToken :one
-INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expires_at)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO personal_access_token (user_id, workspace_id, name, token_hash, token_prefix, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetPersonalAccessTokenByHash :one

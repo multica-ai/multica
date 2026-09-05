@@ -34,6 +34,7 @@ type PersonalAccessTokenResponse struct {
 	ExpiresAt  *string `json:"expires_at"`
 	LastUsedAt *string `json:"last_used_at"`
 	CreatedAt  string  `json:"created_at"`
+	WorkspaceID *string `json:"workspace_id,omitempty"`
 }
 
 type CreatePATResponse struct {
@@ -49,12 +50,14 @@ func patToResponse(pat db.PersonalAccessToken) PersonalAccessTokenResponse {
 		ExpiresAt:  timestampToPtr(pat.ExpiresAt),
 		LastUsedAt: timestampToPtr(pat.LastUsedAt),
 		CreatedAt:  timestampToString(pat.CreatedAt),
+		WorkspaceID: func() *string { if !pat.WorkspaceID.Valid { return nil }; v := uuidToString(pat.WorkspaceID); return &v }(),
 	}
 }
 
 type CreatePATRequest struct {
 	Name          string `json:"name"`
 	ExpiresInDays *int   `json:"expires_in_days"`
+	WorkspaceID   *string `json:"workspace_id,omitempty"`
 }
 
 func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +97,7 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 
 	pat, err := h.Queries.CreatePersonalAccessToken(r.Context(), db.CreatePersonalAccessTokenParams{
 		UserID:      parseUUID(userID),
+		WorkspaceID: func() pgtype.UUID { if req.WorkspaceID == nil || *req.WorkspaceID == "" { return pgtype.UUID{} }; return parseUUID(*req.WorkspaceID) }(),
 		Name:        req.Name,
 		TokenHash:   auth.HashToken(rawToken),
 		TokenPrefix: prefix,
