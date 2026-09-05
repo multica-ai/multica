@@ -273,6 +273,24 @@ Daemon behavior is configured via flags or environment variables:
 | GC Hermes memory TTL (per-agent `memories/`) | — | `MULTICA_GC_HERMES_MEMORY_TTL` | `2160h` (90d; set `0` to disable) |
 | GC Hermes session TTL (per-conversation `state.db`) | — | `MULTICA_GC_HERMES_SESSION_TTL` | `336h` (14d; set `0` to disable) |
 | GC task temp legacy TTL (pre-lock `multica-task-*`) | — | `MULTICA_GC_TASK_TEMP_LEGACY_TTL` | `0` (disabled; set a duration to opt in) |
+| Skill invocation trace | — | `MULTICA_SKILL_TRACE_ENABLED` | disabled (set `true`/`1`/`yes`/`on` to enable) |
+| Skill invocation trace path | — | `MULTICA_SKILL_TRACE_PATH` | `<workspaces_root>/skill-invocations.jsonl` |
+
+#### Skill invocation trace
+
+`MULTICA_SKILL_TRACE_ENABLED=true` enables an append-only, daemon-local JSONL
+audit stream. Each row is a `skill_invoked` event with task, workspace, agent,
+runtime, machine, employee, and skill identity plus the observed signal. The
+daemon records an invocation only when the provider emits a native Skill tool
+call or the model issues a tool call that reads the mounted skill's `SKILL.md`.
+Mounting, advertising, or enumerating the task's available skills writes no
+event, so inventory cannot be mistaken for adoption. `trigger=explicit` means
+the same skill was explicitly selected in the task's originating input;
+otherwise the trigger is `model`. `observed_via` distinguishes `native_skill_tool` from
+`skill_file_read` for downstream audits.
+
+The trace is disabled by default and is never uploaded by this feature. Records
+contain task and employee identifiers; protect the configured path accordingly.
 
 #### Workspace garbage collection
 
