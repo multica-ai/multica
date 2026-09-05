@@ -666,7 +666,11 @@ function EmptyState({
 
 // ---------- Helpers ----------
 
-function truncateValue(value: string, max = 32): string {
+// 36 is the width of a canonical UUID. Task, chat-session and holder ids are
+// logged in full so concurrent runs stay distinguishable (#7326), and those
+// ids carry their entropy in the tail — a budget that clipped them would put
+// the ambiguity right back into this collapsed row.
+function truncateValue(value: string, max = 36): string {
   // `max` is a content-character budget; the shared helper counts the ellipsis
   // toward its own budget, so pass `max + 1`.
   return truncateWithEllipsis(value, max + 1);

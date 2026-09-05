@@ -111,7 +111,12 @@ export function useUpdateWorkspaceMcpServer(wsId: string) {
       config?: Record<string, unknown>;
     }) => api.updateWorkspaceMcpServer(wsId, serverId, update),
     onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.mcpServers(wsId) }),
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: workspaceKeys.mcpServers(wsId) }),
+        // Assignments include the library entry's name and transport, so every
+        // agent's cached projection may change when the entry is updated.
+        queryClient.invalidateQueries({ queryKey: ["agents"] }),
+      ]),
   });
 }
 

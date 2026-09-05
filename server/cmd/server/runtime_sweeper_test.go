@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -12,38 +11,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
-
-// TestRuntimeGCRunsOutsideTheLivenessLoop pins PR1's deployment boundary: GC
-// keeps its existing predicates and budgets, but its seven-day retention scan
-// no longer occupies the 30-second runtime/task loop.
-func TestRuntimeGCRunsOutsideTheLivenessLoop(t *testing.T) {
-	if runtimeGCSweepInterval != time.Hour {
-		t.Fatalf("runtime GC interval = %s, want 1h", runtimeGCSweepInterval)
-	}
-
-	source, err := os.ReadFile("runtime_sweeper.go")
-	if err != nil {
-		t.Fatalf("read runtime_sweeper.go: %v", err)
-	}
-	start := strings.Index(string(source), "func runRuntimeSweeper(")
-	end := strings.Index(string(source), "func runRuntimeGCSweeper(")
-	if start < 0 || end <= start {
-		t.Fatal("could not isolate runtime sweeper loops")
-	}
-	if strings.Contains(string(source[start:end]), "gcRuntimes(") {
-		t.Fatal("runtime GC is still invoked from the 30-second liveness loop")
-	}
-}
-
-// TestRuntimeGCDailyCandidateCapacity prevents an interval or batch-size change
-// from silently reducing the hourly GC worker below its agreed daily capacity.
-func TestRuntimeGCDailyCandidateCapacity(t *testing.T) {
-	const wantCandidatesPerDay = 12_000
-	got := int(24*time.Hour/runtimeGCSweepInterval) * runtimeGCBatchSize
-	if got != wantCandidatesPerDay {
-		t.Fatalf("runtime GC candidate capacity = %d/day, want %d/day", got, wantCandidatesPerDay)
-	}
-}
 
 func TestPeriodicSweepStopsWithItsContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

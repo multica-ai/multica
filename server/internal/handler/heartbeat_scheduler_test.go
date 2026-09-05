@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// TestBatchedHeartbeatScheduler_CoalescesAndFlushes confirms the core P1 win:
+// TestBatchedHeartbeatScheduler_CoalescesAndFlushes confirms the batching win:
 // many Schedule calls for the same id within a tick window collapse to a
 // single bulk UPDATE, and the DB observes the bump after FlushNow.
 func TestBatchedHeartbeatScheduler_CoalescesAndFlushes(t *testing.T) {
@@ -24,7 +26,7 @@ func TestBatchedHeartbeatScheduler_CoalescesAndFlushes(t *testing.T) {
 	setRuntimeLastSeenAt(t, runtimeID, stale)
 	rt := loadRuntime(t, runtimeID)
 
-	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0)
+	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0, nil)
 
 	// Hammer Schedule with the same id from many goroutines.
 	const callers = 50
@@ -33,7 +35,7 @@ func TestBatchedHeartbeatScheduler_CoalescesAndFlushes(t *testing.T) {
 	for i := 0; i < callers; i++ {
 		go func() {
 			defer wg.Done()
-			if err := sched.Schedule(context.Background(), rt); err != nil {
+			if err := sched.Schedule(context.Background(), rt.ID, rt.WorkspaceID); err != nil {
 				t.Errorf("Schedule: %v", err)
 			}
 		}()
@@ -65,32 +67,53 @@ func TestBatchedHeartbeatScheduler_CoalescesAndFlushes(t *testing.T) {
 	}
 }
 
-// TestBatchedHeartbeatScheduler_OfflineFallsBackSync confirms that the sync
-// path is preserved: an offline-status row goes through MarkAgentRuntimeOnline
-// immediately, not through the queue.
-func TestBatchedHeartbeatScheduler_OfflineFallsBackSync(t *testing.T) {
+// TestBatchedHeartbeatScheduler_ExplicitDeregisterReceiptStaysOffline confirms
+// that a heartbeat queued before a user-visible deregistration cannot undo the
+// offline state or leave an online row with stale offline_reason metadata.
+func TestBatchedHeartbeatScheduler_ExplicitDeregisterReceiptStaysOffline(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
-	setRuntimeStatus(t, runtimeID, "offline")
 	setRuntimeLastSeenAt(t, runtimeID, time.Now())
 	rt := loadRuntime(t, runtimeID)
-	if rt.Status != "offline" {
-		t.Fatalf("setup: status=%q want offline", rt.Status)
-	}
-
-	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0)
-	if err := sched.Schedule(context.Background(), rt); err != nil {
+	recoveries := &recordingRecoveryNotifier{}
+	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0, nil)
+	sched.RecoveryNotifier = recoveries
+	if err := sched.Schedule(context.Background(), rt.ID, rt.WorkspaceID); err != nil {
 		t.Fatalf("Schedule: %v", err)
 	}
-
-	if got := sched.PendingCount(); got != 0 {
-		t.Fatalf("offline row should not have been queued, pending=%d", got)
+	reason := []byte(`{"code":"provider_removed"}`)
+	if err := testHandler.Queries.SetAgentRuntimeOfflineWithReason(context.Background(), db.SetAgentRuntimeOfflineWithReasonParams{
+		ID:            rt.ID,
+		OfflineReason: reason,
+	}); err != nil {
+		t.Fatalf("SetAgentRuntimeOfflineWithReason: %v", err)
 	}
-	status, _, _ := readRuntimeRow(t, runtimeID)
-	if status != "online" {
-		t.Fatalf("expected status=online after sync flip, got %q", status)
+
+	if got := sched.PendingCount(); got != 1 {
+		t.Fatalf("pre-deregister heartbeat should remain queued, pending=%d", got)
+	}
+	sched.FlushNow(context.Background())
+
+	var status string
+	var reasonPreserved bool
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT status, metadata->'offline_reason' = $2::jsonb
+		FROM agent_runtime
+		WHERE id = $1
+	`, runtimeID, reason).Scan(&status, &reasonPreserved); err != nil {
+		t.Fatalf("read runtime after flush: %v", err)
+	}
+	if status != "offline" || !reasonPreserved {
+		t.Fatalf("explicit deregistration changed after receipt: status=%q reason_preserved=%t", status, reasonPreserved)
+	}
+	if got := sched.PendingCount(); got != 0 {
+		t.Fatalf("preserved offline runtime remained pending: %d", got)
+	}
+	// A preserved explicit deregistration is not a recovery: no refresh event.
+	if len(recoveries.workspaceIDs) != 0 {
+		t.Fatalf("preserved offline runtime published recovery events: %v", recoveries.workspaceIDs)
 	}
 }
 
@@ -108,13 +131,13 @@ func TestBatchedHeartbeatScheduler_StopDrains(t *testing.T) {
 
 	// Long tick so the natural ticker can't fire during the test — only
 	// the Stop drain can flush.
-	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, time.Hour)
+	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, time.Hour, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sched.Run(ctx)
 
-	if err := sched.Schedule(context.Background(), rt); err != nil {
+	if err := sched.Schedule(context.Background(), rt.ID, rt.WorkspaceID); err != nil {
 		t.Fatalf("Schedule: %v", err)
 	}
 	if got := sched.PendingCount(); got != 1 {
@@ -147,7 +170,7 @@ func TestBatchedHeartbeatScheduler_StopFlushesLateSchedule(t *testing.T) {
 	setRuntimeLastSeenAt(t, runtimeID, stale)
 	rt := loadRuntime(t, runtimeID)
 
-	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, time.Hour)
+	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, time.Hour, nil)
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	go sched.Run(runCtx)
@@ -162,7 +185,7 @@ func TestBatchedHeartbeatScheduler_StopFlushesLateSchedule(t *testing.T) {
 
 	// Now Schedule a late heartbeat. Run is gone; only Stop's defensive
 	// flush can persist this.
-	if err := sched.Schedule(context.Background(), rt); err != nil {
+	if err := sched.Schedule(context.Background(), rt.ID, rt.WorkspaceID); err != nil {
 		t.Fatalf("Schedule: %v", err)
 	}
 	if got := sched.PendingCount(); got != 1 {
@@ -180,13 +203,55 @@ func TestBatchedHeartbeatScheduler_StopFlushesLateSchedule(t *testing.T) {
 	}
 }
 
+// TestBatchedHeartbeatScheduler_StopRecoveryUsesBoundedContextAndKnownWorkspace
+// verifies that the Stop drain keeps its deadline and avoids another lookup.
+func TestBatchedHeartbeatScheduler_StopRecoveryUsesBoundedContextAndKnownWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	setRuntimeLastSeenAt(t, runtimeID, time.Now().Add(-2*heartbeatReceiptRecoveryThreshold))
+	rt := loadRuntime(t, runtimeID)
+
+	recoveries := &recordingRecoveryNotifier{}
+	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, time.Hour, nil)
+	sched.RecoveryNotifier = recoveries
+	go sched.Run(context.Background())
+	if err := sched.Schedule(context.Background(), rt.ID, rt.WorkspaceID); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+	rows, err := testHandler.Queries.MarkRuntimesOfflineByIDs(context.Background(), db.MarkRuntimesOfflineByIDsParams{
+		Ids:          []pgtype.UUID{rt.ID},
+		StaleSeconds: service.RuntimeClaimFreshnessSeconds,
+	})
+	if err != nil {
+		t.Fatalf("MarkRuntimesOfflineByIDs: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("sweeper rows = %d, want 1", len(rows))
+	}
+
+	sched.Stop()
+
+	if len(recoveries.workspaceIDs) != 1 || recoveries.workspaceIDs[0] != testWorkspaceID {
+		t.Fatalf("recovery workspaces = %v, want [%s]", recoveries.workspaceIDs, testWorkspaceID)
+	}
+	deadline, ok := recoveries.contexts[0].Deadline()
+	if !ok {
+		t.Fatal("Stop recovery context has no deadline")
+	}
+	if remaining := time.Until(deadline); remaining <= 0 || remaining > 10*time.Second {
+		t.Fatalf("Stop recovery deadline remaining = %s, want within (0s, 10s]", remaining)
+	}
+}
+
 // TestBatchedHeartbeatScheduler_FlushIgnoresEmpty exercises the empty-pending
 // fast path: a tick with nothing queued must not issue a DB call.
 func TestBatchedHeartbeatScheduler_FlushIgnoresEmpty(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0)
+	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0, nil)
 	// Just calling FlushNow with nothing queued should not panic or error.
 	sched.FlushNow(context.Background())
 	if got := sched.PendingCount(); got != 0 {
@@ -194,43 +259,90 @@ func TestBatchedHeartbeatScheduler_FlushIgnoresEmpty(t *testing.T) {
 	}
 }
 
-// TestBatchedHeartbeatScheduler_RaceToOfflineSelfHeals confirms the
-// next-beat-recovery contract: if the sweeper flips a row to offline between
-// Schedule and FlushNow, the bulk UPDATE leaves it offline (no rows
-// affected), and the runtime's *next* beat takes the sync path through
-// recordHeartbeat → MarkAgentRuntimeOnline to recover.
+// TestBatchedHeartbeatScheduler_RaceToOfflineSelfHeals confirms that if the
+// sweeper flips a row offline between Schedule and FlushNow, receipt
+// reconciliation restores it without a new heartbeat lookup.
+// recordingRecoveryNotifier captures RuntimeRecoveryNotifier calls so tests
+// can assert a lifecycle refresh fires for the already-known workspace.
+type recordingRecoveryNotifier struct {
+	workspaceIDs []string
+	contexts     []context.Context
+}
+
+func (r *recordingRecoveryNotifier) NotifyRuntimeRecovered(ctx context.Context, workspaceID string) {
+	r.workspaceIDs = append(r.workspaceIDs, workspaceID)
+	r.contexts = append(r.contexts, ctx)
+}
+
 func TestBatchedHeartbeatScheduler_RaceToOfflineSelfHeals(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	setRuntimeLastSeenAt(t, runtimeID, time.Now().Add(-2*heartbeatReceiptRecoveryThreshold))
 	rt := loadRuntime(t, runtimeID)
 
-	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0)
-	if err := sched.Schedule(context.Background(), rt); err != nil {
+	recoveries := &recordingRecoveryNotifier{}
+	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0, nil)
+	sched.RecoveryNotifier = recoveries
+	if err := sched.Schedule(context.Background(), rt.ID, rt.WorkspaceID); err != nil {
 		t.Fatalf("Schedule: %v", err)
 	}
 
-	// Sweeper races us to offline before the flush.
-	setRuntimeStatus(t, runtimeID, "offline")
+	// The real sweeper query races us to offline before the flush. Its stale
+	// predicate is the fact receipt reconciliation is allowed to rely on.
+	rows, err := testHandler.Queries.MarkRuntimesOfflineByIDs(context.Background(), db.MarkRuntimesOfflineByIDsParams{
+		Ids:          []pgtype.UUID{rt.ID},
+		StaleSeconds: service.RuntimeClaimFreshnessSeconds,
+	})
+	if err != nil {
+		t.Fatalf("MarkRuntimesOfflineByIDs: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("sweeper rows = %d, want 1", len(rows))
+	}
+
+	flushCtx := context.WithValue(context.Background(), recoveryContextKey{}, "batch")
+	sched.FlushNow(flushCtx)
+
+	// The bulk UPDATE omits the offline row, and receipt reconciliation flips
+	// it back online without waiting for another heartbeat.
+	status, _, _ := readRuntimeRow(t, runtimeID)
+	if status != "online" {
+		t.Fatalf("expected receipt reconciliation to recover online, got %q", status)
+	}
+	// The reconciled flip is a real offline → online recovery: one lifecycle
+	// refresh, no more.
+	if len(recoveries.workspaceIDs) != 1 || recoveries.workspaceIDs[0] != testWorkspaceID {
+		t.Fatalf("recovery workspaces = %v, want [%s]", recoveries.workspaceIDs, testWorkspaceID)
+	}
+	if got := recoveries.contexts[0].Value(recoveryContextKey{}); got != "batch" {
+		t.Fatalf("recovery context value = %v, want batch", got)
+	}
+}
+
+func TestBatchedHeartbeatScheduler_DeletedReceiptInvalidatesRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	rt := loadRuntime(t, runtimeID)
+	notifier := &recordingRuntimeGoneNotifier{}
+	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0, notifier)
+	if err := sched.Schedule(context.Background(), rt.ID, rt.WorkspaceID); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID); err != nil {
+		t.Fatalf("delete runtime before flush: %v", err)
+	}
 
 	sched.FlushNow(context.Background())
 
-	// Bulk UPDATE's status='online' predicate means the row stays offline.
-	status, _, _ := readRuntimeRow(t, runtimeID)
-	if status != "offline" {
-		t.Fatalf("expected status=offline after raced flush, got %q", status)
+	if len(notifier.runtimeIDs) != 1 || notifier.runtimeIDs[0] != runtimeID {
+		t.Fatalf("runtime-gone notifications = %v, want [%s]", notifier.runtimeIDs, runtimeID)
 	}
-
-	// Reload and re-Schedule: rt.Status is now offline, so the scheduler
-	// takes the sync MarkAgentRuntimeOnline path and the row recovers.
-	rt2 := loadRuntime(t, runtimeID)
-	if err := sched.Schedule(context.Background(), rt2); err != nil {
-		t.Fatalf("recovery Schedule: %v", err)
-	}
-	status2, _, _ := readRuntimeRow(t, runtimeID)
-	if status2 != "online" {
-		t.Fatalf("expected sync recovery to flip back to online, got %q", status2)
+	if got := sched.PendingCount(); got != 0 {
+		t.Fatalf("deleted runtime remained pending after reconciliation: %d", got)
 	}
 }
 
@@ -247,10 +359,16 @@ func TestPassthroughHeartbeatScheduler_TouchAndRaceRecovery(t *testing.T) {
 	setRuntimeLastSeenAt(t, runtimeID, stale)
 	rt := loadRuntime(t, runtimeID)
 
+	recoveries := &recordingRecoveryNotifier{}
 	sched := NewPassthroughHeartbeatScheduler(testHandler.Queries)
+	sched.RecoveryNotifier = recoveries
 
-	if err := sched.Schedule(context.Background(), rt); err != nil {
+	if err := sched.Schedule(context.Background(), rt.ID, rt.WorkspaceID); err != nil {
 		t.Fatalf("Schedule: %v", err)
+	}
+	// Ordinary online bump: no recovery refresh.
+	if len(recoveries.workspaceIDs) != 0 {
+		t.Fatalf("online heartbeat published recovery events: %v", recoveries.workspaceIDs)
 	}
 	_, lastSeen, _ := readRuntimeRow(t, runtimeID)
 	if !lastSeen.After(stale.Add(time.Minute)) {
@@ -260,14 +378,24 @@ func TestPassthroughHeartbeatScheduler_TouchAndRaceRecovery(t *testing.T) {
 	// Race: snapshot still says online but DB is now offline.
 	rt2 := loadRuntime(t, runtimeID)
 	setRuntimeStatus(t, runtimeID, "offline")
-	if err := sched.Schedule(context.Background(), rt2); err != nil {
+	scheduleCtx := context.WithValue(context.Background(), recoveryContextKey{}, "passthrough")
+	if err := sched.Schedule(scheduleCtx, rt2.ID, rt2.WorkspaceID); err != nil {
 		t.Fatalf("Schedule under race: %v", err)
 	}
 	status, _, _ := readRuntimeRow(t, runtimeID)
 	if status != "online" {
 		t.Fatalf("expected race recovery via MarkAgentRuntimeOnline, got %q", status)
 	}
+	// The race flip is a real recovery: exactly one lifecycle refresh.
+	if len(recoveries.workspaceIDs) != 1 || recoveries.workspaceIDs[0] != testWorkspaceID {
+		t.Fatalf("recovery workspaces = %v, want [%s]", recoveries.workspaceIDs, testWorkspaceID)
+	}
+	if got := recoveries.contexts[0].Value(recoveryContextKey{}); got != "passthrough" {
+		t.Fatalf("recovery context value = %v, want passthrough", got)
+	}
 }
+
+type recoveryContextKey struct{}
 
 // silenceUnusedPgUUID ensures the package compiles even if no other test
 // happens to reference pgtype after future edits trim imports.

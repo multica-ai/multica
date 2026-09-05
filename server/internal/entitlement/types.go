@@ -31,6 +31,8 @@ const (
 	ActionOff     Action = "off"
 	ActionObserve Action = "observe"
 	ActionEnforce Action = "enforce"
+
+	NotificationFirstRejectionPerPeriod = "first_rejection_per_period"
 )
 
 type Reason string
@@ -51,11 +53,16 @@ const (
 // Gate is the effective instruction for one generic enforcement point. Limits
 // and period boundaries come from Cloud; this package does not derive them.
 type Gate struct {
-	Action      Action
-	Limit       *int
-	PeriodStart *time.Time
-	PeriodEnd   *time.Time
-	ResetAt     *time.Time
+	Action        Action
+	Limit         *int
+	PeriodStart   *time.Time
+	PeriodEnd     *time.Time
+	ResetAt       *time.Time
+	Notifications *NotificationPolicy
+}
+
+type NotificationPolicy struct {
+	OnRejection string
 }
 
 // Decision carries enough source information for consumers to audit why a gate
@@ -111,6 +118,11 @@ func cloneGate(in Gate) Gate {
 	if in.ResetAt != nil {
 		value := *in.ResetAt
 		out.ResetAt = &value
+	}
+	if in.Notifications != nil {
+		out.Notifications = &NotificationPolicy{
+			OnRejection: in.Notifications.OnRejection,
+		}
 	}
 	return out
 }

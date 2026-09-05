@@ -86,12 +86,9 @@ describe("normalizeGitVersion", () => {
 
 describe("DESCRIBE_ARGS", () => {
   it("passes the match pattern as one bare argv token, never a shell-quoted string", () => {
-    // The Windows regression this locks down: the pattern used to be embedded
-    // in a shell command string as `--match 'v[0-9]*'`. cmd.exe does not strip
-    // POSIX single quotes, so git received them literally and matched no tag,
-    // collapsing the Desktop version to the 0.0.0-g<hash> fallback. As a
-    // standalone argv element with no surrounding quotes the pattern is
-    // shell-independent.
+    // Windows cmd.exe does not strip POSIX single quotes. Keeping the pattern
+    // as a bare argv element prevents tagged builds from falling back to a
+    // synthetic 0.0.0-g<hash> version.
     expect(DESCRIBE_ARGS).toContain("v[0-9]*");
     for (const arg of DESCRIBE_ARGS) {
       expect(arg).not.toContain("'");
@@ -470,7 +467,7 @@ describe("electron-builder.yml packaging config", () => {
     return entries;
   }
 
-  it("excludes the dist output directory from the packaged files", () => {
+  it("excludes prior architecture output from packaged files", () => {
     expect(configPath, "electron-builder.yml not found").toBeTruthy();
     const entries = readFilesBlock(readFileSync(configPath, "utf-8"));
     expect(entries.length).toBeGreaterThan(0);

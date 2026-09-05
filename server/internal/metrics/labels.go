@@ -44,6 +44,7 @@ var businessMetricLabels = map[string][]string{
 	"multica_agent_task_terminal_total":                {labelSource, labelRuntimeMode, labelTerminalStatus},
 	"multica_agent_task_failed_total":                  {labelSource, labelRuntimeMode, labelFailureReason},
 	"multica_agent_task_queue_wait_seconds":            {labelSource, labelRuntimeMode},
+	"multica_agent_task_claimable_wait_seconds":        {labelSource, labelRuntimeMode},
 	"multica_agent_task_run_seconds":                   {labelSource, labelRuntimeMode, labelTerminalStatus},
 	"multica_agent_task_total_seconds":                 {labelSource, labelRuntimeMode, labelTerminalStatus},
 	"multica_agent_task_in_progress":                   {labelSource, labelRuntimeMode},
@@ -229,8 +230,9 @@ func metricLabels(metric string) []string {
 // on RuntimeLookupSourceOther, which should sit at ~0 — a non-zero rate there
 // means a new call site was added without classifying it.
 const (
-	// RuntimeLookupSourceHeartbeatWS is the daemon WebSocket heartbeat, one
-	// read per runtime per HeartbeatInterval.
+	// RuntimeLookupSourceHeartbeatWS is retained as the rollout guard for the
+	// daemon WebSocket heartbeat. The connection-lease path must keep this
+	// series at zero; any increment is a regression to per-heartbeat reads.
 	RuntimeLookupSourceHeartbeatWS = "heartbeat_ws"
 	// RuntimeLookupSourceHeartbeatHTTP is the POST /api/daemon/heartbeat
 	// fallback used when the WebSocket ack does not arrive.

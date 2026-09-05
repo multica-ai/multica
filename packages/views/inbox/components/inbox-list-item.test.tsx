@@ -70,7 +70,13 @@ vi.mock("../../common/actor-avatar", () => ({
     />
   ),
 }));
-vi.mock("./inbox-detail-label", () => ({ InboxDetailLabel: () => null }));
+vi.mock("./inbox-detail-label", () => ({
+  InboxDetailLabel: () => null,
+  useTypeLabels: () => ({
+    autopilot_paused: "Autopilot paused",
+    autopilot_quota_exceeded: "Autopilot run limit reached",
+  }),
+}));
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "label" }) }));
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {

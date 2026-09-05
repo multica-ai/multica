@@ -28,6 +28,9 @@ const (
 	// latency-sensitive 30-second liveness path. GC remains independently
 	// bounded by runtimeGCTickTimeout once each hourly round begins.
 	runtimeGCSweepInterval = time.Hour
+	// delegatedFailureRecoverySweepInterval keeps the low-probability durable
+	// recovery scan off the latency-sensitive runtime liveness path.
+	delegatedFailureRecoverySweepInterval = 5 * time.Minute
 	// staleThresholdSeconds marks runtimes offline if no heartbeat for this
 	// long. The heartbeat timing derivation lives with the shared service
 	// constant so every task release path uses the same eligibility window.
@@ -107,6 +110,7 @@ type runtimeGCTxStarter interface {
 type runtimeGCEventPublisher interface {
 	PublishRuntimeTeardown(context.Context, service.RuntimeTeardownResult, string, string, string, string, bool)
 	PublishRuntimeRefresh(string, string, string, string)
+	NotifyRuntimeGone(string)
 }
 
 type runtimeSweepStageStats struct {
@@ -155,17 +159,20 @@ func runPeriodicSweep(ctx context.Context, interval time.Duration, sweep func())
 // stale window — that is the original behavior.
 func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration) {
 	runPeriodicSweep(ctx, sweepInterval, func() {
-		// These stages retain the existing cadence and ordering in PR1 so the
-		// rollout changes no business predicate or recovery semantics. Runtime
-		// GC is the one exception: its seven-day retention work now runs in the
-		// independent hourly loop below and cannot delay this liveness path.
+		// These stages retain their existing cadence and ordering. Runtime GC and
+		// delegated-failure recovery run in independent lower-frequency loops.
 		sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 		sweepOfflineRuntimeTasks(ctx, queries, taskSvc, reconnectGrace)
 		sweepExpiredRuntimeReconnectRetries(ctx, queries, taskSvc, reconnectGrace)
 		sweepStaleTasks(ctx, queries, taskSvc, bus, reconnectGrace)
 		sweepExpiredQueuedTasks(ctx, queries, taskSvc, reconnectGrace)
-		sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
 		sweepDeferredChatFinalizations(ctx, queries, taskSvc)
+	})
+}
+
+func runDelegatedFailureRecoverySweeper(ctx context.Context, taskSvc *service.TaskService) {
+	runPeriodicSweep(ctx, delegatedFailureRecoverySweepInterval, func() {
+		sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
 	})
 }
 
@@ -176,9 +183,9 @@ func runRuntimeGCSweeper(ctx context.Context, txStarter runtimeGCTxStarter, quer
 }
 
 // sweepPendingDelegatedFailureRecoveries retries durable coordinator handoffs
-// that were not acquired by an executable task. It runs even when no stale
-// task was found in this tick, which is what repairs a recovery dispatch lost
-// before a server restart.
+// that were not acquired by an executable task. It runs independently of
+// stale-task discovery, which is what repairs a recovery dispatch lost before
+// a server restart.
 func sweepPendingDelegatedFailureRecoveries(ctx context.Context, taskSvc *service.TaskService) (stats runtimeSweepStageStats) {
 	startedAt := time.Now()
 	defer func() {
@@ -447,6 +454,7 @@ func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, que
 		metrics.RecordRuntimeGCDeleted()
 		gcWorkspaces[result.workspaceID] = true
 		if publisher != nil {
+			publisher.NotifyRuntimeGone(util.UUIDToString(runtimeID))
 			publisher.PublishRuntimeTeardown(gcCtx, result.teardown, result.workspaceID, "system", "", "runtime_gc", false)
 		}
 	}

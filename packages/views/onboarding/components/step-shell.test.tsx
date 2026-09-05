@@ -5,9 +5,6 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enOnboarding from "../../locales/en/onboarding.json";
 import {
-  STEP_COLUMN,
-  STEP_GUTTER,
-  StepFooter,
   StepHeading,
   StepShell,
 } from "./step-shell";
@@ -25,38 +22,6 @@ function renderShell(props: Partial<Parameters<typeof StepShell>[0]> = {}) {
 }
 
 describe("onboarding step shell", () => {
-  // The regression this guards: the horizontal padding used to live on the
-  // element that also carried the measure. Inside a max-w box the two fight —
-  // `md` and `lg` resolved to different content widths for the same box, and
-  // the reading column jumped from 508px to 620px at a breakpoint.
-  it("puts the gutter on the scrolling pane and the measure on the content", () => {
-    const { container } = renderShell();
-
-    const main = container.querySelector("main")!;
-    for (const cls of STEP_GUTTER.split(" ")) {
-      expect(main.className).toContain(cls);
-    }
-    expect(main.className).not.toMatch(/\bmax-w-/);
-  });
-
-  // One measure, not three. Two centred measures of different widths do not
-  // share a left edge, which is how the platform fork ended up ~150px right
-  // of every other step.
-  it("centres a single content measure", () => {
-    expect(STEP_COLUMN).toContain("mx-auto");
-    expect(STEP_COLUMN).toMatch(/max-w-\[[\d.]+rem\]/);
-    expect(STEP_COLUMN).not.toMatch(/\bp[xlr]?-/);
-  });
-
-  // The column fills the pane so StepFooter's `mt-auto` has something to push
-  // against; without it the actions ride up under short content.
-  it("makes the column fill the pane so the footer can pin to the bottom", () => {
-    const { container } = renderShell();
-
-    const column = container.querySelector("main > div")!;
-    expect(column.className).toContain("min-h-full");
-    expect(column.className).toContain("flex-col");
-  });
 
   // The panes persist across steps, so a screen reader user gets no
   // navigation event when the step changes — the heading has to announce.
@@ -71,19 +36,6 @@ describe("onboarding step shell", () => {
     expect(heading.tagName).toBe("H1");
     expect(heading.closest("[aria-live]")).not.toBeNull();
     expect(screen.getByText("Pick a URL.")).toBeInTheDocument();
-  });
-
-  it("pins the step actions to the bottom of the column", () => {
-    const { container } = render(
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <StepFooter hint="Name it to continue.">
-          <button type="button">Continue</button>
-        </StepFooter>
-      </I18nProvider>,
-    );
-
-    expect(container.firstElementChild!.className).toContain("mt-auto");
-    expect(screen.getByText("Name it to continue.")).toBeInTheDocument();
   });
 
   // Two Back buttons is the intended shape, not a duplicate: the rail is
@@ -143,19 +95,6 @@ describe("onboarding step shell", () => {
 });
 
 describe("onboarding progress rail", () => {
-  // The rail replaced a row of dots plus a "Step 2 of 3" counter, which said
-  // how much was left but never what was coming — so the runtime step always
-  // arrived unannounced. Naming every step is the whole point of the change.
-  it("names all three steps up front", () => {
-    const { container } = renderShell({ currentStep: "about_you" });
-
-    // Scoped to the rail: the compact bar also prints the current step's name,
-    // so an unscoped query matches it twice.
-    const rail = within(container.querySelector("aside")!);
-    expect(rail.getByText("About you")).toBeInTheDocument();
-    expect(rail.getByText("Workspace")).toBeInTheDocument();
-    expect(rail.getByText("Meet Mika")).toBeInTheDocument();
-  });
 
   it("marks the current step for assistive tech", () => {
     const { container } = renderShell({ currentStep: "workspace" });

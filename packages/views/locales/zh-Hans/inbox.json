@@ -48,6 +48,8 @@
     "original_input": "原始输入",
     "retry_with_context": "保留上下文重试",
     "edit_advanced": "在完整表单中编辑",
+    "autopilot_quota_exceeded_body": "当前周期的 {{limit}} 次自动化执行额度已用完。在 {{resetAt}} 重置前，后续自动化执行将不会启动。",
+    "autopilot_quota_upgrade": "查看升级方案",
     "archive": "归档",
     "unarchive": "取消归档"
   },
@@ -63,14 +65,16 @@
     "new_comment": "新评论",
     "mentioned": "提及了你",
     "review_requested": "请求审阅",
-    "task_completed": "task 已完成",
-    "task_failed": "task 失败",
+    "task_completed": "运行已完成",
+    "task_failed": "运行失败",
     "agent_blocked": "智能体被阻塞",
     "agent_completed": "智能体已完成",
     "reaction_added": "添加了表情反应",
     "quick_create_done": "通过智能体创建",
     "quick_create_failed": "通过智能体创建失败",
-    "quick_create_unconfirmed": "通过智能体创建结果未确认"
+    "quick_create_unconfirmed": "通过智能体创建结果未确认",
+    "autopilot_paused": "自动化已暂停",
+    "autopilot_quota_exceeded": "自动化执行次数已用完"
   },
   "labels": {
     "set_status_to": "状态设为",
@@ -83,7 +87,8 @@
     "removed_due_date": "移除了截止日期",
     "reacted_to_comment": "用 {{emoji}} 回应了你的评论",
     "created_with_agent": "通过智能体创建：{{identifier}}",
-    "failed_with_detail": "失败：{{detail}}"
+    "failed_with_detail": "失败：{{detail}}",
+    "autopilot_quota_blocked": "执行已被阻止：额度已用完"
   },
   "toasts": {
     "source_context_retry_started": "已使用原始上下文开始重试",

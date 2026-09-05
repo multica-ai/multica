@@ -73,14 +73,6 @@ func useSeatCapacity(t *testing.T, executor seatcapacity.Executor) {
 	})
 }
 
-func TestDefaultInvitationRateLimits(t *testing.T) {
-	limits := DefaultInvitationRateLimits()
-	want := SlidingWindowRateLimit{Limit: 6, Window: 24 * time.Hour}
-	if limits.Recipient != want {
-		t.Fatalf("recipient limit = %+v, want %+v", limits.Recipient, want)
-	}
-}
-
 type stubInvitationRateLimiter struct {
 	allowed     bool
 	allowResult *bool

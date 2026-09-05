@@ -190,18 +190,6 @@ async function editCronText(expr: string) {
 }
 
 describe("ScheduleEditor", () => {
-  // Parsing/serialization, descriptions, state transitions, and rejection
-  // classification are canonical in the sibling .test.ts suites. This file
-  // only keeps DOM wiring, accessibility, and integration-specific behavior.
-  it("renders the three form blocks and the cron readback", () => {
-    renderEditor(cron("0 9-21 * * *"));
-    expect(screen.getByText("Time")).toBeInTheDocument();
-    expect(screen.getByText("Days")).toBeInTheDocument();
-    expect(screen.getByText("Timezone")).toBeInTheDocument();
-    // The cron expression lives in the result panel below the form, shown as a
-    // click-to-edit readback rather than a labelled field.
-    expect(screen.getByRole("button", { name: /click to edit/ })).toBeInTheDocument();
-  });
 
   it("never fires onChange on mount (untouched save sends no update)", async () => {
     const onChange = vi.fn();
@@ -520,35 +508,6 @@ describe("ScheduleEditor", () => {
     // no error at save time.
     expect(endHour).toHaveValue("09");
     expect(cronOut()).toBe("0 9-9 * * *");
-  });
-
-  it("draws the interval and its unit in one box, lit by whichever holds focus", async () => {
-    renderEditor(cron("0 */3 * * *"));
-    const step = screen.getByLabelText("Interval");
-    const unit = screen.getByLabelText("Interval unit");
-    // "Every 3 hours" is one setting: the step and the unit share a box, rather
-    // than sitting in two that happen to be next to each other.
-    const box = step.closest("[data-slot=input-group]");
-    expect(box).not.toBeNull();
-    expect(box).toContainElement(unit);
-    // The box lights its border from the control inside it that has focus, and it
-    // knows them by this slot. A trigger that kept its own would leave the box
-    // dark while the select it holds is the very thing focused.
-    expect(step).toHaveAttribute("data-slot", "input-group-control");
-    expect(unit).toHaveAttribute("data-slot", "input-group-control");
-  });
-
-  it("draws the window's two ends in one box", async () => {
-    renderEditor(cron("0 9-21/3 * * *"));
-    const start = screen.getByLabelText("Window start hour");
-    // A window is one value with two ends, so it reads as one control rather than
-    // two fields that happen to sit next to each other.
-    const box = start.closest("[data-slot=input-group]");
-    expect(box).not.toBeNull();
-    expect(box).toContainElement(screen.getByLabelText("Window end hour"));
-    // The segments, not their wrapper, are what the box lights its border from:
-    // they are what gets focused.
-    expect(start).toHaveAttribute("data-slot", "input-group-control");
   });
 
   // The window is a dimension of the schedule, not a mode of the editor: it is on

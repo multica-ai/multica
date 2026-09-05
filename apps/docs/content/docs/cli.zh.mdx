@@ -108,7 +108,7 @@ multica issue create --title "升级说明" --description-stdin < notes.md
 multica issue comment add MUL-123 --content-stdin < review.md
 ```
 
-查看某次执行的消息，或停止 task：
+查看某次运行的消息，或停止运行：
 
 ```bash
 multica issue run-messages <task-id> --issue MUL-123
@@ -154,7 +154,7 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
-删除仍绑定活跃智能体的运行时时，命令默认拒绝。`multica runtime delete <id> --cascade` 会解绑这些智能体、保留其配置与历史记录，并取消它们的活动 task。
+删除仍绑定活跃智能体的运行时时，命令默认拒绝。`multica runtime delete <id> --cascade` 会解绑这些智能体、保留其配置与历史记录，并取消它们的活动运行。
 
 运行机制和自定义 profile 见[守护进程与运行时](/daemon-runtimes)。
 
@@ -182,7 +182,7 @@ multica runtime activity <runtime-id>
 
 任务使用 `MUL-123` 这样的 key 或完整 UUID，不接受 UUID 短前缀。
 
-其他资源的 `list` 命令通常显示可复制的短 ID，并支持 `--full-id` 输出完整 UUID。短 ID 不唯一时，CLI 会要求增加字符或改用完整 UUID。task 的短 ID 还需要通过 `--issue` 指明所属任务。
+其他资源的 `list` 命令通常显示可复制的短 ID，并支持 `--full-id` 输出完整 UUID。短 ID 不唯一时，CLI 会要求增加字符或改用完整 UUID。运行的短 ID 还需要通过 `--issue` 指明所属任务。
 
 许多命令支持结构化输出：
 
@@ -224,7 +224,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 
 | 命令 | 子命令 | 用途 | 关键 flag |
 | --- | --- | --- | --- |
-| `issue` | `list` | 列出任务 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（可重复）、`--limit`、`--offset`、`--sort`、`--full-id` |
+| `issue` | `list` | 列出任务 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（可重复）、`--property`（可重复，`"名称=值"`；`__none__` 匹配未设置）、`--limit`、`--offset`、`--sort`（支持 `property:<名称或 id>`）、`--full-id` |
 | | `get <id>` | 查看单个任务 | |
 | | `create` | 创建任务 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重复） |
 | | `update <id>` | 更新任务字段 | 与 `create` 同类字段，另有 `--position`、`--no-start` |
@@ -243,7 +243,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `run-messages <task-id>` | 查看单次执行的消息 | `--since`、`--issue` |
 | | `usage <issue-id>` | 查看聚合 token 用量 | |
 | | `rerun <id>` | 按当前指派重新入队执行 | |
-| | `cancel-task <task-id>` | 取消运行中或排队中的 task | `--issue` |
+| | `cancel-task <task-id>` | 取消进行中或排队中的运行 | `--issue` |
 | `project` | `list/get/create/update/delete` | 管理项目 | |
 | | `status <id> <status>` | 修改项目状态 | |
 | | `resource list/add/update/remove` | 管理项目附加资源 | `--type`、`--url`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目录的 `in_place` / `worktree`） |
@@ -251,7 +251,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | `property` | `list/get/create/update/archive/unarchive` | 管理工作区自定义属性 | `create`：`--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`）、`--option`（可重复，仅 select 类型）；`list`：`--include-archived`；类型创建后不可修改 |
 | `agent` | `list/get/create/update/archive/restore` | 管理智能体 | `--name`、`--runtime-id`（`create` 必填）、`--instructions`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 复制为新智能体，原智能体不受影响 | `--name`（默认为原名加 ` (copy)`）、`--runtime-id`（复制到其他运行时时必须同时指定 `--model`）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` 等机密配置不会复制，需用与 `create` 相同的 flag 重新提供 |
-| | `tasks <id>` | 查看智能体的 task | |
+| | `tasks <id>` | 查看智能体的运行 | |
 | | `avatar <id>` | 上传头像 | |
 | | `env get/set <agent-id>` | 读写自定义环境变量（仅 owner 和 admin） | |
 | | `skills list/set/add <agent-id>` | 管理绑定的 skill | `--skill-ids`（`set` 全量替换，`add` 增量添加） |
@@ -281,7 +281,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `stop` / `status` / `restart` | 停止、查看状态、重启（`restart` 与 `start` 同一套 flag） | |
 | | `logs` | 查看守护进程日志 | `--follow`、`--lines` |
 | | `disk-usage` | 查看本机磁盘占用 | `--by-workspace`、`--by-task`、`--top` |
-| `runtime` | `list/usage/activity/update/rename/delete` | 查看和管理运行时 | `delete`：`--cascade`（解绑绑定的智能体、保留其数据并取消其 task） |
+| `runtime` | `list/usage/activity/update/rename/delete` | 查看和管理运行时 | `delete`：`--cascade`（解绑绑定的智能体、保留其数据并取消其运行） |
 | | `profile list/create/update/delete` | 管理自定义运行时 profile | |
 | | `profile set-path/unset-path <profile-id>` | 固定本机可执行文件路径（仅本地生效，不上传服务器） | |
 
@@ -314,5 +314,5 @@ Claude Code 插件市场、Codex skill 安装器、Cursor 以及其他任何加�
 
 - [Multica CLI skill](https://github.com/multica-ai/multica-cli) — 在 Codex、Claude Code 或 Cursor 里操作 Multica。
 - [认证与令牌](/auth-tokens) — PAT 的创建、续期和吊销。
-- [故障排查](/troubleshooting) — 命令报错和 task 不开始的排查路径。
+- [故障排查](/troubleshooting) — 命令报错和运行不开始的排查路径。
 - [创建和配置智能体](/agents-create) — `agent create` 各字段的完整语义。
