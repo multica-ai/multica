@@ -136,10 +136,24 @@ func TestInboundGroupHumanReplyRequiresMentionAndPreservesQuotedContext(t *testi
 	if msg.CommandText != "summarize this" {
 		t.Fatalf("CommandText = %q, want sender's instruction only", msg.CommandText)
 	}
-	for _, want := range []string{"sender=\"Ada Lovelace\"", "/issue historical command", "summarize this"} {
+	for _, want := range []string{"> **Ada Lovelace:**", "/issue historical command", "summarize this"} {
 		if !strings.Contains(msg.Text, want) {
 			t.Fatalf("enriched Text = %q, missing %q", msg.Text, want)
 		}
+	}
+}
+
+func TestInboundGroupHumanReplyMentionOnlyPreservesQuote(t *testing.T) {
+	msg, ok := inboundFromUpdate(Update{UpdateID: 1, Message: &Message{
+		MessageID: 10, From: &User{ID: 111, FirstName: "Grace"},
+		Chat: Chat{ID: -100200, Type: "supergroup"}, Text: "@my_bot",
+		ReplyToMessage: &Message{
+			MessageID: 9, From: &User{ID: 222, FirstName: "Ada"}, Text: "/issue historical command",
+		},
+	}}, 999, "my_bot")
+	if !ok || !msg.AddressedToBot || msg.ReplyTo == nil || msg.CommandText != "" ||
+		msg.Text != "> **Ada:**\n>\n> /issue historical command" {
+		t.Fatalf("mention-only quote = %+v, ok=%v", msg, ok)
 	}
 }
 
@@ -166,7 +180,7 @@ func TestInboundGroupHumanReplyNewCommandPreservesQuotedContext(t *testing.T) {
 		t.Fatalf("CommandText = %q, want original cleaned command", msg.CommandText)
 	}
 	for _, want := range []string{
-		"sender=\"Ada Lovelace\"",
+		"> **Ada Lovelace:**",
 		"the deployment failed after the schema change",
 		"summarize this",
 	} {
@@ -227,7 +241,7 @@ func TestInboundGroupHumanReplyUsesCaptionAndHandlesNonText(t *testing.T) {
 				ReplyToMessage: tc.reply,
 			}}, 999, "my_bot")
 			if !ok || !msg.AddressedToBot || msg.CommandText != "inspect this" ||
-				!strings.Contains(msg.Text, "sender=\"ada\"") || !strings.Contains(msg.Text, tc.wanted) {
+				!strings.Contains(msg.Text, "> **ada:**") || !strings.Contains(msg.Text, tc.wanted) {
 				t.Fatalf("message = %+v", msg)
 			}
 		})

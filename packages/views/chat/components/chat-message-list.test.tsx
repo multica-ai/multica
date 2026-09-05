@@ -417,6 +417,120 @@ describe("ChatMessageList onboarding kickoff", () => {
   });
 });
 
+describe("ChatMessageList channel quote presentation", () => {
+  it("renders channel quote content semantically without exposing protocol metadata", async () => {
+    const content =
+      "> The image contains a celebration emoji.\n\n" +
+      "Can you still see this image?";
+
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "channel-user-message",
+                chat_session_id: "s1",
+                role: "user",
+                content,
+                task_id: TASK_ID,
+                created_at: new Date(0).toISOString(),
+              },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const quote = await screen.findByText("The image contains a celebration emoji.");
+    expect(quote.closest("blockquote")).not.toBeNull();
+    expect(screen.getByText("Can you still see this image?")).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("quoted_message");
+    expect(container).not.toHaveTextContent("private-message-id");
+    expect(container).not.toHaveTextContent("private-platform-id");
+  });
+
+  it("renders a structured channel quote as a semantic list", async () => {
+    const content =
+      "> Any heading:\n>\n" +
+      "> - Plain text item\n" +
+      "> - Another item\n" +
+      "> - [Labeled reference](https://example.com/reference)\n\n" +
+      "Verify this information";
+
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "channel-source-list",
+                chat_session_id: "s1",
+                role: "user",
+                content,
+                task_id: TASK_ID,
+                created_at: new Date(0).toISOString(),
+              },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const quote = container.querySelector("blockquote");
+    expect(quote).not.toBeNull();
+    expect(await screen.findByText("Any heading:")).toBeInTheDocument();
+    expect(quote?.querySelectorAll("li")).toHaveLength(3);
+    expect(quote?.querySelector('a[href="https://example.com/reference"]')).toHaveTextContent(
+      "Labeled reference",
+    );
+    expect(screen.getByText("Verify this information")).toBeInTheDocument();
+  });
+
+  it("keeps text around quoted RichText media and separates current RichText", async () => {
+    const content =
+      "> Quoted rich text before\n>\n" +
+      "> ![Quoted image](https://example.com/quoted.png)\n>\n" +
+      "> Quoted rich text after\n\n" +
+      "Current rich text\n\n" +
+      "![Current image](https://example.com/current.png)";
+
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "channel-rich-text",
+                chat_session_id: "s1",
+                role: "user",
+                content,
+                task_id: TASK_ID,
+                created_at: new Date(0).toISOString(),
+              },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const quote = container.querySelector("blockquote");
+    expect(quote).not.toBeNull();
+    expect(quote).toHaveTextContent("Quoted rich text before");
+    expect(quote).toHaveTextContent("Quoted rich text after");
+    expect(quote?.querySelector('img[alt="Quoted image"]')).not.toBeNull();
+    expect(quote?.querySelector('img[alt="Current image"]')).toBeNull();
+    expect(screen.getByText("Current rich text")).toBeInTheDocument();
+    expect(container.querySelector('img[alt="Current image"]')).not.toBeNull();
+  });
+});
+
 describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
   // The backend moved to the refined taxonomy (agent_error.*) in MUL-2946 but
   // the copy map stayed on the six coarse values, so an exact-key lookup

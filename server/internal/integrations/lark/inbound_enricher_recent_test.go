@@ -470,9 +470,9 @@ func TestEnrichRecentContextWithQuotedReply(t *testing.T) {
 [Bob]: 顺便看下样式
 </recent_context>
 
-<quoted_message message_id="om_parent" sender="Alice" type="text">
-删除按钮加一下
-</quoted_message>
+> **Alice:**
+>
+> 删除按钮加一下
 
 去做`
 	if out.Body != want {

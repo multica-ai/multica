@@ -2,7 +2,6 @@ package telegram
 
 import (
 	"encoding/json"
-	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf16"
@@ -68,7 +67,7 @@ func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.Inbou
 	agentText := cleaned
 	quotedHuman := m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && !m.ReplyToMessage.From.IsBot
 	if chatType == channel.ChatTypeGroup && mentioned && quotedHuman {
-		agentText = enrichWithQuotedHumanMessage(cleaned, m.Chat.ID, m.ReplyToMessage)
+		agentText = enrichWithQuotedHumanMessage(cleaned, m.ReplyToMessage)
 	}
 
 	senderID := strconv.FormatInt(m.From.ID, 10)
@@ -203,7 +202,7 @@ func normalizeText(text, botUsername string) string {
 // explicitly selected by replying and mentioning the bot. Ambient group
 // history never enters the agent context. CommandText remains the sender's own
 // cleaned instruction so commands inside the quoted message stay historical.
-func enrichWithQuotedHumanMessage(instruction string, chatID int64, quoted *Message) string {
+func enrichWithQuotedHumanMessage(instruction string, quoted *Message) string {
 	quotedText := quoted.Text
 	if quotedText == "" {
 		quotedText = quoted.Caption
@@ -217,9 +216,7 @@ func enrichWithQuotedHumanMessage(instruction string, chatID int64, quoted *Mess
 			sender = name
 		}
 	}
-	msgType := classifyMessage(quoted)
-	block := fmt.Sprintf("<quoted_message message_id=%q sender=%q type=%q>\n%s\n</quoted_message>",
-		messageKey(chatID, quoted.MessageID), sender, msgType, quotedText)
+	block := channel.FormatQuotedMessage(sender, quotedText)
 	if instruction == "" {
 		return block
 	}

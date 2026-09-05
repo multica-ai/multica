@@ -205,9 +205,10 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 	startChat := hasControl && control.Kind == ControlCommandNewChat
 	bareFresh := false
 	if startChat {
-		if parsedText, textOK := ParseControlCommand(msg.Text); textOK && parsedText.Kind == ControlCommandNewChat {
-			msg.Text = parsedText.Body
-		} else if msg.Text == msg.CommandText {
+		// Rich-media adapters may already have stripped the original directive.
+		// A remainder beginning with /new is literal, so consume only an
+		// untouched command source here.
+		if msg.Text == msg.CommandText {
 			msg.Text = control.Body
 		}
 		// The consumed /new source must not be reinterpreted as /issue by a

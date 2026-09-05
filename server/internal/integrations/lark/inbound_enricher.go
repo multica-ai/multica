@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
@@ -117,7 +118,9 @@ func NewInboundEnricher(client APIClient, cfg InboundEnricherConfig) Enricher {
 //
 //	<recent_context …>…</recent_context>
 //
-//	<quoted_message …>…</quoted_message>
+//	> **Quoted sender:**
+//	>
+//	> Selected message
 //
 //	<[sender name]: the user's own message, or the forwarded transcript>
 //
@@ -302,7 +305,7 @@ func (e *inboundEnricher) resolveNames(ctx context.Context, creds InstallationCr
 
 // fetchRecentItems pulls the recent group window and returns the
 // messages to render — the trigger message itself and the directly-quoted
-// parent (which gets its own <quoted_message> block) filtered out, sorted
+// parent (which gets its own Markdown quote) filtered out, sorted
 // oldest-first. A fetch failure is returned to the caller (which renders a
 // safe, readable degradation note); it never blocks ingestion.
 //
@@ -552,7 +555,7 @@ func recentContextUnavailableLine(category string) string {
 	}
 }
 
-// renderQuotedBlock renders a <quoted_message> block from the already-
+// renderQuotedBlock renders a Markdown quote from the already-
 // fetched GetMessage(parentID) result. A parent that is itself a
 // merge_forward nests a <forwarded_messages> transcript inside the quoted
 // block (the GetMessage response already carries both the forward
@@ -563,11 +566,11 @@ func (e *inboundEnricher) renderQuotedBlock(parentID string, items []LarkMessage
 	if err != nil || len(items) == 0 {
 		e.logger.Warn("lark enricher: quoted parent fetch failed",
 			"parent_id", parentID, "items", len(items), "err", err)
-		return quotedErrorBlock(parentID)
+		return quotedErrorBlock()
 	}
 	parent := items[0]
 	if parent.Deleted {
-		return quotedErrorBlock(parentID)
+		return quotedErrorBlock()
 	}
 
 	labeler := newSpeakerLabeler(names)
@@ -575,13 +578,13 @@ func (e *inboundEnricher) renderQuotedBlock(parentID string, items []LarkMessage
 
 	if parent.MessageType == larkMsgTypeMergeForward {
 		inner := e.renderForwardedItems(items, parentID, names)
-		return wrapQuoted(parentID, sender, larkMsgTypeMergeForward, inner)
+		return channel.FormatQuotedMessage(sender, inner)
 	}
 	text := e.flattenMessage(parent)
 	if text == "" {
 		text = "[empty message]"
 	}
-	return wrapQuoted(parentID, sender, parent.MessageType, text)
+	return channel.FormatQuotedMessage(sender, text)
 }
 
 // renderForwardedItems renders the children of a forward whose own
@@ -676,13 +679,8 @@ func restMentionsToEvent(ms []LarkMessageMention) []larkMention {
 	return out
 }
 
-func wrapQuoted(messageID, sender, msgType, inner string) string {
-	return fmt.Sprintf("<quoted_message message_id=%q sender=%q type=%q>\n%s\n</quoted_message>",
-		messageID, sender, msgType, inner)
-}
-
-func quotedErrorBlock(messageID string) string {
-	return fmt.Sprintf("<quoted_message message_id=%q type=\"error\">[unable to fetch]</quoted_message>", messageID)
+func quotedErrorBlock() string {
+	return channel.FormatQuotedMessage("", "[unable to fetch]")
 }
 
 func forwardedErrorBlock() string {
