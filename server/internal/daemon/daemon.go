@@ -884,10 +884,13 @@ type healedAgent struct {
 // version detection at registration) then hard-fails with "executable not
 // found".
 //
-// The returned version always matches the returned path, so callers key
-// version-sensitive policy (e.g. the Codex sandbox) off it directly rather than
-// re-reading the shared version cache, which a concurrent heal could still be
-// updating.
+// The returned version matches the returned path in every case but one, so
+// callers key version-sensitive policy (e.g. the Codex sandbox) off it directly
+// rather than re-reading the shared version cache, which a concurrent heal could
+// still be updating. The one exception is the unverified case in the last bullet
+// below: a live-but-undetectable re-resolved path is returned paired with the
+// last known version, and the launch boundary refuses it precisely because that
+// pair was never verified.
 //
 // Behaviour:
 //   - A Windows stable entry point -> its final target is verified and returned
@@ -907,9 +910,14 @@ type healedAgent struct {
 //     through the same minimum-version gate registration applies. This
 //     reproduces exactly what a daemon restart would resolve, so it is no less
 //     safe than the documented restart workaround — only automatic.
-//   - Re-resolution fails, the candidate can't be version-detected, or it is
-//     below the minimum supported version -> entry is returned unchanged so the
-//     candidate is never launched and the downstream error still surfaces.
+//   - Pinned Path gone, re-resolution finds a candidate that is present but
+//     cannot be version-detected -> its path replaces the vanished pin so
+//     registration and model listing probe the real binary and can recover on a
+//     later retry, but it is returned paired with the last known version and is
+//     never launched, because that {path, version} pair is unverified (GH #6452).
+//   - Re-resolution finds nothing, or the candidate is below the minimum
+//     supported version -> entry is returned unchanged so the candidate is never
+//     launched and the downstream error still surfaces.
 func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string) {
 	resolved, version, _ := d.resolveAgentEntryWithHeal(ctx, provider, entry)
 	return resolved, version
@@ -940,10 +948,17 @@ func (d *Daemon) resolveAgentEntryForLaunch(ctx context.Context, provider string
 // version. rejected is nil unless the verdict is genuine — it is only ever set
 // from a *agent.BelowMinimumError, which by construction carries a version
 // that parsed.
+//
+// unverified is the third shape: the pinned path is gone and its command
+// re-resolved to a binary that is present but could not be version-detected.
+// It is not an adoption — nothing was verified, so nothing is published or
+// launched under it — only the observation that this path exists and the
+// pinned one does not (GH #6452).
 type healOutcome struct {
-	adopted  healedAgent
-	rejected *agent.BelowMinimumError
-	failure  error
+	adopted    healedAgent
+	rejected   *agent.BelowMinimumError
+	unverified string
+	failure    error
 }
 
 // resolveAgentEntryWithHeal is resolveAgentEntry plus what the self-heal
@@ -1004,6 +1019,17 @@ func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string,
 	})
 	outcome, _ := v.(healOutcome)
 	if outcome.adopted.path == "" {
+		// Nothing was adopted, but entry.Path was already established as gone
+		// above. Naming a path that provably cannot be executed makes every
+		// consumer fail on a ghost: registration probes it instead of the binary
+		// that is actually installed, so a version probe that would succeed on
+		// retry can never run, and the error the user sees blames a file the
+		// upgrade deleted. Prefer the live re-resolved path (GH #6452). The
+		// version stays the last known one and the pair is left unpublished,
+		// because this path is exactly the one we could not verify.
+		if outcome.unverified != "" {
+			entry.Path = outcome.unverified
+		}
 		return entry, d.agentVersion(provider), outcome
 	}
 	entry.Path = outcome.adopted.path
@@ -1104,7 +1130,16 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 			newPath = launchPath
 		}
 	}
-	return d.adoptAgentPath(ctx, provider, command, newPath, "re-resolved after pinned path vanished")
+	outcome := d.adoptAgentPath(ctx, provider, command, newPath, "re-resolved after pinned path vanished")
+	// Reached only when the pinned path has vanished, so an unadopted candidate
+	// still on disk is the better of the two paths to report. A below-minimum
+	// rejection is excluded: that is a verdict about the binary itself, and its
+	// callers demote the runtime rather than touch the path. Re-checked after the
+	// probe because a long `--version` gives the installer time to move it again.
+	if outcome.adopted.path == "" && outcome.rejected == nil && agentExecutablePresent(newPath) {
+		outcome.unverified = newPath
+	}
+	return outcome
 }
 
 func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath, reason string) healOutcome {
@@ -1114,7 +1149,7 @@ func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath,
 	// registration path applies (MUL-4486 review).
 	version, err := detectAgentVersion(ctx, agent.Command{Path: newPath})
 	if err != nil {
-		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
+		d.logger.Warn("re-resolved agent executable failed version detection; not adopting it",
 			"provider", provider, "command", command, "new_path", newPath, "error", err)
 		return healOutcome{failure: err}
 	}
@@ -1125,7 +1160,7 @@ func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath,
 			// adopt is still right, but reporting a rejection would let the
 			// caller demote a runtime on an unreadable version — the exact
 			// transient case the below-minimum machinery must never act on.
-			d.logger.Warn("re-resolved agent executable version could not be validated; keeping pinned path",
+			d.logger.Warn("re-resolved agent executable version could not be validated; not adopting it",
 				"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
 			return healOutcome{failure: err}
 		}
