@@ -268,7 +268,10 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	}
 
 	serverURL := resolveServerURL(cmd)
-	workspaceID := resolveWorkspaceID(cmd)
+	workspaceID, err := resolveTargetWorkspaceID(cmd)
+	if err != nil {
+		return nil, err
+	}
 	if serverURL == "" {
 		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
 	}
@@ -491,6 +494,47 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	return cfg.WorkspaceID
+}
+
+// resolveTargetWorkspaceID resolves the workspace a command should act on.
+//
+// The --workspace flag (accepting a full UUID, slug, or short UUID prefix)
+// takes highest precedence so scripts can pin a workspace by exact identifier,
+// independent of the mutable current-workspace pointer persisted in
+// config.json. That pointer is global process-shared state — any concurrent
+// `multica workspace switch` (or another script) can shift it mid-run and
+// silently retarget an unrelated command at the wrong workspace (GitHub
+// #7654). A UUID is forwarded as-is; a slug or prefix is resolved against the
+// caller's accessible workspace list, which also serves as the access /
+// existence check and yields a clear "not found" error for an unknown value.
+//
+// When --workspace is absent the existing resolution chain applies unchanged
+// (--workspace-id flag, MULTICA_WORKSPACE_ID env, profile default), preserving
+// today's behavior. Inside a daemon-managed agent task the workspace is bound
+// by the task token and the server ignores any client-supplied workspace, so
+// the flag is deliberately not honored there — resolution stays with the
+// daemon-provided env, exactly as resolveWorkspaceID already enforces.
+func resolveTargetWorkspaceID(cmd *cobra.Command) (string, error) {
+	if !inDaemonManagedExecutionContext() && cmd.Flags().Changed("workspace") {
+		target := strings.TrimSpace(cmd.Flag("workspace").Value.String())
+		if target == "" {
+			return "", fmt.Errorf("--workspace cannot be empty; pass a workspace id, slug, or id prefix")
+		}
+		// A full UUID is self-identifying: forward it without an extra
+		// /api/workspaces round trip, mirroring resolveWorkspaceArg. The
+		// downstream endpoint enforces access.
+		if uuidRegexp.MatchString(target) {
+			return target, nil
+		}
+		ctx, cancel := cli.APIContext(context.Background())
+		defer cancel()
+		ws, err := resolveWorkspaceRef(ctx, cmd, target)
+		if err != nil {
+			return "", err
+		}
+		return ws.ID, nil
+	}
+	return resolveWorkspaceID(cmd), nil
 }
 
 // requireWorkspaceID resolves the workspace ID and returns an error with
