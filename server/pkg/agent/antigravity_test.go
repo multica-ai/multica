@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -509,6 +510,47 @@ func TestAntigravityModelError(t *testing.T) {
 	}
 	if err := antigravityModelError("Claude Opus 4.6", catalog); err == nil {
 		t.Error("near-miss model (dropped suffix) should be rejected")
+	}
+}
+
+func TestAntigravityModelGuardUsesPairedRuntimeEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("env-shebang fixture is POSIX-only")
+	}
+
+	root := t.TempDir()
+	trustedBin := filepath.Join(root, "trusted-bin")
+	hostileBin := filepath.Join(root, "hostile-bin")
+	for _, dir := range []string{trustedBin, hostileBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := filepath.Join(root, "agy")
+	writeTestExecutable(t, target, []byte("#!/usr/bin/env node\n"))
+	writeTestExecutable(t, filepath.Join(trustedBin, "node"), []byte("#!/bin/sh\nif [ \"$2\" = \"models\" ]; then\n  printf '%s\\n' 'trusted-model'\nfi\n"))
+	writeTestExecutable(t, filepath.Join(hostileBin, "node"), []byte("#!/bin/sh\nexit 91\n"))
+
+	t.Setenv("PATH", hostileBin+string(os.PathListSeparator)+"/usr/bin:/bin")
+	pairedPath := trustedBin + string(os.PathListSeparator) + "/usr/bin:/bin"
+	backend, err := New("antigravity", Config{
+		ExecutablePath: target,
+		RuntimeEnv:     map[string]string{"PATH": pairedPath},
+		Env:            map[string]string{"PATH": pairedPath},
+		Logger:         quietAntigravityLogger(),
+	})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Model: "invalid-model"})
+	if err == nil {
+		for range session.Messages {
+		}
+		<-session.Result
+		t.Fatal("model guard ignored paired runtime environment and accepted an invalid model")
+	}
+	if !strings.Contains(err.Error(), "invalid-model") {
+		t.Fatalf("model guard returned the wrong error: %v", err)
 	}
 }
 

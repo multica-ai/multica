@@ -5,7 +5,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -76,6 +79,13 @@ type Command struct {
 	// by FilterLaunchPrefix. Never mutate a Command's Prefix in place; Argv
 	// copies it precisely so a caller cannot alias it.
 	Prefix []string
+	// Env is an optional environment overlay required to execute this exact
+	// command identity. It is primarily used for concrete targets selected by
+	// version managers: the target path can be pinned while its interpreter
+	// (for example /usr/bin/env node) still needs the matching toolset PATH.
+	// Callers should build it through WithEnv so the map cannot be mutated out
+	// from under a concurrent probe.
+	Env map[string]string
 	// logger reports prefix/argument conflicts at the moment a process is
 	// built. Optional: a zero Command logs nothing.
 	logger *slog.Logger
@@ -90,6 +100,21 @@ type Command struct {
 // one-shot `--version` probe.
 func NewCommand(path string, prefix []string) Command {
 	return Command{Path: path, Prefix: append([]string(nil), prefix...)}
+}
+
+// WithEnv returns a copy of c with an immutable environment overlay. The
+// overlay is applied to version probes and model-discovery subprocesses; task
+// launches receive the same values through Config.Env at the daemon boundary.
+func (c Command) WithEnv(env map[string]string) Command {
+	if len(env) == 0 {
+		c.Env = nil
+		return c
+	}
+	c.Env = make(map[string]string, len(env))
+	for key, value := range env {
+		c.Env[key] = value
+	}
+	return c
 }
 
 // Argv returns the full argument vector for one invocation: the command's own
@@ -111,7 +136,11 @@ func (c Command) Argv(args ...string) []string {
 // reintroduce GH #7046. TestOnlyLaunchGoSpawnsRuntimeProcesses enforces it.
 func (c Command) exec(ctx context.Context, args ...string) *exec.Cmd {
 	warnLaunchPrefixOverlap(c.Prefix, args, c.logger)
-	return newRuntimeCmd(exec.CommandContext(ctx, c.Path, c.Argv(args...)...))
+	cmd := newRuntimeCmd(exec.CommandContext(ctx, c.Path, c.Argv(args...)...))
+	if len(c.Env) > 0 {
+		cmd.Env = mergeEnv(os.Environ(), c.Env)
+	}
+	return cmd
 }
 
 // newRuntimeCmd applies the process-lifecycle defaults every runtime process in
@@ -267,7 +296,11 @@ type invocationChooser func(execName, lookedUp string, args []string, logger *sl
 func (c Command) execVia(ctx context.Context, choose invocationChooser, lookedUp string, args []string, logger *slog.Logger) (*exec.Cmd, string, []string) {
 	warnLaunchPrefixOverlap(c.Prefix, args, logger)
 	argv0, cmdArgs := choose(c.Path, lookedUp, c.Argv(args...), logger)
-	return newRuntimeCmd(exec.CommandContext(ctx, argv0, cmdArgs...)), argv0, cmdArgs
+	cmd := newRuntimeCmd(exec.CommandContext(ctx, argv0, cmdArgs...))
+	if len(c.Env) > 0 {
+		cmd.Env = mergeEnv(os.Environ(), c.Env)
+	}
+	return cmd, argv0, cmdArgs
 }
 
 // withFilteredPrefix returns a copy of the command whose prefix has been
@@ -284,16 +317,26 @@ func (c Command) withFilteredPrefix(fn func([]string) []string) Command {
 	return c
 }
 
-// cacheKey identifies the command for the model-discovery memo. The prefix is
-// part of it because two profiles can share one binary and still enumerate
-// different catalogs — `ccms start q36` and `ccms start opus` are the same
-// executable with different models behind it, and keying on the path alone
-// would serve the first one's catalog to the second (see discoveryCacheKey).
+// cacheKey identifies the command for the model-discovery memo. The prefix and
+// environment are part of it because either can select a different runtime
+// behind one executable path. Keying only on the path would serve one wrapped
+// or version-managed command's catalog to another (see discoveryCacheKey).
 func (c Command) cacheKey() string {
-	if len(c.Prefix) == 0 {
-		return c.Path
+	parts := make([]string, 0, 3+len(c.Prefix)+2*len(c.Env))
+	parts = append(parts, c.Path, "prefix:"+strconv.Itoa(len(c.Prefix)))
+	parts = append(parts, c.Prefix...)
+	parts = append(parts, "env:"+strconv.Itoa(len(c.Env)))
+	if len(c.Env) > 0 {
+		keys := make([]string, 0, len(c.Env))
+		for key := range c.Env {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			parts = append(parts, key, c.Env[key])
+		}
 	}
-	return c.Path + "\x00" + strings.Join(c.Prefix, "\x00")
+	return strings.Join(parts, "\x00")
 }
 
 // String renders the command the way a user wrote it in the Runtimes UI, for
@@ -306,11 +349,13 @@ func (c Command) String() string {
 }
 
 // commandAt pairs a resolved executable path with this runtime's launch
-// prefix. Backends call it after their own PATH resolution and default-binary
-// fallback, which is why the path is a parameter rather than read from
-// Config.ExecutablePath.
+// prefix and restricted execution environment. Backends call it after their
+// own PATH resolution and default-binary fallback, which is why the path is a
+// parameter rather than read from Config.ExecutablePath. Carrying RuntimeEnv
+// here keeps backend-owned probes (for example OpenClaw's version gate and
+// Antigravity's model guard) on the same command identity the daemon verified.
 func (c Config) commandAt(path string) Command {
-	return Command{Path: path, Prefix: c.LaunchPrefix, logger: c.Logger}
+	return (Command{Path: path, Prefix: c.LaunchPrefix, logger: c.Logger}).WithEnv(c.RuntimeEnv)
 }
 
 // logAgentCommand is the only boundary allowed to record runtime process

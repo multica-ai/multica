@@ -74,6 +74,23 @@ func cachedShellResolvedAgents() map[string]string {
 	return shellResolveCache
 }
 
+// cachedShellResolvedExecutables adds daemon-specific version-manager
+// resolution to the login shell's invocation paths. Keeping this outside the
+// shell cache preserves its cheap path-only contract while still pairing a
+// mise target with the environment selected from the trusted root.
+func cachedShellResolvedExecutables() map[string]executableResolution {
+	paths := cachedShellResolvedAgents()
+	resolved := make(map[string]executableResolution, len(paths))
+	for name, path := range paths {
+		entry, _, err := resolveMiseDiscoveredExecutable(path, name)
+		if err != nil {
+			continue
+		}
+		resolved[name] = entry
+	}
+	return resolved
+}
+
 // probeAgentCLIs discovers which built-in agent CLIs are installed on this
 // machine and returns one AgentEntry per provider that resolved.
 //
@@ -112,14 +129,29 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// is almost always at least one uninstalled provider to miss on. The TTL
 	// still lets a CLI installed into a login-shell-only PATH dir (nvm, fnm,
 	// ~/.local/bin via ~/.zshrc) be discovered without a restart (MUL-5439).
-	getShellResolved := cachedShellResolvedAgents
+	// A probe checks many provider names. Resolve the login-shell snapshot's
+	// richer launch contracts at most once for this round: the path snapshot is
+	// cached, but mise path/environment resolution intentionally is not, and
+	// repeating it once per missing provider would multiply its two-second
+	// deadline across the whole provider list.
+	var (
+		shellResolvedOnce sync.Once
+		shellResolved     map[string]executableResolution
+	)
+	getShellResolved := func() map[string]executableResolution {
+		shellResolvedOnce.Do(func() {
+			shellResolved = cachedShellResolvedExecutables()
+		})
+		return shellResolved
+	}
 	probe := func(envVar, defaultCmd, modelEnv string) (AgentEntry, bool) {
 		cmd := envOrDefault(envVar, defaultCmd)
-		if path, err := resolveAgentExecutablePath(cmd); err == nil {
+		if resolved, err := resolveAgentExecutable(cmd); err == nil {
 			return AgentEntry{
-				Path:    path,
+				Path:    resolved.Path,
 				Command: cmd,
 				Model:   strings.TrimSpace(os.Getenv(modelEnv)),
+				MiseEnv: resolved.Env,
 			}, true
 		}
 		// The shell fallback only rescues bare command names. An operator
@@ -129,11 +161,12 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 		if strings.ContainsAny(cmd, "/\\") {
 			return AgentEntry{}, false
 		}
-		if path, ok := getShellResolved()[cmd]; ok {
+		if resolved, ok := getShellResolved()[cmd]; ok {
 			return AgentEntry{
-				Path:    path,
+				Path:    resolved.Path,
 				Command: cmd,
 				Model:   strings.TrimSpace(os.Getenv(modelEnv)),
+				MiseEnv: resolved.Env,
 			}, true
 		}
 		if defaultCmd == "codex" && cmd == defaultCmd {
@@ -225,7 +258,7 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// DSH is registered only when its Multica runtime profile is installed.
 	// A bare dsh binary is not enough: without the bundle it has no --stdio
 	// protocol and every task would fail after being advertised as healthy.
-	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok && probeDshMulticaProfile(e.Path) {
+	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok && probeDshMulticaProfile(e.Path, e.MiseEnv) {
 		agents["dsh"] = e
 	}
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
@@ -306,10 +339,16 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	return agents
 }
 
-func probeDshMulticaProfile(executablePath string) bool {
+func probeDshMulticaProfile(executablePath string, runtimeEnv map[string]string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, executablePath, "--profile", "multica", "--probe")
+	if len(runtimeEnv) > 0 {
+		cmd.Env = append([]string(nil), os.Environ()...)
+		for key, value := range runtimeEnv {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
+	}
 	cmd.WaitDelay = time.Second
 	output, err := cmd.Output()
 	if err != nil {

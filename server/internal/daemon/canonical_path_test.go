@@ -3,8 +3,13 @@
 package daemon
 
 import (
+	"context"
+	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestIsNameDispatchingAgentShim_RequiresExactDispatcherName(t *testing.T) {
@@ -28,5 +33,81 @@ func TestIsNameDispatchingAgentShim_RequiresExactDispatcherName(t *testing.T) {
 				t.Fatalf("isNameDispatchingAgentShim(%q) = %v, want %v", tt.path, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResolveMiseManagedExecutable_RejectsManagerAsTarget(t *testing.T) {
+	mise := filepath.Join(t.TempDir(), "mise")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$MULTICA_TEST_MISE_SELF\"\n"
+	if err := os.WriteFile(mise, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake mise: %v", err)
+	}
+	t.Setenv("MULTICA_TEST_MISE_SELF", mise)
+
+	_, err := resolveMiseManagedExecutable(context.Background(), mise, "claude")
+	if err == nil || !strings.Contains(err.Error(), "manager executable") {
+		t.Fatalf("resolve manager target error = %v, want fail-closed diagnosis", err)
+	}
+}
+
+func TestResolveMiseManagedExecutable_RejectsInvalidEnvironment(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write managed target: %v", err)
+	}
+	mise := filepath.Join(t.TempDir(), "mise")
+	script := `#!/bin/sh
+case "$1" in
+  which) printf '%s\n' "$MULTICA_TEST_MISE_TARGET" ;;
+  env) printf '{"JAVA_HOME":"/java"}\n' ;;
+esac
+`
+	if err := os.WriteFile(mise, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake mise: %v", err)
+	}
+	t.Setenv("MULTICA_TEST_MISE_TARGET", target)
+
+	_, err := resolveMiseManagedExecutable(context.Background(), mise, "claude")
+	if err == nil || !strings.Contains(err.Error(), "returned no PATH") {
+		t.Fatalf("resolve target without mise PATH error = %v, want fail-closed diagnosis", err)
+	}
+}
+
+func TestSanitizeMiseResolvedEnv_PreservesToolsetWithoutDaemonOwnedValues(t *testing.T) {
+	got, err := sanitizeMiseResolvedEnv(map[string]string{
+		"PATH":          "/mise/node/bin:/usr/bin:/bin",
+		"JAVA_HOME":     "/mise/java",
+		"HOME":          "/mise/home",
+		"MULTICA_TOKEN": "not-a-task-token",
+	})
+	if err != nil {
+		t.Fatalf("sanitize mise environment: %v", err)
+	}
+	if got["PATH"] != "/mise/node/bin:/usr/bin:/bin" || got["JAVA_HOME"] != "/mise/java" {
+		t.Fatalf("sanitized mise environment lost tool values: %v", got)
+	}
+	if _, ok := got["HOME"]; ok {
+		t.Fatal("sanitized mise environment retained daemon-owned HOME")
+	}
+	if _, ok := got["MULTICA_TOKEN"]; ok {
+		t.Fatal("sanitized mise environment retained task-owned MULTICA_TOKEN")
+	}
+}
+
+func TestResolveMiseManagedExecutable_TimesOut(t *testing.T) {
+	mise := filepath.Join(t.TempDir(), "mise")
+	if err := os.WriteFile(mise, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
+		t.Fatalf("write fake mise: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := resolveMiseManagedExecutable(ctx, mise, "claude")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("resolveMiseManagedExecutable error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("timed-out mise which took %v, want at most 1s", elapsed)
 	}
 }

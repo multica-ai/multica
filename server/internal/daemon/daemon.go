@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log/slog"
+	"maps"
 	"math/rand"
 	"net"
 	"net/http"
@@ -846,7 +847,8 @@ func (d *Daemon) refreshHealedVersion(provider, path, version string) {
 	if !ok || healed.path != path || healed.version == version {
 		return
 	}
-	d.resolvedPaths[provider] = healedAgent{path: path, version: version}
+	healed.version = version
+	d.resolvedPaths[provider] = healed
 }
 
 // hasDetectedAgentVersions reports whether any CLI version has ever been
@@ -858,15 +860,15 @@ func (d *Daemon) hasDetectedAgentVersions() bool {
 	return len(d.agentVersions) > 0
 }
 
-// healedAgent bundles a self-healed executable path with the CLI version
-// detected for it. The two are published together under resolvedPathsMu and
-// returned together from resolveAgentEntry, so a caller that observes the new
-// path necessarily observes the matching version — closing the window where a
-// just-upgraded binary would run under the daemon's previous version policy
-// (MUL-4486 review).
+// healedAgent bundles a self-healed executable path with the CLI version and
+// version-manager environment detected for it. The values are published
+// together under resolvedPathsMu and returned together from resolveAgentEntry,
+// so a caller that observes the new path necessarily observes the matching
+// launch contract (MUL-4486 review, GH #7764).
 type healedAgent struct {
 	path    string
 	version string
+	miseEnv map[string]string
 }
 
 // resolveAgentEntry returns entry with a usable executable path plus the CLI
@@ -969,6 +971,7 @@ func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string,
 			launchOutcome.failure = err
 		} else if outcome, ok := d.resolveAgentLaunchTarget(ctx, provider, entry, launchPath); ok {
 			entry.Path = outcome.adopted.path
+			entry.MiseEnv = maps.Clone(outcome.adopted.miseEnv)
 			return entry, outcome.adopted.version, outcome
 		} else {
 			launchOutcome = outcome
@@ -983,6 +986,7 @@ func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string,
 	d.resolvedPathsMu.RUnlock()
 	if ok && agentExecutablePresent(healed.path) {
 		entry.Path = healed.path
+		entry.MiseEnv = maps.Clone(healed.miseEnv)
 		launchOutcome.adopted = healed
 		return entry, healed.version, launchOutcome
 	}
@@ -1007,6 +1011,7 @@ func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string,
 		return entry, d.agentVersion(provider), outcome
 	}
 	entry.Path = outcome.adopted.path
+	entry.MiseEnv = maps.Clone(outcome.adopted.miseEnv)
 	return entry, outcome.adopted.version, outcome
 }
 
@@ -1036,7 +1041,7 @@ func (d *Daemon) resolveAgentLaunchTarget(ctx context.Context, provider string, 
 			if ok && current.path == launchPath && agentExecutablePresent(current.path) {
 				return healOutcome{adopted: current}, nil
 			}
-			return d.adoptAgentPath(ctx, provider, entry.Command, launchPath, "resolved stable entry point for launch"), nil
+			return d.adoptAgentPath(ctx, provider, entry.Command, launchPath, entry.MiseEnv, "resolved stable entry point for launch"), nil
 		})
 		outcome, _ := v.(healOutcome)
 
@@ -1091,28 +1096,28 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 		return healOutcome{adopted: cached}
 	}
 
-	newPath, found := reresolveAgentCommand(command)
+	resolved, found := reresolveAgentCommand(command)
 	if !found {
 		return healOutcome{}
 	}
-	if launchPath, handled, err := executablePathForLaunch(newPath); handled {
+	if launchPath, handled, err := executablePathForLaunch(resolved.Path); handled {
 		if err != nil {
 			d.logger.Warn("resolve re-discovered agent executable for launch failed; keeping discovered path",
-				"provider", provider, "path", newPath, "error", err)
+				"provider", provider, "path", resolved.Path, "error", err)
 			return healOutcome{failure: err}
 		} else {
-			newPath = launchPath
+			resolved.Path = launchPath
 		}
 	}
-	return d.adoptAgentPath(ctx, provider, command, newPath, "re-resolved after pinned path vanished")
+	return d.adoptAgentPath(ctx, provider, command, resolved.Path, resolved.Env, "re-resolved after pinned path vanished")
 }
 
-func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath, reason string) healOutcome {
+func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath string, miseEnv map[string]string, reason string) healOutcome {
 	// Verify before adopting. An in-place "upgrade" that actually repoints at an
 	// older or broken install must not be launched under the daemon's stale
 	// version policy, and must not slip past the minimum-version gate that the
 	// registration path applies (MUL-4486 review).
-	version, err := detectAgentVersion(ctx, agent.Command{Path: newPath})
+	version, err := detectAgentVersion(ctx, agent.NewCommand(newPath, nil).WithEnv(miseEnv))
 	if err != nil {
 		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
 			"provider", provider, "command", command, "new_path", newPath, "error", err)
@@ -1134,9 +1139,9 @@ func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath,
 		return healOutcome{rejected: tooOld}
 	}
 
-	adopted := healedAgent{path: newPath, version: version}
-	// Publish path + version atomically: any reader that sees the new path in
-	// resolveAgentEntry gets the matching version out of the same struct value.
+	adopted := healedAgent{path: newPath, version: version, miseEnv: maps.Clone(miseEnv)}
+	// Publish the path, version, and version-manager environment atomically: any
+	// reader that sees the new path gets the complete matching launch contract.
 	d.resolvedPathsMu.Lock()
 	if d.resolvedPaths == nil {
 		d.resolvedPaths = make(map[string]healedAgent)
@@ -2351,7 +2356,7 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 				"name", name, "version", heal.rejected.Detected, "error", heal.rejected.Error())
 			return heal.rejected.Detected, heal.rejected.Error(), builtinProbeBelowMinimum
 		}
-		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path})
+		version, err := detectAgentVersion(ctx, agent.NewCommand(resolved.Path, nil).WithEnv(resolved.MiseEnv))
 		if err != nil {
 			lastErr = err
 			if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
@@ -4372,6 +4377,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	// path is also never re-resolved: like runTask, we don't second-guess a
 	// path the profile pinned.
 	var execPath string
+	var miseEnv map[string]string
 	// fixedArgs mirrors the launch prefix runTask would use. Discovery has to
 	// enumerate the CLI the profile actually runs, so a subcommand wrapper is
 	// probed as `ccms start q36 models`, not `ccms models` (GH #7046).
@@ -4387,6 +4393,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		// upgrade deleted (MUL-4486).
 		entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
 		execPath = entry.Path
+		miseEnv = entry.MiseEnv
 	} else {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
@@ -4395,7 +4402,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		return
 	}
 
-	catalog, err := listModels(ctx, rt.Provider, agent.NewCommand(execPath, fixedArgs))
+	catalog, err := listModels(ctx, rt.Provider, agent.NewCommand(execPath, fixedArgs).WithEnv(miseEnv))
 	if err != nil {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
@@ -7174,6 +7181,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if customSpec, isCustom := d.customProfileLaunchForRuntime(task.RuntimeID); isCustom {
 		usesCustomProfileCommand = true
 		entry.Path = customSpec.path
+		entry.MiseEnv = nil
 		resolvedVersion = customSpec.version
 		// Filter here rather than relying on agent.New doing it, so that the
 		// launch and the catalog lookups below agree on one prefix. They share
@@ -7309,8 +7317,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		codexVersion = resolvedVersion
 	}
 	openclawBin := ""
+	var openclawEnv map[string]string
 	if provider == "openclaw" {
 		openclawBin = entry.Path
+		openclawEnv = maps.Clone(entry.MiseEnv)
 	}
 	// Resolve any local_directory assignment again here so runTask can plumb
 	// LocalWorkDir into execenv. handleTask already validated + locked the
@@ -7544,6 +7554,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			CodexVersion:          codexVersion,
 			ResumeSessionID:       task.PriorSessionID,
 			OpenclawBin:           openclawBin,
+			OpenclawEnv:           openclawEnv,
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
 			OpenclawGateway:       openclawGateway,
@@ -7594,6 +7605,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Provider:              provider,
 			CodexVersion:          codexVersion,
 			OpenclawBin:           openclawBin,
+			OpenclawEnv:           openclawEnv,
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
 			OpenclawGateway:       openclawGateway,
@@ -7895,6 +7907,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, err
 	}
 	agentEnv := taskMulticaEnvironment(task, agentName, agentToken, env.MulticaConfigRoot, d.cfg.WorkspacesRoot, d.cfg.ServerBaseURL, d.cfg.HealthPort, slot, taskTempDir)
+	applyMiseResolvedEnv(agentEnv, entry.MiseEnv)
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode
 	}
@@ -7924,7 +7937,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// multica binary so that `multica` commands in the agent always resolve.
 	if selfBin, err := resolveSelfExecutable(); err == nil {
 		binDir := filepath.Dir(selfBin)
-		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+		basePath := os.Getenv("PATH")
+		if resolvedPath := agentEnv["PATH"]; resolvedPath != "" {
+			basePath = resolvedPath
+		}
+		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + basePath
 	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
@@ -8015,6 +8032,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		LaunchPrefix:   profileFixedArgs,
 		CLIVersion:     resolvedVersion,
 		Env:            agentEnv,
+		RuntimeEnv:     maps.Clone(entry.MiseEnv),
 		Logger:         d.logger,
 		TaskID:         task.ID,
 		RuntimeID:      task.RuntimeID,
@@ -8083,7 +8101,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		thinkingLevel = task.Agent.ThinkingLevel
 		serviceTier = task.Agent.ServiceTier
 	}
-	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
+	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs).WithEnv(entry.MiseEnv),
 		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
 	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
 
@@ -9539,6 +9557,20 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	return false
+}
+
+// applyMiseResolvedEnv layers the trusted-root mise environment under the
+// daemon's task-owned values. PATH is expected to be absent at this point and
+// supplies the pinned toolset used by script interpreters; any future overlap
+// keeps the task value so mise config can never replace a credential or task
+// identity assembled by taskMulticaEnvironment.
+func applyMiseResolvedEnv(agentEnv, miseEnv map[string]string) {
+	for key, value := range miseEnv {
+		if _, exists := agentEnv[key]; exists {
+			continue
+		}
+		agentEnv[key] = value
+	}
 }
 
 // layerCustomEnvAndHermesHome applies the agent's custom_env onto the child env

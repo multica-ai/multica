@@ -19,6 +19,21 @@ type AgentEntry struct {
 	// Daemon.resolveAgentEntry and MUL-4486.
 	Command string
 	Model   string // model override (optional)
+	// MiseEnv is the trusted-root environment reported alongside a concrete
+	// mise-managed Path. Pinning only the top-level script is insufficient for
+	// npm-backed CLIs whose /usr/bin/env node shebang would otherwise resolve
+	// through the task worktree's mise shim again. It is nil for ordinary
+	// discovery and for explicit MULTICA_*_PATH overrides.
+	MiseEnv map[string]string
+}
+
+// executableResolution keeps a discovered executable paired with the small
+// environment overlay required to run that exact target. The pair is treated
+// as immutable after discovery so version probes, model discovery, and task
+// launch all observe the same runtime identity.
+type executableResolution struct {
+	Path string
+	Env  map[string]string
 }
 
 // Runtime represents a registered daemon runtime.

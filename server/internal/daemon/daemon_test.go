@@ -318,6 +318,26 @@ func TestLayerCustomEnvAndHermesHome(t *testing.T) {
 	}
 }
 
+func TestApplyMiseResolvedEnv_PreservesTaskOwnedValues(t *testing.T) {
+	agentEnv := map[string]string{
+		"MULTICA_TOKEN": "task-token",
+	}
+	applyMiseResolvedEnv(agentEnv, map[string]string{
+		"PATH":          "/mise/node/bin:/usr/bin:/bin",
+		"JAVA_HOME":     "/mise/java",
+		"MULTICA_TOKEN": "global-mise-token",
+	})
+	if got := agentEnv["PATH"]; got != "/mise/node/bin:/usr/bin:/bin" {
+		t.Fatalf("PATH = %q, want mise toolset PATH", got)
+	}
+	if got := agentEnv["JAVA_HOME"]; got != "/mise/java" {
+		t.Fatalf("JAVA_HOME = %q, want mise tool environment", got)
+	}
+	if got := agentEnv["MULTICA_TOKEN"]; got != "task-token" {
+		t.Fatalf("MULTICA_TOKEN = %q, want task-owned value", got)
+	}
+}
+
 func TestRepoCheckoutModeFor(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

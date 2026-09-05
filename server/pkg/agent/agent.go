@@ -258,11 +258,17 @@ type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, codearts, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim, zeroclaw)
 	CLIVersion     string            // detected version paired with ExecutablePath; observation only, never used to choose behavior
 	Env            map[string]string // extra environment variables
-	Logger         *slog.Logger
-	TaskID         string
-	RuntimeID      string
-	DaemonVersion  string
-	CodexVersion   string
+	// RuntimeEnv is the restricted environment paired with ExecutablePath.
+	// Version-manager targets can be absolute scripts whose /usr/bin/env
+	// interpreter still depends on the matching PATH, so commandAt applies this
+	// overlay to every version or model probe it constructs. Env remains the
+	// complete task environment used by the eventual agent launch.
+	RuntimeEnv    map[string]string
+	Logger        *slog.Logger
+	TaskID        string
+	RuntimeID     string
+	DaemonVersion string
+	CodexVersion  string
 	// BuiltinRuntime reports that ExecutablePath is the provider's own
 	// discovered binary rather than a custom runtime profile's command. A
 	// custom profile keeps its protocol family as the provider, so the

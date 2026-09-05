@@ -555,8 +555,10 @@ func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 // The key spans the launch prefix too, not just the path: two profiles can
 // wrap one binary with different fixed_args — `ccms start q36` and `ccms
 // start opus` — and enumerate genuinely different catalogs out of it.
+// Command.cacheKey also includes its environment so two version-manager
+// toolsets sharing a target path cannot reuse each other's catalog.
 func discoveryCacheKey(providerType string, runtimeCmd Command) string {
-	if runtimeCmd.Path == "" && len(runtimeCmd.Prefix) == 0 {
+	if runtimeCmd.Path == "" && len(runtimeCmd.Prefix) == 0 && len(runtimeCmd.Env) == 0 {
 		return providerType
 	}
 	return providerType + ":" + runtimeCmd.cacheKey()
@@ -1939,7 +1941,8 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	}
 	cmd := runtimeCmd.exec(runCtx, cmdArgs...)
 	hideAgentWindow(cmd)
-	childEnv := append(os.Environ(), p.extraEnv...)
+	childEnv := mergeEnv(os.Environ(), runtimeCmd.Env)
+	childEnv = append(childEnv, p.extraEnv...)
 	if isolatedStateDir != "" {
 		childEnv = replaceEnvValue(childEnv, p.isolatedStateEnv, isolatedStateDir)
 	}

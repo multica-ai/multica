@@ -27,10 +27,65 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 			if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if got := probeDshMulticaProfile(path); got != tc.want {
+			if got := probeDshMulticaProfile(path, nil); got != tc.want {
 				t.Fatalf("probeDshMulticaProfile() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestProbeAgentCLIsMiseManagedDshUsesPairedEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+
+	root := t.TempDir()
+	shimDir := filepath.Join(root, "shims")
+	trustedBin := filepath.Join(root, "trusted-bin")
+	hostileBin := filepath.Join(root, "hostile-bin")
+	for _, dir := range []string{shimDir, trustedBin, hostileBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	target := filepath.Join(root, "dsh-target")
+	if err := os.WriteFile(target, []byte("#!/usr/bin/env node\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(trustedBin, "node"), []byte("#!/bin/sh\nprintf '%s\\n' '{\"v\":1,\"type\":\"probe\",\"runtime\":\"dsh\",\"protocol_version\":1}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hostileBin, "node"), []byte("#!/bin/sh\nexit 91\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := filepath.Join(root, "mise")
+	managerBody := "#!/bin/sh\nset -eu\ncase \"$1\" in\n  which) printf '%s\\n' \"$TEST_DSH_TARGET\" ;;\n  env) printf '{\"PATH\":\"%s:/usr/bin:/bin\"}\\n' \"$TEST_DSH_TRUSTED_BIN\" ;;\n  *) exit 2 ;;\nesac\n"
+	if err := os.WriteFile(manager, []byte(managerBody), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(manager, filepath.Join(shimDir, "dsh")); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("TEST_DSH_TARGET", target)
+	t.Setenv("TEST_DSH_TRUSTED_BIN", trustedBin)
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+hostileBin+string(os.PathListSeparator)+"/usr/bin:/bin")
+	t.Setenv("MULTICA_DSH_PATH", "")
+	t.Setenv("SHELL", filepath.Join(root, "unsupported-shell"))
+	resetShellResolveCacheForTest(t)
+
+	entry, ok := probeAgentCLIs()["dsh"]
+	if !ok {
+		t.Fatal("mise-managed DSH was dropped after its path and environment resolved")
+	}
+	canonicalTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Path != canonicalTarget || entry.MiseEnv["PATH"] == "" {
+		t.Fatalf("dsh entry = %+v, want paired target and environment", entry)
 	}
 }
 

@@ -59,6 +59,11 @@ type PrepareParams struct {
 	Provider     string // agent provider (determines runtime config and skill injection paths)
 	CodexVersion string // detected Codex CLI version (only used when Provider == "codex")
 	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	// OpenclawEnv is the environment paired with OpenclawBin by automatic
+	// version-manager discovery. Config introspection runs before the task child
+	// is built, so it must receive the same interpreter/toolset environment as
+	// the eventual OpenClaw launch.
+	OpenclawEnv map[string]string
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Cursor, OpenClaw, and OMP consume it here;
@@ -726,6 +731,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if params.Provider == "openclaw" {
 		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
 			OpenclawBin: params.OpenclawBin,
+			Env:         params.OpenclawEnv,
 			CacheDir:    openclawProfileCacheDir(params.Profile, logger),
 			McpConfig:   params.McpConfig,
 			Gateway:     params.OpenclawGateway,
@@ -764,6 +770,9 @@ type ReuseParams struct {
 	// it. Empty means a fresh thread. See prepareCodexSessionsDir (MUL-4424).
 	ResumeSessionID string
 	OpenclawBin     string // only used when Provider == "openclaw"; empty = PATH lookup
+	// OpenclawEnv mirrors PrepareParams.OpenclawEnv on reuse so refreshed
+	// config discovery executes the same version-manager launch contract.
+	OpenclawEnv map[string]string
 	// McpConfig is the agent's saved `mcp_config` JSON. Reused on reuse so a
 	// freshly-saved managed set re-materialises into the wrapper before the
 	// task starts — without this a stale wrapper from a prior run would keep
@@ -1014,6 +1023,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if params.Provider == "openclaw" {
 		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{
 			OpenclawBin: params.OpenclawBin,
+			Env:         params.OpenclawEnv,
 			CacheDir:    openclawProfileCacheDir(params.Profile, logger),
 			McpConfig:   params.McpConfig,
 			Gateway:     params.OpenclawGateway,

@@ -1556,3 +1556,41 @@ func TestOpenclawExecuteAllowsCurrentVersion(t *testing.T) {
 		t.Fatal("timeout waiting for result")
 	}
 }
+
+func TestOpenclawVersionGateUsesPairedRuntimeEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("env-shebang fixture is POSIX-only")
+	}
+
+	root := t.TempDir()
+	trustedBin := filepath.Join(root, "trusted-bin")
+	hostileBin := filepath.Join(root, "hostile-bin")
+	for _, dir := range []string{trustedBin, hostileBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := filepath.Join(root, "openclaw")
+	writeTestExecutable(t, target, []byte("#!/usr/bin/env node\n"))
+	writeTestExecutable(t, filepath.Join(trustedBin, "node"), []byte("#!/bin/sh\nif [ \"$2\" = \"--version\" ]; then\n  printf '%s\\n' 'openclaw 2026.8.1'\nfi\n"))
+	writeTestExecutable(t, filepath.Join(hostileBin, "node"), []byte("#!/bin/sh\nexit 91\n"))
+
+	t.Setenv("PATH", hostileBin+string(os.PathListSeparator)+"/usr/bin:/bin")
+	pairedPath := trustedBin + string(os.PathListSeparator) + "/usr/bin:/bin"
+	backend, err := New("openclaw", Config{
+		ExecutablePath: target,
+		RuntimeEnv:     map[string]string{"PATH": pairedPath},
+		Env:            map[string]string{"PATH": pairedPath},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new openclaw backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("version gate ignored paired runtime environment: %v", err)
+	}
+	for range session.Messages {
+	}
+	<-session.Result
+}

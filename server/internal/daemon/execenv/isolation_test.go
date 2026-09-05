@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -249,6 +250,52 @@ func TestPreparationRequestPreservesOpenclawGatewayForHelper(t *testing.T) {
 			}
 			if got := tt.pin(got); got != want {
 				t.Fatal("gateway pin fields did not survive the helper protocol")
+			}
+		})
+	}
+}
+
+func TestPreparationRequestPreservesOpenclawEnvironmentForHelper(t *testing.T) {
+	t.Parallel()
+	want := map[string]string{
+		"PATH":          "/mise/node/bin:/usr/bin:/bin",
+		"OPENCLAW_HOME": "/mise/openclaw-home",
+	}
+	tests := []struct {
+		name    string
+		request preparationRequest
+		env     func(preparationRequest) map[string]string
+	}{
+		{
+			name: "prepare",
+			request: preparationRequest{
+				Action:  preparationActionPrepare,
+				Prepare: &PrepareParams{OpenclawEnv: want},
+			},
+			env: func(request preparationRequest) map[string]string { return request.Prepare.OpenclawEnv },
+		},
+		{
+			name: "reuse",
+			request: preparationRequest{
+				Action: preparationActionReuse,
+				Reuse:  &ReuseParams{OpenclawEnv: want},
+			},
+			env: func(request preparationRequest) map[string]string { return request.Reuse.OpenclawEnv },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, err := marshalPreparationRequest(tt.request)
+			if err != nil {
+				t.Fatalf("marshal preparation request: %v", err)
+			}
+			got, err := decodePreparationRequest(bytes.NewReader(payload))
+			if err != nil {
+				t.Fatalf("decode preparation request: %v", err)
+			}
+			if !reflect.DeepEqual(tt.env(got), want) {
+				t.Fatalf("openclaw environment = %v, want %v", tt.env(got), want)
 			}
 		})
 	}

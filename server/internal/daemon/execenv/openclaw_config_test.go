@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -54,7 +55,65 @@ func installOpenclawStub(t *testing.T, responses map[string]openclawResponse) *o
 	return stub
 }
 
-func (s *openclawCLIStub) exec(ctx context.Context, bin string, args ...string) (string, error) {
+func TestPrepareOpenclawConfigUsesPairedCommandEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("env shebang fixture is Unix-specific")
+	}
+
+	const interpreterName = "multica-openclaw-env-test"
+	runtimeBin := t.TempDir()
+	interpreter := filepath.Join(runtimeBin, interpreterName)
+	interpreterScript := `#!/bin/sh
+shift
+case "$*" in
+  "config validate --json") printf '%s\n' '{"path":"$OPENCLAW_HOME/.openclaw/openclaw.json"}' ;;
+  "config get agents.list --json") printf '%s\n' '[]' ;;
+  *) exit 42 ;;
+esac
+`
+	if err := os.WriteFile(interpreter, []byte(interpreterScript), 0o755); err != nil {
+		t.Fatalf("write managed interpreter: %v", err)
+	}
+	target := filepath.Join(t.TempDir(), "openclaw")
+	if err := os.WriteFile(target, []byte("#!/usr/bin/env "+interpreterName+"\n"), 0o755); err != nil {
+		t.Fatalf("write managed openclaw target: %v", err)
+	}
+
+	openclawHome := t.TempDir()
+	configPath := filepath.Join(openclawHome, ".openclaw", "openclaw.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir openclaw config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("write openclaw config: %v", err)
+	}
+	t.Setenv("PATH", "/usr/bin:/bin")
+
+	if _, err := execOpenclawCLI(context.Background(), target, "config", "validate", "--json"); err == nil {
+		t.Fatal("managed openclaw unexpectedly ran without its paired interpreter environment")
+	}
+
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+		OpenclawBin: target,
+		Env: map[string]string{
+			"PATH":          runtimeBin + string(os.PathListSeparator) + "/usr/bin:/bin",
+			"OPENCLAW_HOME": openclawHome,
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepare openclaw config with paired environment: %v", err)
+	}
+	if result.IncludeRoot != filepath.Dir(configPath) {
+		t.Fatalf("include root = %q, want config directory %q", result.IncludeRoot, filepath.Dir(configPath))
+	}
+}
+
+func (s *openclawCLIStub) exec(ctx context.Context, _ map[string]string, bin string, args ...string) (string, error) {
 	deadline, _ := ctx.Deadline()
 	s.calls = append(s.calls, openclawCall{bin: bin, args: append([]string(nil), args...), deadline: deadline})
 	key := strings.Join(args, " ")
