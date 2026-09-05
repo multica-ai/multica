@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -41,8 +44,69 @@ var openclawBlockedArgs = map[string]blockedArgMode{
 	"--json":          blockedStandalone, // JSON output for daemon communication
 	"--session-id":    blockedWithValue,  // managed by daemon for session resumption
 	"--message":       blockedWithValue,  // prompt is set by daemon
+	"-m":              blockedWithValue,  // alias for --message
+	"--message-file":  blockedWithValue,  // prompt file is set by daemon when --message-file is supported
 	"--model":         blockedWithValue,  // openclaw agent does not accept --model; model is bound at registration via `openclaw agents add/update --model`
 	"--system-prompt": blockedWithValue,  // openclaw agent does not accept --system-prompt; instructions are injected into --message
+}
+
+func isWindowsCommandShim(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".cmd", ".bat":
+		return true
+	default:
+		return false
+	}
+}
+
+// probeOpenclawMessageFileSupport runs `openclaw agent --help` and reports
+// whether its output advertises --message-file. Only a successful probe
+// (or an ErrWaitDelay salvage where the answer already arrived) counts as
+// supported — a non-zero exit that happens to mention the flag in an error
+// message must not become a false-positive. Uses combinedOutputOwned so a
+// lingering descendant holding pipes past WaitDelay does not hide the answer.
+func probeOpenclawMessageFileSupport(ctx context.Context, runtimeCmd Command) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
+	defer cancel()
+	cmd := runtimeCmd.exec(ctx, "agent", "--help")
+	hideAgentWindow(cmd)
+	cmd.WaitDelay = 2 * time.Second
+	data, err := combinedOutputOwned(cmd, runtimeCmd.logger)
+	out := string(data)
+	has := strings.Contains(out, "--message-file")
+	if err != nil {
+		if has && errors.Is(err, exec.ErrWaitDelay) {
+			if runtimeCmd.logger != nil {
+				runtimeCmd.logger.Warn("agent: CLI answered help but left pipes open; using answer", "command", runtimeCmd.String(), "probe", "openclaw agent --help")
+			}
+			return true, nil
+		}
+		return false, err
+	}
+	return has, nil
+}
+
+// writeOpenclawMessageFile writes prompt as UTF-8 (no BOM) to a temp file and
+// returns its path. Caller must remove it via cleanupOpenclawMessageFile on
+// all exit paths (success, failure, cancellation).
+func writeOpenclawMessageFile(prompt string) (string, error) {
+	dir, err := os.MkdirTemp("", "multica-openclaw-msg-*")
+	if err != nil {
+		return "", fmt.Errorf("create openclaw message temp dir: %w", err)
+	}
+	path := filepath.Join(dir, "message.txt")
+	if err := os.WriteFile(path, []byte(prompt), 0o600); err != nil {
+		os.RemoveAll(dir)
+		return "", fmt.Errorf("write openclaw message temp file: %w", err)
+	}
+	return path, nil
+}
+
+func cleanupOpenclawMessageFile(path string) {
+	if path == "" {
+		return
+	}
+	_ = os.RemoveAll(filepath.Dir(path))
 }
 
 // openclawBackend implements Backend by spawning `openclaw agent --message <prompt>
@@ -57,7 +121,8 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if execPath == "" {
 		execPath = "openclaw"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	lookedUp, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("openclaw executable not found at %q: %w", execPath, err)
 	}
 
@@ -72,7 +137,27 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if sessionID == "" {
 		sessionID = fmt.Sprintf("multica-%d", time.Now().UnixNano())
 	}
-	args := buildOpenclawArgs(prompt, sessionID, opts, b.cfg.Logger)
+	finalPrompt := prompt
+	if opts.SystemPrompt != "" {
+		finalPrompt = opts.SystemPrompt + "\n\n" + prompt
+	}
+	useMessageFile := false
+	if runtime.GOOS == "windows" && isWindowsCommandShim(lookedUp) {
+		supported, err := probeOpenclawMessageFileSupport(ctx, b.cfg.commandAt(execPath))
+		useMessageFile = err == nil && supported
+	}
+	var messageFilePath string
+	var args []string
+	if useMessageFile {
+		messageFilePath, err = writeOpenclawMessageFile(finalPrompt)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		args = buildOpenclawArgsWithMessageFile(sessionID, messageFilePath, opts, b.cfg.Logger)
+	} else {
+		args = buildOpenclawArgs(prompt, sessionID, opts, b.cfg.Logger)
+	}
 
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
@@ -105,12 +190,18 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// JSON parser.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		if messageFilePath != "" {
+			cleanupOpenclawMessageFile(messageFilePath)
+		}
 		cancel()
 		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
 	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[openclaw:stderr] ")
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+		if messageFilePath != "" {
+			cleanupOpenclawMessageFile(messageFilePath)
+		}
 		cancel()
 		return nil, fmt.Errorf("start openclaw: %w", err)
 	}
@@ -210,6 +301,12 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			usage = map[string]TokenUsage{model: u}
 		}
 
+		// The buffered resCh would deliver the result before defers run,
+		// so a receiver waking on Result arrival would observe the temp
+		// message file still present. Remove it before sending.
+		if messageFilePath != "" {
+			cleanupOpenclawMessageFile(messageFilePath)
+		}
 		resCh <- Result{
 			Status:     scanResult.status,
 			Output:     scanResult.output,
@@ -267,6 +364,27 @@ func buildOpenclawArgs(prompt, sessionID string, opts ExecOptions, logger *slog.
 		prompt = opts.SystemPrompt + "\n\n" + prompt
 	}
 	args = append(args, "--message", prompt)
+	return args
+}
+
+// buildOpenclawArgsWithMessageFile is the capability-aware variant that
+// delivers the prompt via --message-file. The combined prompt has already
+// been written to messageFilePath as UTF-8; no prompt is inlined on argv.
+func buildOpenclawArgsWithMessageFile(sessionID, messageFilePath string, opts ExecOptions, logger *slog.Logger) []string {
+	args := []string{"agent"}
+	if opts.OpenclawMode != "gateway" {
+		args = append(args, "--local")
+	}
+	args = append(args, "--json", "--session-id", sessionID)
+	if opts.Timeout > 0 {
+		args = append(args, "--timeout", fmt.Sprintf("%d", int(opts.Timeout.Seconds())))
+	}
+	customArgs := filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, logger)
+	if opts.Model != "" && !customArgsContains(customArgs, "--agent") {
+		args = append(args, "--agent", opts.Model)
+	}
+	args = append(args, customArgs...)
+	args = append(args, "--message-file", messageFilePath)
 	return args
 }
 
