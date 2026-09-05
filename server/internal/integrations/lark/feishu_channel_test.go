@@ -18,13 +18,16 @@ import (
 // SendTextMessage — the single method feishuChannel.Send calls.
 type fakeSender struct {
 	APIClient
-	last             SendTextParams
-	msgID            string
-	downloadCalls    []DownloadResourceParams
-	downloaded       DownloadedResource
-	downloadErr      error
-	downloadedByKey  map[string]DownloadedResource
-	downloadErrByKey map[string]error
+	last              SendTextParams
+	msgID             string
+	downloadCalls     []DownloadResourceParams
+	downloaded        DownloadedResource
+	downloadErr       error
+	downloadedByKey   map[string]DownloadedResource
+	downloadErrByKey  map[string]error
+	getMessageCalls   []string
+	getMessageByID    map[string][]LarkMessage
+	getMessageErrByID map[string]error
 }
 
 func (f *fakeSender) SendTextMessage(_ context.Context, p SendTextParams) (string, error) {
@@ -47,6 +50,17 @@ func (f *fakeSender) DownloadMessageResourceStream(_ context.Context, _ Installa
 		Filename:    got.Filename,
 		SizeBytes:   got.SizeBytes,
 	}, nil
+}
+
+func (f *fakeSender) GetMessage(_ context.Context, _ InstallationCredentials, messageID string) ([]LarkMessage, error) {
+	f.getMessageCalls = append(f.getMessageCalls, messageID)
+	if err := f.getMessageErrByID[messageID]; err != nil {
+		return nil, err
+	}
+	if got, ok := f.getMessageByID[messageID]; ok {
+		return got, nil
+	}
+	return nil, nil
 }
 
 func (f *fakeSender) download(p DownloadResourceParams) (DownloadedResource, error) {
@@ -852,5 +866,142 @@ func TestChannelMsgType(t *testing.T) {
 		if got := channelMsgType(in); got != want {
 			t.Fatalf("channelMsgType(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestFeishuMediaResolver_HasMedia_GroupQuotedText(t *testing.T) {
+	resolver := NewFeishuMediaResolver(&fakeSender{}, fakeCreds{secret: "plain"}, &fakeMediaStorage{}, &fakeMediaLedger{}, newDiscardLogger())
+	groupQuoted := InboundMessage{
+		MessageID:   "om_trigger",
+		MessageType: "text",
+		ChatType:    ChatTypeGroup,
+		ChatID:      "oc_group",
+		ParentID:    "om_parent",
+		Body:        "check this",
+		Content:     `{"text":"check this"}`,
+	}
+	if !resolver.HasMedia(channelMessageFromLark(groupQuoted)) {
+		t.Fatalf("group text quoting a parent must report HasMedia=true so ResolveMedia can fetch the parent")
+	}
+	p2pQuoted := groupQuoted
+	p2pQuoted.ChatType = ChatTypeP2P
+	if resolver.HasMedia(channelMessageFromLark(p2pQuoted)) {
+		t.Fatalf("p2p quoted text without own media must remain HasMedia=false")
+	}
+	groupNoParent := InboundMessage{MessageID: "om_plain", MessageType: "text", ChatType: ChatTypeGroup, Body: "hello", Content: `{"text":"hello"}`}
+	if resolver.HasMedia(channelMessageFromLark(groupNoParent)) {
+		t.Fatalf("group text without parent and without media must be HasMedia=false")
+	}
+}
+
+func TestFeishuMediaResolver_GroupQuotedZipAttachesParentFile(t *testing.T) {
+	sender := &fakeSender{
+		getMessageByID: map[string][]LarkMessage{
+			"om_parent": {{MessageID: "om_parent", MessageType: "file", Content: `{"file_key":"zip_parent","file_name":"bundle.zip"}`}}, // parent is a ZIP/file
+		},
+		downloadedByKey: map[string]DownloadedResource{
+			"zip_parent": {Data: []byte("zipdata"), ContentType: "application/zip", Filename: "bundle.zip", SizeBytes: 7},
+		},
+	}
+	storage := &fakeMediaStorage{}
+	ledger := &fakeMediaLedger{}
+	resolver := NewFeishuMediaResolver(sender, fakeCreds{secret: "plain"}, storage, ledger, newDiscardLogger())
+	trigger := InboundMessage{
+		MessageID:   "om_trigger",
+		MessageType: "text",
+		ChatType:    ChatTypeGroup,
+		ChatID:      "oc_group",
+		ParentID:    "om_parent",
+		Body:        "please review",
+		Content:     `{"text":"please review"}`,
+	}
+	got := resolver.ResolveMedia(context.Background(), testMediaInstallation(t), engine.ResolvedIdentity{},
+		uuidFromString(t, "22222222-2222-2222-2222-222222222222"), uuidFromString(t, "33333333-3333-4333-8333-333333333333"), channelMessageFromLark(trigger))
+
+	if len(sender.getMessageCalls) != 1 || sender.getMessageCalls[0] != "om_parent" {
+		t.Fatalf("parent fetch calls = %v, want [om_parent]", sender.getMessageCalls)
+	}
+	if len(sender.downloadCalls) != 1 || sender.downloadCalls[0].FileKey != "zip_parent" {
+		t.Fatalf("download calls = %+v, want zip_parent", sender.downloadCalls)
+	}
+	if len(got.MediaRefs) != 1 {
+		t.Fatalf("media refs = %+v, want 1 from parent ZIP", got.MediaRefs)
+	}
+	ref := got.MediaRefs[0]
+	if ref.Type != channel.MsgTypeFile || ref.Filename != "bundle.zip" || ref.MimeType != "application/zip" {
+		t.Fatalf("media ref wrong: %+v", ref)
+	}
+	if len(ledger.records) != 1 {
+		t.Fatalf("intent records = %d, want 1", len(ledger.records))
+	}
+}
+
+func TestFeishuMediaResolver_GroupQuotedParentNotFileIsIgnored(t *testing.T) {
+	sender := &fakeSender{
+		getMessageByID: map[string][]LarkMessage{
+			"om_parent": {{MessageID: "om_parent", MessageType: "image", Content: `{"image_key":"img_k"}`}}, // image parent must not propagate as file
+		},
+	}
+	storage := &fakeMediaStorage{}
+	resolver := NewFeishuMediaResolver(sender, fakeCreds{secret: "plain"}, storage, &fakeMediaLedger{}, newDiscardLogger())
+	trigger := InboundMessage{
+		MessageID:   "om_trigger",
+		MessageType: "text",
+		ChatType:    ChatTypeGroup,
+		ParentID:    "om_parent",
+		Body:        "check img",
+		Content:     `{"text":"check img"}`,
+	}
+	got := resolver.ResolveMedia(context.Background(), testMediaInstallation(t), engine.ResolvedIdentity{},
+		uuidFromString(t, "22222222-2222-2222-2222-222222222222"), uuidFromString(t, "33333333-3333-4333-8333-333333333333"), channelMessageFromLark(trigger))
+	if len(got.MediaRefs) != 0 {
+		t.Fatalf("non-file parent must not produce media refs, got %+v", got.MediaRefs)
+	}
+	if len(sender.downloadCalls) != 0 {
+		t.Fatalf("non-file parent must not trigger download, got %+v", sender.downloadCalls)
+	}
+}
+
+func TestFeishuMediaResolver_GroupQuotedDeletedParentYieldsNoMedia(t *testing.T) {
+	sender := &fakeSender{
+		getMessageByID: map[string][]LarkMessage{
+			"om_parent": {{MessageID: "om_parent", MessageType: "file", Content: `{"file_key":"zip_parent"}`, Deleted: true}},
+		},
+	}
+	resolver := NewFeishuMediaResolver(sender, fakeCreds{secret: "plain"}, &fakeMediaStorage{}, &fakeMediaLedger{}, newDiscardLogger())
+	trigger := InboundMessage{
+		MessageID:   "om_trigger",
+		MessageType: "text",
+		ChatType:    ChatTypeGroup,
+		ParentID:    "om_parent",
+		Body:        "check",
+		Content:     `{"text":"check"}`,
+	}
+	got := resolver.ResolveMedia(context.Background(), testMediaInstallation(t), engine.ResolvedIdentity{},
+		uuidFromString(t, "22222222-2222-2222-2222-222222222222"), uuidFromString(t, "33333333-3333-4333-8333-333333333333"), channelMessageFromLark(trigger))
+	if len(got.MediaRefs) != 0 {
+		t.Fatalf("deleted parent must yield no refs, got %+v", got.MediaRefs)
+	}
+}
+
+func TestFeishuMediaResolver_GroupQuotedParentFetchFailureIsBestEffort(t *testing.T) {
+	sender := &fakeSender{
+		getMessageErrByID: map[string]error{"om_parent": errors.New("permission denied")},
+		downloaded:        DownloadedResource{Data: []byte("x")},
+	}
+	resolver := NewFeishuMediaResolver(sender, fakeCreds{secret: "plain"}, &fakeMediaStorage{}, &fakeMediaLedger{}, newDiscardLogger())
+	trigger := InboundMessage{
+		MessageID:   "om_trigger",
+		MessageType: "text",
+		ChatType:    ChatTypeGroup,
+		ParentID:    "om_parent",
+		Body:        "check",
+		Content:     `{"text":"check"}`,
+	}
+	before := channelMessageFromLark(trigger)
+	got := resolver.ResolveMedia(context.Background(), testMediaInstallation(t), engine.ResolvedIdentity{},
+		uuidFromString(t, "22222222-2222-2222-2222-222222222222"), uuidFromString(t, "33333333-3333-4333-8333-333333333333"), before)
+	if got.Text != before.Text || len(got.MediaRefs) != 0 {
+		t.Fatalf("fetch failure must preserve message with no refs, got %+v", got)
 	}
 }
