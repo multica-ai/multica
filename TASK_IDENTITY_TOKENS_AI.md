@@ -64,9 +64,12 @@ Requirements:
   cache. An unreachable Multica must not take your system down.
 - **Refetch on an unknown `kid`**, at most once per short interval. This is how
   a rotated key is picked up without a restart.
-- **Keep serving from a stale cache if the refetch fails.** Losing the ability
-  to verify because a network blipped is worse than using a key that is still
-  perfectly valid.
+- **Use a bounded stale cache if a refresh fails**, with a retry cooldown
+  even after failures. Set a maximum stale age according to your key-revocation
+  requirements; once it expires, reject verification until refresh succeeds.
+- **Coalesce concurrent refreshes.** Unknown keys must not turn parallel
+  requests into parallel network calls. Requests with cached keys should keep
+  working while another request refreshes.
 - Do not persist the keys to disk as configuration. The endpoint is the source
   of truth; hand-copied keys are what this endpoint exists to eliminate.
 
@@ -148,22 +151,38 @@ Hand the resolved user to the same code path a browser session uses. Concretely:
   `identity.source` (if templated, commonly as `src`) additionally records
   which attribution path authorized the run.
 
-## Step 6 — Optional: reject replays
+## Step 6 — Prevent duplicate business operations
 
-Each token carries a unique `jti`. If your system performs irreversible actions
-(payments, shipments, deletions), record seen `jti` values with a TTL matching
-the token lifetime and reject repeats.
+A task identity token is a **reusable access credential for one run**. The
+same `jti` legitimately appears on many requests, including multiple writes.
+Do not reject a request merely because that `jti` was seen before; keep it for
+audit correlation or explicit token revocation.
 
-Skip this for read-only integrations. It costs a shared cache and buys nothing
-there.
+For irreversible operations such as payments or shipments, use the system's
+existing business idempotency mechanism. If it has none, accept an operation
+idempotency key and atomically bind it to the authenticated user, endpoint and
+request payload. A retry with the same key and payload returns the stored
+result without repeating the operation; reuse with a different payload is
+rejected. Different operations use different keys, even with the same JWT.
+The retention period follows the business retry window, not the JWT lifetime.
+
+Idempotency prevents accidental duplicate effects; it does not stop use of a
+stolen bearer token to submit new operations. If a particular action needs
+single-use authorization, issue a separate action-bound credential for it.
 
 ## Reference implementation
 
 Language-agnostic, so translate it into whatever this system is written in.
-This is the whole of it:
+The cache below is per process. Prewarm it at startup; during a cold-cache
+refresh other requests fail closed until keys are available. Deployments with
+many worker processes should use a shared cache/refresh coordinator if they
+need one fleet-wide refresh limit. Review `MAX_STALE` against your revocation
+requirements. The example pins the current endpoint's five-minute cache TTL:
 
 ```python
-import time, requests
+import threading
+import time
+import requests
 from jose import jwt  # any mainstream JWT library works
 
 JWKS_URL = "https://multica.domain.com/.well-known/jwks.json"
@@ -171,19 +190,38 @@ ALLOWED_ALGS = ["ES256"]          # pin to what your deployment signs with
 EXPECTED_ISS = "multica"
 EXPECTED_SCOPE = "erp"
 
-_cache, _cached_at = None, 0.0
+CACHE_TTL = 300                    # matches this endpoint's max-age=300
+REFRESH_COOLDOWN = 30             # applies to success AND failure
+MAX_STALE = 3600                  # maximum age since last successful fetch
+_cache, _cached_at = None, float("-inf")
+_last_attempt = float("-inf")
+_refresh_lock = threading.Lock()
 
 def _keys(force=False):
-    global _cache, _cached_at
-    if force or _cache is None or time.time() - _cached_at > 300:
+    global _cache, _cached_at, _last_attempt
+    now = time.monotonic()
+    needs_refresh = force or _cache is None or now - _cached_at >= CACHE_TTL
+    if (needs_refresh and now - _last_attempt >= REFRESH_COOLDOWN
+            and _refresh_lock.acquire(blocking=False)):
         try:
-            _cache = requests.get(JWKS_URL, timeout=3).json()["keys"]
-            _cached_at = time.time()
-        except Exception:
-            if _cache is None:
-                raise                      # nothing to fall back to
-            # Serve the stale set: a network blip must not stop verification.
-    return _cache
+            # Recheck after taking the lock: another request may have refreshed.
+            now = time.monotonic()
+            if now - _last_attempt >= REFRESH_COOLDOWN:
+                _last_attempt = now
+                try:
+                    response = requests.get(JWKS_URL, timeout=3)
+                    response.raise_for_status()
+                    keys = response.json()["keys"]
+                    if not isinstance(keys, list) or not all(isinstance(k, dict) for k in keys):
+                        raise ValueError("invalid JWKS")
+                    _cache, _cached_at = keys, time.monotonic()
+                except (requests.RequestException, ValueError, KeyError):
+                    pass                 # bounded stale fallback below
+        finally:
+            _refresh_lock.release()
+    if _cache is None or time.monotonic() - _cached_at >= MAX_STALE:
+        raise ValueError("JWKS unavailable")
+    return _cache                        # no wait for an in-flight refresh
 
 def _key_for(kid):
     for key in _keys():
@@ -258,8 +296,14 @@ run and observed:
       your audit store.
 - [ ] A user with limited rights gets exactly those rights — not more, not the
       old service account's.
-- [ ] The JWKS is not refetched on every request.
-- [ ] Multica being unreachable does not break verification with a warm cache.
+- [ ] Many unknown `kid` values cause at most one refresh per cooldown.
+- [ ] A failed refresh also observes the cooldown, including on a cold cache.
+- [ ] Concurrent requests share one refresh; warm-cache reads do not wait for it.
+- [ ] A rotated key is picked up after the cooldown without restarting.
+- [ ] An outage permits cached keys only until the configured maximum stale age.
+- [ ] Two distinct writes using the same JWT both succeed when authorized.
+- [ ] Retrying one business idempotency key does not repeat its effects; reusing
+      that key with a different payload is rejected.
 
 Write these as tests in the system's own test suite. They are the regression
 fence for a security boundary; a manual pass does not survive the next refactor.
@@ -292,6 +336,6 @@ Each of these has been the actual cause of a broken integration.
 | "No key for kid" | Template has no `key_id`, so tokens carry no `kid` — match the kid-less entry. Or the key rotated and your cache is stale. |
 | Signature fails, everything else looks right | Usually an algorithm mismatch, or a proxy altering the response body. Compare the token header's `alg` with your allowlist. |
 | `iss` check fails on every token | The deployment did not template `iss`. Fix the server catalog; do not remove the check. |
-| Token is absent from the agent's environment | Not your side. Either the agent has no template enabled, or the run was not asked for by a member — an autopilot schedule firing on its own is refused by design (even though, inside Multica, it runs with its creator's authorization), as is a run whose requester has since left the workspace. |
+| Token is absent from the agent's environment | Check the issuing side: an enabled template, a capable daemon, a proven human triggerer or schedule creator, intact same-human lineage, and current workspace membership are required. Webhooks without an authenticated human, audit-only attribution, and offboarded users receive no generated token. |
 | Works for one person, fails for another | The `sub` mapping does not hold for every user. Check for an address that does not match the local record — or, on a local-part mapping, an email whose local part does not match the username. |
 | One template never produces tokens for some users | The issuing side's `allowed_domains` excludes their email domain — intended behavior for guests/contractors. Confirm with the operator before "fixing" it. |
