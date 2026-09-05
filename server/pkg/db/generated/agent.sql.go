@@ -2994,7 +2994,7 @@ SELECT
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
+    p.work_dir,
     p.attempt + 1, COALESCE($3::int, p.max_attempts), p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
@@ -3051,7 +3051,11 @@ type CreateRetryTaskParams struct {
 // agent's resume context (session_id/work_dir) so the child can continue
 // the conversation when the backend supports it. Resume-unsafe failures are
 // retried as fresh sessions so the child does not inherit a stuck agent
-// conversation. Keep the CASE WHEN predicates in sync with
+// conversation. codex_semantic_inactivity discards only the session_id, not
+// the work_dir: a resume-unsafe provider session says nothing about the
+// filesystem, so the child keeps the parent's workdir and the daemon's reuse
+// validation falls back to a fresh Prepare when that workdir is unusable
+// (GH #7998). Keep the CASE WHEN predicates in sync with
 // resumeUnsafeFailureReason and the resume lookup blacklists. attempt is
 // incremented; max_attempts, trigger_comment_id, coalesced_comment_ids,
 // is_leader_task, and squad_id are inherited so the retried task receives the

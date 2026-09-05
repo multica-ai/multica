@@ -2697,6 +2697,23 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				)
 				resp.PriorSessionResumeUnavailable = true
 			}
+		} else if task.RetryOfTaskID.Valid && task.ForceFreshSession {
+			// Auto-retry child with a forced fresh session (codex_semantic_inactivity
+			// is the only reason CreateRetryTask sets the flag): the poisoned
+			// provider session must NOT be resumed, but the child inherits the
+			// parent's work_dir (GH #7998) — offer it so the daemon's reuse
+			// validation (shouldReusePriorWorkdir) can continue in the same
+			// filesystem/worktree while starting a fresh provider session. A
+			// resume-unsafe provider session says nothing about the filesystem;
+			// when the stale workdir fails reuse validation the daemon falls back
+			// to a fresh Prepare (best-effort, same contract as the rerun path).
+			// PriorSessionID stays empty: a forced-fresh auto-retry never resumes a
+			// session through this path. Auto-retries without the flag (e.g. plain
+			// timeout) still take the GetLastTaskSession branch below, which picks
+			// the freshest resume-safe row rather than this child's own pointer.
+			if task.WorkDir.Valid {
+				resp.PriorWorkDir = task.WorkDir.String
+			}
 		} else if !task.ForceFreshSession {
 			// Non-rerun follow-up on the same issue: resume the most recent
 			// (agent, issue) session so the agent keeps the issue's conversation
@@ -2791,6 +2808,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		projectCtx.applyTo(&resp)
+		// Auto-retry children keep their filesystem even when the provider
+		// session must start fresh (codex_semantic_inactivity).
+		if task.RetryOfTaskID.Valid && task.ForceFreshSession && task.WorkDir.Valid {
+			resp.PriorWorkDir = task.WorkDir.String
+		}
 		if !task.ForceFreshSession && !task.ChannelContextRevision.Valid {
 			// Resume chat sessions only when the stored pointer was produced
 			// by the same runtime as the claiming task. When the chat_session

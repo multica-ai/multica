@@ -552,6 +552,13 @@ func TestGetLastTaskSessionExcludesCodexSemanticInactivity(t *testing.T) {
 	}
 }
 
+// TestCreateRetryTaskFreshensCodexSemanticInactivity pins the full retry
+// contract for Codex semantic inactivity timeouts: the poisoned provider
+// session is discarded and a fresh session is forced, but the parent's
+// work_dir is retained — a resume-unsafe provider session does not imply a
+// resume-unsafe workdir (GH #7998). When the stale workdir itself is
+// unusable, the daemon's reuse validation still falls back to a fresh
+// Prepare.
 func TestCreateRetryTaskFreshensCodexSemanticInactivity(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
@@ -584,8 +591,8 @@ func TestCreateRetryTaskFreshensCodexSemanticInactivity(t *testing.T) {
 	if child.SessionID.Valid {
 		t.Fatalf("expected retry child to drop poisoned session_id, got %q", child.SessionID.String)
 	}
-	if child.WorkDir.Valid {
-		t.Fatalf("expected retry child to drop poisoned work_dir, got %q", child.WorkDir.String)
+	if !child.WorkDir.Valid || child.WorkDir.String != "/tmp/codex-stuck" {
+		t.Fatalf("expected retry child to inherit parent work_dir, got %+v", child.WorkDir)
 	}
 	if !child.ForceFreshSession {
 		t.Fatal("expected retry child to force a fresh session")
