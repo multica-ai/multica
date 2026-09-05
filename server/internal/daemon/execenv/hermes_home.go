@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // Hermes discovers skills from exactly two places (verified against the bundled
@@ -280,28 +282,7 @@ func hermesRootFromHomeFor(base, native string) string {
 // non-existent tail unchanged, rather than failing (as filepath.EvalSymlinks does)
 // when p doesn't fully exist. The result is absolute.
 func resolvePathBestEffort(p string) string {
-	if p == "" {
-		return p
-	}
-	if abs, err := filepath.Abs(p); err == nil {
-		p = abs
-	}
-	if resolved, err := filepath.EvalSymlinks(p); err == nil {
-		return resolved
-	}
-	dir := p
-	var tail []string
-	for {
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return p // reached the root without an existing ancestor
-		}
-		tail = append([]string{filepath.Base(dir)}, tail...)
-		dir = parent
-		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-			return filepath.Join(append([]string{resolved}, tail...)...)
-		}
-	}
+	return util.ResolveSymlinksBestEffort(p)
 }
 
 // isPathUnder reports whether child is parent or nested under it.

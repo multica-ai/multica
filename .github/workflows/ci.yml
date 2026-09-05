@@ -716,6 +716,29 @@ jobs:
         # silently as "ok".
         run: go test ./internal/daemon/execenv -v -run '^TestWindowsOpenclawShim' -count=1 -timeout=5m
 
+      - name: Test Windows workdir containment guard in the CLI
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        # The CLI's --content-file / --attachment guard decides whether a path is
+        # inside the task workdir by canonicalizing both sides. Two of the things
+        # that decision rests on are Windows-only and covered nowhere else: a
+        # candidate on another volume, where filepath.Rel returns an error rather
+        # than a "..", so the guard has to read that as "outside" instead of
+        # surfacing `Rel: can't make Z:\... relative to C:\...` as a resolve
+        # failure; and a directory junction — the containment-relevant link shape
+        # that needs no elevation, so the one real hosts have — which resolves to
+        # itself rather than to its target under this module's go directive. The
+        # junction test pins that gap deliberately, records the observations it
+        # rests on, and fails with instructions if the platform ever starts
+        # resolving them.
+        # cmd/multica has no Windows job otherwise, so these windows-tagged
+        # tests run nowhere else. It matters twice over on a non-admin host,
+        # where the package's cross-platform cases skip for want of the symlink
+        # privilege; the ubuntu backend job covers those shapes instead.
+        # -v so a silent skip (or a -run pattern that stops matching) is visible
+        # in the log instead of passing as "ok".
+        run: go test ./cmd/multica -v -run '^TestFileWithinWorkingDirWindows' -count=1 -timeout=5m
+
       - name: Test Windows isolated repo checkout is committable
         if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
