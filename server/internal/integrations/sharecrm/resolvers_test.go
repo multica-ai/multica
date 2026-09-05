@@ -13,6 +13,7 @@ import (
 type captureChatSession struct {
 	appendIn     engine.AppendInput
 	startIn      engine.StartSessionInput
+	mediaIn      engine.BindMediaInput
 	freshSession pgtype.UUID
 	freshMessage string
 }
@@ -37,7 +38,8 @@ func (f *captureChatSession) AppendUserMessage(_ context.Context, in engine.Appe
 	return engine.AppendResult{}, nil
 }
 
-func (f *captureChatSession) BindMediaRefs(context.Context, engine.BindMediaInput) error {
+func (f *captureChatSession) BindMediaRefs(_ context.Context, in engine.BindMediaInput) error {
+	f.mediaIn = in
 	return nil
 }
 
@@ -120,5 +122,26 @@ func TestShareCRMSessionBinder_StartSessionForwardsRouting(t *testing.T) {
 	}
 	if !session.startIn.PersistMessage {
 		t.Fatal("PersistMessage dropped; /new <message> would create an empty chat")
+	}
+}
+
+func TestShareCRMSessionBinder_MapsMediaBodyAndIssueTarget(t *testing.T) {
+	var message, sessionID, workspace, sender, issue pgtype.UUID
+	message.Bytes[0], sessionID.Bytes[0], workspace.Bytes[0], sender.Bytes[0], issue.Bytes[0] = 1, 2, 3, 4, 5
+	message.Valid, sessionID.Valid, workspace.Valid, sender.Valid, issue.Valid = true, true, true, true, true
+	ref := channel.MediaRef{Type: channel.MsgTypeImage, InlinePlaceholder: "[Image]", InlineIndex: 0}
+	base := pgtype.Text{String: "[Image]\nfix login", Valid: true}
+	session := &captureChatSession{}
+	binder := &sessionBinder{session: session}
+	if _, err := binder.BindMedia(context.Background(), engine.BindMediaParams{
+		MessageID: message, SessionID: sessionID, WorkspaceID: workspace, Sender: sender,
+		IssueID: issue, IssueDescriptionBase: base, IssueCommandText: "/issue fix login",
+		Body: "[Image]\nfix login", MediaRefs: []channel.MediaRef{ref},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := session.mediaIn
+	if got.MessageID != message || got.SessionID != sessionID || got.WorkspaceID != workspace || got.Sender != sender || got.IssueID != issue || got.IssueDescriptionBase != base || got.IssueCommandText != "/issue fix login" || got.Body != "[Image]\nfix login" || len(got.MediaRefs) != 1 || got.MediaRefs[0] != ref {
+		t.Fatalf("mapped media input = %+v", got)
 	}
 }

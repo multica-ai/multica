@@ -145,6 +145,80 @@ func TestInboundFromEvent_MixedKeepsCaptionAndImage(t *testing.T) {
 	}
 }
 
+func TestInboundFromEvent_ClearWithImageIsNotBareCommand(t *testing.T) {
+	data := &botMessageData{
+		MessageID: "m-clear-image",
+		ChatID:    "0:fs:session123:",
+		ChatType:  "direct",
+		From:      botSender{ID: "E.fs.7618", Name: "7618"},
+		Message: &botTextMessage{
+			Type:    "mixed",
+			Content: "/clear",
+			Images:  []botImageRef{{URL: "https://img.example/c", Filename: "c.png"}},
+		},
+		EA:        "fs",
+		BotFullID: "B.fs.bot_demo",
+	}
+	msg, ok := inboundFromEvent(data, "app-1", "B.fs.bot_demo")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if !msg.ForceFresh {
+		t.Fatal("media-bearing /clear must set ForceFresh so Router does not take the bare pending-fresh path")
+	}
+	if msg.CommandText != sharecrmImagePlaceholder || msg.Text != sharecrmImagePlaceholder {
+		t.Fatalf("media-bearing /clear = command %q text %q, want placeholder-only turn", msg.CommandText, msg.Text)
+	}
+}
+
+func TestInboundFromEvent_ClearWithCaptionKeepsImagePlaceholder(t *testing.T) {
+	data := &botMessageData{
+		MessageID: "m-clear-caption",
+		ChatID:    "0:fs:session123:",
+		ChatType:  "direct",
+		From:      botSender{ID: "E.fs.7618", Name: "7618"},
+		Message: &botTextMessage{
+			Type:    "mixed",
+			Content: "/clear inspect this",
+			Images:  []botImageRef{{URL: "https://img.example/d", Filename: "d.png"}},
+		},
+		EA:        "fs",
+		BotFullID: "B.fs.bot_demo",
+	}
+	msg, ok := inboundFromEvent(data, "app-1", "B.fs.bot_demo")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if !msg.ForceFresh {
+		t.Fatal("expected ForceFresh on /clear with a remaining body")
+	}
+	if msg.CommandText != "/clear inspect this" {
+		t.Fatalf("command text = %q", msg.CommandText)
+	}
+	if msg.Text != "inspect this\n"+sharecrmImagePlaceholder {
+		t.Fatalf("text = %q, want caption without /clear plus placeholder", msg.Text)
+	}
+}
+
+func TestInboundFromEvent_BareClearStaysForSharedPendingPath(t *testing.T) {
+	data := &botMessageData{
+		MessageID: "m-bare-clear",
+		ChatID:    "0:fs:session123:",
+		ChatType:  "direct",
+		From:      botSender{ID: "E.fs.7618", Name: "7618"},
+		Message:   &botTextMessage{Type: "text", Content: "/clear"},
+		EA:        "fs",
+		BotFullID: "B.fs.bot_demo",
+	}
+	msg, ok := inboundFromEvent(data, "app-1", "B.fs.bot_demo")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if msg.ForceFresh || msg.Text != "/clear" || msg.CommandText != "/clear" {
+		t.Fatalf("bare /clear must remain visible to the shared Router: %+v", msg)
+	}
+}
+
 func TestInboundFromEvent_DropNoSender(t *testing.T) {
 	_, ok := inboundFromEvent(&botMessageData{ChatID: "0:fs:s:", Text: "x"}, "app", "")
 	if ok {
