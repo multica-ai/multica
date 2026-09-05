@@ -7,9 +7,11 @@ import {
   ChevronDown,
   CircleDot,
   Columns3,
+  FileText,
   Filter,
   FolderKanban,
   FolderMinus,
+  Gauge,
   List,
   Rows3,
   SignalHigh,
@@ -20,6 +22,7 @@ import {
   UserMinus,
   UserPen,
   Waves,
+  Workflow,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
@@ -1144,6 +1147,7 @@ export function IssuesHeader({
   scopedIssues,
   workingAgents,
   allowGantt = false,
+  allowPlanViews = false,
   dateFilter = null,
   onDateFilterChange,
   isRefreshing = false,
@@ -1157,6 +1161,8 @@ export function IssuesHeader({
    *  behind the agents-working chip. */
   workingAgents: WorkingAgentSummary[] | undefined;
   allowGantt?: boolean;
+  /** See IssueDisplayControls.allowPlanViews. */
+  allowPlanViews?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
   isRefreshing?: boolean;
@@ -1335,6 +1341,7 @@ export function IssuesHeader({
           <IssueDisplayControls
             scopedIssues={scopedIssues}
             allowGantt={allowGantt}
+            allowPlanViews={allowPlanViews}
             dateFilter={dateFilter}
             onDateFilterChange={onDateFilterChange}
             facetCountsExact={facetCountsExact}
@@ -1811,6 +1818,7 @@ export function IssueDisplayControls({
   scopedIssues,
   hideViewToggle = false,
   allowGantt = false,
+  allowPlanViews = false,
   dateFilter = null,
   onDateFilterChange,
   facetCountsExact = true,
@@ -1829,6 +1837,11 @@ export function IssueDisplayControls({
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
   // fall back to List if the option were exposed there. Keep Gantt opt-in.
   allowGantt?: boolean;
+  // Same reasoning as allowGantt: only a project-scoped surface with the
+  // plan modes in its `modes` list (i.e. project detail, once the
+  // project_plans flag is on) should offer Plan Document / Pipeline /
+  // Coverage. Everywhere else a plan view is meaningless.
+  allowPlanViews?: boolean;
   /**
    * Whether `scopedIssues` covers the surface's full window. Table does not
    * use loaded rows for counts; server-paged List, Board, and Swimlane follow
@@ -2329,6 +2342,12 @@ export function IssueDisplayControls({
                           <Waves className="size-3.5" />
                         ) : viewMode === "gantt" && allowGantt ? (
                           <ChartGantt className="size-3.5" />
+                        ) : viewMode === "plan_document" && allowPlanViews ? (
+                          <FileText className="size-3.5" />
+                        ) : viewMode === "plan_pipeline" && allowPlanViews ? (
+                          <Workflow className="size-3.5" />
+                        ) : viewMode === "plan_coverage" && allowPlanViews ? (
+                          <Gauge className="size-3.5" />
                         ) : (
                           <List className="size-3.5" />
                         )}
@@ -2341,6 +2360,12 @@ export function IssueDisplayControls({
                             ? t(($) => $.view.swimlane)
                             : viewMode === "gantt" && allowGantt
                             ? t(($) => $.view.gantt)
+                            : viewMode === "plan_document" && allowPlanViews
+                            ? t(($) => $.view.plan_document)
+                            : viewMode === "plan_pipeline" && allowPlanViews
+                            ? t(($) => $.view.plan_pipeline)
+                            : viewMode === "plan_coverage" && allowPlanViews
+                            ? t(($) => $.view.plan_coverage)
                             : t(($) => $.view.list)}
                         </span>
                       </Button>
@@ -2357,6 +2382,12 @@ export function IssueDisplayControls({
                   ? t(($) => $.view.tooltip_swimlane)
                   : viewMode === "gantt" && allowGantt
                   ? t(($) => $.view.tooltip_gantt)
+                  : viewMode === "plan_document" && allowPlanViews
+                  ? t(($) => $.view.tooltip_plan_document)
+                  : viewMode === "plan_pipeline" && allowPlanViews
+                  ? t(($) => $.view.tooltip_plan_pipeline)
+                  : viewMode === "plan_coverage" && allowPlanViews
+                  ? t(($) => $.view.tooltip_plan_coverage)
                   : t(($) => $.view.tooltip_list)}
               </TooltipContent>
             </Tooltip>
@@ -2392,6 +2423,22 @@ export function IssueDisplayControls({
                     <ChartGantt />
                     {t(($) => $.view.gantt)}
                   </DropdownMenuRadioItem>
+                )}
+                {allowPlanViews && (
+                  <>
+                    <DropdownMenuRadioItem value="plan_document">
+                      <FileText />
+                      {t(($) => $.view.plan_document)}
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="plan_pipeline">
+                      <Workflow />
+                      {t(($) => $.view.plan_pipeline)}
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="plan_coverage">
+                      <Gauge />
+                      {t(($) => $.view.plan_coverage)}
+                    </DropdownMenuRadioItem>
+                  </>
                 )}
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>

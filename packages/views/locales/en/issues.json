@@ -222,12 +222,18 @@
     "tooltip_table": "Table view",
     "tooltip_gantt": "Gantt view",
     "tooltip_swimlane": "Swimlane view",
+    "tooltip_plan_document": "Plan Document view",
+    "tooltip_plan_pipeline": "Plan Pipeline view",
+    "tooltip_plan_coverage": "Plan Coverage view",
     "section": "View",
     "board": "Board",
     "list": "List",
     "table": "Table",
     "gantt": "Gantt",
-    "swimlane": "Swimlane"
+    "swimlane": "Swimlane",
+    "plan_document": "Plan Document",
+    "plan_pipeline": "Plan Pipeline",
+    "plan_coverage": "Plan Coverage"
   },
   "table": {
     "select_all": "Select all visible issues",
@@ -595,6 +601,176 @@
     "title": "No issues match these filters",
     "hint": "Adjust or clear the filters to see the issues in this view.",
     "clear_button": "Clear filters"
+  },
+  "plan_empty": {
+    "title": "No plan yet",
+    "hint": "This project doesn't have a plan yet. Document, Pipeline, and Coverage will show real content once one exists."
+  },
+  "plan": {
+    "error": {
+      "title": "Couldn't load the plan",
+      "hint": "The request failed. Your plan may still exist — try again.",
+      "retry": "Retry"
+    },
+    "coverage_state": {
+      "complete": "Done",
+      "in_progress": "In progress",
+      "not_started": "Not started",
+      "no_tasks_yet": "No tasks yet",
+      "covered_no_active_tasks": "Covered · no active tasks"
+    },
+    "coverage_hint": {
+      "no_tasks_yet": "Identified in the plan — no issues created yet.",
+      "covered_no_active_tasks": "Every linked issue was cancelled or deleted. This part is not represented in current work."
+    },
+    "phase_rollup": "{{done}}/{{total}} tasks · {{percent}}%",
+    "part_gap_more_one": "+{{count}} more gap",
+    "part_gap_more_other": "+{{count}} more gaps",
+    "superseded_banner": "This plan version was superseded on {{date}}. Issue status shown below is live, not a snapshot.",
+    "document": {
+      "subtitle": "Version {{version}} · {{phaseCount}} phases",
+      "stat_percent": "complete",
+      "stat_tasks": "tasks done",
+      "stat_gaps": "parts not yet decomposed"
+    },
+    "pipeline": {
+      "stat_percent": "complete",
+      "stat_tasks": "tasks",
+      "stat_gaps": "parts not decomposed",
+      "gate_covered": "Gate: {{covered}} of {{total}} parts covered",
+      "blocked_on_phase": "Blocked on {{title}}",
+      "blocked_on_part": "Blocked on {{title}} ({{phase}})",
+      "blocked_missing": "Blocked on a dependency that no longer exists",
+      "lane_status": {
+        "complete": "Complete",
+        "blocked": "Blocked",
+        "in_progress": "In progress",
+        "not_started": "Not started"
+      }
+    },
+    "coverage": {
+      "tile_percent": "plan complete",
+      "tile_tasks": "tasks done",
+      "tile_parts_covered": "parts covered",
+      "tile_gaps": "parts with no tasks yet",
+      "risk_banner_title_one": "{{count}} plan part has not been decomposed into tasks",
+      "risk_banner_title_other": "{{count}} of {{total}} plan parts have not been decomposed into tasks",
+      "risk_banner_hint": "These are identified in the plan but invisible in the issue tracker today.",
+      "risk_chip_more_one": "+{{count}} more",
+      "risk_chip_more_other": "+{{count}} more",
+      "col_part": "Plan part",
+      "col_coverage": "Coverage",
+      "col_progress": "Progress",
+      "col_assignees": "Assignees",
+      "not_decomposed": "— not decomposed —",
+      "no_assignees": "—"
+    },
+    "authoring": {
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving…",
+      "done": "Done",
+      "rename": "Rename",
+      "move_up": "Move up",
+      "move_down": "Move down",
+      "edit_plan_trigger": "Edit plan",
+      "plan_menu_label": "Plan actions",
+      "phase_menu_label": "Actions for phase {{title}}",
+      "part_menu_label": "Actions for part {{title}}",
+      "field": {
+        "plan_title": "Plan title",
+        "phase_title": "Phase title",
+        "part_title": "Part title",
+        "description": "Description",
+        "acceptance_criteria": "Acceptance criteria"
+      },
+      "create_plan": {
+        "title": "Create a plan",
+        "description": "Start an empty plan for this project, then add phases and parts to it by hand.",
+        "title_placeholder": "e.g. Q3 launch plan",
+        "submit": "Create plan"
+      },
+      "edit_plan": {
+        "title": "Edit plan details",
+        "description": "Changes the current version in place. Phases, parts, and issue links are untouched."
+      },
+      "supersede": {
+        "title": "Supersede plan",
+        "description": "Archives version {{version}} and makes version {{next}} the active plan.",
+        "consequences": "Phases, parts, issue links, and dependencies are copied forward. Version {{version}} stays readable and is marked superseded.",
+        "submit": "Supersede",
+        "confirm_title": "Supersede this plan?"
+      },
+      "delete_plan": {
+        "title": "Delete plan",
+        "description": "Delete “{{title}}” and every phase and part in it?",
+        "consequences": "Linked issues are unlinked from the plan. The issues themselves are not deleted. This cannot be undone.",
+        "submit": "Delete plan"
+      },
+      "add_phase": {
+        "title": "Add phase",
+        "description": "A phase groups the parts of the plan that ship together.",
+        "title_placeholder": "e.g. Phase 1 — Foundations",
+        "submit": "Add phase"
+      },
+      "edit_phase": {
+        "title": "Edit phase",
+        "description": "Renames the phase. Its parts and their issue links stay where they are."
+      },
+      "delete_phase": {
+        "title": "Delete phase",
+        "description": "Delete “{{title}}”?",
+        "consequences_one": "Its {{count}} part is deleted too, and any issues linked to it are unlinked. The issues themselves are not deleted.",
+        "consequences_other": "Its {{count}} parts are deleted too, and any issues linked to them are unlinked. The issues themselves are not deleted.",
+        "submit": "Delete phase",
+        "consequences_empty": "This phase has no parts yet, so nothing else is affected. This cannot be undone."
+      },
+      "add_part": {
+        "title": "Add part",
+        "description": "A part of {{phase}} — one unit of work to be covered by issues.",
+        "title_placeholder": "e.g. Schema migration",
+        "coverage_note": "Until you link an issue to it, this part reports as “No tasks yet” — not as complete, and not as 0%.",
+        "submit": "Add part",
+        "trigger_label": "Add part to {{title}}"
+      },
+      "edit_part": {
+        "title": "Edit part",
+        "description": "Changes the part's own fields. Its linked issues are unaffected."
+      },
+      "delete_part": {
+        "title": "Delete part",
+        "description": "Delete “{{title}}”?",
+        "consequences": "Any issues linked to this part are unlinked. The issues themselves are not deleted.",
+        "submit": "Delete part"
+      },
+      "link_issues": {
+        "title": "Link issues",
+        "description": "Issues that cover “{{part}}”.",
+        "linked_heading": "Linked issues",
+        "search_heading": "Add from this project",
+        "search_placeholder": "Search this project's issues…",
+        "searching": "Searching…",
+        "no_candidates": "No issues in this project match.",
+        "unlink_label": "Unlink {{identifier}}",
+        "deleted_issue": "deleted",
+        "load_failed": "Couldn't search this project's issues",
+        "load_failed_hint": "The request failed, so this list is incomplete — it is not a result.",
+        "retry": "Try again"
+      },
+      "error": {
+        "conflict_title": "This plan changed",
+        "failed_title": "Couldn't save",
+        "conflict": "Someone else changed this plan. Reload it and try again.",
+        "active_plan_exists": "This project already has an active plan.",
+        "issue_already_linked": "That issue is already linked to a part of this plan.",
+        "not_found": "That plan item no longer exists, or project plans have been turned off for this workspace.",
+        "not_active": "Only the active plan version can be edited.",
+        "invalid": "The plan service rejected these values.",
+        "disabled": "Project plans are turned off for this workspace.",
+        "unavailable": "The request didn't reach the plan service. Nothing was saved."
+      },
+      "continue_label": "Continue"
+    }
   },
   "agent_live": {
     "is_working": "{{name}} is working",

@@ -18,8 +18,31 @@ export type IssueCreateDefaults = Partial<
 
 export type IssueSurfaceMode = Extract<
   ViewMode,
-  "board" | "list" | "table" | "swimlane" | "gantt"
+  | "board"
+  | "list"
+  | "table"
+  | "swimlane"
+  | "gantt"
+  | "plan_document"
+  | "plan_pipeline"
+  | "plan_coverage"
 >;
+
+/** The three Plan view modes, as a set surfaces opt into together. */
+export type PlanViewMode = Extract<
+  IssueSurfaceMode,
+  "plan_document" | "plan_pipeline" | "plan_coverage"
+>;
+
+export const PLAN_VIEW_MODES: readonly PlanViewMode[] = [
+  "plan_document",
+  "plan_pipeline",
+  "plan_coverage",
+];
+
+export function isPlanViewMode(mode: IssueSurfaceMode): mode is PlanViewMode {
+  return (PLAN_VIEW_MODES as readonly IssueSurfaceMode[]).includes(mode);
+}
 
 export interface IssueSurfaceProps {
   scope: IssueScope;

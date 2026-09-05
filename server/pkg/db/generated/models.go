@@ -1175,6 +1175,80 @@ type Project struct {
 	DueDate     pgtype.Date        `json:"due_date"`
 }
 
+type ProjectPlan struct {
+	ID                        pgtype.UUID        `json:"id"`
+	WorkspaceID               pgtype.UUID        `json:"workspace_id"`
+	ProjectID                 pgtype.UUID        `json:"project_id"`
+	Version                   int32              `json:"version"`
+	Kind                      string             `json:"kind"`
+	Origin                    string             `json:"origin"`
+	Title                     string             `json:"title"`
+	Description               string             `json:"description"`
+	Attributes                []byte             `json:"attributes"`
+	SourceIssueID             pgtype.UUID        `json:"source_issue_id"`
+	SourceIssueRevision       pgtype.Int8        `json:"source_issue_revision"`
+	SourceDescriptionSnapshot pgtype.Text        `json:"source_description_snapshot"`
+	SourceContentSha256       pgtype.Text        `json:"source_content_sha256"`
+	CreatedByType             string             `json:"created_by_type"`
+	CreatedByID               pgtype.UUID        `json:"created_by_id"`
+	SupersededAt              pgtype.Timestamptz `json:"superseded_at"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProjectPlanDependency struct {
+	ID              pgtype.UUID        `json:"id"`
+	ProjectPlanID   pgtype.UUID        `json:"project_plan_id"`
+	BlockedPhaseID  pgtype.UUID        `json:"blocked_phase_id"`
+	BlockedPartID   pgtype.UUID        `json:"blocked_part_id"`
+	BlockingPhaseID pgtype.UUID        `json:"blocking_phase_id"`
+	BlockingPartID  pgtype.UUID        `json:"blocking_part_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProjectPlanKind struct {
+	Key         string             `json:"key"`
+	DisplayName string             `json:"display_name"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProjectPlanPart struct {
+	ID                 pgtype.UUID        `json:"id"`
+	ProjectPlanID      pgtype.UUID        `json:"project_plan_id"`
+	ProjectPlanPhaseID pgtype.UUID        `json:"project_plan_phase_id"`
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	AcceptanceCriteria string             `json:"acceptance_criteria"`
+	Attributes         []byte             `json:"attributes"`
+	Position           int32              `json:"position"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProjectPlanPartIssue struct {
+	ID                  pgtype.UUID        `json:"id"`
+	ProjectPlanID       pgtype.UUID        `json:"project_plan_id"`
+	ProjectPlanPartID   pgtype.UUID        `json:"project_plan_part_id"`
+	IssueID             pgtype.UUID        `json:"issue_id"`
+	IssueNumberSnapshot int32              `json:"issue_number_snapshot"`
+	IssueTitleSnapshot  string             `json:"issue_title_snapshot"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProjectPlanPhase struct {
+	ID            pgtype.UUID        `json:"id"`
+	ProjectPlanID pgtype.UUID        `json:"project_plan_id"`
+	Title         string             `json:"title"`
+	Description   string             `json:"description"`
+	Attributes    []byte             `json:"attributes"`
+	Position      int32              `json:"position"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ProjectResource struct {
 	ID           pgtype.UUID        `json:"id"`
 	ProjectID    pgtype.UUID        `json:"project_id"`

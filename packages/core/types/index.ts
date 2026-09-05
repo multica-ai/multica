@@ -188,6 +188,27 @@ export type {
 } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
+  ProjectPlan,
+  ProjectPlanCoverageState,
+  ProjectPlanDependency,
+  ProjectPlanDependencyNode,
+  ProjectPlanIssueDetail,
+  ProjectPlanOverview,
+  ProjectPlanPart,
+  ProjectPlanPhase,
+  ProjectPlanRollup,
+  ProjectPlanTaskRollup,
+  ProjectPlanUncoveredPart,
+  CreateManualProjectPlanRequest,
+  UpdateProjectPlanRequest,
+  SupersedeProjectPlanRequest,
+  CreateProjectPlanPhaseRequest,
+  UpdateProjectPlanPhaseRequest,
+  CreateProjectPlanPartRequest,
+  UpdateProjectPlanPartRequest,
+  ReorderProjectPlanRequest,
+} from "./project-plan";
+export type {
   GitHubInstallation,
   GitHubMergeableState,
   GitHubPullRequest,

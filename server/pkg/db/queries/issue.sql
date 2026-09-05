@@ -341,6 +341,15 @@ WITH target AS (
 ),
 cleared_vcs_pr_links AS (
     DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)
+),
+-- Plan memberships intentionally outlive their issue so retained plan versions
+-- can render the immutable number/title snapshots. Clear only the live pointer;
+-- the partial issue_id index keeps this reverse lookup narrow.
+cleared_project_plan_links AS (
+    UPDATE project_plan_part_issue
+    SET issue_id = NULL,
+        updated_at = now()
+    WHERE issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 

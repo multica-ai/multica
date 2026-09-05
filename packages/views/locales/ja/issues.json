@@ -218,12 +218,18 @@
     "tooltip_table": "テーブル表示",
     "tooltip_gantt": "ガント表示",
     "tooltip_swimlane": "スイムレーン表示",
+    "tooltip_plan_document": "計画書表示",
+    "tooltip_plan_pipeline": "計画パイプライン表示",
+    "tooltip_plan_coverage": "計画カバレッジ表示",
     "section": "表示",
     "board": "ボード",
     "list": "リスト",
     "table": "テーブル",
     "gantt": "ガント",
-    "swimlane": "スイムレーン"
+    "swimlane": "スイムレーン",
+    "plan_document": "計画書",
+    "plan_pipeline": "計画パイプライン",
+    "plan_coverage": "計画カバレッジ"
   },
   "table": {
     "select_all": "表示中のタスクをすべて選択",
@@ -574,6 +580,172 @@
     "title": "フィルター条件に一致するタスクがありません",
     "hint": "フィルターを変更または解除すると、このビューのタスクが表示されます。",
     "clear_button": "フィルターを解除"
+  },
+  "plan": {
+    "error": {
+      "title": "計画を読み込めませんでした",
+      "hint": "リクエストが失敗しました。計画はまだ存在している可能性があります。再試行してください。",
+      "retry": "再試行"
+    },
+    "coverage_state": {
+      "complete": "完了",
+      "in_progress": "進行中",
+      "not_started": "未着手",
+      "no_tasks_yet": "タスク未作成",
+      "covered_no_active_tasks": "カバー済み・進行中のタスクなし"
+    },
+    "coverage_hint": {
+      "no_tasks_yet": "計画には記載されていますが、まだタスクが作成されていません。",
+      "covered_no_active_tasks": "関連するタスクはすべてキャンセルまたは削除されました。この部分は現在の作業に反映されていません。"
+    },
+    "phase_rollup": "{{done}}/{{total}} タスク · {{percent}}%",
+    "part_gap_more_other": "他 {{count}} 件のギャップ",
+    "superseded_banner": "この計画バージョンは {{date}} に置き換えられました。以下のタスク状況はスナップショットではなくライブです。",
+    "document": {
+      "subtitle": "バージョン {{version}} · フェーズ {{phaseCount}} 件",
+      "stat_percent": "完了",
+      "stat_tasks": "タスク完了",
+      "stat_gaps": "部分が未分解"
+    },
+    "pipeline": {
+      "stat_percent": "完了",
+      "stat_tasks": "タスク",
+      "stat_gaps": "部分が未分解",
+      "gate_covered": "ゲート: {{total}} 部分中 {{covered}} 部分がカバー済み",
+      "blocked_on_phase": "{{title}} でブロック中",
+      "blocked_on_part": "{{title}}（{{phase}}）でブロック中",
+      "blocked_missing": "存在しない依存関係でブロックされています",
+      "lane_status": {
+        "complete": "完了",
+        "blocked": "ブロック中",
+        "in_progress": "進行中",
+        "not_started": "未着手"
+      }
+    },
+    "coverage": {
+      "tile_percent": "計画完了率",
+      "tile_tasks": "タスク完了",
+      "tile_parts_covered": "部分がカバー済み",
+      "tile_gaps": "部分がタスク未作成",
+      "risk_banner_title_other": "{{total}} 件中 {{count}} 件の計画部分がタスクに分解されていません",
+      "risk_banner_hint": "これらは計画上では識別されていますが、現在のタスクトラッカーには表示されていません。",
+      "risk_chip_more_other": "他 {{count}} 件",
+      "col_part": "計画部分",
+      "col_coverage": "カバー状況",
+      "col_progress": "進捗",
+      "col_assignees": "担当者",
+      "not_decomposed": "—未分解—",
+      "no_assignees": "—"
+    },
+    "authoring": {
+      "cancel": "キャンセル",
+      "save": "保存",
+      "saving": "保存中…",
+      "done": "完了",
+      "rename": "名前を変更",
+      "move_up": "上へ移動",
+      "move_down": "下へ移動",
+      "edit_plan_trigger": "プランを編集",
+      "plan_menu_label": "プランの操作",
+      "phase_menu_label": "フェーズ {{title}} の操作",
+      "part_menu_label": "パート {{title}} の操作",
+      "field": {
+        "plan_title": "プランのタイトル",
+        "phase_title": "フェーズのタイトル",
+        "part_title": "パートのタイトル",
+        "description": "説明",
+        "acceptance_criteria": "受け入れ基準"
+      },
+      "create_plan": {
+        "title": "プランを作成",
+        "description": "このプロジェクトに空のプランを作成し、フェーズとパートを手動で追加します。",
+        "title_placeholder": "例: Q3 リリースプラン",
+        "submit": "プランを作成"
+      },
+      "edit_plan": {
+        "title": "プランの詳細を編集",
+        "description": "現在のバージョンをそのまま更新します。フェーズ、パート、課題のリンクは変わりません。"
+      },
+      "supersede": {
+        "title": "新しいバージョンに更新",
+        "description": "バージョン {{version}} をアーカイブし、バージョン {{next}} を有効なプランにします。",
+        "consequences": "フェーズ、パート、課題のリンク、依存関係が引き継がれます。バージョン {{version}} は閲覧可能なまま、更新済みとして記録されます。",
+        "submit": "更新する",
+        "confirm_title": "このプランを更新しますか？"
+      },
+      "delete_plan": {
+        "title": "プランを削除",
+        "description": "「{{title}}」とその中のすべてのフェーズ・パートを削除しますか？",
+        "consequences": "リンクされた課題はリンクが解除されるだけで、課題自体は削除されません。この操作は取り消せません。",
+        "submit": "プランを削除"
+      },
+      "add_phase": {
+        "title": "フェーズを追加",
+        "description": "フェーズは、まとめてリリースするパートをグループ化します。",
+        "title_placeholder": "例: フェーズ 1 — 基盤",
+        "submit": "フェーズを追加"
+      },
+      "edit_phase": {
+        "title": "フェーズを編集",
+        "description": "フェーズ名のみを変更します。パートと課題のリンクはそのままです。"
+      },
+      "delete_phase": {
+        "title": "フェーズを削除",
+        "description": "「{{title}}」を削除しますか？",
+        "consequences_other": "その {{count}} 件のパートも削除され、リンクされた課題はリンクが解除されます。課題自体は削除されません。",
+        "submit": "フェーズを削除",
+        "consequences_empty": "このフェーズにはまだパートがないため、他に影響はありません。この操作は取り消せません。"
+      },
+      "add_part": {
+        "title": "パートを追加",
+        "description": "{{phase}} のパート — 課題でカバーする一つの作業単位です。",
+        "title_placeholder": "例: スキーマ移行",
+        "coverage_note": "課題をリンクするまで、このパートは「タスクなし」と表示されます。完了でも 0% でもありません。",
+        "submit": "パートを追加",
+        "trigger_label": "{{title}} にパートを追加"
+      },
+      "edit_part": {
+        "title": "パートを編集",
+        "description": "パート自身の項目のみを変更します。リンクされた課題は影響を受けません。"
+      },
+      "delete_part": {
+        "title": "パートを削除",
+        "description": "「{{title}}」を削除しますか？",
+        "consequences": "このパートにリンクされた課題はリンクが解除されるだけで、課題自体は削除されません。",
+        "submit": "パートを削除"
+      },
+      "link_issues": {
+        "title": "課題をリンク",
+        "description": "「{{part}}」をカバーする課題です。",
+        "linked_heading": "リンク済みの課題",
+        "search_heading": "このプロジェクトから追加",
+        "search_placeholder": "このプロジェクトの課題を検索…",
+        "searching": "検索中…",
+        "no_candidates": "このプロジェクトに一致する課題はありません。",
+        "unlink_label": "{{identifier}} のリンクを解除",
+        "deleted_issue": "削除済み",
+        "load_failed": "このプロジェクトの課題を検索できませんでした",
+        "load_failed_hint": "リクエストが失敗したため、この一覧は不完全です。検索結果ではありません。",
+        "retry": "再試行"
+      },
+      "error": {
+        "conflict_title": "このプランは変更されています",
+        "failed_title": "保存できませんでした",
+        "conflict": "他のユーザーがこのプランを変更しました。再読み込みしてからやり直してください。",
+        "active_plan_exists": "このプロジェクトには既に有効なプランがあります。",
+        "issue_already_linked": "その課題は既にこのプランのパートにリンクされています。",
+        "not_found": "そのプラン項目は既に存在しないか、このワークスペースでプロジェクトプランが無効になっています。",
+        "not_active": "編集できるのは有効なプランバージョンだけです。",
+        "invalid": "プランサービスがこの内容を受け付けませんでした。",
+        "disabled": "このワークスペースではプロジェクトプランが無効です。",
+        "unavailable": "リクエストがプランサービスに届きませんでした。何も保存されていません。"
+      },
+      "continue_label": "次へ"
+    }
+  },
+  "plan_empty": {
+    "title": "計画はまだありません",
+    "hint": "このプロジェクトにはまだ計画がありません。計画を作成すると、計画書・パイプライン・カバレッジの各表示に実際の内容が表示されます。"
   },
   "agent_live": {
     "is_working": "{{name}} が作業中",

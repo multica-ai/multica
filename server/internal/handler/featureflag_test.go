@@ -28,10 +28,18 @@ func withFeatureFlag(t *testing.T, h *Handler, key string, enabled bool) {
 		origTaskFlags = h.TaskService.FeatureFlags
 		h.TaskService.FeatureFlags = flags
 	}
+	var origProjectPlanFlags *featureflag.Service
+	if h.ProjectPlanService != nil {
+		origProjectPlanFlags = h.ProjectPlanService.FeatureFlags
+		h.ProjectPlanService.FeatureFlags = flags
+	}
 	t.Cleanup(func() {
 		h.FeatureFlags = origHandlerFlags
 		if h.TaskService != nil {
 			h.TaskService.FeatureFlags = origTaskFlags
+		}
+		if h.ProjectPlanService != nil {
+			h.ProjectPlanService.FeatureFlags = origProjectPlanFlags
 		}
 	})
 }

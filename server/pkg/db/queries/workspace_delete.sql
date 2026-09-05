@@ -649,6 +649,37 @@ DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations);
 -- name: DeleteWorkspaceAgents :exec
 DELETE FROM agent WHERE agent.workspace_id = $1;
 
+-- Project-plan tables deliberately have no foreign keys or cascades. These
+-- statements are called in dependency-to-root order inside the workspace
+-- teardown transaction. The membership delete only removes mapping rows; it
+-- never targets the issue rows referenced by issue_id.
+-- name: DeleteWorkspaceProjectPlanDependencies :exec
+DELETE FROM project_plan_dependency
+WHERE project_plan_id IN (
+    SELECT id FROM project_plan WHERE workspace_id = $1
+);
+
+-- name: DeleteWorkspaceProjectPlanMemberships :exec
+DELETE FROM project_plan_part_issue
+WHERE project_plan_id IN (
+    SELECT id FROM project_plan WHERE workspace_id = $1
+);
+
+-- name: DeleteWorkspaceProjectPlanParts :exec
+DELETE FROM project_plan_part
+WHERE project_plan_id IN (
+    SELECT id FROM project_plan WHERE workspace_id = $1
+);
+
+-- name: DeleteWorkspaceProjectPlanPhases :exec
+DELETE FROM project_plan_phase
+WHERE project_plan_id IN (
+    SELECT id FROM project_plan WHERE workspace_id = $1
+);
+
+-- name: DeleteWorkspaceProjectPlans :exec
+DELETE FROM project_plan WHERE workspace_id = $1;
+
 -- name: DeleteWorkspaceRuntimesAndProjects :exec
 WITH
 deleted_runtimes AS (

@@ -36,7 +36,8 @@ import { useT } from "../../i18n";
 import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
-import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
+import { isPlanViewMode, type IssueCreateDefaults, type IssueSurfaceProps } from "./types";
+import { PlanModePane } from "./plan-panes/plan-mode-pane";
 import {
   useIssueSurfaceController,
   type IssueSurfaceController,
@@ -246,6 +247,7 @@ function IssueSurfaceContent({
             scopedIssues={controller.surfaceIssues}
             workingAgents={controller.workingAgents}
             allowGantt={controller.allowGantt}
+            allowPlanViews={controller.allowPlanViews}
             isRefreshing={controller.isRefreshing}
             facetCountsExact={
               controller.facetCountsExact
@@ -265,7 +267,17 @@ function IssueSurfaceContent({
             Row fetching is suspended while it is down (a custom status filter
             cannot be routed without it), so every branch below would render an
             unexplained empty surface with no way out. (MUL-6243) */}
-        {controller.isStatusCatalogError ? (
+        {isPlanViewMode(controller.viewMode) ? (
+          // The plan read routes are registered in server/cmd/server/router.go
+          // and handled in server/internal/handler/project_plan.go. Each Plan mode
+          // renders the live overview for `controller.projectId` through its
+          // own loading/error/no-plan/present states — independent of the
+          // issue query's own loading/empty status, which this surface
+          // otherwise renders below. `controller.projectId` is guaranteed
+          // here: `allowPlanViews` (and therefore reaching a plan_* mode)
+          // requires it, same invariant `allowGantt` relies on for Gantt.
+          <PlanModePane mode={controller.viewMode} projectId={controller.projectId!} />
+        ) : controller.isStatusCatalogError ? (
           <StatusCatalogErrorState onRetry={controller.retryStatusCatalog} />
         ) : controller.isLoading ? (
           renderLoading ? (

@@ -98,12 +98,20 @@ const MY_VARIANT_HINT_KEY = {
   involved: "hint_my_involved",
 } as const;
 
+// Plan modes are excluded from the layout picker below (line ~247) the same
+// way "gantt" already is — saved views are workspace/my/project-wide, and a
+// plan view only makes sense while looking at one project. They still need a
+// label here so a draft seeded from a live plan-mode surface can
+// render its display summary without crashing.
 const LAYOUT_LABEL_KEY = {
   list: "list",
   board: "board",
   table: "table",
   swimlane: "swimlane",
   gantt: "gantt",
+  plan_document: "plan_document",
+  plan_pipeline: "plan_pipeline",
+  plan_coverage: "plan_coverage",
 } as const;
 
 const GROUPING_LABEL_KEY = {

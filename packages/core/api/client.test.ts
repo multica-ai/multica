@@ -2641,6 +2641,127 @@ describe("importSkillArchive", () => {
   });
 });
 
+describe("ApiClient project plan read", () => {
+  const jsonResponse = (body: unknown, status: number, statusText = "") =>
+    new Response(JSON.stringify(body), {
+      status,
+      statusText,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  // Every field here is one the Go read model always serializes (no
+  // `omitempty`) — this is the shape a healthy server actually sends.
+  function validOverview() {
+    return {
+      plan: {
+        id: "plan-1", workspace_id: "ws-1", project_id: "project-1", version: 1,
+        kind: "prd", origin: "orchestrator", title: "Launch Plan", description: "",
+        attributes: null, source_issue_id: null, superseded: false, superseded_at: null,
+        created_by_type: "agent", created_by_id: "agent-1", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      },
+      rollup: { tasks_done: 1, tasks_total: 2, percent: 50, parts_covered: 1, parts_total: 1, parts_without_tasks: 0 },
+      phases: [
+        {
+          id: "phase-1", title: "Phase 1", description: "", attributes: null, position: 0,
+          rollup: { tasks_done: 1, tasks_total: 2, percent: 50 },
+          parts: [
+            {
+              id: "part-1", title: "Part 1", description: "", acceptance_criteria: "", attributes: null,
+              position: 0, coverage_state: "in_progress",
+              rollup: { tasks_done: 1, tasks_total: 2, percent: 50 },
+              issues: [
+                { id: "issue-1", number: 1, identifier: "LOCO-1", title: "Do it", status: "todo", status_category: "todo", assignee_type: null, assignee_id: null, deleted: false },
+              ],
+              created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+          created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      dependencies: [
+        {
+          id: "dep-1",
+          blocked: { type: "phase", id: "phase-1", title: "Phase 1", missing: false },
+          blocking: { type: "phase", id: "phase-0", title: "Phase 0", missing: false },
+        },
+      ],
+      uncovered_parts: [],
+    };
+  }
+
+  it("resolves a well-formed response to the live overview", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(validOverview(), 200)));
+    const client = new ApiClient("https://api.example.test");
+
+    const overview = await client.getActiveProjectPlan("project-1");
+
+    expect(overview?.phases[0]?.parts[0]?.coverage_state).toBe("in_progress");
+  });
+
+  it("resolves to null on a genuine 404 (no active plan)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ error: "project plan not found" }, 404, "Not Found")),
+    );
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.getActiveProjectPlan("project-1")).resolves.toBeNull();
+  });
+
+  // QC Critical #1/#2: a required field silently defaulting turns a
+  // truncated 200 into a fabricated plan (a manufactured zero rollup here)
+  // instead of failing validation.
+  it("rejects a response with an omitted required field instead of defaulting it", async () => {
+    const malformed = validOverview();
+    // @ts-expect-error -- deliberately building a malformed wire payload
+    delete malformed.rollup;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(malformed, 200)));
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.getActiveProjectPlan("project-1")).rejects.toThrow(/schema validation/i);
+  });
+
+  // QC re-audit round 2: `attributes: z.unknown()` accepted an omitted key at
+  // runtime even though the Go `Plan`/`Phase`/`Part` structs have no
+  // `omitempty` on it — `z.json()` closes that gap by rejecting omission
+  // while still accepting `null` and any JSON value.
+  it("rejects a response with plan.attributes omitted", async () => {
+    const malformed = validOverview();
+    delete (malformed.plan as Record<string, unknown>).attributes;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(malformed, 200)));
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.getActiveProjectPlan("project-1")).rejects.toThrow(/schema validation/i);
+  });
+
+  it("rejects a response with a phase's attributes omitted", async () => {
+    const malformed = validOverview();
+    delete (malformed.phases[0] as Record<string, unknown>).attributes;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(malformed, 200)));
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.getActiveProjectPlan("project-1")).rejects.toThrow(/schema validation/i);
+  });
+
+  it("rejects a response with a part's attributes omitted", async () => {
+    const malformed = validOverview();
+    delete (malformed.phases[0]!.parts[0] as Record<string, unknown>).attributes;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(malformed, 200)));
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.getActiveProjectPlan("project-1")).rejects.toThrow(/schema validation/i);
+  });
+
+  it("rejects a response with a coverage_state outside the 5-value enum instead of defaulting it", async () => {
+    const malformed = validOverview();
+    malformed.phases[0]!.parts[0]!.coverage_state = "bogus_state";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(malformed, 200)));
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.getActiveProjectPlan("project-1")).rejects.toThrow(/schema validation/i);
+  });
+});
+
 describe("clientErrorMessage", () => {
   it("returns a 4xx message, which handlers write for the user", () => {
     expect(clientErrorMessage(new ApiError("autopilot is not active", 400, "Bad Request")))
@@ -2719,5 +2840,129 @@ describe("ApiClient session expiry", () => {
     expect(store.getState().status).toBe("unauthenticated");
     expect(store.getState().expired).toBe(true);
     expect(storage.getItem("multica_token")).toBeNull();
+  });
+});
+
+describe("project plan writes", () => {
+  /**
+   * The only place the plan-write method → URL/verb wiring is actually
+   * executed. `write-routes.test.ts` proves the table transcribes the
+   * server's contract correctly; the component tests in
+   * `packages/views/.../plan-authoring.test.tsx` replace `ApiClient` wholesale
+   * and prove which METHOD each affordance calls. Neither shows that
+   * `linkProjectPlanPartIssue` reaches for `planWriteRoutes.linkIssue` rather
+   * than, say, `unlinkIssue` — a swap the type checker cannot catch, since
+   * both helpers take the same arguments and return a string.
+   */
+  function stubOk(status = 204) {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(status === 204 ? null : "{}", {
+        status,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const call = (fetchMock: ReturnType<typeof vi.fn>) => {
+    const [url, init] = fetchMock.mock.calls[0]!;
+    return {
+      path: String(url).replace("https://api.example.test", ""),
+      method: init?.method,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    };
+  };
+
+  it("sends each write to its own route with its own verb", async () => {
+    const cases: [string, (c: ApiClient) => Promise<void>, string, string][] = [
+      ["createManualProjectPlan",
+        (c) => c.createManualProjectPlan("p1", { kind: "prd", title: "T", description: "" }),
+        "POST", "/api/projects/p1/plans"],
+      ["updateProjectPlan",
+        (c) => c.updateProjectPlan("p1", "pl1", { title: "T" }),
+        "PATCH", "/api/projects/p1/plans/pl1"],
+      ["supersedeProjectPlan",
+        (c) => c.supersedeProjectPlan("p1", "pl1", { title: "T" }),
+        "POST", "/api/projects/p1/plans/pl1/supersede"],
+      ["deleteProjectPlan",
+        (c) => c.deleteProjectPlan("p1", "pl1"),
+        "DELETE", "/api/projects/p1/plans/pl1"],
+      ["createProjectPlanPhase",
+        (c) => c.createProjectPlanPhase("p1", "pl1", { title: "T", description: "", position: 0 }),
+        "POST", "/api/projects/p1/plans/pl1/phases"],
+      ["updateProjectPlanPhase",
+        (c) => c.updateProjectPlanPhase("p1", "pl1", "ph1", { title: "T" }),
+        "PATCH", "/api/projects/p1/plans/pl1/phases/ph1"],
+      ["reorderProjectPlanPhases",
+        (c) => c.reorderProjectPlanPhases("p1", "pl1", { ordered_ids: ["a"] }),
+        "PATCH", "/api/projects/p1/plans/pl1/phases/reorder"],
+      ["deleteProjectPlanPhase",
+        (c) => c.deleteProjectPlanPhase("p1", "pl1", "ph1"),
+        "DELETE", "/api/projects/p1/plans/pl1/phases/ph1"],
+      ["createProjectPlanPart",
+        (c) => c.createProjectPlanPart("p1", "pl1", "ph1", {
+          title: "T", description: "", acceptance_criteria: "", position: 0,
+        }),
+        "POST", "/api/projects/p1/plans/pl1/phases/ph1/parts"],
+      ["updateProjectPlanPart",
+        (c) => c.updateProjectPlanPart("p1", "pl1", "pt1", { title: "T" }),
+        "PATCH", "/api/projects/p1/plans/pl1/parts/pt1"],
+      ["reorderProjectPlanParts",
+        (c) => c.reorderProjectPlanParts("p1", "pl1", "ph1", { ordered_ids: ["a"] }),
+        "PATCH", "/api/projects/p1/plans/pl1/phases/ph1/parts/reorder"],
+      ["deleteProjectPlanPart",
+        (c) => c.deleteProjectPlanPart("p1", "pl1", "pt1"),
+        "DELETE", "/api/projects/p1/plans/pl1/parts/pt1"],
+      ["linkProjectPlanPartIssue",
+        (c) => c.linkProjectPlanPartIssue("p1", "pl1", "pt1", "i1"),
+        "POST", "/api/projects/p1/plans/pl1/parts/pt1/issues/i1"],
+      ["unlinkProjectPlanPartIssue",
+        (c) => c.unlinkProjectPlanPartIssue("p1", "pl1", "pt1", "i1"),
+        "DELETE", "/api/projects/p1/plans/pl1/parts/pt1/issues/i1"],
+    ];
+
+    for (const [name, invoke, method, path] of cases) {
+      const fetchMock = stubOk();
+      await invoke(new ApiClient("https://api.example.test"));
+      expect({ name, ...call(fetchMock) }).toMatchObject({ name, method, path });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("puts the issue id in the path and sends no body when linking", async () => {
+    const fetchMock = stubOk();
+    await new ApiClient("https://api.example.test").linkProjectPlanPartIssue("p1", "pl1", "pt1", "i1");
+    expect(call(fetchMock).body).toBeUndefined();
+  });
+
+  it("never sends a creator, workspace, or source field a manual plan could forge", async () => {
+    const fetchMock = stubOk(201);
+    await new ApiClient("https://api.example.test").createManualProjectPlan("p1", {
+      kind: "prd",
+      title: "Hand-authored",
+      description: "",
+    });
+    expect(Object.keys(call(fetchMock).body as object).sort()).toEqual([
+      "description",
+      "kind",
+      "title",
+    ]);
+  });
+
+  it("surfaces a 409 as an ApiError carrying the server's code", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ code: "issue_already_linked", error: "already linked" }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.linkProjectPlanPartIssue("p1", "pl1", "pt1", "i1"),
+    ).rejects.toMatchObject({ name: "ApiError", status: 409 });
   });
 });
