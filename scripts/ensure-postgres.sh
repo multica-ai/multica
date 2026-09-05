@@ -68,20 +68,25 @@ is_local() {
 
 if is_local; then
   # ---------- Local: use Docker ----------
+  # Worktree env files carry a unique COMPOSE_PROJECT_NAME so that a direct
+  # self-host Compose stack is isolated. Local development intentionally keeps
+  # one shared PostgreSQL container for all checkouts, so pin these commands to
+  # the documented shared project.
+  local_compose=(docker compose -p multica)
   echo "==> Ensuring shared PostgreSQL container is running on localhost:5432..."
-  docker compose up -d postgres
+  "${local_compose[@]}" up -d postgres
 
   echo "==> Waiting for PostgreSQL to be ready..."
-  until docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
+  until "${local_compose[@]}" exec -T postgres pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
     sleep 1
   done
 
   echo "==> Ensuring database '$POSTGRES_DB' exists..."
-  db_exists="$(docker compose exec -T postgres \
+  db_exists="$("${local_compose[@]}" exec -T postgres \
     psql -U "$POSTGRES_USER" -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'")"
 
   if [ "$db_exists" != "1" ]; then
-    docker compose exec -T postgres \
+    "${local_compose[@]}" exec -T postgres \
       psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 \
       -c "CREATE DATABASE \"$POSTGRES_DB\"" \
       > /dev/null
