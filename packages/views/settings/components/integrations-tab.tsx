@@ -5,6 +5,7 @@ import { LarkTab } from "./lark-tab";
 import { ComposioTab } from "./composio-tab";
 import { SlackTab } from "./slack-tab";
 import { DingTalkTab } from "./dingtalk-tab";
+import { ShareCRMTab } from "./sharecrm-tab";
 import { VCSTab } from "./vcs-tab";
 import { WecomTab } from "./wecom-tab";
 import { TelegramTab } from "./telegram-tab";
@@ -18,10 +19,11 @@ import { IntegrationChannelIcon } from "./integration-channel-icon";
 
 // Integrations is the umbrella tab for third-party platform connections.
 // GitHub has its own top-level tab (see github-tab.tsx); everything else
-// — currently Lark, Composio, Slack, Telegram, the self-hosted Git providers
-// (Forgejo / Gitea / GitLab), and WeCom smart-bot, with Linear etc. to follow —
-// lives in here under its own section heading so additional integrations slot
-// in without changing the IA. IntegrationsTab is just the host; each
+// — currently Lark, Composio, Slack, DingTalk, WeCom, Telegram, ShareCRM, and
+// the self-hosted Git providers (Forgejo / Gitea / GitLab), with Linear etc.
+// to follow — lives in here under its own section heading so additional
+// integrations slot in without changing the IA. Section order matches the
+// product docs channels overview. IntegrationsTab is just the host; each
 // integration owns its own description and install flow.
 export function IntegrationsTab() {
   const { t } = useT("settings");
@@ -79,11 +81,6 @@ export function IntegrationsTab() {
       >
         <DingTalkTab />
       </SettingsSection>
-      {vcsAvailable && (
-        <SettingsSection title={t(($) => $.vcs.section_title)}>
-          <VCSTab />
-        </SettingsSection>
-      )}
       <SettingsSection
         title={
           <span className="flex items-center gap-2">
@@ -106,6 +103,22 @@ export function IntegrationsTab() {
       >
         <TelegramTab />
       </SettingsSection>
+      <SettingsSection
+        title={
+          <span className="flex items-center gap-2">
+            <IntegrationChannelIcon channel="sharecrm" />
+            {t(($) => $.sharecrm.section_title)}
+          </span>
+        }
+        description={t(($) => $.sharecrm.page_description)}
+      >
+        <ShareCRMTab />
+      </SettingsSection>
+      {vcsAvailable && (
+        <SettingsSection title={t(($) => $.vcs.section_title)}>
+          <VCSTab />
+        </SettingsSection>
+      )}
     </SettingsTab>
   );
 }

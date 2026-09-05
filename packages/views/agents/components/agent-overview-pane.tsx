@@ -16,6 +16,7 @@ import { slackInstallationsOptions } from "@multica/core/slack";
 import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { wecomInstallationsOptions } from "@multica/core/wecom";
 import { telegramInstallationsOptions } from "@multica/core/telegram";
+import { sharecrmInstallationsOptions } from "@multica/core/sharecrm";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -185,13 +186,20 @@ export function AgentOverviewPane({
     ...telegramInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: sharecrmListing } = useQuery({
+    ...sharecrmInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
 
+  // Any channel with a deployment secret key set should surface the tab so
+  // admins can bind that platform's bot (ShareCRM-only deploys were hiding it).
   const integrationsConfigured =
     larkListing?.configured === true ||
     slackListing?.configured === true ||
     dingtalkListing?.configured === true ||
     wecomListing?.configured === true ||
-    telegramListing?.configured === true;
+    telegramListing?.configured === true ||
+    sharecrmListing?.configured === true;
 
   const visibleCapabilityTabs = useMemo(() => {
     const showMcp = runtime

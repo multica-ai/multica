@@ -104,6 +104,13 @@
       ]
     },
     {
+      "label": "ShareCRM account-bind route",
+      "description": "`/sharecrm/bind` is a global pre-workspace route where a member links their ShareCRM (纷享销客) identity. Reserve the prefix so a workspace slug cannot shadow it.",
+      "slugs": [
+        "sharecrm"
+      ]
+    },
+    {
       "label": "Backend ops / observability",
       "description": "`/health`, `/readyz`, `/healthz`, and `/ws` exist on the backend host; reserving them on the workspace slug space prevents naming confusion if/when these paths are ever proxied through the web origin.",
       "slugs": [

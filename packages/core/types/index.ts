@@ -248,6 +248,12 @@ export type {
   RedeemTelegramBindingTokenResponse,
 } from "./telegram";
 export type {
+  ShareCRMInstallation,
+  ListShareCRMInstallationsResponse,
+  RegisterShareCRMBYORequest,
+  RedeemShareCRMBindingTokenResponse,
+} from "./sharecrm";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,
