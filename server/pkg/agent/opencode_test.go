@@ -1848,3 +1848,58 @@ func equalStringSlice(a, b []string) bool {
 	}
 	return true
 }
+
+// fakeOpencodeCompletedThenCrashScript emits a full, clean event stream
+// (step_start -> text -> step_finish with usage) and then exits non-zero,
+// mimicking OpenCode's Bun binary crashing on process teardown (Windows
+// 0xc0000409) AFTER the run actually finished (#5872).
+func fakeOpencodeCompletedThenCrashScript() string {
+	return `#!/bin/sh
+cat > /dev/null
+printf '%s\n' '{"type":"step_start","timestamp":1000,"sessionID":"ses_x","part":{"type":"step-start"}}'
+printf '%s\n' '{"type":"text","timestamp":1001,"sessionID":"ses_x","part":{"type":"text","text":"All done."}}'
+printf '%s\n' '{"type":"step_finish","timestamp":1002,"sessionID":"ses_x","part":{"type":"step-finish","tokens":{"total":10,"input":8,"output":2}}}'
+exit 134
+`
+}
+
+// TestOpencodeBackendCompletedRunSurvivesCrashOnExit is the regression guard for
+// #5872: a run that reached a terminal signal (step_finish) must stay
+// "completed" even when the process exits non-zero on teardown — a crash-on-exit
+// after a clean stream is not a failed run.
+func TestOpencodeBackendCompletedRunSurvivesCrashOnExit(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeCompletedThenCrashScript()))
+
+	backend, err := New("opencode", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "do the thing", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	// Drain the message stream so the result goroutine can finish.
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("status = %q, want \"completed\" — a run that reached step_finish must not be demoted by a crash-on-exit (#5872); error=%q", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
