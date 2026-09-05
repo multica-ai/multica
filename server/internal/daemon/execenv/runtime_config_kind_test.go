@@ -297,6 +297,7 @@ func TestSlimQuickCreateAvailableCommands(t *testing.T) {
 		"multica issue update <id>",
 		"multica issue status <id> <status>",
 		"multica issue comment add <issue-id>",
+		"multica issue comment update <comment-id>",
 		"multica issue metadata list <issue-id>",
 		"multica issue metadata set <issue-id>",
 		"multica issue metadata delete <issue-id>",

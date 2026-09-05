@@ -98,6 +98,7 @@ multica issue assign MUL-123 --to "Backend Agent"
 # 评论和执行记录
 multica issue comment list MUL-123
 multica issue comment add MUL-123 --content "请先检查回归测试"
+multica issue comment update <comment-id> --expected-revision 2 --content "请检查回归测试和发布说明"
 multica issue runs MUL-123
 ```
 
@@ -106,6 +107,7 @@ multica issue runs MUL-123
 ```bash
 multica issue create --title "升级说明" --description-stdin < notes.md
 multica issue comment add MUL-123 --content-stdin < review.md
+multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
 查看某次运行的消息，或停止运行：

@@ -244,7 +244,7 @@ func sanitizeBriefCodeToken(s string) string {
 
 // writeAvailableCommands emits the slim Available Commands section
 // (~3.0k chars vs legacy ~4.4k). Every test-asserted substring is
-// preserved: each `multica issue …` command name, all three `comment add`
+// preserved: each `multica issue …` command name, all three comment body
 // input modes, `--description-file <path>`, `--parent ""`, the
 // `Next reply cursor` / `Next thread cursor` stderr labels, the three
 // metadata discovery lines, the "core agent loop and common issue
@@ -270,6 +270,7 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	writeIssueStatusCommand(b, ctx)
 	b.WriteString("- `multica issue children <id> [--output json]` — list a parent's sub-issues grouped by stage.\n")
 	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — post a comment. Agent-authored bodies MUST use `--content-file`; see `## Comment Formatting` for why. `multica issue comment add --help` for full flags.\n")
+	b.WriteString("- `multica issue comment update <comment-id> --expected-revision <n> [--content \"...\" | --content-file <path> | --content-stdin]` — edit a comment you authored without overwriting a concurrent edit (workspace admins may edit any comment). Read `revision` with `issue comment list --output json`. Agent-authored bodies MUST use `--content-file`; `multica issue comment update --help` for full flags.\n")
 	b.WriteString("- `multica issue metadata list <issue-id> [--output json]` — list KV metadata.\n")
 	b.WriteString("- `multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]` — pin or overwrite a key.\n")
 	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — remove a key.\n")

@@ -98,6 +98,7 @@ multica issue assign MUL-123 --to "Backend Agent"
 # 댓글 및 실행 기록
 multica issue comment list MUL-123
 multica issue comment add MUL-123 --content "회귀 테스트를 먼저 확인해 주세요"
+multica issue comment update <comment-id> --expected-revision 2 --content "회귀 테스트와 릴리스 노트를 확인해 주세요"
 multica issue runs MUL-123
 ```
 
@@ -106,6 +107,7 @@ multica issue runs MUL-123
 ```bash
 multica issue create --title "업그레이드 안내" --description-stdin < notes.md
 multica issue comment add MUL-123 --content-stdin < review.md
+multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
 특정 실행의 메시지를 확인하거나 실행을 중지합니다.
