@@ -34,6 +34,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Test task token verification reference
+        run: python3 scripts/test-task-token-verifier.py
+
       - name: Filter paths
         id: filter
         uses: dorny/paths-filter@v3

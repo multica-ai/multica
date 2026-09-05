@@ -28,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/tasktoken"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/llm"
@@ -625,6 +626,19 @@ func main() {
 		readRecorder = dbRoutingMetrics
 	}
 
+	// Build the task-token issuer before the router. A deployment that meant
+	// to issue identity tokens must not come up silently issuing none, so a
+	// malformed catalog or key stops the boot rather than degrading.
+	taskTokenIssuer, err := tasktoken.NewIssuer(
+		os.Getenv("MULTICA_TASK_TOKEN_TEMPLATES"),
+		os.Getenv("MULTICA_TASK_TOKEN_PRIVATE_KEY"),
+		os.Getenv("MULTICA_TASK_TOKEN_MANIFEST_ENV"),
+	)
+	if err != nil {
+		slog.Error("invalid task token configuration", "error", err)
+		os.Exit(1)
+	}
+
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:         httpMetrics,
 		BusinessMetrics:     businessMetrics,
@@ -638,6 +652,7 @@ func main() {
 		FeatureFlags:        flags,
 		HeartbeatScheduler:  heartbeatScheduler,
 		LLMMaxRetries:       llmMaxRetries,
+		TaskTokenIssuer:     taskTokenIssuer,
 	})
 	var replicaQueries *db.Queries
 	if replicaPool != nil {

@@ -1845,6 +1845,9 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		resp.AuthToken = tokenStr
 		resp.RemoteMCPDaemonToken = remoteMCPToken
 		resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
+		// After finalization for the same reason as the per-runtime path: an
+		// issuance audit row must never outlive a claim that was requeued.
+		resp.TaskTokens = h.issueClaimedTaskTokens(r, &task, rtWorkspaceID)
 		out = append(out, resp)
 	}
 
@@ -3477,6 +3480,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	resp.RemoteMCPDaemonToken = remoteMCPToken
 	task.DeliveredCommentIds = receipt
 	resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
+	// Identity tokens for the human who asked for this run. Issued only now,
+	// after the claim is final: issuing audits "a credential was minted in this
+	// person's name", and every failure above requeues the task, which would
+	// leave that row (and a live JWT nobody received) behind. Degrades to nil
+	// on every path that cannot name a human; never fails the claim.
+	resp.TaskTokens = h.issueClaimedTaskTokens(r, task, runtimeWorkspaceID)
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	if resp.Agent != nil && len(resp.Agent.Skills) > 0 {

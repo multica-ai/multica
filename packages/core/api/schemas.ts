@@ -3337,3 +3337,27 @@ export const EMPTY_JOIN_SHARE_LINK_RESPONSE: {
   workspace_id: "",
   workspace_slug: "",
 };
+
+export const TaskTokenTemplateSummarySchema = z.object({
+  id: z.string(),
+  label: z.string().default(""),
+  description: z.string().default(""),
+  env: z.string().default(""),
+});
+
+export const AgentTaskTokensSchema = z.object({
+  agent_id: z.string().default(""),
+  available: z.array(TaskTokenTemplateSummarySchema).default([]),
+  enabled: z.array(z.string()).default([]),
+});
+
+export type TaskTokenTemplateSummary = z.infer<typeof TaskTokenTemplateSummarySchema>;
+export type AgentTaskTokens = z.infer<typeof AgentTaskTokensSchema>;
+
+// An unconfigured deployment and a malformed response land on the same shape:
+// nothing available, nothing enabled. The tab treats both as "hide me".
+export const EMPTY_AGENT_TASK_TOKENS: AgentTaskTokens = {
+  agent_id: "",
+  available: [],
+  enabled: [],
+};

@@ -65,6 +65,17 @@ const telegramListingRef = vi.hoisted(() => ({
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
+// The Identity Tokens tab is gated on the deployment having a task-token
+// catalog, which the pane probes through the api layer.
+const taskTokenCatalogRef = vi.hoisted(() => ({
+  current: { agent_id: "agent-1", available: [] as unknown[], enabled: [] as string[] },
+}));
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/api")>()),
+  api: {
+    getAgentTaskTokens: () => Promise.resolve(taskTokenCatalogRef.current),
+  },
+}));
 vi.mock("@multica/core/lark", () => ({
   larkInstallationsOptions: () => ({
     queryKey: ["lark", "installations"],
@@ -178,6 +189,7 @@ beforeEach(() => {
   larkListingRef.current = { installations: [], configured: false };
   slackListingRef.current = { installations: [], configured: false };
   telegramListingRef.current = { installations: [], configured: false };
+  taskTokenCatalogRef.current = { agent_id: "agent-1", available: [], enabled: [] };
 });
 
 describe("AgentOverviewPane MCP tab visibility", () => {
@@ -275,6 +287,50 @@ describe("AgentOverviewPane Environment tab visibility", () => {
     openSettings();
     expect(
       screen.queryByRole("tab", { name: /^Environment$/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("AgentOverviewPane Identity Tokens tab visibility", () => {
+  const catalog = {
+    agent_id: "agent-1",
+    available: [{ id: "erp", label: "ERP", description: "", env: "BOT_TOKEN_ERP" }],
+    enabled: [] as string[],
+  };
+
+  it("shows the Identity Tokens tab once the deployment has a catalog", async () => {
+    taskTokenCatalogRef.current = catalog;
+    renderPane([makeRuntime("claude")]);
+    openSettings();
+    expect(
+      await screen.findByRole("tab", { name: /^Identity Tokens$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the Identity Tokens tab on a deployment with no catalog", async () => {
+    renderPane([makeRuntime("claude")]);
+    openSettings();
+    // Let the probe resolve; the empty catalog must not surface an entry
+    // point to a feature the operator never configured.
+    expect(
+      await screen.findByRole("tab", { name: /^Environment$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: /^Identity Tokens$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides the Identity Tokens tab from users who cannot manage the agent", async () => {
+    // Same server authorization as the env endpoints: anyone else would hit a
+    // guaranteed 403, so the catalog alone must not reveal the tab.
+    taskTokenCatalogRef.current = catalog;
+    renderPane([makeRuntime("claude")], { canEdit: false });
+    openSettings();
+    expect(
+      await screen.findByRole("tab", { name: /^General$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: /^Identity Tokens$/i }),
     ).not.toBeInTheDocument();
   });
 });

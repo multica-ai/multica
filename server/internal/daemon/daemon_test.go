@@ -345,7 +345,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 	t.Run("non-Codex runtime is unchanged", func(t *testing.T) {
 		t.Parallel()
 		codexHome := t.TempDir()
-		if err := configureCodexTaskShellEnvironment("claude", codexHome, nil, nil, nil, slog.Default()); err != nil {
+		if err := configureCodexTaskShellEnvironment("claude", codexHome, nil, nil, nil, nil, slog.Default()); err != nil {
 			t.Fatalf("configureCodexTaskShellEnvironment: %v", err)
 		}
 		if _, err := os.Stat(filepath.Join(codexHome, "config.toml")); !os.IsNotExist(err) {
@@ -374,7 +374,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			"CUSTOM_ACCESS_TOKEN": "agent-secret",
 			"CUSTOM_FLAG":         "enabled",
 		}
-		if err := configureCodexTaskShellEnvironment("codex", codexHome, inherited, agentEnv, agentCustomEnv, slog.Default()); err != nil {
+		if err := configureCodexTaskShellEnvironment("codex", codexHome, inherited, agentEnv, agentCustomEnv, nil, slog.Default()); err != nil {
 			t.Fatalf("configureCodexTaskShellEnvironment: %v", err)
 		}
 		data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
@@ -396,7 +396,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 
 	t.Run("Codex without task home fails closed", func(t *testing.T) {
 		t.Parallel()
-		err := configureCodexTaskShellEnvironment("codex", "", nil, map[string]string{"MULTICA_TOKEN": "mat_task"}, nil, slog.Default())
+		err := configureCodexTaskShellEnvironment("codex", "", nil, map[string]string{"MULTICA_TOKEN": "mat_task"}, nil, nil, slog.Default())
 		if err == nil || !strings.Contains(err.Error(), "CODEX_HOME is missing") {
 			t.Fatalf("error = %v, want missing CODEX_HOME", err)
 		}
@@ -432,7 +432,7 @@ func TestCodexTaskShellEnvInheritsRealHome(t *testing.T) {
 		"MULTICA_SERVER_URL":       "https://task.example",
 	}
 
-	if err := configureCodexTaskShellEnvironment("codex", codexHome, inherited, explicit, nil, slog.Default()); err != nil {
+	if err := configureCodexTaskShellEnvironment("codex", codexHome, inherited, explicit, nil, nil, slog.Default()); err != nil {
 		t.Fatalf("configureCodexTaskShellEnvironment: %v", err)
 	}
 

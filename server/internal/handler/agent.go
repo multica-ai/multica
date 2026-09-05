@@ -506,7 +506,17 @@ type AgentTaskResponse struct {
 	InitiatorID    string `json:"initiator_id,omitempty"`    // user UUID (member) or agent UUID
 	InitiatorName  string `json:"initiator_name,omitempty"`  // display name of the initiator
 	InitiatorEmail string `json:"initiator_email,omitempty"` // member email; empty for agent initiators
-	Kind           string `json:"kind"`                      // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	// TaskTokens are identity tokens signed for the human who asked for this
+	// run, keyed by the environment variable each should be injected under.
+	// Empty unless the deployment configured a catalog AND this agent enabled
+	// at least one template AND the run's delegation chain began with a member
+	// acting (see taskTokenIdentityUser) who is still a workspace member.
+	//
+	// Unlike Initiator* above — which is an attested identity for the brief —
+	// these ARE credentials, scoped to systems outside Multica. The agent's
+	// own Multica credentials remain owner-scoped and are unaffected.
+	TaskTokens map[string]string `json:"task_tokens,omitempty"`
+	Kind       string            `json:"kind"` // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 	// Attribution is the resolved accountable-human provenance for this run
 	// (MUL-4302 §9): the source label + precise flag, the initiator (accountable)
 	// and originator refs, the evidence pointer, and lineage. Always present (the

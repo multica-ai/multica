@@ -48,6 +48,7 @@
     "---자체 호스팅---",
     "security-model",
     "environment-variables",
+    "task-identity-tokens",
     "auth-setup",
     "troubleshooting",
     "---레퍼런스---",

@@ -265,6 +265,7 @@
     "composio_mcp": "MCP アプリ",
     "integrations": "連携",
     "runtime_config": "ルーティング",
+    "task_tokens": "アイデンティティトークン",
     "discard_dialog_title": "保存していない変更を破棄しますか？",
     "discard_dialog_description": "このタブに保存していない変更があります。今移動すると変更は破棄されます。",
     "discard_keep": "編集を続ける",
@@ -395,6 +396,15 @@
       "revealing": "表示中...",
       "reveal_failed_toast": "環境変数の値を読み込めませんでした",
       "empty_editable": "設定された環境変数はありません。起動時にエージェントへ注入する変数を追加してください。"
+    },
+    "task_tokens": {
+      "description": "このエージェントがアクセスできる社内システムを選択します。トークンは実行ごとに、その実行を開始した本人として署名され、保存されません。",
+      "docs_link": "連携ガイド",
+      "unconfigured": "このデプロイではアイデンティティトークンが設定されていません。",
+      "load_failed": "アイデンティティトークンを読み込めませんでした。しばらくしてからもう一度お試しください。",
+      "injected_as": "{{env}} として注入",
+      "saved": "アイデンティティトークンを更新しました",
+      "save_failed": "アイデンティティトークンを更新できませんでした"
     },
     "custom_args": {
       "intro": "エージェントの起動時に渡す CLI 引数を追加します。",
