@@ -49,6 +49,11 @@ import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
+import {
+  OutputTruncatedBadge,
+  TruncationUnknownNotice,
+  hasUnknownTruncation,
+} from "../../common/task-transcript/output-truncation";
 import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
@@ -1070,6 +1075,10 @@ function TimelineView({
 
   return (
     <>
+      {/* Stated once for the turn rather than per row: rows recorded before
+          truncation was tracked carry no badge, and without this they would be
+          visually indistinguishable from confirmed-complete results. */}
+      <TruncationUnknownNotice show={hasUnknownTruncation(items)} />
       {preface.length > 0 && (
         <RichContent
           content={preface.map((t) => t.content ?? "").join("")}
@@ -1251,8 +1260,13 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
   );
 }
 
+// Rendering limit for a collapsed tool result. Unrelated to the server's
+// persistence budget, which OutputTruncatedBadge reports from its own metadata.
+const CHAT_DISPLAY_CLIP_CHARS = 4000;
+
 function ToolResultRow({ item }: { item: ChatTimelineItem }) {
   const { t } = useT("chat");
+  const { t: tAgents } = useT("agents");
   const [open, setOpen] = useState(false);
   const output = item.output ?? "";
   if (!output) return null;
@@ -1261,6 +1275,10 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
   const labelPrefix = item.tool
     ? t(($) => $.message_list.tool_result_named, { tool: item.tool })
     : t(($) => $.message_list.tool_result_unnamed);
+  // Display clipping is a layout decision about the stored preview; the badge
+  // below reports whether the SOURCE was cut. Keeping them worded apart stops
+  // a collapsed body from reading as lost data.
+  const isClipped = output.length > CHAT_DISPLAY_CLIP_CHARS;
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -1271,11 +1289,21 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
         <span className="text-muted-foreground truncate">
           {labelPrefix}{preview}
         </span>
+        <OutputTruncatedBadge
+          truncated={item.output_truncated}
+          originalBytes={item.output_original_bytes}
+          className="ml-auto"
+        />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
-          {output.length > 4000 ? output.slice(0, 4000) + "\n... (truncated)" : output}
+          {isClipped ? output.slice(0, CHAT_DISPLAY_CLIP_CHARS) : output}
         </pre>
+        {isClipped && (
+          <p className="ml-[18px] mt-0.5 text-micro text-faint-foreground">
+            {tAgents(($) => $.transcript.output_display_clipped, { count: CHAT_DISPLAY_CLIP_CHARS })}
+          </p>
+        )}
       </CollapsibleContent>
     </Collapsible>
   );

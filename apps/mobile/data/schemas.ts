@@ -349,6 +349,13 @@ export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z.object(
   content: z.string().optional(),
   input: z.record(z.string(), z.unknown()).optional(),
   output: z.string().optional(),
+  // Truncation metadata decides whether a tool result is presented as complete
+  // or as a preview, so a malformed value must not pass for a real one.
+  // catch(undefined) degrades a bad field to "unknown" — which the UI already
+  // handles — rather than letting the string "false" through, which is truthy
+  // in JS and would read as "truncated" while looking deliberate.
+  output_truncated: z.boolean().optional().catch(undefined),
+  output_original_bytes: z.number().int().nonnegative().finite().optional().catch(undefined),
   created_at: z.string().optional(),
 }).loose();
 

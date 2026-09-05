@@ -804,7 +804,11 @@
     "tool_kind_command": "명령",
     "tool_kind_write": "편집",
     "tool_kind_read": "읽기",
-    "tool_kind_misc": "기타"
+    "tool_kind_misc": "기타",
+    "output_truncated_badge": "원본 출력 잘림 · 총 {{size}}",
+    "output_truncated_hint": "에이전트의 실제 출력이 여기에 저장된 양보다 많습니다. 이것은 미리보기이며 전체 결과가 아닙니다.",
+    "output_display_clipped": "저장된 미리보기의 처음 {{count}}자만 표시합니다.",
+    "output_truncation_unknown": "이 기록의 일부 결과는 잘림 추적이 시작되기 전에 기록되어 완전한지 알 수 없습니다."
   },
   "task_failure": {
     "cancelled_by_system": "시스템에서 취소함",

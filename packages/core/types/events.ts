@@ -294,6 +294,21 @@ export interface TaskMessagePayload {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+  /**
+   * Whether `output` is the whole tool result or a preview of it.
+   *
+   * Three states, and they must stay distinct at the point of rendering:
+   * `undefined` means the daemon that reported this message predates the
+   * field, or the row was stored before the column existed — nothing can be
+   * inferred; `false` is a positive assertion that the output is complete;
+   * `true` means it was truncated.
+   *
+   * Check with `=== true`. Treating `undefined` as "complete" reproduces the
+   * silent truncation this field exists to expose.
+   */
+  output_truncated?: boolean;
+  /** Size of the tool result before truncation, in bytes. */
+  output_original_bytes?: number;
   created_at?: string;
 }
 

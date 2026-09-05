@@ -1,6 +1,6 @@
 -- name: CreateTaskMessage :one
-INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output, output_truncated, output_original_bytes)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;
 
 -- name: CreateTaskMessages :many
@@ -56,9 +56,17 @@ WITH incoming AS (
         unnest(sqlc.arg('tools')::text[]) AS tool,
         unnest(sqlc.arg('contents')::text[]) AS content,
         unnest(sqlc.arg('inputs')::text[]) AS input,
-        unnest(sqlc.arg('outputs')::text[]) AS output
+        unnest(sqlc.arg('outputs')::text[]) AS output,
+        -- Carried as text[] for the same reason the columns above are: a
+        -- boolean[]/bigint[] parameter maps to Go []bool/[]int64, and neither
+        -- can hold a per-row NULL. Every element would arrive as a real value,
+        -- collapsing "not applicable / unknown" into "output is complete" —
+        -- the exact distinction these columns exist to preserve. Empty string
+        -- means SQL NULL, matching the NULLIF convention already used here.
+        unnest(sqlc.arg('output_truncateds')::text[]) AS output_truncated,
+        unnest(sqlc.arg('output_original_bytes_list')::text[]) AS output_original_bytes
 ), inserted AS (
-    INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output)
+    INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output, output_truncated, output_original_bytes)
     SELECT
         m.id,
         sqlc.arg('task_id')::uuid,
@@ -67,7 +75,9 @@ WITH incoming AS (
         NULLIF(m.tool, ''),
         NULLIF(m.content, ''),
         NULLIF(m.input, '')::jsonb,
-        NULLIF(m.output, '')
+        NULLIF(m.output, ''),
+        NULLIF(m.output_truncated, '')::boolean,
+        NULLIF(m.output_original_bytes, '')::bigint
     FROM incoming AS m
     RETURNING *
 )

@@ -507,13 +507,22 @@ func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, ste
 }
 
 // TaskMessageData represents a single agent execution message for batch reporting.
+//
+// OutputTruncated and OutputOriginalBytes are pointers, not plain values, and
+// that is load-bearing rather than stylistic. Every other optional field here
+// carries omitempty, and copying that habit would encode an explicit false as
+// `{}` — indistinguishable on the wire from a daemon too old to know about the
+// field. The reader needs three states: absent (unknown), false (this daemon
+// confirms the output is complete) and true (truncated).
 type TaskMessageData struct {
-	Seq     int            `json:"seq"`
-	Type    string         `json:"type"`
-	Tool    string         `json:"tool,omitempty"`
-	Content string         `json:"content,omitempty"`
-	Input   map[string]any `json:"input,omitempty"`
-	Output  string         `json:"output,omitempty"`
+	Seq                 int            `json:"seq"`
+	Type                string         `json:"type"`
+	Tool                string         `json:"tool,omitempty"`
+	Content             string         `json:"content,omitempty"`
+	Input               map[string]any `json:"input,omitempty"`
+	Output              string         `json:"output,omitempty"`
+	OutputTruncated     *bool          `json:"output_truncated,omitempty"`
+	OutputOriginalBytes *int           `json:"output_original_bytes,omitempty"`
 }
 
 func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages []TaskMessageData) error {

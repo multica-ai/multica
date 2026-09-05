@@ -903,7 +903,11 @@
     "tool_kind_command": "命令",
     "tool_kind_write": "编辑",
     "tool_kind_read": "读取",
-    "tool_kind_misc": "其他"
+    "tool_kind_misc": "其他",
+    "output_truncated_badge": "源输出已截断 · 共 {{size}}",
+    "output_truncated_hint": "智能体的实际输出超过了此处保存的长度。这是预览，不是完整结果。",
+    "output_display_clipped": "仅展示所存预览的前 {{count}} 个字符。",
+    "output_truncation_unknown": "此记录中的部分结果产生于截断标记功能上线之前，无法确定它们是否完整。"
   },
   "task_failure": {
     "cancelled_by_system": "系统已取消",

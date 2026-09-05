@@ -172,6 +172,15 @@ type Message struct {
 	Status    string         // agent status string (Status)
 	Level     string         // log level (Log)
 	SessionID string         // backend session id (Status), for early resume-pointer pinning
+
+	// OutputIsImage marks Output as a structured image content block rather
+	// than text (ToolResult). Only the adapter that decoded the provider's
+	// payload knows this; downstream all it has is a string, and sniffing a
+	// JSON string for image-ish keys would misfire on ordinary output that
+	// happens to mention them. Consumers applying a byte budget must keep such
+	// output whole or drop it whole — half of a base64 image is neither a
+	// picture nor readable text.
+	OutputIsImage bool
 }
 
 // TokenUsage tracks token consumption for a single model.

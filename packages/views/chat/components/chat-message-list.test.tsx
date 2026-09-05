@@ -6,6 +6,9 @@ import { chatKeys } from "@multica/core/chat/queries";
 import type { TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
+// The truncation strings live in the agents namespace, shared with the
+// transcript dialog, so this surface needs it loaded too.
+import enAgents from "../../locales/en/agents.json";
 
 // The live timeline is a real list row rather than Virtuoso chrome (MUL-4922),
 // so it shares one identity with the persisted assistant row and keeps its
@@ -49,6 +52,7 @@ vi.mock("react-virtuoso", () => ({
 import { ChatMessageList } from "./chat-message-list";
 
 const TEST_RESOURCES = { en: { chat: enChat } };
+const TRUNCATION_RESOURCES = { en: { chat: enChat, agents: enAgents } };
 const TASK_ID = "6af44cbe-80ab-4dfe-b07d-bd3cfd588f4d";
 
 function taskMsg(
@@ -586,5 +590,96 @@ describe("ChatMessageList onboarding starter cards", () => {
       await screen.findByRole("button", { name: "Get a board up in minutes" }),
     ).toBeEnabled();
     expect(screen.getByRole("button", { name: "Later chip" })).toBeEnabled();
+  });
+});
+
+// Truncation metadata reaches the chat timeline, not just the transcript
+// dialog. The state matrix for the helpers lives in
+// common/task-transcript/output-truncation.test.ts; these assert this surface
+// actually consults it. Every defect in this area has been a correct helper
+// that some caller never invoked, so helper coverage alone is not evidence.
+describe("ChatMessageList tool result truncation", () => {
+  function renderMessages(messages: TaskMessagePayload[]) {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), messages);
+    return render(
+      <I18nProvider locale="en" resources={TRUNCATION_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={{ task_id: TASK_ID, status: "running" }}
+            availability={undefined}
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+  }
+
+  const truncatedResult = taskMsg(1, "tool_result", {
+    tool: "Bash",
+    output: "partial output",
+    output_truncated: true,
+    output_original_bytes: 36000,
+  });
+
+  it("marks a truncated result with its original size", () => {
+    renderMessages([truncatedResult]);
+    // The size is what tells a reader how much is missing, and it only appears
+    // if the {{size}} placeholder actually interpolates.
+    expect(screen.getByText(/Source truncated · 35 KB total/)).toBeTruthy();
+  });
+
+  it("does not mark a result the daemon reported as complete", () => {
+    renderMessages([
+      taskMsg(1, "tool_result", {
+        tool: "Bash",
+        output: "whole output",
+        output_truncated: false,
+        output_original_bytes: 12,
+      }),
+    ]);
+    expect(screen.queryByText(/Source truncated/)).toBeNull();
+  });
+
+  it("does not mark a result whose state is unknown", () => {
+    renderMessages([taskMsg(1, "tool_result", { tool: "Bash", output: "legacy" })]);
+    expect(screen.queryByText(/Source truncated/)).toBeNull();
+  });
+
+  it("explains once that some results predate truncation tracking", () => {
+    renderMessages([
+      taskMsg(1, "tool_result", { tool: "Bash", output: "legacy one" }),
+      taskMsg(2, "tool_result", { tool: "Bash", output: "legacy two" }),
+      taskMsg(3, "tool_result", { tool: "Bash", output: "legacy three" }),
+    ]);
+    // Once for the turn, not once per row: repeating it would bury the rows
+    // that really were cut.
+    expect(screen.getAllByText(/recorded before truncation was tracked/i)).toHaveLength(1);
+  });
+
+  it("stays silent when every result carries a definite state", () => {
+    renderMessages([
+      truncatedResult,
+      taskMsg(2, "tool_result", { tool: "Bash", output: "ok", output_truncated: false }),
+    ]);
+    expect(screen.queryByText(/recorded before truncation was tracked/i)).toBeNull();
+  });
+
+  it("labels its own display clipping separately from source truncation", () => {
+    // Two different facts: the stored preview is longer than this surface will
+    // paint (display), versus the agent produced more than was stored (source).
+    // Conflating them told users a long-but-complete result had lost data.
+    renderMessages([
+      taskMsg(1, "tool_result", {
+        tool: "Bash",
+        output: "x".repeat(5000),
+        output_truncated: false,
+      }),
+    ]);
+    fireEvent.click(screen.getByText(/Bash result:/));
+    expect(
+      screen.getByText(/Showing the first 4000 characters of the stored preview/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Source truncated/)).toBeNull();
   });
 });

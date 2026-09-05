@@ -4601,6 +4601,12 @@ type TaskMessageRequest struct {
 	Content string         `json:"content,omitempty"`
 	Input   map[string]any `json:"input,omitempty"`
 	Output  string         `json:"output,omitempty"`
+	// Pointers so an absent field stays distinguishable from an explicit
+	// false/0. A daemon predating tool-output truncation metadata sends
+	// neither, and that "unknown" must not be read as "the output is
+	// complete" — which is what a plain bool would decode it to.
+	OutputTruncated     *bool  `json:"output_truncated,omitempty"`
+	OutputOriginalBytes *int64 `json:"output_original_bytes,omitempty"`
 }
 
 type TaskMessageBatchRequest struct {
@@ -4657,6 +4663,10 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		Contents: make([]string, 0, n),
 		Inputs:   make([]string, 0, n),
 		Outputs:  make([]string, 0, n),
+		// text[] rather than boolean[]/bigint[] so a per-row NULL is
+		// expressible; empty string means SQL NULL via the query's NULLIF.
+		OutputTruncateds:        make([]string, 0, n),
+		OutputOriginalBytesList: make([]string, 0, n),
 	}
 	for _, msg := range req.Messages {
 		id, err := uuid.NewV7()
@@ -4712,6 +4722,8 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		params.Contents = append(params.Contents, msg.Content)
 		params.Inputs = append(params.Inputs, inputJSON)
 		params.Outputs = append(params.Outputs, msg.Output)
+		params.OutputTruncateds = append(params.OutputTruncateds, encodeNullableBool(msg.OutputTruncated))
+		params.OutputOriginalBytesList = append(params.OutputOriginalBytesList, encodeNullableInt64(msg.OutputOriginalBytes))
 	}
 
 	created, err := h.Queries.CreateTaskMessages(r.Context(), params)
@@ -4851,16 +4863,59 @@ func taskMessageToPayload(m db.TaskMessage, taskID, issueID string) protocol.Tas
 		createdAt = m.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
 	}
 	return protocol.TaskMessagePayload{
-		TaskID:    taskID,
-		IssueID:   issueID,
-		Seq:       int(m.Seq),
-		Type:      m.Type,
-		Tool:      m.Tool.String,
-		Content:   m.Content.String,
-		Input:     input,
-		Output:    m.Output.String,
-		CreatedAt: createdAt,
+		TaskID:  taskID,
+		IssueID: issueID,
+		Seq:     int(m.Seq),
+		Type:    m.Type,
+		Tool:    m.Tool.String,
+		Content: m.Content.String,
+		Input:   input,
+		Output:  m.Output.String,
+		// NULL stays absent rather than becoming false. A NULL column is a row
+		// written before truncation metadata existed, and the client has to be
+		// able to tell that from a daemon reporting a complete output;
+		// substituting false would assert completeness for every historical row.
+		OutputTruncated:     nullableBool(m.OutputTruncated),
+		OutputOriginalBytes: nullableInt64(m.OutputOriginalBytes),
+		CreatedAt:           createdAt,
 	}
+}
+
+// nullableBool converts a SQL NULL-able column into an optional value, so an
+// unset column serialises as an absent JSON field rather than false.
+func nullableBool(v pgtype.Bool) *bool {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Bool
+}
+
+// nullableInt64 is nullableBool for byte counts.
+func nullableInt64(v pgtype.Int8) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
+}
+
+// encodeNullableBool renders an optional bool for a text[] batch parameter,
+// where the empty string is the query's NULL sentinel. Pointer in, three
+// states out: "", "true", "false".
+func encodeNullableBool(v *bool) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.FormatBool(*v)
+}
+
+// encodeNullableInt64 is encodeNullableBool for byte counts. Negative values
+// are dropped rather than stored: a size cannot be negative, so one means the
+// reporter is confused, and an absurd number in the UI is worse than no number.
+func encodeNullableInt64(v *int64) string {
+	if v == nil || *v < 0 {
+		return ""
+	}
+	return strconv.FormatInt(*v, 10)
 }
 
 // ListTaskMessages returns the persisted messages for a task (for catch-up after reconnect).

@@ -29,6 +29,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  TRUNCATION_UNKNOWN_NOTICE,
+  clipForDisplay,
+  displayClippedLabel,
+  hasUnknownTruncation,
+  sourceTruncatedLabel,
+} from "@/lib/tool-output-truncation";
 
 interface Props {
   items: TaskMessagePayload[];
@@ -40,6 +47,12 @@ interface Props {
 export function ChatTimeline({ items, isStreaming = false }: Props) {
   const processSteps = items.filter((i) => i.type !== "text");
   if (processSteps.length === 0) return null;
+
+  // Rows recorded before truncation was tracked carry no badge, which makes
+  // them visually identical to results confirmed complete. Said once for the
+  // turn rather than per row: it is a property of when the run happened, and
+  // repeating it would bury the rows that really were cut.
+  const showUnknownNotice = hasUnknownTruncation(processSteps);
 
   return (
     <Collapsible defaultOpen={isStreaming}>
@@ -58,6 +71,11 @@ export function ChatTimeline({ items, isStreaming = false }: Props) {
           </Text>
         </View>
       </CollapsibleTrigger>
+      {showUnknownNotice ? (
+        <Text className="mt-0.5 text-[10px] text-muted-foreground/70">
+          {TRUNCATION_UNKNOWN_NOTICE}
+        </Text>
+      ) : null}
       <CollapsibleContent>
         <View className="mt-1 rounded-lg border border-border bg-muted/20 px-2 py-1.5 gap-0.5">
           {processSteps.map((item) => (
@@ -179,6 +197,10 @@ function ToolResultRow({ item }: { item: TaskMessagePayload }) {
   if (!output) return null;
   const preview = output.length > 80 ? `${output.slice(0, 80)}…` : output;
   const prefix = item.tool ? `${item.tool} result: ` : "result: ";
+  // Both labels come from lib/tool-output-truncation so the rules can be
+  // tested without a React Native renderer; this component only places them.
+  const clippedNotice = displayClippedLabel(output);
+  const truncatedLabel = sourceTruncatedLabel(item);
   return (
     <Collapsible>
       <CollapsibleTrigger asChild>
@@ -196,15 +218,21 @@ function ToolResultRow({ item }: { item: TaskMessagePayload }) {
             <Text className="text-xs text-muted-foreground">{prefix}</Text>
             {preview}
           </Text>
+          {truncatedLabel ? (
+            <Text className="shrink-0 text-[10px] text-amber-600 dark:text-amber-500">
+              {truncatedLabel}
+            </Text>
+          ) : null}
         </View>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <View className="ml-4 mt-1 rounded bg-muted/40 px-2 py-1.5">
           <Text className="text-xs text-muted-foreground">
-            {output.length > 4000
-              ? `${output.slice(0, 4000)}\n…(truncated)`
-              : output}
+            {clipForDisplay(output)}
           </Text>
+          {clippedNotice ? (
+            <Text className="mt-1 text-[10px] text-muted-foreground/70">{clippedNotice}</Text>
+          ) : null}
         </View>
       </CollapsibleContent>
     </Collapsible>

@@ -195,6 +195,17 @@ type TaskMessagePayload struct {
 	Input     map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
 	Output    string         `json:"output,omitempty"`  // tool output (tool_result only)
 	CreatedAt string         `json:"created_at,omitempty"`
+
+	// OutputTruncated reports whether Output is the whole tool result or a
+	// preview of it; OutputOriginalBytes is the pre-truncation size.
+	//
+	// Both are pointers so the wire keeps three states apart: absent (written
+	// by a daemon that predates this metadata, or stored before the columns
+	// existed — nothing can be inferred), false (the output is complete) and
+	// true (truncated). A client must not render absent as complete; that is
+	// the silent truncation this metadata exists to expose.
+	OutputTruncated     *bool  `json:"output_truncated,omitempty"`
+	OutputOriginalBytes *int64 `json:"output_original_bytes,omitempty"`
 }
 
 // DaemonRegisterPayload is sent from daemon to server on connection.

@@ -415,13 +415,15 @@ func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message
 	for _, block := range content.Content {
 		if block.Type == "tool_result" {
 			resultStr := ""
+			isImage := false
 			if block.Content != nil {
-				resultStr = string(block.Content)
+				resultStr, isImage = ToolResultOutput(block.Content)
 			}
 			trySend(ch, Message{
-				Type:   MessageToolResult,
-				CallID: block.ToolUseID,
-				Output: resultStr,
+				Type:          MessageToolResult,
+				CallID:        block.ToolUseID,
+				Output:        resultStr,
+				OutputIsImage: isImage,
 			})
 		}
 	}

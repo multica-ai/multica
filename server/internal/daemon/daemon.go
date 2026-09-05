@@ -8933,10 +8933,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						}
 					}
 					s := msgSeq.Add(1)
-					output := msg.Output
-					if len(output) > 8192 {
-						output = output[:8192]
-					}
+					output, outputTruncated, outputOriginalBytes := toolOutputPreview(msg.Output, msg.OutputIsImage)
 					toolName := msg.Tool
 					if toolName == "" && msg.CallID != "" {
 						mu.Lock()
@@ -8950,6 +8947,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						Type:   "tool_result",
 						Tool:   toolName,
 						Output: output,
+						// Sent even when false: a reader has to be able to tell
+						// "this daemon says the output is complete" from "this
+						// daemon is too old to say". Omitting false would
+						// collapse those into the same absent field.
+						OutputTruncated:     &outputTruncated,
+						OutputOriginalBytes: &outputOriginalBytes,
 					})
 					mu.Unlock()
 				case agent.MessageThinking:

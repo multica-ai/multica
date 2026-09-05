@@ -922,7 +922,11 @@
     "tool_kind_command": "Commands",
     "tool_kind_write": "Edits",
     "tool_kind_read": "Reads",
-    "tool_kind_misc": "Other"
+    "tool_kind_misc": "Other",
+    "output_truncated_badge": "Source truncated · {{size}} total",
+    "output_truncated_hint": "The agent produced more output than is stored here. This is a preview, not the full result.",
+    "output_display_clipped": "Showing the first {{count}} characters of the stored preview.",
+    "output_truncation_unknown": "Some results in this transcript were recorded before truncation was tracked, so whether they are complete is unknown."
   },
   "task_failure": {
     "cancelled_by_system": "Cancelled by the system",

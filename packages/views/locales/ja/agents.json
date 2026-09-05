@@ -796,7 +796,11 @@
     "tool_kind_command": "コマンド",
     "tool_kind_write": "編集",
     "tool_kind_read": "読み取り",
-    "tool_kind_misc": "その他"
+    "tool_kind_misc": "その他",
+    "output_truncated_badge": "元の出力を切り詰め済み · 合計 {{size}}",
+    "output_truncated_hint": "エージェントの実際の出力はここに保存されている量を超えています。これはプレビューであり、完全な結果ではありません。",
+    "output_display_clipped": "保存されたプレビューの先頭 {{count}} 文字のみを表示しています。",
+    "output_truncation_unknown": "この記録の一部の結果は切り詰めの記録が始まる前のもので、完全かどうかは不明です。"
   },
   "task_failure": {
     "cancelled_by_system": "システムによってキャンセルされました",

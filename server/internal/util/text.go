@@ -174,3 +174,26 @@ func sanitizePostgresJSONMapKeys(values map[string]any) map[string]string {
 	}
 	return mapped
 }
+
+// TrimToRuneBoundary drops trailing bytes until s is valid UTF-8.
+//
+// Its purpose is a byte-budgeted cut: slicing a string at an arbitrary byte
+// offset can land inside a multi-byte rune, and the resulting fragment is not
+// valid UTF-8. Callers that cut by bytes and want to persist or display the
+// result run it through here.
+//
+// Only a trailing partial rune is repaired. Invalid bytes further inside are
+// left alone — those are a property of the input, and SanitizeTextForPostgres
+// is the place that deals with them.
+func TrimToRuneBoundary(s string) string {
+	// A truncated rune is at most 3 trailing bytes, so this loop runs at most
+	// three times; validating the whole string each pass would be O(n) per byte.
+	for i := 0; i < utf8.UTFMax && len(s) > 0; i++ {
+		r, size := utf8.DecodeLastRuneInString(s)
+		if r != utf8.RuneError || size > 1 {
+			return s
+		}
+		s = s[:len(s)-1]
+	}
+	return s
+}

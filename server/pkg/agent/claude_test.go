@@ -121,8 +121,79 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 		if m.Type != MessageToolResult || m.CallID != "call-1" {
 			t.Fatalf("unexpected message: %+v", m)
 		}
+		// The payload was a JSON-encoded string, so the adapter must hand
+		// downstream the terminal text rather than its transport form. Asserting
+		// only the type and call id would pass whether or not the unwrapping is
+		// wired up here at all.
+		if m.Output != "file contents here" {
+			t.Errorf("Output = %q, want the unwrapped text", m.Output)
+		}
+		if m.OutputIsImage {
+			t.Error("OutputIsImage = true for a text result")
+		}
 	default:
 		t.Fatal("expected message on channel")
+	}
+}
+
+// Wiring regressions for the tool_result path. The shared helper has its own
+// table in content_block_test.go; these exist because every defect in this area
+// so far has been a correct helper that some adapter never called.
+func TestClaudeToolResultOutputWiring(t *testing.T) {
+	t.Parallel()
+
+	imageBlock := []map[string]any{{
+		"type": "image",
+		"source": map[string]any{
+			"type": "base64", "media_type": "image/png", "data": "AAAABBBB",
+		},
+	}}
+
+	tests := []struct {
+		name      string
+		content   any
+		wantOut   string
+		wantImage bool
+	}{
+		{"json string is unwrapped", "line one\nline two", "line one\nline two", false},
+		{"image block is marked and kept whole", imageBlock, "", true},
+		{"bare document passes through", map[string]any{"ok": true}, `{"ok":true}`, false},
+		// json.Unmarshal accepts null into a string and leaves "", so an
+		// error-only check would empty this result and the row would vanish.
+		{"null is not treated as an empty string", nil, "null", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+			ch := make(chan Message, 4)
+			b.handleUser(claudeSDKMessage{
+				Type: "user",
+				Message: mustMarshal(t, claudeMessageContent{
+					Role: "user",
+					Content: []claudeContentBlock{{
+						Type:      "tool_result",
+						ToolUseID: "call-1",
+						Content:   mustMarshal(t, tc.content),
+					}},
+				}),
+			}, ch)
+
+			select {
+			case m := <-ch:
+				if tc.wantOut != "" && m.Output != tc.wantOut {
+					t.Errorf("Output = %q, want %q", m.Output, tc.wantOut)
+				}
+				if m.OutputIsImage != tc.wantImage {
+					t.Errorf("OutputIsImage = %v, want %v", m.OutputIsImage, tc.wantImage)
+				}
+				if tc.wantImage && !strings.Contains(m.Output, "AAAABBBB") {
+					t.Error("image payload was altered; it must reach the budget helper whole")
+				}
+			default:
+				t.Fatal("expected message on channel")
+			}
+		})
 	}
 }
 

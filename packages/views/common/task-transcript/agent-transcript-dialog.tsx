@@ -56,6 +56,11 @@ import { runtimeDisplayName, providerDisplayName } from "@multica/core/runtimes"
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { redactSecrets } from "./redact";
 import {
+  OutputTruncatedBadge,
+  TruncationUnknownNotice,
+  hasUnknownTruncation,
+} from "./output-truncation";
+import {
   createLiveEndFollow,
   FOLLOW_EDGE_THRESHOLD,
   LINE_SCROLL_PX,
@@ -1197,6 +1202,10 @@ export function AgentTranscriptDialog({
         {/* ── Steps, and the inspector when one is selected ───────────── */}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
+            {/* Stated once for the transcript rather than on each row: the
+                gap is a property of when the run was recorded, and repeating
+                it per message would bury the rows that really were cut. */}
+            <TruncationUnknownNotice show={hasUnknownTruncation(items)} />
             {displayRows.length === 0 ? (
               <div className="flex h-full items-center justify-center text-body text-muted-foreground">
                 {isAntigravityLiveEmpty ? (
@@ -1704,7 +1713,15 @@ function StepInspector({
               </InspectorSection>
             )}
             {call.result && (
-              <InspectorSection label={t(($) => $.transcript.step_result)}>
+              <InspectorSection
+                label={t(($) => $.transcript.step_result)}
+                badge={
+                  <OutputTruncatedBadge
+                    truncated={call.result.output_truncated}
+                    originalBytes={call.result.output_original_bytes}
+                  />
+                }
+              >
                 <StepBody item={call.result} />
               </InspectorSection>
             )}
@@ -1719,11 +1736,20 @@ function StepInspector({
   );
 }
 
-function InspectorSection({ label, children }: { label: string; children: React.ReactNode }) {
+function InspectorSection({
+  label,
+  badge,
+  children,
+}: {
+  label: string;
+  badge?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section className="border-b last:border-b-0">
-      <h3 className="px-3 pt-2 text-micro font-medium uppercase tracking-wide text-faint-foreground">
-        {label}
+      <h3 className="flex items-center gap-2 px-3 pt-2 text-micro font-medium uppercase tracking-wide text-faint-foreground">
+        <span>{label}</span>
+        {badge}
       </h3>
       <div className="px-1 pb-2">{children}</div>
     </section>
@@ -1731,6 +1757,11 @@ function InspectorSection({ label, children }: { label: string; children: React.
 }
 
 /** One payload, rendered as what it is. */
+// How much of a stored preview the inspector will paint at once. Purely a
+// rendering limit — unrelated to the server's persistence budget, which is
+// reported separately by OutputTruncatedBadge.
+const DISPLAY_CLIP_CHARS = 8000;
+
 function StepBody({ item }: { item: TimelineItem }) {
   const { t } = useT("agents");
   const detail = useMemo(() => traceEventDetail(item), [item]);
@@ -1763,10 +1794,25 @@ function StepBody({ item }: { item: TimelineItem }) {
       );
     default: {
       const text = detail.text;
-      const clipped =
-        text.length > 8000 ? `${redactSecrets(text.slice(0, 8000))}\n... (truncated)` : redactSecrets(text);
+      // Display clipping, not data loss: the stored preview is longer than we
+      // are willing to paint. Worded as "showing the first N characters" so it
+      // cannot be mistaken for the source having been cut — that is what
+      // OutputTruncatedBadge reports, from the server's own metadata.
+      const isClipped = text.length > DISPLAY_CLIP_CHARS;
+      const body = isClipped
+        ? redactSecrets(text.slice(0, DISPLAY_CLIP_CHARS))
+        : redactSecrets(text);
       const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
-      return <ToolDetailSurface text={clipped} language={path ? languageForPath(path) : undefined} />;
+      return (
+        <>
+          <ToolDetailSurface text={body} language={path ? languageForPath(path) : undefined} />
+          {isClipped && (
+            <p className="px-3 pb-1 text-micro text-faint-foreground">
+              {t(($) => $.transcript.output_display_clipped, { count: DISPLAY_CLIP_CHARS })}
+            </p>
+          )}
+        </>
+      );
     }
   }
 }

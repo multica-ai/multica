@@ -430,16 +430,21 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool
 	for _, block := range content.Content {
 		if block.Type == "tool_result" {
 			resultStr := ""
+			isImage := false
 			if block.Content != nil {
-				resultStr = string(block.Content)
+				// Unwrap the transport layer here, where the decoded payload is
+				// still available: downstream sees only a string and cannot tell
+				// a JSON-encoded string from a bare document.
+				resultStr, isImage = ToolResultOutput(block.Content)
 				if claudeToolResultHasAsyncLaunch(block.Content) {
 					sawAsyncLaunch = true
 				}
 			}
 			trySend(ch, Message{
-				Type:   MessageToolResult,
-				CallID: block.ToolUseID,
-				Output: resultStr,
+				Type:          MessageToolResult,
+				CallID:        block.ToolUseID,
+				Output:        resultStr,
+				OutputIsImage: isImage,
 			})
 		}
 	}

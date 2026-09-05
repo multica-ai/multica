@@ -82,6 +82,7 @@ import type {
   Skill,
   SkillImportResult,
   Squad,
+  TaskMessagePayload,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -3337,3 +3338,53 @@ export const EMPTY_JOIN_SHARE_LINK_RESPONSE: {
   workspace_id: "",
   workspace_slug: "",
 };
+
+// Task execution messages (`GET /api/tasks/:id/messages`) back the Execution
+// log and the chat transcript.
+//
+// The two truncation fields decide whether the reader is shown a tool result
+// as complete or as a preview, so a malformed value must not be able to
+// masquerade as a real one. `catch(undefined)` degrades a bad field to
+// "unknown", which every renderer already handles, rather than letting the
+// string "false" through — that is truthy in JS and would defeat a
+// `!== undefined` style check while looking deliberate.
+const TaskMessageTruncatedSchema = z.boolean().optional().catch(undefined);
+
+// A byte count must be a real, non-negative, finite integer. NaN and Infinity
+// survive JSON round trips through some producers, and both render as garbage.
+const TaskMessageOriginalBytesSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .finite()
+  .optional()
+  .catch(undefined);
+
+export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z
+  .object({
+    task_id: z.string().default(""),
+    issue_id: z.string().default(""),
+    chat_session_id: z.string().optional(),
+    seq: z.number().default(0),
+    // Enum drift downgrades rather than crashes: an unrecognised type still
+    // renders as a plain text chunk instead of taking out the timeline.
+    type: z
+      .enum(["text", "thinking", "tool_use", "tool_result", "error"])
+      .catch("text"),
+    tool: z.string().optional(),
+    content: z.string().optional(),
+    input: z.record(z.string(), z.unknown()).optional(),
+    output: z.string().optional(),
+    output_truncated: TaskMessageTruncatedSchema,
+    output_original_bytes: TaskMessageOriginalBytesSchema,
+    created_at: z.string().optional(),
+  })
+  .loose();
+
+// Recovery is per-field, not per-list. A list-level fallback would drop the
+// entire transcript because one message carried one bad field; the field-level
+// `catch(undefined)` above keeps that message visible with its truncation
+// state reported as unknown, which is both accurate and far less destructive.
+export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);
+
+export const EMPTY_TASK_MESSAGE_LIST: TaskMessagePayload[] = [];

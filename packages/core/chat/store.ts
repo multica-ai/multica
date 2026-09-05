@@ -284,6 +284,14 @@ export interface ChatTimelineItem {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+  /**
+   * Whether `output` is the whole tool result or a preview. `undefined` means
+   * unknown — an older daemon, or a row stored before the field existed — and
+   * must not be rendered as "complete". Check with `=== true`.
+   */
+  output_truncated?: boolean;
+  /** Size of the tool result before truncation, in bytes. */
+  output_original_bytes?: number;
   created_at?: string;
 }
 
