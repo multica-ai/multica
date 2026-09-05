@@ -58,6 +58,7 @@ type Outbound struct {
 	terminalInFlight         int
 	queuedTerminalReplyCount int
 	queuedTerminalReplyBytes int
+	terminalTasks            map[string]time.Time
 	workerOnce               sync.Once
 	workerWG                 sync.WaitGroup
 	terminalWorkerWG         sync.WaitGroup
@@ -68,6 +69,9 @@ type Outbound struct {
 type outboundQueries interface {
 	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
+	GetChatMessageByTaskAssistant(ctx context.Context, taskID pgtype.UUID) (db.ChatMessage, error)
+	SetChatMessageChannelOutboundProvenanceByTask(ctx context.Context, arg db.SetChatMessageChannelOutboundProvenanceByTaskParams) (int64, error)
+	RecordChannelOutboundMessage(ctx context.Context, arg db.RecordChannelOutboundMessageParams) error
 }
 
 // streamState tracks one in-flight streamed reply.
@@ -107,6 +111,7 @@ type terminalSession struct {
 
 type terminalReply struct {
 	event             events.Event
+	taskKey           string
 	byteSize          int
 	initialized       bool
 	target            *replyTarget
@@ -117,6 +122,10 @@ type terminalReply struct {
 	placeholderEdited bool
 	fallbackFreshSend bool
 	plainTextFallback bool
+	plainTextEdit     bool
+	messageIDs        []string
+	deliveryComplete  bool
+	preventReplay     bool
 	cleanupOnce       sync.Once
 }
 
@@ -169,6 +178,9 @@ const (
 	maxQueuedTerminalReplies           = 64
 	maxQueuedTerminalRepliesPerSession = 8
 	maxQueuedTerminalReplyBytes        = 16 << 20
+	terminalTaskDedupTTL               = 10 * time.Minute
+	maxTerminalTaskDedupEntries        = 4096
+	terminalEditRetryDelay             = time.Second
 )
 
 // streamPlaceholder is the first frame's text while the first tokens arrive.
@@ -197,6 +209,7 @@ func NewOutbound(q outboundQueries, decrypt Decrypter, apiBase string, client *h
 		terminalWake:       make(chan struct{}, 1),
 		terminalWork:       make(chan terminalWork, terminalWorkerCount),
 		terminalResults:    make(chan terminalResult, terminalWorkerCount),
+		terminalTasks:      make(map[string]time.Time),
 	}
 	return o
 }
@@ -246,6 +259,9 @@ func (o *Outbound) WaitWithTimeout(timeout time.Duration) bool {
 func (o *Outbound) handleTaskMessage(e events.Event) {
 	payload, ok := e.Payload.(protocol.TaskMessagePayload)
 	if !ok || payload.Type != "text" || payload.Content == "" {
+		return
+	}
+	if taskID, ok := eventTaskID(e); ok && o.terminalTaskKnown(util.UUIDToString(taskID)) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -345,7 +361,7 @@ func (o *Outbound) noteEditFailure(schedule *chatSchedule, err error) {
 // doing Telegram I/O here would stall SubscribeAll realtime fanout behind
 // retry_after waits and slow network requests.
 func (o *Outbound) enqueueTerminalReply(e events.Event) {
-	_, hasTaskID := eventTaskID(e)
+	taskID, hasTaskID := eventTaskID(e)
 	sessionID, sessionErr := util.ParseUUID(e.ChatSessionID)
 	if !hasTaskID || sessionErr != nil || !sessionID.Valid {
 		o.logger.Error("telegram outbound: terminal reply has invalid identity",
@@ -359,11 +375,17 @@ func (o *Outbound) enqueueTerminalReply(e events.Event) {
 		return
 	}
 	sessionKey := e.ChatSessionID
+	taskKey := util.UUIDToString(taskID)
 	replyBytes := len(content)
 	o.terminalMu.Lock()
 	if o.terminalStopped {
 		o.terminalMu.Unlock()
 		o.clearStream(e)
+		return
+	}
+	o.pruneTerminalTasksLocked(o.now())
+	if _, exists := o.terminalTasks[taskKey]; exists {
+		o.terminalMu.Unlock()
 		return
 	}
 	session := o.terminalSessions[sessionKey]
@@ -389,7 +411,9 @@ func (o *Outbound) enqueueTerminalReply(e events.Event) {
 			"queued_bytes", bytes, "reply_bytes", replyBytes, "queued_bytes_limit", maxQueuedTerminalReplyBytes)
 		return
 	}
-	session.queue = append(session.queue, &terminalReply{event: e, byteSize: replyBytes})
+	o.makeTerminalTaskRoomLocked()
+	o.terminalTasks[taskKey] = time.Time{}
+	session.queue = append(session.queue, &terminalReply{event: e, taskKey: taskKey, byteSize: replyBytes})
 	o.queuedTerminalReplyCount++
 	o.queuedTerminalReplyBytes += replyBytes
 	if !session.running && !session.ready && !session.retryWaiting {
@@ -397,6 +421,42 @@ func (o *Outbound) enqueueTerminalReply(e events.Event) {
 	}
 	o.terminalMu.Unlock()
 	o.wakeTerminalDispatcher()
+}
+
+func (o *Outbound) terminalTaskKnown(taskKey string) bool {
+	o.terminalMu.Lock()
+	defer o.terminalMu.Unlock()
+	o.pruneTerminalTasksLocked(o.now())
+	_, exists := o.terminalTasks[taskKey]
+	return exists
+}
+
+func (o *Outbound) pruneTerminalTasksLocked(now time.Time) {
+	for taskKey, completedAt := range o.terminalTasks {
+		if !completedAt.IsZero() && now.Sub(completedAt) >= terminalTaskDedupTTL {
+			delete(o.terminalTasks, taskKey)
+		}
+	}
+}
+
+func (o *Outbound) makeTerminalTaskRoomLocked() {
+	for len(o.terminalTasks) >= maxTerminalTaskDedupEntries {
+		var oldestKey string
+		var oldest time.Time
+		for taskKey, completedAt := range o.terminalTasks {
+			if completedAt.IsZero() {
+				continue
+			}
+			if oldestKey == "" || completedAt.Before(oldest) {
+				oldestKey = taskKey
+				oldest = completedAt
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(o.terminalTasks, oldestKey)
+	}
 }
 
 func (o *Outbound) queueTerminalReadyLocked(sessionID string, session *terminalSession) {
@@ -587,6 +647,18 @@ func (o *Outbound) sendNextTerminalRequest(ctx context.Context, reply *terminalR
 		reply.target = target
 		reply.schedule = schedule
 		reply.chunks = chunkMessage(chatDoneContent(reply.event.Payload), maxMessageUnits)
+		assistant, err := o.q.GetChatMessageByTaskAssistant(ctx, target.taskID)
+		if err == nil && assistant.ChannelOutboundType.Valid &&
+			assistant.ChannelOutboundType.String == string(TypeTelegram) &&
+			assistant.ChannelOutboundInstallationID == target.installationID &&
+			assistant.ChannelOutboundChatID.Valid && assistant.ChannelOutboundChatID.String == target.channelChatID &&
+			len(assistant.ChannelOutboundMessageIds) > 0 {
+			reply.preventReplay = true
+			return terminalRequestResult{done: true}
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return terminalRequestResult{done: true, err: fmt.Errorf("load telegram reply provenance: %w", err)}
+		}
 		if st != nil {
 			reply.streamedMessageID = st.messageID
 		}
@@ -594,6 +666,12 @@ func (o *Outbound) sendNextTerminalRequest(ctx context.Context, reply *terminalR
 			return terminalRequestResult{done: true}
 		}
 		return terminalRequestResult{retryAt: o.now()}
+	}
+	if reply.deliveryComplete {
+		if err := o.recordTerminalProvenance(ctx, reply); err != nil {
+			return terminalRequestResult{done: true, err: err}
+		}
+		return terminalRequestResult{done: true}
 	}
 
 	schedule := reply.schedule
@@ -607,26 +685,42 @@ func (o *Outbound) sendNextTerminalRequest(ctx context.Context, reply *terminalR
 	api := newBotAPI(o.apiBase, reply.target.botToken, o.client)
 
 	if reply.streamedMessageID != 0 && !reply.placeholderEdited && !reply.fallbackFreshSend {
+		reply.preventReplay = true
+		text := formatHTML(reply.chunks[0])
+		parseMode := "HTML"
+		if reply.plainTextEdit {
+			text = reply.chunks[0]
+			parseMode = ""
+		}
 		err := api.EditMessageText(ctx, editMessageTextParams{
 			ChatID: reply.target.chatID, MessageID: reply.streamedMessageID,
-			Text: formatHTML(reply.chunks[0]), ParseMode: "HTML",
+			Text: text, ParseMode: parseMode,
 		})
 		if retry, ok := retryAfter(err); ok {
 			retryAt := o.now().Add(retry)
 			schedule.setBackoffTill(retryAt)
 			return terminalRequestResult{retryAt: retryAt}
 		}
-		if err != nil && !isNotModified(err) {
+		if err != nil && !reply.plainTextEdit && isHTMLParseError(err) {
+			reply.plainTextEdit = true
+			return terminalRequestResult{retryAt: o.now()}
+		}
+		if err != nil && isEditTargetMissing(err) {
 			reply.fallbackFreshSend = true
 			reply.chunkIndex = 0
 			return terminalRequestResult{retryAt: o.now()}
 		}
+		if err != nil && !isNotModified(err) {
+			return terminalRequestResult{retryAt: o.now().Add(terminalEditRetryDelay)}
+		}
 		reply.placeholderEdited = true
+		reply.messageIDs = append(reply.messageIDs, messageKey(reply.target.chatID, reply.streamedMessageID))
 		reply.chunkIndex = 1
 		schedule.lastEdit = o.now()
 		schedule.setBackoffTill(time.Time{})
 		if reply.chunkIndex == len(reply.chunks) {
-			return terminalRequestResult{done: true}
+			reply.deliveryComplete = true
+			return terminalRequestResult{retryAt: o.now()}
 		}
 		return terminalRequestResult{retryAt: schedule.lastEdit.Add(editInterval)}
 	}
@@ -643,7 +737,8 @@ func (o *Outbound) sendNextTerminalRequest(ctx context.Context, reply *terminalR
 		params.Text = chunk
 		params.ParseMode = ""
 	}
-	_, err := api.SendMessage(ctx, params)
+	reply.preventReplay = true
+	sent, err := api.SendMessage(ctx, params)
 	if retry, ok := retryAfter(err); ok {
 		retryAt := o.now().Add(retry)
 		schedule.setBackoffTill(retryAt)
@@ -656,24 +751,69 @@ func (o *Outbound) sendNextTerminalRequest(ctx context.Context, reply *terminalR
 	if err != nil {
 		return terminalRequestResult{done: true, err: fmt.Errorf("send final chunk: %w", err)}
 	}
+	reply.messageIDs = append(reply.messageIDs, messageKey(reply.target.chatID, sent.MessageID))
 	reply.chunkIndex++
 	reply.plainTextFallback = false
 	schedule.lastEdit = o.now()
 	schedule.setBackoffTill(time.Time{})
 	if reply.chunkIndex == len(reply.chunks) {
-		return terminalRequestResult{done: true}
+		reply.deliveryComplete = true
+		return terminalRequestResult{retryAt: o.now()}
 	}
 	return terminalRequestResult{retryAt: schedule.lastEdit.Add(editInterval)}
 }
 
 func (o *Outbound) cleanupTerminalReply(reply *terminalReply) {
 	reply.cleanupOnce.Do(func() {
+		if reply.taskKey != "" {
+			o.terminalMu.Lock()
+			if reply.preventReplay {
+				o.terminalTasks[reply.taskKey] = o.now()
+			} else {
+				delete(o.terminalTasks, reply.taskKey)
+			}
+			o.pruneTerminalTasksLocked(o.now())
+			o.terminalMu.Unlock()
+		}
 		if reply.initialized && reply.schedule != nil {
 			o.releaseChat(reply.schedule, reply.target.chatID)
 			return
 		}
 		o.clearStream(reply.event)
 	})
+}
+
+func (o *Outbound) recordTerminalProvenance(ctx context.Context, reply *terminalReply) error {
+	if len(reply.messageIDs) == 0 {
+		return errors.New("record telegram reply provenance: provider returned no message id")
+	}
+	rows, err := o.q.SetChatMessageChannelOutboundProvenanceByTask(ctx, db.SetChatMessageChannelOutboundProvenanceByTaskParams{
+		ChannelType:    pgtype.Text{String: string(TypeTelegram), Valid: true},
+		InstallationID: reply.target.installationID,
+		ChannelChatID:  pgtype.Text{String: reply.target.channelChatID, Valid: true},
+		MessageIds:     reply.messageIDs,
+		TaskID:         reply.target.taskID,
+	})
+	if err != nil {
+		return fmt.Errorf("record telegram reply provenance: %w", err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("record telegram reply provenance: updated %d assistant rows, want 1", rows)
+	}
+	for _, messageID := range reply.messageIDs {
+		if err := o.q.RecordChannelOutboundMessage(ctx, db.RecordChannelOutboundMessageParams{
+			OutboundInstallationID: reply.target.installationID,
+			OutboundChannelType:    string(TypeTelegram),
+			OutboundMessageID:      messageID,
+			OutboundBindingID:      reply.target.bindingID,
+			OutboundRouteRevision:  reply.target.routeRevision,
+			OutboundTaskID:         reply.target.taskID,
+			OutboundKind:           "task_reply",
+		}); err != nil {
+			return fmt.Errorf("record telegram outbound message: %w", err)
+		}
+	}
+	return nil
 }
 
 // handleTaskFailed clears any stream state and posts a failure notice.
@@ -957,12 +1097,17 @@ func waitForOutbound(ctx context.Context, delay time.Duration) error {
 
 // replyTarget is the resolved destination for one event.
 type replyTarget struct {
-	streamKey string
-	botKey    string
-	chatID    int64
-	threadID  int64
-	replyTo   int64
-	botToken  string
+	streamKey      string
+	taskID         pgtype.UUID
+	botKey         string
+	bindingID      pgtype.UUID
+	installationID pgtype.UUID
+	channelChatID  string
+	routeRevision  int64
+	chatID         int64
+	threadID       int64
+	replyTo        int64
+	botToken       string
 }
 
 // resolveTarget maps an event's immutable task delivery snapshot to Telegram
@@ -1001,12 +1146,17 @@ func (o *Outbound) resolveTarget(ctx context.Context, e events.Event, _ bool) (*
 	}
 	chatID, threadID, replyTo := outboundTarget(binding)
 	return &replyTarget{
-		streamKey: util.UUIDToString(taskID),
-		botKey:    util.UUIDToString(inst.ID),
-		chatID:    chatID,
-		threadID:  threadID,
-		replyTo:   replyTo,
-		botToken:  creds.BotToken,
+		streamKey:      util.UUIDToString(taskID),
+		taskID:         taskID,
+		botKey:         util.UUIDToString(inst.ID),
+		bindingID:      delivery.BindingID,
+		installationID: delivery.InstallationID,
+		channelChatID:  strconv.FormatInt(chatID, 10),
+		routeRevision:  delivery.RouteRevision,
+		chatID:         chatID,
+		threadID:       threadID,
+		replyTo:        replyTo,
+		botToken:       creds.BotToken,
 	}, nil
 }
 
@@ -1081,6 +1231,12 @@ func isNotModified(err error) bool {
 	var ae *apiError
 	return errors.As(err, &ae) && ae.Code == http.StatusBadRequest &&
 		containsFold(ae.Description, "message is not modified")
+}
+
+func isEditTargetMissing(err error) bool {
+	var ae *apiError
+	return errors.As(err, &ae) && ae.Code == http.StatusBadRequest &&
+		containsFold(ae.Description, "message to edit not found")
 }
 
 func firstNonEmpty(a, b string) string {
