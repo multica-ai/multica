@@ -3,8 +3,10 @@ import { IssueDetailRoute } from "@multica/views/issues/components";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { useT } from "@multica/views/i18n";
 
 export function IssueDetailPage({ onDelete }: { onDelete?: () => void }) {
+  const { t } = useT("layout");
   const { id } = useParams<{ id: string }>();
   const wsId = useWorkspaceId();
   // `id` may be an identifier (`MUL-123`); resolving here means the title
@@ -12,7 +14,9 @@ export function IssueDetailPage({ onDelete }: { onDelete?: () => void }) {
   // queries with the IssueDetailRoute below, so it costs no extra request.
   const { issue } = useCanonicalIssue(wsId, id ?? "");
 
-  useDocumentTitle(issue ? `${issue.identifier}: ${issue.title}` : "Issue");
+  useDocumentTitle(
+    issue ? `${issue.identifier}: ${issue.title}` : t(($) => $.tab.issue),
+  );
 
   if (!id) return null;
   // Render errors bubble to the root route errorElement (DesktopRouteErrorPage),
