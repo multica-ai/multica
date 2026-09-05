@@ -2,6 +2,58 @@ packages:
   - apps/*
   - packages/*
 
+# pnpm 10 reads these settings here, not from the `pnpm` field in package.json.
+onlyBuiltDependencies:
+  - esbuild
+  - electron
+
+overrides:
+  # Migrated from root package.json (previously silently ignored by pnpm >= 10.14).
+  '@types/react': 'catalog:'
+  '@types/react-dom': 'catalog:'
+  '@xmldom/xmldom': ^0.8.13
+  postcss: 8.5.26
+  uuid: 11.1.1
+  shell-quote: 1.9.0
+  minimatch@3>brace-expansion: 1.1.18
+  minimatch@5>brace-expansion: 2.1.4
+  minimatch@9>brace-expansion: 2.1.4
+  minimatch@10>brace-expansion: 5.0.9
+  builder-util-runtime: 9.7.0
+  # Security floors for transitive deps (HYP-1621). Ranges are minimum patched
+  # versions per the linked GHSA advisories; pnpm resolves the newest match.
+  glob@10: ^10.5.0 # GHSA-... high: glob CLI command injection (build tooling)
+  hono@4: ^4.12.34 # CORS origin reflection + ReDoS (via shadcn > MCP SDK)
+  fast-uri@3: ^3.1.5 # host confusion / path traversal (via shadcn > ajv)
+  picomatch@2: ^2.3.2 # ReDoS via extglob quantifiers (via fast-glob)
+  picomatch@4: ^4.0.4 # ReDoS via extglob quantifiers (4.x line)
+  path-to-regexp@8: ^8.4.0 # DoS via sequential optional groups (via express router)
+  protobufjs@7: ^7.5.6 # code injection + DoS family (via posthog-js > OTLP)
+  undici@7: ^7.29.0 # TLS bypass / cross-user disclosure family (via jsdom)
+  ws@7: ^7.5.11 # memory exhaustion DoS (7.x line)
+  ws@8: ^8.21.0 # memory exhaustion DoS (via @expo/cli)
+  nanoid@3: ^3.3.18 # infinite loop on negative size (via @react-navigation)
+  js-yaml@3: ^3.15.1 # quadratic CPU in !!omap resolution (via babel-jest)
+  js-yaml@4: ^4.3.0 # quadratic CPU via merge-key chains (via electron-builder)
+  vite: ^8.0.16 # dev server fs.deny bypass + arbitrary file read (>=8.0.16; catalog's plugin-react@6 requires the 8.x line)
+  tar@7: ^7.5.21 # critical: decompression DoS (via electron-builder)
+  form-data@4: ^4.0.6 # CRLF injection in multipart fields (via electron-publish)
+  tmp@0.2: ^0.2.6 # path traversal via prefix/postfix (via flatpak-bundler)
+  ip-address@10: ^10.3.1 # leading-zero octet misparse (via socks)
+  browserslist: ^4.28.7 # GHSA-c83g-rgw3-j3cx + GHSA-73wf-gq98-2v4g (via shadcn, exact-pinned upstream)
+  sharp: ^0.35.4 # libvips CVE-2026-33327/33328 (via next optional dep)
+  app-builder-lib@26: ^26.15.7 # electron-updater AppImage search path (peer-family stickiness)
+  dmg-builder@26: ^26.15.7
+  electron-builder-squirrel-windows@26: ^26.15.7
+
+auditConfig:
+  ignoreGhsas:
+    # No patched version exists upstream (<0.0.0). Dev/docs-surface only:
+    # remove each entry as soon as a fixed release ships. Tracked in HYP-1621.
+    - GHSA-w3rx-r6r6-pgpr # image-size ICNS parser DoS (metro build + fumadocs)
+    - GHSA-5p2g-fcmc-qvqq # image-size JXL/HEIF parser DoS (metro build + fumadocs)
+    - GHSA-jmr9-qjv8-65gv # extract-zip symlink traversal (electron install-time)
+
 catalog:
   '@formatjs/intl-localematcher': ^0.8.4
   '@tailwindcss/postcss': ^4
