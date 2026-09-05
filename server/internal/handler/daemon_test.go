@@ -315,6 +315,222 @@ func TestClaimTaskByRuntime_ChatIntroGateClearsAfterUserReplies(t *testing.T) {
 	}
 }
 
+// TestClaimTaskByRuntime_QuickCreateOriginFenceStatusMatrix pins the claim
+// fence between a quick-create origin task and the issue it creates. Every
+// aged non-terminal origin, including deferred rows promoted during polling,
+// keeps the issue task queued; terminal origins release it.
+func TestClaimTaskByRuntime_QuickCreateOriginFenceStatusMatrix(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Quick-create origin fence runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Quick-create origin fence agent")
+	// The claim helper is deliberately shared with the existing reclaim
+	// fixtures; leave room for the running quick-create-shaped blocker below.
+	dbfx.Exec(t, `UPDATE agent SET max_concurrent_tasks = 100 WHERE id = $1`, agentID)
+
+	originID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"priority":   -1,
+		"status":     "running",
+	})
+	// A queued/deferred origin would otherwise be the first candidate for the
+	// runtime. This active quick-create-shaped row keeps that source occupied,
+	// so the assertion exercises the issue-origin fence rather than candidate
+	// ordering.
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"priority":   -2,
+		"status":     "running",
+	})
+
+	cases := []struct {
+		name     string
+		status   string
+		terminal bool
+	}{
+		{name: "queued aged", status: "queued"},
+		{name: "dispatched aged", status: "dispatched"},
+		{name: "running aged", status: "running"},
+		{name: "waiting local directory aged", status: "waiting_local_directory"},
+		{name: "deferred aged", status: "deferred"},
+		{name: "completed release", status: "completed", terminal: true},
+		{name: "failed release", status: "failed", terminal: true},
+		{name: "cancelled release", status: "cancelled", terminal: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fireAt := "NULL"
+			if tc.status == "deferred" {
+				fireAt = "now() - interval '365 days'"
+			}
+			dbfx.Exec(t, `
+				UPDATE agent_task_queue
+				SET status = $2,
+				    created_at = now() - interval '365 days',
+				    dispatched_at = CASE WHEN $2 = 'dispatched' THEN now() ELSE NULL END,
+				    started_at = CASE WHEN $2 IN ('running', 'waiting_local_directory') THEN now() ELSE NULL END,
+				    completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled') THEN now() ELSE NULL END,
+				    fire_at = `+fireAt+`
+				WHERE id = $1
+			`, originID, tc.status)
+			dbfx.Exec(t, `
+				UPDATE issue
+				SET origin_type = 'quick_create', origin_id = $2
+				WHERE id = $1
+			`, issueID, originID)
+			candidateID := dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id": runtimeID,
+				"issue_id":   issueID,
+				"priority":   1,
+			})
+
+			claimed, body := claimTaskByRuntimeForTest(t, runtimeID)
+			if tc.terminal {
+				if claimed == nil {
+					t.Fatalf("terminal origin %q should release candidate %s: %s", tc.status, candidateID, body)
+				}
+				if claimed.ID != candidateID {
+					t.Fatalf("claimed task = %s, want candidate %s: %s", claimed.ID, candidateID, body)
+				}
+				dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, candidateID)
+				return
+			}
+			if claimed != nil {
+				t.Fatalf("non-terminal origin %q should block candidate %s, got %s: %s", tc.status, candidateID, claimed.ID, body)
+			}
+			dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'cancelled', completed_at = now() WHERE id = $1`, candidateID)
+		})
+	}
+}
+
+// TestClaimTask_QuickCreateOriginTerminalResumeMatrix covers the response
+// fields that the claim fence hands to the first Issue task. Terminal origins
+// on the same agent/runtime may resume a safe session; poisoned failures and
+// exact-origin agent/runtime mismatches must start cold.
+func TestClaimTask_QuickCreateOriginTerminalResumeMatrix(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	dbfx.Exec(t, `UPDATE agent SET max_concurrent_tasks = 100 WHERE id = $1`, agentID)
+	otherRuntimeID := createRuntimeGuardRuntime(t, ctx, "kimi")
+	otherAgentID := dbfx.Agent(t, "Quick-create unrelated origin agent", runtimeID)
+
+	type originCase struct {
+		name          string
+		status        string
+		originAgentID string
+		originRuntime string
+		failureReason string
+		errorText     string
+		wantSession   string
+		wantWorkDir   string
+	}
+
+	const (
+		originSession = "qc-origin-session"
+		originWorkDir = "/tmp/qc-origin-workdir"
+	)
+	cases := []originCase{
+		{
+			name:          "completed resumes",
+			status:        "completed",
+			originAgentID: agentID,
+			originRuntime: runtimeID,
+			wantSession:   originSession,
+			wantWorkDir:   originWorkDir,
+		},
+		{
+			name:          "failed resume safe",
+			status:        "failed",
+			originAgentID: agentID,
+			originRuntime: runtimeID,
+			failureReason: "timeout",
+			wantSession:   originSession,
+			wantWorkDir:   originWorkDir,
+		},
+		{
+			name:          "cancelled resumes",
+			status:        "cancelled",
+			originAgentID: agentID,
+			originRuntime: runtimeID,
+			wantSession:   originSession,
+			wantWorkDir:   originWorkDir,
+		},
+		{
+			name:          "invalid request failure starts cold",
+			status:        "failed",
+			originAgentID: agentID,
+			originRuntime: runtimeID,
+			failureReason: "agent_error",
+			errorText:     "API error 400 invalid_request_error: prompt is too long",
+		},
+		{
+			name:          "unrelated agent starts cold",
+			status:        "running",
+			originAgentID: otherAgentID,
+			originRuntime: runtimeID,
+		},
+		{
+			name:          "unrelated runtime starts cold",
+			status:        "running",
+			originAgentID: agentID,
+			originRuntime: otherRuntimeID,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			originCols := testutil.Cols{
+				"runtime_id":     tc.originRuntime,
+				"status":         tc.status,
+				"session_id":     originSession,
+				"work_dir":       originWorkDir,
+				"failure_reason": tc.failureReason,
+				"error":          tc.errorText,
+				"created_at":     testutil.Raw("now() - interval '1 hour'"),
+				"started_at":     testutil.Raw("now() - interval '1 hour'"),
+			}
+			if tc.status == "completed" || tc.status == "failed" || tc.status == "cancelled" {
+				originCols["completed_at"] = testutil.Raw("now() - interval '30 minutes'")
+			}
+			originID := dbfx.Task(t, tc.originAgentID, originCols)
+			issueID := dbfx.Issue(t, "quick-create terminal origin response", testutil.Cols{
+				"status":      "in_progress",
+				"origin_type": "quick_create",
+				"origin_id":   originID,
+			})
+			candidateID := dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id": runtimeID,
+				"issue_id":   issueID,
+				"priority":   100,
+			})
+
+			task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+			if task.ID != candidateID {
+				t.Fatalf("claimed task = %q, want candidate %q", task.ID, candidateID)
+			}
+			if task.PriorSessionID != tc.wantSession {
+				t.Errorf("PriorSessionID = %q, want %q", task.PriorSessionID, tc.wantSession)
+			}
+			if task.PriorWorkDir != tc.wantWorkDir {
+				t.Errorf("PriorWorkDir = %q, want %q", task.PriorWorkDir, tc.wantWorkDir)
+			}
+			dbfx.Exec(t, `
+				UPDATE agent_task_queue
+				SET status = 'completed', completed_at = now()
+				WHERE id = $1
+			`, candidateID)
+		})
+	}
+}
+
 func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -2652,6 +2868,7 @@ func TestClaimResponseAgentIdentityMatches(t *testing.T) {
 }
 
 type claimRuntimeGuardTask struct {
+	ID                            string          `json:"id"`
 	PriorSessionID                string          `json:"prior_session_id"`
 	PriorWorkDir                  string          `json:"prior_work_dir"`
 	PriorSessionResumeUnavailable bool            `json:"prior_session_resume_unavailable"`

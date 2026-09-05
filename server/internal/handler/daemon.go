@@ -1646,6 +1646,24 @@ func (h *Handler) repairStaleCommentPlanIfNeeded(ctx context.Context, task *db.A
 // daemon never asks for more than its free execution-slot count anyway.
 const claimBatchMaxTasksCap = 32
 
+const quickCreateSessionStorePrefix = "qc_"
+
+func quickCreateSessionStoreScope(originTaskID pgtype.UUID) string {
+	if !originTaskID.Valid {
+		return ""
+	}
+	return quickCreateSessionStorePrefix + uuidToString(originTaskID)
+}
+
+func quickCreateOriginIsTerminal(status string) bool {
+	switch status {
+	case "completed", "failed", "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
 // ClaimTasksByRuntime is the machine-level (MUL-4257) batch claim endpoint. A
 // daemon posts every runtime_id it hosts plus its free execution-slot count and
 // receives up to max_tasks already-claimed tasks in ONE round trip — each
@@ -2386,6 +2404,19 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.ThreadName = issue.Title
 		issueNumber = issue.Number
 
+		var quickCreateOrigin *db.AgentTaskQueue
+		if issue.OriginType.Valid && issue.OriginType.String == service.QuickCreateContextType && issue.OriginID.Valid {
+			resp.SessionStoreScope = quickCreateSessionStoreScope(issue.OriginID)
+			// The origin id is server-stamped, but re-check the carrier agent
+			// before using its session. An issue reassigned to another agent
+			// keeps the same opaque scope under a DIFFERENT agent directory and
+			// starts fresh; it must never inherit the creator's conversation.
+			if origin, err := h.Queries.GetAgentTask(r.Context(), issue.OriginID); err == nil && origin.AgentID == task.AgentID {
+				oc := origin
+				quickCreateOrigin = &oc
+			}
+		}
+
 		// Squad-leader briefing injection: keyed off the task being a
 		// leader-task (is_leader_task) carrying a squad_id — NOT off the
 		// issue being assigned to a squad. The task flag is stamped at
@@ -2703,15 +2734,36 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// context across turns. The "Focus on THIS comment" guard in
 			// prompt.go defends against inheriting the prior turn's "Done."
 			// marker, and GetLastTaskSession already excludes poisoned sessions.
+			priorFound := false
 			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
+				priorFound = true
 				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 				}
 				if prior.WorkDir.Valid {
 					resp.PriorWorkDir = prior.WorkDir.String
+				}
+			}
+			// The quick-create completion path links its task to the new issue
+			// after the terminal write. A first issue claim can land in that small
+			// window, so fall back to the issue's exact origin row instead of
+			// relying only on the (agent, issue) lookup. Only terminal origins
+			// are used; active origins are ordered by ClaimAgentTask.
+			if !priorFound && quickCreateOrigin != nil && quickCreateOriginIsTerminal(quickCreateOrigin.Status) {
+				src := *quickCreateOrigin
+				if src.SessionRolloutMissing {
+					resp.PriorSessionResumeUnavailable = true
+				}
+				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) && src.SessionID.Valid {
+					if src.WorkDir.Valid {
+						resp.PriorWorkDir = src.WorkDir.String
+					}
+					if src.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = src.SessionID.String
+					}
 				}
 			}
 			// MUL-5305: if the most recent terminal task withheld its Codex
@@ -3015,6 +3067,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		var qc service.QuickCreateContext
 		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
 			hasQuickCreate = true
+			resp.SessionStoreScope = quickCreateSessionStoreScope(task.ID)
 			resp.QuickCreatePrompt = qc.Prompt
 			resp.QuickCreatePriority = qc.Priority
 			resp.QuickCreateDueDate = qc.DueDate

@@ -727,13 +727,27 @@ func assertSessionsLinkedToStore(t *testing.T, sessions, storeDir string) {
 	if err != nil {
 		t.Fatalf("sessions link missing: %v", err)
 	}
+	if fi.Mode()&(os.ModeSymlink|os.ModeIrregular) == 0 {
+		t.Fatalf("sessions must link the per-scope store, got mode %v", fi.Mode())
+	}
 	if runtime.GOOS != "windows" {
-		if fi.Mode()&os.ModeSymlink == 0 {
-			t.Fatalf("sessions must link the per-issue store, got mode %v", fi.Mode())
-		}
 		if target, _ := os.Readlink(sessions); filepath.Clean(target) != filepath.Clean(storeDir) {
 			t.Errorf("sessions link target = %q, want store %q", target, storeDir)
 		}
+	}
+	if runtime.GOOS == "windows" {
+		sStat, err := os.Stat(sessions)
+		if err != nil {
+			t.Fatalf("stat sessions: %v", err)
+		}
+		storeStat, err := os.Stat(storeDir)
+		if err != nil {
+			t.Fatalf("stat store: %v", err)
+		}
+		if !os.SameFile(sStat, storeStat) {
+			t.Fatalf("sessions link does not resolve to store via SameFile")
+		}
+		return
 	}
 	realSessions, err := filepath.EvalSymlinks(sessions)
 	if err != nil {

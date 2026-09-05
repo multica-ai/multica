@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -77,13 +78,21 @@ type CodexHomeOptions struct {
 	// ONLY this issue's rollouts — never the machine's whole ~/.codex/sessions.
 	// See prepareCodexSessionsDir (MUL-4424).
 	IsLocalDirectory bool
-	// SessionStoreKey is a stable, per-(agent, issue-or-chat) relative path that
+	// SessionStoreKey is a stable, per-(agent, scope) relative path that
 	// identifies this task's persistent Codex sessions store. It survives across
 	// task IDs (unlike the task-scoped envRoot the GC reclaims) so a follow-up
 	// run resumes the same thread. Empty when no stable key is available (e.g. a
 	// task with no issue), in which case sessions/ stays task-local. See
 	// codexSessionStoreDir and prepareCodexSessionsDir (MUL-4424).
 	SessionStoreKey string
+	// SessionStoreScope is the raw stable scope (qc_<origin_task_id> for
+	// quick-create handoff) that SessionStoreKey was derived from. Validated
+	// as a single safe segment; when it is a valid qc_ scope the store is
+	// durable and shared between the quick_create source and its Issue.
+	// Empty means no explicit scope was provided and SessionStoreKey falls back
+	// to IssueID/chat. Used to decide fresh managed write-through without
+	// validating the whole SessionStoreKey.
+	SessionStoreScope string
 	// CodexCustomArgs are the effective Codex CLI args this task will launch
 	// with (daemon defaults + profile-fixed + per-agent custom_args). Only the
 	// Windows sandbox decision reads them, to honor a `-c windows.sandbox=...`
@@ -395,13 +404,51 @@ func codexSessionStoreNamespace(profile string) string {
 	return "p_" + hex.EncodeToString(sum[:])
 }
 
+const codexQuickCreateScopePrefix = "qc_"
+
+// ValidCodexSessionStoreScope reports whether scope is one safe path segment.
+// Quick-create scopes are additionally required to contain a canonical UUID so
+// malformed wire values fall back to IssueID/chat instead of selecting a
+// colliding store.
+func ValidCodexSessionStoreScope(scope string) bool {
+	if scope == "" || len(scope) > 255 || sanitizePathSegment(scope) != scope {
+		return false
+	}
+	if strings.HasPrefix(scope, codexQuickCreateScopePrefix) {
+		rawID := strings.TrimPrefix(scope, codexQuickCreateScopePrefix)
+		parsed, err := uuid.Parse(rawID)
+		return err == nil && parsed.String() == rawID
+	}
+	return true
+}
+
+// ValidCodexQuickCreateSessionStoreScope reports whether scope is the exact
+// canonical qc_<UUID> form used for quick-create handoff. This is the single
+// validator shared by store-key derivation and the resume reachability gate.
+func ValidCodexQuickCreateSessionStoreScope(scope string) bool {
+	return strings.HasPrefix(scope, codexQuickCreateScopePrefix) && ValidCodexSessionStoreScope(scope)
+}
+
+// isValidQuickCreateScope reports whether scope is a validated quick-create
+// scope (qc_<origin_task_id>). The raw qc_<UUID> must be exactly valid as a
+// single segment; sanitization prevents traversal but distinct malformed scopes
+// may collide into the same issue directory, so the check is strict.
+func isValidQuickCreateScope(scope string) bool {
+	return ValidCodexQuickCreateSessionStoreScope(scope)
+}
+
 // codexSessionStoreKey builds a profile-and-task key for persistent Codex
-// sessions. Issue IDs retain their existing path;
-// direct chats use a prefixed chat_session_id so the two namespaces cannot
-// collide. Returns "" when neither stable identifier is available.
+// sessions. A validated quick-create scope (qc_<origin_task_id>) overrides the
+// stable IssueID/chat fallback as the single central decision point (no
+// handler/call-site duplicate derivation). Raw qc_<UUID> is exactly valid only
+// then override, otherwise IssueID / chat_<ChatSessionID> fallback is preserved.
 func codexSessionStoreKey(profile string, task TaskContextForEnv) string {
-	storeID := sanitizePathSegment(task.IssueID)
-	if storeID == "" {
+	var storeID string
+	if isValidQuickCreateScope(task.SessionStoreScope) {
+		storeID = task.SessionStoreScope
+	} else if task.IssueID != "" {
+		storeID = sanitizePathSegment(task.IssueID)
+	} else {
 		chatID := sanitizePathSegment(task.ChatSessionID)
 		if chatID == "" {
 			return ""
@@ -429,19 +476,19 @@ func sanitizePathSegment(s string) string {
 	return b.String()
 }
 
-// PruneCodexSessionStores reclaims per-issue Codex session stores under the
+// PruneCodexSessionStores reclaims scoped Codex session stores under the
 // shared home's multica-sessions root that have not been touched within
 // retention, bounding the lifetime of the conversation history each one holds.
 //
 // The stores deliberately live outside the task-scoped envRoot the task GC
 // reclaims (so resume survives across task IDs), which means without this they
-// would accumulate forever — a done or abandoned issue's prompts and full
+// would accumulate forever — a done or abandoned conversation's prompts and full
 // rollouts (one reporter saw a single 1.5 GiB rollout) would never be freed, and
 // deleting the issue/agent/workspace would not remove them. A store's newest
 // mtime is its last activity: Codex writes/extends a rollout as the thread
 // advances, so an active or recently-resumed task keeps its store fresh and is
 // never reclaimed; a store idle past retention is removed, giving deleted issues
-// an eventual-reclamation guarantee. retention <= 0 disables pruning entirely.
+// and orphaned quick-create scopes an eventual-reclamation guarantee. retention <= 0 disables pruning entirely.
 //
 // It scans ONLY the caller profile's namespace, so a daemon never reclaims a
 // store owned by another profile-daemon sharing the same ~/.codex — the
@@ -572,12 +619,12 @@ func prepareCodexSessionsDir(codexHome, sharedHome string, opts CodexHomeOptions
 	storeDir := codexSessionStoreDir(sharedHome, opts.SessionStoreKey)
 
 	// local_directory tasks have no reusable envRoot, so their history can only
-	// persist across task IDs in the per-issue store. The daemon still verifies
+	// persist across task IDs in the per-scope store. The daemon still verifies
 	// the specific rollout is present before claiming a resume (see
 	// CodexResumeRolloutPresent), so a missing one no longer masquerades as one.
 	if opts.IsLocalDirectory {
 		if storeDir == "" {
-			// No stable per-issue key (e.g. a non-issue task). Fall back to an
+			// No stable per-scope key (e.g. a non-issue task). Fall back to an
 			// empty local dir rather than re-exposing the whole shared history.
 			return os.MkdirAll(dst, 0o755)
 		}
@@ -587,24 +634,29 @@ func prepareCodexSessionsDir(codexHome, sharedHome string, opts CodexHomeOptions
 	fi, err := os.Lstat(dst)
 	switch {
 	case os.IsNotExist(err):
-		return os.MkdirAll(dst, 0o755) // fresh managed task — empty local dir
+		// Fresh managed task — empty local dir by default, but a validated
+		// qc_ scope must write through to the durable store from the start
+		// (common path, not local_directory only) so the first Issue task can
+		// resume the quick_create source's rollout.
+		if isValidQuickCreateScope(opts.SessionStoreScope) && storeDir != "" {
+			return linkCodexSessionsToStore(dst, storeDir, sharedSessions, opts.ResumeSessionID, logger)
+		}
+		return os.MkdirAll(dst, 0o755)
 	case err != nil:
 		return fmt.Errorf("stat sessions dir %s: %w", dst, err)
 	}
 
-	if fi.Mode()&os.ModeSymlink == 0 {
+	if fi.Mode()&(os.ModeSymlink|os.ModeIrregular) == 0 {
 		// Already a real directory (task-local, authoritative). Ensure it
 		// exists (no-op) and leave its contents alone.
 		return os.MkdirAll(dst, 0o755)
 	}
 
-	// A symlink/junction. If it already points at this issue's store (a home
+	// A symlink/junction. If it already points at this scope's store (a home
 	// migrated with a resume on a prior reuse), it is authoritative — re-ensure
 	// the store link and the resume rollout, then leave it.
-	if storeDir != "" {
-		if target, rlErr := os.Readlink(dst); rlErr == nil && sameCodexPath(target, storeDir) {
-			return linkCodexSessionsToStore(dst, storeDir, sharedSessions, opts.ResumeSessionID, logger)
-		}
+	if storeDir != "" && isSameCodexStoreLink(dst, storeDir) {
+		return linkCodexSessionsToStore(dst, storeDir, sharedSessions, opts.ResumeSessionID, logger)
 	}
 
 	// Legacy symlink into the shared ~/.codex/sessions — migrate it. Drop the
@@ -689,11 +741,73 @@ func CodexSessionStorePath(profile string, task TaskContextForEnv) string {
 	return codexSessionStoreDir(resolveSharedCodexHome(), key)
 }
 
+// CodexStoreHasRollout reports whether the scoped store for (profile, agent, scope)
+// holds a regular-file rollout for sessionID. Used by the resume gate to allow
+// a quick_create handoff to bypass the workdir reachability check when the
+// validated qc_ store already contains the prior session's rollout.
+func CodexStoreHasRollout(profile, agentID, scope, sessionID string) bool {
+	if !isValidQuickCreateScope(scope) || sessionID == "" {
+		return false
+	}
+	key := codexSessionStoreKey(profile, TaskContextForEnv{AgentID: agentID, SessionStoreScope: scope})
+	if key == "" {
+		return false
+	}
+	storeDir := codexSessionStoreDir(resolveSharedCodexHome(), key)
+	if storeDir == "" {
+		return false
+	}
+	for _, p := range findCodexRollouts(storeDir, sessionID) {
+		if fi, err := os.Lstat(p); err == nil && fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+// CodexStoreRolloutPresent reports whether any rollout for sessionID exists as
+// a regular file under storeDir. Exported for tests and the daemon gate.
+func CodexStoreRolloutPresent(storeDir, sessionID string) bool {
+	if storeDir == "" || sessionID == "" {
+		return false
+	}
+	for _, p := range findCodexRollouts(storeDir, sessionID) {
+		if fi, err := os.Lstat(p); err == nil && fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
 // sameCodexPath reports whether two filesystem paths refer to the same location,
 // tolerating separator/cleanliness differences. Used to detect a sessions link
-// that already points at the per-issue store so a reused home is not re-migrated.
+// that already points at the per-scope store so a reused home is not re-migrated.
 func sameCodexPath(a, b string) bool {
 	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+// isSameCodexStoreLink reports whether dst already points at src via a
+// directory link (symlink on Unix, junction on Windows). It uses Lstat to
+// detect link type and Stat+SameFile to compare the link target with src,
+// avoiding Readlink string comparison which breaks on Windows junction
+// reparse forms (\\?\, separator, case).
+func isSameCodexStoreLink(dst, src string) bool {
+	fi, err := os.Lstat(dst)
+	if err != nil {
+		return false
+	}
+	if fi.Mode()&(os.ModeSymlink|os.ModeIrregular) == 0 {
+		return false
+	}
+	dstStat, err := os.Stat(dst)
+	if err != nil {
+		return false
+	}
+	srcStat, err := os.Stat(src)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(dstStat, srcStat)
 }
 
 // resetCodexSessionState removes the rebuildable, session-derived Codex state
@@ -714,22 +828,21 @@ func resetCodexSessionState(codexHome string, logger *slog.Logger) {
 	}
 }
 
-// ensureCodexSessionsLink points codex-home/sessions (dst) at the per-issue
+// ensureCodexSessionsLink points codex-home/sessions (dst) at the per-scope
 // session store (src) via a directory link, creating the store if needed.
 // Idempotent: a link already pointing at src is left as-is; anything else at dst
 // (a real dir, a stale link, a legacy shared-sessions symlink) is replaced. The
 // link crosses volumes without privilege (symlink on Unix, junction on Windows),
 // so the store can live on the shared Codex volume while the task home lives
-// under WorkspacesRoot (see linkCodexSessionsToStore).
+// under WorkspacesRoot (see linkCodexSessionsToStore). Existing behavior is
+// preserved: a real directory is removed and replaced.
 func ensureCodexSessionsLink(dst, src string) error {
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		return fmt.Errorf("create codex session store %s: %w", src, err)
 	}
-	if fi, err := os.Lstat(dst); err == nil {
-		if fi.Mode()&os.ModeSymlink != 0 {
-			if target, rlErr := os.Readlink(dst); rlErr == nil && sameCodexPath(target, src) {
-				return nil
-			}
+	if _, err := os.Lstat(dst); err == nil {
+		if isSameCodexStoreLink(dst, src) {
+			return nil
 		}
 		if err := os.RemoveAll(dst); err != nil {
 			return fmt.Errorf("remove stale sessions path %s: %w", dst, err)

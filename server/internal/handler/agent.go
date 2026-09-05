@@ -406,6 +406,11 @@ type AgentTaskResponse struct {
 	CreatedAt            string                `json:"created_at"`
 	PriorSessionID       string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
 	PriorWorkDir         string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	// SessionStoreScope is an optional stable filesystem scope for Codex
+	// rollouts. Quick-create handoffs use the origin task id so the no-issue
+	// source task and the first issue task mount the same persistent store.
+	// Older daemons ignore it; newer daemons fall back to IssueID when absent.
+	SessionStoreScope string `json:"session_store_scope,omitempty"`
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback. The daemon surfaces the continuity gap in
