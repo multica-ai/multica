@@ -46,8 +46,8 @@ func newChildrenBatchFixture(t *testing.T) childrenBatchFixture {
 		return out
 	}
 
-	parentA := mkIssue("children-batch parent A", "in_progress", "")
-	parentB := mkIssue("children-batch parent B", "in_progress", "")
+	parentA := mkIssue("children-batch parent A", "todo", "")
+	parentB := mkIssue("children-batch parent B", "todo", "")
 	a1 := mkIssue("children-batch a1", "todo", parentA.ID)
 	a2 := mkIssue("children-batch a2", "done", parentA.ID)
 	b1 := mkIssue("children-batch b1", "todo", parentB.ID)
@@ -254,9 +254,9 @@ func createChildIssue(t *testing.T, title, status, parentID string) IssueRespons
 func newScrambledChildren(t *testing.T) (IssueResponse, []IssueResponse) {
 	t.Helper()
 
-	parent := createChildIssue(t, "ordering parent", "in_progress", "")
+	parent := createChildIssue(t, "ordering parent", "todo", "")
 	c1 := createChildIssue(t, "ordering c1", "todo", parent.ID)
-	c2 := createChildIssue(t, "ordering c2", "in_progress", parent.ID)
+	c2 := createChildIssue(t, "ordering c2", "todo", parent.ID)
 	c3 := createChildIssue(t, "ordering c3", "done", parent.ID)
 	c4 := createChildIssue(t, "ordering c4", "todo", parent.ID)
 	children := []IssueResponse{c1, c2, c3, c4}

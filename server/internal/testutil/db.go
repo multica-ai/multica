@@ -182,6 +182,15 @@ func (f *Fixture) Issue(t TB, title string, over ...Cols) string {
 		"creator_id":   f.UserID,
 		"position":     0,
 	}, over)
+	// An in_progress issue requires an assignee (I4127.DP/I4192.DP CHECK
+	// constraint): default to the fixture member unless the test explicitly
+	// names assignee columns (including clearing them).
+	_, hasType := cols["assignee_type"]
+	_, hasID := cols["assignee_id"]
+	if !hasType && !hasID && cols["status"] == "in_progress" {
+		cols["assignee_type"] = "member"
+		cols["assignee_id"] = f.UserID
+	}
 	if _, ok := cols["number"]; !ok {
 		workspaceID, _ := cols["workspace_id"].(string)
 		cols["number"] = Raw(fmt.Sprintf(

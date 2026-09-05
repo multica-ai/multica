@@ -167,6 +167,17 @@ var ErrIssueStatusUnavailable = errors.New("issue status is no longer available"
 
 var ErrSourceContextAlreadyAttached = errors.New("source context is already attached")
 
+// ErrInProgressRequiresAssignee signals that the create would land the issue
+// in the in_progress category without an assignee (I4127.DP / I4192.DP).
+// WillEnqueueRun only starts a run for a valid assignee, so such an issue is
+// a zombie: in_progress forever, no run, no comments, no owner, while still
+// counting against the queue ceiling. The invariant is enforced here in the
+// service — the shared create entry for every transport (HTTP, Lark, channel,
+// future MCP/backfill/admin) — and again by the DB CHECK constraint from
+// migration 349, so no raw-SQL write path can mint a zombie either. Callers
+// translate this into their transport's 400.
+var ErrInProgressRequiresAssignee = errors.New("issue cannot be in_progress without an assignee")
+
 // IssueCreateResult is the typed return from IssueService.Create.
 //
 //   - On the happy path: Issue is the new row, Attachments lists the
@@ -265,6 +276,23 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			}
 			return IssueCreateResult{}, err
 		}
+	}
+
+	// An issue whose EFFECTIVE status is in_progress must carry an assignee
+	// (I4127.DP / I4192.DP). Without one, WillEnqueueRun never starts a run
+	// and the issue is a zombie — in_progress forever, no run, no comments,
+	// no owner, still counting against the queue ceiling. The HTTP handler
+	// validates the same rule, but the service is the shared create entry
+	// for every transport (HTTP, Lark, channel, future MCP/backfill/admin),
+	// so the invariant lives here too; the DB CHECK from migration 349 backs
+	// it up for raw-SQL write paths. Effective maps a custom status to the
+	// canonical key whose behavior it inherits (MUL-6243), so a custom
+	// in_progress-category status is held to the same rule as the built-in.
+	// The check runs after the status catalog block above, so an unknown or
+	// archived status has already been rejected with the more specific error.
+	if issuestatus.Effective(ctx, qtx, p.WorkspaceID, p.Status) == issuestatus.InProgress &&
+		!(p.AssigneeType.Valid && p.AssigneeID.Valid) {
+		return IssueCreateResult{}, ErrInProgressRequiresAssignee
 	}
 
 	// Resolve and validate parent / project before reading from the

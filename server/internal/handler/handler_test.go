@@ -372,7 +372,7 @@ func TestIssueCRUD(t *testing.T) {
 
 	// Update - partial (only status)
 	w = httptest.NewRecorder()
-	status := "in_progress"
+	status := "in_review"
 	req = newRequest("PUT", "/api/issues/"+issueID, map[string]any{
 		"status": status,
 	})
@@ -384,8 +384,8 @@ func TestIssueCRUD(t *testing.T) {
 
 	var updated IssueResponse
 	json.NewDecoder(w.Body).Decode(&updated)
-	if updated.Status != "in_progress" {
-		t.Fatalf("UpdateIssue: expected status 'in_progress', got '%s'", updated.Status)
+	if updated.Status != "in_review" {
+		t.Fatalf("UpdateIssue: expected status 'in_review', got '%s'", updated.Status)
 	}
 	if updated.Title != "Test issue from Go test" {
 		t.Fatalf("UpdateIssue: title should be preserved, got '%s'", updated.Title)
@@ -806,6 +806,10 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 		}
 	}()
 
+	// The duplicate guard's "original" is seeded in_progress, which now
+	// requires an assignee (I4127.DP).
+	agentID := createHandlerTestAgent(t, "Duplicate Guard Agent", nil)
+
 	dbfx.QueryRow(t, `
 		INSERT INTO project (workspace_id, title)
 		VALUES ($1, $2)
@@ -824,6 +828,8 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           title,
 		"status":          "in_progress",
+		"assignee_type":   "agent",
+		"assignee_id":     agentID,
 		"parent_issue_id": parentID,
 		"project_id":      projectID,
 	})

@@ -511,9 +511,12 @@ func TestIssuesCRUDThroughRouter(t *testing.T) {
 		t.Fatalf("expected id %s, got %s", issueID, fetched["id"])
 	}
 
-	// Update status only — should preserve title
+	// Update status only — should preserve title. in_progress requires an
+	// assignee (I4127.DP/I4192.DP), so set one in the same update.
 	resp = authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
-		"status": "in_progress",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	if resp.StatusCode != 200 {
 		t.Fatalf("UpdateIssue: expected 200, got %d", resp.StatusCode)
@@ -1534,9 +1537,13 @@ func TestWebSocketIntegration(t *testing.T) {
 		t.Fatalf("expected type 'issue:created', got '%s'", wsMsg["type"])
 	}
 
-	// Update the issue — should trigger another broadcast
+	// Update the issue — should trigger another broadcast. in_progress
+	// requires an assignee (I4127.DP/I4192.DP); without one the update is
+	// refused and no issue:updated event is broadcast.
 	resp = authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
-		"status": "in_progress",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	resp.Body.Close()
 

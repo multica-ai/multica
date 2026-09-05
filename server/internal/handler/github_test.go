@@ -400,8 +400,10 @@ func TestWebhook_MergedPR_AdvancesLinkedIssueToDone(t *testing.T) {
 
 	// Seed an issue we expect the webhook to close out.
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "PR auto-merge test",
-		"status": "in_progress",
+		"title":         "PR auto-merge test",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
@@ -612,8 +614,10 @@ func TestWebhook_MergedPR_WaitsForOpenSibling(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "Multi-PR auto-merge test",
-		"status": "in_progress",
+		"title":         "Multi-PR auto-merge test",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
@@ -779,8 +783,10 @@ func TestWebhook_ClosedSiblingAfterMerge(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "Closed sibling after merge",
-		"status": "in_progress",
+		"title":         "Closed sibling after merge",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
@@ -843,8 +849,10 @@ func TestWebhook_AllClosedWithoutMerge(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "All closed no merge",
-		"status": "in_progress",
+		"title":         "All closed no merge",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
@@ -940,8 +948,10 @@ func TestWebhook_MergedPR_OnlyClosesIdentifiersWithClosingKeyword(t *testing.T) 
 	createIssue := func(title string) IssueResponse {
 		t.Helper()
 		req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-			"title":  title,
-			"status": "in_progress",
+			"title":         title,
+			"status":        "in_progress",
+			"assignee_type": "member",
+			"assignee_id":   testUserID,
 		})
 		w := testutil.Call(t, testHandler.CreateIssue, req)
 		if w.Code != http.StatusCreated {
@@ -1045,8 +1055,10 @@ func TestWebhook_MergedPR_TitlePrefixDoesNotClose(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "title-prefix repro",
-		"status": "in_progress",
+		"title":         "title-prefix repro",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
@@ -1102,8 +1114,10 @@ func TestWebhook_MergedPR_BranchNameDoesNotClose(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "branch-name repro",
-		"status": "in_progress",
+		"title":         "branch-name repro",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
@@ -1218,8 +1232,10 @@ func TestWebhook_CloseKeywordRemovedBeforeMergeDoesNotClose(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "close intent can be removed",
-		"status": "in_progress",
+		"title":         "close intent can be removed",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
@@ -1263,8 +1279,10 @@ func TestWebhook_CloseKeywordRemovedBeforeMergeDoesNotClose(t *testing.T) {
 	}
 
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "post merge close keyword is link only",
-		"status": "in_progress",
+		"title":         "post merge close keyword is link only",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var second IssueResponse
@@ -1319,8 +1337,10 @@ func TestWebhook_LinkOnlySiblingMergeAfterCloseKeywordPR(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "needs two prs",
-		"status": "in_progress",
+		"title":         "needs two prs",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
@@ -1395,8 +1415,10 @@ func TestWebhook_BareBodyMentionHiddenFromPRList(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "mentioned in passing",
-		"status": "in_progress",
+		"title":         "mentioned in passing",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
@@ -1463,8 +1485,10 @@ func TestWebhook_HiddenBodyMentionDoesNotBlockAutoAdvance(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "closing PR plus invisible mention",
-		"status": "in_progress",
+		"title":         "closing PR plus invisible mention",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
@@ -1607,8 +1631,10 @@ func setupPRTestIssue(t *testing.T, ctx context.Context, secret string) (IssueRe
 	t.Helper()
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "PR CI test",
-		"status": "in_progress",
+		"title":         "PR CI test",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	})
 	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
@@ -2029,10 +2055,13 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 	secret := "merge-parent-notify-secret"
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 
-	// Create parent (open) + child (in_progress) pair.
+	// Create parent (open) + child (in_progress) pair. The parent stays
+	// unassigned so the child-done comment carries no routing mention: an
+	// in_progress parent can no longer be unassigned (I4127.DP/I4192.DP), so
+	// the unassigned-parent branch is pinned via a todo parent instead.
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "PR-merge parent " + time.Now().Format(time.RFC3339Nano),
-		"status": "in_progress",
+		"status": "todo",
 	})
 	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var parent IssueResponse
@@ -2041,6 +2070,8 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           "PR-merge child " + time.Now().Format(time.RFC3339Nano),
 		"status":          "in_progress",
+		"assignee_type":   "member",
+		"assignee_id":     testUserID,
 		"parent_issue_id": parent.ID,
 	})
 	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
@@ -2730,8 +2761,10 @@ func TestWebhook_PullRequest_FansOutToBoundWorkspaces(t *testing.T) {
 	// Workspace B is the shared test workspace (prefix HAN) and owns the issue.
 	w := httptest.NewRecorder()
 	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "fan-out PR test",
-		"status": "in_progress",
+		"title":         "fan-out PR test",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	}))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
@@ -2828,8 +2861,10 @@ func TestWebhook_PullRequest_AmbiguousCloseAcrossWorkspaces(t *testing.T) {
 	// really for.
 	w := httptest.NewRecorder()
 	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "ambiguous close test",
-		"status": "in_progress",
+		"title":         "ambiguous close test",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	}))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
@@ -2853,13 +2888,15 @@ func TestWebhook_PullRequest_AmbiguousCloseAcrossWorkspaces(t *testing.T) {
 	// column, so we can place the collision directly instead of pumping the
 	// workspace's issue counter up to B's.
 	issueA, err := testHandler.Queries.CreateIssue(ctx, db.CreateIssueParams{
-		WorkspaceID: wsA.ID,
-		Title:       "unrelated issue that happens to share a number",
-		Status:      "in_progress",
-		Priority:    "none",
-		CreatorType: "member",
-		CreatorID:   parseUUID(testUserID),
-		Number:      issueB.Number,
+		WorkspaceID:  wsA.ID,
+		Title:        "unrelated issue that happens to share a number",
+		Status:       "in_progress",
+		Priority:     "none",
+		AssigneeType: pgtype.Text{String: "member", Valid: true},
+		AssigneeID:   parseUUID(testUserID),
+		CreatorType:  "member",
+		CreatorID:    parseUUID(testUserID),
+		Number:       issueB.Number,
 	})
 	if err != nil {
 		t.Fatalf("CreateIssue in workspace A: %v", err)
@@ -2997,8 +3034,10 @@ func TestWebhook_PullRequest_UniqueResolverAmongBindingsStillAutoCompletes(t *te
 
 	w := httptest.NewRecorder()
 	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "unique resolver test",
-		"status": "in_progress",
+		"title":         "unique resolver test",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	}))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
@@ -3057,8 +3096,10 @@ func TestWebhook_PullRequest_UnreadableWorkspaceWithholdsCloseIntent(t *testing.
 
 	w := httptest.NewRecorder()
 	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "unreadable workspace test",
-		"status": "in_progress",
+		"title":         "unreadable workspace test",
+		"status":        "in_progress",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
 	}))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
