@@ -1286,6 +1286,51 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("Former Member")).toBeInTheDocument();
   });
 
+  it("refreshes activity and comment relative timestamps on the page clock tick", async () => {
+    vi.useFakeTimers();
+    try {
+      const now = new Date("2026-02-01T12:00:00.000Z");
+      vi.setSystemTime(now);
+      const createdAt = new Date(now.getTime() - 4 * 60_000).toISOString();
+      mockApiObj.listTimeline.mockResolvedValue([
+        {
+          type: "comment",
+          id: "relative-comment",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Relative time comment",
+          parent_id: null,
+          created_at: createdAt,
+          updated_at: createdAt,
+          comment_type: "comment",
+        },
+        {
+          type: "activity",
+          id: "relative-activity",
+          actor_type: "member",
+          actor_id: "user-1",
+          action: "created",
+          created_at: createdAt,
+        },
+      ] as TimelineEntry[]);
+
+      renderIssueDetail();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getAllByText("4m ago")).toHaveLength(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+
+      expect(screen.getAllByText("5m ago")).toHaveLength(2);
+      expect(screen.queryAllByText("4m ago")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reruns the source task from an agent failure comment", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       ...mockTimeline,

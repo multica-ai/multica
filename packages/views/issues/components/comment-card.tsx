@@ -90,6 +90,8 @@ function StickyHeaderShell({
 interface CommentCardProps {
   issueId: string;
   entry: TimelineEntry;
+  /** Parent issue clock tick invalidates this memo for relative timestamps. */
+  timeAgoTick?: number;
   /**
    * Flat list of every nested reply under this thread root, in render order.
    * Computed once in `issue-detail.tsx`'s `timelineView` and stabilized so

@@ -371,6 +371,8 @@ function formatActivity(
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
 
+const RELATIVE_TIME_REFRESH_INTERVAL_MS = 30_000;
+
 // ---------------------------------------------------------------------------
 // Sidebar progressive disclosure
 // ---------------------------------------------------------------------------
@@ -1135,6 +1137,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { t } = useT("issues");
   const locale = useLocale();
   const timeAgo = useTimeAgo();
+  const [relativeTimeTick, setRelativeTimeTick] = useState(0);
   const id = issueId;
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
@@ -1184,6 +1187,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     handleResize: handleDesktopSidebarResize,
   } = useAnimatedRightSidebarState(desktopSidebarInitialOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => setRelativeTimeTick((tick) => tick + 1),
+      RELATIVE_TIME_REFRESH_INTERVAL_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (isMobile) {
@@ -2666,6 +2677,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <CommentCard
             issueId={id}
             entry={item.entry}
+            timeAgoTick={relativeTimeTick}
             replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
             currentUserId={user?.id}
             canModerate={canModerateComments}
