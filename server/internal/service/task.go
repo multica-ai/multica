@@ -5128,6 +5128,21 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // never started, so there is nothing to be idempotent about, and every bundle
 // that did download is already cached on disk — a retry resumes from there
 // instead of re-fetching the whole set (MUL-5370).
+// queued_expired is retryable because it is a runtime availability signal, not
+// a task defect: the row sat in 'queued' until its runtime failed to prove
+// liveness for a full reconnect grace, so nothing was wrong with the task
+// itself. (This is NOT a capacity/queue-length signal — a healthy runtime with a
+// long backlog no longer expires its queued work; ExpireStaleQueuedTasks gates
+// on runtime heartbeat, not wait time.) The retry child is created as an
+// immediate 'queued' attempt (no fire_at backoff) and is reclaimed the moment
+// the runtime heartbeats again; if the runtime never returns, ExpireStaleQueued
+// Tasks re-expires the child after another reconnect grace, so the retry stays
+// bounded by max_attempts without any bespoke schedule (CODI-6 / GH #7795). No
+// exponential backoff is added: a positive fire_at would insert the child as
+// 'deferred', and the bounded-termination sweep only reaps runtime_offline
+// lineage — a deferred queued_expired child would hang forever if the runtime
+// never came back. The agent process never started, so the retry is resume-safe
+// by construction.
 var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonRuntimeOffline):         true,
 	string(taskfailure.ReasonRuntimeRecovery):        true,
@@ -5135,6 +5150,7 @@ var retryableReasons = map[string]bool{
 	"codex_semantic_inactivity":                      true,
 	string(taskfailure.ReasonAgentProviderNetwork):   true,
 	string(taskfailure.ReasonSkillBundleUnavailable): true,
+	string(taskfailure.ReasonQueuedExpired):          true,
 }
 
 // runtime_offline retries start deferred, not queued: their positive fire_at
