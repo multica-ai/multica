@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
 // botMessageData is the Gateway v1.2+ message event payload (data field).
@@ -130,10 +131,32 @@ func inboundFromEvent(data *botMessageData, appID, botFullID string) (channel.In
 		},
 		Raw: rawJSON,
 	}
+	normalizeShareCRMFreshControlLayout(&msg, len(images))
 	if data.ReplyMessageID != nil && *data.ReplyMessageID > 0 {
 		msg.ReplyTo = &channel.ReplyCtx{MessageID: strconv.FormatInt(*data.ReplyMessageID, 10)}
 	}
 	return msg, true
+}
+
+// normalizeShareCRMFreshControlLayout keeps image placeholders on a /clear
+// turn before the shared Router handles it. Router treats CommandText="/clear"
+// as a bare pending-fresh sentinel and otherwise overwrites Text with the
+// command body, which would drop adapter-generated [Image] markers.
+func normalizeShareCRMFreshControlLayout(msg *channel.InboundMessage, imageCount int) {
+	control, ok := engine.ParseControlCommand(msg.CommandText)
+	if !ok || control.Kind != engine.ControlCommandFreshSession {
+		return
+	}
+	if control.Body == "" && imageCount == 0 {
+		return
+	}
+	msg.ForceFresh = true
+	msg.Text = joinNonEmpty("\n", control.Body, inboundImagePlaceholders(imageCount))
+	if control.Body == "" {
+		// Media-bearing `/clear` is a real turn. ForceFresh carries the
+		// already-consumed directive so Router does not take the bare path.
+		msg.CommandText = msg.Text
+	}
 }
 
 // normalizeSenderID prefers the full E.{ea}.{id} form used as the binding key.
