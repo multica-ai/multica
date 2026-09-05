@@ -33,6 +33,7 @@ import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/ui/header";
 import { HeaderActions } from "@/components/ui/app-header-actions";
+import { WorkspaceSwitcherButton } from "@/components/workspace/workspace-switcher-button";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { IssueRow } from "@/components/issue/issue-row";
 import { IssuesLoading } from "@/components/issue/issues-loading";
@@ -120,7 +121,11 @@ export default function MyIssues() {
 
   return (
     <View className="flex-1 bg-background">
-      <Header title="My Issues" right={<HeaderActions />} />
+      <Header
+        title="My Issues"
+        left={<WorkspaceSwitcherButton />}
+        right={<HeaderActions />}
+      />
       <ScopeToolbar
         scopes={SCOPES}
         scope={scope}
