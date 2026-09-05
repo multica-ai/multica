@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -88,12 +87,12 @@ func clearShareLinksForTestWorkspace(t *testing.T) {
 func createTestUserAndMember(t *testing.T, role string) string {
 	t.Helper()
 	ctx := context.Background()
-	seq := testSeq.Add(1)
+	fixtureID := uuid.NewString()
 	var userID string
 	if err := testPool.QueryRow(ctx,
 		`INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
-		fmt.Sprintf("sharelink-test-%d", seq),
-		fmt.Sprintf("sharelink-test-%d@multica.ai", seq),
+		"sharelink-test-"+fixtureID,
+		"sharelink-test-"+fixtureID+"@multica.ai",
 	).Scan(&userID); err != nil {
 		t.Fatalf("create share-link test user: %v", err)
 	}
@@ -125,7 +124,7 @@ func createTestShareLink(t *testing.T, workspaceID, role string, maxUses int32, 
 		RETURNING id, workspace_id, code, created_by, role, expires_at, max_uses, use_count, is_active, created_at
 	`,
 		parseUUID(workspaceID),
-		fmt.Sprintf("testcode-%d", testSeq.Add(1)),
+		"testcode-"+uuid.NewString(),
 		parseUUID(testUserID),
 		role,
 		pgInt32(maxUses),
@@ -559,7 +558,7 @@ func TestShareLink_CrossWorkspaceDenied(t *testing.T) {
 	var otherWS string
 	if err := testPool.QueryRow(ctx,
 		`INSERT INTO workspace (name, slug) VALUES ($1, $2) RETURNING id`,
-		"ShareLink Other", fmt.Sprintf("sharelink-other-%d", testSeq.Add(1)),
+		"ShareLink Other", "sharelink-other-"+uuid.NewString(),
 	).Scan(&otherWS); err != nil {
 		t.Fatalf("create other workspace: %v", err)
 	}

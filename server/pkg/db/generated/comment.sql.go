@@ -51,6 +51,38 @@ func (q *Queries) BumpCommentRevision(ctx context.Context, arg BumpCommentRevisi
 	return i, err
 }
 
+const claimCommentIdempotencySideEffects = `-- name: ClaimCommentIdempotencySideEffects :execrows
+UPDATE comment_idempotency
+SET side_effects_claimed_at = now()
+WHERE workspace_id = $1
+  AND idempotency_key = $2
+  AND request_hash = $3
+  AND side_effects_completed_at IS NULL
+  AND (side_effects_claimed_at IS NULL OR side_effects_claimed_at < $4)
+`
+
+type ClaimCommentIdempotencySideEffectsParams struct {
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	RequestHash    string             `json:"request_hash"`
+	LeaseBefore    pgtype.Timestamptz `json:"lease_before"`
+}
+
+// The creating request claims its own row on insert. Retries and the
+// background reconciler may take over only after the lease expires.
+func (q *Queries) ClaimCommentIdempotencySideEffects(ctx context.Context, arg ClaimCommentIdempotencySideEffectsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimCommentIdempotencySideEffects,
+		arg.WorkspaceID,
+		arg.IdempotencyKey,
+		arg.RequestHash,
+		arg.LeaseBefore,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearOtherThreadResolutions = `-- name: ClearOtherThreadResolutions :many
 WITH RECURSIVE root_of AS (
     -- Walk up from the target to its thread root.
@@ -309,6 +341,38 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 	return i, err
 }
 
+const createCommentIdempotency = `-- name: CreateCommentIdempotency :exec
+INSERT INTO comment_idempotency (
+    workspace_id, idempotency_key, request_hash, comment_id,
+    attachment_ids, suppress_agent_ids, side_effects_claimed_at
+)
+VALUES (
+    $1, $2, $3, $4,
+    $5, $6, now()
+)
+`
+
+type CreateCommentIdempotencyParams struct {
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	IdempotencyKey   string        `json:"idempotency_key"`
+	RequestHash      string        `json:"request_hash"`
+	CommentID        pgtype.UUID   `json:"comment_id"`
+	AttachmentIds    []pgtype.UUID `json:"attachment_ids"`
+	SuppressAgentIds []pgtype.UUID `json:"suppress_agent_ids"`
+}
+
+func (q *Queries) CreateCommentIdempotency(ctx context.Context, arg CreateCommentIdempotencyParams) error {
+	_, err := q.db.Exec(ctx, createCommentIdempotency,
+		arg.WorkspaceID,
+		arg.IdempotencyKey,
+		arg.RequestHash,
+		arg.CommentID,
+		arg.AttachmentIds,
+		arg.SuppressAgentIds,
+	)
+	return err
+}
+
 const deleteComment = `-- name: DeleteComment :one
 WITH locked_issue AS MATERIALIZED (
     -- Lock the aggregate owner before its child so this cannot deadlock with
@@ -361,6 +425,37 @@ func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) (D
 	return i, err
 }
 
+const deleteExpiredCommentIdempotency = `-- name: DeleteExpiredCommentIdempotency :execrows
+WITH victims AS (
+    SELECT c.workspace_id, c.idempotency_key
+    FROM comment_idempotency AS c
+    WHERE c.created_at < $1
+    ORDER BY c.created_at ASC, c.workspace_id ASC, c.idempotency_key ASC
+    LIMIT $2
+    FOR UPDATE SKIP LOCKED
+)
+DELETE FROM comment_idempotency AS c
+USING victims AS v
+WHERE c.workspace_id = v.workspace_id
+  AND c.idempotency_key = v.idempotency_key
+`
+
+type DeleteExpiredCommentIdempotencyParams struct {
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Limit     int32              `json:"limit"`
+}
+
+// Replay keys are operational deduplication state, not comment history. Keep a
+// bounded replay window and delete in small, lock-skipping batches so cleanup
+// cannot monopolize the comment write path or block another server replica.
+func (q *Queries) DeleteExpiredCommentIdempotency(ctx context.Context, arg DeleteExpiredCommentIdempotencyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredCommentIdempotency, arg.CreatedAt, arg.Limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getComment = `-- name: GetComment :one
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at FROM comment
 WHERE id = $1
@@ -388,6 +483,83 @@ func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, erro
 		&i.ViaPluginID,
 		&i.Revision,
 		&i.RecoverySettledAt,
+	)
+	return i, err
+}
+
+const getCommentForUpdate = `-- name: GetCommentForUpdate :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at FROM comment
+WHERE id = $1
+FOR UPDATE
+`
+
+// Admission checks must serialize with edits to the request being answered.
+// Callers use this inside the same transaction as the guarded write.
+func (q *Queries) GetCommentForUpdate(ctx context.Context, id pgtype.UUID) (Comment, error) {
+	row := q.db.QueryRow(ctx, getCommentForUpdate, id)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+		&i.QuickActionID,
+		&i.ViaPluginID,
+		&i.Revision,
+		&i.RecoverySettledAt,
+	)
+	return i, err
+}
+
+const getCommentIdempotency = `-- name: GetCommentIdempotency :one
+SELECT workspace_id, idempotency_key, request_hash, comment_id,
+       attachment_ids, suppress_agent_ids, created_at,
+       side_effects_completed_at, side_effects_claimed_at
+FROM comment_idempotency
+WHERE workspace_id = $1
+  AND idempotency_key = $2
+`
+
+type GetCommentIdempotencyParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	IdempotencyKey string      `json:"idempotency_key"`
+}
+
+type GetCommentIdempotencyRow struct {
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	IdempotencyKey         string             `json:"idempotency_key"`
+	RequestHash            string             `json:"request_hash"`
+	CommentID              pgtype.UUID        `json:"comment_id"`
+	AttachmentIds          []pgtype.UUID      `json:"attachment_ids"`
+	SuppressAgentIds       []pgtype.UUID      `json:"suppress_agent_ids"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	SideEffectsCompletedAt pgtype.Timestamptz `json:"side_effects_completed_at"`
+	SideEffectsClaimedAt   pgtype.Timestamptz `json:"side_effects_claimed_at"`
+}
+
+func (q *Queries) GetCommentIdempotency(ctx context.Context, arg GetCommentIdempotencyParams) (GetCommentIdempotencyRow, error) {
+	row := q.db.QueryRow(ctx, getCommentIdempotency, arg.WorkspaceID, arg.IdempotencyKey)
+	var i GetCommentIdempotencyRow
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.IdempotencyKey,
+		&i.RequestHash,
+		&i.CommentID,
+		&i.AttachmentIds,
+		&i.SuppressAgentIds,
+		&i.CreatedAt,
+		&i.SideEffectsCompletedAt,
+		&i.SideEffectsClaimedAt,
 	)
 	return i, err
 }
@@ -1139,6 +1311,67 @@ func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListComment
 	return items, nil
 }
 
+const listPendingCommentIdempotency = `-- name: ListPendingCommentIdempotency :many
+SELECT workspace_id, idempotency_key, request_hash, comment_id,
+       attachment_ids, suppress_agent_ids, created_at,
+       side_effects_completed_at, side_effects_claimed_at
+FROM comment_idempotency
+WHERE side_effects_completed_at IS NULL
+  AND created_at >= $1
+ORDER BY created_at ASC, workspace_id ASC, idempotency_key ASC
+LIMIT $2
+`
+
+type ListPendingCommentIdempotencyParams struct {
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Limit     int32              `json:"limit"`
+}
+
+type ListPendingCommentIdempotencyRow struct {
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	IdempotencyKey         string             `json:"idempotency_key"`
+	RequestHash            string             `json:"request_hash"`
+	CommentID              pgtype.UUID        `json:"comment_id"`
+	AttachmentIds          []pgtype.UUID      `json:"attachment_ids"`
+	SuppressAgentIds       []pgtype.UUID      `json:"suppress_agent_ids"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	SideEffectsCompletedAt pgtype.Timestamptz `json:"side_effects_completed_at"`
+	SideEffectsClaimedAt   pgtype.Timestamptz `json:"side_effects_claimed_at"`
+}
+
+// Rows whose comment committed but whose post-commit side effects were not
+// durably acknowledged. The caller takes the per-key advisory lock before
+// rechecking and replaying a row, so multiple server replicas converge.
+func (q *Queries) ListPendingCommentIdempotency(ctx context.Context, arg ListPendingCommentIdempotencyParams) ([]ListPendingCommentIdempotencyRow, error) {
+	rows, err := q.db.Query(ctx, listPendingCommentIdempotency, arg.CreatedAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingCommentIdempotencyRow{}
+	for rows.Next() {
+		var i ListPendingCommentIdempotencyRow
+		if err := rows.Scan(
+			&i.WorkspaceID,
+			&i.IdempotencyKey,
+			&i.RequestHash,
+			&i.CommentID,
+			&i.AttachmentIds,
+			&i.SuppressAgentIds,
+			&i.CreatedAt,
+			&i.SideEffectsCompletedAt,
+			&i.SideEffectsClaimedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentThreadCommentsForIssue = `-- name: ListRecentThreadCommentsForIssue :many
 WITH RECURSIVE membership(id, root_id, comment_created_at) AS (
     -- Each root maps to itself.
@@ -1820,6 +2053,41 @@ func (q *Queries) LockCommentAncestorPath(ctx context.Context, arg LockCommentAn
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockCommentIdempotencyKey = `-- name: LockCommentIdempotencyKey :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// Serialize retries for one workspace/key without locking every comment on the
+// issue. Advisory locks are transaction-scoped and are released on commit or
+// rollback; the key is supplied as a workspace-qualified string by callers.
+func (q *Queries) LockCommentIdempotencyKey(ctx context.Context, lockKey string) error {
+	_, err := q.db.Exec(ctx, lockCommentIdempotencyKey, lockKey)
+	return err
+}
+
+const markCommentIdempotencySideEffectsCompleted = `-- name: MarkCommentIdempotencySideEffectsCompleted :execrows
+UPDATE comment_idempotency
+SET side_effects_completed_at = COALESCE(side_effects_completed_at, now())
+WHERE workspace_id = $1
+  AND idempotency_key = $2
+  AND request_hash = $3
+  AND side_effects_completed_at IS NULL
+`
+
+type MarkCommentIdempotencySideEffectsCompletedParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	IdempotencyKey string      `json:"idempotency_key"`
+	RequestHash    string      `json:"request_hash"`
+}
+
+func (q *Queries) MarkCommentIdempotencySideEffectsCompleted(ctx context.Context, arg MarkCommentIdempotencySideEffectsCompletedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markCommentIdempotencySideEffectsCompleted, arg.WorkspaceID, arg.IdempotencyKey, arg.RequestHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const resolveComment = `-- name: ResolveComment :one

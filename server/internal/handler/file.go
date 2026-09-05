@@ -329,15 +329,21 @@ func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) ma
 		return nil
 	}
 	workspaceID := h.resolveWorkspaceID(r)
-	attachments, err := h.Queries.ListAttachmentsByCommentIDs(r.Context(), db.ListAttachmentsByCommentIDsParams{
+	return h.groupAttachmentsForWorkspace(r.Context(), parseUUID(workspaceID), attachmentURLModeFromRequest(r), commentIDs)
+}
+
+func (h *Handler) groupAttachmentsForWorkspace(ctx context.Context, workspaceID pgtype.UUID, mode attachmentURLMode, commentIDs []pgtype.UUID) map[string][]AttachmentResponse {
+	if len(commentIDs) == 0 {
+		return nil
+	}
+	attachments, err := h.Queries.ListAttachmentsByCommentIDs(ctx, db.ListAttachmentsByCommentIDsParams{
 		Column1:     commentIDs,
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		slog.Error("failed to load attachments for comments", "error", err)
 		return nil
 	}
-	mode := attachmentURLModeFromRequest(r)
 	grouped := make(map[string][]AttachmentResponse, len(commentIDs))
 	for _, a := range attachments {
 		cid := uuidToString(a.CommentID)
@@ -1487,14 +1493,17 @@ func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, worksp
 
 // linkAttachmentsByIDs links the given attachment IDs to a comment.
 // Only updates attachments that belong to the same issue and have no comment_id yet.
-func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID pgtype.UUID, ids []pgtype.UUID) {
-	if err := h.Queries.LinkAttachmentsToComment(ctx, db.LinkAttachmentsToCommentParams{
+func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID pgtype.UUID, ids []pgtype.UUID) (int64, error) {
+	linked, err := h.Queries.LinkAttachmentsToComment(ctx, db.LinkAttachmentsToCommentParams{
 		CommentID: commentID,
 		IssueID:   issueID,
 		Column3:   ids,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Error("failed to link attachments to comment", "error", err)
+		return 0, err
 	}
+	return linked, nil
 }
 
 // deleteS3Object removes a single file from S3 by its CDN URL.

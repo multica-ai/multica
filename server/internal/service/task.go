@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/replyadmission"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -4158,7 +4159,7 @@ func (s *TaskService) cancelDeferredEscalationsForTask(ctx context.Context, task
 	}
 }
 
-func (s *TaskService) CancelDeferredEscalationsForIssueAgent(ctx context.Context, issueID, agentID pgtype.UUID) {
+func (s *TaskService) CancelDeferredEscalationsForIssueAgent(ctx context.Context, issueID, agentID pgtype.UUID) error {
 	cancelled, err := s.Queries.CancelDeferredEscalationsForIssueAgent(ctx, db.CancelDeferredEscalationsForIssueAgentParams{
 		IssueID: issueID,
 		AgentID: agentID,
@@ -4168,7 +4169,7 @@ func (s *TaskService) CancelDeferredEscalationsForIssueAgent(ctx context.Context
 			"issue_id", util.UUIDToString(issueID),
 			"agent_id", util.UUIDToString(agentID),
 			"error", err)
-		return
+		return err
 	}
 	for _, task := range cancelled {
 		slog.Info("deferred fallback task cancelled",
@@ -4178,6 +4179,7 @@ func (s *TaskService) CancelDeferredEscalationsForIssueAgent(ctx context.Context
 			"reason", "agent_comment_acknowledged",
 		)
 	}
+	return nil
 }
 
 // ExtendTaskPrepareLease keeps a claimed-but-not-started task protected while
@@ -4310,6 +4312,13 @@ func startsWithAbsolutePath(s string) bool {
 // populated only after the daemon confirms a disposable worktree is gone.
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
 	var task db.AgentTaskQueue
+	var fallbackCreated *db.CreateCommentRow
+	var fallbackIssue *db.Issue
+	var fallbackRoot *db.Comment
+	var fallbackAdmissionRejection error
+	var fallbackAdmissionNotice *db.CreateCommentRow
+	var fallbackAdmissionNoticeIssue *db.Issue
+	var taskCompletionNoRows bool
 	// chatAssistantMsg is the single assistant outcome row written for a chat
 	// task inside the completion transaction below. It is broadcast (chat:done)
 	// only after the transaction commits.
@@ -4329,9 +4338,74 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			RetiredSessionID:      pgtype.Text{String: retiredSessionID, Valid: retiredSessionID != ""},
 		})
 		if err != nil {
+			taskCompletionNoRows = errors.Is(err, pgx.ErrNoRows)
 			return err
 		}
 		task = t
+		fallback, err := s.prepareCompletionFallbackAdmission(ctx, qtx, taskID, result)
+		if err != nil {
+			var missingRequesterMention *replyadmission.MissingRequesterMentionError
+			if !errors.As(err, &missingRequesterMention) {
+				return fmt.Errorf("reply admission: %w", err)
+			}
+			// The synthesized fallback is optional delivery. A policy rejection
+			// must not roll back the terminal task transition or leave a healthy
+			// daemon retrying the same deterministic output forever. The task
+			// result remains durable on the completed row. Leave a system-authored
+			// notice on the issue so completion is visible even though the rejected
+			// agent fallback is not persisted.
+			fallbackAdmissionRejection = err
+			if fallback != nil {
+				notice, createErr := qtx.CreateComment(ctx, db.CreateCommentParams{
+					ID:           dbid.NewV7(),
+					IssueID:      fallback.Issue.ID,
+					WorkspaceID:  fallback.Issue.WorkspaceID,
+					AuthorType:   "system",
+					AuthorID:     pgtype.UUID{Valid: true},
+					Content:      completionFallbackAdmissionNotice(err),
+					Type:         "system",
+					ParentID:     t.TriggerCommentID,
+					SourceTaskID: t.ID,
+				})
+				if createErr != nil {
+					return fmt.Errorf("create completion fallback admission notice: %w", createErr)
+				}
+				fallbackAdmissionNotice = &notice
+				fallbackAdmissionNoticeIssue = &fallback.Issue
+			}
+			fallback = nil
+		}
+		if fallback != nil {
+			// Persist the synthesized substantive reply in this same transaction
+			// as the terminal status flip. The parent row is still locked from
+			// prepareCompletionFallbackAdmission, so neither a parent edit nor a
+			// failed insert can create a completed-but-undelivered task.
+			issue := fallback.Issue
+			created, createErr := qtx.CreateComment(ctx, db.CreateCommentParams{
+				ID:           dbid.NewV7(),
+				IssueID:      t.IssueID,
+				WorkspaceID:  issue.WorkspaceID,
+				AuthorType:   "agent",
+				AuthorID:     t.AgentID,
+				Content:      fallback.Content,
+				Type:         "comment",
+				ParentID:     t.TriggerCommentID,
+				SourceTaskID: t.ID,
+			})
+			if createErr != nil {
+				return fmt.Errorf("create completion fallback comment: %w", createErr)
+			}
+			fallbackCreated = &created
+			fallbackIssue = &issue
+			if fallback.Parent != nil {
+				if root, rootErr := qtx.GetThreadRoot(ctx, db.GetThreadRootParams{
+					CommentID:   t.TriggerCommentID,
+					WorkspaceID: issue.WorkspaceID,
+				}); rootErr == nil {
+					fallbackRoot = &root
+				}
+			}
+		}
 
 		// Atomic with the status flip: a crash between the two would leave a
 		// finished obligation looking pending forever.
@@ -4394,7 +4468,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		// … WHERE status = 'running' returns no rows in that case.
 		// Treat it as an idempotent success — same pattern as CancelTask.
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+			if taskCompletionNoRows && errors.Is(err, pgx.ErrNoRows) {
 				slog.Info("complete task: already finalized",
 					"task_id", util.UUIDToString(taskID),
 					"current_status", existing.Status,
@@ -4420,55 +4494,59 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	}
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
+	if fallbackAdmissionRejection != nil {
+		var missingRequesterMention *replyadmission.MissingRequesterMentionError
+		requesterID := ""
+		if errors.As(fallbackAdmissionRejection, &missingRequesterMention) {
+			requesterID = missingRequesterMention.RequesterID
+		}
+		slog.Warn("completion fallback comment rejected after task completion",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"agent_id", util.UUIDToString(task.AgentID),
+			"requester_id", requesterID,
+			"error", fallbackAdmissionRejection,
+		)
+	}
+	if fallbackAdmissionNotice != nil && fallbackAdmissionNoticeIssue != nil && s.Bus != nil {
+		comment := fallbackAdmissionNotice.Comment()
+		commentFields := commentEventFields(comment)
+		commentFields["revision"] = comment.Revision
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventCommentCreated,
+			WorkspaceID: util.UUIDToString(fallbackAdmissionNoticeIssue.WorkspaceID),
+			ActorType:   "system",
+			Payload: map[string]any{
+				"comment":        commentFields,
+				"issue_title":    fallbackAdmissionNoticeIssue.Title,
+				"issue_status":   fallbackAdmissionNoticeIssue.Status,
+				"issue_revision": fallbackAdmissionNotice.IssueRevision,
+			},
+		})
+	}
 	s.captureTaskCompleted(ctx, task)
 
-	// Invariant: every completed issue task must have at least one agent
-	// comment on the issue, so the user always sees something when a run
-	// ends. If the agent posted a comment during execution (result, progress
-	// ping, or CLI reply), HasAgentCommentedSince returns true and we skip.
-	// Otherwise, synthesize one from the final output. For comment-triggered
-	// tasks, TriggerCommentID threads the fallback under the original comment;
-	// for assignment-triggered tasks it is NULL and the fallback is top-level.
-	// Chat tasks have no IssueID and are handled separately below.
-	if task.IssueID.Valid {
-		suppressNoActionComment, err := HasSquadLeaderNoActionEvaluationForTask(ctx, s.Queries, task)
-		if err != nil {
-			slog.Warn("checking squad leader no_action evaluation failed",
-				"task_id", util.UUIDToString(task.ID),
-				"issue_id", util.UUIDToString(task.IssueID),
-				"agent_id", util.UUIDToString(task.AgentID),
-				"error", err,
-			)
-		}
-		agentCommented, _ := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
-			IssueID:  task.IssueID,
-			AuthorID: task.AgentID,
-			Since:    task.StartedAt,
+	// The fallback row was inserted before the transaction committed, so the
+	// only post-commit work is delivery side effects. These cannot make the
+	// task appear completed without its substantive output.
+	if fallbackCreated != nil && fallbackIssue != nil {
+		comment := fallbackCreated.Comment()
+		s.CancelDeferredEscalationsForIssueAgent(ctx, task.IssueID, task.AgentID)
+		commentFields := commentEventFields(comment)
+		commentFields["revision"] = comment.Revision
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventCommentCreated,
+			WorkspaceID: util.UUIDToString(fallbackIssue.WorkspaceID),
+			ActorType:   "agent",
+			ActorID:     util.UUIDToString(task.AgentID),
+			Payload: map[string]any{
+				"comment":        commentFields,
+				"issue_title":    fallbackIssue.Title,
+				"issue_status":   fallbackIssue.Status,
+				"issue_revision": fallbackCreated.IssueRevision,
+			},
 		})
-		if !suppressNoActionComment && !agentCommented {
-			var payload protocol.TaskCompletedPayload
-			if err := json.Unmarshal(result, &payload); err == nil {
-				if payload.Output != "" {
-					// Match the CLI's --content / --description behavior: agents that
-					// emit literal `\n` 4-char sequences (Python/JSON-style) get them
-					// decoded into real newlines before the comment hits the DB. See
-					// util.UnescapeBackslashEscapes for the exact contract.
-					body := util.UnescapeBackslashEscapes(payload.Output)
-					if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
-						slog.Warn("suppressing trivial comment-trigger fallback output",
-							"task_id", util.UUIDToString(task.ID),
-							"issue_id", util.UUIDToString(task.IssueID),
-							"agent_id", util.UUIDToString(task.AgentID),
-						)
-					} else {
-						// Redact first, then bound: a runaway raw-stream Output (GH #5455)
-						// must never reach the issue thread, even as a clipped excerpt.
-						content := truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)
-						s.createAgentComment(ctx, task.IssueID, task.AgentID, content, "comment", task.TriggerCommentID, task.ID)
-					}
-				}
-			}
-		}
+		s.AutoUnresolveThreadOnReply(ctx, fallbackRoot, util.UUIDToString(fallbackIssue.WorkspaceID), "agent", util.UUIDToString(task.AgentID))
 	}
 
 	// Quick-create tasks: locate the issue the agent just created and push
@@ -5074,7 +5152,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// in addition to the coordinator recovery signal, preserving visibility on
 	// both sides of a cross-issue handoff.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
+		if err := s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID); err != nil {
+			slog.Warn("task failure system comment rejected", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", err)
+		}
 	}
 
 	// Quick-create tasks: push a failure inbox notification to the
@@ -7203,19 +7283,83 @@ func commentEventFields(c db.Comment) map[string]any {
 	}
 }
 
-func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) {
+func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) error {
 	if content == "" {
-		return
+		return nil
 	}
 	// Look up issue to get workspace ID for mention expansion and broadcasting.
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
-		return
+		return fmt.Errorf("load issue: %w", err)
+	}
+	var rootComment *db.Comment
+	if commentType == "comment" && parentID.Valid {
+		if s.TxStarter == nil {
+			return fmt.Errorf("reply admission is unavailable")
+		}
+		tx, err := s.TxStarter.Begin(ctx)
+		if err != nil {
+			return fmt.Errorf("begin reply admission: %w", err)
+		}
+		defer tx.Rollback(ctx)
+		qtx := s.Queries.WithTx(tx)
+		lockedIssue, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
+			ID:          issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return fmt.Errorf("lock issue for reply admission: %w", err)
+		}
+		issue = lockedIssue
+		lockedParent, err := qtx.GetCommentForUpdate(ctx, parentID)
+		if err != nil {
+			return fmt.Errorf("load reply parent: %w", err)
+		}
+		if lockedParent.IssueID != issue.ID || lockedParent.WorkspaceID != issue.WorkspaceID {
+			return fmt.Errorf("reply parent scope mismatch")
+		}
+		started := time.Now()
+		decision := replyadmission.Evaluate(replyadmission.Parent{
+			ID:          util.UUIDToString(lockedParent.ID),
+			IssueID:     util.UUIDToString(lockedParent.IssueID),
+			WorkspaceID: util.UUIDToString(lockedParent.WorkspaceID),
+			AuthorType:  lockedParent.AuthorType,
+			AuthorID:    util.UUIDToString(lockedParent.AuthorID),
+			Content:     lockedParent.Content,
+			IsReply:     lockedParent.ParentID.Valid,
+		}, content)
+		s.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathTaskAgentComment, decision.Outcome(), decision.Reason, time.Since(started))
+		if !decision.Admitted {
+			return &replyadmission.MissingRequesterMentionError{RequesterID: decision.RequesterID}
+		}
+		created, err := qtx.CreateComment(ctx, db.CreateCommentParams{
+			ID:           dbid.NewV7(),
+			IssueID:      issueID,
+			WorkspaceID:  issue.WorkspaceID,
+			AuthorType:   "agent",
+			AuthorID:     agentID,
+			Content:      content,
+			Type:         commentType,
+			ParentID:     parentID,
+			SourceTaskID: sourceTaskID,
+		})
+		if err != nil {
+			return fmt.Errorf("create comment: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("commit comment: %w", err)
+		}
+		if root, rootErr := s.Queries.GetThreadRoot(ctx, db.GetThreadRootParams{
+			CommentID:   parentID,
+			WorkspaceID: issue.WorkspaceID,
+		}); rootErr == nil {
+			rootComment = &root
+		}
+		return s.deliverAgentCommentSideEffects(ctx, issue, created, rootComment, agentID)
 	}
 	// Resolve the thread root for thread-level side effects without overwriting
 	// parentID. The stored parent_id must remain the exact comment being replied
 	// to; recursive thread reads recover the root when needed.
-	var rootComment *db.Comment
 	if parentID.Valid {
 		if root, err := s.Queries.GetThreadRoot(ctx, db.GetThreadRootParams{
 			CommentID:   parentID,
@@ -7236,10 +7380,16 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		SourceTaskID: sourceTaskID,
 	})
 	if err != nil {
-		return
+		return fmt.Errorf("create comment: %w", err)
 	}
+	return s.deliverAgentCommentSideEffects(ctx, issue, created, rootComment, agentID)
+}
+
+func (s *TaskService) deliverAgentCommentSideEffects(ctx context.Context, issue db.Issue, created db.CreateCommentRow, parent *db.Comment, agentID pgtype.UUID) error {
 	comment := created.Comment()
-	s.CancelDeferredEscalationsForIssueAgent(ctx, issueID, agentID)
+	if err := s.CancelDeferredEscalationsForIssueAgent(ctx, issue.ID, agentID); err != nil {
+		return fmt.Errorf("cancel deferred escalations: %w", err)
+	}
 	commentFields := commentEventFields(comment)
 	commentFields["revision"] = comment.Revision
 	s.Bus.Publish(events.Event{
@@ -7254,23 +7404,27 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			"issue_revision": created.IssueRevision,
 		},
 	})
-	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))
+	if err := s.AutoUnresolveThreadOnReply(ctx, parent, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID)); err != nil {
+		return fmt.Errorf("auto-unresolve reply thread: %w", err)
+	}
+	return nil
 }
 
 // AutoUnresolveThreadOnReply clears resolved_at on the thread root when a
 // reply lands in a resolved thread, and broadcasts comment:unresolved. Shared
 // between the user-facing Handler.CreateComment path and the agent-facing
 // TaskService.createAgentComment path so the resolved-then-replied state can
-// never desync (one of the bugs Emacs flagged on PR #2300). Errors are logged
-// — the reply itself already committed, the desync is recoverable on next read.
-func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db.Comment, workspaceID, actorType, actorID string) {
+// never desync (one of the bugs Emacs flagged on PR #2300). The reply itself
+// is already committed, so callers decide whether an error should be retried
+// as a post-commit side effect.
+func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db.Comment, workspaceID, actorType, actorID string) error {
 	if parent == nil || !parent.ResolvedAt.Valid {
-		return
+		return nil
 	}
 	updated, err := s.Queries.UnresolveComment(ctx, parent.ID)
 	if err != nil {
 		slog.Warn("auto-unresolve on reply failed", "error", err, "comment_id", util.UUIDToString(parent.ID))
-		return
+		return err
 	}
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventCommentUnresolved,
@@ -7295,6 +7449,7 @@ func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db
 			},
 		},
 	})
+	return nil
 }
 
 // IssueToMap renders an issue row as the map shape the issue:created /
