@@ -4,6 +4,8 @@ import (
 	"context"
 	"sort"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 type workspaceDeleteAction string
@@ -128,6 +130,9 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"vcs_pull_request":                   workspaceDelete,
 	"verification_code":                  workspaceDeleteKeep,
 	"webhook_delivery":                   workspaceDelete,
+	"workflow_definition":                workspaceDelete,
+	"workflow_run":                       workspaceDelete,
+	"workflow_transition":                workspaceDelete,
 	"workspace":                          workspaceDelete,
 	"workspace_invitation":               workspaceDelete,
 	"workspace_share_link":               workspaceDelete,
@@ -212,6 +217,60 @@ WHERE table_schema = 'public'
 			if !hasWorkspaceID {
 				t.Errorf("%s table %s lost workspace_id; update its teardown selector", action, table)
 			}
+		}
+	}
+}
+
+func TestDeleteWorkspaceIssueRootsDeletesWorkflowData(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	suffix := uuid.NewString()[:8]
+	var workspaceID, issueID, definitionID, runID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, '', 'WFD') RETURNING id
+	`, "Workflow Delete "+suffix, "workflow-delete-"+suffix).Scan(&workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id=$1`, workspaceID) })
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'workflow delete issue', 'todo', 'medium', 'member', $2, 1) RETURNING id
+	`, workspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatal(err)
+	}
+	definition := `{"schema_version":1,"stages":[{"key":"build","name":"Build"}]}`
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workflow_definition (workspace_id, name, version, definition, created_by)
+		VALUES ($1, 'delete-flow', 1, $2::jsonb, $3) RETURNING id
+	`, workspaceID, definition, testUserID).Scan(&definitionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workflow_run (workspace_id, issue_id, workflow_definition_id, definition_snapshot, status, current_stage, started_by_type, started_by_id)
+		VALUES ($1, $2, $3, $4::jsonb, 'running', 1, 'member', $5) RETURNING id
+	`, workspaceID, issueID, definitionID, definition, testUserID).Scan(&runID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workflow_transition (workspace_id, workflow_run_id, idempotency_key, kind, to_status, actor_type)
+		VALUES ($1, $2, 'delete-test', 'started', 'running', 'system')
+	`, workspaceID, runID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := testHandler.Queries.DeleteWorkspaceIssueRoots(ctx, parseUUID(workspaceID)); err != nil {
+		t.Fatalf("DeleteWorkspaceIssueRoots: %v", err)
+	}
+	for _, table := range []string{"workflow_transition", "workflow_run", "workflow_definition"} {
+		var n int
+		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE workspace_id=$1`, workspaceID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Fatalf("%s rows after issue-root delete = %d, want 0", table, n)
 		}
 	}
 }

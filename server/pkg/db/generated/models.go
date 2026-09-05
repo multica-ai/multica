@@ -1513,6 +1513,50 @@ type WebhookDelivery struct {
 	ReplayIdempotencyKey   pgtype.Text        `json:"replay_idempotency_key"`
 }
 
+type WorkflowDefinition struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Version     int32              `json:"version"`
+	Definition  []byte             `json:"definition"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkflowRun struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	IssueID              pgtype.UUID        `json:"issue_id"`
+	WorkflowDefinitionID pgtype.UUID        `json:"workflow_definition_id"`
+	DefinitionSnapshot   []byte             `json:"definition_snapshot"`
+	Status               string             `json:"status"`
+	CurrentStage         int32              `json:"current_stage"`
+	Revision             int64              `json:"revision"`
+	StartedByType        string             `json:"started_by_type"`
+	StartedByID          pgtype.UUID        `json:"started_by_id"`
+	StartedAt            pgtype.Timestamptz `json:"started_at"`
+	CompletedAt          pgtype.Timestamptz `json:"completed_at"`
+	CancelledAt          pgtype.Timestamptz `json:"cancelled_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkflowTransition struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	WorkflowRunID  pgtype.UUID        `json:"workflow_run_id"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	Kind           string             `json:"kind"`
+	FromStage      pgtype.Int4        `json:"from_stage"`
+	ToStage        pgtype.Int4        `json:"to_stage"`
+	FromStatus     pgtype.Text        `json:"from_status"`
+	ToStatus       string             `json:"to_status"`
+	ActorType      string             `json:"actor_type"`
+	ActorID        pgtype.UUID        `json:"actor_id"`
+	Payload        []byte             `json:"payload"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type Workspace struct {
 	ID           pgtype.UUID        `json:"id"`
 	Name         string             `json:"name"`

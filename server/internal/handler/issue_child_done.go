@@ -109,13 +109,6 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if parentStatus == "backlog" {
 		return
 	}
-	// Human-assigned parents read their own timeline; an automated system
-	// comment is just noise and there is no agent task to trigger. Skip the
-	// whole notification (comment + mention + inbox row) — MUL-2538.
-	if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
-		return
-	}
-
 	// Stage barrier (MUL-3508 / discussion #4320). The notification + assignee
 	// wake fire only when this completion *closes a stage* — i.e. every sibling
 	// in the lowest unfinished stage is now terminal. An unstaged sibling set is
@@ -142,6 +135,14 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	var closedStage int32
 	if staged {
 		closedStage = issue.Stage.Int32
+		if h.tryAdvanceWorkflowFromClosedStage(ctx, parent, closedStage) {
+			return
+		}
+	}
+	// Preserve the legacy human-parent guard when no active workflow owns the
+	// staged progression. Workflows are server-owned and are handled above.
+	if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
+		return
 	}
 	h.postChildDoneComment(ctx, parent, issue, children, staged, closedStage, false)
 }
@@ -203,10 +204,6 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		if parentStatus == "backlog" {
 			continue
 		}
-		if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
-			continue
-		}
-
 		children, err := h.Queries.ListChildIssues(ctx, parent.ID)
 		if err != nil {
 			slog.Warn("batch child done: failed to list siblings for stage barrier",
@@ -221,6 +218,9 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			// in the final state. stageBarrierClosed ignores `completed` on the
 			// unstaged path, so any completed child stands in for the barrier check.
 			if !stageBarrierClosed(children, g.children[0], isTerminal) {
+				continue
+			}
+			if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
 				continue
 			}
 			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch)
@@ -252,6 +252,12 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			}
 		}
 		if !found {
+			continue
+		}
+		if h.tryAdvanceWorkflowFromClosedStage(ctx, parent, bestStage) {
+			continue
+		}
+		if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
 			continue
 		}
 		h.postChildDoneComment(ctx, parent, rep, children, true, bestStage, batch)
