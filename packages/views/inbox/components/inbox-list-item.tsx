@@ -6,7 +6,7 @@ import {
   IssueAgentActivityIndicator,
 } from "../../issues/components/issue-agent-activity-indicator";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { Archive, ArchiveRestore } from "lucide-react";
+import { AlertCircle, Archive, ArchiveRestore } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";
@@ -85,6 +85,13 @@ export function InboxListItem({
     ? t(($) => $.list.unarchive_tooltip)
     : t(($) => $.list.archive_tooltip);
   const actorType = item.actor_type ?? item.recipient_type;
+  // `severity` is assigned at creation time but was never rendered, so a
+  // "needs you" row (issue_assigned, task_failed, a failed quick-create) read
+  // identically to routine churn while triaging. Mark the `action_required`
+  // tier — the clear "needs you" case — and leave `attention`/`info` unmarked.
+  // Severity is intrinsic to the item, so unlike the unread dot it is not
+  // suppressed in the archived view.
+  const isActionRequired = item.severity === "action_required";
   // The glyph is per CATEGORY, so it alone cannot tell "In Review" from a
   // custom "Human Review" — moving between two statuses of the same category
   // left this row pixel-identical and read as "the inbox never updated"
@@ -140,6 +147,13 @@ export function InboxListItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
+            {isActionRequired && (
+              <AlertCircle
+                role="img"
+                aria-label={t(($) => $.list.action_required)}
+                className="h-3.5 w-3.5 shrink-0 text-destructive"
+              />
+            )}
             {showUnread && (
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
             )}

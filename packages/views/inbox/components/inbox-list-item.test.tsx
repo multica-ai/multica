@@ -139,6 +139,51 @@ function renderRow(props: {
 
 const unreadDot = (container: HTMLElement) => container.querySelector(".bg-brand");
 const title = (container: HTMLElement) => container.querySelector(".truncate");
+const severityMarker = (container: HTMLElement) =>
+  container.querySelector(".text-destructive");
+
+describe("InboxListItem severity affordance", () => {
+  it("flags an action-required row with a marker", () => {
+    // `action_required` is the "needs you" tier (issue_assigned, mentioned,
+    // task_failed). It is stored on every row but was never rendered, so it
+    // read identically to routine churn while triaging.
+    const { container } = renderRow({
+      item: item({ severity: "action_required" }),
+      view: "inbox",
+    });
+
+    expect(severityMarker(container)).not.toBeNull();
+  });
+
+  it("leaves an info row unmarked", () => {
+    const { container } = renderRow({
+      item: item({ severity: "info" }),
+      view: "inbox",
+    });
+
+    expect(severityMarker(container)).toBeNull();
+  });
+
+  it("does not flag an attention row (marker is scoped to action_required)", () => {
+    const { container } = renderRow({
+      item: item({ severity: "attention" }),
+      view: "inbox",
+    });
+
+    expect(severityMarker(container)).toBeNull();
+  });
+
+  it("keeps the marker in the archived view", () => {
+    // Severity is intrinsic to the item, not a function of read/archived
+    // state, so the marker is not suppressed the way the unread dot is.
+    const { container } = renderRow({
+      item: item({ severity: "action_required", archived: true }),
+      view: "archived",
+    });
+
+    expect(severityMarker(container)).not.toBeNull();
+  });
+});
 
 describe("InboxListItem unread affordance", () => {
   it("marks an unread row in the main inbox", () => {
