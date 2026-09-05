@@ -484,6 +484,12 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"multica issue runs <issue-id> --siblings --output json",
 				"capped at 20",
 				"Nothing here reserves an issue or serialises anything",
+				// #8008: the read path for typed properties. The flag, the
+				// per-item names and the promise that the stored ids stay
+				// beside them are each what a script joins on.
+				"--resolve-properties",
+				"display_values",
+				"`value` keeps the stored ids",
 			},
 			notWant: []string{
 				// A curated key list is the "recommended fields" concept the

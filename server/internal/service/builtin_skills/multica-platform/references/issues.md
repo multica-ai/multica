@@ -197,6 +197,19 @@ multica issue list --sort property:Impact --direction desc --output json
   text/url by value; issues without the property sort last either way.
   Archived properties and types without an order (multi_select, checkbox,
   actor kinds) are rejected up front.
+- `issue list` and `issue get` return `properties` as a map of definition id
+  to stored value. Add `--resolve-properties` in JSON mode to get the rows
+  `issue property list` prints instead (name, type, stored value, display
+  names); the CLI makes at most one catalog request for the whole page, so
+  no `property list` call is needed:
+
+```bash
+multica issue list --status in_progress --output json --resolve-properties
+multica issue get <issue-id> --resolve-properties
+```
+
+  Read `display` for a single value and `display_values` for a multi_select
+  or multi_actor value; `value` keeps the stored ids.
 
 ## Status changes have server side effects
 

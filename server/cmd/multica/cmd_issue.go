@@ -499,9 +499,11 @@ func init() {
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
 	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority, or property:<name-or-id> to sort by a custom property (select properties sort by option order)")
 	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column or a property sort (position is always ascending)")
+	issueListCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
+	issueGetCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
@@ -681,11 +683,13 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		params.Set("metadata", filter)
 	}
 	// --property filtering and property:<ref> sorting both address definitions
-	// by name or UUID, so they share a single catalog fetch.
+	// by name or UUID, so they share a single catalog fetch. An actor filter
+	// and --resolve-properties share one member request the same way.
 	const propertySortPrefix = "property:"
 	propertyFlags, _ := cmd.Flags().GetStringArray("property")
 	sortVal, _ := cmd.Flags().GetString("sort")
 	var properties []propertyDTO
+	var members memberDirectory
 	if len(propertyFlags) > 0 || strings.HasPrefix(sortVal, propertySortPrefix) {
 		var err error
 		if properties, err = fetchProperties(ctx, client); err != nil {
@@ -693,7 +697,7 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	if len(propertyFlags) > 0 {
-		filter, err := buildPropertiesFilterQueryParam(ctx, client, properties, propertyFlags)
+		filter, err := buildPropertiesFilterQueryParam(ctx, client, &members, properties, propertyFlags)
 		if err != nil {
 			return err
 		}
@@ -747,6 +751,11 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
+		if resolve, _ := cmd.Flags().GetBool("resolve-properties"); resolve {
+			if err := resolveIssueProperties(ctx, client, properties, &members, issuesRaw); err != nil {
+				return err
+			}
+		}
 		total, _ := result["total"].(float64)
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
@@ -917,6 +926,11 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	if resolve, _ := cmd.Flags().GetBool("resolve-properties"); resolve {
+		if err := resolveIssueProperties(ctx, client, nil, &memberDirectory{}, []any{issue}); err != nil {
+			return err
+		}
+	}
 	return cli.PrintJSON(os.Stdout, issue)
 }
 
@@ -2703,51 +2717,47 @@ func (k assigneeKinds) describe() string {
 	}
 }
 
+// assigneeCandidate is one directory entry matchAssignee ranks. aliases are
+// additional unique identifiers that select a candidate outright, ranked with
+// id matches rather than name matches — a member's email is as unambiguous as
+// their id, and is what people actually have to hand. Without it,
+// `--value bohan@example.com` fails to resolve.
+type assigneeCandidate struct {
+	assigneeMatch
+	aliases []string
+}
+
+func (c assigneeCandidate) matchesAlias(input string) bool {
+	for _, alias := range c.aliases {
+		if alias != "" && strings.EqualFold(alias, input) {
+			return true
+		}
+	}
+	return false
+}
+
+func memberCandidates(members []map[string]any) []assigneeCandidate {
+	candidates := make([]assigneeCandidate, 0, len(members))
+	for _, m := range members {
+		candidates = append(candidates, assigneeCandidate{
+			assigneeMatch: assigneeMatch{Type: "member", ID: strVal(m, "user_id"), Name: strVal(m, "name")},
+			aliases:       []string{strVal(m, "email")},
+		})
+	}
+	return candidates
+}
+
 func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, kinds assigneeKinds) (string, string, error) {
 	if client.WorkspaceID == "" {
 		return "", "", fmt.Errorf("workspace ID is required to resolve assignees; use --workspace-id or set MULTICA_WORKSPACE_ID")
 	}
-
-	input := normalizeAssigneeLookupInput(name)
-	if input == "" {
+	if normalizeAssigneeLookupInput(name) == "" {
 		return "", "", fmt.Errorf("no %s found matching %q", kinds.describe(), name)
 	}
-	inputLower := strings.ToLower(input)
 
-	// Matches are collected into three priority buckets. Higher-priority buckets
-	// short-circuit lower-priority matching so that, e.g., an exact name match
-	// always wins over a substring collision with another candidate.
-	//   1. idMatches        — full UUID or 8-char ShortID (as shown by `truncateID`).
-	//   2. exactMatches     — case-insensitive full name equality.
-	//   3. substringMatches — preserves the existing partial-name UX.
-	var idMatches, exactMatches, substringMatches []assigneeMatch
+	var candidates []assigneeCandidate
 	var errs []error
 	var fetchAttempts int
-
-	// exactAliases are additional unique identifiers that select a candidate
-	// outright, ranked with id matches rather than name matches — a member's
-	// email is as unambiguous as their id, and is what people actually have to
-	// hand. Without it, `--value bohan@example.com` fails to resolve.
-	classify := func(entityType, id, displayName string, exactAliases ...string) {
-		match := assigneeMatch{Type: entityType, ID: id, Name: displayName}
-		if id != "" && (strings.EqualFold(id, input) || strings.EqualFold(truncateID(id), input)) {
-			idMatches = append(idMatches, match)
-			return
-		}
-		for _, alias := range exactAliases {
-			if alias != "" && strings.EqualFold(alias, input) {
-				idMatches = append(idMatches, match)
-				return
-			}
-		}
-		if strings.EqualFold(displayName, input) {
-			exactMatches = append(exactMatches, match)
-			return
-		}
-		if strings.Contains(strings.ToLower(displayName), inputLower) {
-			substringMatches = append(substringMatches, match)
-		}
-	}
 
 	// Search members.
 	if kinds.member {
@@ -2756,9 +2766,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 		if err := getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err != nil {
 			errs = append(errs, fmt.Errorf("fetch members: %w", err))
 		} else {
-			for _, m := range members {
-				classify("member", strVal(m, "user_id"), strVal(m, "name"), strVal(m, "email"))
-			}
+			candidates = append(candidates, memberCandidates(members)...)
 		}
 	}
 
@@ -2771,7 +2779,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 			errs = append(errs, fmt.Errorf("fetch agents: %w", err))
 		} else {
 			for _, a := range agents {
-				classify("agent", strVal(a, "id"), strVal(a, "name"))
+				candidates = append(candidates, assigneeCandidate{assigneeMatch: assigneeMatch{Type: "agent", ID: strVal(a, "id"), Name: strVal(a, "name")}})
 			}
 		}
 	}
@@ -2793,7 +2801,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 				if strVal(s, "archived_at") != "" {
 					continue
 				}
-				classify("squad", strVal(s, "id"), strVal(s, "name"))
+				candidates = append(candidates, assigneeCandidate{assigneeMatch: assigneeMatch{Type: "squad", ID: strVal(s, "id"), Name: strVal(s, "name")}})
 			}
 		}
 	}
@@ -2805,6 +2813,37 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 			msgs[i] = e.Error()
 		}
 		return "", "", fmt.Errorf("failed to resolve assignee: %s", strings.Join(msgs, "; "))
+	}
+
+	return matchAssignee(name, kinds, candidates)
+}
+
+// matchAssignee resolves name against candidates a caller already fetched.
+// Matches are collected into three priority buckets. Higher-priority buckets
+// short-circuit lower-priority matching so that, e.g., an exact name match
+// always wins over a substring collision with another candidate.
+//  1. idMatches        — full UUID or 8-char ShortID (as shown by `truncateID`), or an alias.
+//  2. exactMatches     — case-insensitive full name equality.
+//  3. substringMatches — preserves the existing partial-name UX.
+func matchAssignee(name string, kinds assigneeKinds, candidates []assigneeCandidate) (string, string, error) {
+	input := normalizeAssigneeLookupInput(name)
+	if input == "" {
+		return "", "", fmt.Errorf("no %s found matching %q", kinds.describe(), name)
+	}
+	inputLower := strings.ToLower(input)
+
+	var idMatches, exactMatches, substringMatches []assigneeMatch
+	for _, c := range candidates {
+		switch {
+		case c.ID != "" && (strings.EqualFold(c.ID, input) || strings.EqualFold(truncateID(c.ID), input)):
+			idMatches = append(idMatches, c.assigneeMatch)
+		case c.matchesAlias(input):
+			idMatches = append(idMatches, c.assigneeMatch)
+		case strings.EqualFold(c.Name, input):
+			exactMatches = append(exactMatches, c.assigneeMatch)
+		case strings.Contains(strings.ToLower(c.Name), inputLower):
+			substringMatches = append(substringMatches, c.assigneeMatch)
+		}
 	}
 
 	for _, bucket := range [][]assigneeMatch{idMatches, exactMatches, substringMatches} {

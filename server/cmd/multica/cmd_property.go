@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -444,11 +445,34 @@ func makePropertyArchiveRun(archive bool) func(*cobra.Command, []string) error {
 // issue property {list|set|unset}
 // ---------------------------------------------------------------------------
 
+// memberDirectory serves every member lookup in one command from a single
+// request. An actor --property filter, an actor --value and
+// --resolve-properties all read the list, and each used to fetch its own.
+type memberDirectory struct {
+	members []map[string]any
+	loaded  bool
+}
+
+func (d *memberDirectory) load(ctx context.Context, client *cli.APIClient) ([]map[string]any, error) {
+	if d.loaded {
+		return d.members, nil
+	}
+	if client.WorkspaceID == "" {
+		return nil, fmt.Errorf("workspace ID is required to resolve members; use --workspace-id or set MULTICA_WORKSPACE_ID")
+	}
+	var members []map[string]any
+	if err := getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err != nil {
+		return nil, fmt.Errorf("list members: %w", err)
+	}
+	d.members, d.loaded = members, true
+	return members, nil
+}
+
 // resolveActorPropertyRef turns one --value token into a "member:<uuid>"
 // actor reference. An already-prefixed token is taken as-is (after checking
-// the id parses); anything else goes through the same member lookup
-// `--assignee` uses, so names, emails, UUIDs and short ids all work.
-func resolveActorPropertyRef(ctx context.Context, client *cli.APIClient, raw string) (string, error) {
+// the id parses); anything else is matched the way `--assignee` matches
+// members, so names, emails, UUIDs and short ids all work.
+func resolveActorPropertyRef(ctx context.Context, client *cli.APIClient, directory *memberDirectory, raw string) (string, error) {
 	token := strings.TrimSpace(raw)
 	if token == "" {
 		return "", fmt.Errorf("actor value cannot be empty")
@@ -464,7 +488,11 @@ func resolveActorPropertyRef(ctx context.Context, client *cli.APIClient, raw str
 		// store fine via `property set` but silently miss as a filter.
 		return kind + ":" + parsed.String(), nil
 	}
-	actorType, actorID, err := resolveAssignee(ctx, client, token, memberOnlyKinds)
+	members, err := directory.load(ctx, client)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve assignee: %w", err)
+	}
+	actorType, actorID, err := matchAssignee(token, memberOnlyKinds, memberCandidates(members))
 	if err != nil {
 		return "", err
 	}
@@ -491,7 +519,7 @@ func resolveSelectOptionRef(property propertyDTO, ref string) (string, error) {
 // encodeIssuePropertyValue converts the CLI --value string into the typed
 // JSON the API expects, translating option names to ids for select types and
 // member names to actor references for actor types.
-func encodeIssuePropertyValue(ctx context.Context, client *cli.APIClient, property propertyDTO, raw string) (json.RawMessage, error) {
+func encodeIssuePropertyValue(ctx context.Context, client *cli.APIClient, directory *memberDirectory, property propertyDTO, raw string) (json.RawMessage, error) {
 	optionNames := make([]string, len(property.Config.Options))
 	for i, opt := range property.Config.Options {
 		optionNames[i] = opt.Name
@@ -522,7 +550,7 @@ func encodeIssuePropertyValue(ctx context.Context, client *cli.APIClient, proper
 		}
 		return json.Marshal(ids)
 	case "actor":
-		ref, err := resolveActorPropertyRef(ctx, client, raw)
+		ref, err := resolveActorPropertyRef(ctx, client, directory, raw)
 		if err != nil {
 			return nil, err
 		}
@@ -534,7 +562,7 @@ func encodeIssuePropertyValue(ctx context.Context, client *cli.APIClient, proper
 			if strings.TrimSpace(part) == "" {
 				continue
 			}
-			ref, err := resolveActorPropertyRef(ctx, client, part)
+			ref, err := resolveActorPropertyRef(ctx, client, directory, part)
 			if err != nil {
 				return nil, err
 			}
@@ -559,53 +587,68 @@ func encodeIssuePropertyValue(ctx context.Context, client *cli.APIClient, proper
 	}
 }
 
+// propertyOptionName maps a stored option id to its name, or returns the id
+// when the option is no longer in the definition (the server sorts such a
+// value as NULL rather than failing; display does the same).
+func propertyOptionName(property propertyDTO, id string) string {
+	for _, opt := range property.Config.Options {
+		if opt.ID == id {
+			return opt.Name
+		}
+	}
+	return id
+}
+
+func actorPropertyName(actorNames map[string]string, ref string) string {
+	if name, ok := actorNames[ref]; ok {
+		return name
+	}
+	return ref
+}
+
+// issuePropertyDisplayValues resolves each item of a multi_select or
+// multi_actor value to its display name. The result stays index-parallel
+// with the stored array (a non-string item renders as JSON rather than being
+// dropped) and is nil for every other type or a non-array value.
+func issuePropertyDisplayValues(property propertyDTO, value any, actorNames map[string]string) []string {
+	if property.Type != "multi_select" && property.Type != "multi_actor" {
+		return nil
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		switch {
+		case !ok:
+			names = append(names, formatMetadataValue(item))
+		case property.Type == "multi_select":
+			names = append(names, propertyOptionName(property, s))
+		default:
+			names = append(names, actorPropertyName(actorNames, s))
+		}
+	}
+	return names
+}
+
 // formatIssuePropertyValue renders a stored value for humans: option ids
 // become option names, actor references become member names, everything
 // else prints via formatMetadataValue. actorNames may be nil — references then
 // print in their raw "<kind>:<uuid>" form rather than failing.
 func formatIssuePropertyValue(property propertyDTO, value any, actorNames map[string]string) string {
-	optionName := func(id string) string {
-		for _, opt := range property.Config.Options {
-			if opt.ID == id {
-				return opt.Name
-			}
-		}
-		return id
-	}
-	actorName := func(ref string) string {
-		if name, ok := actorNames[ref]; ok {
-			return name
-		}
-		return ref
+	if names := issuePropertyDisplayValues(property, value, actorNames); names != nil {
+		return strings.Join(names, ", ")
 	}
 	switch property.Type {
 	case "select":
 		if s, ok := value.(string); ok {
-			return optionName(s)
-		}
-	case "multi_select":
-		if items, ok := value.([]any); ok {
-			names := make([]string, 0, len(items))
-			for _, item := range items {
-				if s, ok := item.(string); ok {
-					names = append(names, optionName(s))
-				}
-			}
-			return strings.Join(names, ", ")
+			return propertyOptionName(property, s)
 		}
 	case "actor":
 		if s, ok := value.(string); ok {
-			return actorName(s)
-		}
-	case "multi_actor":
-		if items, ok := value.([]any); ok {
-			names := make([]string, 0, len(items))
-			for _, item := range items {
-				if s, ok := item.(string); ok {
-					names = append(names, actorName(s))
-				}
-			}
-			return strings.Join(names, ", ")
+			return actorPropertyName(actorNames, s)
 		}
 	case "checkbox":
 		if b, ok := value.(bool); ok {
@@ -618,13 +661,18 @@ func formatIssuePropertyValue(property propertyDTO, value any, actorNames map[st
 	return formatMetadataValue(value)
 }
 
+// issuePropertyValueRow is one set property on an issue. display is the
+// human rendering; display_values carries the per-item names of a
+// multi_select or multi_actor value, since a joined string is ambiguous
+// once an option name contains a comma.
 type issuePropertyValueRow struct {
-	PropertyID string `json:"property_id"`
-	Name       string `json:"name"`
-	Type       string `json:"type"`
-	Value      any    `json:"value"`
-	Display    string `json:"display"`
-	Archived   bool   `json:"archived,omitempty"`
+	PropertyID    string   `json:"property_id"`
+	Name          string   `json:"name"`
+	Type          string   `json:"type"`
+	Value         any      `json:"value"`
+	Display       string   `json:"display"`
+	DisplayValues []string `json:"display_values,omitempty"`
+	Archived      bool     `json:"archived,omitempty"`
 }
 
 func buildIssuePropertyRows(properties []propertyDTO, bag map[string]any, actorNames map[string]string) []issuePropertyValueRow {
@@ -635,42 +683,111 @@ func buildIssuePropertyRows(properties []propertyDTO, bag map[string]any, actorN
 			continue
 		}
 		rows = append(rows, issuePropertyValueRow{
-			PropertyID: p.ID,
-			Name:       p.Name,
-			Type:       p.Type,
-			Value:      value,
-			Display:    formatIssuePropertyValue(p, value, actorNames),
-			Archived:   p.Archived,
+			PropertyID:    p.ID,
+			Name:          p.Name,
+			Type:          p.Type,
+			Value:         value,
+			Display:       formatIssuePropertyValue(p, value, actorNames),
+			DisplayValues: issuePropertyDisplayValues(p, value, actorNames),
+			Archived:      p.Archived,
 		})
 	}
 	return rows
 }
 
 // fetchActorPropertyNames builds a "member:<uuid>" → display name map, but
-// only when the bag actually holds an actor value: every other property type
+// only when some bag actually holds an actor value: every other property type
 // renders without a second round trip, and `issue property list` shouldn't pay
 // for a request it doesn't need.
-func fetchActorPropertyNames(ctx context.Context, client *cli.APIClient, properties []propertyDTO, bag map[string]any) map[string]string {
+func fetchActorPropertyNames(ctx context.Context, client *cli.APIClient, directory *memberDirectory, properties []propertyDTO, bags ...map[string]any) (map[string]string, error) {
 	needed := false
 	for _, p := range properties {
-		if _, present := bag[p.ID]; present && (p.Type == "actor" || p.Type == "multi_actor") {
-			needed = true
-			break
+		if p.Type != "actor" && p.Type != "multi_actor" {
+			continue
 		}
-	}
-	if !needed || client.WorkspaceID == "" {
-		return nil
-	}
-	names := make(map[string]string)
-	var members []map[string]any
-	if err := getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err == nil {
-		for _, m := range members {
-			if id := strVal(m, "user_id"); id != "" {
-				names["member:"+id] = strVal(m, "name")
+		for _, bag := range bags {
+			if _, present := bag[p.ID]; present {
+				needed = true
 			}
 		}
 	}
-	return names
+	if !needed || client.WorkspaceID == "" {
+		return nil, nil
+	}
+	members, err := directory.load(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]string, len(members))
+	for _, m := range members {
+		if id := strVal(m, "user_id"); id != "" {
+			names["member:"+id] = strVal(m, "name")
+		}
+	}
+	return names, nil
+}
+
+const resolvePropertiesHelp = "JSON output only: replace the properties id map with the rows `issue property list` prints (property name and type, option and member names beside the stored ids). Omit for the raw map. No effect on --output table."
+
+// resolveIssueProperties rewrites each issue's properties bag in place into
+// the rows issue property list prints. A nil catalog is fetched on demand,
+// after the page and only when some bag holds a value, so a server without
+// the endpoint still serves pages with nothing to resolve. A bag key with no
+// definition is an error rather than a dropped value: --property and --sort
+// fetch the catalog before the page, so a definition can be newer than it.
+func resolveIssueProperties(ctx context.Context, client *cli.APIClient, catalog []propertyDTO, directory *memberDirectory, issues []any) error {
+	type target struct {
+		issue map[string]any
+		bag   map[string]any
+	}
+	var targets []target
+	var bags []map[string]any
+	for _, raw := range issues {
+		issue, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("resolve properties: issue is %T, expected an object", raw)
+		}
+		value, present := issue["properties"]
+		if !present {
+			continue
+		}
+		bag, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("resolve properties: %s: properties is %T, expected an object", issueDisplayKey(issue), value)
+		}
+		targets = append(targets, target{issue: issue, bag: bag})
+		if len(bag) > 0 {
+			bags = append(bags, bag)
+		}
+	}
+	if len(bags) > 0 && catalog == nil {
+		var err error
+		if catalog, err = fetchProperties(ctx, client); err != nil {
+			return err
+		}
+	}
+	actorNames, err := fetchActorPropertyNames(ctx, client, directory, catalog, bags...)
+	if err != nil {
+		return err
+	}
+	known := make(map[string]bool, len(catalog))
+	for _, p := range catalog {
+		known[p.ID] = true
+	}
+	for _, t := range targets {
+		var unknown []string
+		for id := range t.bag {
+			if !known[id] {
+				unknown = append(unknown, id)
+			}
+		}
+		if len(unknown) > 0 {
+			sort.Strings(unknown)
+			return fmt.Errorf("resolve properties: %s has values for property definitions missing from the catalog (%s); re-run to fetch a current catalog", issueDisplayKey(t.issue), strings.Join(unknown, ", "))
+		}
+		t.issue["properties"] = buildIssuePropertyRows(catalog, t.bag, actorNames)
+	}
+	return nil
 }
 
 func fetchIssuePropertyBag(ctx context.Context, client *cli.APIClient, issueID string) (map[string]any, error) {
@@ -715,7 +832,9 @@ func runIssuePropertyList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	rows := buildIssuePropertyRows(properties, bag, fetchActorPropertyNames(ctx, client, properties, bag))
+	// A failed member lookup leaves display on the raw reference.
+	actorNames, _ := fetchActorPropertyNames(ctx, client, &memberDirectory{}, properties, bag)
+	rows := buildIssuePropertyRows(properties, bag, actorNames)
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, rows)
@@ -753,7 +872,8 @@ func runIssuePropertySet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	value, err := encodeIssuePropertyValue(ctx, client, property, rawValue)
+	var members memberDirectory
+	value, err := encodeIssuePropertyValue(ctx, client, &members, property, rawValue)
 	if err != nil {
 		return err
 	}
@@ -765,7 +885,9 @@ func runIssuePropertySet(cmd *cobra.Command, args []string) error {
 	if err := client.PutJSON(ctx, path, map[string]any{"value": value}, &result); err != nil {
 		return fmt.Errorf("set property: %w", err)
 	}
-	rows := buildIssuePropertyRows(properties, result.Properties, fetchActorPropertyNames(ctx, client, properties, result.Properties))
+	// The value is already written; a failed member lookup must not fail the command.
+	actorNames, _ := fetchActorPropertyNames(ctx, client, &members, properties, result.Properties)
+	rows := buildIssuePropertyRows(properties, result.Properties, actorNames)
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, rows)
@@ -843,7 +965,7 @@ var issueSortablePropertyTypes = []string{"select", "number", "date", "text", "u
 // property ORs its values (server semantics: OR within a definition, AND
 // across definitions), keyed by the RESOLVED definition id so name and UUID
 // addressing aggregate into one entry.
-func buildPropertiesFilterQueryParam(ctx context.Context, client *cli.APIClient, properties []propertyDTO, pairs []string) (string, error) {
+func buildPropertiesFilterQueryParam(ctx context.Context, client *cli.APIClient, directory *memberDirectory, properties []propertyDTO, pairs []string) (string, error) {
 	filter := make(map[string][]string, len(pairs))
 	for _, pair := range pairs {
 		name, rawValue, found := strings.Cut(pair, "=")
@@ -865,7 +987,7 @@ func buildPropertiesFilterQueryParam(ctx context.Context, client *cli.APIClient,
 		if property.Archived {
 			return "", fmt.Errorf("property %q is archived; archived properties are hidden from filtering (matching the web UI) — restore it with `multica property unarchive` if you need it", property.Name)
 		}
-		value, err := resolvePropertyFilterValue(ctx, client, property, rawValue)
+		value, err := resolvePropertyFilterValue(ctx, client, directory, property, rawValue)
 		if err != nil {
 			return "", err
 		}
@@ -898,7 +1020,7 @@ func buildPropertiesFilterQueryParam(ctx context.Context, client *cli.APIClient,
 // and url length; the branches below follow it. A value that could never
 // match is rejected here rather than sent, because an empty result reads
 // like a real answer.
-func resolvePropertyFilterValue(ctx context.Context, client *cli.APIClient, property propertyDTO, raw string) (string, error) {
+func resolvePropertyFilterValue(ctx context.Context, client *cli.APIClient, directory *memberDirectory, property propertyDTO, raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == propertyNoValueSentinel {
 		return propertyNoValueSentinel, nil
@@ -912,7 +1034,7 @@ func resolvePropertyFilterValue(ctx context.Context, client *cli.APIClient, prop
 		}
 		return trimmed, nil
 	case "actor", "multi_actor":
-		return resolveActorPropertyRef(ctx, client, trimmed)
+		return resolveActorPropertyRef(ctx, client, directory, trimmed)
 	case "number":
 		num, err := strconv.ParseFloat(trimmed, 64)
 		if err != nil {

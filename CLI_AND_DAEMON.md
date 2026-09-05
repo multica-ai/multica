@@ -503,6 +503,7 @@ multica issue list --full-id
 multica issue list --limit 20 --output json
 multica issue list --status todo --sort position       # board order (the default)
 multica issue list --sort created_at --direction desc  # newest first
+multica issue list --output json --resolve-properties  # property names beside the ids
 ```
 
 Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--metadata`, `--property`, `--limit`. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
@@ -524,11 +525,18 @@ multica issue list --property "Impact=__none__" --status in_review
 multica issue list --property "Score=42" --property "Ship Date=2026-08-28"
 ```
 
+In JSON output, `properties` is a map from definition id to the stored value: an option id for `select`, a list of option ids for `multi_select`, a `member:<uuid>` reference for the actor types, and the value itself otherwise. Pass `--resolve-properties` to replace that map with the rows `issue property list` prints, one per set property, in catalog order: `property_id`, `name`, `type`, the stored `value`, a human `display`, `display_values` (the per-item names of a `multi_select` or `multi_actor` value) and `archived` when the definition is archived. Archived definitions still resolve, since their values stay on the issue. An option that is no longer in the definition, or a member who has left the workspace, keeps its raw id in `display`. The flag adds at most two requests: the catalog, shared with `--property` and `--sort property:`, and the member list, fetched only when an actor `--property` filter or an actor value on the page needs it and shared between the two. If either request fails the command fails rather than printing ids. The flag has no effect on `--output table`.
+
+```bash
+multica issue list --output json --resolve-properties | jq '.issues[] | {identifier, properties: [.properties[]? | {name, display}]}'
+```
+
 ### Get Issue
 
 ```bash
 multica issue get <id>
 multica issue get <id> --output json
+multica issue get <id> --resolve-properties   # property names beside the ids, as in issue list
 ```
 
 ### Create Issue
