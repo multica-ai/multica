@@ -180,6 +180,118 @@ func TestMediaResolver_PreservesInboundPositionPastUserPlaceholder(t *testing.T)
 	}
 }
 
+func TestMediaResolver_DownloadsQuotedPictureFromNestedCallback(t *testing.T) {
+	env := newMediaTestEnv(t, map[string][]byte{"quoted-code": pngBytes})
+	cb := textCallback(convTypeP2P, false)
+	cb.Text.Content = "inspect this"
+	cb.Text.IsReplyMsg = true
+	cb.Text.RepliedMsg = &botCallbackRepliedMessage{
+		MsgType: "picture", MsgId: "quoted-message", SenderNick: "Alice",
+		Content: botCallbackRepliedContent{DownloadCode: "quoted-code"},
+	}
+	msg, ok := inboundFromCallback(cb, "app-key")
+	if !ok || !env.resolver.HasMedia(msg) {
+		t.Fatalf("quoted picture media unavailable: ok=%v msg=%+v", ok, msg)
+	}
+
+	inst, messageID, _ := mediaFixture()
+	got := env.resolver.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, messageID, msg)
+	if len(got.MediaRefs) != 1 || env.resolves.Load() != 1 {
+		t.Fatalf("quoted picture refs/resolves = %d/%d", len(got.MediaRefs), env.resolves.Load())
+	}
+	if ref := got.MediaRefs[0]; ref.MimeType != "image/png" || ref.InlinePlaceholder != dingtalkImagePlaceholder || ref.InlineIndex != 0 {
+		t.Fatalf("quoted picture media ref = %+v", ref)
+	}
+}
+
+func TestMediaResolver_DownloadsQuotedAndCurrentRichTextPictures(t *testing.T) {
+	env := newMediaTestEnv(t, map[string][]byte{
+		"quoted-picture":  pngBytes,
+		"current-picture": jpegBytes,
+	})
+	cb := textCallback(convTypeP2P, false)
+	cb.Msgtype = "richText"
+	cb.Text = botCallbackText{}
+	cb.Content = json.RawMessage(`{
+		"richText":[
+			{"type":"picture","downloadCode":"current-picture"},
+			{"text":"Compare both images"}
+		],
+		"isReplyMsg":true,
+		"repliedMsg":{
+			"msgType":"picture",
+			"msgId":"quoted-picture",
+			"senderNick":"Alice",
+			"content":{"downloadCode":"quoted-picture"}
+		}
+	}`)
+	msg, ok := inboundFromCallback(cb, "app-key")
+	if !ok || !env.resolver.HasMedia(msg) {
+		t.Fatalf("combined picture media unavailable: ok=%v msg=%+v", ok, msg)
+	}
+
+	inst, messageID, _ := mediaFixture()
+	got := env.resolver.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, messageID, msg)
+	if len(got.MediaRefs) != 2 || env.resolves.Load() != 2 {
+		t.Fatalf("combined refs/resolves = %d/%d", len(got.MediaRefs), env.resolves.Load())
+	}
+	if got.MediaRefs[0].MimeType != "image/png" || got.MediaRefs[0].InlineIndex != 0 ||
+		got.MediaRefs[1].MimeType != "image/jpeg" || got.MediaRefs[1].InlineIndex != 1 {
+		t.Fatalf("combined resolved media order/indexes = %+v", got.MediaRefs)
+	}
+}
+
+func TestMediaResolver_QuotedAndCurrentIndexesUseCanonicalBody(t *testing.T) {
+	env := newMediaTestEnv(t, map[string][]byte{
+		"quoted-picture": pngBytes, "current-picture": jpegBytes,
+	})
+	var callback botCallbackData
+	if err := json.Unmarshal([]byte(`{
+		"msgId":"current-message", "msgtype":"richText",
+		"conversationId":"cid-123", "conversationType":"1", "senderStaffId":"staff-9",
+		"content":{
+			"richText":[
+				{"text":"current literal [Image]"},
+				{"type":"picture","downloadCode":"current-picture"}
+			],
+			"isReplyMsg":true,
+			"repliedMsg":{
+				"msgType":"richText", "msgId":"quoted-message", "senderNick":"Alice [Image]",
+				"content":{"richText":[
+					{"msgType":"text","content":"quoted literal [Image]"},
+					{"msgType":"picture","downloadCode":"quoted-picture"}
+				]}
+			}
+		}
+	}`), &callback); err != nil {
+		t.Fatal(err)
+	}
+	msg, ok := inboundFromCallback(&callback, "app-key")
+	if !ok {
+		t.Fatal("callback rejected")
+	}
+	wantBody := "> **Alice \\[Image\\]:**\n>\n> quoted literal [Image]\n> [Image]\n\ncurrent literal [Image]\n[Image]"
+	if msg.Text != wantBody {
+		t.Fatalf("canonical quoted/current body = %q, want %q", msg.Text, wantBody)
+	}
+	inst, messageID, _ := mediaFixture()
+	resolved := env.resolver.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, messageID, msg)
+	if len(resolved.MediaRefs) != 2 || env.resolves.Load() != 2 {
+		t.Fatalf("resolved media = %+v, download calls=%d", resolved.MediaRefs, env.resolves.Load())
+	}
+	if first, second := resolved.MediaRefs[0], resolved.MediaRefs[1]; first.InlineIndex != 1 || first.MimeType != "image/png" || second.InlineIndex != 3 || second.MimeType != "image/jpeg" {
+		t.Fatalf("canonical quote/current image positions = %+v", resolved.MediaRefs)
+	}
+	// The canonical body is handed unchanged to the Router. Resolved resources
+	// must address generated placeholders in that body, never the escaped name
+	// or the literal markers the user typed around the images.
+	parts := strings.Split(msg.Text, dingtalkImagePlaceholder)
+	if !strings.HasSuffix(parts[resolved.MediaRefs[0].InlineIndex], "\n> ") ||
+		!strings.HasSuffix(parts[resolved.MediaRefs[1].InlineIndex], "\n") {
+		t.Fatalf("resolved resources did not target quote/current image lines: %+v", parts)
+	}
+}
+
 func TestMediaResolver_AltFallback(t *testing.T) {
 	env := newMediaTestEnv(t, map[string][]byte{"alt": pngBytes})
 	inst, messageID, msg := mediaFixture(dingtalkMediaResource{Ref: "expired", Alt: "alt"})
