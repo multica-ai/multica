@@ -23,6 +23,9 @@ const (
 	// gate pinned Task/Run execution: disabling discovery and management must not
 	// mutate an immutable execution manifest that is already in flight.
 	PluginsV1 = "plugins_v1"
+	// CerebraRouting gates the Cerebra intelligent model router. When disabled,
+	// tasks use the agent runtime's default model directly.
+	CerebraRouting = "cerebra_routing"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -56,6 +59,14 @@ func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) boo
 
 func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, PluginsV1, false)
+}
+
+// CerebraRoutingEnabled reports whether Cerebra model routing is enabled.
+func CerebraRoutingEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	if flags == nil {
+		return true
+	}
+	return flags.IsEnabled(ctx, CerebraRouting, true)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
