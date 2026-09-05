@@ -40,6 +40,7 @@ overrides:
   form-data@4: ^4.0.6 # CRLF injection in multipart fields (via electron-publish)
   tmp@0.2: ^0.2.6 # path traversal via prefix/postfix (via flatpak-bundler)
   ip-address@10: ^10.3.1 # leading-zero octet misparse (via socks)
+  browserslist: ^4.28.7 # GHSA-c83g-rgw3-j3cx + GHSA-73wf-gq98-2v4g (via shadcn, exact-pinned upstream)
   sharp: ^0.35.4 # libvips CVE-2026-33327/33328 (via next optional dep)
   app-builder-lib@26: ^26.15.7 # electron-updater AppImage search path (peer-family stickiness)
   dmg-builder@26: ^26.15.7
