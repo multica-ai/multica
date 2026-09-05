@@ -41,6 +41,12 @@ type shutdownSequence struct {
 	// StopHeartbeats flushes the final batch of queued heartbeat bumps.
 	StopHeartbeats func()
 
+	// FlushPATLastUsed writes the final batch of buffered PAT last_used
+	// bumps. It runs after CancelWorkers because the recorder derives its
+	// own Background deadline, so the flush survives the sweeper context
+	// cancellation.
+	FlushPATLastUsed func()
+
 	JoinWebhookWorker func()
 	JoinTelegram      func()
 
@@ -65,6 +71,7 @@ func (s shutdownSequence) run() {
 		s.StopOutboundRelay,
 		s.CancelWorkers,
 		s.StopHeartbeats,
+		s.FlushPATLastUsed,
 		s.JoinWebhookWorker,
 		s.JoinTelegram,
 		s.JoinChannelSupervisor,

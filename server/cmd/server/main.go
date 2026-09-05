@@ -577,6 +577,7 @@ func main() {
 	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
 	var channelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
 	var wecomMetrics *obsmetrics.WecomMetrics
+	var patLastUsedMetrics *auth.PATLastUsedMetrics
 	var dbRoutingMetrics *obsmetrics.DBRoutingMetrics
 	if metricsConfig.Enabled() {
 		metricsRegistry := obsmetrics.NewRegistry(obsmetrics.RegistryOptions{
@@ -592,6 +593,7 @@ func main() {
 		channelMediaMetrics = metricsRegistry.ChannelMedia
 		channelLeaseMetrics = metricsRegistry.ChannelLease
 		wecomMetrics = metricsRegistry.Wecom
+		patLastUsedMetrics = auth.NewPATLastUsedMetrics(metricsRegistry.Registerer)
 		dbRoutingMetrics = metricsRegistry.DBRouting
 		// Forward inbound daemon WS frames into the per-kind counter so
 		// dashboards can split heartbeat / unknown / invalid traffic.
@@ -611,6 +613,12 @@ func main() {
 	// alongside the sweeper, and Stop is called explicitly during graceful
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval, daemonWakeup)
+
+	// Construct the PAT last_used recorder before the router so it can be
+	// injected and shared by the Auth, DaemonAuth and patResolver PAT paths.
+	// Run starts below alongside the sweeper; Stop is called during graceful
+	// shutdown to flush the final batch. Returns a no-op when queries is nil.
+	patLastUsed := auth.NewBatchedPATLastUsedRecorder(queries, patLastUsedMetrics)
 
 	// Validate the LLM retry budget before the router exists: an operator who
 	// typed a value we cannot honor should see the boot stop, the same way a
@@ -637,6 +645,7 @@ func main() {
 		WecomRelayOutbound:  wecomRelayOutbound,
 		FeatureFlags:        flags,
 		HeartbeatScheduler:  heartbeatScheduler,
+		PATLastUsedRecorder: patLastUsed,
 		LLMMaxRetries:       llmMaxRetries,
 	})
 	var replicaQueries *db.Queries
@@ -697,6 +706,12 @@ func main() {
 	// instead of a slot in the runtime sweep tick.
 	go runSourceContextSweeper(sweepCtx, taskSvc)
 	go heartbeatScheduler.Run(sweepCtx)
+	// Start the PAT last_used batch writer on the sweeper ctx. The concrete
+	// type carries Run/Stop; a nil-queries deployment gets the no-op recorder
+	// (no Run needed), which this assertion naturally skips.
+	if bw, ok := patLastUsed.(*auth.BatchedPATLastUsedRecorder); ok {
+		go bw.Run(sweepCtx)
+	}
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	if autopilotSvc.QuotaEnabled() {
 		go runAutopilotQuotaReconciler(autopilotCtx, autopilotSvc)
@@ -827,6 +842,14 @@ func main() {
 		StopOutboundRelay: stopRelay,
 		CancelWorkers:     sweepCancel,
 		StopHeartbeats:    heartbeatScheduler.Stop,
+		// Flush the final PAT last_used batch after the heartbeat scheduler
+		// stops. Stop derives its own Background deadline, so it still writes
+		// even though the sweeper context (CancelWorkers) was just cancelled.
+		FlushPATLastUsed: func() {
+			if bw, ok := patLastUsed.(*auth.BatchedPATLastUsedRecorder); ok {
+				bw.Stop()
+			}
+		},
 		JoinWebhookWorker: func() {
 			if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
 				slog.Warn("webhook delivery worker did not exit within shutdown timeout")

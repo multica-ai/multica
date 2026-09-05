@@ -247,6 +247,11 @@ type RouterOptions struct {
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
 	// tests leave this nil and get the legacy synchronous behavior.
 	HeartbeatScheduler handler.HeartbeatScheduler
+	// PATLastUsedRecorder, when non-nil, receives every PAT cache miss so
+	// last_used_at is refreshed off the request path (see internal/auth).
+	// main.go injects a BatchedPATLastUsedRecorder and drives Run/Stop;
+	// tests leave this nil and get the no-op recorder.
+	PATLastUsedRecorder auth.PATLastUsedRecorder
 	// LLMMaxRetries carries the parsed MULTICA_LLM_MAX_RETRIES budget. Unlike
 	// its three MULTICA_LLM_* siblings it is injected rather than read here,
 	// because an invalid value must fail the boot and only main() can exit —
@@ -1250,6 +1255,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.DaemonTokenCache = daemonTokenCache
 	h.MembershipCache = auth.NewMembershipCache(rdb)
 
+	// PAT last_used_at recorder: shared by the Auth, DaemonAuth and
+	// patResolver PAT paths so a cache miss refreshes last_used_at off the
+	// request path instead of forking an unbounded goroutine per miss.
+	// main.go injects a BatchedPATLastUsedRecorder (and drives Run/Stop);
+	// tests leave it nil and get the no-op recorder.
+	lastUsed := opts.PATLastUsedRecorder
+	if lastUsed == nil {
+		lastUsed = auth.NoopPATLastUsedRecorder{}
+	}
+
 	// Cloud PAT verifier: validates mcn_ tokens against Multica Cloud
 	// Fleet. Returns nil when no Cloud URL is configured — the Auth /
 	// DaemonAuth middlewares treat nil as "mcn_ not supported" and
@@ -1327,7 +1342,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// WebSocket
 	mc := &membershipChecker{queries: queries}
-	pr := &patResolver{queries: queries, cache: patCache}
+	pr := &patResolver{queries: queries, cache: patCache, lastUsed: lastUsed}
 	slugResolver := realtime.SlugResolver(func(ctx context.Context, slug string) (string, error) {
 		ws, err := queries.GetWorkspaceBySlug(ctx, slug)
 		if err != nil {
@@ -1432,7 +1447,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
-		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier))
+		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier, lastUsed))
 
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
@@ -1504,7 +1519,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// signed-in user's session and the installation header. Keeping it outside
 	// /v1 prevents the Public API from accepting session cookies.
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
+		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, lastUsed))
 		r.Route(pluginBridgePrefix, func(r chi.Router) {
 			registerPluginActionRoutes(r, h)
 			// ui / manual only. `event` is dispatched by the host off the event
@@ -1514,7 +1529,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	})
 
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
+		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, lastUsed))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
 		// Plugin Action API. Called by the HOST PAGE on the signed-in user's
@@ -2390,8 +2405,9 @@ func (mc *membershipChecker) IsMember(ctx context.Context, userID, workspaceID s
 // revoke through any path invalidates the cache for all of them. Nil
 // cache is supported and degrades to direct DB lookups.
 type patResolver struct {
-	queries *db.Queries
-	cache   *auth.PATCache
+	queries  *db.Queries
+	cache    *auth.PATCache
+	lastUsed auth.PATLastUsedRecorder
 }
 
 func (pr *patResolver) ResolveToken(ctx context.Context, token string) (string, bool) {
@@ -2414,9 +2430,9 @@ func (pr *patResolver) ResolveToken(ctx context.Context, token string) (string, 
 	}
 	pr.cache.Set(ctx, hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
 
-	// Cache miss = first WS auth in this TTL window. Refresh last_used_at;
-	// subsequent connects within the window skip the write.
-	go pr.queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
+	// Cache miss = first WS auth in this TTL window. Refresh last_used_at
+	// off the request path; subsequent connects within the window skip it.
+	pr.lastUsed.Record(pat.ID)
 
 	return userID, true
 }
