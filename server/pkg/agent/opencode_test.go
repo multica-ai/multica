@@ -220,6 +220,149 @@ func TestOpencodeHandleToolUseEventNilState(t *testing.T) {
 	}
 }
 
+// ── Tool duration tests (multica-ai/multica#8025) ──
+
+// toolResultFrom parses a real `opencode run --format json` tool_use line and
+// returns the paired tool_result message the backend emits for it.
+func toolResultFrom(t *testing.T, line string) Message {
+	t.Helper()
+	b := &opencodeBackend{}
+	ch := make(chan Message, 10)
+	var event opencodeEvent
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	b.handleToolUseEvent(event, ch)
+	for {
+		msg, ok := <-ch
+		if !ok {
+			t.Fatal("no tool_result message emitted")
+		}
+		if msg.Type == MessageToolResult {
+			return msg
+		}
+	}
+}
+
+func TestOpencodeToolDurationCompleted(t *testing.T) {
+	t.Parallel()
+
+	// Real terminal tool event shape: completed with a measured window.
+	msg := toolResultFrom(t, `{"type":"tool_use","timestamp":1002,"sessionID":"ses_dur","part":{"tool":"bash","callID":"call_dur","state":{"status":"completed","input":{"command":"go test"},"output":"ok","time":{"start":100000,"end":112345}}}}`)
+	if msg.DurationMs != 12345 {
+		t.Errorf("duration: got %d, want 12345", msg.DurationMs)
+	}
+}
+
+func TestOpencodeToolDurationMissingTime(t *testing.T) {
+	t.Parallel()
+
+	// No time block at all — the duration stays 0 (unknown), the run is
+	// unaffected, and the result is still emitted.
+	msg := toolResultFrom(t, `{"type":"tool_use","timestamp":1002,"sessionID":"ses_dur","part":{"tool":"bash","callID":"call_dur","state":{"status":"completed","input":{"command":"go test"},"output":"ok"}}}`)
+	if msg.DurationMs != 0 {
+		t.Errorf("duration: got %d, want 0", msg.DurationMs)
+	}
+}
+
+func TestOpencodeToolDurationEndBeforeStart(t *testing.T) {
+	t.Parallel()
+
+	// end < start is a malformed window — fall back to 0 (unknown), not a
+	// negative or nonsense duration.
+	msg := toolResultFrom(t, `{"type":"tool_use","timestamp":1002,"sessionID":"ses_dur","part":{"tool":"bash","callID":"call_dur","state":{"status":"completed","input":{"command":"go test"},"output":"ok","time":{"start":112345,"end":100000}}}}`)
+	if msg.DurationMs != 0 {
+		t.Errorf("duration: got %d, want 0", msg.DurationMs)
+	}
+}
+
+func TestOpencodeToolDurationErrorStatePreserved(t *testing.T) {
+	t.Parallel()
+
+	// A recovered tool error still carries the real execution window: the
+	// duration must be preserved alongside the error output.
+	msg := toolResultFrom(t, `{"type":"tool_use","timestamp":1002,"sessionID":"ses_dur","part":{"tool":"bash","callID":"call_dur","state":{"status":"error","input":{"command":"exit 1"},"error":"command failed","time":{"start":100000,"end":112345}}}}`)
+	if msg.DurationMs != 12345 {
+		t.Errorf("duration: got %d, want 12345", msg.DurationMs)
+	}
+	if msg.Output != "command failed" {
+		t.Errorf("output: got %q, want %q", msg.Output, "command failed")
+	}
+}
+
+// ── Malformed timing must never drop the event ──
+
+// A time.start that is not a number (e.g. an OpenCode version emitting a
+// string) previously failed the WHOLE event's json.Unmarshal, dropping the
+// tool_use/result and leaving the daemon with an empty step that flipped the
+// run to failed. The event must survive with an unknown duration instead.
+func TestOpencodeToolDurationMalformedStartString(t *testing.T) {
+	t.Parallel()
+
+	msg := toolResultFrom(t, `{"type":"tool_use","timestamp":1002,"sessionID":"ses_dur","part":{"tool":"bash","callID":"call_dur","state":{"status":"completed","input":{"command":"go test"},"output":"ok","time":{"start":"bad","end":112345}}}}`)
+	if msg.DurationMs != 0 {
+		t.Errorf("duration: got %d, want 0", msg.DurationMs)
+	}
+	if msg.Output != "ok" {
+		t.Errorf("output: got %q, want %q — event was dropped", msg.Output, "ok")
+	}
+}
+
+// time itself not an object — same survival rule as malformed fields.
+func TestOpencodeToolDurationTimeNotObject(t *testing.T) {
+	t.Parallel()
+
+	msg := toolResultFrom(t, `{"type":"tool_use","timestamp":1002,"sessionID":"ses_dur","part":{"tool":"bash","callID":"call_dur","state":{"status":"completed","input":{"command":"go test"},"output":"ok","time":"bad"}}}`)
+	if msg.DurationMs != 0 {
+		t.Errorf("duration: got %d, want 0", msg.DurationMs)
+	}
+	if msg.Output != "ok" {
+		t.Errorf("output: got %q, want %q — event was dropped", msg.Output, "ok")
+	}
+}
+
+// Epoch values beyond int64 (e.g. 1e19) overflow int64 decoding — they must
+// degrade to unknown, not poison the event.
+func TestOpencodeToolDurationOverflow(t *testing.T) {
+	t.Parallel()
+
+	msg := toolResultFrom(t, `{"type":"tool_use","timestamp":1002,"sessionID":"ses_dur","part":{"tool":"bash","callID":"call_dur","state":{"status":"completed","input":{"command":"go test"},"output":"ok","time":{"start":10000000000000000000,"end":20000000000000000000}}}}`)
+	if msg.DurationMs != 0 {
+		t.Errorf("duration: got %d, want 0", msg.DurationMs)
+	}
+	if msg.Output != "ok" {
+		t.Errorf("output: got %q, want %q — event was dropped", msg.Output, "ok")
+	}
+}
+
+// Non-positive bounds are malformed, not measurements.
+func TestOpencodeToolDurationNonPositive(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name string
+		time string
+	}{
+		{"zero start", `{"start":0,"end":112345}`},
+		{"negative start", `{"start":-5,"end":112345}`},
+		{"zero end", `{"start":100000,"end":0}`},
+		{"negative end", `{"start":100000,"end":-5}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			line := fmt.Sprintf(`{"type":"tool_use","timestamp":1002,"sessionID":"ses_dur","part":{"tool":"bash","callID":"call_dur","state":{"status":"completed","input":{"command":"go test"},"output":"ok","time":%s}}}`, tt.time)
+			msg := toolResultFrom(t, line)
+			if msg.DurationMs != 0 {
+				t.Errorf("duration: got %d, want 0", msg.DurationMs)
+			}
+			if msg.Output != "ok" {
+				t.Errorf("output: got %q, want %q — event was dropped", msg.Output, "ok")
+			}
+		})
+	}
+}
+
 // ── Error event tests ──
 
 func TestOpencodeHandleErrorEvent(t *testing.T) {

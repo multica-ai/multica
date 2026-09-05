@@ -169,9 +169,15 @@ type Message struct {
 	CallID    string         // tool call ID (ToolUse, ToolResult)
 	Input     map[string]any // tool input (ToolUse)
 	Output    string         // tool output (ToolResult)
-	Status    string         // agent status string (Status)
-	Level     string         // log level (Log)
-	SessionID string         // backend session id (Status), for early resume-pointer pinning
+	// DurationMs carries the provider's own wall-clock measurement of a tool
+	// call, attached to the paired tool_result message (OpenCode reports it
+	// as part.state.time.start/end). Zero means unknown: providers that don't
+	// measure timing leave it at zero, and every consumer downstream falls
+	// back to the timestamp difference it used before this field existed.
+	DurationMs int64
+	Status     string // agent status string (Status)
+	Level      string // log level (Log)
+	SessionID  string // backend session id (Status), for early resume-pointer pinning
 }
 
 // TokenUsage tracks token consumption for a single model.

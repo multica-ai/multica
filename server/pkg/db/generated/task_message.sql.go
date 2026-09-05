@@ -12,22 +12,28 @@ import (
 )
 
 const createTaskMessage = `-- name: CreateTaskMessage :one
-INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, task_id, seq, type, tool, content, input, output, created_at
+INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output, duration_ms)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF(GREATEST($9::bigint, 0), 0))
+RETURNING id, task_id, seq, type, tool, content, input, output, created_at, duration_ms
 `
 
 type CreateTaskMessageParams struct {
-	ID      pgtype.UUID `json:"id"`
-	TaskID  pgtype.UUID `json:"task_id"`
-	Seq     int32       `json:"seq"`
-	Type    string      `json:"type"`
-	Tool    pgtype.Text `json:"tool"`
-	Content pgtype.Text `json:"content"`
-	Input   []byte      `json:"input"`
-	Output  pgtype.Text `json:"output"`
+	ID         pgtype.UUID `json:"id"`
+	TaskID     pgtype.UUID `json:"task_id"`
+	Seq        int32       `json:"seq"`
+	Type       string      `json:"type"`
+	Tool       pgtype.Text `json:"tool"`
+	Content    pgtype.Text `json:"content"`
+	Input      []byte      `json:"input"`
+	Output     pgtype.Text `json:"output"`
+	DurationMs pgtype.Int8 `json:"duration_ms"`
 }
 
+// duration_ms carries the provider-reported tool-call duration (NULL = not
+// reported). Nullable BIGINT param: pass a zero Int8 for "no duration".
+// Same clamp as the batch insert below: 0 stays NULL (not reported) and a
+// negative value is malformed rather than a duration, so neither ever
+// reaches the column as a number.
 func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessageParams) (TaskMessage, error) {
 	row := q.db.QueryRow(ctx, createTaskMessage,
 		arg.ID,
@@ -38,6 +44,7 @@ func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessagePa
 		arg.Content,
 		arg.Input,
 		arg.Output,
+		arg.DurationMs,
 	)
 	var i TaskMessage
 	err := row.Scan(
@@ -50,6 +57,7 @@ func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessagePa
 		&i.Input,
 		&i.Output,
 		&i.CreatedAt,
+		&i.DurationMs,
 	)
 	return i, err
 }
@@ -68,45 +76,51 @@ WITH incoming AS (
         unnest($4::text[]) AS tool,
         unnest($5::text[]) AS content,
         unnest($6::text[]) AS input,
-        unnest($7::text[]) AS output
+        unnest($7::text[]) AS output,
+        unnest($8::bigint[]) AS duration_ms
 ), inserted AS (
-    INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output)
+    INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output, duration_ms)
     SELECT
         m.id,
-        $8::uuid,
+        $9::uuid,
         m.seq,
         m.type,
         NULLIF(m.tool, ''),
         NULLIF(m.content, ''),
         NULLIF(m.input, '')::jsonb,
-        NULLIF(m.output, '')
+        NULLIF(m.output, ''),
+        -- 0 = not reported (NULL); a negative value is malformed rather than
+        -- a duration, so it is clamped to unknown instead of stored.
+        NULLIF(GREATEST(m.duration_ms, 0), 0)
     FROM incoming AS m
-    RETURNING id, task_id, seq, type, tool, content, input, output, created_at
+    RETURNING id, task_id, seq, type, tool, content, input, output, created_at, duration_ms
 )
-SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM inserted ORDER BY seq ASC
+SELECT id, task_id, seq, type, tool, content, input, output, created_at, duration_ms FROM inserted ORDER BY seq ASC
 `
 
 type CreateTaskMessagesParams struct {
-	Ids      []pgtype.UUID `json:"ids"`
-	Seqs     []int32       `json:"seqs"`
-	Types    []string      `json:"types"`
-	Tools    []string      `json:"tools"`
-	Contents []string      `json:"contents"`
-	Inputs   []string      `json:"inputs"`
-	Outputs  []string      `json:"outputs"`
-	TaskID   pgtype.UUID   `json:"task_id"`
+	Ids         []pgtype.UUID `json:"ids"`
+	Seqs        []int32       `json:"seqs"`
+	Types       []string      `json:"types"`
+	Tools       []string      `json:"tools"`
+	Contents    []string      `json:"contents"`
+	Inputs      []string      `json:"inputs"`
+	Outputs     []string      `json:"outputs"`
+	DurationMss []int64       `json:"duration_mss"`
+	TaskID      pgtype.UUID   `json:"task_id"`
 }
 
 type CreateTaskMessagesRow struct {
-	ID        pgtype.UUID        `json:"id"`
-	TaskID    pgtype.UUID        `json:"task_id"`
-	Seq       int32              `json:"seq"`
-	Type      string             `json:"type"`
-	Tool      pgtype.Text        `json:"tool"`
-	Content   pgtype.Text        `json:"content"`
-	Input     []byte             `json:"input"`
-	Output    pgtype.Text        `json:"output"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID         pgtype.UUID        `json:"id"`
+	TaskID     pgtype.UUID        `json:"task_id"`
+	Seq        int32              `json:"seq"`
+	Type       string             `json:"type"`
+	Tool       pgtype.Text        `json:"tool"`
+	Content    pgtype.Text        `json:"content"`
+	Input      []byte             `json:"input"`
+	Output     pgtype.Text        `json:"output"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	DurationMs pgtype.Int8        `json:"duration_ms"`
 }
 
 // Batch variant of CreateTaskMessage: persists a whole daemon-reported batch in
@@ -157,6 +171,7 @@ func (q *Queries) CreateTaskMessages(ctx context.Context, arg CreateTaskMessages
 		arg.Contents,
 		arg.Inputs,
 		arg.Outputs,
+		arg.DurationMss,
 		arg.TaskID,
 	)
 	if err != nil {
@@ -176,6 +191,7 @@ func (q *Queries) CreateTaskMessages(ctx context.Context, arg CreateTaskMessages
 			&i.Input,
 			&i.Output,
 			&i.CreatedAt,
+			&i.DurationMs,
 		); err != nil {
 			return nil, err
 		}
@@ -198,7 +214,7 @@ func (q *Queries) DeleteTaskMessages(ctx context.Context, taskID pgtype.UUID) er
 }
 
 const listTaskMessages = `-- name: ListTaskMessages :many
-SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
+SELECT id, task_id, seq, type, tool, content, input, output, created_at, duration_ms FROM task_message
 WHERE task_id = $1
 ORDER BY seq ASC
 `
@@ -222,6 +238,7 @@ func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]T
 			&i.Input,
 			&i.Output,
 			&i.CreatedAt,
+			&i.DurationMs,
 		); err != nil {
 			return nil, err
 		}
@@ -234,7 +251,7 @@ func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]T
 }
 
 const listTaskMessagesSince = `-- name: ListTaskMessagesSince :many
-SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
+SELECT id, task_id, seq, type, tool, content, input, output, created_at, duration_ms FROM task_message
 WHERE task_id = $1 AND seq > $2
 ORDER BY seq ASC
 `
@@ -263,6 +280,7 @@ func (q *Queries) ListTaskMessagesSince(ctx context.Context, arg ListTaskMessage
 			&i.Input,
 			&i.Output,
 			&i.CreatedAt,
+			&i.DurationMs,
 		); err != nil {
 			return nil, err
 		}

@@ -8946,10 +8946,11 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					taskLog.Info("tool_result observed", "seq", s, "tool", toolName, "call_id", msg.CallID)
 					mu.Lock()
 					batch = append(batch, TaskMessageData{
-						Seq:    int(s),
-						Type:   "tool_result",
-						Tool:   toolName,
-						Output: output,
+						Seq:        int(s),
+						Type:       "tool_result",
+						Tool:       toolName,
+						Output:     output,
+						DurationMs: msg.DurationMs,
 					})
 					mu.Unlock()
 				case agent.MessageThinking:

@@ -4601,6 +4601,10 @@ type TaskMessageRequest struct {
 	Content string         `json:"content,omitempty"`
 	Input   map[string]any `json:"input,omitempty"`
 	Output  string         `json:"output,omitempty"`
+	// DurationMs is the provider-reported tool-call duration (tool_result
+	// rows). Absent/0 = unknown; a negative value is malformed and clamped to
+	// unknown below rather than stored.
+	DurationMs int64 `json:"duration_ms,omitempty"`
 }
 
 type TaskMessageBatchRequest struct {
@@ -4649,14 +4653,15 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 	// string means SQL NULL, applied by the query's NULLIF.
 	n := len(req.Messages)
 	params := db.CreateTaskMessagesParams{
-		TaskID:   parseUUID(taskID),
-		Ids:      make([]pgtype.UUID, 0, n),
-		Seqs:     make([]int32, 0, n),
-		Types:    make([]string, 0, n),
-		Tools:    make([]string, 0, n),
-		Contents: make([]string, 0, n),
-		Inputs:   make([]string, 0, n),
-		Outputs:  make([]string, 0, n),
+		TaskID:      parseUUID(taskID),
+		Ids:         make([]pgtype.UUID, 0, n),
+		Seqs:        make([]int32, 0, n),
+		Types:       make([]string, 0, n),
+		Tools:       make([]string, 0, n),
+		Contents:    make([]string, 0, n),
+		Inputs:      make([]string, 0, n),
+		Outputs:     make([]string, 0, n),
+		DurationMss: make([]int64, 0, n),
 	}
 	for _, msg := range req.Messages {
 		id, err := uuid.NewV7()
@@ -4705,6 +4710,15 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			inputJSON = string(encoded)
 		}
 
+		// A duration the daemon never sent (or sent as 0) is "unknown"; a
+		// negative one is malformed, not a measurement. Both land as SQL NULL
+		// via the query's NULLIF/GREATEST so old-daemon transcripts keep
+		// reading exactly as before.
+		durationMs := msg.DurationMs
+		if durationMs < 0 {
+			durationMs = 0
+		}
+
 		params.Ids = append(params.Ids, pgtype.UUID{Bytes: [16]byte(id), Valid: true})
 		params.Seqs = append(params.Seqs, int32(msg.Seq))
 		params.Types = append(params.Types, msg.Type)
@@ -4712,6 +4726,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		params.Contents = append(params.Contents, msg.Content)
 		params.Inputs = append(params.Inputs, inputJSON)
 		params.Outputs = append(params.Outputs, msg.Output)
+		params.DurationMss = append(params.DurationMss, durationMs)
 	}
 
 	created, err := h.Queries.CreateTaskMessages(r.Context(), params)
@@ -4850,7 +4865,7 @@ func taskMessageToPayload(m db.TaskMessage, taskID, issueID string) protocol.Tas
 	if m.CreatedAt.Valid {
 		createdAt = m.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
 	}
-	return protocol.TaskMessagePayload{
+	p := protocol.TaskMessagePayload{
 		TaskID:    taskID,
 		IssueID:   issueID,
 		Seq:       int(m.Seq),
@@ -4861,6 +4876,12 @@ func taskMessageToPayload(m db.TaskMessage, taskID, issueID string) protocol.Tas
 		Output:    m.Output.String,
 		CreatedAt: createdAt,
 	}
+	// 0 keeps the field off the payload (omitempty), so clients that predate
+	// provider durations see byte-identical messages.
+	if m.DurationMs.Valid && m.DurationMs.Int64 > 0 {
+		p.DurationMs = m.DurationMs.Int64
+	}
+	return p
 }
 
 // ListTaskMessages returns the persisted messages for a task (for catch-up after reconnect).

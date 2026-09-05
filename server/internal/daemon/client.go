@@ -514,6 +514,12 @@ type TaskMessageData struct {
 	Content string         `json:"content,omitempty"`
 	Input   map[string]any `json:"input,omitempty"`
 	Output  string         `json:"output,omitempty"`
+	// DurationMs is the provider's own tool-call duration, in ms, attached to
+	// the paired tool_result row. omitempty keeps the wire payload byte-for-
+	// byte identical to pre-duration daemons whenever the provider didn't
+	// measure timing (0 = unknown), so old daemons keep talking to new
+	// servers and vice versa unchanged.
+	DurationMs int64 `json:"duration_ms,omitempty"`
 }
 
 func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages []TaskMessageData) error {

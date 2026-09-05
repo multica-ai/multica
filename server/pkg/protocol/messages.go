@@ -195,6 +195,11 @@ type TaskMessagePayload struct {
 	Input     map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
 	Output    string         `json:"output,omitempty"`  // tool output (tool_result only)
 	CreatedAt string         `json:"created_at,omitempty"`
+	// DurationMs is the provider-reported tool-call duration in ms, carried on
+	// tool_result rows when the runtime measured the call itself. omitempty:
+	// rows without a provider duration look exactly as they did before the
+	// field existed, so older clients are unaffected.
+	DurationMs int64 `json:"duration_ms,omitempty"`
 }
 
 // DaemonRegisterPayload is sent from daemon to server on connection.

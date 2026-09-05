@@ -92,6 +92,21 @@ function durationBetween(start?: string, end?: string): number | undefined {
   return Math.max(0, b - a);
 }
 
+/**
+ * The provider's own measurement of a tool call, when the runtime carried one
+ * across the wire (OpenCode's part.state.time.start/end arrives as
+ * `duration_ms`). Any finite, non-negative number is the provider's word and
+ * wins over the server-arrival-stamp fallback — including an explicit 0:
+ * the daemon omits the field entirely when it doesn't know, so a 0 on the
+ * wire is deliberate, not a missing value. Anything malformed (negative, NaN,
+ * infinity) is ignored so a garbage number can't poison the display.
+ */
+function providerDurationMs(result: TimelineItem | undefined): number | undefined {
+  const d = result?.duration_ms;
+  if (d === undefined || !Number.isFinite(d) || d < 0) return undefined;
+  return d;
+}
+
 /** Fold `tool_use` / `tool_result` pairs into single steps, in stream order. */
 export function buildSteps(items: TimelineItem[]): TraceStep[] {
   const steps: TraceStep[] = [];
@@ -123,7 +138,31 @@ export function buildSteps(items: TimelineItem[]): TraceStep[] {
       if (pending) {
         pending.result = item;
         pending.endedAt = item.created_at;
-        pending.durationMs = durationBetween(pending.startedAt, item.created_at);
+        const provider = providerDurationMs(item);
+        if (provider !== undefined) {
+          // The provider measured the call itself, so its number is the
+          // duration — not the gap between two server arrival stamps that
+          // both land at flush time (a 12s call would otherwise render 0s,
+          // multica-ai/multica#8025). Reconstruct the interval from the
+          // result's arrival stamp only when it parses; a missing or
+          // unparseable one leaves the timestamps untouched rather than
+          // fabricating them.
+          pending.durationMs = provider;
+          const end = timeMs(pending.endedAt);
+          if (end !== undefined) {
+            // Guard the Date range: a huge provider number next to a real
+            // arrival stamp can land outside the ±8.64e15 ms window where
+            // Date is defined, and toISOString() would throw a RangeError
+            // that takes the whole transcript down with it. Outside the
+            // window, keep the number and the real timestamps.
+            const startedMs = end - provider;
+            if (Number.isFinite(startedMs) && Math.abs(startedMs) <= 8.64e15) {
+              pending.startedAt = new Date(startedMs).toISOString();
+            }
+          }
+        } else {
+          pending.durationMs = durationBetween(pending.startedAt, item.created_at);
+        }
         continue;
       }
       // Orphan result: keep it as a step of its own so no output is dropped.
@@ -134,6 +173,7 @@ export function buildSteps(items: TimelineItem[]): TraceStep[] {
         result: item,
         startedAt: item.created_at,
         endedAt: item.created_at,
+        durationMs: providerDurationMs(item),
       });
       continue;
     }

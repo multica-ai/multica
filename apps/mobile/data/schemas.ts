@@ -350,6 +350,9 @@ export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z.object(
   input: z.record(z.string(), z.unknown()).optional(),
   output: z.string().optional(),
   created_at: z.string().optional(),
+  // Provider-reported tool-call duration in ms (e.g. OpenCode's
+  // part.state.time). Absent = unknown; consumers fall back to created_at.
+  duration_ms: z.number().optional(),
 }).loose();
 
 export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);

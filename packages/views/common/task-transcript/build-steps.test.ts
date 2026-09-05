@@ -93,6 +93,103 @@ describe("buildSteps", () => {
 
     expect(steps[0]!.durationMs).toBeUndefined();
   });
+
+  // Regression for multica-ai/multica#8025: OpenCode runs show every tool call
+  // as 0s because the pair's created_at stamps are both flush-time. The
+  // provider's own duration (part.state.time) must win over that 0s diff.
+  it("prefers the provider duration_ms over a 0s created_at difference", () => {
+    const steps = buildSteps([
+      { seq: 1, type: "tool_use", tool: "Bash", created_at: at(0) },
+      { seq: 2, type: "tool_result", tool: "Bash", output: "ok", created_at: at(0), duration_ms: 5000 },
+    ]) as TraceCallStep[];
+
+    expect(steps[0]!.durationMs).toBe(5000);
+  });
+
+  it("reconstructs the interval from the provider duration when it is present", () => {
+    const steps = buildSteps([
+      { seq: 1, type: "tool_use", tool: "Bash", created_at: at(0) },
+      { seq: 2, type: "tool_result", tool: "Bash", output: "ok", created_at: at(0), duration_ms: 5000 },
+    ]) as TraceCallStep[];
+
+    const step = steps[0]!;
+    expect(step.endedAt).toBe(at(0));
+    expect(step.startedAt).toBe(at(-5));
+  });
+
+  it("falls back to the created_at difference when duration_ms is absent", () => {
+    const steps = buildSteps([
+      { seq: 1, type: "tool_use", tool: "Bash", created_at: at(0) },
+      { seq: 2, type: "tool_result", tool: "Bash", output: "ok", created_at: at(4) },
+    ]) as TraceCallStep[];
+
+    expect(steps[0]!.durationMs).toBe(4000);
+    expect(steps[0]!.startedAt).toBe(at(0));
+  });
+
+  it("ignores a malformed duration_ms and falls back to the created_at difference", () => {
+    for (const bad of [-3, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const steps = buildSteps([
+        { seq: 1, type: "tool_use", tool: "Bash", created_at: at(0) },
+        { seq: 2, type: "tool_result", tool: "Bash", output: "ok", created_at: at(4), duration_ms: bad },
+      ]) as TraceCallStep[];
+
+      expect(steps[0]!.durationMs).toBe(4000);
+      expect(steps[0]!.startedAt).toBe(at(0));
+    }
+  });
+
+  it("uses a provider duration alone when the pair carries no timestamps", () => {
+    const steps = buildSteps([
+      { seq: 1, type: "tool_use", tool: "Bash" },
+      { seq: 2, type: "tool_result", tool: "Bash", output: "ok", duration_ms: 5000 },
+    ]) as TraceCallStep[];
+
+    expect(steps[0]!.durationMs).toBe(5000);
+    expect(steps[0]!.startedAt).toBeUndefined();
+    expect(steps[0]!.endedAt).toBeUndefined();
+  });
+
+  it("carries duration_ms through an orphan tool_result", () => {
+    const steps = buildSteps([
+      { seq: 1, type: "tool_result", tool: "Bash", output: "ok", created_at: at(0), duration_ms: 5000 },
+    ]) as TraceCallStep[];
+
+    expect(steps[0]!.durationMs).toBe(5000);
+  });
+
+  it("lets an explicit duration_ms of 0 beat the created_at difference", () => {
+    // 0 on the wire is a deliberate provider value (the daemon omits the
+    // field entirely when it doesn't know) — it wins like any other number.
+    const steps = buildSteps([
+      { seq: 1, type: "tool_use", tool: "Bash", created_at: at(0) },
+      { seq: 2, type: "tool_result", tool: "Bash", output: "ok", created_at: at(4), duration_ms: 0 },
+    ]) as TraceCallStep[];
+
+    expect(steps[0]!.durationMs).toBe(0);
+  });
+
+  it("keeps the transcript renderable when a provider duration is huge", () => {
+    // end - durationMs can land outside the Date range (±8.64e15 ms), where
+    // toISOString() throws a RangeError that would break the whole transcript
+    // view. The step must keep the number and its real timestamps instead.
+    const steps = buildSteps([
+      { seq: 1, type: "tool_use", tool: "Bash", created_at: at(0) },
+      {
+        seq: 2,
+        type: "tool_result",
+        tool: "Bash",
+        output: "ok",
+        created_at: at(4),
+        duration_ms: Number.MAX_VALUE,
+      },
+    ]) as TraceCallStep[];
+
+    const step = steps[0]!;
+    expect(step.durationMs).toBe(Number.MAX_VALUE);
+    expect(step.startedAt).toBe(at(0));
+    expect(step.endedAt).toBe(at(4));
+  });
 });
 
 describe("groupSteps", () => {
