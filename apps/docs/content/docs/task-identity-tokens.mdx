@@ -40,12 +40,13 @@ Named precisely, this is **delegated user impersonation** in the [RFC 8693](http
 
 ## Who gets an identity
 
-The identity comes from the human who **authorized** the run — recorded in `originator_user_id`, which is NULL whenever nobody lent their authority. The audit label beside it resolves a human for almost every run, autopilot included; that is a label, not authorization, and it is not what gets signed. A run nobody authorized gets no token, proceeds normally, and whatever needed the token sees an ordinary "unauthorized", never a task failure.
+The identity comes from the human who **asked for** the run — the member whose own action sits at the root of its delegation chain, recorded in `originator_user_id` and followed back through every agent hop. An armed autopilot trigger does run with its creator's authorization inside Multica, and the audit label beside it names a human for almost every run; neither is what gets signed. A run whose chain does not begin with a member acting gets no token, proceeds normally, and whatever needed the token sees an ordinary "unauthorized", never a run failure. The person must also still be a workspace member when the run is claimed.
 
 | Source | Signed |
 | --- | --- |
-| `direct_human`, `delegation`, `comment_source` | yes |
-| `trigger_owner`, `rule_owner` — an autopilot trigger fired on its own | no |
+| `direct_human` | yes |
+| `delegation`, `comment_source` — copied down from a chain root | only when that root is `direct_human` |
+| `trigger_owner`, `rule_owner` — an autopilot trigger fired on its own, even though the run carries its creator's authorization inside Multica | no |
 | `owner_fallback`, `backfill`, `unattributed` | no |
 
 Tokens are only signed for a daemon that advertises it can inject them (`task-identity-tokens-v1`), so upgrade daemons before enabling the feature: issuing for an older one would record an issuance nothing ever received.

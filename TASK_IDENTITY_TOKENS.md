@@ -244,34 +244,44 @@ agent environment variables — and every change lands in the activity log.
 
 ## Who gets an identity
 
-A token is signed only for a run **a human authorized**. Multica records that
-in `originator_user_id`, which is NULL whenever nobody lent their authority.
-That column, not the audit label beside it, decides:
+A token is signed only for a run **a member asked for** — one whose delegation
+chain begins with a person's own action. Multica records the authorizing human
+in `originator_user_id`; that column, followed back to the root of the chain,
+decides. The audit label beside it never does:
 
 | Source | Signed | Meaning |
 | --- | --- | --- |
 | `direct_human` | yes | A person acted |
-| `delegation` | yes | A person delegated |
-| `comment_source` | yes | Traced to a person's comment |
+| `delegation` | only if the chain root is `direct_human` | An agent hop copied the human from the run above it |
+| `comment_source` | only if the chain root is `direct_human` | Same, traced through a comment |
 | `trigger_owner` | **no** | An autopilot trigger fired on its own |
 | `rule_owner` | **no** | Same, with the rule's publisher as the audit label |
 | `owner_fallback` | **no** | Nobody authorized this; the owner is a guess |
 | `backfill` | **no** | Reconstructed after the fact |
 | `unattributed` | **no** | Unknown |
 
-The autopilot rows are the ones worth understanding, because the activity UI
-*does* name a human for them — whoever armed the trigger or published the rule.
-That name is an audit label, resolvable for every run by design; it is not a
-statement that the person asked for this run. A schedule firing at 3am carries
-no authorization from anyone, and signing there would give an unattended run
-that person's full permissions in your systems, on input they never saw. So it
-is refused, for the same reason `owner_fallback` is.
+The autopilot rows are the ones worth understanding. Inside Multica an armed
+schedule or webhook *does* run with its creator's authorization (MUL-6951):
+arming the trigger is treated like a deferred "run now", so the run's
+`originator_user_id` names that person and every agent it delegates to copies
+them down the chain. This feature still refuses to sign there. Letting an
+automation invoke an agent under someone's rights is a bounded grant inside the
+product; handing an unattended 3am run that person's full permissions in *your*
+systems, on input they never saw, is not the same grant — and the person is
+not watching. So the gate walks a delegation chain back to its root and signs
+only when that root is a member's own action. A chain whose root cannot be
+proven (a deleted ancestor) is refused rather than assumed.
 
-A run with no authorizing human simply gets no token, proceeds normally, and
-whatever needed the token sees an ordinary "unauthorized" — never a task
-failure. If you want a scheduled run to reach an internal system, give that
-system its own service account for that job: the point of this feature is that
-a *person's* authority is only ever lent to work that person asked for.
+The person must also still be a member of the workspace when the run is
+claimed. Attribution is decided when the run is queued, signing when it is
+claimed, and a queue can wait days for an offline runtime — no credential is
+minted in the name of someone offboarded in between.
+
+A run that is refused simply gets no token, proceeds normally, and whatever
+needed the token sees an ordinary "unauthorized" — never a task failure. If you
+want a scheduled run to reach an internal system, give that system its own
+service account for that job: the point of this feature is that a *person's*
+authority is only ever lent to work that person asked for.
 
 **Every issuance is audited in-product.** Each time tokens are minted for a
 run, an `agent_task_tokens_issued` row lands in the activity log, tied to the

@@ -292,6 +292,6 @@ Each of these has been the actual cause of a broken integration.
 | "No key for kid" | Template has no `key_id`, so tokens carry no `kid` — match the kid-less entry. Or the key rotated and your cache is stale. |
 | Signature fails, everything else looks right | Usually an algorithm mismatch, or a proxy altering the response body. Compare the token header's `alg` with your allowlist. |
 | `iss` check fails on every token | The deployment did not template `iss`. Fix the server catalog; do not remove the check. |
-| Token is absent from the agent's environment | Not your side. Either the agent has no template enabled, or no human authorized the run — an autopilot schedule firing on its own carries no authorization, and Multica issues nothing there by design. |
+| Token is absent from the agent's environment | Not your side. Either the agent has no template enabled, or the run was not asked for by a member — an autopilot schedule firing on its own is refused by design (even though, inside Multica, it runs with its creator's authorization), as is a run whose requester has since left the workspace. |
 | Works for one person, fails for another | The `sub` mapping does not hold for every user. Check for an address that does not match the local record — or, on a local-part mapping, an email whose local part does not match the username. |
 | One template never produces tokens for some users | The issuing side's `allowed_domains` excludes their email domain — intended behavior for guests/contractors. Confirm with the operator before "fixing" it. |
