@@ -172,6 +172,9 @@ type Message struct {
 	Status    string         // agent status string (Status)
 	Level     string         // log level (Log)
 	SessionID string         // backend session id (Status), for early resume-pointer pinning
+	// WaitingUntil defers the idle watchdog during a confirmed native scheduled
+	// wait. The normal idle budget resumes at this time; hard timeouts still apply.
+	WaitingUntil time.Time
 }
 
 // TokenUsage tracks token consumption for a single model.

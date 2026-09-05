@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -42,6 +43,12 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	case "async_launched_tool_result":
 		runFakeClaudeAsyncLaunchedToolResult()
+		os.Exit(0)
+	case "scheduled_wakeup_exit", "scheduled_wakeup_eof", "scheduled_wakeup_no_result":
+		runFakeClaudeScheduledWakeup(mode)
+		os.Exit(0)
+	case "native_loop", "native_loop_exit", "native_loop_incomplete", "native_loop_init_incomplete", "native_loop_cancel", "native_cron":
+		runFakeClaudeNativeLoop(mode)
 		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown CLAUDE_FAKE_MODE: %q\n", mode)
@@ -153,6 +160,35 @@ func runFakeClaudeAsyncLaunchedToolResult() {
 	fmt.Println(`{"type":"system","session_id":"sess-async-launched"}`)
 	fmt.Println(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-async","content":{"status":"async_launched","message":"background task launched"}}]}}`)
 	fmt.Println(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-async-launched","result":"parent turn completed early"}`)
+}
+
+// runFakeClaudeScheduledWakeup reproduces a headless turn that arms a wakeup
+// and then exits. A successful tool result does not promise another CLI turn.
+func runFakeClaudeScheduledWakeup(mode string) {
+	reader := bufio.NewReader(os.Stdin)
+	if _, err := reader.ReadString('\n'); err != nil {
+		fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
+		os.Exit(51)
+	}
+
+	fmt.Fprintln(os.Stderr, `[claude-code:unrecognized_model] {"model":"k3-256k","query_source":"sdk"}`)
+	fmt.Println(`{"type":"system","session_id":"sess-wakeup"}`)
+	fmt.Println(`{"type":"assistant","message":{"role":"assistant","model":"k3-256k","content":[{"type":"tool_use","id":"call-arm","name":"ScheduleWakeup","input":{"delaySeconds":1400,"prompt":"repeat"}}]}}`)
+	fmt.Println(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-arm","content":"Next wakeup scheduled"}]}}`)
+	fmt.Println(`{"type":"assistant","message":{"role":"assistant","model":"k3-256k","content":[{"type":"text","text":"assistant fallback"}],"usage":{"input_tokens":4,"output_tokens":1}}}`)
+	if mode == "scheduled_wakeup_no_result" {
+		return
+	}
+	fmt.Println(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-wakeup","result":"current turn finished","modelUsage":{"k3-256k":{"inputTokens":10,"outputTokens":2,"cacheReadInputTokens":3,"cacheCreationInputTokens":4}}}`)
+
+	if mode == "scheduled_wakeup_eof" {
+		// Also enforce the turn boundary for a child that waits for stdin EOF.
+		// Merely retaining sawResult while keeping stdin open would still hang.
+		if _, err := reader.ReadByte(); err != io.EOF {
+			fmt.Fprintf(os.Stderr, "expected stdin EOF after result, got %v\n", err)
+			os.Exit(52)
+		}
+	}
 }
 
 // TestClaudeExecuteDoesNotDeadlockOnStartupStdoutBurst verifies that the
@@ -357,5 +393,63 @@ func TestClaudeExecuteFailsLoudlyOnAsyncLaunchedToolResult(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for result — claude backend did not fail async_launched tool result")
+	}
+}
+
+func TestClaudeExecuteScheduledWakeupPreservesTerminalResult(t *testing.T) {
+	t.Parallel()
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	for _, mode := range []string{"scheduled_wakeup_exit", "scheduled_wakeup_eof", "scheduled_wakeup_no_result"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			backend, err := New("claude", Config{
+				ExecutablePath: self,
+				Env:            map[string]string{"CLAUDE_FAKE_MODE": mode, "IS_SANDBOX": "1"},
+				Logger:         slog.Default(),
+			})
+			if err != nil {
+				t.Fatalf("new claude backend: %v", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "/loop continue", ExecOptions{Model: "k3-256k", Timeout: 3 * time.Second})
+			if err != nil {
+				t.Fatalf("execute returned error: %v", err)
+			}
+			for range session.Messages {
+			}
+			result, ok := <-session.Result
+			if !ok {
+				t.Fatal("result channel closed without a value")
+			}
+			if result.SessionID != "sess-wakeup" {
+				t.Fatalf("expected resumable session id sess-wakeup, got %q", result.SessionID)
+			}
+			if mode == "scheduled_wakeup_no_result" {
+				if result.Status != "failed" || !strings.Contains(result.Error, "stream ended without terminal result") {
+					t.Fatalf("expected missing terminal result failure, got status=%q error=%q", result.Status, result.Error)
+				}
+				if !strings.Contains(result.Error, "[claude-code:unrecognized_model]") {
+					t.Fatalf("expected stderr preserved for a real failure, got %q", result.Error)
+				}
+				return
+			}
+			if result.Status != "completed" || result.Error != "" {
+				t.Fatalf("expected successful completion despite stderr warning, got status=%q error=%q", result.Status, result.Error)
+			}
+			if result.Output != "current turn finished" {
+				t.Fatalf("expected terminal result text, got %q", result.Output)
+			}
+			wantUsage := TokenUsage{InputTokens: 10, OutputTokens: 2, CacheReadTokens: 3, CacheWriteTokens: 4}
+			if got := result.Usage["k3-256k"]; got != wantUsage {
+				t.Fatalf("result usage = %+v, want %+v", got, wantUsage)
+			}
+		})
 	}
 }

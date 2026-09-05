@@ -8749,7 +8749,8 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	var toolCount atomic.Int32
 	// lastActivityAt records (as unix nanos) when the drain loop most
-	// recently received a message from the backend. The idle watchdog
+	// recently received a message from the backend, or the end of a confirmed
+	// native scheduled wait, whichever is later. The idle watchdog
 	// reads this to decide whether the agent has gone silent for too long.
 	// Initialise to the start so a backend that never emits a single
 	// message also trips the watchdog.
@@ -8844,6 +8845,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		}()
 
 		var sessionPinned atomic.Bool
+		var waitingUntil time.Time
 		for {
 			select {
 			case msg, ok := <-session.Messages:
@@ -8855,7 +8857,14 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				// gone silent — stamping before processing makes sure a
 				// slow downstream call (mu.Lock contention, batch resize)
 				// can't be misattributed to backend silence.
-				lastActivityAt.Store(time.Now().UnixNano())
+				activityAt := time.Now()
+				if msg.Type == agent.MessageStatus {
+					waitingUntil = msg.WaitingUntil
+				}
+				if waitingUntil.After(activityAt) {
+					activityAt = waitingUntil
+				}
+				lastActivityAt.Store(activityAt.UnixNano())
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
