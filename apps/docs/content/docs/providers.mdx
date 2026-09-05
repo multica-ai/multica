@@ -62,6 +62,19 @@ DeepSeek Harness advertises its model catalog from the runtime itself (`dsh --pr
 Different tools may use different model names. After switching AI coding tools, the previous model value is invalid in the new tool and needs to be selected again.
 </Callout>
 
+### OpenAI-compatible discovery for OpenCode
+
+The daemon can supplement OpenCode's catalog from one operator-configured OpenAI-compatible `/models` endpoint. This is useful for GPUStack, LiteLLM, LM Studio, and private gateways whose models are not published by models.dev:
+
+```dotenv
+MULTICA_OPENCODE_DISCOVERY_BASE_URL=https://gateway.example/v1
+MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID=gpustack
+MULTICA_OPENCODE_DISCOVERY_PROVIDER_NAME=GPUStack
+OPENCODE_DISCOVERY_API_KEY=replace-with-a-local-key
+```
+
+Set these variables in the daemon's local environment, then restart the daemon. Multica fetches `.../models`, merges the returned model IDs into the normal `opencode models` catalog, and injects only the selected model into OpenCode when a task starts. The API key stays in the machine environment and is never copied into generated configuration or the Multica server database. Discovery failure preserves OpenCode's normal catalog.
+
 ## Session resumption
 
 All tools marked ✓ support continuing an existing session in a later run. The prerequisites are that the original session still exists and the run is executed by a runtime that can reach it. MiniMax Code 0.1.2 advertises no session-loading capability over ACP, so Multica starts a fresh MCode session for a later run.

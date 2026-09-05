@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -755,6 +757,9 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
 		return []Model{}, nil
 	}
+	providerCtx, providerCancel := context.WithTimeout(ctx, 3*time.Second)
+	discoveredProvider, _ := discoverOpenCodeCompatibleProvider(providerCtx, openCodeDiscoveryHTTPClient, os.Getenv)
+	providerCancel()
 	// Newer opencode (1.15+) syncs its hosted free-model catalog over the
 	// network on `opencode models`, which can take ~6s; the previous 5s cap
 	// timed out and returned an empty list, so the runtime showed online but
@@ -762,6 +767,7 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "models", "--verbose")
+	applyOpenCodeDiscoveryEnv(cmd, discoveredProvider)
 	hideAgentWindow(cmd)
 	// Parse whatever the verbose command printed, even on a non-zero exit — a
 	// stale config entry can make `opencode models` exit non-zero while still
@@ -773,6 +779,7 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 		// empty list). Retry the plain command, which omits the per-model JSON
 		// but still prints the IDs.
 		cmd = runtimeCmd.exec(runCtx, "models")
+		applyOpenCodeDiscoveryEnv(cmd, discoveredProvider)
 		hideAgentWindow(cmd)
 		out, _ = outputOwned(cmd, runtimeCmd.logger)
 		models = parseOpenCodeModels(string(out))
@@ -781,6 +788,162 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 		return []Model{}, nil
 	}
 	return models, nil
+}
+
+type openCodeCompatibleDiscovery struct {
+	ProviderID   string
+	ProviderName string
+	BaseURL      string
+	APIKeyEnv    string
+	Models       []string
+}
+
+var openCodeDiscoveryHTTPClient = &http.Client{
+	// Do not forward an operator's bearer token through endpoint redirects.
+	// The configured URL must identify the authoritative API root directly.
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+func openCodeCompatibleProviderFromEnv(getenv func(string) string) (openCodeCompatibleDiscovery, bool) {
+	baseURL := strings.TrimRight(strings.TrimSpace(getenv("MULTICA_OPENCODE_DISCOVERY_BASE_URL")), "/")
+	if baseURL == "" {
+		return openCodeCompatibleDiscovery{}, false
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return openCodeCompatibleDiscovery{}, false
+	}
+	providerID := strings.TrimSpace(getenv("MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID"))
+	if providerID == "" {
+		providerID = "openai-compatible"
+	}
+	if !validOpenCodeProviderID(providerID) {
+		return openCodeCompatibleDiscovery{}, false
+	}
+	providerName := strings.TrimSpace(getenv("MULTICA_OPENCODE_DISCOVERY_PROVIDER_NAME"))
+	if providerName == "" {
+		providerName = providerID
+	}
+	apiKeyEnv := strings.TrimSpace(getenv("MULTICA_OPENCODE_DISCOVERY_API_KEY_ENV"))
+	if apiKeyEnv == "" {
+		apiKeyEnv = "OPENCODE_DISCOVERY_API_KEY"
+	}
+	if !validEnvironmentName(apiKeyEnv) {
+		return openCodeCompatibleDiscovery{}, false
+	}
+	return openCodeCompatibleDiscovery{
+		ProviderID: providerID, ProviderName: providerName, BaseURL: baseURL, APIKeyEnv: apiKeyEnv,
+	}, true
+}
+
+func discoverOpenCodeCompatibleProvider(ctx context.Context, client *http.Client, getenv func(string) string) (openCodeCompatibleDiscovery, bool) {
+	discovery, ok := openCodeCompatibleProviderFromEnv(getenv)
+	if !ok {
+		return openCodeCompatibleDiscovery{}, false
+	}
+	apiKey := strings.TrimSpace(getenv(discovery.APIKeyEnv))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discovery.BaseURL+"/models", nil)
+	if err != nil {
+		return openCodeCompatibleDiscovery{}, false
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return openCodeCompatibleDiscovery{}, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return openCodeCompatibleDiscovery{}, false
+	}
+
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	dec := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
+	if err := dec.Decode(&payload); err != nil {
+		return openCodeCompatibleDiscovery{}, false
+	}
+	ids := make([]string, 0, len(payload.Data))
+	seen := map[string]bool{}
+	for _, item := range payload.Data {
+		id := strings.TrimSpace(item.ID)
+		if id == "" || strings.Contains(id, "#") || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	if len(ids) == 0 {
+		return openCodeCompatibleDiscovery{}, false
+	}
+	discovery.Models = ids
+	return discovery, true
+}
+
+var openCodeProviderIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+func validOpenCodeProviderID(id string) bool { return openCodeProviderIDRe.MatchString(id) }
+
+func validEnvironmentName(name string) bool {
+	if name == "" || !(name[0] == '_' || name[0] >= 'A' && name[0] <= 'Z' || name[0] >= 'a' && name[0] <= 'z') {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		c := name[i]
+		if c != '_' && !(c >= 'A' && c <= 'Z') && !(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func applyOpenCodeDiscoveryEnv(cmd *exec.Cmd, discovery openCodeCompatibleDiscovery) {
+	if len(discovery.Models) == 0 {
+		return
+	}
+	discoveredContent, err := openCodeDiscoveryConfigContent(discovery)
+	if err != nil {
+		return
+	}
+	content, err := mergeOpenCodeConfigContents(os.Getenv("OPENCODE_CONFIG_CONTENT"), discoveredContent)
+	if err != nil {
+		return
+	}
+	cmd.Env = replaceEnvValue(os.Environ(), "OPENCODE_CONFIG_CONTENT", content)
+}
+
+func openCodeDiscoveryConfigContent(discovery openCodeCompatibleDiscovery) (string, error) {
+	models := make(map[string]map[string]any, len(discovery.Models))
+	for _, id := range discovery.Models {
+		models[id] = map[string]any{
+			"name": id,
+		}
+	}
+	options := map[string]any{"baseURL": discovery.BaseURL}
+	if discovery.APIKeyEnv != "" {
+		options["apiKey"] = "{env:" + discovery.APIKeyEnv + "}"
+	}
+	content := map[string]any{
+		"provider": map[string]any{
+			discovery.ProviderID: map[string]any{
+				"name":    discovery.ProviderName,
+				"npm":     "@ai-sdk/openai-compatible",
+				"options": options,
+				"models":  models,
+			},
+		},
+	}
+	raw, err := json.Marshal(content)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 // parseOpenCodeModels accepts the `opencode models` text output and

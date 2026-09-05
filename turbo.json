@@ -20,6 +20,13 @@
     "DESKTOP_RENDERER_PORT",
     "DESKTOP_APP_SUFFIX"
   ],
+  "globalPassThroughEnv": [
+    "MULTICA_OPENCODE_DISCOVERY_BASE_URL",
+    "MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID",
+    "MULTICA_OPENCODE_DISCOVERY_PROVIDER_NAME",
+    "MULTICA_OPENCODE_DISCOVERY_API_KEY_ENV",
+    "OPENCODE_DISCOVERY_API_KEY"
+  ],
   "tasks": {
     // `fumadocs-mdx` regenerates `.source/` by removing the directory and
     // writing it again, so two of them in the same package at once is a race:

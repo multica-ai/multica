@@ -504,6 +504,59 @@ func TestOpencodeBackendOmitsMCPEnvWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestOpencodeBackendInjectsDiscoveredProviderForSelectedModel(t *testing.T) {
+	t.Setenv("MULTICA_OPENCODE_DISCOVERY_BASE_URL", "https://models.example/v1")
+	t.Setenv("MULTICA_OPENCODE_DISCOVERY_PROVIDER_ID", "gateway")
+	t.Setenv("MULTICA_OPENCODE_DISCOVERY_PROVIDER_NAME", "Private Gateway")
+	t.Setenv("MULTICA_OPENCODE_DISCOVERY_API_KEY_ENV", "GATEWAY_API_KEY")
+	t.Setenv("GATEWAY_API_KEY", "local-secret")
+
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "opencode")
+	captureFile := filepath.Join(tempDir, "env-capture.txt")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScriptCapturingEnv()))
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_CAPTURE_FILE":   captureFile,
+			"OPENCODE_CONFIG_CONTENT": `{"permission":{"read":"allow"}}`,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 5 * time.Second,
+		Model:   "gateway/qwen3-coder",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	if result := <-session.Result; result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q; want completed", result.Status, result.Error)
+	}
+
+	content := readCapturedEnv(t, captureFile)["OPENCODE_CONFIG_CONTENT"]
+	if strings.Contains(content, "local-secret") {
+		t.Fatal("provider config leaked the API key value")
+	}
+	for _, want := range []string{`"provider"`, `"gateway"`, `"qwen3-coder"`, `"{env:GATEWAY_API_KEY}"`, `"permission"`} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("OPENCODE_CONFIG_CONTENT missing %s:\n%s", want, content)
+		}
+	}
+}
+
 // TestOpencodeBackendOverridesUserOpenCodeConfigContent asserts the
 // daemon-level mcp_config wins over a user-supplied OPENCODE_CONFIG_CONTENT
 // in agent.custom_env. This is the behaviour Go's os/exec dedup gives us

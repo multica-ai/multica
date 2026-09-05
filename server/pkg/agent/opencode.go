@@ -142,12 +142,12 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if opts.Cwd != "" {
 		env = append(env, "PWD="+opts.Cwd)
 	}
-	// Project agent.mcp_config into OpenCode via OPENCODE_CONFIG_CONTENT —
+	// Project agent.mcp_config and an optional daemon-local OpenAI-compatible
+	// provider into OpenCode via OPENCODE_CONFIG_CONTENT —
 	// OpenCode's general inline-config injection mechanism that merges at
 	// "local" scope (after the project-config loop, before remote / managed
-	// configs). MCP is the only field we currently project there; if a
-	// future Multica field needs the same channel it would assemble a
-	// combined OpenCode config slice before the env append.
+	// configs). The assembly helper keeps the provider and MCP slices together
+	// without writing into the task worktree.
 	//
 	// This deliberately leaves <workdir>/opencode.json untouched — the
 	// workdir is reused across turns for the same (agent, issue), and any
@@ -158,11 +158,36 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cancel()
 		return nil, err
 	}
-	if mcpContent != "" {
-		if _, dup := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; dup {
-			b.cfg.Logger.Warn("agent.custom_env sets OPENCODE_CONFIG_CONTENT but agent.mcp_config takes precedence and overrides it")
+	providerContent := ""
+	if provider, ok := openCodeCompatibleProviderFromEnv(os.Getenv); ok {
+		prefix := provider.ProviderID + "/"
+		if strings.HasPrefix(opts.Model, prefix) && len(opts.Model) > len(prefix) {
+			provider.Models = []string{strings.TrimPrefix(opts.Model, prefix)}
+			providerContent, err = openCodeDiscoveryConfigContent(provider)
+			if err != nil {
+				cancel()
+				return nil, err
+			}
 		}
-		env = append(env, "OPENCODE_CONFIG_CONTENT="+mcpContent)
+	}
+	if providerContent != "" || mcpContent != "" {
+		userContent := ""
+		// Preserve the existing MCP precedence contract: a daemon-managed MCP
+		// payload replaces user OPENCODE_CONFIG_CONTENT. Provider-only injection
+		// can safely deep-merge because it owns a separate top-level slice.
+		if mcpContent == "" {
+			if configured, ok := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; ok {
+				userContent = configured
+			} else {
+				userContent = os.Getenv("OPENCODE_CONFIG_CONTENT")
+			}
+		}
+		content, mergeErr := mergeOpenCodeConfigContents(userContent, providerContent, mcpContent)
+		if mergeErr != nil {
+			cancel()
+			return nil, mergeErr
+		}
+		env = replaceEnvValue(env, "OPENCODE_CONFIG_CONTENT", content)
 	}
 	cmd.Env = env
 
