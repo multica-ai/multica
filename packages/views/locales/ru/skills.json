@@ -1,0 +1,387 @@
+{
+  "page": {
+    "title": "Навыки",
+    "tagline": "Инструкции, которые может использовать любой агент в этом рабочем пространстве.",
+    "learn_more": "Узнать больше →",
+    "new_skill": "Новый навык",
+    "search_placeholder": "Поиск навыков…",
+    "scopes": {
+      "all": {
+        "label": "Все",
+        "description": "Все навыки в этом рабочем пространстве"
+      },
+      "used": {
+        "label": "Используются",
+        "description": "Навыки, назначенные хотя бы одному агенту"
+      },
+      "unused": {
+        "label": "Не используются",
+        "description": "Навыки, не назначенные ни одному агенту"
+      },
+      "mine": {
+        "label": "Созданные мной",
+        "description": "Навыки, которые создали вы"
+      }
+    },
+    "empty": {
+      "title": "Пока нет навыков",
+      "description": "Создайте первый навык, импортируйте его по URL или из локальной папки, либо скопируйте из подключённой среды выполнения — и он станет доступен каждому агенту в рабочем пространстве."
+    },
+    "no_matches": {
+      "title": "Нет совпадений",
+      "with_query": "Нет навыков, соответствующих запросу «{{query}}»{{filterSuffix}}.",
+      "with_query_filter_suffix": " в этом фильтре",
+      "filter_only": "Нет навыков, соответствующих этому фильтру.",
+      "try_different": " Попробуйте другой запрос."
+    },
+    "intro_banner": {
+      "title": "Общее для рабочего пространства.",
+      "body": "Любой может создать навык, импортировать его по URL или из локальной папки, либо скопировать из своей локальной среды выполнения — и он станет доступен каждому агенту.",
+      "highlight": "Навыки из локальной среды выполнения остаются приватными, пока вы не скопируете их сюда."
+    },
+    "list_error": {
+      "title": "Не удалось загрузить навыки",
+      "fallback": "Что-то пошло не так при загрузке списка навыков.",
+      "retry": "Повторить"
+    },
+    "supporting_data_warning": "Не удалось загрузить часть данных рабочего пространства. Атрибуция автора, названия сред выполнения или права на редактирование могут отображаться не полностью."
+  },
+  "table": {
+    "name": "Название",
+    "created_by": "Добавил(а)",
+    "used_by": "Используют",
+    "source": "Источник",
+    "updated": "Обновлён",
+    "created": "Создан",
+    "lock_tooltip": "Только для чтения — редактировать может только создатель или администратор",
+    "unused": "— не используется",
+    "by_creator": "автор: {{name}}",
+    "source_manual": "Создан вручную",
+    "source_runtime_named": "Из {{name}}",
+    "source_runtime_provider": "Из среды выполнения {{provider}}",
+    "source_runtime_unknown": "Из среды выполнения",
+    "source_clawhub": "Из ClawHub",
+    "source_skills_sh": "Из Skills.sh",
+    "source_github": "Из GitHub"
+  },
+  "actions": {
+    "row_menu": "Действия",
+    "add_to_agent": "Добавить агенту",
+    "refresh": "Обновить из источника",
+    "my_agents": "Мои агенты",
+    "other_agents": "Другие агенты",
+    "no_agents": "Нет доступных агентов",
+    "search_placeholder": "Поиск агентов…",
+    "no_agents_match": "Нет агентов, соответствующих запросу.",
+    "has_partial": "Добавлено {{owned}}/{{total}}",
+    "added_toast": "Добавлено агенту {{name}}",
+    "add_failed_toast": "Не удалось добавить навык",
+    "delete": "Удалить",
+    "selected": "Выбрано: {{count}}",
+    "clear_selection": "Снять выделение",
+    "delete_no_permission": "В выборке есть навыки, которые может удалить только их создатель или администратор",
+    "delete_dialog_title_one": "Удалить {{count}} навык?",
+    "delete_dialog_title_other": "Удалить {{count}} навыков?",
+    "delete_dialog_desc_one": "Выбранный навык будет безвозвратно удалён и снят со всех агентов.",
+    "delete_dialog_desc_other": "Выбранные навыки ({{count}}) будут безвозвратно удалены и сняты со всех агентов.",
+    "deleted_toast_one": "Удалён {{count}} навык",
+    "deleted_toast_other": "Удалено навыков: {{count}}",
+    "delete_failed_toast": "Не удалось удалить навыки",
+    "update": "Обновить",
+    "update_none": "В выборке нет импортированных навыков, которые можно обновить",
+    "update_dialog_title": "Обновить навыки из источника?",
+    "update_summary_selected_one": "{{count}} навык будет обновлён из своего источника",
+    "update_summary_selected_other": "Навыков будет обновлено из источников: {{count}}",
+    "update_summary_skipped_one": "{{count}} нельзя обновить из источника — пропущен",
+    "update_summary_skipped_other": "Нельзя обновить из источника — пропущено: {{count}}",
+    "update_confirm": "Обновить ({{count}})",
+    "update_updating": "Обновление {{done}}/{{total}}…",
+    "updated_toast_one": "Обновлён {{count}} навык из источника",
+    "updated_toast_other": "Обновлено навыков из источника: {{count}}",
+    "update_partial_toast": "Обновлено: {{count}}, ошибок: {{failed}}",
+    "add_dialog_description": "Выберите агентов, которым нужно добавить выбранные навыки.",
+    "cancel": "Отмена",
+    "add_confirm": "Добавить ({{num}})",
+    "adding": "Добавление...",
+    "added_multi_toast_one": "Добавлено {{count}} агенту",
+    "added_multi_toast_other": "Добавлено агентам: {{count}}"
+  },
+  "toolbar": {
+    "result_count_title": "Найдено навыков / всего навыков",
+    "filter_label": "Фильтр",
+    "filter_active_count_one": "{{count}} фильтр",
+    "filter_active_count_other": "Фильтров: {{count}}",
+    "clear_filters": "Сбросить фильтры",
+    "section_usage": "Использование",
+    "display": "Отображение",
+    "sort_by": "Сортировать по",
+    "direction_asc": "По возрастанию",
+    "direction_desc": "По убыванию",
+    "section_columns": "Столбцы"
+  },
+  "detail": {
+    "all_skills": "Все навыки",
+    "read_only": "Только для чтения",
+    "delete_aria": "Удалить навык",
+    "delete_tooltip": "Удалить навык",
+    "supporting_data_warning": "Не удалось загрузить часть данных рабочего пространства. Атрибуция автора, названия сред выполнения или права на редактирование могут отображаться не полностью до следующего обновления.",
+    "delete_file": "Удалить файл",
+    "name_placeholder": "skill-name",
+    "description_placeholder": "Одно предложение о том, когда агенту стоит использовать этот навык…",
+    "subline": {
+      "origin_runtime_named": "Локальная среда выполнения · {{name}}",
+      "origin_runtime_provider": "Локальная среда выполнения · {{provider}}",
+      "origin_runtime_unknown": "Локальная среда выполнения",
+      "origin_clawhub": "Импортирован · ClawHub",
+      "origin_skills_sh": "Импортирован · Skills.sh",
+      "origin_github": "Импортирован · GitHub",
+      "origin_workspace": "Создан вручную"
+    },
+    "conflict_banner": {
+      "title": "Кто-то другой обновил этот навык",
+      "body": "Ваши изменения сохранены. Отмените, чтобы получить чужие изменения, либо сохраните, чтобы перезаписать их."
+    },
+    "save_bar": {
+      "changed_summary": "Изменено: {{parts}}",
+      "changed_files_one": "{{count}} файл",
+      "changed_files_other": "Файлов: {{count}}",
+      "discard": "Отменить",
+      "save": "Сохранить изменения",
+      "saving": "Сохранение…"
+    },
+    "not_found": {
+      "title": "Навык не найден",
+      "fallback": "Возможно, этот навык был удалён или у вас нет к нему доступа.",
+      "back": "Назад к навыкам"
+    },
+    "toast_saved": "Навык сохранён",
+    "toast_save_failed": "Не удалось сохранить навык",
+    "toast_deleted": "Навык удалён",
+    "toast_delete_failed": "Не удалось удалить навык",
+    "refresh": {
+      "button": "Обновить",
+      "tooltip": "Повторно загрузить этот навык из источника",
+      "source_github": "GitHub",
+      "source_skills_sh": "Skills.sh",
+      "source_clawhub": "ClawHub",
+      "toast_success": "Навык обновлён из {{source}}",
+      "toast_failed": "Не удалось обновить навык",
+      "dialog": {
+        "title": "Обновить из источника?",
+        "description": "Это заново загрузит «{{name}}» из {{source}} и заменит его название, описание, SKILL.md и файлы на последнюю версию.",
+        "warning": "Локальные изменения этого навыка будут перезаписаны. Назначения агентам, метки и создатель сохранятся.",
+        "cancel": "Отмена",
+        "confirm": "Обновить",
+        "refreshing": "Обновление…"
+      }
+    },
+    "delete_dialog": {
+      "title": "Удалить навык?",
+      "description_with_agents_one": "«{{name}}» будет безвозвратно удалён и снят с {{count}} агента, который сейчас его использует.",
+      "description_with_agents_other": "«{{name}}» будет безвозвратно удалён и снят с агентов, которые сейчас его используют ({{count}}).",
+      "description_no_agents": "«{{name}}» будет безвозвратно удалён и снят со всех агентов.",
+      "warning": "Это действие нельзя отменить.",
+      "cancel": "Отмена",
+      "confirm": "Удалить навсегда",
+      "deleting": "Удаление…"
+    },
+    "add_file": {
+      "placeholder": "templates/review.md",
+      "add": "Добавить",
+      "cancel": "Отмена",
+      "errors": {
+        "empty": "Путь не может быть пустым.",
+        "absolute": "Абсолютные пути не допускаются.",
+        "double_dot": "Путь не может содержать «..».",
+        "reserved": "SKILL.md зарезервирован для основного файла.",
+        "exists": "Файл по этому пути уже существует.",
+        "is_directory": "Папка с таким именем уже существует",
+        "under_file": "По этому пути уже существует файл"
+      }
+    },
+    "header": {
+      "files_one": "{{count}} файл",
+      "files_other": "Файлов: {{count}}",
+      "used_by_one": "{{count}} агент",
+      "used_by_other": "Агентов: {{count}}",
+      "updated": "Обновлён {{when}}",
+      "updated_by": "Обновлён {{when}} — {{name}}"
+    },
+    "tabs": {
+      "aria": "Разделы навыка",
+      "overview": "Обзор",
+      "files_one": "Файлы {{count}}",
+      "files_other": "Файлы {{count}}"
+    },
+    "overview": {
+      "properties": "Свойства",
+      "properties_hint": "Эти поля синхронизированы с frontmatter файла SKILL.md.",
+      "name": "Название",
+      "description": "Описание",
+      "description_hint": "Символов: {{count}}. Агенты читают это, чтобы решить, загружать ли навык.",
+      "labels": "Метки",
+      "used_by_one": "Используется {{count}} агентом",
+      "used_by_other": "Используется агентами: {{count}}",
+      "used_by_empty": "Пока не назначен ни одному агенту. Чтобы назначить, откройте вкладку «Навыки» у агента.",
+      "permissions_owner": "Вы можете редактировать и удалять этот навык. Изменения вступят в силу при следующем запуске агента.",
+      "permissions_locked_creator": "Редактировать этот навык может только создатель ({{name}}) или администратор рабочего пространства.",
+      "permissions_locked": "Редактировать этот навык может только создатель или администратор рабочего пространства."
+    },
+    "files": {
+      "list_aria": "Файлы навыка",
+      "main": "Основной файл",
+      "supporting_one": "Дополнительный {{count}}",
+      "supporting_other": "Дополнительные {{count}}",
+      "supporting_empty": "Нет дополнительных файлов.",
+      "add_file": "Новый файл",
+      "mode_aria": "Режим просмотра файла",
+      "mode_preview": "Просмотр",
+      "mode_edit": "Редактирование",
+      "mode_raw": "Обычный текст"
+    }
+  },
+  "create": {
+    "back": "Назад",
+    "back_aria": "Назад к выбору способа",
+    "close": "Закрыть",
+    "close_aria": "Закрыть",
+    "method": {
+      "chooser": {
+        "title": "Новый навык",
+        "desc": "Выберите способ добавления навыка в это рабочее пространство."
+      },
+      "manual": {
+        "title": "Создать вручную",
+        "desc": "Начать с пустого SKILL.md."
+      },
+      "local": {
+        "title": "Импорт из локальной папки",
+        "desc": "Выберите папку с SKILL.md или архив .skill / .zip."
+      },
+      "url": {
+        "title": "Импорт по URL",
+        "desc": "Загрузить опубликованный навык по URL."
+      },
+      "runtime": {
+        "title": "Скопировать из среды выполнения",
+        "desc": "Перенести навык, установленный в вашей локальной среде выполнения."
+      }
+    },
+    "manual": {
+      "name_label": "Название",
+      "name_placeholder": "например, review-helper",
+      "name_hint": "Должно быть уникальным в пределах рабочего пространства.",
+      "description_label": "Описание",
+      "description_placeholder": "Одно предложение о том, когда назначать этот навык агенту.",
+      "name_conflict_hint": " Попробуйте другое название и отправьте снова.",
+      "fallback_error": "Не удалось создать навык",
+      "cancel": "Отмена",
+      "submit": "Создать навык",
+      "submitting": "Создание…",
+      "toast_created": "Навык создан"
+    },
+    "local": {
+      "choose_folder": "Выбрать папку",
+      "choose_archive": "Выбрать .skill / .zip",
+      "folder_label": "Папка",
+      "archive_label": "Архив",
+      "files_one": "{{count}} файл",
+      "files_other": "Файлов: {{count}}",
+      "missing_skill_md": "Это не навык — в папке нет файла SKILL.md.",
+      "too_large": "Этот навык слишком велик для импорта.",
+      "empty": "Папка пуста.",
+      "too_many_files": "В этом навыке слишком много файлов для импорта.",
+      "name_conflict_hint": " Название импортируемого навыка уже существует — удалите существующий и повторите попытку.",
+      "fallback_error": "Ошибка импорта",
+      "cancel": "Отмена",
+      "import": "Импортировать",
+      "importing": "Импорт…",
+      "toast_imported": "Навык импортирован"
+    },
+    "url": {
+      "url_label": "URL навыка",
+      "supported_sources": "Поддерживаемые источники",
+      "import": "Импортировать",
+      "importing": "Импорт…",
+      "importing_clawhub": "Импорт из ClawHub…",
+      "importing_skills_sh": "Импорт из Skills.sh…",
+      "importing_github": "Импорт из GitHub…",
+      "name_conflict_hint": " Название импортируемого навыка уже существует — удалите существующий и повторите попытку.",
+      "fallback_error": "Ошибка импорта",
+      "cancel": "Отмена",
+      "toast_imported": "Навык импортирован"
+    }
+  },
+  "runtime_import": {
+    "runtime_label": "Среда выполнения",
+    "runtime_placeholder": "Выберите локальную среду выполнения",
+    "no_local_runtimes_title": "Нет доступных локальных сред выполнения",
+    "no_local_runtimes_hint": "Подключите локальную среду выполнения, чтобы просматривать и импортировать её локальные навыки.",
+    "choose_runtime": "Чтобы продолжить, выберите среду выполнения",
+    "must_be_online": "Для просмотра локальных навыков среда выполнения должна быть в сети.",
+    "load_failed": "Не удалось загрузить локальные навыки среды выполнения",
+    "not_supported": "Этот провайдер среды выполнения пока не предоставляет список локальных навыков.",
+    "no_skills_title": "Локальные навыки не найдены",
+    "no_skills_hint": "У этой среды выполнения пока нет доступных локальных навыков.",
+    "search_placeholder": "Поиск локальных навыков",
+    "no_search_results_title": "Совпадений среди локальных навыков нет",
+    "no_search_results_hint": "Нет локальных навыков, соответствующих запросу «{{query}}».",
+    "ignored_files_hint": "Символические ссылки, нечитаемые файлы, файлы слишком большого размера и очень крупные наборы файлов при импорте игнорируются.",
+    "ready": "Готово к импорту",
+    "into_workspace": "в это рабочее пространство.",
+    "select_skill": "Чтобы продолжить, выберите навык.",
+    "import_button": "Импортировать в рабочее пространство",
+    "importing": "Импорт…",
+    "skill_files_one": "{{count}} файл",
+    "skill_files_other": "Файлов: {{count}}",
+    "skill_name_label": "Название навыка в рабочем пространстве",
+    "skill_description_label": "Описание",
+    "skill_description_placeholder": "Необязательно — опишите, когда агенту стоит использовать этот навык.",
+    "toast_imported": "Навык импортирован",
+    "toast_import_failed": "Не удалось импортировать навык",
+    "select_all": "Выбрать все ({{count}})",
+    "bulk_ready": "Выбрано навыков: {{count}}",
+    "bulk_import_button": "Импортировать {{count}} навыков",
+    "bulk_progress": "Импорт {{completed}} / {{total}}…",
+    "bulk_cancel_button": "Отмена",
+    "bulk_complete_hint": "Импорт завершён.",
+    "bulk_cancelled_hint": "Импорт отменён.",
+    "bulk_done_button": "Готово",
+    "bulk_summary_created": "Создано",
+    "bulk_summary_updated": "Обновлено",
+    "bulk_summary_conflicts": "Конфликты",
+    "bulk_summary_skipped": "Пропущено",
+    "bulk_summary_failed": "Ошибки",
+    "conflict_single_title": "Навык с таким названием уже существует",
+    "conflict_bulk_title": "Требуется решение для {{count}} навыков",
+    "conflict_hint": "Выберите: перезаписать существующий навык рабочего пространства, импортировать под новым названием или пропустить его.",
+    "conflict_locked_creator": "Этот навык создан пользователем {{creator}}. Перезаписать его при локальном импорте может только создатель; чтобы изменить его, откройте страницу навыка.",
+    "conflict_locked": "Перезаписать этот навык при локальном импорте может только создатель; чтобы изменить его, откройте страницу навыка.",
+    "conflict_overwrite": "Перезаписать",
+    "conflict_rename": "Переименовать",
+    "conflict_skip": "Пропустить",
+    "conflict_cancel": "Отмена",
+    "conflict_overwrite_all": "Перезаписать все",
+    "conflict_skip_all": "Пропустить все",
+    "conflict_rename_label": "Новое название навыка",
+    "conflict_footer": "Ожидают решения конфликтов: {{count}}.",
+    "conflict_apply_button": "Применить решения",
+    "conflict_missing_resolution": "Выберите способ разрешения этого конфликта.",
+    "conflict_name_still_exists": "Такое название уже существует. Выберите другое название или пропустите."
+  },
+  "file_tree": {
+    "no_files": "Нет файлов",
+    "actions": {
+      "label": "Действия для {{path}}",
+      "edit": "Редактировать",
+      "rename": "Переименовать",
+      "delete": "Удалить"
+    }
+  },
+  "file_viewer": {
+    "no_content": "*Пока нет содержимого*",
+    "markdown_placeholder": "Введите содержимое в формате markdown...",
+    "raw_placeholder": "Содержимое файла...",
+    "raw_aria": "Обычный текст содержимого {{path}}"
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "page": {
+    "title": "Входящие",
+    "back": "Входящие"
+  },
+  "menu": {
+    "mark_all_read": "Отметить всё как прочитанное",
+    "archive_all": "Архивировать всё",
+    "archive_all_read": "Архивировать всё прочитанное",
+    "archive_completed": "Архивировать завершённые"
+  },
+  "filters": {
+    "tooltip": "Фильтр входящих",
+    "active_count_one": "{{count}} активный фильтр",
+    "active_count_other": "{{count}} активных фильтров",
+    "status": "Статус",
+    "priority": "Приоритет",
+    "from": "От",
+    "unread_only": "Только непрочитанные",
+    "notification_count_one": "{{count}} уведомление",
+    "notification_count_other": "{{count}} уведомлений",
+    "clear": "Очистить фильтры",
+    "empty": "Нет уведомлений, соответствующих фильтрам"
+  },
+  "context_menu": {
+    "mark_read": "Отметить как прочитанное",
+    "mark_unread": "Отметить как непрочитанное",
+    "archive": "Архивировать",
+    "unarchive": "Восстановить из архива",
+    "open_in_new_tab": "Открыть в новой вкладке"
+  },
+  "list": {
+    "empty": "Нет уведомлений",
+    "mark_done_tooltip": "Отметить как выполненное",
+    "archive_tooltip": "Архивировать",
+    "time": {
+      "just_now": "только что",
+      "minutes": "{{count}} мин",
+      "hours": "{{count}} ч",
+      "days": "{{count}} дн"
+    },
+    "archived_title": "Архив",
+    "archived_empty": "Нет архивных уведомлений",
+    "unarchive_tooltip": "Восстановить из архива",
+    "actions_aria": "Действия с уведомлением"
+  },
+  "detail": {
+    "select_prompt": "Выберите уведомление, чтобы посмотреть детали",
+    "empty": "Ваши входящие пусты",
+    "original_input": "Исходный ввод",
+    "retry_with_context": "Повторить с контекстом",
+    "edit_advanced": "Редактировать как расширенную форму",
+    "archive": "Архивировать",
+    "unarchive": "Восстановить из архива"
+  },
+  "types": {
+    "issue_assigned": "Назначено",
+    "issue_subscribed": "Подписка оформлена",
+    "unassigned": "Исполнитель снят",
+    "assignee_changed": "Исполнитель изменён",
+    "status_changed": "Статус изменён",
+    "priority_changed": "Приоритет изменён",
+    "start_date_changed": "Дата начала изменена",
+    "due_date_changed": "Срок изменён",
+    "new_comment": "Новый комментарий",
+    "mentioned": "Упоминание",
+    "review_requested": "Запрошено ревью",
+    "task_completed": "Задача выполнена",
+    "task_failed": "Задача не выполнена",
+    "agent_blocked": "Агент заблокирован",
+    "agent_completed": "Агент завершил работу",
+    "reaction_added": "Реакция",
+    "quick_create_done": "Создано с помощью агента",
+    "quick_create_failed": "Ошибка создания с помощью агента",
+    "quick_create_unconfirmed": "Создание с помощью агента не подтверждено"
+  },
+  "labels": {
+    "set_status_to": "Установлен статус",
+    "set_priority_to": "Установлен приоритет",
+    "assigned_to": "Назначено {{name}}",
+    "removed_assignee": "Исполнитель удалён",
+    "set_start_date_to": "Установлена дата начала {{date}}",
+    "removed_start_date": "Дата начала удалена",
+    "set_due_date_to": "Установлен срок {{date}}",
+    "removed_due_date": "Срок удалён",
+    "reacted_to_comment": "Отреагировал(а) {{emoji}} на ваш комментарий",
+    "created_with_agent": "Создано с помощью агента: {{identifier}}",
+    "failed_with_detail": "Ошибка: {{detail}}"
+  },
+  "toasts": {
+    "source_context_retry_started": "Повтор запущен с исходным контекстом",
+    "archived": "Уведомление архивировано",
+    "unarchived": "Уведомление восстановлено"
+  },
+  "errors": {
+    "source_context_retry_failed": "Не удалось повторить с исходным контекстом",
+    "source_context_retry_unavailable": "Этот контекст больше нельзя повторить. Начните заново с точки ветвления.",
+    "mark_read_failed": "Не удалось отметить как прочитанное",
+    "mark_unread_failed": "Не удалось отметить как непрочитанное",
+    "archive_failed": "Не удалось архивировать",
+    "mark_done_failed": "Не удалось отметить как выполненное",
+    "mark_all_read_failed": "Не удалось отметить всё как прочитанное",
+    "archive_all_failed": "Не удалось архивировать всё",
+    "archive_all_read_failed": "Не удалось архивировать прочитанные элементы",
+    "archive_completed_failed": "Не удалось архивировать завершённые",
+    "unarchive_failed": "Не удалось восстановить из архива",
+    "archived_load_failed": "Не удалось загрузить архивные уведомления"
+  }
+}
