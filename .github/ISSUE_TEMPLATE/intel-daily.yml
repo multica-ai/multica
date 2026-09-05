@@ -1,0 +1,32 @@
+name: "Intel daily"
+description: Product intel lounge daily scan output (intel/YYYY-MM-DD-daily).
+title: "intel/"
+labels: ["intel"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Created by **每日产品热点扫描** autopilot or intel-scout agent.
+        See [.ai-company/docs/35-product-intel-lounge.md](https://github.com/multica-ai/multica/blob/main/.ai-company/docs/35-product-intel-lounge.md).
+
+  - type: textarea
+    id: hotspots
+    attributes:
+      label: 热点列表（编号 1..N）
+      description: 每条含 title, source_url, one_line_summary, relevance, suggested_action
+      placeholder: |
+        ### 1. Example headline
+        - source_url: https://...
+        - one_line_summary: ...
+        - relevance: high
+        - suggested_action: open-agent-safe
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: 今日建议（1 条）
+      description: 建议你今天点头的条目编号与理由
+    validations:
+      required: true

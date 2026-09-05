@@ -1,0 +1,21 @@
+---
+description: AI 公司交付规范 — 动手前读 Company OS 分层
+alwaysApply: true
+---
+
+# Company Harness
+
+本仓已接入 AI 公司 OS。**写代码 / 接票前**按 `.delivery/company-os/docs/28-norm-layers.md` 的 Agent 阅读顺序加载；冲突以后者为准。
+
+| 层 | 读本仓 |
+|----|-----|
+| 项目 | `CLAUDE.md` · `.delivery/<slug>/brief.md` · `accept_cases.md` |
+| 公司 | `.delivery/company-os/`（只读副本，勿手改） |
+| 任务 | 当前 GitHub Issue 或 `.delivery/prompts/orchestrator-kickoff.md` |
+
+流水线：`.cursor/agents/` · `.delivery/config/merge-policy.json`  
+刷新规范：见 `.delivery/COMPANY-OS.md`
+
+**禁止**在 Cursor 规则或 `CLAUDE.md` 里复制 company-os 全文。
+
+**经验回流**：`.delivery/company-os/docs/31-harness-learnings-routing.md`；HQ 执行 `record-harness-learning.sh`；口令 `记录 harness 经验：[结论]`。

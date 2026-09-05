@@ -1,0 +1,158 @@
+# AI 公司 — 项目台账
+# CEO 每周更新。调度脚本 / LangGraph 可读此文件做多 repo 公平队列。
+#
+# 资产字段（domain、cloudflare_project、sla_hours）为可选，供指挥舱/文档；
+# 本机路径与密钥名见 config/repo-paths.local.yaml、company-assets.local.yaml（gitignore）。
+# 详见 docs/19-asset-registry.md
+#
+# 内容线（自媒体 / Hermes 远程机）额外字段：
+#   kind: product | content          （默认 product）
+#   dispatch_mode: gha | remote-pull | local
+#       content + gha     → CEO 触发 content-delivery-dispatch（self-hosted runner）
+#       content + remote-pull → 仅统计；远程 cron 跑 pull-dispatch.sh
+#   workflow: content-delivery-dispatch.yml  （可选，默认按 kind 推断）
+#   executor: remote-hermes            （文档用，脚本不解析）
+#   publish_policy: ceo-approve        （文档用；发布 human-only）
+#   channels: [youtube, x]            （可选）
+#   content_workbench_url: https://hq.revoices.app/#content/review  （内容审稿 HQ，默认此 URL）
+# OpenWorld 系（出海 monorepo + No WiFi / MetaViewer）：
+#   portfolio_group: openworld
+#   workbench_url: https://...   （生产站或外部 HQ，指挥舱深链）
+# 内容仓 **不需要** CEO 本机 AI_REPO_PATH_*。
+# 职责划分（Harness）：harness/content-hq-split.md → 内容仓 .delivery/CONTENT-HQ-SPLIT.md
+# 运营接线：docs/24-content-operations.md
+
+company:
+  name: your-ai-company
+  multica_workspace: default
+  timezone: Asia/Shanghai
+  github_org: chenzh   # used by ceo-dashboard.sh / portfolio-dispatch (override: GITHUB_ORG)
+
+defaults:
+  max_verify_loops: 3
+  branch_prefix: cursor/
+  labels:
+    safe: agent-safe
+    running: agent-running
+    blocked: agent-blocked
+    done: agent-done
+
+projects:
+  - id: beatscape
+    repo: github.com/chenzh/MusicSaas
+    tier: production
+    priority: 30
+    stack: vite-react-beatscape
+    autopilot_id: null
+    max_nightly_tickets: 2
+    openapi: false
+    e2e: true
+    paused: false
+    delivery_slug: beatscape
+    notes: "BeatScape apps/beatscape — MLX/gateway human-only"
+
+  - id: landing-tool-a
+    repo: github.com/chenzh/landing-tool-a
+    tier: experiment
+    priority: 10
+    stack: next-static
+    autopilot_id: null
+    max_nightly_tickets: 2
+    openapi: false
+    e2e: false
+    paused: false
+    delivery_slug: landing-tool-a
+    notes: "Lightweight landing; scaffold via scripts/ai-company/scaffold-landing.sh"
+
+  - id: saas-stripe-mvp
+    repo: github.com/chenzh/saas-stripe-mvp
+    tier: staging
+    priority: 15
+    stack: next-go-saas
+    autopilot_id: null
+    max_nightly_tickets: 2
+    openapi: false
+    e2e: false
+    paused: false
+    delivery_slug: saas-stripe-mvp
+    notes: "Payment human-only; repo bootstrapped 2026-08-26"
+
+  - id: json-site
+    repo: github.com/chenzh/json-site
+    tier: experiment
+    priority: 12
+    stack: cloudflare-pages
+    autopilot_id: null
+    max_nightly_tickets: 2
+    openapi: false
+    e2e: false
+    paused: false
+    delivery_slug: json-site
+    domain: json-site.pages.dev
+    cloudflare_project: json-site
+    notes: "Feishu site-factory 2026-08-27 — json 格式化"
+
+  - id: meigen-replica
+    repo: github.com/chenzh/meigen-replica
+    tier: experiment
+    priority: 17
+    stack: visual-replica
+    autopilot_id: null
+    max_nightly_tickets: 2
+    openapi: false
+    e2e: true
+    paused: false
+    delivery_slug: meigen-replica
+    notes: "MeiGen AI gallery+studio replica — visual gate + autopilot"
+
+  # ── OpenWorld 系（出海 monorepo + MetaViewer）— 先登记；装 harness 后取消 paused ──
+  - id: metadata-viewer
+    repo: github.com/chenzh/metadata-viewer
+    portfolio_group: openworld
+    tier: production
+    priority: 16
+    stack: next-static-pwa
+    autopilot_id: null
+    max_nightly_tickets: 1
+    openapi: false
+    e2e: false
+    paused: true
+    delivery_slug: metadata-viewer
+    domain: www.nowifiwebgames.com
+    cloudflare_project: no-wifi-games
+    workbench_url: https://www.nowifiwebgames.com
+    notes: "MetaViewer / No WiFi Games — install-harness.sh then agent-safe queue"
+
+  - id: openworld
+    repo: github.com/chenzh/openworld
+    portfolio_group: openworld
+    tier: staging
+    priority: 17
+    stack: monorepo-opc
+    autopilot_id: null
+    max_nightly_tickets: 1
+    openapi: false
+    e2e: false
+    paused: true
+    delivery_slug: openworld
+    workbench_url: https://hermes.nowifiwebgames.com
+    notes: "出海 monorepo — hermes-mobile/revoice/games/workshop; SecondBrain projects/openworld"
+
+  # ── 自媒体线（Hermes 远程机）示例 — 起号前保持 paused ──
+  - id: content-youtube-sea
+    kind: content
+    repo: github.com/chenzh/content-youtube-sea
+    tier: experiment
+    priority: 8
+    stack: markdown-calendar
+    dispatch_mode: gha
+    workflow: content-delivery-dispatch.yml
+    executor: remote-hermes
+    publish_policy: ceo-approve
+    channels: [youtube, x]
+    autopilot_id: null
+    max_nightly_tickets: 1
+    paused: true
+    delivery_slug: content-youtube-sea
+    content_workbench_url: https://hq.revoices.app/#content/review
+    notes: "Remote Hermes machine — install-content-harness.sh; no CEO local path"

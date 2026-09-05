@@ -1,0 +1,21 @@
+---
+description: AI 公司 OS — HQ 权威与交付分层
+alwaysApply: true
+---
+
+# Company Harness (HQ)
+
+Multica 兼 **Company OS 权威**（`.ai-company/`）与 **产品代码**（`CLAUDE.md`）。
+
+**动手前**：
+
+| 场景 | 读 |
+|------|-----|
+| 改 TS/Go/产品 | 根 `CLAUDE.md` → `docs/CODE-INDEX.md` |
+| 公司交付 / portfolio | `.ai-company/docs/28-norm-layers.md` 阅读顺序 |
+| dogfood 流水线 | `.delivery/README.md` |
+
+规范下发：`.delivery/company-os/`（`sync-company-norms.sh`）。  
+**禁止**把 `.ai-company/docs/` 全文塞进 Cursor 规则或 `AGENTS.md`。
+
+**经验回流**（里程碑 / BLOCKED 解决后）：读 `.ai-company/docs/31-harness-learnings-routing.md`；记入 `harness-candidates`（`record-harness-learning.sh`）；口令 `记录 harness 经验：[结论]`。禁止无审批 PATCH 宪法正文。

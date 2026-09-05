@@ -1,0 +1,164 @@
+openapi: 3.1.0
+info:
+  title: Music Game SEA API
+  version: 0.1.0
+  description: |
+    MVP contract for anonymous rhythm game sessions and leaderboards.
+    Source of truth: sync with api/openapi.yaml in the game repo.
+servers:
+  - url: https://api.example.com
+    description: Production
+  - url: http://localhost:8080
+    description: Local
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /v1/sessions:
+    post:
+      operationId: createSession
+      summary: Create anonymous play session
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+  /v1/sessions/{sessionId}/scores:
+    post:
+      operationId: submitScore
+      summary: Submit score for a completed run
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScoreSubmitRequest"
+      responses:
+        "201":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScoreRecord"
+        "400":
+          description: Validation failed
+        "404":
+          description: Session not found
+  /v1/leaderboards/{trackId}:
+    get:
+      operationId: getLeaderboard
+      summary: Top scores for a track
+      parameters:
+        - name: trackId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: demo-track
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 50
+      responses:
+        "200":
+          description: Leaderboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaderboardResponse"
+components:
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    Session:
+      type: object
+      required: [id, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+    ScoreSubmitRequest:
+      type: object
+      required: [trackId, score, maxCombo, accuracy, nickname]
+      properties:
+        trackId:
+          type: string
+          example: demo-track
+        score:
+          type: integer
+          minimum: 0
+          maximum: 10000000
+        maxCombo:
+          type: integer
+          minimum: 0
+        accuracy:
+          type: number
+          minimum: 0
+          maximum: 100
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 16
+    ScoreRecord:
+      type: object
+      required: [id, rank]
+      properties:
+        id:
+          type: string
+          format: uuid
+        rank:
+          type: integer
+          minimum: 1
+    LeaderboardResponse:
+      type: object
+      required: [trackId, entries]
+      properties:
+        trackId:
+          type: string
+        entries:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/LeaderboardEntry"
+    LeaderboardEntry:
+      type: object
+      required: [nickname, score, submittedAt]
+      properties:
+        nickname:
+          type: string
+        score:
+          type: integer
+        submittedAt:
+          type: string
+          format: date-time

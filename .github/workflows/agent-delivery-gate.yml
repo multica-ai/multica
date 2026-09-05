@@ -1,0 +1,107 @@
+name: Agent delivery gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to evaluate
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve PR number
+        id: pr
+        env:
+          PR_INPUT: ${{ inputs.pr_number }}
+        run: |
+          if [ -n "$PR_INPUT" ]; then
+            echo "number=$PR_INPUT" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip non-agent PRs
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head="$(gh pr view "${{ steps.pr.outputs.number }}" --json headRefName -q .headRefName)"
+          PREFIX="cursor-issue"
+          if [ -f .delivery/config/merge-policy.json ]; then
+            PREFIX="$(jq -r '.branchNamePrefix // "cursor-issue"' .delivery/config/merge-policy.json)"
+          fi
+          if [[ "$head" != ${PREFIX}* ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Not an agent branch (${PREFIX}*) — skipping gate."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Read merge policy
+        if: steps.scope.outputs.skip == 'false'
+        id: policy
+        run: |
+          REGEX='^(frontend|backend|mobile-verify|check)$'
+          if [ -f .delivery/config/merge-policy.json ]; then
+            REGEX="$(jq -r '.requiredChecksRegexp // "^(frontend|backend|mobile-verify|check)$"' .delivery/config/merge-policy.json)"
+          fi
+          echo "regexp=$REGEX" >> "$GITHUB_OUTPUT"
+          echo "requiredChecksRegexp=$REGEX"
+
+      - name: Wait for required checks
+        if: github.event_name == 'pull_request' && steps.scope.outputs.skip == 'false'
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          check-regexp: ${{ steps.policy.outputs.regexp }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 30
+          allowed-conclusions: success,skipped
+
+      - name: Check merge eligibility
+        if: steps.scope.outputs.skip == 'false'
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          chmod +x scripts/agent-delivery/check-merge-eligible.sh
+          set +e
+          OUT="$(bash scripts/agent-delivery/check-merge-eligible.sh "${{ steps.pr.outputs.number }}")"
+          code=$?
+          set -e
+          echo "$OUT"
+          echo "$OUT" >> "$GITHUB_STEP_SUMMARY"
+          eligible=false
+          if echo "$OUT" | grep -q '^merge_eligible=true'; then
+            eligible=true
+          fi
+          echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+
+      - name: Enable auto-merge
+        if: steps.scope.outputs.skip == 'false' && steps.gate.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr merge "${{ steps.pr.outputs.number }}" --auto --squash --delete-branch
+          gh pr comment "${{ steps.pr.outputs.number }}" --body "✅ Auto-merge enabled (agent delivery allowlist + CI green)."
+
+      - name: Comment when manual merge required
+        if: steps.scope.outputs.skip == 'false' && steps.gate.outputs.eligible != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment "${{ steps.pr.outputs.number }}" --body "ℹ️ Auto-merge skipped (deny path or not in allowlist). Review manually. See \`.delivery/config/merge-policy.json\`."

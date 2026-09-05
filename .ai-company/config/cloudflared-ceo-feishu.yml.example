@@ -1,0 +1,9 @@
+# Copy to cloudflared-ceo-feishu.yml after: cloudflared tunnel create ceo-feishu-approval
+# Do not commit credentials — keep in .ai-company/config/ (local only).
+
+tunnel: <TUNNEL_ID>
+credentials-file: /Users/you/.cloudflared/<TUNNEL_ID>.json
+ingress:
+  - hostname: feishu-ceo.example.com
+    service: http://127.0.0.1:9478
+  - service: http_status:404

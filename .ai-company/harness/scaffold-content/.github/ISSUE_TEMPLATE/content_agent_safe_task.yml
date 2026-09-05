@@ -1,0 +1,42 @@
+name: Content agent-safe task
+description: Draft / research / calendar work for Hermes (not auto-publish)
+title: "[content] "
+labels: ["agent-safe"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Content line** — Hermes runs on the **remote** machine only (see `.delivery/CONTENT-HQ-SPLIT.md`).
+        **CEO HQ** creates Issues and publishes; remote worker writes `drafts/` + PR.
+        Publishing to platforms requires CEO approval unless you add label `publish-ok` (human-only by default).
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should exist in the repo when done?
+      placeholder: "Draft 3 YouTube titles + outline under drafts/2026-08-29-topic/"
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance (checkboxes)
+      description: Verifiable deliverables in git, not chat-only
+      value: |
+        - [ ] Files committed under `drafts/` or `calendar/`
+        - [ ] No platform publish / API calls
+        - [ ] PR or branch `content/issue-N` opened
+    validations:
+      required: true
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Channel
+      options:
+        - youtube
+        - x
+        - tiktok
+        - newsletter
+        - other
+    validations:
+      required: true

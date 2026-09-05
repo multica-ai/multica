@@ -78,3 +78,17 @@ data/
 # Python (agent tooling)
 __pycache__/
 *.pyc
+.ai-company/config/local.env
+.ai-company/config/proxy.env
+.ai-company/config/feishu-webhook.url
+.ai-company/config/feishu-bot-notify.env
+.ai-company/config/feishu-approval.env
+.ai-company/config/repo-paths.local.yaml
+.ai-company/config/company-assets.local.yaml
+.ai-company/run-logs/
+.ai-company/config/*.env
+!.ai-company/config/*.env.example
+# 加密灾备包（若本机生成）永不进明文仓
+.ai-company/backups/
+*.age
+*.env.age

@@ -1,0 +1,52 @@
+# Optional: enable when api/openapi.yaml exists.
+# Requires: vacuum CLI in CI (or use pb33f/vacuum-action).
+name: API contract gate
+
+on:
+  pull_request:
+    paths:
+      - "api/**"
+      - "server/**"
+      - "apps/**"
+      - "packages/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  skip:
+    if: hashFiles('api/openapi.yaml') == ''
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No api/openapi.yaml — API contract gate skipped"
+
+  lint-openapi:
+    if: hashFiles('api/openapi.yaml') != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install vacuum
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/daveshanley/vacuum/main/bin/install.sh | bash
+          echo "$HOME/.vacuum/bin" >> "$GITHUB_PATH"
+
+      - name: Lint OpenAPI
+        run: vacuum lint api/openapi.yaml --fail-severity error
+
+  breaking-changes:
+    if: hashFiles('api/openapi.yaml') != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Breaking change check
+        uses: oasdiff/oasdiff-action/breaking@v0
+        with:
+          base: "origin/${{ github.base_ref }}:api/openapi.yaml"
+          revision: "HEAD:api/openapi.yaml"
+          fail-on: WARN

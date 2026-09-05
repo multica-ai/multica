@@ -1,0 +1,13 @@
+# Optional per-machine repo checkout paths (gitignored).
+# Copy to repo-paths.local.yaml
+# Keys: project id from project-registry.yaml, or owner/repo.
+# See docs/19-asset-registry.md
+
+beatscape: /Users/you/Desktop/MusicSaas
+landing-tool-a: /Users/you/Projects/landing-tool-a
+saas-stripe-mvp: /Users/you/Projects/saas-stripe-mvp
+json-site: /Users/you/Projects/json-site
+meigen-replica: /Users/you/Projects/meigen-replica
+openworld: /Users/you/Projects/openworld
+metadata-viewer: /Users/you/Projects/metadata-viewer
+# chenzh/MusicSaas: /Users/you/Desktop/MusicSaas

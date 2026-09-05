@@ -1,0 +1,27 @@
+{
+  "$schema": "Agent delivery auto-merge policy. Deny wins over allow.",
+  "autoMergeEnabled": true,
+  "requireLabels": ["agent-safe"],
+  "branchNamePrefix": "cursor-issue",
+  "requiredChecksRegexp": "^(frontend|backend|mobile-verify|check)$",
+  "allow": [
+    "docs/**",
+    "apps/docs/**",
+    "**/*.md",
+    "**/*.mdx",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*_test.go",
+    "packages/views/locales/**"
+  ],
+  "deny": [
+    "server/migrations/**",
+    "server/pkg/db/queries/**",
+    "packages/core/api/**",
+    "packages/core/paths/reserved-slugs.ts",
+    "server/internal/handler/reserved_slugs.json",
+    ".github/workflows/**",
+    "docker-compose*.yml",
+    "Makefile"
+  ]
+}

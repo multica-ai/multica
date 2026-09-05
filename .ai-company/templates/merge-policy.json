@@ -1,0 +1,22 @@
+{
+  "autoMergeEnabled": true,
+  "branchNamePrefix": "cursor/",
+  "allow": [
+    "docs/**",
+    "**/*.md",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*_test.go",
+    "packages/ui/**",
+    "packages/views/**/*.test.tsx"
+  ],
+  "deny": [
+    "server/migrations/**",
+    "**/auth/**",
+    "**/payment/**",
+    "packages/core/api/**",
+    "**/.env*",
+    "**/secrets/**",
+    "api/openapi.yaml"
+  ]
+}

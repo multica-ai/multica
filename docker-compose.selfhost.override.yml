@@ -1,0 +1,14 @@
+services:
+  backend:
+    dns:
+      - 223.5.5.5
+      - 8.8.8.8
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # 直连飞书 API；仅在宿主机代理(7897)稳定运行时再启用下面两行
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      NO_PROXY: "*"
