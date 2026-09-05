@@ -98,7 +98,7 @@ func (r *sessionBinder) StartSession(ctx context.Context, p engine.StartSessionP
 			BindingKey: p.Message.Source.ChatID, ChatType: p.Message.Source.ChatType,
 		},
 		Initiator: p.Sender,
-		Body:      p.Message.Text, MessageID: p.Message.MessageID,
+		Body:      p.Message.Text, CommandText: p.Message.CommandText, MessageID: p.Message.MessageID,
 		ClaimToken: p.ClaimToken, MediaPendingSeconds: p.MediaPendingSeconds,
 		PersistMessage: p.PersistMessage, HistoryBoundaryPending: p.HistoryBoundaryPending,
 		BeforeCommit: p.BeforeCommit,

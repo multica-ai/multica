@@ -392,8 +392,12 @@ type StartSessionInput struct {
 	EnsureSessionInput
 	// Initiator is the authenticated sender of the /new command. Sender in the
 	// embedded EnsureSessionInput remains the owner of the newly created Chat.
-	Initiator              pgtype.UUID
-	Body                   string
+	Initiator pgtype.UUID
+	Body      string
+	// CommandText is the current member-authored instruction before adapter
+	// context enrichment. It is used only for the initial Chat title; Body
+	// remains the canonical persisted/agent-visible content.
+	CommandText            string
 	MessageID              string
 	DedupMessageID         string
 	ThreadID               string
@@ -468,7 +472,7 @@ func (s *ChatSession) StartSession(ctx context.Context, in StartSessionInput) (S
 
 	title := ""
 	if in.PersistMessage {
-		title = deriveFirstMessageTitle(in.Body, in.MediaPendingSeconds > 0)
+		title = deriveFirstMessageTitle(chatTitleSource(in.Body, in.CommandText, false), in.MediaPendingSeconds > 0)
 	}
 	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
 		ID: dbid.NewV7(), WorkspaceID: in.WorkspaceID, AgentID: in.AgentID,
@@ -645,7 +649,7 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	becameVisible := cmd == nil && !hadPublicUserMessage && !currentSession.ExplicitlyCreatedAt.Valid
 	initializedTitle := ""
 	if cmd == nil {
-		title := deriveFirstMessageTitle(in.Body, in.MediaPendingSeconds > 0)
+		title := deriveFirstMessageTitle(chatTitleSource(in.Body, in.CommandText, in.ForceFresh), in.MediaPendingSeconds > 0)
 		if becameVisible {
 			if _, err := qtx.ReplaceImplicitChatSessionTitle(ctx, db.ReplaceImplicitChatSessionTitleParams{ID: in.SessionID, Title: title}); err != nil {
 				return AppendResult{}, fmt.Errorf("replace implicit chat title: %w", err)

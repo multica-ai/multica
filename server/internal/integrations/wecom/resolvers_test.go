@@ -89,7 +89,7 @@ func TestSessionBinder_StartSessionMapsWeComRouteAndFirstTurn(t *testing.T) {
 		Sender:       sender,
 		ClaimToken:   claim,
 		Message: channel.InboundMessage{
-			MessageID: "m1", Text: "first turn",
+			MessageID: "m1", Text: "first turn", CommandText: "current instruction",
 			Source: channel.Source{ChatID: "GROUP_1", ChatType: channel.ChatTypeGroup},
 		},
 		MediaPendingSeconds: 45,
@@ -102,7 +102,7 @@ func TestSessionBinder_StartSessionMapsWeComRouteAndFirstTurn(t *testing.T) {
 		t.Fatal("StartSession lost shared-session result")
 	}
 	got := fb.startIn
-	if got.BindingKey != "GROUP_1" || got.Body != "first turn" || got.MessageID != "m1" || got.ClaimToken != claim || got.MediaPendingSeconds != 45 || !got.PersistMessage {
+	if got.BindingKey != "GROUP_1" || got.Body != "first turn" || got.CommandText != "current instruction" || got.MessageID != "m1" || got.ClaimToken != claim || got.MediaPendingSeconds != 45 || !got.PersistMessage {
 		t.Fatalf("start mapping wrong: %+v", got)
 	}
 	if got.Sender != creator || got.Initiator != sender {
