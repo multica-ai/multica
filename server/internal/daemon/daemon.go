@@ -265,21 +265,59 @@ var (
 	// process PATH. Mirrors the detectAgentVersion hook above.
 	lookPath = exec.LookPath
 
-	// profilePathExecutable reports whether path points at an existing,
-	// non-directory file with at least one executable bit set. It is the
-	// gate appendProfileRuntimes uses before trusting a per-machine command
-	// path override (MUL-3284) — a stale or mistyped override must fall back
-	// to the PATH lookup rather than register a runtime that can't launch.
+	// profilePathExecutable reports whether path points at a file this host
+	// can actually launch. Unix uses the executable bits; Windows has none
+	// (Go reports 0666/0444 for regular files and only adds 0111 on
+	// directories), so a PATHEXT match is the equivalent gate. This is what
+	// appendProfileRuntimes uses before trusting a per-machine command path
+	// override (MUL-3284) — a stale or mistyped override must fall back to
+	// PATH rather than register a runtime that can't launch.
 	// Indirected as a package var so tests can assert override preference
 	// without staging a real executable on disk.
-	profilePathExecutable = func(path string) bool {
-		info, err := os.Stat(path)
-		if err != nil || info.IsDir() {
-			return false
-		}
-		return info.Mode().Perm()&0o111 != 0
-	}
+	profilePathExecutable = fileLooksLaunchable
 )
+
+// defaultWindowsPathext is used when PATHEXT is unset. It matches the
+// CreateProcess default closely enough to accept .exe/.cmd shims and reject
+// ordinary data files.
+const defaultWindowsPathext = ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC"
+
+// fileLooksLaunchable is the real profilePathExecutable implementation.
+func fileLooksLaunchable(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return extListedInPathext(path, os.Getenv("PATHEXT"))
+	}
+	return info.Mode().Perm()&0o111 != 0
+}
+
+// extListedInPathext reports whether path's extension is in a PATHEXT list.
+// Comparison is case-insensitive; a missing/empty list uses defaultWindowsPathext.
+func extListedInPathext(path, pathext string) bool {
+	if pathext == "" {
+		pathext = defaultWindowsPathext
+	}
+	ext := filepath.Ext(path)
+	if ext == "" {
+		return false
+	}
+	for _, candidate := range strings.Split(pathext, ";") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if candidate[0] != '.' {
+			candidate = "." + candidate
+		}
+		if strings.EqualFold(ext, candidate) {
+			return true
+		}
+	}
+	return false
+}
 
 // workspaceState tracks registered runtimes for a single workspace.
 //
