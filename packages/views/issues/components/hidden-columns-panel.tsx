@@ -1,5 +1,6 @@
 "use client";
 
+import { useDroppable } from "@dnd-kit/core";
 import { statusCategoryOfKey } from "@multica/core/issues";
 import { Eye, MoreHorizontal } from "lucide-react";
 import type { IssueStatusCategory } from "@multica/core/types";
@@ -13,6 +14,7 @@ import {
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { StatusIcon } from "./status-icon";
 import { useT } from "../../i18n";
+import { statusGroupId } from "../utils/drag-utils";
 
 /**
  * Single source of truth for the "Hidden columns" side panel rendered by
@@ -59,8 +61,17 @@ export function HiddenColumnRow({
 }) {
   const { t } = useT("issues");
   const viewStoreApi = useViewStoreApi();
+  const { setNodeRef, isOver } = useDroppable({
+    id: statusGroupId(status),
+    data: { status, isHiddenColumn: true },
+  });
   return (
-    <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
+    <div
+      ref={setNodeRef}
+      className={`flex items-center justify-between rounded-lg px-2.5 py-2 transition-colors ${
+        isOver ? "bg-accent/60 ring-2 ring-brand/25" : "hover:bg-muted/50"
+      }`}
+    >
       <div className="flex items-center gap-2">
         <StatusIcon status={status} className="h-3.5 w-3.5" />
         <span className="text-body">{t(($) => $.status[statusCategoryOfKey(status)])}</span>
