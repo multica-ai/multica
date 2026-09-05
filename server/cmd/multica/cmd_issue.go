@@ -38,6 +38,32 @@ import (
 // to a native command), so Chinese / Cyrillic / any non-ASCII content
 // arrives as `?`. Reading a UTF-8 file directly bypasses the shell's pipe
 // re-encoding entirely. See issues #2198 / #2236 / #2376.
+// expectedRevisionFlag is the name of the optimistic-concurrency precondition
+// flag shared by the mutating issue commands.
+const expectedRevisionFlag = "expected-revision"
+
+// applyExpectedRevision reads the optional --expected-revision precondition and,
+// when set, writes it into the request body as expected_revision. The server
+// then performs the compare-and-set atomically and rejects the write with a 409
+// revision conflict on mismatch; omitting the flag preserves the unconditional
+// write that existing scripts and older clients rely on. A non-positive value is
+// rejected here so the caller gets a clear message without a round-trip (the
+// server enforces the same rule).
+func applyExpectedRevision(cmd *cobra.Command, body map[string]any) error {
+	if !cmd.Flags().Changed(expectedRevisionFlag) {
+		return nil
+	}
+	rev, err := cmd.Flags().GetInt64(expectedRevisionFlag)
+	if err != nil {
+		return err
+	}
+	if rev < 1 {
+		return fmt.Errorf("--%s must be a positive integer", expectedRevisionFlag)
+	}
+	body["expected_revision"] = rev
+	return nil
+}
+
 func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) {
 	stdinFlag := flagName + "-stdin"
 	fileFlag := flagName + "-file"
@@ -546,10 +572,12 @@ func init() {
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
+	issueUpdateCmd.Flags().Int64(expectedRevisionFlag, 0, "Optimistic-concurrency precondition: only apply if the issue is still at this revision (from `issue get`), else fail with a revision conflict")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
+	issueStatusCmd.Flags().Int64(expectedRevisionFlag, 0, "Optimistic-concurrency precondition: only apply if the issue is still at this revision (from `issue get`), else fail with a revision conflict")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
@@ -560,6 +588,7 @@ func init() {
 	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
 	issueAssignCmd.Flags().Bool("no-start", false, "Assign ownership without starting an agent run")
+	issueAssignCmd.Flags().Int64(expectedRevisionFlag, 0, "Optimistic-concurrency precondition: only apply if the issue is still at this revision (from `issue get`), else fail with a revision conflict")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment list
@@ -1440,6 +1469,9 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	if noStart {
 		body["suppress_run"] = true
 	}
+	if err := applyExpectedRevision(cmd, body); err != nil {
+		return err
+	}
 
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
@@ -1512,6 +1544,10 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if err := applyExpectedRevision(cmd, body); err != nil {
+		return err
+	}
+
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
 		return fmt.Errorf("assign issue: %w", err)
@@ -1555,6 +1591,9 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	body := map[string]any{"status": status}
 	if noStart {
 		body["suppress_run"] = true
+	}
+	if err := applyExpectedRevision(cmd, body); err != nil {
+		return err
 	}
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {

@@ -989,3 +989,75 @@ func TestAuxiliaryVisibleMutationsAdvanceOwnerRevisionExactlyOnce(t *testing.T) 
 		t.Fatalf("duplicate status update = (%+v, %v), want unchanged revision 13", statusIssue, err)
 	}
 }
+
+// TestExpectedRevisionPreconditionReturnsStructuredConflict pins the wire
+// contract the CLI's --expected-revision precondition depends on: a matching
+// revision applies the write and advances the revision by one; a stale revision
+// is rejected with a 409 carrying a stable machine code and the current
+// revision, and leaves the issue untouched.
+func TestExpectedRevisionPreconditionReturnsStructuredConflict(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	issueID := insertWorkflowTestIssue(t, "precondition original", int(time.Now().UnixNano()%100000)+8_780_000)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	update := func(title string, expectedRevision int64) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
+			"title":             title,
+			"expected_revision": expectedRevision,
+		}), "id", issueID)
+		testHandler.UpdateIssue(w, req)
+		return w
+	}
+
+	// A matching precondition applies and reports the advanced revision.
+	ok := update("precondition applied", 1)
+	if ok.Code != http.StatusOK {
+		t.Fatalf("matching precondition = %d, want 200: %s", ok.Code, ok.Body.String())
+	}
+	var applied struct {
+		Title    string `json:"title"`
+		Revision int64  `json:"revision"`
+	}
+	if err := json.Unmarshal(ok.Body.Bytes(), &applied); err != nil {
+		t.Fatalf("decode applied response: %v", err)
+	}
+	if applied.Title != "precondition applied" || applied.Revision != 2 {
+		t.Fatalf("applied response = (%q, %d), want (precondition applied, 2)", applied.Title, applied.Revision)
+	}
+
+	// A stale precondition is rejected with a structured conflict.
+	stale := update("precondition stale", 1)
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("stale precondition = %d, want 409: %s", stale.Code, stale.Body.String())
+	}
+	var conflict struct {
+		Code             string `json:"code"`
+		ExpectedRevision int64  `json:"expected_revision"`
+		ActualRevision   int64  `json:"actual_revision"`
+	}
+	if err := json.Unmarshal(stale.Body.Bytes(), &conflict); err != nil {
+		t.Fatalf("decode conflict response: %v", err)
+	}
+	if conflict.Code != "revision_conflict" {
+		t.Fatalf("conflict code = %q, want revision_conflict", conflict.Code)
+	}
+	if conflict.ExpectedRevision != 1 || conflict.ActualRevision != 2 {
+		t.Fatalf("conflict revisions = (expected %d, actual %d), want (1, 2)", conflict.ExpectedRevision, conflict.ActualRevision)
+	}
+
+	// The stale write changed nothing and did not advance the revision.
+	var title string
+	var revision int64
+	if err := testPool.QueryRow(ctx, `SELECT title, revision FROM issue WHERE id = $1`, issueID).Scan(&title, &revision); err != nil {
+		t.Fatalf("reload issue: %v", err)
+	}
+	if title != "precondition applied" || revision != 2 {
+		t.Fatalf("issue after stale write = (%q, %d), want (precondition applied, 2)", title, revision)
+	}
+}

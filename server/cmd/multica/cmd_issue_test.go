@@ -2892,6 +2892,7 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().Int("stage", 0, "")
 	cmd.Flags().Float64("position", 0, "")
 	cmd.Flags().Bool("no-start", false, "")
+	cmd.Flags().Int64("expected-revision", 0, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -2902,6 +2903,7 @@ func newIssueAssignTestCmd() *cobra.Command {
 	cmd.Flags().String("to-id", "", "")
 	cmd.Flags().Bool("unassign", false, "")
 	cmd.Flags().Bool("no-start", false, "")
+	cmd.Flags().Int64("expected-revision", 0, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -2909,6 +2911,7 @@ func newIssueAssignTestCmd() *cobra.Command {
 func newIssueStatusTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "status"}
 	cmd.Flags().Bool("no-start", false, "")
+	cmd.Flags().Int64("expected-revision", 0, "")
 	cmd.Flags().String("output", "table", "")
 	return cmd
 }
@@ -4152,5 +4155,175 @@ func TestRunIssueRunsWarnsOnTruncatedFamilyRead(t *testing.T) {
 				t.Fatalf("warned = %v, want %v; stderr was %q", warned, tc.truncated, stderr)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Optimistic-concurrency precondition (--expected-revision)
+// ---------------------------------------------------------------------------
+
+// These tests pass testIssueUUID (a full UUID), which resolveIssueRef treats as
+// self-identifying, so they exercise only the mutating PUT without a resolver
+// round-trip.
+
+// captureUpdateBody starts a fake API server that records the PUT body sent to
+// the issue and replies with a minimal issue payload at the given revision.
+func captureUpdateBody(t *testing.T, revision int64, body *map[string]any) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/issues/"+testIssueUUID {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         testIssueUUID,
+			"identifier": "MUL-1",
+			"title":      "updated",
+			"status":     "in_progress",
+			"priority":   "none",
+			"revision":   revision,
+		})
+	}))
+	return srv
+}
+
+func TestRunIssueUpdateSendsExpectedRevision(t *testing.T) {
+	var body map[string]any
+	srv := captureUpdateBody(t, 5, &body)
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("title", "updated")
+	_ = cmd.Flags().Set("expected-revision", "4")
+	if _, err := captureStdout(t, func() error { return runIssueUpdate(cmd, []string{testIssueUUID}) }); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	got, ok := body["expected_revision"]
+	if !ok {
+		t.Fatalf("expected_revision missing from body: %#v", body)
+	}
+	if num, ok := got.(float64); !ok || int64(num) != 4 {
+		t.Fatalf("expected_revision = %#v, want 4", got)
+	}
+}
+
+func TestRunIssueUpdateOmitsExpectedRevisionWhenUnset(t *testing.T) {
+	var body map[string]any
+	srv := captureUpdateBody(t, 2, &body)
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("title", "updated")
+	if _, err := captureStdout(t, func() error { return runIssueUpdate(cmd, []string{testIssueUUID}) }); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	if _, ok := body["expected_revision"]; ok {
+		t.Fatalf("expected_revision must be omitted when the flag is unset: %#v", body)
+	}
+}
+
+func TestRunIssueStatusSendsExpectedRevision(t *testing.T) {
+	var body map[string]any
+	srv := captureUpdateBody(t, 3, &body)
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueStatusTestCmd()
+	_ = cmd.Flags().Set("expected-revision", "2")
+	if _, err := captureStdout(t, func() error {
+		return runIssueStatus(cmd, []string{testIssueUUID, "in_progress"})
+	}); err != nil {
+		t.Fatalf("runIssueStatus: %v", err)
+	}
+	if num, ok := body["expected_revision"].(float64); !ok || int64(num) != 2 {
+		t.Fatalf("expected_revision = %#v, want 2", body["expected_revision"])
+	}
+}
+
+func TestRunIssueAssignSendsExpectedRevision(t *testing.T) {
+	var body map[string]any
+	srv := captureUpdateBody(t, 3, &body)
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueAssignTestCmd()
+	_ = cmd.Flags().Set("unassign", "true")
+	_ = cmd.Flags().Set("expected-revision", "7")
+	if _, err := captureStdout(t, func() error { return runIssueAssign(cmd, []string{testIssueUUID}) }); err != nil {
+		t.Fatalf("runIssueAssign: %v", err)
+	}
+	if num, ok := body["expected_revision"].(float64); !ok || int64(num) != 7 {
+		t.Fatalf("expected_revision = %#v, want 7", body["expected_revision"])
+	}
+}
+
+func TestRunIssueUpdateRejectsNonPositiveExpectedRevision(t *testing.T) {
+	reached := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("title", "updated")
+	_ = cmd.Flags().Set("expected-revision", "0")
+	err := runIssueUpdate(cmd, []string{testIssueUUID})
+	if err == nil {
+		t.Fatalf("expected error for --expected-revision 0")
+	}
+	if !strings.Contains(err.Error(), "positive integer") {
+		t.Fatalf("error = %q, want it to mention a positive integer", err.Error())
+	}
+	if reached {
+		t.Fatalf("no request should be sent when --expected-revision is invalid")
+	}
+}
+
+func TestRunIssueUpdateSurfacesRevisionConflict(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]any{
+			"code":              "revision_conflict",
+			"error":             "issue revision is now 5, but this write expected 4; re-read it and retry with expected_revision=5",
+			"resource_type":     "issue",
+			"expected_revision": 4,
+			"actual_revision":   5,
+		})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("title", "updated")
+	_ = cmd.Flags().Set("expected-revision", "4")
+	err := runIssueUpdate(cmd, []string{testIssueUUID})
+	if err == nil {
+		t.Fatalf("expected a conflict error")
+	}
+	msg := cli.FormatError(err, false)
+	if !strings.Contains(msg, "revision") || !strings.Contains(msg, "5") {
+		t.Fatalf("conflict message = %q, want it to name the current revision", msg)
+	}
+	if code := cli.ExitCodeFor(err); code == 0 {
+		t.Fatalf("conflict exit code = %d, want non-zero", code)
 	}
 }
