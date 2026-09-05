@@ -36,6 +36,7 @@ func TestRunToResponseDoesNotReverseEngineerReasonCode(t *testing.T) {
 func TestDispatchBlockedFallbackMessageIsNonEnumerating(t *testing.T) {
 	codes := []DispatchReasonCode{
 		ReasonInvocationNotAllowed, ReasonTargetUnavailable, ReasonRuntimeOffline,
+		ReasonRuntimeAccessDenied,
 		ReasonAttributionBlocked, ReasonAlreadyActive, ReasonInternalError,
 		DispatchReasonCode("some_future_code"),
 	}

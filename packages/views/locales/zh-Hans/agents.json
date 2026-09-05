@@ -919,6 +919,7 @@
       "skill_bundle_unavailable": "无法下载智能体的 skill",
       "runtime_cli_timeout": "本地运行时 CLI 超时",
       "environment_prepare_failed": "无法准备执行环境",
+      "runtime_access_denied": "该智能体无法在其私有运行时上运行，暂时无法回复。请将该运行时设为公开，或将智能体重新绑定/复制到其所有者可用的运行时。",
       "invalid_task_identity": "运行身份不匹配",
       "agent_error_provider_auth_or_access": "提供商认证失败",
       "agent_error_provider_quota_limit": "提供商配额已用尽",

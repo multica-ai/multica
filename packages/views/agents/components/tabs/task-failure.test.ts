@@ -113,6 +113,13 @@ describe("failureReasonLabel", () => {
     );
   });
 
+  it("maps runtime access denial to actionable recovery copy", () => {
+    const label = failureReasonLabel("runtime_access_denied", enT);
+    expect(label).toMatch(/make the runtime public/i);
+    expect(label).toMatch(/rebind\/copy/i);
+    expect(label).not.toBe("Task identity mismatch");
+  });
+
   it("covers operational reasons emitted outside the canonical taxonomy", () => {
     expect(failureReasonLabel("agent_fallback_message", enT)).toBe(
       "Agent returned a fallback message",

@@ -812,6 +812,7 @@
       "skill_bundle_unavailable": "エージェントのスキルをダウンロードできませんでした",
       "runtime_cli_timeout": "ローカルランタイム CLI がタイムアウトしました",
       "environment_prepare_failed": "実行環境を準備できませんでした",
+      "runtime_access_denied": "このエージェントはプライベートランタイムで実行できないため、返信できませんでした。ランタイムを公開にするか、所有者が利用できるランタイムへエージェントを再設定/コピーしてください。",
       "invalid_task_identity": "実行のエージェント情報が一致しません",
       "agent_error_provider_auth_or_access": "プロバイダーの認証に失敗しました",
       "agent_error_provider_quota_limit": "プロバイダーのクォータを使い切りました",

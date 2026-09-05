@@ -471,6 +471,14 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });
 
+  it("renders dedicated recovery copy for persisted runtime access denial", async () => {
+    renderFailure("runtime_access_denied");
+    expect(
+      await screen.findByText(enChat.message_list.failure.runtime_access_denied),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
+  });
+
   it("renders dedicated copy for a refined reason the map names", async () => {
     renderFailure("agent_error.provider_network");
     expect(

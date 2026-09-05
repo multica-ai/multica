@@ -80,6 +80,7 @@
     "run_blocked_invocation_not_allowed": "未触发——你没有该自动化所用智能体的使用权限",
     "run_blocked_runtime_offline": "未触发——该智能体的运行时已离线",
     "run_blocked_agent_runtime_required": "未触发——该智能体未绑定运行时，绑定后才能运行",
+    "run_blocked_runtime_access_denied": "未触发——该智能体无法在其私有运行时上运行。请将该运行时设为公开，或重新绑定/复制智能体",
     "run_blocked_target_unavailable": "未触发——该智能体不可用",
     "run_blocked_attribution": "未触发——无法确定本次运行的负责成员",
     "run_blocked_already_active": "未触发——最近已有一次运行覆盖了本次",
