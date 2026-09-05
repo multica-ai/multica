@@ -37,7 +37,7 @@ export function TaskTokensTab({ agent }: { agent: Agent }) {
   const { t, i18n } = useT("agents");
   const qc = useQueryClient();
 
-  const { data } = useQuery({
+  const { data, isPending, isError } = useQuery({
     queryKey: agentTaskTokensKey(agent.id),
     queryFn: () => api.getAgentTaskTokens(agent.id),
   });
@@ -68,7 +68,16 @@ export function TaskTokensTab({ agent }: { agent: Agent }) {
       return api.updateAgentTaskTokens(agent.id, next);
     },
     onSuccess: (result) => {
-      qc.setQueryData(agentTaskTokensKey(agent.id), result);
+      // The client degrades a response that fails schema validation to the
+      // EMPTY shape (agent_id ""). Writing that over the cache would wipe the
+      // catalog — hiding the tab mid-edit — and hand the next queued toggle an
+      // empty set to build its PUT from, the lost write this tab guards
+      // against. The server did apply the change; refetch it instead.
+      if (result.agent_id === "") {
+        qc.invalidateQueries({ queryKey: agentTaskTokensKey(agent.id) });
+      } else {
+        qc.setQueryData(agentTaskTokensKey(agent.id), result);
+      }
       toast.success(t(($) => $.tab_body.task_tokens.saved));
     },
     onError: (err) => {
@@ -86,6 +95,18 @@ export function TaskTokensTab({ agent }: { agent: Agent }) {
     [mutation],
   );
 
+  // "Nothing configured" is a claim about the deployment; a request still in
+  // flight or one that failed must not be reported as that fact.
+  if (isPending) {
+    return null;
+  }
+  if (isError) {
+    return (
+      <p className="text-body text-muted-foreground">
+        {t(($) => $.tab_body.task_tokens.load_failed)}
+      </p>
+    );
+  }
   if (available.length === 0) {
     return (
       <p className="text-body text-muted-foreground">

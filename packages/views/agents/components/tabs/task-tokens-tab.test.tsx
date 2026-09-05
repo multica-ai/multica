@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { createQueryClient } from "@multica/core/query-client";
 import { setApiInstance } from "@multica/core/api";
@@ -45,8 +45,7 @@ function installApi(overrides: Record<string, unknown> = {}) {
   return { getAgentTaskTokens, updateAgentTaskTokens };
 }
 
-function renderTab() {
-  const queryClient = createQueryClient();
+function renderTab(queryClient: QueryClient = createQueryClient()) {
   render(
     <I18nProvider
       locale="en"
@@ -162,6 +161,43 @@ describe("TaskTokensTab", () => {
     release(undefined);
     await waitFor(() => expect(app).not.toHaveAttribute("aria-disabled", "true"));
     expect(erp).not.toHaveAttribute("aria-disabled", "true");
+  });
+
+  // The client degrades a save response that fails schema validation to the
+  // EMPTY shape. That must not be written over known-good state: it would
+  // hide the tab mid-edit and give the next queued toggle an empty set to
+  // build its PUT from — a lost write, on a success toast.
+  it("refetches instead of caching a malformed save response", async () => {
+    const { getAgentTaskTokens } = installApi({
+      updateAgentTaskTokens: vi
+        .fn()
+        .mockResolvedValue({ agent_id: "", available: [], enabled: [] }),
+    });
+    renderTab();
+
+    const app = await screen.findByRole("checkbox", { name: /APP/ });
+    await userEvent.click(app);
+
+    await waitFor(() => expect(getAgentTaskTokens).toHaveBeenCalledTimes(2));
+    // The catalog is still there, served by the refetch, not by the EMPTY set.
+    expect(screen.getByText("ERP")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/no identity tokens configured/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reports a failed catalog request rather than claiming nothing is configured", async () => {
+    installApi({
+      getAgentTaskTokens: vi.fn().mockRejectedValue(new Error("boom")),
+    });
+    renderTab(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+
+    expect(
+      await screen.findByText(/could not load identity tokens/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/no identity tokens configured/i),
+    ).not.toBeInTheDocument();
   });
 
   it("shows the unconfigured notice when the catalog is empty", async () => {

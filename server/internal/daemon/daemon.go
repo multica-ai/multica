@@ -29,6 +29,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
@@ -7988,7 +7989,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
 		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
 	}
-	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
+	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, task.TaskTokens, d.logger); err != nil {
 		return TaskResult{}, err
 	}
 	// The overlay is authoritative once built, so nothing on the command line
@@ -9531,15 +9532,9 @@ func socketSafeTempBaseDir() string {
 // configured custom_env. This prevents accidental or malicious override of
 // daemon-internal variables and critical system paths.
 func isBlockedEnvKey(key string) bool {
-	upper := strings.ToUpper(key)
-	if strings.HasPrefix(upper, "MULTICA_") {
-		return true
-	}
-	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "REASONIX_STATE_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
-		return true
-	}
-	return false
+	// The list lives in pkg/protocol so the server's task-token catalog can
+	// reject the same names at boot instead of the daemon dropping them here.
+	return protocol.IsDaemonReservedEnvName(key)
 }
 
 // layerCustomEnvAndHermesHome applies the agent's custom_env onto the child env
@@ -9798,14 +9793,20 @@ func codexShellAuthorizedCustomEnvNames(customEnv map[string]string) []string {
 // credentials.
 // Failure is fatal: launching with an unowned or malformed policy could either
 // drop the task-scoped token again or expose inherited daemon credentials.
-func configureCodexTaskShellEnvironment(provider, codexHome string, inherited []string, agentEnv, agentCustomEnv map[string]string, logger *slog.Logger) error {
+func configureCodexTaskShellEnvironment(provider, codexHome string, inherited []string, agentEnv, agentCustomEnv, taskTokens map[string]string, logger *slog.Logger) error {
 	if provider != "codex" {
 		return nil
 	}
 	if strings.TrimSpace(codexHome) == "" {
 		return errors.New("configure Codex shell environment: task CODEX_HOME is missing")
 	}
-	authorizedExplicit := codexShellAuthorizedCustomEnvNames(agentCustomEnv)
+	// Server-issued task identity tokens are credential-shaped by name
+	// (BOT_TOKEN_*), so Codex's default KEY/SECRET/TOKEN exclusion would drop
+	// them from every shell tool unless they are authorized here exactly like
+	// the agent's own custom_env credentials. The server has already audited
+	// their issuance; an agent that then cannot present them is the false
+	// "issued" outcome the capability gate exists to prevent.
+	authorizedExplicit := append(codexShellAuthorizedCustomEnvNames(agentCustomEnv), codexShellAuthorizedCustomEnvNames(taskTokens)...)
 	includeOnly := execenv.CodexShellEnvAllowlist(inherited, agentEnv, authorizedExplicit)
 	configPath := filepath.Join(codexHome, "config.toml")
 	if err := execenv.EnsureCodexShellEnvPolicyConfig(configPath, includeOnly, logger); err != nil {

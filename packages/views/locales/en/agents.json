@@ -520,6 +520,7 @@
       "description": "Choose which internal systems this agent may act on. Tokens are signed per run for the person who triggered it, and are never stored.",
       "docs_link": "Integration guide",
       "unconfigured": "This deployment has no identity tokens configured.",
+      "load_failed": "Could not load identity tokens. Try again shortly.",
       "injected_as": "Injected as {{env}}",
       "saved": "Identity tokens updated",
       "save_failed": "Could not update identity tokens"

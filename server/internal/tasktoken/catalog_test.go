@@ -109,6 +109,12 @@ func TestParseCatalogRejects(t *testing.T) {
 		{"env leading digit", `[{"id":"a","label":"A","env":"1TOKEN","claims":{"sub":"x"}}]`, "env must match"},
 		{"reserved env prefix", `[{"id":"a","label":"A","env":"MULTICA_X","claims":{"sub":"x"}}]`, "reserved"},
 		{"reserved env name", `[{"id":"a","label":"A","env":"PATH","claims":{"sub":"x"}}]`, "reserved"},
+		// From the shared daemon list (pkg/protocol): the daemon would drop
+		// this at injection, so it must fail at boot instead.
+		{"reserved env name shared with daemon", `[{"id":"a","label":"A","env":"CURSOR_MCP_AUTH_SOURCE","claims":{"sub":"x"}}]`, "reserved"},
+		// Not on the daemon blocklist, but overwritten by the Hermes overlay
+		// after tokens are layered — a token there never reaches the agent.
+		{"reserved env name hermes home", `[{"id":"a","label":"A","env":"HERMES_HOME","claims":{"sub":"x"}}]`, "reserved"},
 		{"empty claims", `[{"id":"a","label":"A","env":"TOKEN_A","claims":{}}]`, "claims is required"},
 		{"bad algorithm", `[{"id":"a","label":"A","env":"TOKEN_A","algorithm":"HS256","claims":{"sub":"x"}}]`, "unsupported algorithm"},
 		{"bad ttl", `[{"id":"a","label":"A","env":"TOKEN_A","ttl":"soon","claims":{"sub":"x"}}]`, "invalid ttl"},

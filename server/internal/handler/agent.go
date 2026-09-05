@@ -506,10 +506,11 @@ type AgentTaskResponse struct {
 	InitiatorID    string `json:"initiator_id,omitempty"`    // user UUID (member) or agent UUID
 	InitiatorName  string `json:"initiator_name,omitempty"`  // display name of the initiator
 	InitiatorEmail string `json:"initiator_email,omitempty"` // member email; empty for agent initiators
-	// TaskTokens are identity tokens signed for this run's accountable human,
-	// keyed by the environment variable each should be injected under. Empty
-	// unless the deployment configured a catalog AND this agent enabled at
-	// least one template AND the run has a precise accountable human.
+	// TaskTokens are identity tokens signed for the human who asked for this
+	// run, keyed by the environment variable each should be injected under.
+	// Empty unless the deployment configured a catalog AND this agent enabled
+	// at least one template AND the run's delegation chain began with a member
+	// acting (see taskTokenIdentityUser) who is still a workspace member.
 	//
 	// Unlike Initiator* above — which is an attested identity for the brief —
 	// these ARE credentials, scoped to systems outside Multica. The agent's

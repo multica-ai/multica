@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/tasktoken"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // agentTaskTokensActivityUpdated is the audit action for a change to which
@@ -205,36 +206,85 @@ func (h *Handler) UpdateAgentTaskTokens(w http.ResponseWriter, r *http.Request) 
 // run, and whether signing is permitted at all.
 //
 // The gate reads originator_user_id — the AUTHORIZATION column — and never
-// accountable_user_id. The two are not interchangeable here (migration 185):
-// accountable_user_id is an audit/visibility output that degrades to *some*
-// human for every run, while originator_user_id is NULL exactly when no human
-// lent their authority. An autopilot schedule firing at 3am carries
-// originator_source = trigger_owner, which attribution.Precise() reports true
-// because the audit label is compliance-grade — but its originator is NULL by
-// construction, and signing there would hand the trigger's long-departed
-// creator's full permissions to a run they did not request and are not
-// watching. That is the same refusal owner_fallback already gets.
+// accountable_user_id (migration 185: the latter is an audit output that
+// degrades to *some* human for every run). But since MUL-6951 the originator
+// alone is not enough either: an armed autopilot trigger now carries its
+// creator's authorization inside Multica, so a schedule firing at 3am has a
+// non-NULL originator and a precise trigger_owner label, and every delegation
+// / comment_source hop below it copies that same human under a hop label. Read
+// by value, such a run is indistinguishable from one the person asked for.
 //
-// Precise() is still required on top, so a source that names an authorizing
-// human only in hindsight (backfill) does not mint a live credential. It is a
-// second condition, never the deciding one.
-func taskTokenIdentityUser(task *db.AgentTaskQueue) (pgtype.UUID, bool) {
+// So the condition is stated as what it means: the chain BEGAN with a member
+// acting (its root label is direct_human). A hop label is followed back to the
+// run that actually resolved the human, through the same lineage walk the
+// delegated-subscriber rule uses (GetDelegatedSubscriptionFacts, MUL-7051). It
+// is a whitelist: trigger_owner and rule_owner roots are refused, because
+// lending a person's full permissions in an external system to an unattended
+// run they are not watching is a different grant from letting the automation
+// invoke an agent here; backfill, owner_fallback and unattributed roots never
+// carried a live authorization; and a lineage the walk cannot prove (a deleted
+// ancestor, or the 32-hop limit) reports a hop label and is refused rather
+// than assumed.
+func (h *Handler) taskTokenIdentityUser(ctx context.Context, task *db.AgentTaskQueue, workspaceID pgtype.UUID) (pgtype.UUID, bool) {
 	if !task.OriginatorUserID.Valid {
 		return pgtype.UUID{}, false
 	}
-	if !attribution.Source(task.OriginatorSource.String).Precise() {
+	root := attribution.Source(task.OriginatorSource.String)
+	if root == attribution.SourceDelegation || root == attribution.SourceCommentSource {
+		facts, err := h.Queries.GetDelegatedSubscriptionFacts(ctx, db.GetDelegatedSubscriptionFactsParams{
+			OriginTaskID: task.ID,
+			WorkspaceID:  workspaceID,
+		})
+		if err != nil {
+			slog.Warn("task token: delegation lineage lookup failed; issuing none",
+				"task_id", uuidToString(task.ID), "error", err)
+			return pgtype.UUID{}, false
+		}
+		root = attribution.Source(facts.RootSource.String)
+	}
+	if root != attribution.SourceDirectHuman {
 		return pgtype.UUID{}, false
 	}
 	return task.OriginatorUserID, true
 }
 
+// issueClaimedTaskTokens is the claim-path entry point. It runs only once the
+// claim has been finalized — the task token and delivery receipt committed,
+// nothing left that can requeue or cancel the task — because issuing writes an
+// audit row stating that a credential was minted in a person's name. Signing
+// any earlier meant a later claim failure (skill load, chat input, remote MCP
+// token, finalize) requeued the task with that row already standing and a live
+// JWT nobody received; the next claim then minted a second one.
+//
+// Gated on the daemon advertising that it injects the tokens: an older daemon
+// json-skips the response field, so issuing for it would record an issuance
+// nothing received. A missing row is recoverable; a false one is not.
+func (h *Handler) issueClaimedTaskTokens(r *http.Request, task *db.AgentTaskQueue, workspaceID string) map[string]string {
+	if h.TaskTokenIssuer == nil || !requestHasClientCapability(r, protocol.DaemonCapabilityTaskIdentityTokensV1) {
+		return nil
+	}
+	agent, err := h.Queries.GetAgent(r.Context(), task.AgentID)
+	if err != nil {
+		slog.Warn("task token: agent lookup failed; issuing none",
+			"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID), "error", err)
+		return nil
+	}
+	return h.issueTaskTokens(r.Context(), task, agent, workspaceID)
+}
+
 // issueTaskTokens signs the identity tokens this run's agent has enabled.
 //
-// The identity is the human who authorized the run (see taskTokenIdentityUser).
-// When originator_user_id is set the attribution invariant makes it equal to
-// accountable_user_id, so the token still speaks for the person the activity UI
-// shows (MUL-4302) — it just refuses the sources where the two diverge, which
-// are precisely the runs nobody authorized.
+// The identity is the human who authorized the run at the root of its chain
+// (see taskTokenIdentityUser). When originator_user_id is set the attribution
+// invariant makes it equal to accountable_user_id, so the token still speaks
+// for the person the activity UI shows (MUL-4302); the gate only narrows WHICH
+// of those runs may borrow that person's identity outside Multica.
+//
+// The human must also still be a member of the workspace at issue time.
+// Attribution is decided at enqueue, signing at claim, and a queue waiting on
+// an offline runtime can hold a run for days — long enough for the person who
+// asked to have been offboarded. Their authority to have the run executed is
+// the enqueue-time question; a credential in their name is a now question.
 //
 // Returns nil on every degraded path. Failing to obtain a token is an
 // "unauthorized" condition for whatever wanted it, never a task failure, so
@@ -249,9 +299,9 @@ func (h *Handler) issueTaskTokens(ctx context.Context, task *db.AgentTaskQueue, 
 	}
 
 	src := attribution.Source(task.OriginatorSource.String)
-	identityID, authorized := taskTokenIdentityUser(task)
+	identityID, authorized := h.taskTokenIdentityUser(ctx, task, agent.WorkspaceID)
 	if !authorized {
-		slog.Info("task token: run carries no human authorization; issuing none",
+		slog.Info("task token: run was not asked for by a member at the root of its chain; issuing none",
 			"task_id", uuidToString(task.ID),
 			"originator_source", task.OriginatorSource.String)
 		return nil
@@ -260,6 +310,15 @@ func (h *Handler) issueTaskTokens(ctx context.Context, task *db.AgentTaskQueue, 
 	user, err := h.Queries.GetUser(ctx, identityID)
 	if err != nil {
 		slog.Warn("task token: authorizing user lookup failed; issuing none",
+			"task_id", uuidToString(task.ID),
+			"user_id", uuidToString(identityID), "error", err)
+		return nil
+	}
+	if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      identityID,
+		WorkspaceID: agent.WorkspaceID,
+	}); err != nil {
+		slog.Warn("task token: authorizing user is no longer a workspace member; issuing none",
 			"task_id", uuidToString(task.ID),
 			"user_id", uuidToString(identityID), "error", err)
 		return nil

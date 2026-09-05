@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const (
@@ -28,14 +30,15 @@ const (
 // envNamePattern is the shell-safe environment variable name form.
 var envNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
-// reservedEnvNames are names the daemon owns. The daemon blocks these again
-// at injection time (isBlockedEnvKey); rejecting them here turns a silently
-// dropped variable into a startup error the operator can act on.
-var reservedEnvNames = map[string]struct{}{
-	"HOME": {}, "PATH": {}, "USER": {}, "SHELL": {}, "TERM": {},
-	"TMPDIR": {}, "TMP": {}, "TEMP": {},
-	"CODEX_HOME": {}, "REASONIX_STATE_HOME": {}, "CURSOR_DATA_DIR": {},
-	"OPENCLAW_CONFIG_PATH": {}, "OPENCLAW_INCLUDE_ROOTS": {}, "HERMES_HOME": {},
+// reservedEnvName reports whether the daemon would refuse or overwrite a
+// variable of this name, so a template using it is rejected at startup rather
+// than silently dropped at injection time. The daemon's own blocklist is the
+// shared protocol.IsDaemonReservedEnvName; HERMES_HOME is not on it (the
+// daemon deliberately lets custom_env set it) but is overwritten by the
+// per-task Hermes overlay after tokens are layered, so a token under that
+// name would never reach the agent either.
+func reservedEnvName(name string) bool {
+	return protocol.IsDaemonReservedEnvName(name) || name == "HERMES_HOME"
 }
 
 // reservedClaims are written by the signer itself and must not be templated.
@@ -176,10 +179,10 @@ func validateEntry(e templateJSON) (Template, error) {
 	if !envNamePattern.MatchString(tpl.Env) {
 		return Template{}, fmt.Errorf("env must match %s, got %q", envNamePattern, tpl.Env)
 	}
-	if strings.HasPrefix(tpl.Env, "MULTICA_") {
+	if strings.HasPrefix(tpl.Env, protocol.DaemonReservedEnvPrefix) {
 		return Template{}, fmt.Errorf("env %q is reserved: the MULTICA_ prefix belongs to the daemon", tpl.Env)
 	}
-	if _, bad := reservedEnvNames[tpl.Env]; bad {
+	if reservedEnvName(tpl.Env) {
 		return Template{}, fmt.Errorf("env %q is reserved by the daemon", tpl.Env)
 	}
 
@@ -241,10 +244,10 @@ func ValidateEnvName(name string) error {
 	if !envNamePattern.MatchString(name) {
 		return fmt.Errorf("env name must match %s, got %q", envNamePattern, name)
 	}
-	if strings.HasPrefix(name, "MULTICA_") {
+	if strings.HasPrefix(name, protocol.DaemonReservedEnvPrefix) {
 		return fmt.Errorf("env name %q is reserved: the MULTICA_ prefix belongs to the daemon", name)
 	}
-	if _, bad := reservedEnvNames[name]; bad {
+	if reservedEnvName(name) {
 		return fmt.Errorf("env name %q is reserved by the daemon", name)
 	}
 	return nil

@@ -508,6 +508,7 @@
       "description": "选择该智能体可以访问哪些内部系统。令牌按次签发，代表触发这次运行的人，不会被保存。",
       "docs_link": "对接文档",
       "unconfigured": "当前部署未配置身份令牌。",
+      "load_failed": "无法加载身份令牌，请稍后重试。",
       "injected_as": "注入为 {{env}}",
       "saved": "身份令牌已更新",
       "save_failed": "身份令牌更新失败"

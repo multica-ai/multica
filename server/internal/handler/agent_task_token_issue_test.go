@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -16,10 +18,14 @@ import (
 // TestIssueTaskTokensBySource is the regression fence for the issuing gate.
 //
 // Every row sets accountable_user_id — the audit column resolves a human for
-// almost every run — so what the table really pins is the other half: whether
-// originator_user_id, the authorization column, carries a human. A run that
-// nobody authorized must not mint a credential in anyone's name, however
-// precise its audit label is.
+// almost every run — and the `authorized` column sets originator_user_id, the
+// authorization column. Neither alone decides. The gate signs only when the
+// run's chain BEGINS with a member acting (root label direct_human): since
+// MUL-6951 an armed autopilot carries its creator's authorization inside
+// Multica, so a schedule fire has a non-NULL originator too, and that must not
+// become a credential in the creator's name. Rows here have no lineage, so hop
+// labels (delegation / comment_source) are refused as unproven; the positive
+// hop cases live in TestIssueTaskTokensFollowsDelegationToChainRoot.
 func TestIssueTaskTokensBySource(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -34,18 +40,24 @@ func TestIssueTaskTokensBySource(t *testing.T) {
 		authorized bool
 		wantToken  bool
 	}{
-		// A member's own action, or an agent acting under one. originator and
-		// accountable name the same person (migration 185's invariant).
+		// A member's own action. originator and accountable name the same
+		// person (migration 185's invariant).
 		{"direct_human", "direct_human", true, true},
-		{"delegation", "delegation", true, true},
-		{"comment_source", "comment_source", true, true},
-		// Autopilot fires on its own. accountable_user_id still names whoever
-		// armed the trigger — that is what the activity UI shows — but
-		// originator_user_id is NULL by construction, so nothing may speak in
-		// their name. Signing here would hand an unattended 3am run that
-		// person's full permissions in the receiving system.
-		{"trigger_owner", "trigger_owner", false, false},
+		// Hop labels with no delegated_from_task_id to follow: the chain root
+		// cannot be proven, so the gate refuses rather than assumes.
+		{"delegation_without_lineage", "delegation", true, false},
+		{"comment_source_without_lineage", "comment_source", true, false},
+		// Autopilot fires on its own. Since MUL-6951 the trigger's creator IS
+		// the originator (arming a trigger authorizes the run inside Multica),
+		// so the authorized=true row is what production now emits — and it
+		// still must not mint a credential: that would hand an unattended 3am
+		// run that person's full permissions in the receiving system, on input
+		// they never saw. The NULL-originator rows are the pre-MUL-6951 shape
+		// and the rule_owner fallback, refused for the same reason.
+		{"trigger_owner", "trigger_owner", true, false},
+		{"trigger_owner_without_originator", "trigger_owner", false, false},
 		{"rule_owner", "rule_owner", false, false},
+		{"rule_owner_with_originator", "rule_owner", true, false},
 		// Degraded audit sources never carried authorization to begin with.
 		{"owner_fallback", "owner_fallback", false, false},
 		{"backfill", "backfill", false, false},
@@ -86,6 +98,88 @@ func TestIssueTaskTokensBySource(t *testing.T) {
 				t.Fatalf("issueTaskTokens() = %v, want none for an unauthorized %q run", got, tc.source)
 			}
 		})
+	}
+}
+
+// TestIssueTaskTokensFollowsDelegationToChainRoot pins the lineage half of
+// the gate. Attribution COPIES the originator across every agent hop, so a
+// run two hops below a member's comment and one two hops below an armed
+// schedule carry the same originator_user_id and the same "delegation" /
+// "comment_source" labels. Only the chain root's label separates them, and it
+// is what decides.
+func TestIssueTaskTokensFollowsDelegationToChainRoot(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	withTaskTokenCatalog(t, taskTokenTestCatalog)
+
+	cases := []struct {
+		name       string
+		rootSource string
+		wantToken  bool
+	}{
+		{"member_asked", "direct_human", true},
+		{"armed_autopilot", "trigger_owner", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			human := testutil.Cols{
+				"runtime_id":          handlerTestRuntimeID(t),
+				"originator_user_id":  testUserID,
+				"accountable_user_id": testUserID,
+			}
+			// One agent per hop: the lineage walk re-joins agent for its
+			// tenant guard, and the queue's own constraints are happier with
+			// one queued run per agent.
+			rootAgent := dbfx.Agent(t, "chain-root-"+tc.name, handlerTestRuntimeID(t), testutil.Cols{"owner_id": testUserID})
+			rootID := dbfx.Task(t, rootAgent, testutil.Cols{"originator_source": tc.rootSource}, human)
+			hopAgent := dbfx.Agent(t, "chain-hop-"+tc.name, handlerTestRuntimeID(t), testutil.Cols{"owner_id": testUserID})
+			hopID := dbfx.Task(t, hopAgent, testutil.Cols{"originator_source": "delegation", "delegated_from_task_id": rootID}, human)
+			leafAgent := dbfx.Agent(t, "chain-leaf-"+tc.name, handlerTestRuntimeID(t), testutil.Cols{
+				"owner_id":             testUserID,
+				"task_token_templates": `["erp"]`,
+			})
+			leafID := dbfx.Task(t, leafAgent, testutil.Cols{"originator_source": "comment_source", "delegated_from_task_id": hopID}, human)
+
+			task := loadTaskRow(t, leafID)
+			agent := loadAgentRow(t, leafAgent)
+			got := testHandler.issueTaskTokens(context.Background(), &task, agent, testWorkspaceID)
+			if tc.wantToken {
+				if got["BOT_TOKEN_ERP"] == "" {
+					t.Fatalf("issueTaskTokens() = %v, want a token for a chain rooted in %q", got, tc.rootSource)
+				}
+			} else if len(got) != 0 {
+				t.Fatalf("issueTaskTokens() = %v, want none for a chain rooted in %q", got, tc.rootSource)
+			}
+		})
+	}
+}
+
+// TestIssueTaskTokensRefusesNonMember pins the membership check: attribution
+// is decided at enqueue, signing at claim, and a queue can wait days for an
+// offline runtime — long enough for the person who asked to be offboarded.
+func TestIssueTaskTokensRefusesNonMember(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	withTaskTokenCatalog(t, taskTokenTestCatalog)
+	formerID := dbfx.User(t, "Former Member",
+		fmt.Sprintf("former-member-%d@example.com", time.Now().UnixNano()))
+	agentID := dbfx.Agent(t, "issue-former-member", handlerTestRuntimeID(t), testutil.Cols{
+		"owner_id":             testUserID,
+		"task_token_templates": `["erp"]`,
+	})
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":          handlerTestRuntimeID(t),
+		"originator_source":   "direct_human",
+		"originator_user_id":  formerID,
+		"accountable_user_id": formerID,
+	})
+
+	task := loadTaskRow(t, taskID)
+	agent := loadAgentRow(t, agentID)
+	if got := testHandler.issueTaskTokens(context.Background(), &task, agent, testWorkspaceID); len(got) != 0 {
+		t.Errorf("issueTaskTokens() = %v, want none for an originator who is not a workspace member", got)
 	}
 }
 
