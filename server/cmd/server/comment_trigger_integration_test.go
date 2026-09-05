@@ -9,14 +9,19 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/auth"
 )
 
-// authRequestWithAgent makes an authenticated request with X-Agent-ID +
-// X-Task-ID headers, causing the server to resolve the actor as an agent
-// instead of a member. resolveActor requires both headers to grant agent
-// identity (defense against header forgery — see #2359 PR review), so we
-// seed a queued task for the agent on demand and pass its UUID as
-// X-Task-ID. The task is best-effort cleaned up via test teardown elsewhere.
+// authRequestWithAgent makes a request authenticated as an agent, so the
+// server resolves the actor as an agent instead of a member. It does this
+// the same way production does: by presenting a genuine mat_ task token.
+// The Auth middleware re-stamps X-Agent-ID / X-Task-ID / X-Workspace-ID
+// from the bound token row, so we deliberately do NOT set those headers
+// ourselves — the middleware strips any client-supplied copies precisely
+// so a member cannot forge an agent identity (see middleware/auth.go).
+// Posing as an agent therefore requires holding a real task token, exactly
+// like a daemon-injected agent process.
 func authRequestWithAgent(t *testing.T, method, path string, body any, agentID string) *http.Response {
 	t.Helper()
 	var bodyReader io.Reader
@@ -29,10 +34,7 @@ func authRequestWithAgent(t *testing.T, method, path string, body any, agentID s
 		t.Fatalf("failed to create request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+testToken)
-	req.Header.Set("X-Workspace-ID", testWorkspaceID)
-	req.Header.Set("X-Agent-ID", agentID)
-	req.Header.Set("X-Task-ID", ensureAgentTask(t, agentID))
+	req.Header.Set("Authorization", "Bearer "+mintTaskToken(t, agentID, ensureAgentTask(t, agentID)))
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -41,10 +43,30 @@ func authRequestWithAgent(t *testing.T, method, path string, body any, agentID s
 	return r
 }
 
+// mintTaskToken inserts a real mat_ task token bound to
+// (agent, task, workspace=testWorkspaceID, user=testUserID) and returns the
+// plaintext token. This mirrors what the daemon does at task-claim time and
+// is what lets tests authenticate as an agent now that the Auth middleware
+// strips forged X-Agent-ID / X-Task-ID headers.
+func mintTaskToken(t *testing.T, agentID, taskID string) string {
+	t.Helper()
+	token, err := auth.GenerateAgentTaskToken()
+	if err != nil {
+		t.Fatalf("mintTaskToken: generate: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at)
+		VALUES ($1, $2, $3, $4, $5, now() + interval '1 hour')
+	`, auth.HashToken(token), taskID, agentID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("mintTaskToken: insert task token for agent %s: %v", agentID, err)
+	}
+	return token
+}
+
 // ensureAgentTask returns a queued task UUID belonging to the given agent,
-// inserting one if none exists. Used by authRequestWithAgent so callers
-// can keep treating "set X-Agent-ID" as the single knob for posing as an
-// agent — resolveActor's pair-required policy is satisfied transparently.
+// inserting one if none exists. Used by authRequestWithAgent to bind a
+// minted mat_ task token to a concrete task, so callers can keep treating
+// the agent ID as the single knob for posing as an agent.
 func ensureAgentTask(t *testing.T, agentID string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -222,7 +244,8 @@ func postComment(t *testing.T, issueID, content string, parentID *string) string
 	return comment["id"].(string)
 }
 
-// postCommentAsAgent posts a comment with the X-Agent-ID header.
+// postCommentAsAgent posts a comment authenticated as the given agent via a
+// real mat_ task token (see authRequestWithAgent / mintTaskToken).
 func postCommentAsAgent(t *testing.T, issueID, content, agentID string, parentID *string) string {
 	t.Helper()
 	body := map[string]any{
