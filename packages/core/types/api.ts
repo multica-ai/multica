@@ -120,6 +120,22 @@ export interface IssueTriggerPreview {
   total_count: number;
 }
 
+/** A one-time scheduled run bound to an issue (#5927) — the wire shape of
+ *  POST/GET/DELETE `/api/issues/:id/schedule`. `status` stays a plain
+ *  string, not a union, per the API Compatibility rule: an older/newer
+ *  server value must still parse rather than break the type. */
+export interface IssueSchedule {
+  id: string;
+  issue_id: string;
+  /** RFC3339 instant the run is scheduled to fire at. */
+  run_at: string;
+  status: string;
+  missed_policy: string;
+  created_by_user_id: string;
+  fired_at: string | null;
+  created_at: string;
+}
+
 export interface ListIssuesParams {
   limit?: number;
   offset?: number;

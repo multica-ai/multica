@@ -43,6 +43,7 @@ import {
   InboxItemListSchema,
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
+  IssueScheduleSchema,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
@@ -536,6 +537,57 @@ describe("IssueTriggerPreviewSchema", () => {
   it("parseWithFallback returns the fallback for null / non-object bodies", () => {
     expect(parseWithFallback(null, IssueTriggerPreviewSchema, PREVIEW_FALLBACK, PREVIEW_ENDPOINT)).toEqual(PREVIEW_FALLBACK);
     expect(parseWithFallback("oops", IssueTriggerPreviewSchema, PREVIEW_FALLBACK, PREVIEW_ENDPOINT)).toEqual(PREVIEW_FALLBACK);
+  });
+});
+
+describe("IssueScheduleSchema", () => {
+  const SCHEDULE_ENDPOINT = { endpoint: "GET /api/issues/:id/schedule" };
+  const SCHEDULE_FALLBACK = null;
+
+  it("parses a well-formed pending schedule", () => {
+    const parsed = IssueScheduleSchema.parse({
+      id: "sched-1",
+      issue_id: "i1",
+      run_at: "2026-09-01T12:00:00Z",
+      status: "pending",
+      missed_policy: "notify",
+      created_by_user_id: "u1",
+      fired_at: null,
+      created_at: "2026-08-20T00:00:00Z",
+    });
+    expect(parsed.status).toBe("pending");
+    expect(parsed.fired_at).toBeNull();
+  });
+
+  it("accepts an unknown status value (server enum drift) rather than rejecting", () => {
+    // status/missed_policy stay z.string(), not enums, per the API
+    // Compatibility rule (CLAUDE.md): a value this client doesn't know yet
+    // must still parse so an installed desktop client on an older schema
+    // (or a newer server) never breaks.
+    const parsed = IssueScheduleSchema.parse({
+      id: "sched-1",
+      issue_id: "i1",
+      run_at: "2026-09-01T12:00:00Z",
+      status: "some_future_status",
+      created_at: "2026-08-20T00:00:00Z",
+    });
+    expect(parsed.status).toBe("some_future_status");
+    expect(parsed.missed_policy).toBe("notify");
+  });
+
+  it("parseWithFallback returns the fallback for a malformed body (missing required id)", () => {
+    const parsed = parseWithFallback(
+      { issue_id: "i1", run_at: "2026-09-01T12:00:00Z", status: "pending", created_at: "2026-08-20T00:00:00Z" },
+      IssueScheduleSchema,
+      SCHEDULE_FALLBACK,
+      SCHEDULE_ENDPOINT,
+    );
+    expect(parsed).toBeNull();
+  });
+
+  it("parseWithFallback returns the fallback for null / non-object bodies", () => {
+    expect(parseWithFallback(null, IssueScheduleSchema, SCHEDULE_FALLBACK, SCHEDULE_ENDPOINT)).toBeNull();
+    expect(parseWithFallback("oops", IssueScheduleSchema, SCHEDULE_FALLBACK, SCHEDULE_ENDPOINT)).toBeNull();
   });
 });
 

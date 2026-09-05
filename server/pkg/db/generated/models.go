@@ -836,6 +836,18 @@ type IssueReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type IssueScheduledTrigger struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	RunAt           pgtype.Timestamptz `json:"run_at"`
+	Status          string             `json:"status"`
+	MissedPolicy    string             `json:"missed_policy"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	FiredAt         pgtype.Timestamptz `json:"fired_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type IssueSourceContext struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`

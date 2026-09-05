@@ -47,6 +47,7 @@ import type {
   CommentTriggerPreview,
   IssueTriggerPreview,
   IssueTriggerPreviewParams,
+  IssueSchedule,
   Reaction,
   IssueReaction,
   Workspace,
@@ -255,6 +256,7 @@ import {
   CommentsListSchema,
   CommentTriggerPreviewSchema,
   IssueTriggerPreviewSchema,
+  IssueScheduleSchema,
   CloudRuntimeNodeListSchema,
   CloudRuntimeNodeSchema,
   AgentBuilderRuntimeSwitchSchema,
@@ -1332,6 +1334,47 @@ export class ApiClient {
     return parseWithFallback(raw, IssueTriggerPreviewSchema, { triggers: [], total_count: 0 }, {
       endpoint: "POST /api/issues/preview-trigger",
     });
+  }
+
+  /** Register a one-time future run for issueId's CURRENT assignee (#5927).
+   *  runAt is an RFC3339 instant. */
+  async createIssueSchedule(issueId: string, runAt: string): Promise<IssueSchedule> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/schedule`, {
+      method: "POST",
+      body: JSON.stringify({ run_at: runAt }),
+    });
+    return parseWithFallback(raw, IssueScheduleSchema, {
+      id: "", issue_id: issueId, run_at: runAt, status: "pending",
+      missed_policy: "notify", created_by_user_id: "", fired_at: null, created_at: "",
+    }, { endpoint: "POST /api/issues/:id/schedule" });
+  }
+
+  /** Read issueId's pending schedule, if any. A 404 means "never scheduled
+   *  (or already resolved)" — the common case, not an error — so it resolves
+   *  to null instead of throwing. */
+  async getIssueSchedule(issueId: string): Promise<IssueSchedule | null> {
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/schedule`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+    const parsed = parseWithFallback<IssueSchedule | null>(raw, IssueScheduleSchema, null, {
+      endpoint: "GET /api/issues/:id/schedule",
+    });
+    return parsed;
+  }
+
+  /** Cancel issueId's pending schedule, if any. */
+  async cancelIssueSchedule(issueId: string): Promise<IssueSchedule> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/schedule`, {
+      method: "DELETE",
+    });
+    return parseWithFallback(raw, IssueScheduleSchema, {
+      id: "", issue_id: issueId, run_at: "", status: "cancelled",
+      missed_policy: "notify", created_by_user_id: "", fired_at: null, created_at: "",
+    }, { endpoint: "DELETE /api/issues/:id/schedule" });
   }
 
   async listTimeline(issueId: string): Promise<TimelineEntry[]> {

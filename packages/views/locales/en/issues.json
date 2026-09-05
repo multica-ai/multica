@@ -671,6 +671,25 @@
     "keep": "Keep running",
     "confirm": "Stop run"
   },
+  "schedule_dialog": {
+    "trigger_tooltip": "Schedule run",
+    "title": "Schedule run",
+    "description": "Pick a date and time. The assignee will run once, automatically.",
+    "no_assignee": "Assign this issue to someone before scheduling a run.",
+    "loading": "Loading…",
+    "date_label": "Date",
+    "time_label": "Time",
+    "past_time_error": "Pick a time in the future.",
+    "schedule_button": "Schedule",
+    "cancel_button": "Cancel",
+    "close_button": "Close",
+    "pending_description": "This issue is scheduled to run at {{time}}.",
+    "cancel_schedule_button": "Cancel schedule",
+    "toast_scheduled": "Run scheduled",
+    "toast_cancelled": "Schedule cancelled",
+    "toast_failed": "Something went wrong. Try again.",
+    "toast_conflict": "This issue already has a pending schedule"
+  },
   "batch": {
     "selected": "{{count}} selected",
     "status": "Status",
