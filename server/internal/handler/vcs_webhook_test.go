@@ -10,11 +10,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/integrations/vcs"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -102,6 +104,321 @@ func giteaSig(raw []byte) string {
 	mac := hmac.New(sha256.New, []byte(vcsTestSecret))
 	mac.Write(raw)
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func fireGitLabMRWebhook(t *testing.T, connID string, attrs map[string]any) {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]any{
+		"object_kind":       "merge_request",
+		"user":              map[string]any{"username": "alice"},
+		"project":           map[string]any{"path_with_namespace": "acme/widget"},
+		"object_attributes": attrs,
+	})
+	w := httptest.NewRecorder()
+	testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+		"X-Gitlab-Event": "Merge Request Hook", "X-Gitlab-Token": vcsTestSecret,
+	}, raw))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("GitLab MR webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+func gitLabMRAttrs(action, state, title, description, updatedAt string) map[string]any {
+	return map[string]any{
+		"iid": 42, "title": title, "description": description,
+		"state": state, "action": action, "source_branch": "feat",
+		"url":        "https://gitlab.test/acme/widget/-/merge_requests/42",
+		"created_at": "2026-05-01 00:00:00 UTC", "updated_at": updatedAt,
+		"last_commit": map[string]any{"id": "deadbeef"},
+	}
+}
+
+func vcsLinkFlags(t *testing.T, ctx context.Context, issueID string) (bool, bool) {
+	t.Helper()
+	var closeIntent, referenceOnly bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT close_intent, reference_only FROM issue_vcs_pull_request WHERE issue_id = $1`,
+		issueID).Scan(&closeIntent, &referenceOnly); err != nil {
+		t.Fatalf("select VCS link flags: %v", err)
+	}
+	return closeIntent, referenceOnly
+}
+
+func vcsPullRequestExists(t *testing.T, ctx context.Context, connID string, number int32) bool {
+	t.Helper()
+	var exists bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM vcs_pull_request WHERE connection_id = $1 AND pr_number = $2)`,
+		connID, number).Scan(&exists); err != nil {
+		t.Fatalf("select VCS PR exists #%d: %v", number, err)
+	}
+	return exists
+}
+
+func vcsLinkCount(t *testing.T, ctx context.Context, issueID string) int {
+	t.Helper()
+	var count int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`,
+		issueID).Scan(&count); err != nil {
+		t.Fatalf("select VCS link count: %v", err)
+	}
+	return count
+}
+
+func vcsPullRequestByNumber(t *testing.T, ctx context.Context, connID string, number int32) db.VcsPullRequest {
+	t.Helper()
+	var pr db.VcsPullRequest
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state,
+		       html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at,
+		       pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at
+		FROM vcs_pull_request
+		WHERE connection_id = $1 AND pr_number = $2
+	`, connID, number).Scan(
+		&pr.ID, &pr.WorkspaceID, &pr.ConnectionID, &pr.Provider, &pr.RepoOwner, &pr.RepoName, &pr.PrNumber,
+		&pr.Title, &pr.State, &pr.HtmlUrl, &pr.Branch, &pr.HeadSha, &pr.AuthorLogin, &pr.AuthorAvatarUrl,
+		&pr.MergedAt, &pr.ClosedAt, &pr.PrCreatedAt, &pr.PrUpdatedAt, &pr.Additions, &pr.Deletions,
+		&pr.ChangedFiles, &pr.CreatedAt, &pr.UpdatedAt,
+	); err != nil {
+		t.Fatalf("select VCS PR #%d: %v", number, err)
+	}
+	return pr
+}
+
+func TestUpsertVCSPullRequestTerminalStateMonotonicity(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	t.Cleanup(func() { cleanupVCS(ctx, "") })
+
+	connUUID := parseUUID(connID)
+	created := pgtype.Timestamptz{Time: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), Valid: true}
+	t1 := pgtype.Timestamptz{Time: time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC), Valid: true}
+	t2 := pgtype.Timestamptz{Time: time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC), Valid: true}
+
+	upsert := func(number int32, state string, updated pgtype.Timestamptz, mergedAt, closedAt pgtype.Timestamptz) db.UpsertVCSPullRequestRow {
+		t.Helper()
+		row, err := testHandler.Queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
+			WorkspaceID: parseUUID(testWorkspaceID), ConnectionID: connUUID,
+			Provider: "gitlab", RepoOwner: "acme", RepoName: "widget", PrNumber: number,
+			Title: "PR", State: state, HtmlUrl: "https://gitlab.test/acme/widget/-/merge_requests/test",
+			MergedAt: mergedAt, ClosedAt: closedAt, PrCreatedAt: created, PrUpdatedAt: updated,
+			Additions: 1, Deletions: 2, ChangedFiles: 3, HeadSha: state + "-sha",
+		})
+		if err != nil {
+			t.Fatalf("UpsertVCSPullRequest(%d, %s): %v", number, state, err)
+		}
+		return row
+	}
+
+	upsert(101, "merged", t1, t1, pgtype.Timestamptz{})
+	row := upsert(101, "open", t2, pgtype.Timestamptz{}, pgtype.Timestamptz{})
+	if row.State != "merged" || !row.MergedAt.Valid || !row.PrUpdatedAt.Time.Equal(t1.Time) || row.HeadSha != "merged-sha" {
+		t.Fatalf("merged -> newer open regressed: state=%q merged_at=%v pr_updated_at=%v head_sha=%q", row.State, row.MergedAt.Valid, row.PrUpdatedAt.Time, row.HeadSha)
+	}
+
+	upsert(102, "closed", t1, pgtype.Timestamptz{}, t1)
+	row = upsert(102, "open", t2, pgtype.Timestamptz{}, pgtype.Timestamptz{})
+	if row.State != "closed" || !row.ClosedAt.Valid || !row.PrUpdatedAt.Time.Equal(t1.Time) || row.HeadSha != "closed-sha" {
+		t.Fatalf("closed -> newer open regressed: state=%q closed_at=%v pr_updated_at=%v head_sha=%q", row.State, row.ClosedAt.Valid, row.PrUpdatedAt.Time, row.HeadSha)
+	}
+
+	row = upsert(101, "closed", t2, t1, t2)
+	if row.State != "closed" || !row.MergedAt.Valid || !row.ClosedAt.Valid || !row.PrUpdatedAt.Time.Equal(t2.Time) || row.HeadSha != "closed-sha" {
+		t.Fatalf("terminal -> terminal should advance: state=%q merged_at=%v closed_at=%v pr_updated_at=%v head_sha=%q", row.State, row.MergedAt.Valid, row.ClosedAt.Valid, row.PrUpdatedAt.Time, row.HeadSha)
+	}
+}
+
+func TestVCSWebhookConcurrentFirstUpsertKeepsAcceptedEventLinkFlags(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
+	issue := newVCSIssue(t, "Concurrent terminal")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	conn, err := testHandler.Queries.GetVCSConnectionByID(ctx, parseUUID(connID))
+	if err != nil {
+		t.Fatalf("GetVCSConnectionByID: %v", err)
+	}
+
+	openEv := vcs.PullRequestEvent{
+		Action: "opened", RepoOwner: "acme", RepoName: "widget", Number: 88,
+		Title: "Docs", Body: "Related " + issue.Identifier, State: "open",
+		HTMLURL: "https://forgejo.test/acme/widget/pulls/88", Branch: "docs", HeadSHA: "open-sha",
+		CreatedAt: "2026-05-01T00:00:00Z", UpdatedAt: "2026-05-01T00:00:00Z",
+	}
+	mergedEv := vcs.PullRequestEvent{
+		Action: "closed", RepoOwner: "acme", RepoName: "widget", Number: 88,
+		Title: "Fix " + issue.Identifier, Body: "Closes " + issue.Identifier, State: "merged",
+		HTMLURL: "https://forgejo.test/acme/widget/pulls/88", Branch: "fix", HeadSHA: "merged-sha",
+		MergedAt: "2026-05-02T00:00:00Z", ClosedAt: "2026-05-02T00:00:00Z",
+		CreatedAt: "2026-05-01T00:00:00Z", UpdatedAt: "2026-05-02T00:00:00Z",
+	}
+
+	lockTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin lock tx: %v", err)
+	}
+	defer lockTx.Rollback(ctx)
+	if _, err := lockTx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", vcsPullRequestLockKey(conn, mergedEv)); err != nil {
+		t.Fatalf("hold PR advisory lock: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for _, ev := range []vcs.PullRequestEvent{openEv, mergedEv} {
+		ev := ev
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			testHandler.mirrorVCSPullRequest(ctx, conn, ev)
+		}()
+	}
+	close(start)
+	time.Sleep(50 * time.Millisecond)
+	if vcsPullRequestExists(t, ctx, connID, 88) || vcsLinkCount(t, ctx, issue.ID) != 0 {
+		t.Fatal("PR/link wrote while the per-PR advisory lock was held")
+	}
+	if err := lockTx.Commit(ctx); err != nil {
+		t.Fatalf("release PR advisory lock: %v", err)
+	}
+	wg.Wait()
+
+	wantMergedAt := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
+	pr := vcsPullRequestByNumber(t, ctx, connID, 88)
+	if pr.State != "merged" || pr.HeadSha != "merged-sha" || !pr.PrUpdatedAt.Time.Equal(wantMergedAt) {
+		t.Fatalf("concurrent first upsert persisted %q/%q/%v, want merged/merged-sha/2026-05-02", pr.State, pr.HeadSha, pr.PrUpdatedAt.Time)
+	}
+	closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("concurrent link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+
+	rejected := openEv
+	rejected.UpdatedAt = "2026-05-03T00:00:00Z"
+	rejected.HeadSHA = "rejected-open-sha"
+	testHandler.mirrorVCSPullRequest(ctx, conn, rejected)
+
+	pr = vcsPullRequestByNumber(t, ctx, connID, 88)
+	if pr.State != "merged" || pr.HeadSha != "merged-sha" || !pr.PrUpdatedAt.Time.Equal(wantMergedAt) {
+		t.Fatalf("newer open replay after concurrent terminal persisted %q/%q/%v, want merged/merged-sha/2026-05-02", pr.State, pr.HeadSha, pr.PrUpdatedAt.Time)
+	}
+	closeIntent, referenceOnly = vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("rejected replay link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+}
+
+func TestVCSWebhookPullRequestLockTimeoutRollsBack(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
+	issue := newVCSIssue(t, "Lock timeout")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	conn, err := testHandler.Queries.GetVCSConnectionByID(ctx, parseUUID(connID))
+	if err != nil {
+		t.Fatalf("GetVCSConnectionByID: %v", err)
+	}
+	ev := vcs.PullRequestEvent{
+		Action: "closed", RepoOwner: "acme", RepoName: "widget", Number: 89,
+		Title: "Fix " + issue.Identifier, Body: "Closes " + issue.Identifier, State: "merged",
+		HTMLURL: "https://forgejo.test/acme/widget/pulls/89", Branch: "fix", HeadSHA: "merged-sha",
+		MergedAt: "2026-05-02T00:00:00Z", ClosedAt: "2026-05-02T00:00:00Z",
+		CreatedAt: "2026-05-01T00:00:00Z", UpdatedAt: "2026-05-02T00:00:00Z",
+	}
+
+	lockTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin lock tx: %v", err)
+	}
+	defer lockTx.Rollback(ctx)
+	if _, err := lockTx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", vcsPullRequestLockKey(conn, ev)); err != nil {
+		t.Fatalf("hold PR advisory lock: %v", err)
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	testHandler.mirrorVCSPullRequest(callCtx, conn, ev)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("PR mirror did not exit within bounded lock timeout: %s", elapsed)
+	}
+	if vcsPullRequestExists(t, ctx, connID, 89) {
+		t.Fatal("PR row was written after lock timeout")
+	}
+	if count := vcsLinkCount(t, ctx, issue.ID); count != 0 {
+		t.Fatalf("link rows after lock timeout = %d, want 0", count)
+	}
+}
+
+func TestVCSWebhookRejectedTerminalReplayDoesNotRewriteLinkFlags(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
+	issue := newVCSIssue(t, "Terminal replay")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	fireForgejo := func(action, state, updatedAt, title, body, branch string) {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{
+			"action": action,
+			"pull_request": map[string]any{
+				"number": 77, "html_url": "https://forgejo.test/acme/widget/pulls/77",
+				"title": title, "body": body, "state": state, "merged": state == "merged",
+				"merged_at": "2026-05-02T00:00:00Z", "closed_at": "2026-05-02T00:00:00Z",
+				"created_at": "2026-05-01T00:00:00Z", "updated_at": updatedAt,
+				"head": map[string]any{"ref": branch, "sha": state + "-sha"},
+				"user": map[string]any{"username": "octo"},
+			},
+			"repository": map[string]any{"name": "widget", "owner": map[string]any{"username": "acme"}},
+		})
+		w := httptest.NewRecorder()
+		testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+			"X-Gitea-Event": "pull_request", "X-Gitea-Signature": giteaSig(raw),
+		}, raw))
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("Forgejo PR webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
+		}
+	}
+
+	fireForgejo("closed", "merged", "2026-05-02T00:00:00Z", "Fix "+issue.Identifier, "Closes "+issue.Identifier, "fix")
+	closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("merged link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+
+	fireForgejo("opened", "open", "2026-05-03T00:00:00Z", "Docs", "Related "+issue.Identifier, "docs")
+	pr := vcsPullRequestByNumber(t, ctx, connID, 77)
+	if pr.State != "merged" || !pr.MergedAt.Valid {
+		t.Fatalf("newer terminal replay regressed PR: state=%q merged_at=%v", pr.State, pr.MergedAt.Valid)
+	}
+	closeIntent, referenceOnly = vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("rejected newer open rewrote link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+
+	fireForgejo("opened", "open", "not-a-time", "Docs", "Related "+issue.Identifier, "docs")
+	pr = vcsPullRequestByNumber(t, ctx, connID, 77)
+	if pr.State != "merged" || !pr.MergedAt.Valid {
+		t.Fatalf("fallback-now terminal replay regressed PR: state=%q merged_at=%v", pr.State, pr.MergedAt.Valid)
+	}
+	closeIntent, referenceOnly = vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("fallback-now replay rewrote link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+
+	fireForgejo("opened", "open", "", "Docs", "Related "+issue.Identifier, "docs")
+	pr = vcsPullRequestByNumber(t, ctx, connID, 77)
+	if pr.State != "merged" || !pr.MergedAt.Valid {
+		t.Fatalf("missing-timestamp terminal replay regressed PR: state=%q merged_at=%v", pr.State, pr.MergedAt.Valid)
+	}
+	closeIntent, referenceOnly = vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("missing-timestamp replay rewrote link flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
 }
 
 func TestVCSWebhook_ForgejoMirrorsAndCloses(t *testing.T) {
@@ -439,6 +756,196 @@ func TestVCSWebhook_GitlabMergeRequest(t *testing.T) {
 	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
 	if updated.Status != "done" {
 		t.Errorf("expected issue done, got %q", updated.Status)
+	}
+}
+
+func TestVCSWebhook_GitlabMergedUpdateFirstUpsertClosesIssue(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	issue := newVCSIssue(t, "GitLab merged update")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"update", "merged",
+		"Add "+issue.Identifier,
+		"Closes "+issue.Identifier,
+		"2026-05-02 00:00:00 UTC",
+	))
+
+	closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("link flags after first terminal upsert = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
+	if updated.Status != "done" {
+		t.Errorf("expected issue done, got %q", updated.Status)
+	}
+}
+
+func TestVCSWebhook_GitlabFirstTerminalTransitionRecomputesCloseIntent(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	issue := newVCSIssue(t, "GitLab transition update")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"update", "opened",
+		"WIP "+issue.Identifier,
+		"Related "+issue.Identifier,
+		"2026-05-01 00:00:00 UTC",
+	))
+	closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+	if closeIntent || referenceOnly {
+		t.Fatalf("non-terminal update flags = close_intent:%v reference_only:%v, want false/false", closeIntent, referenceOnly)
+	}
+
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"update", "merged",
+		"Finish "+issue.Identifier,
+		"Closes "+issue.Identifier,
+		"2026-05-02 00:00:00 UTC",
+	))
+	closeIntent, referenceOnly = vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("first terminal transition flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
+	if updated.Status != "done" {
+		t.Errorf("expected issue done, got %q", updated.Status)
+	}
+}
+
+func TestVCSWebhook_GitlabPostTerminalUpdatePreservesCloseIntent(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	issue := newVCSIssue(t, "GitLab terminal preservation")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"merge", "merged",
+		"Finish "+issue.Identifier,
+		"Closes "+issue.Identifier,
+		"2026-05-02 00:00:00 UTC",
+	))
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"update", "merged",
+		"Finish "+issue.Identifier,
+		"Related "+issue.Identifier,
+		"2026-05-03 00:00:00 UTC",
+	))
+
+	closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("post-terminal update flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+}
+
+func TestVCSWebhook_GitlabClosedUpdateTerminalSemantics(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+
+	t.Run("first upsert records close intent", func(t *testing.T) {
+		connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+		issue := newVCSIssue(t, "GitLab closed update first upsert")
+		t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+		fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+			"update", "closed",
+			"Cancel "+issue.Identifier,
+			"Closes "+issue.Identifier,
+			"2026-05-02 00:00:00 UTC",
+		))
+
+		closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+		if !closeIntent || referenceOnly {
+			t.Fatalf("closed first upsert flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+		}
+		rows, _ := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issue.ID))
+		if len(rows) != 1 || rows[0].State != "closed" {
+			t.Fatalf("closed first upsert row = %+v, want one closed row", rows)
+		}
+	})
+
+	t.Run("first terminal transition recomputes close intent", func(t *testing.T) {
+		connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+		issue := newVCSIssue(t, "GitLab closed update transition")
+		t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+		fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+			"update", "opened",
+			"WIP "+issue.Identifier,
+			"Related "+issue.Identifier,
+			"2026-05-03 00:00:00 UTC",
+		))
+		fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+			"update", "closed",
+			"Cancel "+issue.Identifier,
+			"Closes "+issue.Identifier,
+			"2026-05-04 00:00:00 UTC",
+		))
+
+		closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+		if !closeIntent || referenceOnly {
+			t.Fatalf("closed transition flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+		}
+	})
+
+	t.Run("later terminal update preserves link flags", func(t *testing.T) {
+		connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+		issue := newVCSIssue(t, "GitLab closed update preservation")
+		t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+		fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+			"update", "closed",
+			"Cancel "+issue.Identifier,
+			"Closes "+issue.Identifier,
+			"2026-05-05 00:00:00 UTC",
+		))
+		fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+			"update", "closed",
+			"Cancel "+issue.Identifier,
+			"Related "+issue.Identifier,
+			"2026-05-06 00:00:00 UTC",
+		))
+
+		closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+		if !closeIntent || referenceOnly {
+			t.Fatalf("closed preservation flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+		}
+	})
+}
+
+func TestVCSWebhook_GitlabEqualTimestampNonterminalReplayDoesNotClearTerminal(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	issue := newVCSIssue(t, "GitLab equal timestamp replay")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	sameTimestamp := "2026-05-02 00:00:00 UTC"
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"update", "merged",
+		"Finish "+issue.Identifier,
+		"Closes "+issue.Identifier,
+		sameTimestamp,
+	))
+	fireGitLabMRWebhook(t, connID, gitLabMRAttrs(
+		"update", "opened",
+		"WIP "+issue.Identifier,
+		"Related "+issue.Identifier,
+		sameTimestamp,
+	))
+
+	closeIntent, referenceOnly := vcsLinkFlags(t, ctx, issue.ID)
+	if !closeIntent || referenceOnly {
+		t.Fatalf("equal timestamp replay flags = close_intent:%v reference_only:%v, want true/false", closeIntent, referenceOnly)
+	}
+	rows, _ := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issue.ID))
+	if len(rows) != 1 || rows[0].State != "merged" {
+		t.Fatalf("equal timestamp replay regressed PR row: %+v", rows)
 	}
 }
 

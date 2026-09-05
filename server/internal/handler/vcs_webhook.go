@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -15,6 +16,8 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+const vcsPullRequestLockTimeout = "500ms"
 
 // ── Response mappers ────────────────────────────────────────────────────────
 
@@ -44,6 +47,49 @@ func vcsPullRequestToResponse(p db.VcsPullRequest) GitHubPullRequestResponse {
 		Additions:        p.Additions,
 		Deletions:        p.Deletions,
 		ChangedFiles:     p.ChangedFiles,
+	}
+}
+
+func vcsPullRequestStateTerminal(state string) bool {
+	return state == "merged" || state == "closed"
+}
+
+func vcsPullRequestLockKey(conn db.VcsConnection, ev vcs.PullRequestEvent) string {
+	return uuidToString(conn.ID) + "|" + ev.RepoOwner + "/" + ev.RepoName + "|" + strconv.Itoa(int(ev.Number))
+}
+
+func vcsPullRequestAcceptedEvent(pr db.UpsertVCSPullRequestRow, ev vcs.PullRequestEvent, evUpdatedAt pgtype.Timestamptz) bool {
+	return pr.PrUpdatedAt.Valid &&
+		evUpdatedAt.Valid &&
+		pr.PrUpdatedAt.Time.UnixMicro() == evUpdatedAt.Time.UnixMicro() &&
+		pr.State == ev.State
+}
+
+func vcsPullRequestFromUpsertRow(pr db.UpsertVCSPullRequestRow) db.VcsPullRequest {
+	return db.VcsPullRequest{
+		ID:              pr.ID,
+		WorkspaceID:     pr.WorkspaceID,
+		ConnectionID:    pr.ConnectionID,
+		Provider:        pr.Provider,
+		RepoOwner:       pr.RepoOwner,
+		RepoName:        pr.RepoName,
+		PrNumber:        pr.PrNumber,
+		Title:           pr.Title,
+		State:           pr.State,
+		HtmlUrl:         pr.HtmlUrl,
+		Branch:          pr.Branch,
+		HeadSha:         pr.HeadSha,
+		AuthorLogin:     pr.AuthorLogin,
+		AuthorAvatarUrl: pr.AuthorAvatarUrl,
+		MergedAt:        pr.MergedAt,
+		ClosedAt:        pr.ClosedAt,
+		PrCreatedAt:     pr.PrCreatedAt,
+		PrUpdatedAt:     pr.PrUpdatedAt,
+		Additions:       pr.Additions,
+		Deletions:       pr.Deletions,
+		ChangedFiles:    pr.ChangedFiles,
+		CreatedAt:       pr.CreatedAt,
+		UpdatedAt:       pr.UpdatedAt,
 	}
 }
 
@@ -161,7 +207,24 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		return
 	}
 
-	pr, err := h.Queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		slog.Warn("vcs: begin pr mirror transaction failed", "err", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT set_config('lock_timeout', $1, true)", vcsPullRequestLockTimeout); err != nil {
+		slog.Warn("vcs: set pr mirror lock timeout failed", "err", err)
+		return
+	}
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", vcsPullRequestLockKey(conn, ev)); err != nil {
+		slog.Warn("vcs: acquire pr mirror lock failed", "err", err)
+		return
+	}
+	qtx := h.Queries.WithTx(tx)
+	prCreatedAt := parseGHTimeRequired(ev.CreatedAt)
+	prUpdatedAt := parseGHTimeRequired(ev.UpdatedAt)
+	pr, err := qtx.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
 		WorkspaceID:     conn.WorkspaceID,
 		ConnectionID:    conn.ID,
 		Provider:        conn.Provider,
@@ -176,8 +239,8 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		AuthorAvatarUrl: ptrToText(strPtrOrNil(ev.AuthorAvatarURL)),
 		MergedAt:        parseGHTime(ev.MergedAt),
 		ClosedAt:        parseGHTime(ev.ClosedAt),
-		PrCreatedAt:     parseGHTimeRequired(ev.CreatedAt),
-		PrUpdatedAt:     parseGHTimeRequired(ev.UpdatedAt),
+		PrCreatedAt:     prCreatedAt,
+		PrUpdatedAt:     prUpdatedAt,
 		Additions:       ev.Additions,
 		Deletions:       ev.Deletions,
 		ChangedFiles:    ev.ChangedFiles,
@@ -188,23 +251,18 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		return
 	}
 
-	// Out-of-order guard for the link metadata. UpsertVCSPullRequest keeps the
-	// newer persisted row on a stale redelivery, so `pr` may reflect a newer
-	// event than this `ev`. Everything the link write derives below —
-	// close_intent, reference_only, preserveCloseIntent — comes from `ev`, so
-	// rewriting the link from a stale event would corrupt what the newer event
-	// already set (e.g. a redelivered older "opened" event flipping a merged
-	// PR's link back to reference_only, blocking auto-advance). If the persisted
-	// row is strictly newer than this event, the newer event already linked and
-	// published — stop here. (An event with no usable timestamp falls back to
-	// now(), which is never strictly after the stored value, so it proceeds.)
-	evUpdatedAt := parseGHTimeRequired(ev.UpdatedAt)
-	if pr.PrUpdatedAt.Valid && evUpdatedAt.Valid && pr.PrUpdatedAt.Time.After(evUpdatedAt.Time) {
+	// UpsertVCSPullRequest returns the current persisted row even when SQL kept
+	// it over this event. Everything the link write derives below — close_intent,
+	// reference_only, preserveCloseIntent — comes from `ev`, so only continue
+	// when the persisted version is exactly the accepted event. This also blocks
+	// fallback-now terminal replays from rewriting link metadata after SQL rejects
+	// their terminal -> non-terminal state change.
+	if !vcsPullRequestAcceptedEvent(pr, ev, prUpdatedAt) {
 		return
 	}
 
 	workspaceID := uuidToString(conn.WorkspaceID)
-	resp := vcsPullRequestToResponse(pr)
+	resp := vcsPullRequestToResponse(vcsPullRequestFromUpsertRow(pr))
 
 	// Auto-link to issues by identifiers in title/body/branch. Connecting a
 	// a provider is the opt-in, so there is no separate per-workspace flag. The
@@ -230,20 +288,32 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	for c := range closingIdents {
 		qualifyingIdents[c] = struct{}{}
 	}
-	// Freeze close_intent once the terminal merge/close event has arrived.
-	preserveCloseIntent := !ev.Terminal() && (ev.State == "merged" || ev.State == "closed")
-	prefix := h.getIssuePrefix(ctx, conn.WorkspaceID)
+	ws, err := qtx.GetWorkspace(ctx, conn.WorkspaceID)
+	if err != nil {
+		slog.Warn("vcs: get workspace for pr link failed", "err", err)
+		return
+	}
+	prefix := ws.IssuePrefix
+	if prefix == "" {
+		prefix = issuePrefixForWorkspace(ws)
+	}
+	// Recompute close_intent on the first terminal transition, then freeze it
+	// for later terminal updates whose raw provider action is non-terminal
+	// (e.g. GitLab state=merged/action=update redeliveries).
+	previouslyTerminal := pr.PreviousState.Valid && vcsPullRequestStateTerminal(pr.PreviousState.String)
+	doneTransitions := make([]issueDoneTransition, 0)
 	reevalIssues := make([]db.Issue, 0, len(idents))
 	for _, id := range idents {
-		issue, ok := h.lookupIssueByIdentifier(ctx, conn.WorkspaceID, prefix, id)
+		issue, ok := h.lookupIssueByIdentifierWithQueries(ctx, qtx, conn.WorkspaceID, prefix, id)
 		if !ok {
 			continue
 		}
 		_, declared := closingIdents[id]
+		preserveCloseIntent := !ev.Terminal() && vcsPullRequestStateTerminal(ev.State) && (previouslyTerminal || !declared)
 		closeIntent := declared && !preserveCloseIntent
 		_, qualifies := qualifyingIdents[id]
 		referenceOnly := !qualifies
-		if err := h.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
+		if err := qtx.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
 			IssueID:             issue.ID,
 			PullRequestID:       pr.ID,
 			CloseIntent:         closeIntent,
@@ -259,23 +329,34 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		reevalIssues = append(reevalIssues, issue)
 	}
 
-	if ev.State == "merged" || ev.State == "closed" {
+	if vcsPullRequestStateTerminal(ev.State) {
 		for _, issue := range reevalIssues {
 			// A custom terminal status counts as terminal here. (MUL-6243)
 			if s := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status); s == "done" || s == "cancelled" {
 				continue
 			}
-			counts, err := h.Queries.GetIssueCombinedPullRequestCloseAggregate(ctx, issue.ID)
+			counts, err := qtx.GetIssueCombinedPullRequestCloseAggregate(ctx, issue.ID)
 			if err != nil {
 				slog.Warn("vcs: count linked pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
 				continue
 			}
 			if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
-				h.advanceIssueToDone(ctx, issue, workspaceID)
+				updated, ok := h.advanceIssueToDoneWithQueries(ctx, qtx, issue)
+				if ok {
+					doneTransitions = append(doneTransitions, issueDoneTransition{previous: issue, updated: updated})
+				}
 			}
 		}
 	}
 
+	if err := tx.Commit(ctx); err != nil {
+		slog.Warn("vcs: commit pr mirror transaction failed", "err", err)
+		return
+	}
+
+	for _, transition := range doneTransitions {
+		h.publishIssueAdvancedToDone(ctx, transition.previous, transition.updated, workspaceID)
+	}
 	h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
 		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
