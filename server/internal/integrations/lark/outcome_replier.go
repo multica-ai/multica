@@ -156,7 +156,7 @@ func NewLarkOutcomeReplier(cfg OutcomeReplierConfig) OutcomeReplier {
 func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
 	case OutcomeNeedsBinding:
-		if err := r.sendBindingPrompt(ctx, inst, res); err != nil {
+		if err := r.sendBindingPrompt(ctx, inst, msg, res); err != nil {
 			r.log.Warn("lark outcome replier: binding prompt failed",
 				"installation_id", uuidString(inst.ID),
 				"open_id", string(res.SenderOpenID),
@@ -223,7 +223,7 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 	}
 }
 
-func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Installation, res DispatchResult) error {
+func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) error {
 	if res.SenderOpenID == "" {
 		return errors.New("missing sender open_id")
 	}
@@ -239,11 +239,31 @@ func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Install
 	if err != nil {
 		return err
 	}
-	return r.client.SendBindingPromptCard(ctx, BindingPromptParams{
+	if err := r.client.SendBindingPromptCard(ctx, BindingPromptParams{
 		InstallationID: creds,
 		OpenID:         res.SenderOpenID,
 		BindURL:        bindURL,
-	})
+	}); err != nil {
+		if isBindingPromptUnavailable(err) {
+			if err := r.sendChatNotice(ctx, inst, msg, bindingPromptUnavailableCopy); err != nil {
+				return fmt.Errorf("send binding prompt fallback failed: %w", err)
+			}
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func isBindingPromptUnavailable(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Code == codeNoAvailability
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "no availability") {
+		return true
+	}
+	return false
 }
 
 // sendIssueOutcome posts either the created confirmation or active-duplicate
@@ -411,10 +431,11 @@ func renderNoticeCard(header, body string) (string, error) {
 // match the §4.6 design: an offline agent will run when the daemon
 // comes back; an archived agent needs operator action.
 const (
-	agentOfflineCopy        = "Agent 当前离线，消息已记录。下次 daemon 上线后会自动继续处理。"
-	agentArchivedCopy       = "这个 Agent 已被归档，无法继续处理消息。请联系工作区管理员恢复或重新绑定。"
-	freshPendingCopy        = "✅ 已准备从空上下文运行。你的下一条聊天消息仍会进入当前对话，但不会带上之前的上下文。"
-	chatStartedCopy         = "✅ 已新建 Multica 对话。你的下一条消息会进入该对话。"
-	issueUsageCopy          = "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）"
-	issueUsageWithMediaCopy = "请添加标题，并与图片或视频一起重新发送（*图片或视频可以位于命令之前或之后*）：\n\n`/issue <标题>`\n`[描述]`（可选）"
+	agentOfflineCopy             = "Agent 当前离线，消息已记录。下次 daemon 上线后会自动继续处理。"
+	agentArchivedCopy            = "这个 Agent 已被归档，无法继续处理消息。请联系工作区管理员恢复或重新绑定。"
+	freshPendingCopy             = "✅ 已准备从空上下文运行。你的下一条聊天消息仍会进入当前对话，但不会带上之前的上下文。"
+	chatStartedCopy              = "✅ 已新建 Multica 对话。你的下一条消息会进入该对话。"
+	issueUsageCopy               = "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）"
+	issueUsageWithMediaCopy      = "请添加标题，并与图片或视频一起重新发送（*图片或视频可以位于命令之前或之后*）：\n\n`/issue <标题>`\n`[描述]`（可选）"
+	bindingPromptUnavailableCopy = "你还未绑定 Multica 账户，绑定卡片未能发送到你的私聊。\n请先与 Bot 建立私信后重试，或联系管理员检查机器人在该用户侧的可见性。"
 )

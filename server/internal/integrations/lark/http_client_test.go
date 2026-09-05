@@ -234,6 +234,13 @@ func testCreds() InstallationCredentials {
 	return InstallationCredentials{AppID: "cli_app_xx", AppSecret: "secret_xx"}
 }
 
+func TestHTTPClient_IsConfigured(t *testing.T) {
+	c := NewHTTPAPIClient(HTTPClientConfig{})
+	if !c.IsConfigured() {
+		t.Fatalf("real client must report IsConfigured()=true")
+	}
+}
+
 func TestHTTPClient_DownloadMessageResource(t *testing.T) {
 	fake := newLarkFake(t)
 	fake.stubToken("tok_resource", 7200)
@@ -426,6 +433,16 @@ func TestHTTPClient_DownloadMessageResourceBusinessError(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "234003") {
 		t.Fatalf("expected APIError with code, got %v", err)
+	}
+}
+
+// TestHTTPClient_StubReportsNotConfigured pins that the stub never
+// claims wired outbound — handlers gate install / management UI on
+// this signal.
+func TestHTTPClient_StubReportsNotConfigured(t *testing.T) {
+	s := NewStubAPIClient(nil)
+	if s.IsConfigured() {
+		t.Errorf("stub IsConfigured must be false")
 	}
 }
 
@@ -1087,6 +1104,36 @@ func TestHTTPClient_SendBindingPromptCard_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(capturedBody["content"], "去绑定") {
 		t.Errorf("binding card should carry the localized CTA: %q", capturedBody["content"])
+	}
+}
+
+func TestHTTPClient_SendBindingPromptCard_NoAvailabilityReturnsAPIError(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_bind_no_avail", 7200)
+
+	fake.mux.HandleFunc("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		fake.bindN.Add(1)
+		writeJSON(w, map[string]any{"code": 230013, "msg": "Bot has NO availability to this user.", "data": map[string]any{}})
+	})
+
+	c := newTestClient(fake, time.Now)
+	err := c.SendBindingPromptCard(context.Background(), BindingPromptParams{
+		InstallationID: testCreds(),
+		OpenID:         OpenID("ou_user_1"),
+		BindURL:        "https://multica.test/lark/bind?token=abc",
+	})
+	if err == nil {
+		t.Fatal("expected SendBindingPromptCard to fail")
+	}
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.Code != 230013 {
+		t.Fatalf("expected code=230013, got %d", apiErr.Code)
+	}
+	if apiErr.Msg != "Bot has NO availability to this user." {
+		t.Fatalf("unexpected msg: %q", apiErr.Msg)
 	}
 }
 
