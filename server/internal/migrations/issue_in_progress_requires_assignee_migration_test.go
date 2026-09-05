@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// I4127.DP / I4192.DP: migration 349 enforces the in_progress-requires-
+// I4127.DP / I4192.DP: migration 451 enforces the in_progress-requires-
 // assignee invariant at the DB level. This test runs the migration against
 // the real schema inside a transaction that is rolled back afterwards, so
 // the shared test database is left exactly as it was: a legacy zombie row is
@@ -49,7 +49,7 @@ func TestIssueInProgressRequiresAssigneeMigration(t *testing.T) {
 		INSERT INTO workspace (name, slug, issue_prefix)
 		VALUES ($1, $2, $3)
 		RETURNING id
-	`, fmt.Sprintf("mig349 %d", suffix), fmt.Sprintf("mig349-%d", suffix), "M349").Scan(&workspaceID); err != nil {
+	`, fmt.Sprintf("mig451 %d", suffix), fmt.Sprintf("mig451-%d", suffix), "M451").Scan(&workspaceID); err != nil {
 		t.Fatalf("create scratch workspace: %v", err)
 	}
 
@@ -75,21 +75,21 @@ func TestIssueInProgressRequiresAssigneeMigration(t *testing.T) {
 	// transaction stays usable (a 23514 would otherwise abort the whole tx).
 	mustViolate := func(name string, fn func() error) {
 		t.Helper()
-		if _, err := tx.Exec(ctx, `SAVEPOINT mig349_expect_check`); err != nil {
+		if _, err := tx.Exec(ctx, `SAVEPOINT mig451_expect_check`); err != nil {
 			t.Fatalf("%s: savepoint: %v", name, err)
 		}
 		err := fn()
 		if !isCheckViolation(err) {
 			t.Fatalf("%s: got %v, want check violation", name, err)
 		}
-		if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT mig349_expect_check`); err != nil {
+		if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT mig451_expect_check`); err != nil {
 			t.Fatalf("%s: rollback to savepoint: %v", name, err)
 		}
 	}
 
 	// A legacy zombie (in_progress, no assignee) can still be inserted BEFORE
-	// the migration runs — that is exactly the gap 349 closes. The shared test
-	// DB may already have 349's constraint applied (CI runs `migrate up` before
+	// the migration runs — that is exactly the gap 451 closes. The shared test
+	// DB may already have 451's constraint applied (CI runs `migrate up` before
 	// tests), so drop it inside this transaction to restore the pre-migration
 	// state; the rollback at the end undoes the drop.
 	if _, err := tx.Exec(ctx,
@@ -101,7 +101,7 @@ func TestIssueInProgressRequiresAssigneeMigration(t *testing.T) {
 		t.Fatalf("insert legacy zombie pre-migration: %v", err)
 	}
 
-	applyMigrationFile(t, ctx, tx, "349_issue_in_progress_requires_assignee.up.sql")
+	applyMigrationFile(t, ctx, tx, "451_issue_in_progress_requires_assignee.up.sql")
 
 	// The migration repaired the legacy zombie to backlog.
 	var status string
@@ -127,7 +127,7 @@ func TestIssueInProgressRequiresAssigneeMigration(t *testing.T) {
 
 	// The guard follows the EFFECTIVE status (MUL-6243): a custom status in
 	// the in_progress category is held to the same rule.
-	progressKey := fmt.Sprintf("mig349_progress_%d", suffix%1_000_000)
+	progressKey := fmt.Sprintf("mig451_progress_%d", suffix%1_000_000)
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO issue_status (workspace_id, key, name, description, category, color, position)
 		VALUES ($1, $2, $3, '', 'in_progress', '#123456', 1)
