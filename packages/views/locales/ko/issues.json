@@ -551,7 +551,9 @@
     "tasks_count_other": "실행 {{count}}개",
     "chip_agents_working_other": "작업 중인 에이전트 {{count}}개",
     "issues_count_other": "태스크 {{count}}개",
-    "chip_agents_working_unknown": "작업 중인 에이전트: —"
+    "chip_agents_working_unknown": "작업 중인 에이전트: —",
+    "status_waiting": "하위 태스크 대기 중",
+    "waiting_detail": "{{done}}/{{total}} 완료"
   },
   "filtered_empty": {
     "title": "필터 조건에 맞는 태스크가 없습니다",

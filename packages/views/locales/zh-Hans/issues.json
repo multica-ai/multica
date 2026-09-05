@@ -551,7 +551,9 @@
     "tasks_count_other": "{{count}} 次运行",
     "chip_agents_working_other": "{{count}} 个智能体工作中",
     "issues_count_other": "{{count}} 个任务",
-    "chip_agents_working_unknown": "工作中的智能体：—"
+    "chip_agents_working_unknown": "工作中的智能体：—",
+    "status_waiting": "等待子任务",
+    "waiting_detail": "{{done}}/{{total}} 已完成"
   },
   "filtered_empty": {
     "title": "没有符合筛选条件的任务",

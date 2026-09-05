@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 
-import type { Issue } from "@multica/core/types";
+import type { Issue, IssueStatusCategory } from "@multica/core/types";
 
 // InlineTitle renders the self-contained agent-activity badge, which fetches
 // the workspace agent-task snapshot via React Query. Stub it (same pattern as
@@ -15,8 +15,21 @@ import type { Issue } from "@multica/core/types";
 // wired into the cell with the row's issue — otherwise the badge insertion in
 // table-view.tsx could be deleted and every test here would still pass.
 vi.mock("./issue-agent-activity-indicator", () => ({
-  IssueAgentActivityIndicator: ({ issueId }: { issueId: string }) => (
-    <span data-testid="issue-agent-activity" data-issue-id={issueId} />
+  IssueAgentActivityIndicator: ({
+    issueId,
+    childProgress,
+    statusCategory,
+  }: {
+    issueId: string;
+    childProgress?: { done: number; total: number } | null;
+    statusCategory?: string | null;
+  }) => (
+    <span
+      data-testid="issue-agent-activity"
+      data-issue-id={issueId}
+      data-child-progress={childProgress ? `${childProgress.done}/${childProgress.total}` : ""}
+      data-status-category={statusCategory ?? ""}
+    />
   ),
 }));
 
@@ -227,5 +240,59 @@ describe("InlineTitle", () => {
       badge.compareDocumentPosition(titleButton) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("forwards childProgress and statusCategory to the activity indicator", () => {
+    const row = {
+      kind: "issue" as const,
+      key: "issue:issue-1",
+      issue: {
+        ...makeIssue("Original"),
+        status: "in_progress" as const,
+        status_category: "in_progress" as const,
+      },
+      depth: 0,
+      hasChildren: true,
+      collapsed: false,
+    };
+    render(
+      <InlineTitle
+        {...baseProps}
+        row={row}
+        editing={false}
+        onEditingChange={vi.fn()}
+        childProgress={{ done: 1, total: 3 }}
+        statusCategory={"in_progress" as IssueStatusCategory}
+      />,
+    );
+    const badge = screen.getByTestId("issue-agent-activity");
+    expect(badge.getAttribute("data-child-progress")).toBe("1/3");
+    expect(badge.getAttribute("data-status-category")).toBe("in_progress");
+  });
+
+  it("derives statusCategory from the row issue when not explicitly passed", () => {
+    const row = {
+      kind: "issue" as const,
+      key: "issue:issue-1",
+      issue: {
+        ...makeIssue("Original"),
+        status: "in_progress" as const,
+      },
+      depth: 0,
+      hasChildren: true,
+      collapsed: false,
+    };
+    render(
+      <InlineTitle
+        {...baseProps}
+        row={row}
+        editing={false}
+        onEditingChange={vi.fn()}
+      />,
+    );
+    const badge = screen.getByTestId("issue-agent-activity");
+    // issueStatusCategory(row.issue) fallback inside InlineTitle
+    expect(badge.getAttribute("data-status-category")).toBe("in_progress");
+    expect(badge.getAttribute("data-child-progress")).toBe("");
   });
 });

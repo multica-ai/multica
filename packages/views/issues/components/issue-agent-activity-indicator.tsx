@@ -16,6 +16,7 @@ import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { AgentActivityHoverContent } from "../../agents/components/agent-activity-hover-content";
 import { selectIssueTasks, type IssueTaskGroups } from "../surface/activity";
 import { useT } from "../../i18n";
+import type { IssueStatusCategory } from "@multica/core/types";
 
 const EMPTY_GROUPS: IssueTaskGroups = { running: [], queued: [] };
 
@@ -47,6 +48,11 @@ interface IssueAgentActivityIndicatorProps {
   // Whether hovering opens the activity card. Opt OUT where the card's only
   // incremental information is not worth a popup (Inbox — see below).
   hoverCard?: boolean;
+  // Derived waiting state: an in_progress parent with unfinished children
+  // and no active task shows "Waiting on sub-issues". Reuses already-loaded
+  // childProgress + resolved status category; no extra query (MUL-7925).
+  childProgress?: { done: number; total: number } | null;
+  statusCategory?: IssueStatusCategory | null;
 }
 
 /**
@@ -56,7 +62,9 @@ interface IssueAgentActivityIndicatorProps {
  *
  *   - has ≥1 running task  → tiny avatar stack + shimmering "Working"
  *   - 0 running, ≥1 queued → half-opacity stack + muted "Queued"
- *   - nothing               → return null (no chrome, no placeholder)
+ *   - 0 active, in_progress parent with unfinished children (done < total)
+ *     → muted "Waiting on sub-issues" (+ hover detail "done/total complete")
+ *   - otherwise             → return null (no chrome, no placeholder)
  *
  * The shimmer reuses chat's `animate-chat-text-shimmer` utility (defined
  * in packages/ui/styles/base.css). Earlier iterations layered a brand
@@ -90,6 +98,8 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
   issueId,
   size = "xs",
   hoverCard = true,
+  childProgress,
+  statusCategory,
 }: IssueAgentActivityIndicatorProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -114,10 +124,34 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
     };
   }, [groups]);
 
-  if (agentIds.length === 0) return null;
-  const isRunning = opacity === "full";
+  const hasRunning = groups.running.length > 0;
+  const hasQueued = groups.queued.length > 0;
+  const isWaiting =
+    !hasRunning &&
+    !hasQueued &&
+    statusCategory === "in_progress" &&
+    !!childProgress &&
+    childProgress.total > 0 &&
+    childProgress.done < childProgress.total;
 
-  const badge = (
+  if (agentIds.length === 0 && !isWaiting) return null;
+  const isRunning = hasRunning;
+
+  const badge = isWaiting ? (
+    <span
+      className="text-micro text-muted-foreground"
+      title={
+        childProgress
+          ? t(($) => $.agent_activity.waiting_detail, {
+              done: childProgress.done,
+              total: childProgress.total,
+            })
+          : undefined
+      }
+    >
+      {t(($) => $.agent_activity.status_waiting)}
+    </span>
+  ) : (
     <>
       <AgentAvatarStack
         agentIds={agentIds}
@@ -146,6 +180,39 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
   if (!hoverCard) {
     return (
       <span className="inline-flex shrink-0 items-center gap-1">{badge}</span>
+    );
+  }
+
+  if (isWaiting) {
+    const waitingLabel = t(($) => $.agent_activity.status_waiting);
+    const waitingDetail = childProgress
+      ? t(($) => $.agent_activity.waiting_detail, {
+          done: childProgress.done,
+          total: childProgress.total,
+        })
+      : "";
+    return (
+      <HoverCard>
+        <HoverCardTrigger
+          delay={OPEN_DELAY_MS}
+          closeDelay={CLOSE_DELAY_MS}
+          render={
+            <span className="inline-flex shrink-0 items-center gap-1" />
+          }
+        >
+          {badge}
+        </HoverCardTrigger>
+        <HoverCardContent align="end" className="w-64">
+          <div className="space-y-1">
+            <div className="text-body font-medium">{waitingLabel}</div>
+            {waitingDetail ? (
+              <div className="text-caption text-muted-foreground">
+                {waitingDetail}
+              </div>
+            ) : null}
+          </div>
+        </HoverCardContent>
+      </HoverCard>
     );
   }
 

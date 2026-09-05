@@ -573,7 +573,9 @@
     "chip_agents_working_other": "{{count}} agents working",
     "issues_count_one": "{{count}} issue",
     "issues_count_other": "{{count}} issues",
-    "chip_agents_working_unknown": "Agents working: —"
+    "chip_agents_working_unknown": "Agents working: —",
+    "status_waiting": "Waiting on sub-issues",
+    "waiting_detail": "{{done}}/{{total}} complete"
   },
   "filtered_empty": {
     "title": "No issues match these filters",

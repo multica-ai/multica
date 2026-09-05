@@ -25,6 +25,7 @@ import { LabelChip } from "../../labels/label-chip";
 import { CustomStatusChip } from "./custom-status-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { issueStatusCategory } from "@multica/core/issues";
 import { useLocale } from "../../i18n";
 
 export interface ChildProgress {
@@ -113,7 +114,11 @@ function ListRowContent({
           <span className="min-w-16 shrink-0 text-caption text-muted-foreground">
             {issue.identifier}
           </span>
-          <IssueAgentActivityIndicator issueId={issue.id} />
+          <IssueAgentActivityIndicator
+            issueId={issue.id}
+            childProgress={childProgress}
+            statusCategory={issueStatusCategory(issue)}
+          />
 
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>

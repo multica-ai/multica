@@ -27,7 +27,24 @@ vi.mock("../../agents/components/agent-activity-hover-content", () => ({
 }));
 
 vi.mock("../../i18n", () => ({
-  useT: () => ({ t: () => "Working" }),
+  useT: () => ({
+    t: (selector: (v: Record<string, unknown>) => unknown, vars?: Record<string, unknown>) => {
+      const base = {
+        agent_activity: {
+          status_running: "Working",
+          status_queued: "Queued",
+          status_waiting: "Waiting on sub-issues",
+          waiting_detail: vars ? `${(vars as Record<string, unknown>).done}/${(vars as Record<string, unknown>).total} complete` : "0/1 complete",
+        },
+      };
+      try {
+        const picked = (selector as (v: typeof base) => unknown)(base);
+        return typeof picked === "string" ? picked : String(picked ?? "");
+      } catch {
+        return "Working";
+      }
+    },
+  }),
 }));
 
 // The hover card only portals its content once open, so absence of the body
@@ -140,5 +157,87 @@ describe("IssueAgentActivityIndicator", () => {
     );
 
     expect(container.firstChild).toBeNull();
+  });
+
+  // MUL-7925: derived waiting state (no new query, no status write)
+  it("shows Working when running even with unfinished children", () => {
+    mockState.snapshot = [makeTask({ status: "running" })];
+    const { container } = render(
+      <IssueAgentActivityIndicator
+        issueId="issue-1"
+        statusCategory="in_progress"
+        childProgress={{ done: 0, total: 1 }}
+        hoverCard={false}
+      />,
+    );
+    expect(container.textContent).toContain("Working");
+    expect(container.textContent).not.toContain("Waiting on sub-issues");
+  });
+
+  it("shows Queued when queued even with unfinished children", () => {
+    mockState.snapshot = [makeTask({ status: "queued" })];
+    const { container } = render(
+      <IssueAgentActivityIndicator
+        issueId="issue-1"
+        statusCategory="in_progress"
+        childProgress={{ done: 0, total: 1 }}
+        hoverCard={false}
+      />,
+    );
+    expect(container.textContent).toContain("Queued");
+    expect(container.textContent).not.toContain("Waiting on sub-issues");
+  });
+
+  it("shows Waiting on sub-issues when in_progress with unfinished children and no active task", () => {
+    mockState.snapshot = [];
+    const { container } = render(
+      <IssueAgentActivityIndicator
+        issueId="issue-1"
+        statusCategory="in_progress"
+        childProgress={{ done: 0, total: 1 }}
+        hoverCard={false}
+      />,
+    );
+    expect(container.textContent).toContain("Waiting on sub-issues");
+  });
+
+  it("shows nothing when all children are done even if in_progress and idle", () => {
+    mockState.snapshot = [];
+    const { container } = render(
+      <IssueAgentActivityIndicator
+        issueId="issue-1"
+        statusCategory="in_progress"
+        childProgress={{ done: 1, total: 1 }}
+        hoverCard={false}
+      />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("shows nothing when unfinished children but status is not in_progress", () => {
+    mockState.snapshot = [];
+    const { container } = render(
+      <IssueAgentActivityIndicator
+        issueId="issue-1"
+        statusCategory="todo"
+        childProgress={{ done: 0, total: 1 }}
+        hoverCard={false}
+      />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("waiting wraps in a hover card with detail when hoverCard=true", () => {
+    mockState.snapshot = [];
+    render(
+      <IssueAgentActivityIndicator
+        issueId="issue-1"
+        statusCategory="in_progress"
+        childProgress={{ done: 0, total: 1 }}
+      />,
+    );
+    expect(screen.getByTestId("hover-card")).not.toBeNull();
+    expect(screen.getAllByText("Waiting on sub-issues").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("0/1 complete")).not.toBeNull();
   });
 });

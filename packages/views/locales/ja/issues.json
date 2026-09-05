@@ -551,7 +551,9 @@
     "tasks_count_other": "実行 {{count}} 件",
     "chip_agents_working_other": "作業中のエージェント {{count}} 件",
     "issues_count_other": "タスク {{count}} 件",
-    "chip_agents_working_unknown": "作業中のエージェント: —"
+    "chip_agents_working_unknown": "作業中のエージェント: —",
+    "status_waiting": "サブタスク待ち",
+    "waiting_detail": "{{done}}/{{total}} 完了"
   },
   "filtered_empty": {
     "title": "フィルター条件に一致するタスクがありません",
