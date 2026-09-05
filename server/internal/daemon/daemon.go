@@ -1036,7 +1036,7 @@ func (d *Daemon) resolveAgentLaunchTarget(ctx context.Context, provider string, 
 			if ok && current.path == launchPath && agentExecutablePresent(current.path) {
 				return healOutcome{adopted: current}, nil
 			}
-			return d.adoptAgentPath(ctx, provider, entry.Command, launchPath, "resolved stable entry point for launch"), nil
+			return d.adoptAgentPath(ctx, provider, entry.Command, launchPath, entry.LaunchPrefix, "resolved stable entry point for launch"), nil
 		})
 		outcome, _ := v.(healOutcome)
 
@@ -1104,15 +1104,15 @@ func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) he
 			newPath = launchPath
 		}
 	}
-	return d.adoptAgentPath(ctx, provider, command, newPath, "re-resolved after pinned path vanished")
+	return d.adoptAgentPath(ctx, provider, command, newPath, nil, "re-resolved after pinned path vanished")
 }
 
-func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath, reason string) healOutcome {
+func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath string, prefix []string, reason string) healOutcome {
 	// Verify before adopting. An in-place "upgrade" that actually repoints at an
 	// older or broken install must not be launched under the daemon's stale
 	// version policy, and must not slip past the minimum-version gate that the
 	// registration path applies (MUL-4486 review).
-	version, err := detectAgentVersion(ctx, agent.Command{Path: newPath})
+	version, err := detectAgentVersion(ctx, agent.Command{Path: newPath, Prefix: prefix})
 	if err != nil {
 		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
 			"provider", provider, "command", command, "new_path", newPath, "error", err)
@@ -2351,7 +2351,7 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 				"name", name, "version", heal.rejected.Detected, "error", heal.rejected.Error())
 			return heal.rejected.Detected, heal.rejected.Error(), builtinProbeBelowMinimum
 		}
-		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path})
+		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path, Prefix: resolved.LaunchPrefix})
 		if err != nil {
 			lastErr = err
 			if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
@@ -7194,6 +7194,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		entry, resolvedVersion, resolveErr = d.resolveAgentEntryForLaunch(prepareCtx, provider, entry)
 		if resolveErr != nil {
 			return TaskResult{}, resolveErr
+		}
+		// A built-in entry may carry its own launch prefix (the WorkBuddy
+		// bundled CLI is launched as "<staged node> <cli script> -p …" on
+		// Windows). It is filtered through the same protocol-flag guard as a
+		// custom profile's fixed_args so a prefix can never smuggle in a
+		// protocol flag the family owns.
+		if len(entry.LaunchPrefix) > 0 {
+			profileFixedArgs = agent.FilterLaunchPrefix(provider, entry.LaunchPrefix, d.logger)
 		}
 	}
 	if !ok {

@@ -98,6 +98,26 @@ var BuiltinRuntimes = []BuiltinRuntime{
 		ProviderLabel:     "omp",
 		ModelDiscovery:    discoverOmpModels,
 	},
+	{
+		// workbuddy is the CodeBuddy CLI that Tencent's WorkBuddy desktop app
+		// bundles. It speaks the codebuddy stream-json protocol (the bundle is
+		// the same @genie/agent-cli CodeBuddy Code ships), so it reuses the
+		// codebuddy backend and family skills dirs. The daemon probes the
+		// desktop-app bundle locations when neither MULTICA_WORKBUDDY_PATH nor
+		// a PATH install of the default command exists; on Windows the bundled
+		// CLI is a shebang script, so discovery pairs it with the Node runtime
+		// WorkBuddy stages and launches it through a node <script> prefix.
+		ID:                "workbuddy",
+		ProtocolFamily:    "codebuddy",
+		DefaultCommand:    "codebuddy", // bundled CLI binary name inside the app resources
+		EnvPrefix:         "MULTICA_WORKBUDDY",
+		DisplayName:       "WorkBuddy",
+		SkillsDir:         ".codebuddy/skills",
+		UserSkillsDir:     ".codebuddy/skills",
+		LaunchHeader:      "workbuddy (WorkBuddy bundled CLI)",
+		DefaultExecutable: "codebuddy",
+		ProviderLabel:     "workbuddy",
+	},
 }
 
 // BuiltinRuntimeByID returns the descriptor for the given runtime identity,
@@ -144,6 +164,13 @@ func (b *piBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
 	b.defaultExecutable = desc.DefaultExecutable
 	b.providerLabel = desc.ProviderLabel
 }
+
+// codebuddyBackend implements backendOverrideApplicator too: a runtime
+// identity such as "workbuddy" is hosted by the codebuddy protocol family
+// and overrides the fallback executable and error label through its
+// descriptor. The method body lives in codebuddy.go next to the fields it
+// fills.
+var _ backendOverrideApplicator = (*codebuddyBackend)(nil)
 
 // ResolveBackend is the single production entry point the daemon uses to
 // construct a backend from a provider key. It routes built-in runtime

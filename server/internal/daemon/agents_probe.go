@@ -203,7 +203,24 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// separate CLI independently so a host with both pi and omp installed gets
 	// two runtimes. The env prefix and default command come from the
 	// descriptor, so adding a new fork is a descriptor entry, not a probe edit.
+	//
+	// workbuddy is probed separately (not by the generic descriptor loop):
+	// its CLI is the CodeBuddy binary bundled inside the WorkBuddy desktop
+	// app, which is never on PATH and whose launcher needs pairing with a
+	// Node runtime on Windows. probeWorkBuddyAgent owns that resolution. The
+	// descriptor's EnvPrefix (MULTICA_WORKBUDDY_PATH/MODEL) is honored inside
+	// it, so an operator override keeps working; see probeWorkBuddyAgent.
+	genericDescs := make([]agent.BuiltinRuntime, 0, len(agent.BuiltinRuntimes))
 	for _, desc := range agent.BuiltinRuntimes {
+		if desc.ID == "workbuddy" {
+			if e, ok := probeWorkBuddyAgent(); ok {
+				agents["workbuddy"] = e
+			}
+			continue
+		}
+		genericDescs = append(genericDescs, desc)
+	}
+	for _, desc := range genericDescs {
 		pathEnv := desc.EnvPrefix + "_PATH"
 		modelEnv := desc.EnvPrefix + "_MODEL"
 		if e, ok := probe(pathEnv, desc.DefaultCommand, modelEnv); ok {
