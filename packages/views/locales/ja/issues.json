@@ -376,6 +376,8 @@
     "prop_start_date": "開始日",
     "prop_due_date": "期限",
     "prop_project": "プロジェクト",
+    "prop_branch": "ブランチ",
+    "branch_not_created": "ブランチ未作成",
     "prop_labels": "ラベル",
     "add_property_action": "プロパティを追加",
     "prop_created_by": "作成者",

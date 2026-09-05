@@ -17,8 +17,10 @@ Product contracts the runtime brief does not fully encode.
 The GitHub webhook runs two separate scans over an incoming PR. They are not the
 same gate and they read different fields.
 
-**Linking** scans the PR **title, body, OR branch** for a routable issue key
-(`PREFIX-NUMBER`, e.g. `MUL-123`). Each match writes an issue to PR link row.
+**Linking** first matches a Multica checkout by its exact **repository + task
+branch**. For PRs created outside that flow, it also scans the PR **title, body,
+OR branch** for a routable issue key (`PREFIX-NUMBER`, e.g. `MUL-123`). Each
+match writes an issue ↔ PR link row.
 This is the link that `multica issue pull-requests` reads back — but see the
 reference-only rule below: a key that appears **only** as a bare mention in the
 body is linked yet hidden from that list.
@@ -69,8 +71,12 @@ an unconditional command: if no code changed, say no PR is needed; if PR creatio
 is blocked by auth, failing tests, or missing remote state, report that blocker
 instead of pretending the run is complete.
 
-Use a routable issue key in the PR title, body, or branch so the webhook can link
-the PR back to the issue. If the PR should close the issue on merge, put the key
+For a repository checked out through Multica, create the PR from that checkout's
+current branch; the daemon records the repository + branch before returning the
+checkout, and the webhook links that exact head branch to the issue. For a PR
+created outside a Multica checkout, use the identifier fallback: Use a routable
+issue key in the PR title, body, or branch. If the PR should close the issue on
+merge, put the key
 immediately after a closing keyword in the title or body, for example:
 
 ```text
@@ -118,10 +124,11 @@ Returns `{"pull_requests": [...]}`. Each element exposes:
 So "is it merged?" is `state == "merged"` (or `merged_at != null`); "is it still
 a draft?" is `state == "draft"`; coarse CI status is `checks_conclusion`.
 
-If the command returns no linked PRs after a PR was opened, the link scanner did
-not observe a routable issue key in the PR title/body/branch — or the only match
-was a bare body mention, which links as `reference_only` and is hidden from this
-list (see the reference-only rule above).
+If the command returns no linked PRs after a PR was opened, verify that it was
+opened from the branch returned by the Multica checkout. For an external/manual
+checkout, the scanner may not have observed a routable issue key in the PR
+title/body/branch; a bare body mention links as `reference_only` and is hidden
+from this list (see the reference-only rule above).
 
 ## Metadata: durable custom state
 

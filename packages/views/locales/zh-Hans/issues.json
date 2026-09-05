@@ -376,6 +376,8 @@
     "prop_start_date": "开始日期",
     "prop_due_date": "截止日期",
     "prop_project": "项目",
+    "prop_branch": "分支",
+    "branch_not_created": "未创建分支",
     "prop_labels": "标签",
     "add_property_action": "添加字段",
     "prop_created_by": "创建者",

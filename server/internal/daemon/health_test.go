@@ -341,6 +341,56 @@ func TestRepoCheckoutUsesTaskScopedProjectRefByDefault(t *testing.T) {
 	}
 }
 
+func TestRepoCheckoutRecordsBranchBeforeReturning(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-checkout"
+	const repoURL = "https://github.com/org/repo.git"
+	const taskID = "task-1"
+	recorded := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/daemon/workspaces/"+workspaceID+"/repos":
+			json.NewEncoder(w).Encode(WorkspaceReposResponse{
+				WorkspaceID: workspaceID, Repos: []RepoData{{URL: repoURL}}, ReposVersion: "v1",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/daemon/tasks/"+taskID+"/checkout-branch":
+			recorded <- struct{}{}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	workDir := t.TempDir()
+	d := &Daemon{
+		cfg:       Config{CLIVersion: "v1.0.0"},
+		client:    NewClient(srv.URL),
+		repoCache: &recordingRepoCache{lookupPath: "/cache/org/repo.git"},
+		workspaces: map[string]*workspaceState{
+			workspaceID: newWorkspaceState(workspaceID, nil, "", []RepoData{{URL: repoURL}}, nil),
+		},
+		logger: slog.Default(),
+	}
+	d.registerActiveRepoCheckoutTask("mat_repo_checkout_test", activeRepoCheckoutTask{
+		WorkspaceID: workspaceID, TaskID: taskID, AgentID: "agent-1", AgentName: "Test Agent", WorkDir: workDir,
+	})
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"` + taskID + `"}`)
+	d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(body))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case <-recorded:
+	default:
+		t.Fatal("checkout returned before recording the task branch")
+	}
+}
+
 // A request with no Authorization header can only come from a CLI older than
 // repoCheckoutMinCLIVersion, which is a permanent failure. The rejection has to
 // say so: the agent sees this string and nothing else (#7520).

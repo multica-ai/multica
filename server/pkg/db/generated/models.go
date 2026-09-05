@@ -172,6 +172,7 @@ type AgentTaskQueue struct {
 	BranchName                pgtype.Text `json:"branch_name"`
 	DurableWorkDir            pgtype.Text `json:"durable_work_dir"`
 	ChannelContextRevision    pgtype.Int8 `json:"channel_context_revision"`
+	CheckoutRepoIdentity      pgtype.Text `json:"checkout_repo_identity"`
 }
 
 type AgentToLabel struct {

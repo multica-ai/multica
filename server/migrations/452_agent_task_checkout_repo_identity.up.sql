@@ -1,0 +1,20 @@
+-- Repo scope for the branch-exact PR auto-link path (HOM-16 follow-up).
+--
+-- 451 keyed the branch → issue lookup on (workspace_id, branch_name) alone. That
+-- is not enough: a workspace can hold several repos at once, and even mix
+-- providers (a GitHub App installation alongside VCS connections for
+-- GitLab/Forgejo, plus local_directory resources). Every run records the SAME
+-- deterministic branch shape (agent/<name>/<task>) regardless of which repo —
+-- or which provider — it checked out. So a run that checked out a NON-GitHub
+-- repo could have its branch matched by a GitHub webhook firing on a
+-- coincidentally same-named branch, cross-linking a PR to an unrelated issue.
+--
+-- checkout_repo_identity pins each recorded branch to the repo the run actually
+-- checked out (normalized host/owner/repo, e.g. github.com/acme/widget). The
+-- webhook now matches branch AND repo identity, so a non-GitHub checkout — whose
+-- identity can never equal a github.com/... form — is structurally excluded from
+-- the GitHub path, and two GitHub repos in the same workspace can no longer
+-- cross-link either. Nullable and only populated by the checkout callback; rows
+-- written before this column simply do not participate in the exact-match path
+-- and fall back to the identifier scan, same as a missing branch.
+ALTER TABLE agent_task_queue ADD COLUMN IF NOT EXISTS checkout_repo_identity TEXT;

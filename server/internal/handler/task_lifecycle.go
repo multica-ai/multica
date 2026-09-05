@@ -11,7 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // RecoverOrphanedTasks is called by the daemon at startup for each runtime
@@ -140,7 +142,71 @@ func (h *Handler) PinTaskSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// RerunIssueRequest is the optional body of POST /api/issues/{id}/rerun.
+// RecordTaskCheckoutBranchRequest carries the branch a live task checked its
+// repo out on, plus the repo URL it cloned, so the GitHub webhook can attribute
+// a PR opened from that branch to this task's issue by exact match — scoped to
+// the exact repo — instead of scraping PREFIX-NUMBER identifiers (HOM-16).
+type RecordTaskCheckoutBranchRequest struct {
+	BranchName string `json:"branch_name"`
+	RepoURL    string `json:"repo_url"`
+}
+
+// RecordTaskCheckoutBranch persists the repo checkout branch (and the identity
+// of the repo it was cloned from) on a live task row. It is the write half of
+// the branch-primary PR auto-link path: the daemon calls it the moment a run
+// checks out its repo, when the (branch, repo, issue) triple is unambiguous.
+// The repo identity is what scopes the later webhook match to the correct repo
+// — a branch name alone is identical across every repo/provider a run might
+// clone. Best-effort — it only fills empty slots on a non-terminal row
+// (RecordTaskCheckoutBranch query), so it never clobbers a delivered-branch name
+// recorded by a terminal callback, and a lost call simply falls back to the
+// identifier scan at webhook time.
+func (h *Handler) RecordTaskCheckoutBranch(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+	_, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
+		return
+	}
+
+	var req RecordTaskCheckoutBranchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
+	if req.BranchName == "" {
+		writeError(w, http.StatusBadRequest, "branch_name required")
+		return
+	}
+	// Derive the canonical host/owner/repo identity from the cloned URL. A URL
+	// we cannot parse into a repo identity leaves the column NULL, which simply
+	// excludes the row from the exact-match path (it falls back to the
+	// identifier scan) rather than risking a bad match.
+	repoIdent := repoIdentityFromGitURL(req.RepoURL)
+	repoIdentParam := pgtype.Text{}
+	if repoIdent != "" {
+		repoIdentParam = pgtype.Text{String: repoIdent, Valid: true}
+	}
+
+	if err := h.Queries.RecordTaskCheckoutBranch(r.Context(), db.RecordTaskCheckoutBranchParams{
+		ID:           parseUUID(taskID),
+		BranchName:   pgtype.Text{String: req.BranchName, Valid: true},
+		RepoIdentity: repoIdentParam,
+	}); err != nil {
+		slog.Warn("record checkout branch failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "record checkout branch failed")
+		return
+	}
+	// The issue sidebar reads branch_name from the per-issue task list. Notify
+	// connected clients immediately so a branch created after the page opened
+	// appears without waiting for task completion or a manual refresh.
+	h.publishTask(protocol.EventTaskBranchRecorded, workspaceID, "system", "", taskID, map[string]any{
+		"task_id":     taskID,
+		"branch_name": req.BranchName,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // All fields are optional; an empty body keeps the legacy "rerun the issue's
 // current assignee" behaviour used by the CLI.
 type RerunIssueRequest struct {

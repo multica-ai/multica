@@ -1612,6 +1612,26 @@ UPDATE agent_task_queue
 SET branch_name = COALESCE(branch_name, sqlc.arg('branch_name'))
 WHERE id = sqlc.arg('id') AND status = 'cancelled';
 
+-- name: RecordTaskCheckoutBranch :exec
+-- Records the branch a running task checked its repo out on, plus the identity
+-- of the repo it cloned (host/owner/repo), so the GitHub webhook can later
+-- attribute a PR opened from that branch to this task's issue by exact match
+-- instead of scraping PREFIX-NUMBER identifiers (HOM-16). The repo identity is
+-- what keeps the match honest: branch names are identical across every repo and
+-- provider a run might check out, so the webhook matches branch AND repo — a
+-- non-GitHub or different-GitHub checkout sharing the branch name is excluded.
+-- Unlike SetAgentTaskBranchName (cancel-ack) and the complete/fail callbacks —
+-- which all record the DELIVERED branch on a terminal row — this fires
+-- mid-flight, at checkout, while the task is still live. It only fills empty
+-- slots: a later terminal callback delivering the same branch is a COALESCE
+-- no-op, and it never runs against a terminal row, so it cannot clobber a
+-- recorded delivery.
+UPDATE agent_task_queue
+SET branch_name = COALESCE(branch_name, sqlc.arg('branch_name')),
+    checkout_repo_identity = COALESCE(checkout_repo_identity, sqlc.narg('repo_identity'))
+WHERE id = sqlc.arg('id')
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred');
+
 -- name: SetAgentTaskDurableWorkDir :exec
 -- Records the durable replacement for a disposable worktree on a CANCELLED
 -- task. The daemon only sends this after Finalize confirms the task worktree

@@ -376,6 +376,8 @@
     "prop_start_date": "시작일",
     "prop_due_date": "마감일",
     "prop_project": "프로젝트",
+    "prop_branch": "브랜치",
+    "branch_not_created": "브랜치가 생성되지 않음",
     "prop_labels": "라벨",
     "add_property_action": "속성 추가",
     "prop_created_by": "생성자",

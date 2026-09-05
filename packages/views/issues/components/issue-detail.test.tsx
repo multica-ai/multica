@@ -301,6 +301,7 @@ const mockApiObj = vi.hoisted(() => ({
   unsubscribeFromIssueSubtree: vi.fn().mockResolvedValue(undefined),
   getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
   listTasksByIssue: vi.fn().mockResolvedValue([]),
+  listIssuePullRequests: vi.fn().mockResolvedValue({ pull_requests: [] }),
   rerunIssue: vi.fn(),
   listTaskMessages: vi.fn().mockResolvedValue([]),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
@@ -704,6 +705,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
     mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.listIssuePullRequests.mockResolvedValue({ pull_requests: [] });
     mockApiObj.rerunIssue.mockResolvedValue({ id: "task-rerun" });
     mockApiObj.listMembers.mockResolvedValue([
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
@@ -1040,6 +1042,60 @@ describe("IssueDetail (shared)", () => {
     // The "+ Add property" affordance is always offered while any
     // optional field is still hidden.
     expect(screen.getByText("Add property")).toBeInTheDocument();
+  });
+
+  it("always shows Branch and reports when the latest run has not created one", async () => {
+    mockApiObj.listTasksByIssue.mockResolvedValue([
+      {
+        id: "task-new", agent_id: "agent-1", runtime_id: "runtime-1",
+        issue_id: "issue-1", status: "running", priority: 0,
+        dispatched_at: "2026-06-09T08:00:00Z", started_at: "2026-06-09T08:00:00Z",
+        completed_at: null, result: null, error: null,
+        created_at: "2026-06-09T08:00:00Z",
+      },
+      {
+        id: "task-old", agent_id: "agent-1", runtime_id: "runtime-1",
+        issue_id: "issue-1", status: "completed", priority: 0,
+        dispatched_at: "2026-06-08T08:00:00Z", started_at: "2026-06-08T08:00:00Z",
+        completed_at: "2026-06-08T08:05:00Z", result: null, error: null,
+        created_at: "2026-06-08T08:00:00Z", branch_name: "agent/old/task",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("Branch")).toBeInTheDocument();
+    expect(screen.getByText("Not created")).toBeInTheDocument();
+    expect(screen.queryByText("agent/old/task")).not.toBeInTheDocument();
+  });
+
+  it("shows the latest run branch for both GitHub and local projects", async () => {
+    mockApiObj.listTasksByIssue.mockResolvedValue([
+      {
+        id: "task-new", agent_id: "agent-1", runtime_id: "runtime-1",
+        issue_id: "issue-1", status: "running", priority: 0,
+        dispatched_at: "2026-06-09T08:00:00Z", started_at: "2026-06-09T08:00:00Z",
+        completed_at: null, result: null, error: null,
+        created_at: "2026-06-09T08:00:00Z", branch_name: "agent/mika/tes-1",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("Branch")).toBeInTheDocument();
+    expect(screen.getByText("agent/mika/tes-1")).toBeInTheDocument();
+  });
+
+  it("falls back to the linked GitHub PR head branch for older task responses", async () => {
+    mockApiObj.listIssuePullRequests.mockResolvedValue({
+      pull_requests: [{ branch: "agent/mika/legacy-task" }],
+    });
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("Branch")).toBeInTheDocument();
+    expect(screen.getByText("agent/mika/legacy-task")).toBeInTheDocument();
+    expect(screen.queryByText("Not created")).not.toBeInTheDocument();
   });
 
   it("hides every optional property row when none are set", async () => {

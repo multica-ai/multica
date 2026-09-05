@@ -67,7 +67,7 @@ import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
-import { errorCode } from "@multica/core/api";
+import { api, errorCode } from "@multica/core/api";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
@@ -94,7 +94,7 @@ import { ExecutionLogSection } from "./execution-log-section";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
 import { PullRequestList } from "./pull-request-list";
-import { useGitHubSettings } from "@multica/core/github";
+import { issuePullRequestsOptions, useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -102,7 +102,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useModalStore } from "@multica/core/modals";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions, issueKeys } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -1816,6 +1816,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     ...projectDetailOptions(wsId, issueProjectId ?? ""),
     enabled: !!issueProjectId,
   });
+  // The project resource ref is the repository's default branch, not the
+  // branch created for this issue's sandbox run. Use the task-run record as
+  // the source of truth so this works for both GitHub and local projects.
+  const { data: issueTasks = [] } = useQuery({
+    queryKey: issueKeys.tasks(id),
+    queryFn: () => api.listTasksByIssue(id),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const latestTaskBranch = issueTasks
+    .toSorted((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+    ?.branch_name?.trim() || undefined;
+  const { data: issuePullRequests } = useQuery(issuePullRequestsOptions(id));
+  // PR rows carry the authoritative GitHub head branch. Keep this fallback for
+  // installed clients talking to a backend from before checkout branch
+  // reporting shipped; both consumers share one React Query cache entry.
+  const issueBranch = latestTaskBranch || issuePullRequests?.pull_requests[0]?.branch?.trim() || undefined;
   const {
     data: childIssues = [],
     isSuccess: childIssuesLoaded,
@@ -2335,6 +2352,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               projectId={issue.project_id}
               onUpdate={handleUpdateField}
             />
+          </PropRow>
+          <PropRow label={t(($) => $.detail.prop_branch)}>
+            <span
+              className="truncate text-muted-foreground"
+              title={issueBranch ?? t(($) => $.detail.branch_not_created)}
+            >
+              {issueBranch ?? t(($) => $.detail.branch_not_created)}
+            </span>
           </PropRow>
 
           {/* Optional props — rendered only when set on the issue OR added

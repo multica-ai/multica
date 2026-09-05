@@ -190,6 +190,72 @@ func (q *Queries) GetGitHubPullRequest(ctx context.Context, arg GetGitHubPullReq
 	return i, err
 }
 
+const getIssueByWorkspaceTaskBranch = `-- name: GetIssueByWorkspaceTaskBranch :one
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at
+FROM agent_task_queue q
+JOIN issue i ON i.id = q.issue_id
+WHERE i.workspace_id = $1
+  AND q.branch_name = $2
+  AND q.checkout_repo_identity = $3
+ORDER BY q.created_at DESC
+LIMIT 1
+`
+
+type GetIssueByWorkspaceTaskBranchParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	BranchName   pgtype.Text `json:"branch_name"`
+	RepoIdentity pgtype.Text `json:"repo_identity"`
+}
+
+// Resolves the issue a Multica run created a branch for, by exact branch match
+// (HOM-16). When a run checks out its repo it records the deterministic branch
+// name (agent/<name>/<task>) AND the repo it cloned (checkout_repo_identity,
+// e.g. github.com/owner/repo) on its task row; the GitHub webhook uses this to
+// attribute a PR opened from that branch to its issue WITHOUT scraping
+// PREFIX-NUMBER identifiers. Scoped to the workspace (via the task's issue) so a
+// branch name reused across workspaces can never cross-link, AND to the exact
+// repo the PR came from: branch names are identical across every repo/provider a
+// run might check out, so without the repo filter a non-GitHub (or different
+// GitHub) checkout sharing the branch name would be mislinked on this GitHub
+// webhook path. When several tasks share a branch name within the same repo (a
+// branch reused across runs of the same issue chain), the most recent task wins
+// — its issue is the one this branch is currently doing work for.
+func (q *Queries) GetIssueByWorkspaceTaskBranch(ctx context.Context, arg GetIssueByWorkspaceTaskBranchParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, getIssueByWorkspaceTaskBranch, arg.WorkspaceID, arg.BranchName, arg.RepoIdentity)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+		&i.Revision,
+		&i.LastActivityAt,
+	)
+	return i, err
+}
+
 const getIssuePullRequestCloseAggregate = `-- name: GetIssuePullRequestCloseAggregate :one
 SELECT
     COALESCE(SUM(CASE WHEN pr.state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
