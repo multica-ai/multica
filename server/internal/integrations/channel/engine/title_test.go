@@ -34,3 +34,23 @@ func TestDeriveFirstMessageTitle_MediaPlaceholderWaitsForFilename(t *testing.T) 
 		t.Fatalf("literal text title = %q, want the user-authored text", got)
 	}
 }
+
+func TestChatTitleSourceConsumesOnlyAppliedFreshDirective(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, command, want string
+		fresh                     bool
+	}{
+		{"enriched fresh", "<quoted_message>history</quoted_message>\n\nanswer", "/clear answer", "answer", true},
+		{"nested fresh", "/clear answer", "/clear /clear answer", "/clear answer", true},
+		{"new body is literal", "<recent_context>history</recent_context>\n\n/clear answer", "/clear answer", "/clear answer", false},
+		{"native fresh", "<recent_context>history</recent_context>\n\nanswer", "answer", "answer", true},
+		{"media fresh", "[Image]", "/clear", "", true},
+		{"missing current text", "body fallback", "  ", "body fallback", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := chatTitleSource(tc.body, tc.command, tc.fresh); got != tc.want {
+				t.Fatalf("title source = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

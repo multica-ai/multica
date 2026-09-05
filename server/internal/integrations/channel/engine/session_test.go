@@ -410,6 +410,9 @@ func TestStartSessionCreatesExplicitEmptyGeneration(t *testing.T) {
 	if !result.SessionID.Valid || len(f.messages) != 0 {
 		t.Fatalf("session=%v messages=%v", result.SessionID.Valid, f.messages)
 	}
+	if f.lastSessionCreate.Title != "" || result.Append.InitialTitle != "" {
+		t.Fatalf("empty Chat title = stored %q result %q, want empty", f.lastSessionCreate.Title, result.Append.InitialTitle)
+	}
 	if f.createdSessions != 1 || f.markRows != 1 {
 		t.Fatalf("created=%d markRows=%d", f.createdSessions, f.markRows)
 	}
@@ -433,6 +436,9 @@ func TestStartSessionBodyCreatesOrdinaryFirstMessageAndTitle(t *testing.T) {
 	}
 	if len(f.messages) != 1 || f.messages[0] != "# 发布检查" {
 		t.Fatalf("messages=%v", f.messages)
+	}
+	if f.lastSessionCreate.Title != "发布检查" || result.Append.InitialTitle != "发布检查" {
+		t.Fatalf("first-turn title = stored %q result %q, want body-derived fallback", f.lastSessionCreate.Title, result.Append.InitialTitle)
 	}
 	if f.lastCreate.MessageKind.Valid {
 		t.Fatalf("message kind=%q, want ordinary", f.lastCreate.MessageKind.String)

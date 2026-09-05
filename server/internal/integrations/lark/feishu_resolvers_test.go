@@ -116,7 +116,7 @@ func TestFeishuSessionBinder_StartSessionMapping(t *testing.T) {
 		Sender:       binderUUID(7),
 		ClaimToken:   binderUUID(9),
 		Message: channel.InboundMessage{
-			MessageID: "om_1", Text: "first turn",
+			MessageID: "om_1", Text: "first turn", CommandText: "current instruction",
 			Source: channel.Source{ChatID: "oc_chat", ChatType: channel.ChatTypeGroup, ThreadID: "omt_topic1"},
 		},
 		MediaPendingSeconds:    45,
@@ -131,7 +131,7 @@ func TestFeishuSessionBinder_StartSessionMapping(t *testing.T) {
 		t.Fatalf("SessionID = %+v, want shared-session result", result.SessionID)
 	}
 	got := f.startIn
-	if got.BindingKey != "oc_chat:omt_topic1" || got.ThreadID != "omt_topic1" || got.Body != "first turn" || got.MessageID != "om_1" {
+	if got.BindingKey != "oc_chat:omt_topic1" || got.ThreadID != "omt_topic1" || got.Body != "first turn" || got.CommandText != "current instruction" || got.MessageID != "om_1" {
 		t.Fatalf("start route/message mapping wrong: %+v", got)
 	}
 	if got.Sender != binderUUID(6) || got.Initiator != binderUUID(7) {
