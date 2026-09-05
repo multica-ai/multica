@@ -2185,6 +2185,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// the strict DELETE refused with
 					// `runtime_has_active_agents` and the user confirmed.
 					r.Post("/unbind-agents-and-delete", h.UnbindAgentsAndDeleteRuntime)
+					// Confirmed public-to-private transition. The normal PATCH
+					// returns a structured plan when teammates still have agents
+					// or active work on the runtime; this route applies that plan
+					// atomically after the owner reviews it.
+					r.Post("/revoke-workspace-access", h.RevokeRuntimeWorkspaceAccess)
 					// Legacy path for installed clients built against the
 					// archive-and-delete contract (MUL-5559 renamed the
 					// behaviour, not just the route). Same handler.

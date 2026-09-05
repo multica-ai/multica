@@ -2132,6 +2132,17 @@ export const DuplicateIssueErrorBodySchema = z.object({
   }).loose(),
 }).loose();
 
+// A destructive confirmation must fail closed on an incomplete plan. Do not
+// default missing arrays to empty or silently discard malformed entries.
+export const RuntimeAccessRevocationPlanSchema = z.object({
+  code: z.enum(["runtime_has_nonowner_dependents", "runtime_access_revocation_plan_changed"]),
+  nonowner_agents: z.array(z.object({ id: z.string().uuid(), name: z.string() })),
+  active_task_ids: z.array(z.string().uuid()),
+}).refine((body) =>
+  new Set(body.nonowner_agents.map((agent) => agent.id)).size === body.nonowner_agents.length &&
+  new Set(body.active_task_ids).size === body.active_task_ids.length,
+).transform((body) => ({ agents: body.nonowner_agents, activeTaskIds: body.active_task_ids }));
+
 export interface DuplicateIssueErrorBody {
   code: "active_duplicate_issue";
   error?: string;

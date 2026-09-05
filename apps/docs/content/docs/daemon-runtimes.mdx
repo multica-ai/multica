@@ -79,6 +79,10 @@ A local runtime is **private** by default: only the runtime owner can create age
 
 Only the runtime owner can make it **public** — workspace admins can rename or delete a runtime, but sharing one is the owner's decision. Other workspace members can then select this runtime as well; that does not share the underlying AI coding tool's login credentials — it only lets members route their agents' runs to this computer.
 
+When the owner makes a public runtime **private** again, Multica shows the affected agents and active runs before applying the change. Confirmation unbinds those teammates' agents, cancels their queued, dispatched, running, local-directory-waiting and deferred runs with `runtime_access_revoked`, and pauses active autopilots assigned to the unbound agents. The owner's own agents and runs are unaffected. A changed plan requires renewed confirmation; concurrent chat writes may require a retry. To resume work, bind the agent to an accessible runtime, then explicitly resume its paused autopilots.
+
+Cancellation preserves chat history and stores draft/attachment recovery data on the server. Web and desktop use the existing draft recovery UI; mobile does not yet expose that recovery UI. A started turn with no output waits for the daemon's cancellation acknowledgement or the server's finalize grace period before deciding whether to restore the input. A connected daemon observes cancellation through its regular check. If the computer is offline, server-side access is still revoked immediately, but the local process may continue until it receives cancellation after reconnecting; the server cannot guarantee an immediate remote stop.
+
 ## Custom runtime profiles
 
 If your team uses an internal wrapper, a version-pinned executable, or needs fixed extra arguments for a compatible tool, create a **custom runtime profile**.

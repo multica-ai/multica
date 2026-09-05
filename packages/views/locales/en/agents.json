@@ -931,6 +931,7 @@
       "runtime_offline": "Daemon offline",
       "runtime_reconnect_timeout": "Daemon did not reconnect in time",
       "runtime_recovery": "Daemon restarted",
+      "runtime_access_revoked": "Runtime access revoked",
       "timeout": "Run timed out",
       "iteration_limit": "Hit the iteration limit",
       "agent_blocked": "Waiting on human input",

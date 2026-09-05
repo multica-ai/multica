@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -1476,6 +1477,18 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
+	// The preflight runtime can become private while validation is in flight.
+	// Serialize with revocation and keep the authorization lock through INSERT.
+	runtime, err = qtx.LockAgentRuntimeForAccessChange(r.Context(), runtimeUUID)
+	if err != nil || runtime.WorkspaceID != wsUUID {
+		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return
+	}
+	if !canUseRuntimeForAgent(member, runtime) {
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
+		return
+	}
+
 	created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:              wsUUID,
 		Name:                     req.Name,
@@ -2118,7 +2131,35 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updated, err := h.Queries.UpdateAgent(r.Context(), params)
+	// Only binding writes need this transaction. Hold the same runtime lock as
+	// revocation until the new binding commits; a preflight-only check is stale
+	// as soon as a public runtime becomes private.
+	updateQueries := h.Queries
+	var bindingTx pgx.Tx
+	if req.RuntimeID != nil {
+		member, ok := h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
+		if !ok {
+			return
+		}
+		bindingTx, err = h.TxStarter.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to start agent binding transaction")
+			return
+		}
+		defer bindingTx.Rollback(r.Context())
+		updateQueries = h.Queries.WithTx(bindingTx)
+		runtime, err := updateQueries.LockAgentRuntimeForAccessChange(r.Context(), params.RuntimeID)
+		if err != nil || runtime.WorkspaceID != existing.WorkspaceID {
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can move agents onto it")
+			return
+		}
+		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
+	}
+	updated, err := updateQueries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — mirror CreateAgent and
 		// return a clear conflict instead of a 500 that leaks the raw
@@ -2138,6 +2179,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update agent: "+err.Error())
 		return
+	}
+
+	if bindingTx != nil {
+		if err := bindingTx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to commit agent binding")
+			return
+		}
 	}
 
 	// Nullable runtime overrides: null/empty in the request means explicitly

@@ -73,6 +73,10 @@ const (
 	// task went offline. Written by FailTasksForOfflineRuntimes.
 	ReasonRuntimeOffline Reason = "runtime_offline"
 
+	// ReasonRuntimeAccessRevoked: the runtime owner withdrew workspace access.
+	// This is a cancellation, not a runner failure or a retryable outage.
+	ReasonRuntimeAccessRevoked Reason = "runtime_access_revoked"
+
 	// ReasonRuntimeReconnectTimeout: a retry waiting for an offline runtime
 	// remained deferred for the full reconnect grace. Non-retryable: the
 	// runtime must return before a user starts another attempt. Written by
@@ -264,6 +268,7 @@ var allReasons = []Reason{
 	// Platform / scheduler side.
 	ReasonQueuedExpired,
 	ReasonRuntimeOffline,
+	ReasonRuntimeAccessRevoked,
 	ReasonRuntimeReconnectTimeout,
 	ReasonRuntimeRecovery,
 	ReasonTimeout,

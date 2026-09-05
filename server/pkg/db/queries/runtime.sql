@@ -129,8 +129,9 @@ RETURNING *, (xmax = 0) AS inserted;
 -- name: UpdateAgentRuntimeVisibility :one
 -- Toggles a runtime between 'private' (only owner can bind agents) and
 -- 'public' (any workspace member can). Default for new rows is 'private'
--- (see migration 083). Gated at the handler layer to owner / workspace
--- admin only.
+-- (see migration 083). Gated at the handler layer to the runtime owner only:
+-- visibility is consent to use that person's machine, not a workspace-governance
+-- setting.
 UPDATE agent_runtime
 SET visibility = @visibility, updated_at = now()
 WHERE id = @id
@@ -350,6 +351,75 @@ WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid
   AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
+-- name: ListNonOwnerActiveTasksByRuntime :many
+-- Lists live user-agent tasks that still target a public runtime but belong to
+-- somebody other than its owner. It forms part of the public-to-private
+-- confirmation plan so the owner explicitly approves cancelling work that
+-- could otherwise keep running after machine access is revoked.
+SELECT task.*
+FROM agent_task_queue AS task
+JOIN agent ON agent.id = task.agent_id
+WHERE task.runtime_id = @runtime_id
+  AND agent.kind = 'user'
+  AND agent.owner_id IS DISTINCT FROM @runtime_owner_id
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+ORDER BY task.id;
+
+-- name: ListNonOwnerActiveTasksByRuntimeForUpdate :many
+-- Acquired after the affected agent and chat-session locks. Bindings serialize
+-- on LockAgentRuntimeForAccessChange; enqueue rechecks the locked agent.
+SELECT task.*
+FROM agent_task_queue AS task
+JOIN agent ON agent.id = task.agent_id
+WHERE task.runtime_id = @runtime_id
+  AND agent.kind = 'user'
+  AND agent.owner_id IS DISTINCT FROM @runtime_owner_id
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+ORDER BY task.id
+FOR UPDATE OF task;
+
+-- name: LockAgentRuntimeForAccessChange :one
+-- Binding and visibility writers share this lock and recheck access under it.
+-- NO KEY UPDATE deliberately permits legacy FK KEY SHARE locks: a chat enqueue
+-- holding session/agent locks must not wait here while revocation locks them.
+SELECT * FROM agent_runtime WHERE id = $1 FOR NO KEY UPDATE;
+
+-- name: LockRuntimeRevocationChatSessions :many
+-- Revocation already holds affected agents. Never wait in the reverse of the
+-- normal session -> agent/task order: a concurrent chat writer yields a 409
+-- and the entire revocation rolls back before changing anything.
+SELECT cs.id FROM chat_session cs
+WHERE EXISTS (
+    SELECT 1 FROM agent_task_queue task JOIN agent ON agent.id = task.agent_id
+    WHERE task.chat_session_id = cs.id
+      AND task.runtime_id = @runtime_id
+      AND agent.kind = 'user'
+      AND agent.owner_id IS DISTINCT FROM @runtime_owner_id
+      AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+)
+ORDER BY cs.id
+FOR UPDATE OF cs NOWAIT;
+
+-- name: CancelNonOwnerTasksByRuntime :many
+-- Server-side execution revocation for a public runtime made private. The
+-- join deliberately classifies work by its agent owner rather than cancelling
+-- every task on the runtime, so the runtime owner's own tasks keep running.
+-- cancellation polling on an online daemon observes the state change; an
+-- offline daemon cannot run new work and will observe it after reconnecting.
+UPDATE agent_task_queue AS task
+SET status = 'cancelled',
+    completed_at = now(),
+    error = 'runtime access was revoked',
+    failure_reason = @failure_reason::text,
+    wait_reason = NULL
+FROM agent
+WHERE task.agent_id = agent.id
+  AND task.runtime_id = @runtime_id
+  AND agent.kind = 'user'
+  AND agent.owner_id IS DISTINCT FROM @runtime_owner_id
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+RETURNING task.*;
+
 -- name: CountUndrainedTasksByRuntimeOrAgent :one
 -- Belt-and-braces gate for the runtime-delete transaction: after cancelling,
 -- every task on this runtime OR owned by an agent being unbound must be terminal
@@ -390,6 +460,17 @@ WHERE runtime_id = $1 AND completed_at IS NOT NULL;
 UPDATE agent
 SET runtime_id = NULL, updated_at = now()
 WHERE runtime_id = $1 AND kind = 'user'
+RETURNING *;
+
+-- name: UnbindNonOwnerUserAgentsFromRuntime :many
+-- The companion to CancelNonOwnerTasksByRuntime for a public-to-private
+-- transition. Only teammates lose the binding; the runtime owner's agents
+-- remain bound and usable after the machine becomes private again.
+UPDATE agent
+SET runtime_id = NULL, updated_at = now()
+WHERE runtime_id = @runtime_id
+  AND kind = 'user'
+  AND owner_id IS DISTINCT FROM @runtime_owner_id
 RETURNING *;
 
 -- name: DeleteAgentRuntime :exec

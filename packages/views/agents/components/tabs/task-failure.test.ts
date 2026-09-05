@@ -40,6 +40,12 @@ const enT = fixedT("en");
 // row, a user's own cancel stays a plain "Cancelled" — labelling every cancel
 // would bury the rows that actually need the user to act.
 describe("cancelReasonLabel", () => {
+  it("localizes access revocation without calling the cancelled run a failure", () => {
+    for (const locale of Object.keys(AGENT_RESOURCES) as SupportedLocale[]) {
+      expect(cancelReasonLabel({ status: "cancelled", failure_reason: "runtime_access_revoked" }, fixedT(locale)))
+        .toBe(AGENT_RESOURCES[locale].task_failure.reasons.runtime_access_revoked);
+    }
+  });
   it("returns null for a user-initiated cancel", () => {
     expect(
       cancelReasonLabel(
