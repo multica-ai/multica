@@ -349,9 +349,14 @@ export function AgentCreatePanel({
   );
   const usesExplicitFields = priority !== "none" || dueDate !== null;
   const versionCheck = usesExplicitFields ? fieldVersionCheck : baseVersionCheck;
+  // A member may invoke a shared agent without being allowed to list the
+  // owner's private runtime. Absence from this privacy-filtered list is
+  // therefore unknown, not "version missing"; defer that case to the
+  // authoritative server gate, which can read the target runtime directly.
   const versionBlocked =
-    baseVersionCheck.state !== "ok" ||
-    (usesExplicitFields && fieldVersionCheck.state !== "ok");
+    selectedRuntime !== undefined &&
+    (baseVersionCheck.state !== "ok" ||
+      (usesExplicitFields && fieldVersionCheck.state !== "ok"));
 
   const initialPrompt = draft.agent.prompt || (data?.prompt as string) || "";
   // The editor is uncontrolled — we read the latest markdown via the ref at
