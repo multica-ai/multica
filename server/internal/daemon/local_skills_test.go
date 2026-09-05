@@ -279,6 +279,25 @@ func TestListRuntimeLocalSkills_Kiro(t *testing.T) {
 	}
 }
 
+func TestListRuntimeLocalSkills_Junie(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeTestLocalSkill(t, filepath.Join(home, ".junie", "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Junie Review\ndescription: Review code with Junie\n---\n# Junie Review\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("junie")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported || len(skills) != 1 {
+		t.Fatalf("supported=%v skills=%#v", supported, skills)
+	}
+	if skills[0].Name != "Junie Review" || skills[0].SourcePath != "~/.junie/skills/review-helper" {
+		t.Fatalf("unexpected Junie skill: %#v", skills[0])
+	}
+}
+
 func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 	tests := []struct {
 		provider string

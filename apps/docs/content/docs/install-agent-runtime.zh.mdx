@@ -28,6 +28,7 @@ Multica 当前会检测以下命令：
 | Hermes Agent | `hermes` | [Hermes 快速开始](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
 | Kiro CLI | `kiro-cli` | [安装 Kiro CLI](https://kiro.dev/docs/cli/installation/) |
+| Junie CLI | `junie` | [安装 Junie CLI](https://junie.jetbrains.com/docs/junie-cli-usage.html) |
 | MiniMax Code | `mcode` | [安装 MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) |
 | OpenClaw | `openclaw` | [安装 OpenClaw](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode 快速开始](https://opencode.ai/en/docs) |
@@ -50,6 +51,8 @@ Multica 当前会检测以下命令：
 使用 CodeArts 时，请用 `codearts run --model provider/model "只回复 OK"` 验证非交互模式，而不只是验证 TUI。当前 CodeArts CLI 可能允许自定义 provider 在 TUI 中工作，但 `run`、`models` 和 `serve` 仍要求配置 [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html)。Multica 可以从 `~/.codeartsdoer/codearts_cli.json` 或 `.jsonc` 发现自定义模型，但每次运行都会使用 `codearts run`，因此仍遵循该命令的授权要求。
 
 使用 Reasonix 时，请先运行 `reasonix setup`，配置默认的模型服务和模型，再启动守护进程。
+
+使用 Junie 时，请先启动一次 `junie`，通过 `/account` 选择 JetBrains 账号、`JUNIE_API_KEY`、BYOK 或自定义/本地端点。Ollama、LM Studio、LiteLLM 和 Junie Local 模型会出现在同一个模型选择器中，Multica 通过 ACP 发现这些模型。执行 task 前必须先启动所选的本地模型服务；Multica 只发现配置，不会启动或管理该服务，也不会复制或保存凭据。
 
 使用 QwenPaw 时，请在 QwenPaw 自身的配置里选择模型服务和模型。Multica 无法在执行时覆盖 QwenPaw 的模型。
 

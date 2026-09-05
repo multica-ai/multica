@@ -233,6 +233,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverKiroModels(ctx, runtimeCmd))
 		})
+	case "junie":
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discovered(discoverJunieModels(ctx, runtimeCmd))
+		})
 	case "qoder", "qoderclicn":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverQoderModels(ctx, runtimeCmd, qoderDefaultBinary(providerType)))
@@ -1782,6 +1786,26 @@ func discoverKiroModels(ctx context.Context, runtimeCmd Command) ([]Model, error
 	})
 }
 
+// discoverJunieModels starts Junie's ACP server and reads the nested model
+// selector returned by session/new. IDs are opaque and must be passed back
+// byte-for-byte through session/set_config_option.
+//
+// Deliberately do not attach the advertised thought_level catalog yet. The
+// installed 26.8.31 build accepts and reads back the effort option, but the
+// authenticated prompt needed to prove that the setting reaches the actual
+// provider request could not be completed. acpCatalogThinkingProviders treats
+// that distinction as a release gate, so exposing a picker here would promise
+// more than the current evidence supports.
+func discoverJunieModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
+	return discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
+		defaultBin:   "junie",
+		clientName:   "multica-model-discovery",
+		acpArgs:      []string{"--acp=true"},
+		tmpdirPrefix: "multica-junie-discovery-",
+		strictErrors: true,
+	})
+}
+
 // discoverCopilotModels spins up `copilot --acp` and reads the
 // `availableModels` block from session/new. The catalog is keyed
 // off the user's GitHub account, so this is the only way to know
@@ -2202,18 +2226,25 @@ func parseACPSessionNewModels(raw json.RawMessage) []Model {
 //	  ]
 //	}
 //
+// Junie extends the same option shape with heading-only choices whose nested
+// `options` contain the actual models. Walk those groups recursively while
+// retaining wire order. A group can also carry a selectable value of its own,
+// so visit its value before its children. IDs stay opaque throughout: in
+// particular, delimiter-rich custom/local IDs are not provider/model pairs.
+//
 // A config option counts as the model picker when its `id` or `category`
 // is "model" (case-insensitive). Every other option — thinking level in
 // particular — is deliberately ignored: those are separate product
 // surfaces, and mapping them into the model dropdown would offer values
-// `session/set_model` cannot honour. `currentValue` marks the default.
+// the model-selection operation cannot honour. `currentValue` marks the default.
 //
 // Returns nil when no model option is present, so the caller can keep
 // whatever the `models` block produced.
 func parseACPConfigOptionModels(raw json.RawMessage) []Model {
 	type acpConfigChoice struct {
-		Value string `json:"value"`
-		Name  string `json:"name"`
+		Value   string            `json:"value"`
+		Name    string            `json:"name"`
+		Options []acpConfigChoice `json:"options"`
 	}
 	type acpConfigOption struct {
 		ID                string            `json:"id"`
@@ -2244,14 +2275,18 @@ func parseACPConfigOptionModels(raw json.RawMessage) []Model {
 		}
 		models := make([]Model, 0, len(opt.Options))
 		seen := map[string]bool{}
-		for _, choice := range opt.Options {
-			modelID := strings.TrimSpace(choice.Value)
-			if modelID == "" || seen[modelID] {
-				continue
+		var appendChoices func([]acpConfigChoice)
+		appendChoices = func(choices []acpConfigChoice) {
+			for _, choice := range choices {
+				modelID := strings.TrimSpace(choice.Value)
+				if modelID != "" && !seen[modelID] {
+					seen[modelID] = true
+					models = append(models, acpModelEntry(modelID, choice.Name, currentValue))
+				}
+				appendChoices(choice.Options)
 			}
-			seen[modelID] = true
-			models = append(models, acpModelEntry(modelID, choice.Name, currentValue))
 		}
+		appendChoices(opt.Options)
 		if len(models) > 0 {
 			return models
 		}

@@ -28,6 +28,7 @@ Multica는 현재 다음 명령을 감지합니다.
 | Hermes Agent | `hermes` | [Hermes 빠른 시작](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
 | Kiro CLI | `kiro-cli` | [Kiro CLI 설치](https://kiro.dev/docs/cli/installation/) |
+| Junie CLI | `junie` | [Junie CLI 설치](https://junie.jetbrains.com/docs/junie-cli-usage.html) |
 | MiniMax Code | `mcode` | [MiniMax Code CLI 설치](https://www.npmjs.com/package/@minimax-ai/code) |
 | OpenClaw | `openclaw` | [OpenClaw 설치](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode 빠른 시작](https://opencode.ai/en/docs) |
@@ -50,6 +51,8 @@ Multica는 현재 다음 명령을 감지합니다.
 CodeArts는 TUI뿐 아니라 `codearts run --model provider/model "OK만 응답하세요"`로 비대화형 모드도 확인하세요. 현재 CodeArts CLI에서는 사용자 지정 provider가 TUI에서 동작하더라도 `run`, `models`, `serve`에 여전히 [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html)가 필요할 수 있습니다. Multica는 `~/.codeartsdoer/codearts_cli.json` 또는 `.jsonc`에서 사용자 지정 모델을 찾을 수 있지만, 실행에는 `codearts run`을 사용하므로 해당 인증 요구 사항을 따릅니다.
 
 Reasonix를 사용할 때는 데몬을 시작하기 전에 `reasonix setup`을 실행해 기본 공급자와 모델을 설정하세요.
+
+Junie는 먼저 `junie`를 실행한 뒤 `/account`에서 JetBrains Account, `JUNIE_API_KEY`, BYOK 또는 사용자 지정/로컬 엔드포인트를 선택하세요. Ollama, LM Studio, LiteLLM, Junie Local 모델은 Multica가 ACP를 통해 검색하는 동일한 모델 선택기에 표시됩니다. 작업을 실행하기 전에 선택한 로컬 모델 서비스를 시작해야 합니다. Multica는 설정을 검색하지만 해당 서비스를 시작하거나 관리하지 않으며 자격 증명도 복사하거나 저장하지 않습니다.
 
 QwenPaw를 사용할 때는 QwenPaw 자체 설정에서 공급자와 모델을 선택하세요. Multica는 실행 시 QwenPaw의 모델을 덮어쓸 수 없습니다.
 

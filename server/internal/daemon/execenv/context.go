@@ -397,6 +397,10 @@ func skillsDirPath(workDir, provider string) string {
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
 		return filepath.Join(workDir, ".kiro", "skills")
+	case "junie":
+		// Junie discovers project skills from .junie/skills/ and also reads
+		// the shared .agents/skills convention.
+		return filepath.Join(workDir, ".junie", "skills")
 	case "qoder", "qoderclicn":
 		// Both Qoder CLI editions discover project-level skills under
 		// .qoder/skills/. Their user-level roots differ, which is handled by

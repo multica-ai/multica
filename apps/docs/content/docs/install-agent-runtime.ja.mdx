@@ -28,6 +28,7 @@ Multica は現在、次のコマンドを検出します。
 | Hermes Agent | `hermes` | [Hermes クイックスタート](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
 | Kiro CLI | `kiro-cli` | [Kiro CLI のインストール](https://kiro.dev/docs/cli/installation/) |
+| Junie CLI | `junie` | [Junie CLI のインストール](https://junie.jetbrains.com/docs/junie-cli-usage.html) |
 | MiniMax Code | `mcode` | [MiniMax Code CLI のインストール](https://www.npmjs.com/package/@minimax-ai/code) |
 | OpenClaw | `openclaw` | [OpenClaw のインストール](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode クイックスタート](https://opencode.ai/en/docs) |
@@ -50,6 +51,8 @@ Multica は現在、次のコマンドを検出します。
 CodeArts では、TUI だけでなく `codearts run --model provider/model "OK とだけ返してください"` で非対話モードを確認してください。現在の CodeArts CLI では、カスタム provider が TUI で動作しても、`run`、`models`、`serve` には引き続き [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html) が必要な場合があります。Multica は `~/.codeartsdoer/codearts_cli.json` または `.jsonc` からカスタムモデルを検出できますが、実行には `codearts run` を使用するため、その認証要件に従います。
 
 Reasonix を使う場合は、デーモンを起動する前に `reasonix setup` を実行し、デフォルトのプロバイダーとモデルを設定してください。
+
+Junie では、最初に `junie` を起動し、`/account` で JetBrains Account、`JUNIE_API_KEY`、BYOK、またはカスタム/ローカルエンドポイントを選択してください。Ollama、LM Studio、LiteLLM、Junie Local のモデルは、Multica が ACP 経由で検出する同じモデルピッカーに表示されます。タスクを実行する前に、選択したローカルモデルサービスを起動してください。Multica は設定を検出しますが、そのサービスを起動または管理せず、認証情報もコピーまたは保存しません。
 
 QwenPaw を使う場合は、QwenPaw 側の設定でプロバイダーとモデルを選んでください。Multica が実行時に QwenPaw のモデルを上書きすることはできません。
 

@@ -2347,7 +2347,7 @@ func TestHermesProviderErrorSnifferRealErrorsAfterSingleLineInfo(t *testing.T) {
 // regression: a genuine provider failure emitted as one long line (well
 // over acpMaxErrorLineLen) with no successful output must still fail the
 // run. Length must never decide whether a line is an error. The shared
-// sniffer backs hermes/kimi/kiro/qoder/grok/traecli, so verify the
+// sniffer backs hermes/kimi/kiro/junie/qoder/grok/traecli, so verify the
 // non-Hermes callers too, and confirm the persisted message stays bounded.
 func TestHermesProviderErrorSnifferLongRealErrorStillFails(t *testing.T) {
 	t.Parallel()
@@ -2360,7 +2360,7 @@ func TestHermesProviderErrorSnifferLongRealErrorStillFails(t *testing.T) {
 		t.Fatalf("fixture is %d bytes, must exceed the cap %d to exercise the path", len(longReal), acpMaxErrorLineLen)
 	}
 
-	for _, provider := range []string{"hermes", "kimi", "reasonix", "kiro", "qoder", "grok", "traecli"} {
+	for _, provider := range []string{"hermes", "kimi", "reasonix", "kiro", "junie", "qoder", "grok", "traecli"} {
 		t.Run(provider, func(t *testing.T) {
 			s := newACPProviderErrorSniffer(provider)
 			if _, err := s.Write([]byte(longReal + "\n")); err != nil {
@@ -2846,14 +2846,14 @@ func TestACPProviderErrorSnifferFinalizeFlushesPartialLine(t *testing.T) {
 
 // TestACPProviderErrorSnifferNonKimiIgnoresProviderApiError verifies that the
 // kimi-specific provider.api_error patterns are scoped to kimi only. Other ACP
-// backends (hermes, grok, kiro, qoder, qwenpaw, reasonix, traecli) must not
+// backends (hermes, grok, kiro, junie, qoder, qwenpaw, reasonix, traecli) must not
 // classify a provider.api_error line as terminal — tool output can legitimately
 // echo such lines when calling an underlying Kimi API, and a run with real
 // output must stay completed (GitHub multica#5785 P1 from Aug 10 review).
 func TestACPProviderErrorSnifferNonKimiIgnoresProviderApiError(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []string{"hermes", "grok", "kiro", "qoder", "qwenpaw", "reasonix", "traecli"} {
+	for _, provider := range []string{"hermes", "grok", "kiro", "junie", "qoder", "qwenpaw", "reasonix", "traecli"} {
 		t.Run(provider, func(t *testing.T) {
 			s := newACPProviderErrorSniffer(provider)
 			s.Write([]byte("provider.api_error: 400 assistant must not be empty\n"))
@@ -3511,7 +3511,7 @@ func TestFilterACPMcpServersByCapabilityOmittedForwardsOnListedRuntime(t *testin
 func TestFilterACPMcpServersByCapabilityOmittedStillDropsOnUnlistedRuntimes(t *testing.T) {
 	t.Parallel()
 	caps := acpMcpTransportCapabilities{Declaration: acpMcpCapabilitiesOmitted}
-	for _, backend := range []string{"kimi", "kiro", "grok", "qoder", "reasonix", "traecli", "qwenpaw", "mcode"} {
+	for _, backend := range []string{"kimi", "kiro", "junie", "grok", "qoder", "reasonix", "traecli", "qwenpaw", "mcode"} {
 		assertOnlyStdioSurvives(t, backend,
 			filterACPMcpServersByCapability(mixedTransportACPServers(), caps, backend, builtinACPConfig()))
 	}

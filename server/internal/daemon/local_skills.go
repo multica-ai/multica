@@ -109,6 +109,7 @@ const (
 //     (https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)
 //   - Kimi: ~/.kimi/skills mirrors Kimi CLI's project-level .kimi/skills layout
 //   - Kiro: project and user-level .kiro/skills directories discovered by Kiro CLI
+//   - Junie: project and user-level .junie/skills directories discovered by Junie
 //   - Qoder: ~/.qoder/skills mirrors Qoder CLI's project-level .qoder/skills layout
 //   - Antigravity: ~/.gemini/antigravity-cli/skills user-level skill root
 //     (https://antigravity.google/docs/gcli-migration "Global skills")
@@ -187,6 +188,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 			providerRoot = filepath.Join(dshHome, "skills")
 		case "kiro":
 			providerRoot = filepath.Join(home, ".kiro", "skills")
+		case "junie":
+			providerRoot = filepath.Join(home, ".junie", "skills")
 		case "qoder":
 			providerRoot = filepath.Join(home, ".qoder", "skills")
 		case "qoderclicn":

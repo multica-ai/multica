@@ -43,6 +43,32 @@ enabled = false
 	}
 }
 
+func TestListRuntimeLocalMcpServers_Junie(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, ".junie", "mcp", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"docs":{"type":"http","url":"https://example.test/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	servers, supported, err := listRuntimeLocalMcpServers("junie")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported || len(servers) != 1 {
+		t.Fatalf("supported=%v servers=%#v", supported, servers)
+	}
+	if servers[0].Name != "docs" || servers[0].Transport != "http" || servers[0].Source != "User config" {
+		t.Fatalf("unexpected Junie MCP server: %#v", servers[0])
+	}
+	if _, supported, err := loadRuntimeMcpServerConfigs("junie"); err != nil || supported {
+		t.Fatalf("Junie native MCP config must be inventory-only: supported=%v err=%v", supported, err)
+	}
+}
+
 func TestListRuntimeLocalMcpServersClaudeMissingConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	servers, supported, err := listRuntimeLocalMcpServers("claude")
