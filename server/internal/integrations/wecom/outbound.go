@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -136,6 +137,12 @@ func NewOutbound(q outboundQueries, senders *sendersRegistry, logger *slog.Logge
 // Register subscribes to the chat-done event on the bus.
 func (o *Outbound) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventChatDone, o.handleEvent)
+	// A failed run ends the turn just as a reply does, and it goes out on the
+	// same route: task delivery row, origin gate, installation, socket. Until
+	// this subscription a failed run in WeCom said nothing and logged nothing,
+	// because no handler ran; DingTalk, Lark, Slack and Telegram all handle it.
+	bus.Subscribe(protocol.EventTaskFailed, o.handleEvent)
+	bus.Subscribe(protocol.EventTaskCancelled, o.handleTaskCancelled)
 	// Inbox notifications delivered through the smart bot: when the
 	// recipient member has a WeCom binding with a live connection, their
 	// inbox:new items are pushed to the aibot as a markdown card.
@@ -170,7 +177,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// agent produced a file and said nothing about it: the platform writes an
 	// assistant message for exactly that case, and returning now would throw
 	// the work away.
-	content := chatDoneContent(e.Payload)
+	content := deliverableContent(e)
 	if content == "" && !o.mayCarryAttachments(e) {
 		o.skipped(ctx, e, skipNothingToSay)
 		return nil
@@ -311,6 +318,47 @@ func wecomBindingFromTaskDelivery(delivery db.ChannelTaskDelivery) db.ChannelCha
 // envelope's TaskID is preferred, with the payload as the fallback —
 // service.broadcastChatDone sets ChatDonePayload.TaskID and leaves the
 // envelope's empty, so in practice the fallback is the live path.
+// taskFailedPrefix marks a failure notice apart from a reply in the chat, the
+// way DingTalk's and Lark's do.
+const taskFailedPrefix = "⚠️ "
+
+// deliverableContent is what this event has to say in the chat.
+//
+// chat:done carries the agent's reply. task:failed carries the platform's own
+// redacted failure text in `error` — the same text the web transcript shows —
+// and nothing while an auto-retry is pending: the retry attempt reports its
+// own outcome, and announcing a failure the next attempt may undo would be
+// noise. Empty means the turn ends silently, exactly as an empty reply does.
+func deliverableContent(e events.Event) string {
+	if e.Type == protocol.EventTaskFailed {
+		return taskFailedContent(e.Payload)
+	}
+	return chatDoneContent(e.Payload)
+}
+
+func taskFailedContent(payload any) string {
+	p, ok := payload.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if pending, _ := p["retry_pending"].(bool); pending {
+		return ""
+	}
+	msg, _ := p["error"].(string)
+	if strings.TrimSpace(msg) == "" {
+		return ""
+	}
+	return taskFailedPrefix + msg
+}
+
+// handleTaskCancelled is subscribed for the log line and nothing else: a
+// cancellation ends the run without an answer, and WeCom has nothing to take
+// back — no typing badge, no placeholder. Lark makes the same choice.
+func (o *Outbound) handleTaskCancelled(e events.Event) {
+	o.logger.DebugContext(context.Background(), "wecom outbound: run cancelled, nothing to send",
+		"chat_session_id", e.ChatSessionID, "task_id", e.TaskID)
+}
+
 func chatDoneTaskID(e events.Event) (pgtype.UUID, bool) {
 	raw := e.TaskID
 	if raw == "" {

@@ -106,8 +106,8 @@
     },
     "stop_dialog": {
       "title": "Stop this run?",
-      "description_with_title": "This will cancel the current agent task in \"{{title}}\". Partial output will stay in the chat.",
-      "description_default": "This will cancel the current agent task. Partial output will stay in the chat.",
+      "description_with_title": "This will cancel the current agent run in \"{{title}}\". Partial output will stay in the chat.",
+      "description_default": "This will cancel the current agent run. Partial output will stay in the chat.",
       "cancel": "Keep running",
       "confirm": "Stop run",
       "confirming": "Stopping..."
@@ -159,8 +159,8 @@
       "prompt": "What are you best at helping with? Give me a concise overview."
     },
     "first_task": {
-      "label": "Suggest a first task",
-      "prompt": "Suggest three useful tasks I could delegate to you."
+      "label": "Suggest a first issue",
+      "prompt": "Suggest three useful issues I could assign to you."
     },
     "recommend": {
       "label": "Recommend an action",

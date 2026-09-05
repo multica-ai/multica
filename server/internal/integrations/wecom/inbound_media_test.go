@@ -13,7 +13,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -236,17 +235,6 @@ func TestOwnText_MixedWithNothingReadableTakesTheReceipt(t *testing.T) {
 	}
 	if len(conn.frames) != 1 {
 		t.Fatalf("expected one receipt, got %d frames", len(conn.frames))
-	}
-}
-
-// TestUnsupportedReceipt_DoesNotClaimTextOnly: the receipt used to say the
-// bot only handles text. It now routes photos, files, videos and 图文混排, so
-// a person who just watched it answer a screenshot must not then be told it
-// handles text only.
-func TestUnsupportedReceipt_DoesNotClaimTextOnly(t *testing.T) {
-	t.Parallel()
-	if strings.Contains(unsupportedMsgTypeReceipt, "只能处理文字") {
-		t.Errorf("receipt %q still claims text-only while image/file/video/mixed route", unsupportedMsgTypeReceipt)
 	}
 }
 

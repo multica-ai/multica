@@ -75,6 +75,13 @@ type CLIConfig struct {
 	// MULTICA_DAEMON_POLL_INTERVAL env, this field, DefaultPollInterval.
 	PollInterval string `json:"poll_interval,omitempty"`
 
+	// WSClaimPollInterval is the upper bound for missed-event safety polls
+	// while task claims use a healthy WebSocket. The daemon applies
+	// downward-only jitter, and retains PollInterval for old servers and
+	// uncertain claims. Resolution precedence: --ws-claim-poll-interval,
+	// MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL, this field, 3m default.
+	WSClaimPollInterval string `json:"ws_claim_poll_interval,omitempty"`
+
 	// HeartbeatInterval is how often the daemon sends heartbeat pings to
 	// the server (Go duration string). Same persist-once motivation as
 	// PollInterval. Empty ("") means "not set — use env / built-in

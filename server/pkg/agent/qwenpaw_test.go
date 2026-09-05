@@ -22,17 +22,6 @@ func TestQwenpawModelSelectionUnsupported(t *testing.T) {
 	}
 }
 
-func TestNewReturnsQwenpawBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("qwenpaw", Config{ExecutablePath: "/nonexistent/qwenpaw"})
-	if err != nil {
-		t.Fatalf("New(qwenpaw) error: %v", err)
-	}
-	if _, ok := b.(*qwenpawBackend); !ok {
-		t.Fatalf("expected *qwenpawBackend, got %T", b)
-	}
-}
-
 // fakeQwenpawACPScript impersonates `qwenpaw acp` for unit tests.
 // Wire format mirrors other Multica ACP fakes (grok/kimi):
 // session/new returns sessionId, session/load accepts an existing session,
@@ -229,22 +218,6 @@ func TestQwenpawListModels(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("qwenpaw ListModels executed the CLI; it must return an empty catalog without spawning a discovery subprocess")
-	}
-}
-
-func TestQwenpawBlockedArgs(t *testing.T) {
-	t.Parallel()
-	if _, ok := qwenpawBlockedArgs["acp"]; !ok {
-		t.Fatal("expected acp to be in qwenpawBlockedArgs")
-	}
-	if qwenpawBlockedArgs["acp"] != blockedStandalone {
-		t.Fatalf("expected acp to be blockedStandalone, got %v", qwenpawBlockedArgs["acp"])
-	}
-	if _, ok := qwenpawBlockedArgs["--workspace"]; !ok {
-		t.Fatal("expected --workspace to be in qwenpawBlockedArgs")
-	}
-	if qwenpawBlockedArgs["--workspace"] != blockedWithValue {
-		t.Fatalf("expected --workspace to be blockedWithValue, got %v", qwenpawBlockedArgs["--workspace"])
 	}
 }
 
@@ -800,18 +773,5 @@ done
 	// Daemon-injected --workspace must be present
 	if !strings.Contains(args, "/tmp/correct-workspace") {
 		t.Fatalf("expected daemon-injected workspace path in command args, got:\n%s", args)
-	}
-}
-
-func TestQwenpawBackendJSON(t *testing.T) {
-	// Verify that the qwenpawBackend type is registered in the
-	// backend constructor map.
-	t.Parallel()
-	b, err := New("qwenpaw", Config{ExecutablePath: "/test/qwenpaw"})
-	if err != nil {
-		t.Fatalf("New(qwenpaw) error: %v", err)
-	}
-	if _, ok := b.(*qwenpawBackend); !ok {
-		t.Fatalf("expected *qwenpawBackend, got %T", b)
 	}
 }

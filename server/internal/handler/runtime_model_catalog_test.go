@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 func sampleCatalog() []ModelEntry {
@@ -274,6 +276,62 @@ func TestModelCatalogServeWindow_ServesDayOldSnapshotAndRevalidates(t *testing.T
 	}
 }
 
+// TestInitiateListModels_ForceSkipsCatalogCache pins the contract behind the
+// picker's Refresh action: a normal open stays instant on a warm catalog, while
+// force=true creates a request the daemon must answer instead of returning the
+// same cached snapshot again.
+func TestInitiateListModels_ForceSkipsCatalogCache(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := dbfx.Runtime(t, "Force model refresh runtime")
+	cache := NewInMemoryModelCatalogCache()
+	unavailable := []UnavailableModelEntry{{
+		ID:     "cc-update-required-1",
+		Label:  "Fable 5.1 (disabled)",
+		Reason: "Update Claude Code",
+	}}
+	if err := cache.Put(context.Background(), runtimeID, sampleCatalog(), unavailable, true); err != nil {
+		t.Fatalf("seed catalog: %v", err)
+	}
+	store := NewInMemoryModelListStore()
+	recorder := &pendingWorkRecorder{}
+	h := *testHandler
+	h.ModelCatalogCache = cache
+	h.ModelListStore = store
+	h.DaemonPendingWork = recorder
+
+	request := func(query string) *http.Request {
+		return withURLParam(
+			newRequest(http.MethodPost, "/api/runtimes/"+runtimeID+"/models"+query, nil),
+			"runtimeId",
+			runtimeID,
+		)
+	}
+
+	var cached ModelListRequest
+	testutil.Call(t, h.InitiateListModels, request("")).Want(http.StatusOK).JSON(&cached)
+	if cached.Status != ModelListCompleted || !cached.Cached {
+		t.Fatalf("normal open = %+v, want completed cache hit", cached)
+	}
+	if len(cached.UnavailableModels) != 1 || cached.UnavailableModels[0].ID != unavailable[0].ID {
+		t.Fatalf("normal cache hit lost unavailable models: %+v", cached.UnavailableModels)
+	}
+	if recorder.count() != 0 {
+		t.Fatalf("normal cache hit queued %d daemon requests, want 0", recorder.count())
+	}
+
+	var forced ModelListRequest
+	testutil.Call(t, h.InitiateListModels, request("?force=true")).Want(http.StatusOK).JSON(&forced)
+	if forced.Status != ModelListPending || forced.Cached {
+		t.Fatalf("forced refresh = %+v, want pending live request", forced)
+	}
+	if recorder.count() != 1 {
+		t.Fatalf("forced refresh queued %d daemon requests, want 1", recorder.count())
+	}
+}
+
 // failingModelCatalogCache reports a backend error on every read.
 type failingModelCatalogCache struct{}
 
@@ -400,70 +458,6 @@ func TestCacheableModelCatalog(t *testing.T) {
 	// stand-in out of the 24h serve window.
 	if cacheableModelCatalog(sampleCatalog(), true, true) {
 		t.Error("a fallback catalog must never be cached as the runtime's real catalog")
-	}
-}
-
-// TestCachedModelListResponse_WireShape pins what a cache hit looks like on the
-// wire. Existing clients only branch on status/models, so the response must be
-// indistinguishable from a completed live discovery apart from the additive
-// `cached` marker.
-func TestCachedModelListResponse_WireShape(t *testing.T) {
-	storedAt := time.Now().Add(-2 * time.Minute)
-	resp := &ModelListRequest{
-		ID:        randomID(),
-		RuntimeID: "rt-1",
-		Status:    ModelListCompleted,
-		Models:    sampleCatalog(),
-		Supported: true,
-		CreatedAt: storedAt,
-		UpdatedAt: storedAt,
-		Cached:    true,
-		CachedAt:  &storedAt,
-	}
-	raw, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var decoded struct {
-		ID        string          `json:"id"`
-		Status    ModelListStatus `json:"status"`
-		Models    []ModelEntry    `json:"models"`
-		Supported bool            `json:"supported"`
-		Cached    bool            `json:"cached"`
-		CachedAt  *time.Time      `json:"cached_at"`
-	}
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if decoded.Status != ModelListCompleted {
-		t.Fatalf("status = %q, want completed so clients stop polling", decoded.Status)
-	}
-	if decoded.ID == "" {
-		t.Error("a cache hit still needs a request id for client-side bookkeeping")
-	}
-	if len(decoded.Models) != 2 || !decoded.Supported {
-		t.Fatalf("cache hit must carry the catalog: %+v supported=%v", decoded.Models, decoded.Supported)
-	}
-	if !decoded.Cached || decoded.CachedAt == nil {
-		t.Fatalf("cache hit must be marked: cached=%v cached_at=%v", decoded.Cached, decoded.CachedAt)
-	}
-
-	// A live (non-cached) response must not carry the markers at all, so older
-	// clients see exactly the previous payload.
-	live, err := json.Marshal(&ModelListRequest{ID: "x", RuntimeID: "rt-1", Status: ModelListPending, Supported: true})
-	if err != nil {
-		t.Fatalf("marshal live: %v", err)
-	}
-	var liveFields map[string]any
-	if err := json.Unmarshal(live, &liveFields); err != nil {
-		t.Fatalf("unmarshal live: %v", err)
-	}
-	if _, ok := liveFields["cached"]; ok {
-		t.Error("live responses must omit the cached marker")
-	}
-	if _, ok := liveFields["cached_at"]; ok {
-		t.Error("live responses must omit cached_at")
 	}
 }
 

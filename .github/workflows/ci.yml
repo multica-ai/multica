@@ -95,10 +95,9 @@ jobs:
               # mode for everyone with no error anywhere, so a change to the
               # frontend half must run the backend suite.
               - 'packages/core/runtimes/cli-version.ts'
-              # internal/daemon/agent_command_names_test.go reads both of
-              # these as test inputs; the guard script is additionally the
-              # entry point scripts/test-go.sh runs, and the names file is
-              # the data that guard consumes.
+              # internal/daemon/agent_command_names_test.go exercises the
+              # guard script; scripts/test-go.sh also uses it as the backend
+              # test entry point, and the script reads the command names file.
               - 'scripts/agent-cli-command-names.txt'
               - 'scripts/go-test-with-agent-cli-guard.sh'
               - 'scripts/helm-config.test.sh'
@@ -521,6 +520,16 @@ jobs:
       - name: Build
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go build ./...
+
+      # The `agentintegration` files execute real agent CLIs, so no CI job runs
+      # them. Nothing compiled them either, which let them rot silently: a
+      # helper renamed in an ordinary test file, or two branches each defining
+      # the same helper in one package, breaks the tagged build with every
+      # untagged job still green. vet type-checks test files, so this is the
+      # cheapest gate that keeps them honest without needing an agent CLI.
+      - name: Vet tag-gated agent integration tests
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: cd server && go vet -tags agentintegration ./...
 
       - name: Run migrations
         if: ${{ needs.changes.outputs.backend == 'true' }}

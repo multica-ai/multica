@@ -213,6 +213,64 @@ func TestBriefOwnsAutopilotIssueCommandsGuard(t *testing.T) {
 	}
 }
 
+// TestQuickCreateBriefOwnsRunAndOutputRules pins the brief as the single
+// statement of how a quick-create run executes and what it prints (MUL-6984).
+//
+// The same five rules used to be written three times — the brief's Workflow
+// section, the brief's ## Output section, and the per-turn prompt's "Output
+// format" block — with two of the three copies in this very file. The brief is
+// the copy that survives, because its own contract is that these guardrails
+// hold "even if the user message is missing"; the per-turn message now renders
+// only the field VALUES the modal picked.
+func TestQuickCreateBriefOwnsRunAndOutputRules(t *testing.T) {
+	t.Parallel()
+
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		QuickCreatePrompt: "create an issue about flaky tests",
+		AgentName:         "Eve", AgentID: "eve-1",
+	})
+
+	for _, want := range []string{
+		// exactly one create, no retry — a retry would duplicate the issue
+		"Run exactly one `multica issue create --output json` invocation",
+		"Do not retry for any reason",
+		// no issue to query, transition, or comment on
+		"Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add`",
+		// the success line, and the reason it must not be scraped or
+		// prefix-guessed: workspaces set their own issue prefix, so a
+		// successful create must not read as failed
+		"`identifier` (preferred) or `id` (fallback)",
+		"Created <identifier-or-id>: <title>",
+		"never assume a workspace issue prefix such as `MUL-`",
+		// failure path
+		"exit with that error as the only output",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("quick-create brief missing rule %q\n---\n%s", want, out)
+		}
+	}
+
+	// ## Output states where the output goes and how a FILE is delivered; the
+	// rules themselves are stated once, above. A second copy here is what this
+	// change removed.
+	outputIdx := strings.Index(out, "## Output")
+	if outputIdx < 0 {
+		t.Fatalf("quick-create brief has no ## Output section\n---\n%s", out)
+	}
+	outputSection := out[outputIdx:]
+	if !strings.Contains(outputSection, "**Delivering files here:**") {
+		t.Errorf("## Output lost the file-delivery channel\n---\n%s", outputSection)
+	}
+	for _, banned := range []string{
+		"Created <identifier-or-id>: <title>",
+		"Do NOT call `multica issue comment add`",
+	} {
+		if strings.Contains(outputSection, banned) {
+			t.Errorf("## Output restates workflow rule %q\n---\n%s", banned, outputSection)
+		}
+	}
+}
+
 // TestSlimQuickCreateAvailableCommands locks the minimal-variant content
 // for quick-create's Available Commands: `issue create` present, every
 // other Core command absent (the hard guardrails forbid the call).

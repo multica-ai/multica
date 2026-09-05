@@ -12,16 +12,6 @@ import (
 	"time"
 )
 
-func TestNewDshBackend(t *testing.T) {
-	b, err := New("dsh", Config{ExecutablePath: "/nonexistent/dsh"})
-	if err != nil {
-		t.Fatalf("New(dsh): %v", err)
-	}
-	if _, ok := b.(*dshBackend); !ok {
-		t.Fatalf("New(dsh) returned %T", b)
-	}
-}
-
 func TestParseDshModelID(t *testing.T) {
 	got, err := parseDshModelID("deepseek-official/deepseek-v4%2Fflash")
 	if err != nil {

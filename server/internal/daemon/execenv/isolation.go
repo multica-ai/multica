@@ -236,11 +236,26 @@ func marshalPreparationRequest(request preparationRequest) ([]byte, error) {
 	return json.Marshal(payload)
 }
 
+// decodePreparationRequest reads the parent's payload. Unknown fields are
+// IGNORED, not rejected: parent and helper are the same program but not
+// necessarily the same build. The parent is the daemon process that is
+// running; the helper is whatever binary sits at that executable path when the
+// task starts, and every upgrade path replaces the file under a live daemon —
+// Desktop swaps the bundled/managed CLI and defers the restart while the daemon
+// is busy, `brew upgrade` and a manual replacement are picked up by
+// trySelfReload only on its next idle tick. Until the daemon re-execs, an
+// older parent talks to a newer helper.
+//
+// DisallowUnknownFields turned that ordinary window into a hard failure of
+// every task on the host: removing TaskContextForEnv.HandoffNote (#7626) left
+// old daemons still sending an untagged, non-omitempty `"HandoffNote": ""`,
+// and the new helper answered `json: unknown field "HandoffNote"` (MUL-7029).
+// Field drift in a struct nobody versions is expected here, so the request is
+// decoded on the same best-effort terms as the response the parent reads back:
+// a param the other side does not know about is dropped, not fatal.
 func decodePreparationRequest(in io.Reader) (preparationRequest, error) {
 	var request preparationRequest
-	decoder := json.NewDecoder(in)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
+	if err := json.NewDecoder(in).Decode(&request); err != nil {
 		return preparationRequest{}, err
 	}
 	return request, nil

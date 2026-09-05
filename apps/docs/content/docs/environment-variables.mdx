@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica reads environment variables at process startup. After changing one, restart the affected API, web, or daemon process. Docker Compose's `docker compose restart` does not re-read `.env`; recreate containers with `up -d` for changes to take effect.
 
-This page lists deployment-facing configuration only; test variables and internal task variables are not covered here. It is a grouped reference — for full deployment steps, see the [self-host quickstart](/self-host-quickstart).
+This page lists deployment-facing configuration only; test variables and internal run variables are not covered here. It is a grouped reference — for full deployment steps, see the [self-host quickstart](/self-host-quickstart).
 
 ## Minimum production configuration
 
@@ -33,6 +33,9 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `DATABASE_URL` | local `multica` database | PostgreSQL connection string |
 | `DATABASE_MAX_CONNS` | `25` | Maximum database connections per API process |
 | `DATABASE_MIN_CONNS` | `5` | Minimum connections each API process keeps |
+| `DATABASE_REPLICA_URL` | empty | Optional PostgreSQL read-only replica connection string; new connections are validated as read-only, while businesses must explicitly opt into eventual-consistency reads in code |
+| `DATABASE_REPLICA_MAX_CONNS` | `10` | Maximum replica connections per API process |
+| `DATABASE_REPLICA_MIN_CONNS` | `0` | Minimum replica connections each API process keeps |
 | `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | Container-level retry budget shared by migration and API startup; set to `0` for one fail-fast attempt per phase |
 | `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | Fallback timeout for each startup connection attempt; native pgx `connect_timeout`, `PGCONNECT_TIMEOUT`, or service settings take precedence |
 | `PORT` | `8080` | API listen port |
@@ -41,9 +44,11 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `AUTH_TOKEN_TTL` | `720h` (30 days) | Lifetime of browser JWTs and cookies; accepts a Go duration or a positive integer of seconds |
 | `LOG_LEVEL` | application default | Log level |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | How long to wait after a termination signal before graceful shutdown begins |
-| `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | How long an offline runtime may reconnect before its in-flight tasks fail; values below `150s` are clamped |
+| `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | How long an offline runtime may reconnect before its in-flight runs fail; values below `150s` are clamped |
 
 When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must exceed the hold plus the time the actual shutdown needs.
+
+The primary and replica connection limits are independent. Budget their sum across every API process against the PostgreSQL cluster's connection ceiling. Replica connections are recycled after five minutes by default to refresh read-only validation after promotion. Replica connection failures transparently fall back to primary and open a short passive circuit; no background database probe is added. Replica reads have no application-enforced staleness bound, so monitor lag in the database layer and keep consistency-sensitive reads on primary.
 
 ## Public URLs and browser access
 
@@ -191,7 +196,7 @@ For setup steps, see [GitHub integration](/github-integration#self-hosting-setup
 
 ## Server-side LLM
 
-This group configures server-side assist generation, such as conversation titles; it is not the AI coding tool credentials agents use to execute tasks.
+This group configures server-side assist generation, such as conversation titles; it is not the AI coding tool credentials agents use to execute runs.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -210,7 +215,7 @@ Two features use this layer, and each one sends chat content to the endpoint you
 When both the API key and the base URL are empty, this layer is disabled and makes no upstream request at all — neither feature above sends anything. That is the supported configuration when your policy does not allow this layer to send chat content off the deployment: chat sessions keep the title the client derives from the first message, the follow-up question buttons do not appear, and everything else is unaffected.
 
 <Callout type="info">
-This covers the assist layer only. Running an agent is a separate data path: when an agent answers a chat, your daemon executes that agent's AI coding tool using the tool's own credentials, and does not forward the `MULTICA_LLM_*` settings above to it. (The task-scoped Multica connection variables the agent needs are injected by the daemon separately.) Emptying the variables above does not affect that path — govern it through the agent's runtime configuration.
+This covers the assist layer only. Running an agent is a separate data path: when an agent answers a chat, your daemon executes that agent's AI coding tool using the tool's own credentials, and does not forward the `MULTICA_LLM_*` settings above to it. (The run-scoped Multica connection variables the agent needs are injected by the daemon separately.) Emptying the variables above does not affect that path — govern it through the agent's runtime configuration.
 </Callout>
 
 ## Daemon configuration
@@ -222,9 +227,10 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Multica API / WebSocket URL; also accepts `http(s)` |
 | `MULTICA_DAEMON_DEVICE_NAME` | hostname | Device name shown in the runtime list |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | Runtime display name |
-| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Task polling interval when no wake event arrives |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Run polling interval when no wake event arrives |
+| `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | Upper bound for healthy WebSocket claim safety polls, configured independently of `MULTICA_DAEMON_POLL_INTERVAL`; downward jitter makes the normal default `2m30s`–`2m45s`, while old servers and uncertain claims retain the ordinary poll interval |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat interval |
-| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Concurrent task ceiling per daemon |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Concurrent run ceiling per daemon |
 | `MULTICA_AGENT_TIMEOUT` | `0` | Absolute time limit per run; `0` means no limit |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | Silence ceiling with no output and no tool execution; `0` disables the watchdog entirely |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Silence ceiling for a single tool call; set it only to give tools more room than the model gets, `0` never force-stops a tool call |
@@ -235,9 +241,11 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Whether to restart into a `multica` binary replaced on disk out of band (`brew upgrade`, a re-download, a local build). Independent of `MULTICA_DAEMON_AUTO_UPDATE` |
-| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for task working directories |
-| `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS only. Parent directory for private per-task temp dirs; must be an existing, writable absolute directory, and an invalid value fails task startup instead of falling back to `/tmp`. Pick a short path — child tools may bind AF_UNIX sockets under it, and `sun_path` is limited to 108 bytes on Linux and 104 on macOS |
-| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep task directories for debugging |
+| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for run working directories |
+| `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS only. Parent directory for private per-run temp dirs; must be an existing, writable absolute directory, and an invalid value fails run startup instead of falling back to `/tmp`. Pick a short path — child tools may bind AF_UNIX sockets under it, and `sun_path` is limited to 108 bytes on Linux and 104 on macOS |
+| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep run directories for debugging |
+
+For the internal context that the daemon injects into agent tasks, see [Task runtime environment](/daemon-runtimes#task-runtime-environment).
 
 Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw and MiniMax Code have no model variable because Multica never sends them a model; MiniMax Code's path variable is `MULTICA_MCODE_PATH` — see [AI coding tools comparison](/providers#model-sources). DeepSeek Harness supports `MULTICA_DSH_PATH` and `MULTICA_DSH_MODEL` (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`). Dim supports `MULTICA_DIM_PATH` and `MULTICA_DIM_MODEL` (a model id from the dim catalog). ZeroClaw supports `MULTICA_ZEROCLAW_PATH` but has no model variable; its agent profile owns the model selection. Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
 
@@ -266,9 +274,10 @@ Supported keys:
 | `workspace_id` | empty | Default workspace |
 | `device_name` | hostname | Device name shown in the runtime list |
 | `runtime_name` | `Local Agent` | Runtime display name |
-| `workspaces_root` | profile-aware path under `~` | Root directory for task working directories |
-| `max_concurrent_tasks` | `20` | Concurrent task ceiling; `0` or empty means unset |
-| `poll_interval` | `30s` | Task polling interval |
+| `workspaces_root` | profile-aware path under `~` | Root directory for run working directories |
+| `max_concurrent_tasks` | `20` | Concurrent run ceiling; `0` or empty means unset |
+| `poll_interval` | `30s` | Run polling interval |
+| `ws_claim_poll_interval` | `3m` | Upper bound for healthy WebSocket claim safety polls, independent of `poll_interval`; the daemon applies downward-only jitter |
 | `heartbeat_interval` | `15s` | Heartbeat interval |
 | `agent_timeout` | unlimited | Absolute time limit per run |
 | `codex_semantic_inactivity_timeout` | derived | Codex semantic-silence threshold. With nothing set it takes the larger of the idle and tool watchdog budgets; a tool budget of `0` falls back to the idle budget, and only when the whole watchdog suite is disabled does Codex keep its own `10m` |

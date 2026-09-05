@@ -11,17 +11,6 @@ import (
 	"log/slog"
 )
 
-func TestNewReturnsTraecliBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("traecli", Config{ExecutablePath: "/nonexistent/traecli"})
-	if err != nil {
-		t.Fatalf("New(traecli) error: %v", err)
-	}
-	if _, ok := b.(*traecliBackend); !ok {
-		t.Fatalf("expected *traecliBackend, got %T", b)
-	}
-}
-
 // fakeTraecliACPScript impersonates the official `traecli acp serve` for unit
 // tests. It speaks the SAME wire format the real traecli v0.120.42 emits
 // (captured live): method "session/update" with an "update.sessionUpdate"

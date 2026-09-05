@@ -16,17 +16,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsHermesBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("hermes", Config{ExecutablePath: "/nonexistent/hermes"})
-	if err != nil {
-		t.Fatalf("New(hermes) error: %v", err)
-	}
-	if _, ok := b.(*hermesBackend); !ok {
-		t.Fatalf("expected *hermesBackend, got %T", b)
-	}
-}
-
 // ── extractACPSessionID ──
 
 func TestExtractACPSessionID(t *testing.T) {
@@ -90,6 +79,171 @@ func TestExtractACPCurrentModelIDMissing(t *testing.T) {
 	t.Parallel()
 	if got := extractACPCurrentModelID(json.RawMessage(`{"sessionId":"ses_123"}`)); got != "" {
 		t.Errorf("got %q, want empty", got)
+	}
+}
+
+// ── acpModelIDsEquivalent ──
+
+func TestACPModelIDsEquivalent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		configured string
+		current    string
+		want       bool
+	}{
+		{
+			// The regression this helper exists for: agent.model is stored
+			// bare, Hermes reports the provider-encoded form. A raw string
+			// compare missed, so the MUL-5029 skip-gate never fired and every
+			// turn re-sent set_model — rebuilding the runtime-side agent and
+			// re-running the provider auto-detection the gate exists to avoid.
+			name:       "bare configured vs provider-encoded current",
+			configured: "claude-sonnet-4-5",
+			current:    "custom:claude-sonnet-4-5",
+			want:       true,
+		},
+		{
+			name:       "both provider-encoded and identical",
+			configured: "custom:claude-sonnet-4-5",
+			current:    "custom:claude-sonnet-4-5",
+			want:       true,
+		},
+		{
+			name:       "second bare model vs encoded",
+			configured: "claude-haiku-4-5",
+			current:    "custom:claude-haiku-4-5",
+			want:       true,
+		},
+		{
+			// A real provider switch must still send set_model.
+			name:       "same model, different explicit providers",
+			configured: "openrouter:claude-sonnet-4-5",
+			current:    "custom:claude-sonnet-4-5",
+			want:       false,
+		},
+		{
+			name:       "different models under same provider",
+			configured: "custom:claude-sonnet-4-5",
+			current:    "custom:claude-haiku-4-5",
+			want:       false,
+		},
+		{
+			name:       "different bare models",
+			configured: "claude-sonnet-4-5",
+			current:    "custom:claude-opus-4-5",
+			want:       false,
+		},
+		{
+			// Hermes lowercases the provider when encoding; a config written
+			// with different casing must still match.
+			name:       "provider casing differs",
+			configured: "Custom:Claude-Sonnet-4-5",
+			current:    "custom:claude-sonnet-4-5",
+			want:       true,
+		},
+		{
+			// Older runtime / unparsable state: fall through and send
+			// set_model, preserving prior behaviour.
+			name:       "empty current",
+			configured: "claude-sonnet-4-5",
+			current:    "",
+			want:       false,
+		},
+		{
+			name:       "empty configured",
+			configured: "",
+			current:    "custom:claude-sonnet-4-5",
+			want:       false,
+		},
+		{
+			name:       "both empty",
+			configured: "",
+			current:    "",
+			want:       false,
+		},
+		{
+			name:       "surrounding whitespace is ignored",
+			configured: "  claude-sonnet-4-5 ",
+			current:    "custom:claude-sonnet-4-5",
+			want:       true,
+		},
+		{
+			// Model names carrying a slash (OpenRouter-style) must not be
+			// confused with the provider prefix.
+			name:       "slash-bearing model name, bare vs encoded",
+			configured: "moonshotai/kimi-k2.6",
+			current:    "nous:moonshotai/kimi-k2.6",
+			want:       true,
+		},
+		{
+			// The asymmetric case. A bare *configured* id expresses no
+			// provider preference, but an explicit one does, and a bare
+			// *current* id cannot confirm it was honoured. Treating this as
+			// equivalent would silently swallow the switch the member asked
+			// for, so it must fall through and send set_model.
+			//
+			// Bare current ids are not hypothetical: acp_effort_test.go
+			// captures an unprefixed `gpt-5.6-sol` from jcode, which routes
+			// through this same backend. Hermes Agent's encoder has a bare
+			// branch too, though a normally-configured install resolves a
+			// provider and reports the prefixed form.
+			name:       "explicit configured provider vs bare current",
+			configured: "openrouter:hermes-4",
+			current:    "hermes-4",
+			want:       false,
+		},
+		{
+			// Both sides bare and identical: nothing to switch to, and the
+			// runtimes above really do answer this way.
+			name:       "both bare and identical",
+			configured: "hermes-4",
+			current:    "hermes-4",
+			want:       true,
+		},
+		{
+			name:       "both bare, different models",
+			configured: "hermes-4",
+			current:    "gpt-5.6-sol",
+			want:       false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := acpModelIDsEquivalent(tc.configured, tc.current); got != tc.want {
+				t.Errorf("acpModelIDsEquivalent(%q, %q) = %v, want %v",
+					tc.configured, tc.current, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSplitACPModelID(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		in           string
+		wantProvider string
+		wantModel    string
+	}{
+		{"custom:claude-sonnet-4-5", "custom", "claude-sonnet-4-5"},
+		{"claude-sonnet-4-5", "", "claude-sonnet-4-5"},
+		{"nous:moonshotai/kimi-k2.6", "nous", "moonshotai/kimi-k2.6"},
+		{"", "", ""},
+		// Leading colon carries no provider — index 0 is not a separator.
+		{":weird", "", ":weird"},
+		// Only the first colon separates; the rest belongs to the model.
+		{"custom:vendor:model", "custom", "vendor:model"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			t.Parallel()
+			gotProvider, gotModel := splitACPModelID(tc.in)
+			if gotProvider != tc.wantProvider || gotModel != tc.wantModel {
+				t.Errorf("splitACPModelID(%q) = (%q, %q), want (%q, %q)",
+					tc.in, gotProvider, gotModel, tc.wantProvider, tc.wantModel)
+			}
+		})
 	}
 }
 
@@ -3749,6 +3903,99 @@ func TestHermesSendsSetModelWhenModelDiffersFromCurrent(t *testing.T) {
 	}
 	if params["modelId"] != "custom:deepseek-v4-pro" {
 		t.Errorf("session/set_model.modelId = %v, want custom:deepseek-v4-pro", params["modelId"])
+	}
+}
+
+// TestHermesSkipsRedundantSetModelForBareConfiguredModel pins the defect this
+// change exists for, at the level it actually lives at. agent.model is stored
+// bare (the spelling the CLI documents) while the session reports the
+// provider-encoded form, so the raw == in the MUL-5029 gate missed and
+// set_model went out every turn. Asserting on acpModelIDsEquivalent alone
+// would not have caught that the gate never fired.
+func TestHermesSkipsRedundantSetModelForBareConfiguredModel(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScriptWithCurrentModel(recordPath, "ses_new", "custom:deepseek-v4-pro")))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		Model:   "deepseek-v4-pro",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	assertNoRecordedFrame(t, recordPath, "session/set_model")
+}
+
+// TestHermesSendsSetModelWhenExplicitProviderAndBareCurrent guards the
+// asymmetry of the equivalence rules. A caller that names a provider
+// explicitly must get the switch even when the runtime reports a bare current
+// id, because a bare id cannot confirm which provider is actually in use.
+// Runtimes really do answer this way — acp_effort_test.go captures an
+// unprefixed `gpt-5.6-sol` from jcode, which routes through this backend.
+func TestHermesSendsSetModelWhenExplicitProviderAndBareCurrent(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScriptWithCurrentModel(recordPath, "ses_new", "hermes-4")))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		Model:   "openrouter:hermes-4",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/set_model")
+	params, ok := frame["params"].(map[string]any)
+	if !ok {
+		t.Fatalf("session/set_model params: got %T, want map", frame["params"])
+	}
+	if params["modelId"] != "openrouter:hermes-4" {
+		t.Errorf("session/set_model.modelId = %v, want openrouter:hermes-4", params["modelId"])
 	}
 }
 

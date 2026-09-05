@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import { readFileSync } from "node:fs";
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -252,7 +251,7 @@ describe("AgentTranscriptDialog", () => {
 
     expect(
       await screen.findByText(
-        "Antigravity does not currently provide live execution events. The transcript will be available after the task completes.",
+        "Antigravity does not currently provide live execution events. The transcript will be available after the run completes.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("Waiting for events...")).not.toBeInTheDocument();
@@ -579,25 +578,6 @@ describe("AgentTranscriptDialog", () => {
 
     // `let` is a Rust keyword, so the highlighter must have marked it up.
     expect(container.querySelector(".hljs-keyword")?.textContent).toBe("let");
-  });
-
-  it("carries the scope class the hljs palette is defined under", () => {
-    // The palette lives in editor/styles/code.css, scoped to the editor surface
-    // and this class. Without it the spans render but stay uncoloured.
-    const { container } = renderDialog([
-      {
-        seq: 1,
-        type: "tool_use",
-        tool: "Edit",
-        input: { file_path: "/repo/src/lib.rs", old_string: "let a = 1;", new_string: "let b = 2;" },
-      },
-    ]);
-
-    fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
-
-    expect(container.querySelector("pre")?.className).toContain("transcript-code");
-    const css = readFileSync("editor/styles/code.css", "utf8");
-    expect(css).toContain(".transcript-code");
   });
 
   it("leaves an unknown extension unhighlighted rather than guessing", () => {

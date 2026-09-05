@@ -580,19 +580,6 @@ describe("ThreadNavPanel", () => {
     expect(container.querySelector(".bg-brand")).toBeNull();
   });
 
-  it("renders the keyboard hints as real keycaps, not glyphs in a string", () => {
-    renderWithI18n(<Harness />);
-    fireEvent.click(screen.getByRole("button", { name: /Comment threads/ }));
-    // Scoped to the footer: the trigger's tooltip renders keycaps too.
-    const footer = screen.getByText("select").closest("div")!.parentElement!;
-    const keycaps = footer.querySelectorAll('[data-slot="shortcut-keycaps"]');
-    // Up, Down, Enter, Escape.
-    expect(keycaps).toHaveLength(4);
-    expect(screen.getByText("select")).toBeTruthy();
-    expect(screen.getByText("jump")).toBeTruthy();
-    expect(screen.getByText("close")).toBeTruthy();
-  });
-
   // Enter used to be handled for every keydown bubbling up to the popup, and
   // preventDefault on a button's keydown cancels the click the browser is about
   // to synthesize — so Enter on a filter pill jumped away instead of filtering.

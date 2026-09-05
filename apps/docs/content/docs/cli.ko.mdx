@@ -108,7 +108,7 @@ multica issue create --title "업그레이드 안내" --description-stdin < note
 multica issue comment add MUL-123 --content-stdin < review.md
 ```
 
-특정 실행의 메시지를 확인하거나 작업을 중지합니다.
+특정 실행의 메시지를 확인하거나 실행을 중지합니다.
 
 ```bash
 multica issue run-messages <task-id> --issue MUL-123
@@ -154,7 +154,7 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
-활성 에이전트가 계속 연결된 런타임을 삭제하면 명령이 기본적으로 거부됩니다. `multica runtime delete <id> --cascade`는 에이전트의 런타임 연결을 해제하고 설정과 기록을 보존하며 활성 작업을 취소합니다.
+활성 에이전트가 계속 연결된 런타임을 삭제하면 명령이 기본적으로 거부됩니다. `multica runtime delete <id> --cascade`는 에이전트의 런타임 연결을 해제하고 설정과 기록을 보존하며 활성 실행을 취소합니다.
 
 실행 메커니즘과 사용자 지정 profile은 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
 
@@ -182,7 +182,7 @@ multica runtime activity <runtime-id>
 
 태스크에는 `MUL-123` 같은 key 또는 전체 UUID를 사용하며 UUID 짧은 접두사는 허용하지 않습니다.
 
-다른 리소스의 `list` 명령은 일반적으로 복사 가능한 짧은 ID를 표시하고 `--full-id`로 전체 UUID를 출력할 수 있습니다. 짧은 ID가 고유하지 않으면 CLI가 더 많은 글자를 입력하거나 전체 UUID를 사용하도록 요청합니다. 작업의 짧은 ID에는 `--issue`로 소속 태스크도 지정해야 합니다.
+다른 리소스의 `list` 명령은 일반적으로 복사 가능한 짧은 ID를 표시하고 `--full-id`로 전체 UUID를 출력할 수 있습니다. 짧은 ID가 고유하지 않으면 CLI가 더 많은 글자를 입력하거나 전체 UUID를 사용하도록 요청합니다. 실행의 짧은 ID에는 `--issue`로 소속 태스크도 지정해야 합니다.
 
 많은 명령이 구조화 출력을 지원합니다.
 
@@ -243,7 +243,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `run-messages <task-id>` | 단일 실행 메시지 확인 | `--since`, `--issue` |
 | | `usage <issue-id>` | 집계 token 사용량 확인 | |
 | | `rerun <id>` | 현재 할당을 기준으로 다시 큐에 넣어 실행 | |
-| | `cancel-task <task-id>` | 실행 중 또는 큐 대기 중인 작업 취소 | `--issue` |
+| | `cancel-task <task-id>` | 진행 중 또는 큐 대기 중인 실행 취소 | `--issue` |
 | `project` | `list/get/create/update/delete` | 프로젝트 관리 | |
 | | `status <id> <status>` | 프로젝트 상태 변경 | |
 | | `resource list/add/update/remove` | 프로젝트 추가 리소스 관리 | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode`(로컬 디렉터리의 `in_place` / `worktree`) |
@@ -251,7 +251,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | `property` | `list/get/create/update/archive/unarchive` | 워크스페이스 사용자 지정 속성 관리 | `create`: `--name`, `--type`(`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option`(반복 가능, select 유형만). `list`: `--include-archived`. 유형은 생성 후 변경 불가 |
 | `agent` | `list/get/create/update/archive/restore` | 에이전트 관리 | `--name`, `--runtime-id`(`create`에서 필수), `--instructions`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
 | | `copy <agent-id>` | 원래 에이전트에 영향 없이 새 에이전트로 복사 | `--name`(기본값은 원래 이름 + ` (copy)`), `--runtime-id`(다른 런타임으로 복사할 때 `--model`도 필수), `--no-skills`. `custom_env`, `mcp_config`, `runtime_config` 같은 기밀 설정은 복사되지 않으며 `create`와 같은 flag로 다시 제공해야 함 |
-| | `tasks <id>` | 에이전트 작업 확인 | |
+| | `tasks <id>` | 에이전트 실행 확인 | |
 | | `avatar <id>` | 아바타 업로드 | |
 | | `env get/set <agent-id>` | 사용자 지정 환경 변수 읽기/쓰기(owner와 admin만) | |
 | | `skills list/set/add <agent-id>` | 연결된 스킬 관리 | `--skill-ids`(`set`은 전체 교체, `add`는 증분 추가) |
@@ -281,7 +281,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `stop` / `status` / `restart` | 중지, 상태 확인, 다시 시작(`restart`와 `start`의 flag가 같음) | |
 | | `logs` | 데몬 로그 확인 | `--follow`, `--lines` |
 | | `disk-usage` | 로컬 디스크 사용량 확인 | `--by-workspace`, `--by-task`, `--top` |
-| `runtime` | `list/usage/activity/update/rename/delete` | 런타임 확인 및 관리 | `delete`: `--cascade`(연결된 에이전트의 런타임을 해제하고 데이터를 보존하며 작업 취소) |
+| `runtime` | `list/usage/activity/update/rename/delete` | 런타임 확인 및 관리 | `delete`: `--cascade`(연결된 에이전트의 런타임을 해제하고 데이터를 보존하며 실행 취소) |
 | | `profile list/create/update/delete` | 사용자 지정 런타임 profile 관리 | |
 | | `profile set-path/unset-path <profile-id>` | 로컬 실행 파일 경로 고정(로컬에만 적용되고 서버에 업로드되지 않음) | |
 
@@ -316,5 +316,5 @@ Claude Code 플러그인 마켓플레이스, Codex skill 설치 도구, Cursor�
 
 - [Multica CLI skill](https://github.com/multica-ai/multica-cli) — Codex, Claude Code, Cursor에서 Multica를 조작합니다.
 - [인증과 토큰](/auth-tokens) — PAT 생성, 갱신, 취소를 알아봅니다.
-- [문제 해결](/troubleshooting) — 명령 오류와 작업이 시작되지 않는 문제를 해결합니다.
+- [문제 해결](/troubleshooting) — 명령 오류와 실행이 시작되지 않는 문제를 해결합니다.
 - [에이전트 생성 및 설정](/agents-create) — `agent create` 각 필드의 전체 의미를 알아봅니다.

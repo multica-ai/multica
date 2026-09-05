@@ -611,7 +611,6 @@ func parseQueryNumber(q string) (int, bool) {
 // searchResult holds a raw row from the dynamic search query.
 type searchResult struct {
 	issue                 db.Issue
-	totalCount            int64
 	matchSource           string
 	matchedCommentContent string
 }
@@ -861,7 +860,6 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id,
 		i.revision,
-		COUNT(*) OVER() AS total_count,
 		%s AS match_source,
 		%s AS matched_comment_content
 	FROM issue i
@@ -960,7 +958,6 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 				&sr.issue.Number,
 				&sr.issue.ProjectID,
 				&sr.issue.Revision,
-				&sr.totalCount,
 				&sr.matchSource,
 				&sr.matchedCommentContent,
 			); err != nil {
@@ -987,11 +984,6 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("search issues failed", "error", err, "workspace_id", workspaceID, "query", q)
 		writeError(w, http.StatusInternalServerError, "failed to search issues")
 		return
-	}
-
-	var total int64
-	if len(results) > 0 {
-		total = results[0].totalCount
 	}
 
 	prefix := h.getIssuePrefix(ctx, wsUUID)
@@ -1022,10 +1014,8 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		resp[i] = sir
 	}
 
-	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
-		"total":  total,
 	})
 }
 
@@ -3138,10 +3128,9 @@ type UpdateIssueRequest struct {
 	// the issue can be run later via manual run/rerun. Optional; omitted or
 	// false keeps today's behavior. Mirrors comment suppress_agent_ids.
 	SuppressRun bool `json:"suppress_run,omitempty"`
-	// HandoffNote is an optional free-text instruction injected into the run's
-	// opening context when this write starts an agent/squad run ("交接说明" —
-	// MUL-3375). Only consumed when a run actually starts: SuppressRun=true or
-	// a parked/non-triggering write drops it. Never fabricates a comment.
+	// HandoffNote is retained at the API boundary for installed clients that
+	// predate the handoff UI removal. It is consumed only when this write starts
+	// a run and is never stored on the issue itself.
 	HandoffNote string `json:"handoff_note,omitempty"`
 }
 

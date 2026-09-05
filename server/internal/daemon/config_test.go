@@ -106,12 +106,6 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	}
 }
 
-func TestDefaultGCIntervalIsTwoHours(t *testing.T) {
-	if DefaultGCInterval != 2*time.Hour {
-		t.Fatalf("DefaultGCInterval = %s, want 2h", DefaultGCInterval)
-	}
-}
-
 // A localhost server URL is not the official cloud host, so this exercises the
 // self-host branch of defaultGCCompletedTaskTTL: retention stays unbounded until
 // an operator opts in, and a daemon upgrade never starts deleting on its own.
@@ -145,6 +139,46 @@ func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *tes
 	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "not-a-duration")
 	if _, err := LoadConfig(overrides); err == nil || !strings.Contains(err.Error(), "MULTICA_GC_COMPLETED_TASK_TTL") {
 		t.Fatalf("LoadConfig invalid completed-task TTL error = %v, want named validation error", err)
+	}
+}
+
+func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
+	t.Setenv("MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL", "")
+	base := Overrides{ServerURL: "http://localhost:0", WorkspacesRoot: t.TempDir()}
+
+	cfg, err := LoadConfig(base)
+	if err != nil {
+		t.Fatalf("LoadConfig default: %v", err)
+	}
+	if cfg.WSClaimPollInterval != DefaultWSClaimPollInterval {
+		t.Fatalf("default WSClaimPollInterval = %s, want %s", cfg.WSClaimPollInterval, DefaultWSClaimPollInterval)
+	}
+
+	t.Setenv("MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL", "75s")
+	cfg, err = LoadConfig(base)
+	if err != nil {
+		t.Fatalf("LoadConfig env: %v", err)
+	}
+	if cfg.WSClaimPollInterval != 75*time.Second {
+		t.Fatalf("env WSClaimPollInterval = %s, want 75s", cfg.WSClaimPollInterval)
+	}
+
+	base.WSClaimPollInterval = 2 * time.Minute
+	cfg, err = LoadConfig(base)
+	if err != nil {
+		t.Fatalf("LoadConfig override: %v", err)
+	}
+	if cfg.WSClaimPollInterval != 2*time.Minute {
+		t.Fatalf("override WSClaimPollInterval = %s, want 2m", cfg.WSClaimPollInterval)
+	}
+
+	base.WSClaimPollInterval = 0
+	t.Setenv("MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL", "0s")
+	if _, err := LoadConfig(base); err == nil || !strings.Contains(err.Error(), "must be positive") {
+		t.Fatalf("LoadConfig zero WS claim poll error = %v, want positive-duration validation", err)
 	}
 }
 

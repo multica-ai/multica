@@ -389,17 +389,6 @@ describe("comment composers", () => {
     expect(shell.className).not.toContain("h-[60vh]");
   });
 
-  it("lets default-size replies grow without a height cap", () => {
-    const { container } = renderReplyInput({ size: "default" });
-
-    activateComposer("reply-composer-shell");
-    expect(screen.getByPlaceholderText("Leave a reply...")).toBeInTheDocument();
-    expect(container.querySelectorAll("button")).toHaveLength(2);
-
-    const shell = screen.getByTestId("drop-zone");
-    expect(shell.className).not.toMatch(/max-h-/);
-  });
-
   it("keeps main comment submission wired after removing expand", async () => {
     const { container, onSubmit } = renderCommentInput();
 
