@@ -420,6 +420,7 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   completed_at: z.string().nullable().default(null),
   result: z.unknown().default(null),
   error: z.string().nullable().default(null),
+  warnings: z.array(z.string()).optional().catch(undefined),
   // Open string, not an enum — same contract as `failure_reason` in
   // packages/core/types/agent.ts and as the chat message schema above. The
   // backend taxonomy passed the six coarse values at MUL-1949 and keeps

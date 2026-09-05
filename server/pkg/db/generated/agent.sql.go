@@ -8104,8 +8104,9 @@ type SetAgentTaskDurableWorkDirParams struct {
 }
 
 // Records the durable replacement for a disposable worktree on a CANCELLED
-// task. The daemon only sends this after Finalize confirms the task worktree
-// is gone. As with branch_name, the status CAS rejects stale acknowledgements
+// task. The daemon only sends this after Finalize safely delivers the branch;
+// a non-fatal warning may still record deferred directory cleanup. As with
+// branch_name, the status CAS rejects stale acknowledgements
 // and COALESCE makes replays idempotent.
 func (q *Queries) SetAgentTaskDurableWorkDir(ctx context.Context, arg SetAgentTaskDurableWorkDirParams) error {
 	_, err := q.db.Exec(ctx, setAgentTaskDurableWorkDir, arg.DurableWorkDir, arg.ID)

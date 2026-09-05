@@ -557,6 +557,43 @@ func TestRunGC_SharedRootPreservesForeignDirectories(t *testing.T) {
 	}
 }
 
+func TestRunGC_UnownedPendingWorktreeMarkerCannotMutateSharedDirectory(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.GCOrphanTTL = 0
+	taskDir := filepath.Join(d.cfg.WorkspacesRoot, "source-repository", "data")
+	worktreeDir := filepath.Join(taskDir, "worktree")
+	if err := os.MkdirAll(worktreeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload := filepath.Join(worktreeDir, "research.sqlite")
+	if err := os.WriteFile(payload, []byte("do not delete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	marker, err := json.Marshal(map[string]any{
+		"version":       1,
+		"git_root":      t.TempDir(),
+		"worktree_path": worktreeDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	markerPath := filepath.Join(taskDir, ".pending_local_worktree_cleanup.json")
+	if err := os.WriteFile(markerPath, marker, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	d.runGC(context.Background())
+
+	if got, err := os.ReadFile(payload); err != nil || string(got) != "do not delete" {
+		t.Fatalf("forged pending cleanup mutated shared data: data=%q err=%v", got, err)
+	}
+	if _, err := os.Stat(markerPath); err != nil {
+		t.Fatalf("unowned pending cleanup marker was removed: %v", err)
+	}
+}
+
 // The incident regression above only proves the no-meta orphan path returns
 // early. applyGCAction is the single gate every mutating action passes
 // through, so pin all four: an unowned directory must survive full cleanup,

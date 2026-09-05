@@ -302,6 +302,8 @@ export interface AgentTask {
   completed_at: string | null;
   result: unknown;
   error: string | null;
+  /** Non-fatal runner diagnostics for a task that kept its terminal outcome. */
+  warnings?: string[];
   // Empty string when the task is not in a failed state (the backend uses
   // `omitempty`, so the field may also be missing on non-failed tasks).
   // Open string on the wire, not a closed enum: the backend's classifier

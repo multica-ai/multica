@@ -87,6 +87,7 @@ func TestCompleteTaskCallbackWithNULSucceeds(t *testing.T) {
 		"work_dir":         "/tmp/work\x00dir",
 		"durable_work_dir": "/Users/dev/pro\x00ject",
 		"session_id":       "sess-nul-complete",
+		"warnings":         []string{"cleanup\x00 pending"},
 	})
 
 	testHandler.CompleteTask(w, req)
@@ -124,6 +125,9 @@ func TestCompleteTaskCallbackWithNULSucceeds(t *testing.T) {
 	}
 	if stored.DurableWorkDir != "/Users/dev/project" {
 		t.Fatalf("stored durable_work_dir = %q, want %q", stored.DurableWorkDir, "/Users/dev/project")
+	}
+	if len(stored.Warnings) != 1 || stored.Warnings[0] != "cleanup pending" {
+		t.Fatalf("stored warnings = %#v, want sanitized cleanup warning", stored.Warnings)
 	}
 }
 

@@ -4307,7 +4307,7 @@ func startsWithAbsolutePath(s string) bool {
 // flipping to 'completed' and chat_session.session_id being refreshed,
 // causing the new task to resume against a stale (or NULL) session.
 // durableWorkDir is terminal delivery metadata, not a resume pointer: it is
-// populated only after the daemon confirms a disposable worktree is gone.
+// populated after the daemon safely delivers a disposable worktree's branch.
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
 	var task db.AgentTaskQueue
 	// chatAssistantMsg is the single assistant outcome row written for a chat

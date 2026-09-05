@@ -622,6 +622,17 @@ describe("AgentTaskListSchema", () => {
     expect(parsed[0]?.delivered_comment_ids).toBeUndefined();
   });
 
+  it("preserves valid warnings and drops malformed optional warnings", () => {
+    const parsed = AgentTaskListSchema.parse([
+      { ...task, warnings: ["cleanup pending"] },
+      { ...task, id: "task-2", warnings: ["cleanup pending", 42] },
+    ]);
+
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]?.warnings).toEqual(["cleanup pending"]);
+    expect(parsed[1]?.warnings).toBeUndefined();
+  });
+
   it("degrades malformed optional coverage without dropping task rows", () => {
     const parsed = AgentTaskListSchema.parse([
       {

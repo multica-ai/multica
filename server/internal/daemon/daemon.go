@@ -220,6 +220,7 @@ type terminalTaskReport struct {
 	sessionID      string
 	workDir        string
 	durableWorkDir string
+	warnings       []string
 	failureReason  string
 	// sessionRolloutMissing is true when the daemon withheld this task's Codex
 	// session because its rollout was not in the store (MUL-5305). The server
@@ -5902,6 +5903,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			sessionID:             result.SessionID,
 			workDir:               result.WorkDir,
 			durableWorkDir:        result.DurableWorkDir,
+			warnings:              result.Warnings,
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
 		})
@@ -6002,7 +6004,7 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 
 	switch report.kind {
 	case terminalTaskReportComplete:
-		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir)
+		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.warnings...)
 	case terminalTaskReportFail:
 		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir)
 	default:
@@ -7111,6 +7113,15 @@ func qualifyTaskModel(
 	return qualified
 }
 
+// Task-result warnings are rendered in shared task history. Keep host-specific
+// paths and raw OS errors in daemon logs, not in the persisted result.
+func finalizedWorktreeCleanupWarning(retryRecorded bool) string {
+	if retryRecorded {
+		return "local_directory worktree cleanup was deferred after task completion; an automatic retry was recorded"
+	}
+	return "local_directory worktree cleanup was deferred after task completion; no automatic retry was recorded, so inspect the repository with git worktree list and clean up manually if it is still present"
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (taskResult TaskResult, returnErr error) {
 	// A claim carries the task-row agent id both at the top level and inside
 	// the expanded agent configuration. The top-level id is authoritative
@@ -7712,18 +7723,33 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				taskResult.BranchName = outcome.Branch
 			}
 			if finalizeErr == nil {
-				// The configured local_directory becomes authoritative only after
-				// Finalize confirms the disposable task worktree is actually gone.
+				// The configured local_directory becomes authoritative after
+				// Finalize safely delivers and removes the disposable worktree.
 				if localAssignment != nil {
 					taskResult.DurableWorkDir = localAssignment.AbsPath
 				}
 				return
 			}
+			var cleanupPending *execenv.FinalizedWorktreeCleanupError
+			if errors.As(finalizeErr, &cleanupPending) {
+				// The branch already contains the task's work. Preserve the task's
+				// own disposition, but distinguish a durable automatic retry from a
+				// marker failure that needs manual cleanup.
+				taskResult.Warnings = append(taskResult.Warnings,
+					finalizedWorktreeCleanupWarning(cleanupPending.RetryRecorded))
+				if localAssignment != nil {
+					taskResult.DurableWorkDir = localAssignment.AbsPath
+				}
+				taskLog.Warn("local_directory: finalized worktree cleanup deferred",
+					"error", finalizeErr,
+					"path", outcome.CleanupPendingPath,
+					"retry_recorded", cleanupPending.RetryRecorded)
+				return
+			}
 			// Finalize could not complete its delivery contract, so the task
-			// worktree remains authoritative. This covers both an uncommitted
-			// change set and a committed branch whose worktree removal could not
-			// be confirmed. Fail the task: reporting success or a durable project
-			// directory here would hide the path that still needs attention.
+			// worktree remains authoritative because the changes could not be
+			// committed safely. Fail the task: reporting success or a durable
+			// project directory here would hide the only copy of the work.
 			//
 			// Wrapped in worktreePreservedError so the cancel path can
 			// recognise it: a cancelled task discards its result and error, but

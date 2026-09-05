@@ -1614,8 +1614,9 @@ WHERE id = sqlc.arg('id') AND status = 'cancelled';
 
 -- name: SetAgentTaskDurableWorkDir :exec
 -- Records the durable replacement for a disposable worktree on a CANCELLED
--- task. The daemon only sends this after Finalize confirms the task worktree
--- is gone. As with branch_name, the status CAS rejects stale acknowledgements
+-- task. The daemon only sends this after Finalize safely delivers the branch;
+-- a non-fatal warning may still record deferred directory cleanup. As with
+-- branch_name, the status CAS rejects stale acknowledgements
 -- and COALESCE makes replays idempotent.
 UPDATE agent_task_queue
 SET durable_work_dir = COALESCE(durable_work_dir, sqlc.arg('durable_work_dir'))

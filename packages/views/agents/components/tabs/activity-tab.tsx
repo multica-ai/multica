@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowUpRight,
   CircleHelp,
   Hash,
@@ -594,6 +595,7 @@ function TaskRow({
     task.status === "failed"
       ? failureReasonLabel(task.failure_reason, t)
       : cancelReasonLabel(task, t);
+  const hasWarnings = (task.warnings?.length ?? 0) > 0;
 
   // Only show duration for terminal rows. An active row's duration is
   // inferred from the timeText already ("Started 2m ago") and adding a
@@ -689,6 +691,15 @@ function TaskRow({
                   (#7411); the full diagnostic lives in the transcript's Run
                   details instead. */}
               <span className="text-destructive">{failureLabel}</span>
+            </>
+          )}
+          {hasWarnings && (
+            <>
+              <Sep />
+              <span className="inline-flex items-center gap-1 text-warning">
+                <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                {t(($) => $.tab_body.activity.warning_present)}
+              </span>
             </>
           )}
           {/* Accountable member (MUL-4302 §9): whose behalf this run is on.

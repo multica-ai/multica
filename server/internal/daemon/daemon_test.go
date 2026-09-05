@@ -4124,6 +4124,47 @@ type reportTaskResultRecorder struct {
 	payload map[string]any
 }
 
+func TestFinalizedWorktreeCleanupWarningIsPathFreeSnapshot(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		retryRecorded bool
+		want          string
+	}{
+		{
+			name:          "automatic retry recorded",
+			retryRecorded: true,
+			want:          "local_directory worktree cleanup was deferred after task completion; an automatic retry was recorded",
+		},
+		{
+			name:          "manual cleanup may be needed",
+			retryRecorded: false,
+			want:          "local_directory worktree cleanup was deferred after task completion; no automatic retry was recorded, so inspect the repository with git worktree list and clean up manually if it is still present",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := finalizedWorktreeCleanupWarning(tt.retryRecorded); got != tt.want {
+				t.Fatalf("finalizedWorktreeCleanupWarning(%t) = %q, want %q", tt.retryRecorded, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTerminalTaskReportTimeoutCoversRetrySchedule(t *testing.T) {
+	client := NewClient("http://example.invalid")
+	worstCase := time.Duration(len(defaultTerminalRetrySchedule)+1) * client.client.Timeout
+	for _, delay := range defaultTerminalRetrySchedule {
+		worstCase += delay
+	}
+	if terminalTaskReportTimeout < worstCase {
+		t.Fatalf("terminal report timeout = %s, want at least retry worst case %s", terminalTaskReportTimeout, worstCase)
+	}
+}
+
 func (r *reportTaskResultRecorder) handler(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -4164,6 +4205,7 @@ func TestReportTaskResult_CompletedHitsCompleteEndpoint(t *testing.T) {
 		BranchName: "agent/foo",
 		SessionID:  "ses-1",
 		WorkDir:    "/tmp/foo",
+		Warnings:   []string{"worktree cleanup is pending"},
 	}, slog.Default())
 
 	rec.mu.Lock()
@@ -4179,6 +4221,10 @@ func TestReportTaskResult_CompletedHitsCompleteEndpoint(t *testing.T) {
 	}
 	if rec.payload["session_id"] != "ses-1" {
 		t.Errorf("session_id: got %v", rec.payload["session_id"])
+	}
+	warnings, ok := rec.payload["warnings"].([]any)
+	if !ok || len(warnings) != 1 || warnings[0] != "worktree cleanup is pending" {
+		t.Errorf("warnings: got %#v", rec.payload["warnings"])
 	}
 }
 

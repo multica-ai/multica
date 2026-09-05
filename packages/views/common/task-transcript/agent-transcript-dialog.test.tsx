@@ -776,6 +776,21 @@ describe("AgentTranscriptDialog — delivered branch", () => {
   });
 });
 
+describe("AgentTranscriptDialog — non-fatal warnings", () => {
+  it("surfaces cleanup diagnostics without changing the successful status", async () => {
+    const warning =
+      "local_directory worktree cleanup is pending; manual cleanup is required";
+    renderDialog(items, {
+      task: { ...baseTask, warnings: [warning] },
+    });
+
+    expect(screen.getByText("Completed")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+    expect(screen.getByText("Warnings")).toBeInTheDocument();
+    expect(screen.getByText(warning)).toBeInTheDocument();
+  });
+});
+
 // A server-cancelled run (worktree claim gate, preserved-work delivery) must
 // explain itself: the localized reason rides the status badge and heads the
 // "Reason" row in Run details, while the raw persisted diagnostic sits under

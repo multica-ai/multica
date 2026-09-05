@@ -460,7 +460,7 @@ type TaskCancelAck struct {
 	// left to report where that work went.
 	BranchName string
 	// DurableWorkDir is the configured local_directory path that became
-	// authoritative after the disposable task worktree was removed.
+	// authoritative after the disposable task worktree safely delivered.
 	DurableWorkDir string
 	// ErrorMessage / FailureReason: set when the cancelled run additionally
 	// FAILED to persist its work (worktree Finalize abort). There is no branch
@@ -522,7 +522,7 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
-func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
+func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, warnings ...string) error {
 	body := map[string]any{"output": output}
 	if branchName != "" {
 		body["branch_name"] = branchName
@@ -535,6 +535,9 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	}
 	if durableWorkDir != "" {
 		body["durable_work_dir"] = durableWorkDir
+	}
+	if len(warnings) > 0 {
+		body["warnings"] = warnings
 	}
 	if sessionRolloutMissing {
 		body["session_rollout_missing"] = true

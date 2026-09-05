@@ -17,11 +17,17 @@ const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
+vi.mock("@multica/core/paths", () => ({
+  useWorkspacePaths: () => ({ issueDetail: (id: string) => `/issues/${id}` }),
+}));
 
 // api / paths are only reached from a rendered TaskRow, which never mounts in
 // the loading and empty states under test — stub them so the module graph
 // resolves without dragging in platform wiring.
 vi.mock("@multica/core/api", () => ({ api: {} }));
+vi.mock("../../../common/task-transcript", () => ({
+  TranscriptButton: () => null,
+}));
 
 // The tab reads three data sources. Snapshot ("Now") and the activity map
 // ("Last 30 days") stay empty; the per-agent task list is the one under test,
@@ -101,5 +107,31 @@ describe("ActivityTab Recent work loading state", () => {
     expect(
       document.querySelectorAll('[data-slot="skeleton"]').length,
     ).toBe(0);
+  });
+
+  it("keeps a successful run's cleanup warning visible", async () => {
+    agentTasksRef.current = () =>
+      Promise.resolve([
+        {
+          id: "task-1",
+          agent_id: "agent-1",
+          runtime_id: "runtime-1",
+          issue_id: "",
+          status: "completed",
+          priority: 0,
+          dispatched_at: null,
+          started_at: null,
+          completed_at: "2026-08-28T01:00:00Z",
+          result: null,
+          error: null,
+          warnings: ["automatic retry could not be recorded"],
+          created_at: "2026-08-28T00:00:00Z",
+          kind: "quick_create",
+        },
+      ]);
+
+    renderTab();
+
+    expect(await screen.findByText("Warning")).toBeInTheDocument();
   });
 });

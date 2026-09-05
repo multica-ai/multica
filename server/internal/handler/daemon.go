@@ -3772,7 +3772,7 @@ type TaskCompleteRequest struct {
 	SessionID string `json:"session_id"` // Claude session ID for future resumption
 	WorkDir   string `json:"work_dir"`   // working directory used during execution
 	// DurableWorkDir is the configured project directory that replaces a
-	// disposable task worktree after the daemon confirms the worktree is gone.
+	// disposable task worktree after the daemon safely delivers its branch.
 	DurableWorkDir string `json:"durable_work_dir,omitempty"`
 	// BranchName is the branch this run delivered its work on. Worktree-mode
 	// local_directory tasks never touch the user's working copy, so this is the
@@ -3787,6 +3787,9 @@ type TaskCompleteRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// Warnings are non-fatal daemon delivery diagnostics. They remain in the
+	// task result while the task itself keeps its successful disposition.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every
@@ -3804,6 +3807,9 @@ func sanitizeTaskCompleteRequest(req *TaskCompleteRequest) {
 	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
+	for i := range req.Warnings {
+		req.Warnings[i] = util.SanitizeTextForPostgres(req.Warnings[i])
+	}
 }
 
 func sanitizeTaskFailRequest(req *TaskFailRequest) {

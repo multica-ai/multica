@@ -390,6 +390,7 @@ type AgentTaskResponse struct {
 	CompletedAt          *string               `json:"completed_at"`
 	Result               any                   `json:"result"`
 	Error                *string               `json:"error"`
+	Warnings             []string              `json:"warnings,omitempty"`
 	FailureReason        string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
 	Attempt              int32                 `json:"attempt"`
 	MaxAttempts          int32                 `json:"max_attempts"`
@@ -425,8 +426,9 @@ type AgentTaskResponse struct {
 	// WorkDir directly; newer UIs should prefer RelativeWorkDir.
 	RelativeWorkDir string `json:"relative_work_dir,omitempty"`
 	// DurableWorkDir is the daemon-confirmed directory that remains usable
-	// after a disposable task worktree has been finalized and removed. It is a
-	// point-in-time task snapshot and does not follow later resource edits.
+	// after a disposable task worktree safely delivers its branch. A result
+	// warning may still report deferred cleanup of that disposable path. It is
+	// a point-in-time task snapshot and does not follow later resource edits.
 	DurableWorkDir string `json:"durable_work_dir,omitempty"`
 	// RelativeDurableWorkDir is the privacy-safe display form. The absolute
 	// value is retained for explicit clipboard actions only.
@@ -753,8 +755,14 @@ type TaskAgentData struct {
 // it, in which case RelativeWorkDir falls back to the existing WorkDir.
 func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	var result any
+	var resultMetadata struct {
+		Warnings []string `json:"warnings"`
+	}
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
+		if err := json.Unmarshal(t.Result, &resultMetadata); err != nil {
+			resultMetadata.Warnings = nil
+		}
 	}
 	failureReason := ""
 	if t.FailureReason.Valid {
@@ -789,6 +797,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		CompletedAt:            timestampToPtr(t.CompletedAt),
 		Result:                 result,
 		Error:                  textToPtr(t.Error),
+		Warnings:               resultMetadata.Warnings,
 		FailureReason:          failureReason,
 		BranchName:             branchName,
 		Attempt:                t.Attempt,
