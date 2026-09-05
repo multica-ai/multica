@@ -31,7 +31,23 @@ For install script or manual installs, use:
 multica update
 ```
 
-`multica update` auto-detects your installation method and upgrades accordingly.
+`multica update` uses GitHub Releases by default. Self-hosted installations can
+point the CLI at a GitHub Releases-compatible metadata mirror and an artifact
+mirror without changing the command. To let a daemon poll that source, also
+enable self-update explicitly because self-hosted auto-update is disabled by
+default:
+
+```bash
+export MULTICA_RELEASE_API_BASE_URL=https://updates.example/api
+export MULTICA_RELEASE_DOWNLOAD_BASE_URL=https://updates.example/releases/download
+export MULTICA_DAEMON_AUTO_UPDATE=true
+multica update
+```
+
+The metadata mirror must serve `/repos/multica-ai/multica/releases/latest` and
+`/repos/multica-ai/multica/releases/tags/<tag>`. The artifact mirror must serve
+`/<tag>/<asset-name>` and preserve the published `checksums.txt` contents.
+When these variables are unset, the GitHub defaults remain unchanged.
 
 ## Quick Start
 
