@@ -886,5 +886,12 @@
     "surface_loading": "Loading {{name}}…",
     "surface_unavailable": "{{name}} could not load its interface. The installed version may not include it.",
     "surface_navigated": "{{name}} tried to replace its panel with a page loaded from elsewhere. It has been stopped and disconnected — tell your workspace admin."
+  },
+  "automation": {
+    "title": "Automation",
+    "manual": "Manual",
+    "entry_count_one": "{{count}} entry",
+    "entry_count_other": "{{count}} entries",
+    "take_over": "Take over"
   }
 }

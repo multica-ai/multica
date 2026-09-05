@@ -71,6 +71,10 @@ import {
   IssueStatusEntrySchema,
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_ISSUE_STATUS_ENTRY,
+  IssueLifecycleResponseSchema,
+  EMPTY_ISSUE_LIFECYCLE_RESPONSE,
+  TransitionIssueStatusNodeResponseSchema,
+  IssueTableGroupsResponseSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
 
@@ -203,6 +207,21 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     });
     expect(parsed.issues[0]?.id).toBe(baseIssue.id);
     expect(parsed.issues[0]?.source_context).toBeUndefined();
+  });
+  it("keeps an issue while independently dropping malformed lifecycle cursors", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{
+        ...baseIssue,
+        lifecycle_id: 7,
+        lifecycle_status_id: { id: "status-1" },
+        transition_id: false,
+      }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+    expect(parsed.issues[0]?.lifecycle_id).toBeUndefined();
+    expect(parsed.issues[0]?.lifecycle_status_id).toBeUndefined();
+    expect(parsed.issues[0]?.transition_id).toBeUndefined();
   });
   it("parses source-context change reasons without requiring them from older servers", () => {
     const sourceContext = {
@@ -2101,5 +2120,117 @@ describe("issue status catalog schemas", () => {
       { endpoint: "POST /api/issue-statuses" },
     );
     expect(parsed).toEqual(EMPTY_ISSUE_STATUS_ENTRY);
+  });
+});
+
+describe("issue lifecycle schemas", () => {
+  const lifecycle = {
+    id: "lifecycle-1",
+    workspace_id: "ws-1",
+    scope_type: "project",
+    scope_id: "project-1",
+    name: "Project lifecycle",
+    revision: 2,
+    initial_status_id: "status-1",
+    created_at: "2026-09-03T00:00:00Z",
+    updated_at: "2026-09-03T00:00:00Z",
+  };
+  const status = {
+    id: "status-1",
+    lifecycle_id: "lifecycle-1",
+    legacy_status_key: "in_progress",
+    spec_key: "building",
+    name: "Building",
+    description: "Agent is working",
+    color: "#2563eb",
+    position: 2,
+    phase: "started",
+    outcome: null,
+    entry_policy: {
+      assignee: { type: "keep" },
+      executor: { type: "agent", id: "agent-1" },
+      instructions: "Implement the issue.",
+      advance: "executor_may_transition",
+    },
+    entry_policy_revision: 3,
+    archived_at: null,
+    created_at: "2026-09-03T00:00:00Z",
+    updated_at: "2026-09-03T00:00:00Z",
+  };
+
+  it("parses an effective project lifecycle and keeps forward-compatible phases", () => {
+    const parsed = IssueLifecycleResponseSchema.parse({
+      lifecycle,
+      statuses: [status, { ...status, id: "status-2", phase: "waiting" }],
+      mode: "custom",
+    });
+    expect(parsed.lifecycle.revision).toBe(2);
+    expect(parsed.lifecycle.initial_status_id).toBe("status-1");
+    expect(parsed.statuses[0]?.spec_key).toBe("building");
+    expect(parsed.statuses[0]?.entry_policy_revision).toBe(3);
+    expect(parsed.statuses[0]?.entry_policy.executor).toEqual({ type: "agent", id: "agent-1" });
+    expect(parsed.statuses[1]?.phase).toBe("waiting");
+  });
+
+  it("normalizes an additive server's empty entry policy to safe defaults", () => {
+    const parsed = IssueLifecycleResponseSchema.parse({
+      lifecycle,
+      statuses: [{ ...status, entry_policy: {} }],
+      mode: "custom",
+    });
+    expect(parsed.statuses[0]?.entry_policy).toEqual({
+      assignee: { type: "keep" },
+      executor: { type: "none" },
+      instructions: "",
+      advance: "human_confirms",
+    });
+  });
+
+  it("falls back safely when a lifecycle response is malformed", () => {
+    const parsed = parseWithFallback(
+      { lifecycle: { id: 7 }, statuses: "bad" },
+      IssueLifecycleResponseSchema,
+      EMPTY_ISSUE_LIFECYCLE_RESPONSE,
+      { endpoint: "GET /api/issue-lifecycles/effective" },
+    );
+    expect(parsed).toEqual(EMPTY_ISSUE_LIFECYCLE_RESPONSE);
+  });
+
+  it("accepts a no-op transition without fabricating an audit record", () => {
+    const parsed = TransitionIssueStatusNodeResponseSchema.parse({
+      issue: { ...baseIssue, lifecycle_id: "lifecycle-1", lifecycle_status_id: "status-1" },
+      transition: null,
+    });
+    expect(parsed.issue.lifecycle_status_id).toBe("status-1");
+    expect(parsed.transition).toBeNull();
+  });
+
+  it("preserves lifecycle status-node identity in table group descriptors", () => {
+    const parsed = IssueTableGroupsResponseSchema.parse({
+      query_fingerprint: "query-1",
+      total: 2,
+      groups: [
+        {
+          key: "lifecycle_status:status-1",
+          value: {
+            kind: "lifecycle_status",
+            lifecycle_id: "lifecycle-1",
+            lifecycle_status_id: "status-1",
+            status: "todo",
+            name: "Implementation",
+            color: "#2563eb",
+            position: 2,
+            phase: "started",
+          },
+          count: 2,
+        },
+      ],
+      next_cursor: null,
+    });
+    expect(parsed.groups[0]?.value).toMatchObject({
+      kind: "lifecycle_status",
+      lifecycle_status_id: "status-1",
+      name: "Implementation",
+    });
   });
 });

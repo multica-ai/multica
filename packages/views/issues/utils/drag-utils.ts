@@ -11,7 +11,7 @@ import type { BoardColumnGroup } from "../components/board-column";
 
 export type DragMoveTargetUpdates = Pick<
   UpdateIssueRequest,
-  "status" | "assignee_type" | "assignee_id" | "project_id" | "position"
+  "status" | "lifecycle_status_id" | "assignee_type" | "assignee_id" | "project_id" | "position"
 >;
 
 export type DragMoveUpdates = DragMoveTargetUpdates & {
@@ -58,12 +58,20 @@ export function getIssueGroupId(
   issue: Issue,
   grouping: IssueGrouping,
   knownOptionIds?: ReadonlySet<string>,
+  lifecycleStatusGrouping = false,
 ): string {
   // Status columns are CATEGORIES, so the card buckets by the category it
   // behaves as. Bucketing by the raw key gave a custom status a column id no
   // column has, and the card was dropped from the board/list entirely
   // (MUL-6409).
-  if (grouping === "status") return statusGroupId(issueColumnCategory(issue));
+  if (grouping === "status") {
+    if (lifecycleStatusGrouping) {
+      return issue.lifecycle_status_id
+        ? `lifecycle_status:${issue.lifecycle_status_id}`
+        : `lifecycle_status:legacy:${issue.status}`;
+    }
+    return statusGroupId(issueColumnCategory(issue));
+  }
   if (grouping === "project") return projectGroupId(issue.project_id ?? null);
   const propertyId = propertyIdFromViewKey(grouping);
   if (propertyId) {
@@ -89,8 +97,16 @@ export function buildColumns(
 ): Record<string, string[]> {
   const cols: Record<string, string[]> = {};
   for (const group of groups) cols[group.id] = [];
+  const lifecycleStatusGrouping =
+    grouping === "status" &&
+    groups.some((group) => group.lifecycleStatusId !== undefined);
   for (const issue of issues) {
-    const gid = getIssueGroupId(issue, grouping, knownOptionIds);
+    const gid = getIssueGroupId(
+      issue,
+      grouping,
+      knownOptionIds,
+      lifecycleStatusGrouping,
+    );
     if (cols[gid]) cols[gid].push(issue.id);
   }
   return cols;
@@ -151,6 +167,12 @@ export function findColumn(
 }
 
 export function issueMatchesGroup(issue: Issue, group: BoardColumnGroup): boolean {
+  if (group.lifecycleStatusId !== undefined) {
+    return group.lifecycleStatusId
+      ? issue.lifecycle_status_id === group.lifecycleStatusId
+      : issue.lifecycle_status_id == null &&
+          issue.status === group.lifecycleStatusLegacyKey;
+  }
   // "Is this card already in that column?" — a category question, like the
   // column itself. Comparing the raw key answered no for every custom status,
   // so a drop that changed nothing still fired a status write (MUL-6409).
@@ -177,8 +199,18 @@ export function getMoveUpdates(
    *  DIFFERENT key — so writing the column's canonical key would silently
    *  rewrite `awaiting_response` to `in_review`, and a status change starts an
    *  agent run, for a drag that only changed the row order (MUL-6409). */
-  issue?: Pick<Issue, "status" | "status_category">,
+  issue?: Pick<Issue, "status" | "status_category" | "lifecycle_status_id">,
 ): DragMoveTargetUpdates {
+  if (group.lifecycleStatusId !== undefined) {
+    if (group.lifecycleStatusId) {
+      return issue?.lifecycle_status_id === group.lifecycleStatusId
+        ? { position }
+        : { lifecycle_status_id: group.lifecycleStatusId, position };
+    }
+    return group.lifecycleStatusLegacyKey
+      ? { status: group.lifecycleStatusLegacyKey, position }
+      : { position };
+  }
   if (group.status) {
     const keepsStatus =
       issue !== undefined &&

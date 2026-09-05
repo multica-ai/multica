@@ -5,6 +5,7 @@ import { hashKey, keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type {
   Issue,
+  IssueLifecycleStatusNode,
   IssueStatusCategory,
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
@@ -17,6 +18,7 @@ import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { ALL_STATUSES } from "@multica/core/issues/config";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { effectiveIssueLifecycleOptions } from "@multica/core/issue-lifecycles/queries";
 import { statusFilterColumns } from "@multica/core/issues";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import type { IssueSortParam } from "@multica/core/issues/queries";
@@ -85,6 +87,8 @@ export interface IssueSurfaceController {
   ganttIssues: Issue[];
   visibleStatuses: IssueStatusCategory[];
   hiddenStatuses: IssueStatusCategory[];
+  /** Concrete status nodes for project-scoped Board/List surfaces. */
+  lifecycleStatuses?: IssueLifecycleStatusNode[];
   /** Exact server counts plus cursor controls for List/status Board. */
   statusPagination?: IssueStatusPagination;
   /** Exact group catalog plus independent row cursors for Assignee/Property
@@ -323,12 +327,43 @@ export function useIssueSurfaceController({
       : grouping;
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
   const usesTable = effectiveViewMode === "table";
+  const wantsProjectLifecycleSurface =
+    !!projectId &&
+    (effectiveViewMode === "list" ||
+      (effectiveViewMode === "board" && effectiveGrouping === "status"));
+  const projectLifecycleQuery = useQuery({
+    ...effectiveIssueLifecycleOptions(wsId, projectId ?? null, true),
+    enabled: wantsProjectLifecycleSurface,
+  });
+  // Installed clients can still point at an older self-hosted backend. Hold
+  // the first paint while capability resolves, then fall back to the portable
+  // category surface only when the lifecycle endpoint is actually absent.
+  const usesProjectLifecycleSurface =
+    wantsProjectLifecycleSurface &&
+    projectLifecycleQuery.isSuccess &&
+    !!projectLifecycleQuery.data.lifecycle.id;
+  const projectLifecyclePending =
+    wantsProjectLifecycleSurface && projectLifecycleQuery.isPending;
+  const projectLifecycleStatuses = useMemo(
+    () =>
+      (projectLifecycleQuery.data?.statuses ?? []).filter(
+        (status) =>
+          !status.archived_at &&
+          (statusFilters.length === 0 ||
+            (status.legacy_status_key != null &&
+              statusFilters.includes(status.legacy_status_key))),
+      ),
+    [projectLifecycleQuery.data?.statuses, statusFilters],
+  );
   const activeSearch = usesTable ? tableSearch : search;
   const debouncedActiveSearch = useDebouncedTableSearch(activeSearch);
   const usesServerStatusSurface =
-    effectiveViewMode === "list" ||
-    (effectiveViewMode === "board" && effectiveGrouping === "status");
+    !usesProjectLifecycleSurface &&
+    !projectLifecyclePending &&
+    (effectiveViewMode === "list" ||
+      (effectiveViewMode === "board" && effectiveGrouping === "status"));
   const usesServerGroupSurface =
+    usesProjectLifecycleSurface ||
     (effectiveViewMode === "board" && effectiveGrouping !== "status") ||
     effectiveViewMode === "swimlane";
   const usesServerFacets =
@@ -628,6 +663,7 @@ export function useIssueSurfaceController({
     enabled: usesServerStatusSurface && !statusFilterUnresolved,
   });
   const serverGroupSpec = useMemo<IssueTableGroupsRequest["group"]>(() => {
+    if (usesProjectLifecycleSurface) return { kind: "lifecycle_status" };
     if (effectiveViewMode === "swimlane") {
       return {
         kind: "compound",
@@ -657,6 +693,7 @@ export function useIssueSurfaceController({
     hasCustomStatuses,
     serverStatuses,
     swimlaneGrouping,
+    usesProjectLifecycleSurface,
   ]);
   const serverGroupQuery = useMemo<IssueTableQuerySpec>(() => {
     if (effectiveViewMode !== "swimlane") return tableQuerySpec;
@@ -672,6 +709,7 @@ export function useIssueSurfaceController({
     observeEmptyBranches:
       effectiveViewMode === "swimlane" ||
       (effectiveViewMode === "board" && activeGroupingProperty !== null),
+    eagerBranches: usesProjectLifecycleSurface,
     enabled: usesServerGroupSurface && !statusFilterUnresolved,
   });
 
@@ -842,6 +880,9 @@ export function useIssueSurfaceController({
     ...surfaceData,
     workingAgents,
     hasActiveFilters,
+    lifecycleStatuses: usesProjectLifecycleSurface
+      ? projectLifecycleStatuses
+      : undefined,
     statusPagination: usesServerStatusSurface
       ? data.statusPagination
       : undefined,
@@ -854,8 +895,12 @@ export function useIssueSurfaceController({
     // cleared query is waiting to re-fetch the unsearched window.
     isEmpty:
       data.isEmpty &&
+      !projectLifecyclePending &&
       !data.isRefreshing &&
       !(usesTable && (tableSearch.trim() || debouncedActiveSearch)),
+    isLoading:
+      data.isLoading ||
+      projectLifecyclePending,
     isStatusCatalogError: data.isStatusCatalogError,
     retryStatusCatalog: catalog.retry,
     sort,

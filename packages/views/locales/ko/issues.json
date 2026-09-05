@@ -855,5 +855,11 @@
     "surface_loading": "{{name}} 불러오는 중…",
     "surface_unavailable": "{{name}}의 인터페이스를 불러올 수 없습니다. 설치된 버전에 포함되어 있지 않을 수 있습니다.",
     "surface_navigated": "{{name}}이(가) 패널을 외부에서 불러온 페이지로 바꾸려 했습니다. 중지하고 연결을 끊었습니다. 워크스페이스 관리자에게 알리세요."
+  },
+  "automation": {
+    "title": "자동화",
+    "manual": "수동",
+    "entry_count_other": "실행 {{count}}개",
+    "take_over": "직접 인계받기"
   }
 }

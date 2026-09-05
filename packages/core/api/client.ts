@@ -122,6 +122,12 @@ import type {
   IssueStatusEntry,
   CreateIssueStatusRequest,
   UpdateIssueStatusRequest,
+  IssueLifecycleResponse,
+  AutomationExecution,
+  UpdateIssueLifecycleStatusRequest,
+  TransitionIssueStatusNodeRequest,
+  TransitionIssueStatusNodeResponse,
+  TakeOverAutomationExecutionResponse,
   IssueLabelsResponse,
   LabelResourceType,
   ResourceLabelsResponse,
@@ -383,6 +389,12 @@ import {
   ListLabelsResponseSchema,
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
+  IssueLifecycleResponseSchema,
+  AutomationExecutionListSchema,
+  EMPTY_ISSUE_LIFECYCLE_RESPONSE,
+  TransitionIssueStatusNodeResponseSchema,
+  TakeOverAutomationExecutionResponseSchema,
+  EMPTY_TRANSITION_ISSUE_STATUS_NODE_RESPONSE,
   IssuePropertySchema,
   ListPropertiesResponseSchema,
   IssuePropertiesResponseSchema,
@@ -3711,6 +3723,116 @@ export class ApiClient {
     return parseWithFallback(raw, IssueStatusEntrySchema, EMPTY_ISSUE_STATUS_ENTRY, {
       endpoint: "DELETE /api/issue-statuses/{id}",
     });
+  }
+
+  async getEffectiveIssueLifecycle(
+    projectId?: string | null,
+    includeArchived = false,
+  ): Promise<IssueLifecycleResponse> {
+    const query = new URLSearchParams();
+    if (projectId) query.set("project_id", projectId);
+    if (includeArchived) query.set("include_archived", "true");
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/effective${suffix}`);
+    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "GET /api/issue-lifecycles/effective",
+    });
+  }
+
+  async getIssueLifecycle(lifecycleId: string): Promise<IssueLifecycleResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/${lifecycleId}`);
+    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "GET /api/issue-lifecycles/{lifecycleId}",
+    });
+  }
+
+  async listIssueAutomationExecutions(issueId: string): Promise<AutomationExecution[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/automation-executions`);
+    return parseWithFallback(raw, AutomationExecutionListSchema, [], {
+      endpoint: "GET /api/issues/{id}/automation-executions",
+    });
+  }
+
+  async updateProjectIssueLifecycle(
+    projectId: string,
+    mode: "default" | "custom",
+  ): Promise<IssueLifecycleResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/issue-lifecycle`, {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    });
+    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PUT /api/projects/{id}/issue-lifecycle",
+    });
+  }
+
+  async updateIssueLifecycleStatus(
+    lifecycleId: string,
+    statusId: string,
+    data: UpdateIssueLifecycleStatusRequest,
+  ): Promise<IssueLifecycleResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/${lifecycleId}/statuses/${statusId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PATCH /api/issue-lifecycles/{lifecycleId}/statuses/{statusId}",
+    });
+  }
+
+  async archiveIssueLifecycleStatus(
+    lifecycleId: string,
+    statusId: string,
+    expectedRevision: number,
+  ): Promise<IssueLifecycleResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/${lifecycleId}/statuses/${statusId}?expected_revision=${expectedRevision}`, {
+      method: "DELETE",
+    });
+    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "DELETE /api/issue-lifecycles/{lifecycleId}/statuses/{statusId}",
+    });
+  }
+
+  async reorderIssueLifecycleStatuses(
+    lifecycleId: string,
+    statusIds: string[],
+    expectedRevision: number,
+  ): Promise<IssueLifecycleResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/${lifecycleId}/statuses/reorder`, {
+      method: "PATCH",
+      body: JSON.stringify({ status_ids: statusIds, expected_revision: expectedRevision }),
+    });
+    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PATCH /api/issue-lifecycles/{lifecycleId}/statuses/reorder",
+    });
+  }
+
+  async transitionIssueStatusNode(
+    issueId: string,
+    data: TransitionIssueStatusNodeRequest,
+  ): Promise<TransitionIssueStatusNodeResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/transitions`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      TransitionIssueStatusNodeResponseSchema,
+      EMPTY_TRANSITION_ISSUE_STATUS_NODE_RESPONSE,
+      { endpoint: "POST /api/issues/{id}/transitions" },
+    );
+  }
+
+  async takeOverAutomationExecution(
+    issueId: string,
+    executionId: string,
+    expectedRevision?: number,
+  ): Promise<TakeOverAutomationExecutionResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/automation-executions/${executionId}/take-over`, {
+      method: "POST",
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    });
+    return TakeOverAutomationExecutionResponseSchema.parse(raw) as TakeOverAutomationExecutionResponse;
   }
 
   // Custom issue properties

@@ -9,7 +9,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -81,8 +82,9 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// Both sides of the transition are resolved to the canonical status they
 	// inherit, so a move into a custom done/cancelled status fires the barrier
 	// exactly like a move into Done or Cancelled. (MUL-6243)
-	prevTerminal := isTerminalChildStatus(issuestatus.Effective(ctx, h.Queries, prev.WorkspaceID, prev.Status))
-	nowTerminal := isTerminalChildStatus(issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status))
+	lifecycleEnabled := featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)
+	prevTerminal := issuepolicy.ResolveIssue(ctx, h.Queries, prev, lifecycleEnabled).IsTerminal()
+	nowTerminal := issuepolicy.ResolveIssue(ctx, h.Queries, issue, lifecycleEnabled).IsTerminal()
 	if prevTerminal || !nowTerminal {
 		return
 	}
@@ -97,8 +99,8 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// Custom statuses inherit the canonical status they name, so a custom
 	// terminal status closes this out and a custom backlog status parks it,
 	// exactly like Done/Cancelled and Backlog do. (MUL-6243)
-	parentStatus := issuestatus.Effective(ctx, h.Queries, parent.WorkspaceID, parent.Status)
-	if parentStatus == "done" || parentStatus == "cancelled" {
+	parentState := issuepolicy.ResolveIssue(ctx, h.Queries, parent, lifecycleEnabled)
+	if parentState.IsTerminal() {
 		return
 	}
 	// A parent parked in backlog is deliberately held for later. Posting the
@@ -106,7 +108,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// promote sibling backlog sub-issues into todo — the surprise auto-
 	// activation reported in #4320 / MUL-3497. Skip the whole notification so
 	// a backlog parent stays inert until the user explicitly promotes it.
-	if parentStatus == "backlog" {
+	if parentState.IsParked() {
 		return
 	}
 	// Human-assigned parents read their own timeline; an automated system
@@ -196,11 +198,11 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			continue
 		}
 		// Same parent guards as the single path (see notifyParentOfChildDone).
-		parentStatus := issuestatus.Effective(ctx, h.Queries, parent.WorkspaceID, parent.Status)
-		if parentStatus == "done" || parentStatus == "cancelled" {
+		parentState := issuepolicy.ResolveIssue(ctx, h.Queries, parent, featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags))
+		if parentState.IsTerminal() {
 			continue
 		}
-		if parentStatus == "backlog" {
+		if parentState.IsParked() {
 			continue
 		}
 		if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
@@ -371,7 +373,7 @@ func isTerminalChildStatus(status string) bool {
 // would show the category instead of the status the user actually picked.
 func (h *Handler) terminalChildPredicate(ctx context.Context) func(db.Issue) bool {
 	return func(c db.Issue) bool {
-		return isTerminalChildStatus(issuestatus.Effective(ctx, h.Queries, c.WorkspaceID, c.Status))
+		return issuepolicy.ResolveIssue(ctx, h.Queries, c, featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)).IsTerminal()
 	}
 }
 

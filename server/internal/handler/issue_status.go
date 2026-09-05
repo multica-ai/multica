@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuelifecycle"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -261,6 +262,9 @@ func (h *Handler) createIssueStatusEntry(ctx context.Context, workspaceID pgtype
 	if err != nil {
 		return db.IssueStatus{}, "", err
 	}
+	if err := issuelifecycle.SyncDefault(ctx, qtx, workspaceID); err != nil {
+		return db.IssueStatus{}, "", err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return db.IssueStatus{}, "", err
 	}
@@ -322,7 +326,15 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		position = pgtype.Float8{Float64: *req.Position, Valid: true}
 	}
 
-	updated, err := h.Queries.UpdateIssueStatusEntry(r.Context(), db.UpdateIssueStatusEntryParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update issue status")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	updated, err := qtx.UpdateIssueStatusEntry(r.Context(), db.UpdateIssueStatusEntryParams{
 		ID:          entry.ID,
 		WorkspaceID: wsUUID,
 		Name:        name,
@@ -342,6 +354,16 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		slog.Warn("UpdateIssueStatus failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update issue status")
+		return
+	}
+	if err := issuelifecycle.SyncDefault(r.Context(), qtx, wsUUID); err != nil {
+		slog.Warn("UpdateIssueStatus lifecycle sync failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update issue status")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("UpdateIssueStatus commit failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue status")
 		return
 	}
@@ -404,6 +426,11 @@ func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		slog.Warn("ArchiveIssueStatus failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to archive issue status")
+		return
+	}
+	if err := issuelifecycle.SyncDefault(r.Context(), qtx, wsUUID); err != nil {
+		slog.Warn("ArchiveIssueStatus lifecycle sync failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to archive issue status")
 		return
 	}
@@ -618,6 +645,11 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("ReorderIssueStatuses touched an unexpected row count",
 			append(logger.RequestAttrs(r), "affected", affected, "expected", len(ids))...)
 		writeError(w, http.StatusConflict, "issue status catalog changed during reorder")
+		return
+	}
+	if err := issuelifecycle.SyncDefault(r.Context(), qtx, wsUUID); err != nil {
+		slog.Warn("ReorderIssueStatuses lifecycle sync failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to reorder issue statuses")
 		return
 	}
 

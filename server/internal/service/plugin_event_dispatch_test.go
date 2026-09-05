@@ -85,10 +85,8 @@ func TestEventDispatchShedsLoadRatherThanGrowingWithoutBound(t *testing.T) {
 }
 
 // The bus vocabulary and the plugin vocabulary are deliberately separate. This
-// pins the mapping, including the one event that has no internal equivalent:
-// issue.status_changed is derived from an issue:updated carrying
-// status_changed=true, so a plugin can subscribe to the specific thing it cares
-// about instead of filtering every field change itself.
+// pins the mapping, including the transition domain event that backs the
+// published issue.status_changed hook.
 func TestEventBridgeMapsInternalEventsToThePublishedVocabulary(t *testing.T) {
 	seen := []string{}
 	bus := events.New()
@@ -102,8 +100,10 @@ func TestEventBridgeMapsInternalEventsToThePublishedVocabulary(t *testing.T) {
 	bus.Publish(events.Event{Type: protocol.EventTaskFailed, WorkspaceID: workspace})
 	// A plain field edit is issue.updated only.
 	bus.Publish(events.Event{Type: protocol.EventIssueUpdated, WorkspaceID: workspace, Payload: map[string]any{"title_changed": true}})
-	// A status change is BOTH, so a subscriber to either sees it.
+	// Compatibility clients still receive issue.updated for a status mutation.
 	bus.Publish(events.Event{Type: protocol.EventIssueUpdated, WorkspaceID: workspace, Payload: map[string]any{"status_changed": true}})
+	// Status-specific consumers receive the explicit domain event.
+	bus.Publish(events.Event{Type: protocol.EventIssueTransitioned, WorkspaceID: workspace, Payload: map[string]any{"status_changed": true}})
 
 	want := []string{
 		plugincontract.EventIssueCreated,

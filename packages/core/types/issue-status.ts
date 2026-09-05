@@ -75,3 +75,136 @@ export interface UpdateIssueStatusRequest {
   color?: string;
   position?: number;
 }
+
+export type IssueLifecyclePhase =
+  | "backlog"
+  | "unstarted"
+  | "started"
+  | "completed"
+  | "cancelled";
+
+export interface IssueLifecycleDefinition {
+  id: string;
+  workspace_id: string;
+  scope_type: "workspace" | "project" | (string & {});
+  scope_id: string;
+  name: string;
+  revision: number;
+  initial_status_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type IssueLifecycleAssigneeTarget =
+  | { type: "keep"; id?: never }
+  | { type: "human" | "agent" | "squad"; id: string };
+
+export type IssueLifecycleExecutorTarget =
+  | { type: "none"; id?: never }
+  | { type: "agent" | "squad"; id: string };
+
+export interface IssueLifecycleEntryPolicy {
+  assignee: IssueLifecycleAssigneeTarget;
+  executor: IssueLifecycleExecutorTarget;
+  /** Prompt supplied to the executor when the issue enters this node. */
+  instructions: string;
+  advance: "executor_may_transition" | "human_confirms";
+}
+
+export interface IssueLifecycleStatusNode {
+  id: string;
+  lifecycle_id: string;
+  legacy_status_key: string | null;
+  /** Stable key used by lifecycle YAML/JSON definitions. */
+  spec_key: string;
+  name: string;
+  description: string;
+  color: string;
+  position: number;
+  phase: IssueLifecyclePhase | (string & {});
+  outcome: "completed" | "cancelled" | null | (string & {});
+  entry_policy: IssueLifecycleEntryPolicy;
+  entry_policy_revision: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IssueLifecycleResponse {
+  lifecycle: IssueLifecycleDefinition;
+  statuses: IssueLifecycleStatusNode[];
+  mode: "default" | "custom" | (string & {});
+}
+
+export interface UpdateIssueLifecycleStatusRequest {
+  expected_revision: number;
+  name?: string;
+  description?: string;
+  color?: string;
+  phase?: IssueLifecyclePhase;
+  entry_policy?: IssueLifecycleEntryPolicy;
+}
+
+export interface ReorderIssueLifecycleStatusesRequest {
+  expected_revision: number;
+  status_ids: string[];
+}
+
+export interface IssueTransitionRecord {
+  id: string;
+  from_status_id: string | null;
+  to_status_id: string;
+  actor_type: string;
+  actor_id: string | null;
+  cause: string;
+  issue_revision_before: number;
+  issue_revision_after: number;
+  created_at: string;
+}
+
+export type AutomationExecutionStatus =
+  | "dormant"
+  | "pending"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "superseded";
+
+export interface AutomationExecution {
+  id: string;
+  issue_id: string;
+  trigger_transition_id: string;
+  lifecycle_id: string;
+  lifecycle_revision: number;
+  status_id: string;
+  policy_revision: number;
+  policy_snapshot: IssueLifecycleEntryPolicy;
+  executor_type: "agent" | "squad" | null | (string & {});
+  executor_id: string | null;
+  status: AutomationExecutionStatus | (string & {});
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TransitionIssueStatusNodeRequest {
+  lifecycle_status_id: string;
+  expected_revision?: number;
+  expected_transition_id?: string;
+}
+
+export interface TransitionIssueStatusNodeResponse {
+  issue: import("./issue").Issue;
+  /** Null when the issue was already on the requested node. */
+  transition: IssueTransitionRecord | null;
+  /** Policy snapshot created for this concrete entry. */
+  execution: AutomationExecution | null;
+  /** Present only when the entry policy configured an agent or squad. */
+  task_id: string | null;
+}
+
+export interface TakeOverAutomationExecutionResponse {
+  issue: import("./issue").Issue;
+  execution: AutomationExecution;
+}

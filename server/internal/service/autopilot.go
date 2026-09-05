@@ -18,13 +18,16 @@ import (
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issuelifecycle"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issueposition"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -40,6 +43,7 @@ type AutopilotService struct {
 	TaskSvc      *TaskService
 	Entitlements entitlement.Provider
 	QuotaMetrics AutopilotQuotaMetrics
+	FeatureFlags *featureflag.Service
 }
 
 // DefaultAutopilotTriggerTimezone is the timezone used to render Autopilot
@@ -323,7 +327,8 @@ func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, aut
 	if err != nil {
 		return fmt.Errorf("dispatch for webhook delivery: load linked issue: %w", err)
 	}
-	if effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status); effective != "todo" && effective != "in_progress" {
+	state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags))
+	if state.LegacyCategory != "todo" && state.LegacyCategory != "in_progress" {
 		return nil
 	}
 	if autopilot.AssigneeType == "squad" {
@@ -671,6 +676,39 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("refresh autopilot: %w", err)
 	}
 	projectID := currentAutopilot.ProjectID
+	lifecycle, err := issuelifecycle.Effective(ctx, qtx, ap.WorkspaceID, projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if seedErr := qtx.SeedIssueStatusEntries(ctx, ap.WorkspaceID); seedErr != nil {
+			return fmt.Errorf("seed issue status catalog: %w", seedErr)
+		}
+		if _, ensureErr := issuelifecycle.EnsureDefault(ctx, qtx, ap.WorkspaceID); ensureErr != nil {
+			return ensureErr
+		}
+		lifecycle, err = issuelifecycle.Effective(ctx, qtx, ap.WorkspaceID, projectID)
+	}
+	if err != nil {
+		return fmt.Errorf("resolve issue lifecycle: %w", err)
+	}
+	var lifecycleStatus db.IssueLifecycleStatus
+	if lifecycle.InitialStatusID.Valid {
+		lifecycleStatus, err = qtx.LockActiveIssueLifecycleStatus(ctx, db.LockActiveIssueLifecycleStatusParams{
+			WorkspaceID: ap.WorkspaceID, LifecycleID: lifecycle.ID, ID: lifecycle.InitialStatusID,
+		})
+	} else {
+		lifecycleStatus, err = qtx.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
+			WorkspaceID: ap.WorkspaceID, LifecycleID: lifecycle.ID,
+			LegacyStatusKey: pgtype.Text{String: "todo", Valid: true},
+		})
+		if err == nil {
+			lifecycleStatus, err = qtx.LockActiveIssueLifecycleStatus(ctx, db.LockActiveIssueLifecycleStatusParams{
+				WorkspaceID: ap.WorkspaceID, LifecycleID: lifecycle.ID, ID: lifecycleStatus.ID,
+			})
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("resolve initial lifecycle status: %w", err)
+	}
+	compatibilityStatus := issuelifecycle.LegacyProjection(lifecycleStatus)
 
 	if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
 		ctx, qtx, ap.WorkspaceID, ap.ID, projectID, title, autopilotRecentDuplicateWindow,
@@ -692,7 +730,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("allocate issue number: %w", err)
 	}
 
-	newPosition, err := issueposition.NextTopPosition(ctx, tx, ap.WorkspaceID, "todo")
+	newPosition, err := issueposition.NextTopPosition(ctx, tx, ap.WorkspaceID, compatibilityStatus)
 	if err != nil {
 		return fmt.Errorf("get next issue position: %w", err)
 	}
@@ -702,7 +740,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		WorkspaceID:  ap.WorkspaceID,
 		Title:        title,
 		Description:  description,
-		Status:       "todo",
+		Status:       compatibilityStatus,
 		Priority:     "none",
 		AssigneeType: pgtype.Text{String: ap.AssigneeType, Valid: true},
 		AssigneeID:   ap.AssigneeID,
@@ -711,19 +749,28 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		// is captured separately via origin_type=autopilot + origin_id. For
 		// squad-assigned autopilots, the creator is the resolved leader —
 		// the same agent the issue listener will end up enqueueing.
-		CreatorType:   "agent",
-		CreatorID:     leader.ID,
-		ParentIssueID: pgtype.UUID{},
-		Position:      newPosition,
-		StartDate:     pgtype.Date{},
-		DueDate:       pgtype.Date{},
-		Number:        issueNumber,
-		ProjectID:     projectID,
-		OriginType:    pgtype.Text{String: "autopilot", Valid: true},
-		OriginID:      ap.ID,
+		CreatorType:       "agent",
+		CreatorID:         leader.ID,
+		ParentIssueID:     pgtype.UUID{},
+		Position:          newPosition,
+		StartDate:         pgtype.Date{},
+		DueDate:           pgtype.Date{},
+		Number:            issueNumber,
+		ProjectID:         projectID,
+		OriginType:        pgtype.Text{String: "autopilot", Valid: true},
+		OriginID:          ap.ID,
+		LifecycleID:       lifecycle.ID,
+		LifecycleStatusID: lifecycleStatus.ID,
 	})
 	if err != nil {
 		return fmt.Errorf("create issue: %w", err)
+	}
+	issue, _, _, err = issuelifecycle.RecordTransition(ctx, qtx, nil, issue, issuelifecycle.TransitionActor{
+		Type: "agent",
+		ID:   leader.ID,
+	}, "autopilot_issue_created")
+	if err != nil {
+		return fmt.Errorf("record initial issue transition: %w", err)
 	}
 
 	// Fan out the default subscriber template inside the same tx as the
@@ -1068,10 +1115,10 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 	// The failure reason below deliberately keeps issue.Status, not the
 	// normalized key, so the audit trail names the status a human actually
 	// chose. (MUL-6243)
-	effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags))
 
-	switch effectiveStatus {
-	case "done", "in_review":
+	switch state.AutopilotResolution() {
+	case issuepolicy.AutopilotComplete:
 		updatedRun, err := s.completeAutopilotRun(ctx, db.UpdateAutopilotRunCompletedParams{
 			ID: run.ID,
 		})
@@ -1081,7 +1128,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 		}
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
-	case "cancelled", "blocked":
+	case issuepolicy.AutopilotFail:
 		reason := "issue " + issue.Status
 		updatedRun, err := s.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
 			ID:            run.ID,

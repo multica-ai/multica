@@ -1,7 +1,8 @@
 -- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed
+       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed,
+       w.default_issue_lifecycle_id
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
@@ -181,6 +182,18 @@ cleared_issue_properties AS (
 ),
 cleared_quick_actions AS (
     DELETE FROM quick_action WHERE workspace_id = $1
+),
+cleared_automation_executions AS (
+    DELETE FROM automation_execution WHERE workspace_id = $1
+),
+cleared_issue_transitions AS (
+    DELETE FROM issue_transition WHERE workspace_id = $1
+),
+cleared_issue_lifecycle_statuses AS (
+    DELETE FROM issue_lifecycle_status WHERE workspace_id = $1
+),
+cleared_issue_lifecycles AS (
+    DELETE FROM issue_lifecycle WHERE workspace_id = $1
 ),
 ws_mcp_servers AS (
     SELECT id FROM workspace_mcp_server WHERE workspace_id = $1

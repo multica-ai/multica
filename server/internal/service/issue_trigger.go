@@ -4,7 +4,8 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -117,20 +118,19 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	// like Todo. Built-in keys resolve to themselves without a query, leaving
 	// this decision bit-identical for workspaces with no custom statuses —
 	// which is the whole set of them until an admin defines one. (MUL-6243)
-	currentStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
-	prevStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, in.PrevStatus)
+	lifecycleEnabled := featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags)
+	currentState := issuepolicy.ResolveIssue(ctx, s.Queries, issue, lifecycleEnabled)
+	prevState := issuepolicy.ResolveStatus(ctx, s.Queries, issue.WorkspaceID, issue.LifecycleID, in.PrevStatus, lifecycleEnabled)
 
 	var source RunEnqueueSource
 	switch {
 	case in.IsCreate || in.AssigneeChanged:
 		// Backlog is the parking lot: assigning into backlog never starts a run.
-		if currentStatus == "backlog" {
+		if currentState.IsParked() {
 			return IssueRunTrigger{}, false
 		}
 		source = RunSourceAssign
-	case in.StatusChanged && prevStatus == "backlog" &&
-		currentStatus != "backlog" &&
-		currentStatus != "done" && currentStatus != "cancelled":
+	case in.StatusChanged && prevState.IsParked() && currentState.AllowsRunTrigger():
 		if probe.IsSelfLoop != nil && probe.IsSelfLoop() {
 			return IssueRunTrigger{}, false
 		}

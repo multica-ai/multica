@@ -68,7 +68,7 @@ import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { errorCode } from "@multica/core/api";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, LifecycleStatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
@@ -91,6 +91,7 @@ import { ThreadNavPanel, mentionsUser, type ThreadNavThread } from "./thread-nav
 import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
+import { AutomationExecutionSection } from "./automation-execution-section";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
 import { PullRequestList } from "./pull-request-list";
@@ -299,8 +300,8 @@ function formatActivity(
       return t(($) => $.activity.created);
     case "status_changed":
       return t(($) => $.activity.status_changed, {
-        from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
-        to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
+        from: details.from_name || statusLabel(details.from ?? "?", t, resolveStatusLabel),
+        to: details.to_name || statusLabel(details.to ?? "?", t, resolveStatusLabel),
       });
     case "priority_changed":
       return t(($) => $.activity.priority_changed, {
@@ -2325,7 +2326,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           {/* Core props — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
-            <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
+            {issue.lifecycle_id && issue.lifecycle_status_id ? (
+              <LifecycleStatusPicker issue={issue} align="start" />
+            ) : (
+              <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
+            )}
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
@@ -2502,6 +2507,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           )}
         </div>}
       </div>
+
+      <AutomationExecutionSection issue={issue} />
 
       {/* Quick actions — the sidebar's only "do something" block, so it sits
           directly under Properties and above every read-only section. Renders

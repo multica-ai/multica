@@ -21,7 +21,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/dispatch"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issuelifecycle"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -79,6 +82,15 @@ type IssueResponse struct {
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
 	Revision  int64   `json:"revision"`
+	// LifecycleID and LifecycleStatusID are the canonical workflow identity.
+	// They are optional at the API boundary so installed clients remain
+	// compatible with rolling deploys while repaired rows are being bound.
+	LifecycleID       *string `json:"lifecycle_id,omitempty"`
+	LifecycleStatusID *string `json:"lifecycle_status_id,omitempty"`
+	// TransitionID is the optimistic status cursor. Additive clients may send
+	// it back as expected_transition_id; older clients continue using revision
+	// or no precondition.
+	TransitionID *string `json:"transition_id"`
 	// LastActivityAt is the latest semantic issue activity. It stays nullable
 	// while the operator-run historical backfill is incomplete.
 	LastActivityAt *string `json:"last_activity_at"`
@@ -205,12 +217,12 @@ func assertIssueStatusStillActive(ctx context.Context, qtx *db.Queries, workspac
 	return nil
 }
 
-// runWithIssueStatusGuard runs an issue write that lands on a custom status
-// inside a transaction that re-verifies the status under the shared catalog
-// lock (see assertIssueStatusStillActive). A built-in target skips the
-// transaction entirely.
+// runWithIssueStatusGuard runs an issue write that changes status inside one
+// transaction. Custom targets additionally take the catalog archive guard.
+// Built-in transitions also need the transaction now because the legacy field,
+// lifecycle projection, and immutable transition must commit atomically.
 func (h *Handler) runWithIssueStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, fn func(q *db.Queries) error) error {
-	if statusKey == "" || issuestatus.IsBuiltIn(statusKey) {
+	if statusKey == "" {
 		return fn(h.Queries)
 	}
 	tx, err := h.TxStarter.Begin(ctx)
@@ -301,31 +313,34 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		statusCategory = i.Status
 	}
 	return IssueResponse{
-		ID:             uuidToString(i.ID),
-		WorkspaceID:    uuidToString(i.WorkspaceID),
-		Number:         i.Number,
-		Identifier:     identifier,
-		Title:          i.Title,
-		Description:    textToPtr(i.Description),
-		Status:         i.Status,
-		StatusCategory: statusCategory,
-		Priority:       i.Priority,
-		AssigneeType:   textToPtr(i.AssigneeType),
-		AssigneeID:     uuidToPtr(i.AssigneeID),
-		CreatorType:    i.CreatorType,
-		CreatorID:      uuidToString(i.CreatorID),
-		ParentIssueID:  uuidToPtr(i.ParentIssueID),
-		ProjectID:      uuidToPtr(i.ProjectID),
-		Position:       i.Position,
-		Stage:          int4ToPtr(i.Stage),
-		StartDate:      dateToPtr(i.StartDate),
-		DueDate:        dateToPtr(i.DueDate),
-		CreatedAt:      timestampToString(i.CreatedAt),
-		UpdatedAt:      timestampToString(i.UpdatedAt),
-		Revision:       i.Revision,
-		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
-		Metadata:       parseIssueMetadata(i.Metadata),
-		Properties:     parseIssueProperties(i.Properties),
+		ID:                uuidToString(i.ID),
+		WorkspaceID:       uuidToString(i.WorkspaceID),
+		Number:            i.Number,
+		Identifier:        identifier,
+		Title:             i.Title,
+		Description:       textToPtr(i.Description),
+		Status:            i.Status,
+		StatusCategory:    statusCategory,
+		Priority:          i.Priority,
+		AssigneeType:      textToPtr(i.AssigneeType),
+		AssigneeID:        uuidToPtr(i.AssigneeID),
+		CreatorType:       i.CreatorType,
+		CreatorID:         uuidToString(i.CreatorID),
+		ParentIssueID:     uuidToPtr(i.ParentIssueID),
+		ProjectID:         uuidToPtr(i.ProjectID),
+		Position:          i.Position,
+		Stage:             int4ToPtr(i.Stage),
+		StartDate:         dateToPtr(i.StartDate),
+		DueDate:           dateToPtr(i.DueDate),
+		CreatedAt:         timestampToString(i.CreatedAt),
+		UpdatedAt:         timestampToString(i.UpdatedAt),
+		Revision:          i.Revision,
+		LifecycleID:       uuidToPtr(i.LifecycleID),
+		LifecycleStatusID: uuidToPtr(i.LifecycleStatusID),
+		TransitionID:      uuidToPtr(i.LastTransitionID),
+		LastActivityAt:    timestampToNanoPtr(i.LastActivityAt),
+		Metadata:          parseIssueMetadata(i.Metadata),
+		Properties:        parseIssueProperties(i.Properties),
 	}
 }
 
@@ -338,31 +353,34 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:             uuidToString(i.ID),
-		WorkspaceID:    uuidToString(i.WorkspaceID),
-		Number:         i.Number,
-		Identifier:     identifier,
-		Title:          i.Title,
-		Description:    textToPtr(i.Description),
-		Status:         i.Status,
-		StatusCategory: statusCategory,
-		Priority:       i.Priority,
-		AssigneeType:   textToPtr(i.AssigneeType),
-		AssigneeID:     uuidToPtr(i.AssigneeID),
-		CreatorType:    i.CreatorType,
-		CreatorID:      uuidToString(i.CreatorID),
-		ParentIssueID:  uuidToPtr(i.ParentIssueID),
-		ProjectID:      uuidToPtr(i.ProjectID),
-		Position:       i.Position,
-		Stage:          int4ToPtr(i.Stage),
-		StartDate:      dateToPtr(i.StartDate),
-		DueDate:        dateToPtr(i.DueDate),
-		CreatedAt:      timestampToString(i.CreatedAt),
-		UpdatedAt:      timestampToString(i.UpdatedAt),
-		Revision:       i.Revision,
-		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
-		Metadata:       parseIssueMetadata(i.Metadata),
-		Properties:     parseIssueProperties(i.Properties),
+		ID:                uuidToString(i.ID),
+		WorkspaceID:       uuidToString(i.WorkspaceID),
+		Number:            i.Number,
+		Identifier:        identifier,
+		Title:             i.Title,
+		Description:       textToPtr(i.Description),
+		Status:            i.Status,
+		StatusCategory:    statusCategory,
+		Priority:          i.Priority,
+		AssigneeType:      textToPtr(i.AssigneeType),
+		AssigneeID:        uuidToPtr(i.AssigneeID),
+		CreatorType:       i.CreatorType,
+		CreatorID:         uuidToString(i.CreatorID),
+		ParentIssueID:     uuidToPtr(i.ParentIssueID),
+		ProjectID:         uuidToPtr(i.ProjectID),
+		Position:          i.Position,
+		Stage:             int4ToPtr(i.Stage),
+		StartDate:         dateToPtr(i.StartDate),
+		DueDate:           dateToPtr(i.DueDate),
+		CreatedAt:         timestampToString(i.CreatedAt),
+		UpdatedAt:         timestampToString(i.UpdatedAt),
+		Revision:          i.Revision,
+		LifecycleID:       uuidToPtr(i.LifecycleID),
+		LifecycleStatusID: uuidToPtr(i.LifecycleStatusID),
+		TransitionID:      uuidToPtr(i.LastTransitionID),
+		LastActivityAt:    timestampToNanoPtr(i.LastActivityAt),
+		Metadata:          parseIssueMetadata(i.Metadata),
+		Properties:        parseIssueProperties(i.Properties),
 	}
 }
 
@@ -407,31 +425,34 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:             uuidToString(i.ID),
-		WorkspaceID:    uuidToString(i.WorkspaceID),
-		Number:         i.Number,
-		Identifier:     identifier,
-		Title:          i.Title,
-		Description:    textToPtr(i.Description),
-		Status:         i.Status,
-		StatusCategory: statusCategory,
-		Priority:       i.Priority,
-		AssigneeType:   textToPtr(i.AssigneeType),
-		AssigneeID:     uuidToPtr(i.AssigneeID),
-		CreatorType:    i.CreatorType,
-		CreatorID:      uuidToString(i.CreatorID),
-		ParentIssueID:  uuidToPtr(i.ParentIssueID),
-		ProjectID:      uuidToPtr(i.ProjectID),
-		Position:       i.Position,
-		Stage:          int4ToPtr(i.Stage),
-		StartDate:      dateToPtr(i.StartDate),
-		DueDate:        dateToPtr(i.DueDate),
-		CreatedAt:      timestampToString(i.CreatedAt),
-		UpdatedAt:      timestampToString(i.UpdatedAt),
-		Revision:       i.Revision,
-		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
-		Metadata:       parseIssueMetadata(i.Metadata),
-		Properties:     parseIssueProperties(i.Properties),
+		ID:                uuidToString(i.ID),
+		WorkspaceID:       uuidToString(i.WorkspaceID),
+		Number:            i.Number,
+		Identifier:        identifier,
+		Title:             i.Title,
+		Description:       textToPtr(i.Description),
+		Status:            i.Status,
+		StatusCategory:    statusCategory,
+		Priority:          i.Priority,
+		AssigneeType:      textToPtr(i.AssigneeType),
+		AssigneeID:        uuidToPtr(i.AssigneeID),
+		CreatorType:       i.CreatorType,
+		CreatorID:         uuidToString(i.CreatorID),
+		ParentIssueID:     uuidToPtr(i.ParentIssueID),
+		ProjectID:         uuidToPtr(i.ProjectID),
+		Position:          i.Position,
+		Stage:             int4ToPtr(i.Stage),
+		StartDate:         dateToPtr(i.StartDate),
+		DueDate:           dateToPtr(i.DueDate),
+		CreatedAt:         timestampToString(i.CreatedAt),
+		UpdatedAt:         timestampToString(i.UpdatedAt),
+		Revision:          i.Revision,
+		LifecycleID:       uuidToPtr(i.LifecycleID),
+		LifecycleStatusID: uuidToPtr(i.LifecycleStatusID),
+		TransitionID:      uuidToPtr(i.LastTransitionID),
+		LastActivityAt:    timestampToNanoPtr(i.LastActivityAt),
+		Metadata:          parseIssueMetadata(i.Metadata),
+		Properties:        parseIssueProperties(i.Properties),
 	}
 }
 
@@ -1492,7 +1513,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-	   i.revision
+	   i.revision, i.lifecycle_id, i.lifecycle_status_id, i.last_transition_id
 FROM issue i
 WHERE %s
 ORDER BY %s
@@ -1533,6 +1554,9 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Stage,
 			&row.Properties,
 			&row.Revision,
+			&row.LifecycleID,
+			&row.LifecycleStatusID,
+			&row.LastTransitionID,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -2389,6 +2413,7 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Queries.ChildIssueProgress(r.Context(), db.ChildIssueProgressParams{
 		WorkspaceID:        wsUUID,
 		TerminalStatusKeys: terminalStatusKeys,
+		LifecycleEnabled:   featureflags.IssueLifecycleV1Enabled(r.Context(), h.FeatureFlags),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
@@ -2754,18 +2779,19 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
-	Title         string   `json:"title"`
-	Description   *string  `json:"description"`
-	Status        string   `json:"status"`
-	Priority      string   `json:"priority"`
-	AssigneeType  *string  `json:"assignee_type"`
-	AssigneeID    *string  `json:"assignee_id"`
-	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
-	Stage         *int32   `json:"stage,omitempty"`
-	StartDate     *string  `json:"start_date"`
-	DueDate       *string  `json:"due_date"`
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	Title             string   `json:"title"`
+	Description       *string  `json:"description"`
+	Status            string   `json:"status"`
+	LifecycleStatusID *string  `json:"lifecycle_status_id,omitempty"`
+	Priority          string   `json:"priority"`
+	AssigneeType      *string  `json:"assignee_type"`
+	AssigneeID        *string  `json:"assignee_id"`
+	ParentIssueID     *string  `json:"parent_issue_id"`
+	ProjectID         *string  `json:"project_id"`
+	Stage             *int32   `json:"stage,omitempty"`
+	StartDate         *string  `json:"start_date"`
+	DueDate           *string  `json:"due_date"`
+	AttachmentIDs     []string `json:"attachment_ids,omitempty"`
 	// LabelIDs are issue-scoped labels to attach to the new issue in the same
 	// transaction as the create. Unknown or non-issue ids are rejected with
 	// 400 (service.ErrIssueLabelNotFound) rather than silently dropped.
@@ -2809,17 +2835,20 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status := req.Status
-	if status == "" {
-		status = "todo"
+	if req.Status != "" && req.LifecycleStatusID != nil {
+		writeError(w, http.StatusBadRequest, "status and lifecycle_status_id are mutually exclusive")
+		return
 	}
+	status := req.Status
 	priority := req.Priority
 	if priority == "" {
 		priority = "none"
 	}
-	status, ok = h.resolveIssueStatusKey(w, r, wsUUID, status)
-	if !ok {
-		return
+	if status != "" {
+		status, ok = h.resolveIssueStatusKey(w, r, wsUUID, status)
+		if !ok {
+			return
+		}
 	}
 	if !validateIssueEnum(w, "priority", priority, validIssuePriorities) {
 		return
@@ -2844,6 +2873,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var parentIssueID pgtype.UUID
 	var projectID pgtype.UUID
+	var lifecycleStatusID pgtype.UUID
+	if req.LifecycleStatusID != nil {
+		id, ok := parseUUIDOrBadRequest(w, *req.LifecycleStatusID, "lifecycle_status_id")
+		if !ok {
+			return
+		}
+		lifecycleStatusID = id
+	}
 	if req.ParentIssueID != nil {
 		id, ok := parseUUIDOrBadRequest(w, *req.ParentIssueID, "parent_issue_id")
 		if !ok {
@@ -3001,25 +3038,26 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
-		WorkspaceID:    wsUUID,
-		Title:          req.Title,
-		Description:    ptrToText(req.Description),
-		Status:         status,
-		Priority:       priority,
-		AssigneeType:   assigneeType,
-		AssigneeID:     assigneeID,
-		CreatorType:    creatorType,
-		CreatorID:      parseUUID(actualCreatorID),
-		ParentIssueID:  parentIssueID,
-		ProjectID:      projectID,
-		StartDate:      startDate,
-		DueDate:        dueDate,
-		OriginType:     originType,
-		OriginID:       originID,
-		Stage:          ptrToInt4(req.Stage),
-		AttachmentIDs:  attachmentIDs,
-		LabelIDs:       labelIDs,
-		AllowDuplicate: req.AllowDuplicate,
+		WorkspaceID:       wsUUID,
+		Title:             req.Title,
+		Description:       ptrToText(req.Description),
+		Status:            status,
+		LifecycleStatusID: lifecycleStatusID,
+		Priority:          priority,
+		AssigneeType:      assigneeType,
+		AssigneeID:        assigneeID,
+		CreatorType:       creatorType,
+		CreatorID:         parseUUID(actualCreatorID),
+		ParentIssueID:     parentIssueID,
+		ProjectID:         projectID,
+		StartDate:         startDate,
+		DueDate:           dueDate,
+		OriginType:        originType,
+		OriginID:          originID,
+		Stage:             ptrToInt4(req.Stage),
+		AttachmentIDs:     attachmentIDs,
+		LabelIDs:          labelIDs,
+		AllowDuplicate:    req.AllowDuplicate,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
@@ -3095,8 +3133,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
-	Title            *string `json:"title"`
+	ExpectedRevision     *int64  `json:"expected_revision,omitempty"`
+	ExpectedTransitionID *string `json:"expected_transition_id,omitempty"`
+	Title                *string `json:"title"`
 	// TitleBase is the title adopted by the editor before producing Title. It
 	// protects title edits without coupling them to unrelated issue mutations.
 	TitleBase   *string `json:"title_base,omitempty"`
@@ -3106,17 +3145,21 @@ type UpdateIssueRequest struct {
 	// that landed asynchronously after that base without making media already
 	// present in the base impossible for the user to delete. Older clients omit
 	// it and receive conservative channel-media preservation.
-	DescriptionBase *string  `json:"description_base,omitempty"`
-	Status          *string  `json:"status"`
-	Priority        *string  `json:"priority"`
-	AssigneeType    *string  `json:"assignee_type"`
-	AssigneeID      *string  `json:"assignee_id"`
-	Position        *float64 `json:"position"`
-	StartDate       *string  `json:"start_date"`
-	DueDate         *string  `json:"due_date"`
-	ParentIssueID   *string  `json:"parent_issue_id"`
-	ProjectID       *string  `json:"project_id"`
-	Stage           *int32   `json:"stage"`
+	DescriptionBase *string `json:"description_base,omitempty"`
+	Status          *string `json:"status"`
+	// LifecycleStatusID is the canonical destination for new clients. It is
+	// required when a project move crosses lifecycle boundaries. Status remains
+	// the installed-client adapter and cannot be sent in the same request.
+	LifecycleStatusID *string  `json:"lifecycle_status_id,omitempty"`
+	Priority          *string  `json:"priority"`
+	AssigneeType      *string  `json:"assignee_type"`
+	AssigneeID        *string  `json:"assignee_id"`
+	Position          *float64 `json:"position"`
+	StartDate         *string  `json:"start_date"`
+	DueDate           *string  `json:"due_date"`
+	ParentIssueID     *string  `json:"parent_issue_id"`
+	ProjectID         *string  `json:"project_id"`
+	Stage             *int32   `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -3213,7 +3256,12 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 
 var errIssueFieldConflict = errors.New("issue text field conflict")
 
-func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string) (db.Issue, db.Issue, bool, error) {
+type issueLifecycleBinding struct {
+	LifecycleID       pgtype.UUID
+	LifecycleStatusID pgtype.UUID
+}
+
+func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string, lifecycleBinding *issueLifecycleBinding, actor issuelifecycle.TransitionActor, cause string) (db.Issue, db.Issue, bool, error) {
 	if h.TxStarter == nil {
 		return db.Issue{}, db.Issue{}, false, errors.New("atomic issue update requires transaction starter")
 	}
@@ -3289,6 +3337,19 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	if err != nil {
 		return db.Issue{}, current, false, fmt.Errorf("update locked issue: %w", err)
 	}
+	if lifecycleBinding != nil {
+		issue, err = qtx.BindIssueToLifecycleStatus(ctx, db.BindIssueToLifecycleStatusParams{
+			IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+			LifecycleID: lifecycleBinding.LifecycleID, LifecycleStatusID: lifecycleBinding.LifecycleStatusID,
+		})
+		if err != nil {
+			return db.Issue{}, current, false, fmt.Errorf("bind lifecycle status: %w", err)
+		}
+	}
+	issue, _, _, err = issuelifecycle.RecordTransition(ctx, qtx, &current, issue, actor, cause)
+	if err != nil {
+		return db.Issue{}, current, false, err
+	}
 
 	attachmentsChanged := false
 	if len(attachmentIDs) > 0 {
@@ -3344,6 +3405,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
+	// Resolve actor before the write so a status transition can record it in
+	// the same transaction as the issue mutation.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	transitionActor := issuelifecycle.TransitionActor{Type: actorType}
+	if actorID != "" {
+		transitionActor.ID, _ = util.ParseUUID(actorID)
+	}
+
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
 		ID:            prevIssue.ID,
@@ -3366,6 +3435,17 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		params.ExpectedRevision = pgtype.Int8{Int64: *req.ExpectedRevision, Valid: true}
 	}
+	if req.ExpectedTransitionID != nil {
+		expectedTransitionID, ok := parseUUIDOrBadRequest(w, *req.ExpectedTransitionID, "expected_transition_id")
+		if !ok {
+			return
+		}
+		if prevIssue.LastTransitionID != expectedTransitionID {
+			writeError(w, http.StatusConflict, "issue transition conflict; reload and retry")
+			return
+		}
+		params.ExpectedTransitionID = expectedTransitionID
+	}
 
 	// COALESCE fields — only set when explicitly provided
 	if req.Title != nil {
@@ -3378,6 +3458,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// empty otherwise. Empty means "this write does not touch status", which the
 	// guard treats as nothing to protect.
 	statusKeyForGuard := ""
+	if req.Status != nil && req.LifecycleStatusID != nil {
+		writeError(w, http.StatusBadRequest, "status and lifecycle_status_id cannot be updated together")
+		return
+	}
 	if req.Status != nil {
 		statusKey, _, ok := h.resolveIssueStatusKeyKind(w, r, prevIssue.WorkspaceID, *req.Status)
 		if !ok {
@@ -3513,6 +3597,54 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Existing issues stay pinned when a project's default changes. Resolve the
+	// project's effective lifecycle only for a real cross-project move; an
+	// ordinary status-node transition stays inside the issue's pinned lifecycle.
+	projectChangedForLifecycle := params.ProjectID != prevIssue.ProjectID
+	targetLifecycleID := prevIssue.LifecycleID
+	if !targetLifecycleID.Valid || projectChangedForLifecycle {
+		effective, lifecycleErr := issuelifecycle.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, params.ProjectID)
+		if lifecycleErr != nil {
+			slog.Warn("resolve target project lifecycle failed", append(logger.RequestAttrs(r), "error", lifecycleErr)...)
+			writeError(w, http.StatusInternalServerError, "failed to resolve target project lifecycle")
+			return
+		}
+		targetLifecycleID = effective.ID
+	}
+	if projectChangedForLifecycle && prevIssue.LifecycleID.Valid && targetLifecycleID != prevIssue.LifecycleID && req.LifecycleStatusID == nil {
+		writeError(w, http.StatusConflict, "moving across lifecycles requires lifecycle_status_id")
+		return
+	}
+	var lifecycleBinding *issueLifecycleBinding
+	if req.LifecycleStatusID != nil {
+		statusID, ok := parseUUIDOrBadRequest(w, *req.LifecycleStatusID, "lifecycle_status_id")
+		if !ok {
+			return
+		}
+		targetStatus, statusErr := h.Queries.GetIssueLifecycleStatusByID(r.Context(), db.GetIssueLifecycleStatusByIDParams{
+			WorkspaceID: prevIssue.WorkspaceID, LifecycleID: targetLifecycleID, ID: statusID,
+		})
+		if statusErr != nil {
+			if errors.Is(statusErr, pgx.ErrNoRows) {
+				writeError(w, http.StatusConflict, "lifecycle status does not belong to the target lifecycle")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to resolve lifecycle status")
+			return
+		}
+		if targetStatus.ArchivedAt.Valid || !targetStatus.LegacyStatusKey.Valid {
+			writeError(w, http.StatusConflict, "lifecycle status is unavailable")
+			return
+		}
+		params.Status = pgtype.Text{String: targetStatus.LegacyStatusKey.String, Valid: true}
+		// The lifecycle row itself is the archive authority. Do not route a
+		// lifecycle-native write back through the workspace legacy catalog.
+		statusKeyForGuard = ""
+		lifecycleBinding = &issueLifecycleBinding{
+			LifecycleID: targetLifecycleID, LifecycleStatusID: targetStatus.ID,
+		}
+	}
+
 	// Validate the resulting (assignee_type, assignee_id) pair when the caller
 	// touches either field. Existing data on the issue is left alone if the
 	// caller is not changing it.
@@ -3538,10 +3670,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var issue db.Issue
 	attachmentsChanged := false
-	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
+	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 || lifecycleBinding != nil {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
-			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard,
+			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard, lifecycleBinding, transitionActor, "issue_updated",
 		)
 		if lockedPrev.ID.Valid {
 			prevIssue = lockedPrev
@@ -3550,6 +3682,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		err = h.runWithIssueStatusGuard(r.Context(), prevIssue.WorkspaceID, statusKeyForGuard, func(q *db.Queries) error {
 			var innerErr error
 			issue, innerErr = q.UpdateIssue(r.Context(), params)
+			if innerErr == nil && lifecycleBinding != nil {
+				issue, innerErr = q.BindIssueToLifecycleStatus(r.Context(), db.BindIssueToLifecycleStatusParams{
+					IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+					LifecycleID: lifecycleBinding.LifecycleID, LifecycleStatusID: lifecycleBinding.LifecycleStatusID,
+				})
+			}
+			if innerErr == nil {
+				issue, _, _, innerErr = issuelifecycle.RecordTransition(r.Context(), q, &prevIssue, issue, transitionActor, "issue_updated")
+			}
 			return innerErr
 		})
 	}
@@ -3568,13 +3709,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if errors.Is(err, pgx.ErrNoRows) && req.ExpectedTransitionID != nil {
+			writeError(w, http.StatusConflict, "issue transition conflict; reload and retry")
+			return
+		}
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
 	}
-
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
@@ -3583,13 +3725,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
 		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
-	statusChanged := req.Status != nil && prevIssue.Status != issue.Status
+	statusChanged := (req.Status != nil || req.LifecycleStatusID != nil) &&
+		(prevIssue.Status != issue.Status || prevIssue.LifecycleID != issue.LifecycleID || prevIssue.LifecycleStatusID != issue.LifecycleStatusID)
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
 	// project_changed gates the client's per-project issue-list refetch the way
 	// status/assignee flags gate theirs. Without it the client must diff
 	// project_id against its own cache, which breaks once an optimistic local
 	// move has overwritten the cached value (MUL-3669 / #4548).
-	projectChanged := req.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
+	_, projectTouched := rawFields["project_id"]
+	projectChanged := projectTouched && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
 	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
 	prevStartDate := dateToPtr(prevIssue.StartDate)
@@ -3599,7 +3743,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
-	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+	updatePayload := map[string]any{
 		"issue":               resp,
 		"assignee_changed":    assigneeChanged,
 		"status_changed":      statusChanged,
@@ -3619,7 +3763,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"prev_description":    textToPtr(prevIssue.Description),
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
-	})
+	}
+	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, updatePayload)
+	if statusChanged {
+		h.publish(protocol.EventIssueTransitioned, workspaceID, actorType, actorID, updatePayload)
+	}
 	if attachmentsChanged {
 		// The full owner snapshot must be admitted before an auxiliary event at
 		// the same revision. Otherwise clients advance only the revision here and
@@ -3768,7 +3916,7 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 // UpdateIssue.
 func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
 	// A custom status in the backlog category parks like Backlog. (MUL-6243)
-	if issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issuepolicy.ResolveIssue(ctx, h.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)).IsParked() {
 		return false
 	}
 	return h.isAgentAssigneeReady(ctx, issue)
@@ -4079,6 +4227,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	transitionActor := issuelifecycle.TransitionActor{Type: actorType}
+	if actorID != "" {
+		transitionActor.ID, _ = util.ParseUUID(actorID)
+	}
 	// Status is validated against this workspace's catalog, so it has to wait
 	// for wsUUID above. One check for the whole batch — every issue in it
 	// shares the workspace — and a rejection rather than a silent skip, so a
@@ -4281,7 +4434,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
 			issue, lockedPrev, _, err = h.updateIssueAtomically(
-				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey,
+				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey, nil, transitionActor, "batch_issue_updated",
 			)
 			if err == nil {
 				prevIssue = lockedPrev
@@ -4290,6 +4443,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			err = h.runWithIssueStatusGuard(r.Context(), wsUUID, batchStatusKey, func(q *db.Queries) error {
 				var innerErr error
 				issue, innerErr = q.UpdateIssue(r.Context(), params)
+				if innerErr == nil {
+					issue, _, _, innerErr = issuelifecycle.RecordTransition(r.Context(), q, &prevIssue, issue, transitionActor, "batch_issue_updated")
+				}
 				return innerErr
 			})
 		}
@@ -4306,8 +4462,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
-
 		fillBatch(&resp)
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
@@ -4315,13 +4469,18 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
 		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 
-		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+		updatePayload := map[string]any{
 			"issue":            resp,
 			"assignee_changed": assigneeChanged,
 			"status_changed":   statusChanged,
 			"priority_changed": priorityChanged,
 			"project_changed":  projectChanged,
-		})
+			"prev_status":      prevIssue.Status,
+		}
+		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, updatePayload)
+		if statusChanged {
+			h.publish(protocol.EventIssueTransitioned, workspaceID, actorType, actorID, updatePayload)
+		}
 
 		// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —
 		// mirrors UpdateIssue. See that handler for the rationale.
@@ -4358,10 +4517,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// comparison here left childDoneCompleted empty and silently skipped
 		// notifyParentsOfBatchChildDone entirely. (MUL-6243)
 		if statusChanged && issue.ParentIssueID.Valid {
-			prevTerminal := isTerminalChildStatus(
-				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
-			nowTerminal := isTerminalChildStatus(
-				issuestatus.Effective(r.Context(), h.Queries, issue.WorkspaceID, issue.Status))
+			lifecycleEnabled := featureflags.IssueLifecycleV1Enabled(r.Context(), h.FeatureFlags)
+			prevTerminal := issuepolicy.ResolveIssue(r.Context(), h.Queries, prevIssue, lifecycleEnabled).IsTerminal()
+			nowTerminal := issuepolicy.ResolveIssue(r.Context(), h.Queries, issue, lifecycleEnabled).IsTerminal()
 			if !prevTerminal && nowTerminal {
 				childDoneCompleted = append(childDoneCompleted, issue)
 			}

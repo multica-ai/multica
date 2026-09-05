@@ -65,6 +65,8 @@ import type {
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
   IssueStatusEntry,
+  IssueLifecycleResponse,
+  TransitionIssueStatusNodeResponse,
   ListIssueStatusesResponse,
   NotificationPreferenceResponse,
   PluginInstallation,
@@ -518,6 +520,80 @@ export const EMPTY_LIST_ISSUE_STATUSES_RESPONSE: ListIssueStatusesResponse = {
   statuses: [],
   categories: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   total: 0,
+};
+
+export const IssueLifecycleDefinitionSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  scope_type: z.string(),
+  scope_id: z.string(),
+  name: z.string(),
+  revision: z.number().int().positive(),
+  initial_status_id: z.string().nullable().default(null),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const IssueLifecycleAssigneeTargetSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("keep") }),
+  z.object({ type: z.enum(["human", "agent", "squad"]), id: z.string() }),
+]);
+
+export const IssueLifecycleExecutorTargetSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("none") }),
+  z.object({ type: z.enum(["agent", "squad"]), id: z.string() }),
+]);
+
+export const IssueLifecycleEntryPolicySchema = z.object({
+  assignee: IssueLifecycleAssigneeTargetSchema.default({ type: "keep" }),
+  executor: IssueLifecycleExecutorTargetSchema.default({ type: "none" }),
+  instructions: z.string().default(""),
+  advance: z.enum(["executor_may_transition", "human_confirms"]).default("human_confirms"),
+});
+
+export const IssueLifecycleStatusNodeSchema = z.object({
+  id: z.string(),
+  lifecycle_id: z.string(),
+  legacy_status_key: z.string().nullable().default(null),
+  spec_key: z.string().default(""),
+  name: z.string(),
+  description: z.string().default(""),
+  color: z.string().default("#6b7280"),
+  position: z.number().default(0),
+  phase: z.string(),
+  outcome: z.string().nullable().default(null),
+  entry_policy: IssueLifecycleEntryPolicySchema.default({
+    assignee: { type: "keep" },
+    executor: { type: "none" },
+    instructions: "",
+    advance: "human_confirms",
+  }),
+  entry_policy_revision: z.number().int().positive().default(1),
+  archived_at: z.string().nullable().default(null),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const IssueLifecycleResponseSchema = z.object({
+  lifecycle: IssueLifecycleDefinitionSchema,
+  statuses: z.array(IssueLifecycleStatusNodeSchema).default([]),
+  mode: z.string(),
+}).loose();
+
+export const EMPTY_ISSUE_LIFECYCLE_RESPONSE: IssueLifecycleResponse = {
+  lifecycle: {
+    id: "",
+    workspace_id: "",
+    scope_type: "workspace",
+    scope_id: "",
+    name: "",
+    revision: 1,
+    initial_status_id: null,
+    created_at: "",
+    updated_at: "",
+  },
+  statuses: [],
+  mode: "default",
 };
 
 export const ResourceLabelsResponseSchema = z.object({
@@ -1241,6 +1317,11 @@ export const IssueSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   revision: z.number().int().positive().optional(),
+  // Additive lifecycle identity. Drop only a malformed field instead of
+  // degrading the entire issue/list response during a mixed-version rollout.
+  lifecycle_id: z.string().nullable().optional().catch(undefined),
+  lifecycle_status_id: z.string().nullable().optional().catch(undefined),
+  transition_id: z.string().nullable().optional().catch(undefined),
   // Optional for compatibility with older self-hosted backends; a current
   // backend emits null until its historical backfill reaches the issue.
   last_activity_at: z.string().nullable().optional(),
@@ -1248,6 +1329,78 @@ export const IssueSchema = z.object({
   // erase an otherwise usable issue returned by a mixed-version server.
   source_context: IssueSourceContextSchema.optional().catch(undefined),
 }).loose();
+
+export const IssueTransitionRecordSchema = z.object({
+  id: z.string(),
+  from_status_id: z.string().nullable(),
+  to_status_id: z.string(),
+  actor_type: z.string(),
+  actor_id: z.string().nullable(),
+  cause: z.string(),
+  issue_revision_before: z.number().int().positive(),
+  issue_revision_after: z.number().int().positive(),
+  created_at: z.string(),
+}).loose();
+
+export const AutomationExecutionSchema = z.object({
+  id: z.string(),
+  issue_id: z.string(),
+  trigger_transition_id: z.string(),
+  lifecycle_id: z.string(),
+  lifecycle_revision: z.number().int().positive(),
+  status_id: z.string(),
+  policy_revision: z.number().int().positive(),
+  policy_snapshot: IssueLifecycleEntryPolicySchema,
+  executor_type: z.string().nullable(),
+  executor_id: z.string().nullable(),
+  status: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const AutomationExecutionListSchema = z.array(AutomationExecutionSchema);
+
+export const TransitionIssueStatusNodeResponseSchema = z.object({
+  issue: IssueSchema,
+  transition: IssueTransitionRecordSchema.nullable(),
+  execution: AutomationExecutionSchema.nullable().optional().default(null),
+  task_id: z.string().nullable().optional().default(null),
+}).loose();
+
+export const TakeOverAutomationExecutionResponseSchema = z.object({
+  issue: IssueSchema,
+  execution: AutomationExecutionSchema,
+}).loose();
+
+export const EMPTY_TRANSITION_ISSUE_STATUS_NODE_RESPONSE: TransitionIssueStatusNodeResponse = {
+  issue: {
+    id: "",
+    workspace_id: "",
+    number: 0,
+    identifier: "",
+    title: "",
+    description: null,
+    status: "todo",
+    priority: "none",
+    assignee_type: null,
+    assignee_id: null,
+    creator_type: "member",
+    creator_id: "",
+    parent_issue_id: null,
+    project_id: null,
+    position: 0,
+    stage: null,
+    start_date: null,
+    due_date: null,
+    metadata: {},
+    properties: {},
+    created_at: "",
+    updated_at: "",
+  },
+  transition: null,
+  execution: null,
+  task_id: null,
+};
 
 export const ListIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
@@ -1363,6 +1516,17 @@ const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("status"),
     status: z.string(),
+  }).loose(),
+  z.object({
+    kind: z.literal("lifecycle_status"),
+    lifecycle_id: z.string().optional(),
+    lifecycle_status_id: z.string().optional(),
+    status: z.string().default(""),
+    name: z.string(),
+    color: z.string().optional(),
+    position: z.number().optional(),
+    phase: z.string().optional(),
+    archived: z.boolean().optional(),
   }).loose(),
   z.object({
     kind: z.literal("assignee"),
