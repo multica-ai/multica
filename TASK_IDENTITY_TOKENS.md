@@ -45,7 +45,7 @@ instead of a shared bot.
 ## How it works
 
 ```
-   Alice assigns an issue to an agent
+   Alice assigns an issue, or her schedule fires
              │
              ▼
  ┌───────────────────────────────────────────────────────────────────┐
@@ -244,44 +244,31 @@ agent environment variables — and every change lands in the activity log.
 
 ## Who gets an identity
 
-A token is signed only for a run **a member asked for** — one whose delegation
-chain begins with a person's own action. Multica records the authorizing human
-in `originator_user_id`; that column, followed back to the root of the chain,
-decides. The audit label beside it never does:
+A token is signed for the **human who triggered the run**, or for the
+**immutable creator of a schedule** when that schedule fires. Delegated runs
+keep the same human; assigning an existing issue must never substitute its
+creator or the agent's owner. `originator_user_id` carries the authorization;
+`accountable_user_id` is an audit field and cannot grant an identity by itself.
 
 | Source | Signed | Meaning |
 | --- | --- | --- |
-| `direct_human` | yes | A person acted |
-| `delegation` | only if the chain root is `direct_human` | An agent hop copied the human from the run above it |
-| `comment_source` | only if the chain root is `direct_human` | Same, traced through a comment |
-| `trigger_owner` | **no** | An autopilot trigger fired on its own |
-| `rule_owner` | **no** | Same, with the rule's publisher as the audit label |
-| `owner_fallback` | **no** | Nobody authorized this; the owner is a guess |
-| `backfill` | **no** | Reconstructed after the fact |
-| `unattributed` | **no** | Unknown |
+| `direct_human` | yes | The member who acted |
+| `trigger_owner` | only for a proven schedule | The schedule's immutable member creator |
+| `delegation`, `comment_source` | only with a proven permitted root | The same human carried through every hop |
+| webhook `trigger_owner` | **no** | No authenticated human triggerer has been established |
+| `rule_owner`, `owner_fallback`, `backfill`, `unattributed` | **no** | Audit or fallback attribution is not authorization |
 
-The autopilot rows are the ones worth understanding. Inside Multica an armed
-schedule or webhook *does* run with its creator's authorization (MUL-6951):
-arming the trigger is treated like a deferred "run now", so the run's
-`originator_user_id` names that person and every agent it delegates to copies
-them down the chain. This feature still refuses to sign there. Letting an
-automation invoke an agent under someone's rights is a bounded grant inside the
-product; handing an unattended 3am run that person's full permissions in *your*
-systems, on input they never saw, is not the same grant — and the person is
-not watching. So the gate walks a delegation chain back to its root and signs
-only when that root is a member's own action. A chain whose root cannot be
-proven (a deleted ancestor) is refused rather than assumed.
+The signer follows delegation edges within the workspace and requires the same
+human at every hop. Missing ancestors, changed identities and excessive depth
+fail closed. A schedule root must resolve to a real scheduled dispatch and a
+schedule trigger whose `created_by_type` is `member` and whose `created_by_id`
+matches that human. The automation's owner, rule publisher and later trigger
+editors cannot replace its creator. Both `run_only` and `create_issue` schedules
+are supported, including descendants claimed after the root run finishes.
 
-The person must also still be a member of the workspace when the run is
-claimed. Attribution is decided when the run is queued, signing when it is
-claimed, and a queue can wait days for an offline runtime — no credential is
-minted in the name of someone offboarded in between.
-
-A run that is refused simply gets no token, proceeds normally, and whatever
-needed the token sees an ordinary "unauthorized" — never a task failure. If you
-want a scheduled run to reach an internal system, give that system its own
-service account for that job: the point of this feature is that a *person's*
-authority is only ever lent to work that person asked for.
+The person must still be a workspace member when the run is claimed. A run
+without a proven identity receives no generated token and continues normally;
+any internal-system operation requiring that credential remains unauthorized.
 
 **Every issuance is audited in-product.** Each time tokens are minted for a
 run, an `agent_task_tokens_issued` row lands in the activity log, tied to the

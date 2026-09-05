@@ -17,15 +17,9 @@ import (
 
 // TestIssueTaskTokensBySource is the regression fence for the issuing gate.
 //
-// Every row sets accountable_user_id — the audit column resolves a human for
-// almost every run — and the `authorized` column sets originator_user_id, the
-// authorization column. Neither alone decides. The gate signs only when the
-// run's chain BEGINS with a member acting (root label direct_human): since
-// MUL-6951 an armed autopilot carries its creator's authorization inside
-// Multica, so a schedule fire has a non-NULL originator too, and that must not
-// become a credential in the creator's name. Rows here have no lineage, so hop
-// labels (delegation / comment_source) are refused as unproven; the positive
-// hop cases live in TestIssueTaskTokensFollowsDelegationToChainRoot.
+// Every row sets the audit identity, but only a proven authorization signs.
+// Standalone hop labels have no lineage, and trigger_owner without a schedule
+// dispatch record is unproven. Schedule fixtures below cover the positive grant.
 func TestIssueTaskTokensBySource(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -47,14 +41,8 @@ func TestIssueTaskTokensBySource(t *testing.T) {
 		// cannot be proven, so the gate refuses rather than assumes.
 		{"delegation_without_lineage", "delegation", true, false},
 		{"comment_source_without_lineage", "comment_source", true, false},
-		// Autopilot fires on its own. Since MUL-6951 the trigger's creator IS
-		// the originator (arming a trigger authorizes the run inside Multica),
-		// so the authorized=true row is what production now emits — and it
-		// still must not mint a credential: that would hand an unattended 3am
-		// run that person's full permissions in the receiving system, on input
-		// they never saw. The NULL-originator rows are the pre-MUL-6951 shape
-		// and the rule_owner fallback, refused for the same reason.
-		{"trigger_owner", "trigger_owner", true, false},
+		// A trigger_owner label alone cannot prove a scheduled dispatch.
+		{"trigger_owner_without_schedule", "trigger_owner", true, false},
 		{"trigger_owner_without_originator", "trigger_owner", false, false},
 		{"rule_owner", "rule_owner", false, false},
 		{"rule_owner_with_originator", "rule_owner", true, false},
@@ -101,12 +89,8 @@ func TestIssueTaskTokensBySource(t *testing.T) {
 	}
 }
 
-// TestIssueTaskTokensFollowsDelegationToChainRoot pins the lineage half of
-// the gate. Attribution COPIES the originator across every agent hop, so a
-// run two hops below a member's comment and one two hops below an armed
-// schedule carry the same originator_user_id and the same "delegation" /
-// "comment_source" labels. Only the chain root's label separates them, and it
-// is what decides.
+// TestIssueTaskTokensFollowsDelegationToChainRoot distinguishes a proven human
+// root from an unproven trigger_owner label, even through multiple agent hops.
 func TestIssueTaskTokensFollowsDelegationToChainRoot(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -119,7 +103,7 @@ func TestIssueTaskTokensFollowsDelegationToChainRoot(t *testing.T) {
 		wantToken  bool
 	}{
 		{"member_asked", "direct_human", true},
-		{"armed_autopilot", "trigger_owner", false},
+		{"unproven_autopilot", "trigger_owner", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

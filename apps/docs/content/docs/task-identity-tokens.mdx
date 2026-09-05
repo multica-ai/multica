@@ -26,8 +26,8 @@ Task identity tokens remove that trade-off. Your permission model does not chang
 
 ## How it works
 
-1. **A human triggers a run** — assigns an issue, comments, delegates.
-2. **The server resolves the accountable human** from the run's attribution and, for each identity token the agent has enabled, signs a JWT with that person as the `sub` and the acting agent as the `act_*` claims.
+1. **A human triggers a run, or their schedule fires** — by assignment, comment, delegation or a scheduled dispatch.
+2. **The server resolves the authorizing human** from the run's attribution and, for each identity token the agent has enabled, signs a JWT with that person as the `sub` and the acting agent as the `act_*` claims.
 3. **The daemon injects the token** into the agent process environment under the template's variable name (e.g. `BOT_TOKEN_ERP`).
 4. **The agent calls your system** with the token as a bearer credential.
 5. **Your system verifies the token** against the published public keys, maps `sub` to its own user record, and applies that user's existing permissions and audit.
@@ -40,14 +40,16 @@ Named precisely, this is **delegated user impersonation** in the [RFC 8693](http
 
 ## Who gets an identity
 
-The identity comes from the human who **asked for** the run — the member whose own action sits at the root of its delegation chain, recorded in `originator_user_id` and followed back through every agent hop. An armed autopilot trigger does run with its creator's authorization inside Multica, and the audit label beside it names a human for almost every run; neither is what gets signed. A run whose chain does not begin with a member acting gets no token, proceeds normally, and whatever needed the token sees an ordinary "unauthorized", never a run failure. The person must also still be a workspace member when the run is claimed.
+The identity belongs to the **human who triggered the run**, or to the **immutable creator of its schedule**. Each agent delegation must preserve that human in `originator_user_id`. An issue's creator, an agent's owner, a rule publisher or a later schedule editor cannot replace them. The person must still be a workspace member when the run is claimed.
 
 | Source | Signed |
 | --- | --- |
-| `direct_human` | yes |
-| `delegation`, `comment_source` — copied down from a chain root | only when that root is `direct_human` |
-| `trigger_owner`, `rule_owner` — an autopilot trigger fired on its own, even though the run carries its creator's authorization inside Multica | no |
-| `owner_fallback`, `backfill`, `unattributed` | no |
+| `direct_human` | yes, for the member who acted |
+| `trigger_owner` | only for a verified scheduled dispatch, as the schedule's member creator |
+| `delegation`, `comment_source` | only when every hop preserves the human from a permitted root |
+| webhook `trigger_owner`, `rule_owner`, `owner_fallback`, `backfill`, `unattributed` | no |
+
+Both schedule execution modes (`run_only` and `create_issue`) are supported, including descendants of completed runs. Missing provenance, a changed identity or an unproven creator yields no generated token. The run continues; operations requiring that credential remain unauthorized.
 
 Tokens are only signed for a daemon that advertises it can inject them (`task-identity-tokens-v1`), so upgrade daemons before enabling the feature: issuing for an older one would record an issuance nothing ever received.
 

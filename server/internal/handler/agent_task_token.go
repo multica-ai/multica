@@ -202,50 +202,63 @@ func (h *Handler) UpdateAgentTaskTokens(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// taskTokenIdentityUser returns the human whose identity may be signed for a
-// run, and whether signing is permitted at all.
-//
-// The gate reads originator_user_id — the AUTHORIZATION column — and never
-// accountable_user_id (migration 185: the latter is an audit output that
-// degrades to *some* human for every run). But since MUL-6951 the originator
-// alone is not enough either: an armed autopilot trigger now carries its
-// creator's authorization inside Multica, so a schedule firing at 3am has a
-// non-NULL originator and a precise trigger_owner label, and every delegation
-// / comment_source hop below it copies that same human under a hop label. Read
-// by value, such a run is indistinguishable from one the person asked for.
-//
-// So the condition is stated as what it means: the chain BEGAN with a member
-// acting (its root label is direct_human). A hop label is followed back to the
-// run that actually resolved the human, through the same lineage walk the
-// delegated-subscriber rule uses (GetDelegatedSubscriptionFacts, MUL-7051). It
-// is a whitelist: trigger_owner and rule_owner roots are refused, because
-// lending a person's full permissions in an external system to an unattended
-// run they are not watching is a different grant from letting the automation
-// invoke an agent here; backfill, owner_fallback and unattributed roots never
-// carried a live authorization; and a lineage the walk cannot prove (a deleted
-// ancestor, or the 32-hop limit) reports a hop label and is refused rather
-// than assumed.
+// taskTokenIdentityUser permits a human-triggered chain or a scheduled chain
+// acting as the schedule's immutable creator. Audit-only identities never sign.
 func (h *Handler) taskTokenIdentityUser(ctx context.Context, task *db.AgentTaskQueue, workspaceID pgtype.UUID) (pgtype.UUID, bool) {
 	if !task.OriginatorUserID.Valid {
 		return pgtype.UUID{}, false
 	}
-	root := attribution.Source(task.OriginatorSource.String)
-	if root == attribution.SourceDelegation || root == attribution.SourceCommentSource {
-		facts, err := h.Queries.GetDelegatedSubscriptionFacts(ctx, db.GetDelegatedSubscriptionFactsParams{
-			OriginTaskID: task.ID,
-			WorkspaceID:  workspaceID,
+	root := *task
+	if root.OriginatorSource.String == string(attribution.SourceDelegation) || root.OriginatorSource.String == string(attribution.SourceCommentSource) {
+		facts, err := h.Queries.GetTaskTokenChainRoot(ctx, db.GetTaskTokenChainRootParams{
+			TaskID: task.ID, WorkspaceID: workspaceID,
 		})
-		if err != nil {
-			slog.Warn("task token: delegation lineage lookup failed; issuing none",
-				"task_id", uuidToString(task.ID), "error", err)
+		if err != nil || facts.OriginatorUserID != task.OriginatorUserID {
 			return pgtype.UUID{}, false
 		}
-		root = attribution.Source(facts.RootSource.String)
+		root.ID, root.OriginatorSource = facts.ID, facts.OriginatorSource
+		root.AutopilotRunID, root.IssueID = facts.AutopilotRunID, facts.IssueID
 	}
-	if root != attribution.SourceDirectHuman {
-		return pgtype.UUID{}, false
+	switch attribution.Source(root.OriginatorSource.String) {
+	case attribution.SourceDirectHuman:
+		return task.OriginatorUserID, true
+	case attribution.SourceTriggerOwner:
+		if h.taskTokenScheduleCreator(ctx, root, workspaceID) {
+			return task.OriginatorUserID, true
+		}
 	}
-	return task.OriginatorUserID, true
+	return pgtype.UUID{}, false
+}
+
+// taskTokenScheduleCreator proves the scheduled root against its dispatch record
+// and trigger. Both execution modes are supported; webhook runs and a trigger's
+// editor/publisher are deliberately not grants to use someone's identity.
+func (h *Handler) taskTokenScheduleCreator(ctx context.Context, root db.AgentTaskQueue, workspaceID pgtype.UUID) bool {
+	var run db.AutopilotRun
+	var err error
+	switch {
+	case root.AutopilotRunID.Valid:
+		run, err = h.Queries.GetAutopilotRun(ctx, root.AutopilotRunID)
+		if err != nil || run.TaskID != root.ID {
+			return false
+		}
+	case root.IssueID.Valid:
+		run, err = h.Queries.GetTaskTokenAutopilotRunByIssue(ctx, root.IssueID)
+		if err != nil {
+			return false
+		}
+	default:
+		return false
+	}
+	if run.Source != "schedule" || !run.TriggerID.Valid {
+		return false
+	}
+	trigger, err := h.Queries.GetAutopilotTriggerForAutopilot(ctx, db.GetAutopilotTriggerForAutopilotParams{
+		ID: run.TriggerID, AutopilotID: run.AutopilotID, WorkspaceID: workspaceID,
+	})
+	return err == nil && trigger.Kind == "schedule" &&
+		trigger.CreatedByType.String == "member" && trigger.CreatedByID.Valid &&
+		trigger.CreatedByID == root.OriginatorUserID
 }
 
 // issueClaimedTaskTokens is the claim-path entry point. It runs only once the
@@ -301,7 +314,7 @@ func (h *Handler) issueTaskTokens(ctx context.Context, task *db.AgentTaskQueue, 
 	src := attribution.Source(task.OriginatorSource.String)
 	identityID, authorized := h.taskTokenIdentityUser(ctx, task, agent.WorkspaceID)
 	if !authorized {
-		slog.Info("task token: run was not asked for by a member at the root of its chain; issuing none",
+		slog.Info("task token: no authorized human or schedule creator at chain root; issuing none",
 			"task_id", uuidToString(task.ID),
 			"originator_source", task.OriginatorSource.String)
 		return nil
