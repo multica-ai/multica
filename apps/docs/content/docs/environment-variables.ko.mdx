@@ -247,7 +247,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 
 데몬이 에이전트 작업에 주입하는 내부 컨텍스트는 [작업 런타임 환경](/daemon-runtimes#작업-런타임-환경)을 참고하세요.
 
-각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`로 명령 경로를 덮어쓸 수 있으며 모델 재정의를 지원하는 도구는 `MULTICA_<PROVIDER>_MODEL`도 사용할 수 있습니다. QwenPaw와 MiniMax Code에는 모델 변수가 없고 MiniMax Code의 경로 변수는 `MULTICA_MCODE_PATH`입니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness는 `MULTICA_DSH_PATH`와 `MULTICA_DSH_MODEL`을 지원합니다(값은 dsh 모델 카탈로그의 모델 ID, 예: `deepseek-official/deepseek-chat`). ZeroClaw는 `MULTICA_ZEROCLAW_PATH`를 지원하지만 모델 변수는 없습니다. 모델은 ZeroClaw의 에이전트 설정에서 관리합니다. 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
+각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`로 명령 경로를 덮어쓸 수 있으며 모델 재정의를 지원하는 도구는 `MULTICA_<PROVIDER>_MODEL`도 사용할 수 있습니다. QwenPaw, MiniMax Code, Prime Agent에는 모델 변수가 없고 MiniMax Code의 경로 변수는 `MULTICA_MCODE_PATH`입니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness는 `MULTICA_DSH_PATH`와 `MULTICA_DSH_MODEL`을 지원합니다(값은 dsh 모델 카탈로그의 모델 ID, 예: `deepseek-official/deepseek-chat`). ZeroClaw는 `MULTICA_ZEROCLAW_PATH`를 지원하지만 모델 변수는 없습니다. 모델은 ZeroClaw의 에이전트 설정에서 관리합니다. 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw, Prime Agent 여섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`, `MULTICA_PRIME_ARGS`입니다. 예시:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

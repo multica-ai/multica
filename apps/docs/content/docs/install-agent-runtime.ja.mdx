@@ -33,6 +33,7 @@ Multica は現在、次のコマンドを検出します。
 | OpenCode | `opencode` | [OpenCode クイックスタート](https://opencode.ai/en/docs) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
 | Oh-My-Pi | `omp` | [Oh-My-Pi インストール](https://omp.sh) |
+| Prime Agent | `prime-agent` | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) |
 | Qoder CLI | `qodercli` | [Qoder CLI クイックスタート](https://docs.qoder.com/en/cli/quick-start) |
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI クイックスタート](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
@@ -56,6 +57,8 @@ QwenPaw を使う場合は、QwenPaw 側の設定でプロバイダーとモデ�
 MiniMax Code を使う場合は、対応する Node.js バージョン（`>=22.19 <23` または `>=24 <27`）をインストールし、`npm install --global @minimax-ai/code@latest` を実行してください。npm のグローバルインストールによって `mcode` は npm のグローバル実行ファイルディレクトリに配置されます。`command -v mcode` または `Get-Command mcode` で見つからない場合は、そのディレクトリを `PATH` に追加してください。その後 `mcode login` を実行します。モデルは MiniMax Code が管理し、Multica から ACP 経由で上書きすることはできません。
 
 DeepSeek Harness を使う場合は、Node.js 20+ をインストールして `npm install -g @deepseek-ai/dsh` を実行し、Multica ランタイムプロファイルを追加してください（`dsh plugin --profile multica add <bundle>`）。デーモンは `dsh --profile multica --probe` が成功した場合のみ DeepSeek Harness を登録します。デーモンを起動する前に `DEEPSEEK_API_KEY` を設定（または dsh の設定に保存）してください。
+
+Prime Agent を使う場合は、先にログイン（サブスクリプションまたは API key）を済ませ、Prime Agent 側の設定でモデルを選んでください。Multica は実行時に Prime Agent のモデルを選択できず、Prime Agent は以前のセッションを再開せず、Multica が管理する MCP 設定も読み取りません — 詳しくは [AI コーディングツール比較](/providers) を参照してください。
 
 ログイン情報はツールがローカル環境に保存します。Multica が Claude、Codex、Cursor などの CLI のログイントークンを受け取ることはありません。
 

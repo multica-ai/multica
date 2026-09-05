@@ -19,6 +19,16 @@ var MinVersions = map[string]string{
 	"dim":      "0.3.10",  // cross-run session/load: per-process lock releases on graceful exit
 	"mcode":    "0.1.2",   // ACP v1 session/new, prompt, MCP capability forwarding
 	"zeroclaw": "0.8.0",   // persistent ACP sessions and session/resume were added in 0.8.0
+	// The whole fail-closed rlmMaxDepth gate is argued from v0.7.1 internals:
+	// getAgentDir's PRIME_AGENT_CODING_AGENT_DIR handling, _resolveRlmMaxDepth's
+	// precedence chain, and the settings.json path the gate opens. A build that
+	// resolved that path differently would make the gate read the wrong file and
+	// pass silently, so the assumption is enforced rather than only documented.
+	// 0.7.1 is also the only version smoke-tested against a live account, but
+	// getAgentDir, ENV_AGENT_DIR, CONFIG_DIR_NAME and _resolveRlmMaxDepth were
+	// diffed against v0.9.1 and are unchanged, so the floor admits nothing that
+	// resolves the path differently.
+	"prime": "0.7.1",
 }
 
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against

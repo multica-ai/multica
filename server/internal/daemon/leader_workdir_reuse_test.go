@@ -1039,3 +1039,42 @@ func TestRunTaskDeclinesReuseWhenTheClaimedDirectoryIsSwappedBeforeUse(t *testin
 		t.Fatal("second task produced no environment at all")
 	}
 }
+
+// TestShouldReusePriorWorkdirAcceptsWorkdirWithoutPriorSession closes the chain
+// the claim-side fix opens.
+//
+// The server can now offer a PriorWorkDir for a turn that reported no session
+// id, which is what a backend like Prime Agent produces on every run. That is
+// only worth anything if the reuse decision here is independent of the session
+// — so this pins that an empty PriorSessionID does not, by itself, send a
+// fully-provenanced directory back to a fresh Prepare. Provenance is still
+// what decides: the companion assertion drops the marker and the same task
+// stops reusing.
+//
+// Server-side counterpart: TestClaimTask_IssueKeepsWorkDirWithoutSession in
+// internal/handler.
+func TestShouldReusePriorWorkdirAcceptsWorkdirWithoutPriorSession(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
+	writeLeaderManagedEnvProvenance(t, workDir, "ws-leader", "issue-leader", "agent-leader")
+
+	task := leaderReuseTestTask("task-sessionless-reuse")
+	task.PriorSessionID = ""
+	task.PriorWorkDir = workDir
+	if _, ok := shouldReusePriorWorkdir(task, nil, root); !ok {
+		t.Fatalf("a fully-provenanced workdir %q was refused merely because no session id came with it", workDir)
+	}
+
+	// The session is not the gate, but provenance still is.
+	unprovenanced := filepath.Join(root, "ws-leader", "87654321", "workdir")
+	if err := os.MkdirAll(unprovenanced, 0o755); err != nil {
+		t.Fatalf("mkdir unprovenanced workdir: %v", err)
+	}
+	task.PriorWorkDir = unprovenanced
+	if _, ok := shouldReusePriorWorkdir(task, nil, root); ok {
+		t.Fatalf("sessionless task reused %q with no ownership provenance", unprovenanced)
+	}
+}
