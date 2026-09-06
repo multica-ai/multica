@@ -68,6 +68,15 @@ func TestSecretaryProjectionAtomicAndMemberInstructions(t *testing.T) {
 	if w := publish(req); w.Code != 200 {
 		t.Fatalf("publish: %d %s", w.Code, w.Body.String())
 	}
+	var stalePayload map[string]any
+	_ = json.Unmarshal(req.Projection, &stalePayload)
+	stalePayload["state_version"] = 84
+	stale := req
+	stale.ExpectedRevision, stale.Updates = 1, nil
+	stale.Projection, _ = json.Marshal(stalePayload)
+	if w := publish(stale); w.Code != 409 {
+		t.Fatal("a stale canonical version replaced newer history")
+	}
 	var precise time.Time
 	if err := testPool.QueryRow(t.Context(), `SELECT updated_at FROM issue WHERE id=$1`, id).Scan(&precise); err != nil {
 		t.Fatal(err)

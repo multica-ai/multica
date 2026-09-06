@@ -216,7 +216,8 @@ func (h *Handler) PutLifeOSSecretary(w http.ResponseWriter, r *http.Request) {
 	}
 	var current int64
 	var previousHash string
-	if err = tx.QueryRow(r.Context(), `SELECT revision, source_sha256 FROM lifeos_secretary_projection WHERE workspace_id=$1 FOR UPDATE`, ws).Scan(&current, &previousHash); err != nil {
+	var previousStateVersion int
+	if err = tx.QueryRow(r.Context(), `SELECT revision, source_sha256, COALESCE((payload->>'state_version')::integer,0) FROM lifeos_secretary_projection WHERE workspace_id=$1 FOR UPDATE`, ws).Scan(&current, &previousHash, &previousStateVersion); err != nil {
 		writeError(w, 500, "failed to publish projection")
 		return
 	}
@@ -224,7 +225,11 @@ func (h *Handler) PutLifeOSSecretary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "projection changed; reload before retry")
 		return
 	}
-	// Serialize source changes with member plans; never rewrite status or spawn execution.
+	if p.StateVersion < previousStateVersion {
+		writeError(w, 409, "canonical state advanced; reload before rebuilding")
+		return
+	}
+	// Serialize presentation and verified terminal updates; never spawn execution.
 	for _, update := range req.Updates {
 		id, parseErr := util.ParseUUID(update.ID)
 		if parseErr != nil {
