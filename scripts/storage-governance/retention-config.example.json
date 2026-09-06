@@ -1,0 +1,90 @@
+{
+  "external_path": "/Volumes/MacMini-HotSSD",
+  "canary_root": "/Volumes/MacMini-HotSSD/archive/multica-archive",
+  "external_volume_uuid": "00000000-0000-0000-0000-000000000000",
+  "external_min_free_gib": 100,
+  "archive_root": "/Volumes/MacMini-HotSSD/MulticaArchive/workspaces",
+  "workspace_roots": [
+    "/Users/example/multica_workspaces",
+    "/Users/example/multica_workspaces_desktop-api.multica.ai"
+  ],
+  "retention_days": 7,
+  "recent_write_seconds": 86400,
+  "workspace_stale_seconds": 86400,
+  "workspace_stale_report_path": "/Users/example/.local/state/storage-governance/workspace-stale-dry-run.json",
+  "archive_enabled": false,
+  "approved_candidates": [],
+  "delete_source": false,
+  "require_cron_lineage": true,
+  "cron_bridge_trigger_path": "/Users/example/.local/state/storage-governance/cron-trigger.json",
+  "cron_bridge_receipt_path": "/Users/example/.local/state/storage-governance/cron-receipt.json",
+  "lock_path": "/Users/example/.local/state/storage-governance/retention.lock",
+  "report_path": "/Users/example/.local/state/storage-governance/gc-dry-run.json",
+  "alert_log_path": "/Users/example/.local/state/storage-governance/retention-alerts.jsonl",
+  "electron_updater_audit": {
+    "enabled": true,
+    "timezone": "Asia/Shanghai",
+    "day_of_month": 15,
+    "home_path": "/Users/example",
+    "report_dir": "/Users/example/.org/metrics",
+    "patterns": [
+      {
+        "label": "sandbox_update_packages",
+        "glob": "Library/Containers/*/Data/Library/Global/UpdatePackages"
+      },
+      {
+        "label": "application_support_update_noindex",
+        "glob": "Library/Application Support/*/update.noindex"
+      },
+      {
+        "label": "application_support_update_downloading",
+        "glob": "Library/Application Support/*/update_downloading"
+      },
+      {
+        "label": "application_support_software_update",
+        "glob": "Library/Application Support/*/Software Update"
+      },
+      {
+        "label": "sandbox_application_support_update_noindex",
+        "glob": "Library/Containers/*/Data/Library/Application Support/*/update.noindex"
+      },
+      {
+        "label": "sandbox_application_support_update_downloading",
+        "glob": "Library/Containers/*/Data/Library/Application Support/*/update_downloading"
+      },
+      {
+        "label": "electron_software_update_cache",
+        "glob": "Library/Caches/*/Software Update"
+      },
+      {
+        "label": "electron_updater_cache",
+        "glob": "Library/Caches/*-updater"
+      },
+      {
+        "label": "scoped_electron_updater_cache",
+        "glob": "Library/Caches/@*-updater"
+      },
+      {
+        "label": "squirrel_shipit_cache",
+        "glob": "Library/Caches/*.ShipIt"
+      },
+      {
+        "label": "minimax_hot_update",
+        "glob": "Library/Application Support/MiniMax Agent/hot-update"
+      },
+      {
+        "label": "multica_pending_update_zip",
+        "glob": ".multica/*update*.zip"
+      },
+      {
+        "label": "multica_profile_pending_update_zip",
+        "glob": ".multica/profiles/*/*update*.zip"
+      }
+    ],
+    "warn_total_gib": 5,
+    "warn_candidate_gib": 1,
+    "stale_days": 45,
+    "stale_min_mib": 100
+  },
+  "lark_open_id": ""
+}

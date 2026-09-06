@@ -66,6 +66,9 @@ func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	if got, want := raw["resource_wait_task_count"], float64(1); got != want {
 		t.Errorf("resource_wait_task_count key: got %v, want %v", got, want)
 	}
+	if got, want := raw["admission_paused"], false; got != want {
+		t.Errorf("admission_paused key: got %v, want %v", got, want)
+	}
 	if got, want := raw["status"], "running"; got != want {
 		t.Errorf("status key: got %v, want %q", got, want)
 	}
@@ -93,6 +96,9 @@ func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	}
 	if resp.ResourceWaitTaskCount != 1 {
 		t.Errorf("ResourceWaitTaskCount: got %d, want 1", resp.ResourceWaitTaskCount)
+	}
+	if resp.AdmissionPaused {
+		t.Error("AdmissionPaused: got true, want false")
 	}
 }
 
@@ -139,6 +145,134 @@ func TestHealthHandlerReportsDeferredReload(t *testing.T) {
 			t.Errorf("reload_pending_reason = %q, want it to name the version on disk", got)
 		}
 	})
+}
+
+func TestAdmissionHandlerPausesAndResumesNewClaims(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{}
+
+	pauseRec := httptest.NewRecorder()
+	d.admissionHandler(true).ServeHTTP(
+		pauseRec,
+		httptest.NewRequest(http.MethodPost, "/admission/pause", nil),
+	)
+	if pauseRec.Code != http.StatusOK {
+		t.Fatalf("pause status: got %d, want 200: %s", pauseRec.Code, pauseRec.Body.String())
+	}
+	if d.tryEnterClaim() {
+		d.exitClaim()
+		t.Fatal("claim entered while admission was paused")
+	}
+
+	resumeRec := httptest.NewRecorder()
+	d.admissionHandler(false).ServeHTTP(
+		resumeRec,
+		httptest.NewRequest(http.MethodPost, "/admission/resume", nil),
+	)
+	if resumeRec.Code != http.StatusOK {
+		t.Fatalf("resume status: got %d, want 200: %s", resumeRec.Code, resumeRec.Body.String())
+	}
+	if !d.tryEnterClaim() {
+		t.Fatal("claim remained blocked after admission resumed")
+	}
+	d.exitClaim()
+}
+
+func TestAdmissionResumeDoesNotClearAutoUpdateBarrier(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{pauseClaims: true, admissionPauseOwners: map[string]struct{}{"manual": {}}}
+	rec := httptest.NewRecorder()
+	d.admissionHandler(false).ServeHTTP(
+		rec,
+		httptest.NewRequest(http.MethodPost, "/admission/resume", nil),
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("resume status: got %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if d.tryEnterClaim() {
+		d.exitClaim()
+		t.Fatal("manual resume cleared the independent auto-update claim barrier")
+	}
+}
+
+func TestAdmissionPauseReportsClaimDrainPending(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{claimsInFlight: 1}
+	rec := httptest.NewRecorder()
+	d.admissionHandler(true).ServeHTTP(
+		rec,
+		httptest.NewRequest(http.MethodPost, "/admission/pause", nil),
+	)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("pause status: got %d, want 202: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, want := body["claims_in_flight"], float64(1); got != want {
+		t.Fatalf("claims_in_flight: got %v, want %v", got, want)
+	}
+	if d.tryEnterClaim() {
+		d.exitClaim()
+		t.Fatal("new claim entered while a pre-pause claim was draining")
+	}
+}
+
+func TestAdmissionHandlerRejectsNonPost(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{}
+	rec := httptest.NewRecorder()
+	d.admissionHandler(true).ServeHTTP(
+		rec,
+		httptest.NewRequest(http.MethodGet, "/admission/pause", nil),
+	)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status: got %d, want 405", rec.Code)
+	}
+	if d.isAdmissionPaused() {
+		t.Fatal("GET request changed admission state")
+	}
+}
+
+func TestAdmissionOwnersAreIndependentAndPersistAcrossRestart(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	d := &Daemon{cfg: Config{WorkspacesRoot: root}, admissionPauseOwners: make(map[string]struct{})}
+	request := func(path string) map[string]any {
+		rec := httptest.NewRecorder()
+		d.admissionHandler(strings.Contains(path, "/pause")).ServeHTTP(
+			rec,
+			httptest.NewRequest(http.MethodPost, path, nil),
+		)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status: %d: %s", path, rec.Code, rec.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	request("/admission/pause?owner=manual")
+	request("/admission/pause?owner=storage-guard")
+	body := request("/admission/resume?owner=storage-guard")
+	if body["admission_paused"] != true || body["owner_paused"] != false {
+		t.Fatalf("storage resume cleared manual owner: %v", body)
+	}
+
+	restarted := &Daemon{cfg: Config{WorkspacesRoot: root}, admissionPauseOwners: make(map[string]struct{})}
+	if err := restarted.loadAdmissionOwners(); err != nil {
+		t.Fatal(err)
+	}
+	if got := restarted.admissionPauseOwnersSnapshot(); len(got) != 1 || got[0] != "manual" {
+		t.Fatalf("persisted owners = %v, want [manual]", got)
+	}
 }
 
 // TestHealthHandlerReportsStartingUntilReady pins the liveness/readiness split:
