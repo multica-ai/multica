@@ -9,6 +9,7 @@ import {
   HoverCardContent,
 } from "@multica/ui/components/ui/hover-card";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AgentProfileCard } from "../agents/components/agent-profile-card";
@@ -40,6 +41,15 @@ export type AgentHoverCardVariant = "profile" | "live";
 interface ActorAvatarProps {
   actorType: string;
   actorId: string;
+  /** Timeline-provided identity for actors no longer in the live directory. */
+  name?: string;
+  avatarUrl?: string | null;
+  /**
+   * Disable profile interactions after the live directory confirms that this
+   * actor no longer has a profile. Timeline surfaces opt in because their
+   * hydrated identity remains displayable after an actor leaves.
+   */
+  profileRequiresDirectoryEntry?: boolean;
   size?: AvatarSize;
   className?: string;
   /**
@@ -77,6 +87,9 @@ const PROFILE_LINK_CONTROL_SELECTOR =
 export function ActorAvatar({
   actorType,
   actorId,
+  name,
+  avatarUrl,
+  profileRequiresDirectoryEntry = false,
   size,
   className,
   enableHoverCard,
@@ -84,13 +97,25 @@ export function ActorAvatar({
   hoverCardVariant = "profile",
   profileLink,
 }: ActorAvatarProps) {
-  const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
+  const {
+    getActorName,
+    getActorInitials,
+    getActorAvatarUrl,
+    hasActor,
+  } = useActorName();
   const paths = useWorkspacePaths();
+  const resolvedName = name ?? getActorName(actorType, actorId);
+  const resolvedAvatarUrl =
+    avatarUrl === undefined
+      ? getActorAvatarUrl(actorType, actorId)
+      : avatarUrl?.startsWith("/")
+        ? resolvePublicFileUrl(avatarUrl)
+        : avatarUrl;
   const avatar = (
     <ActorAvatarBase
-      name={getActorName(actorType, actorId)}
-      initials={getActorInitials(actorType, actorId)}
-      avatarUrl={getActorAvatarUrl(actorType, actorId)}
+      name={resolvedName}
+      initials={getActorInitials(actorType, actorId, resolvedName)}
+      avatarUrl={resolvedAvatarUrl}
       isAgent={actorType === "agent"}
       isSystem={actorType === "system"}
       isSquad={actorType === "squad"}
@@ -112,9 +137,14 @@ export function ActorAvatar({
   ) : (
     avatar
   );
+  const profileAvailable =
+    !profileRequiresDirectoryEntry || hasActor(actorType, actorId) !== false;
   const shouldLinkToProfile =
-    profileLink ??
-    (actorType === "member" || actorType === "agent" || actorType === "squad");
+    profileAvailable &&
+    (profileLink ??
+      (actorType === "member" ||
+        actorType === "agent" ||
+        actorType === "squad"));
   const profileHref = shouldLinkToProfile
     ? actorType === "member"
       ? paths.memberDetail(actorId)
@@ -130,7 +160,7 @@ export function ActorAvatar({
     dotted
   );
 
-  if (!enableHoverCard) {
+  if (!enableHoverCard || !profileAvailable) {
     return content;
   }
   if (actorType === "agent") {

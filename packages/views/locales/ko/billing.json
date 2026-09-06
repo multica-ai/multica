@@ -175,8 +175,8 @@
     "limits": {
       "title": "사용량 및 한도",
       "description": "한도와 사용량은 서버의 현재 entitlement와 쿼터 집계에서 가져옵니다.",
-      "issues": "Issue 수",
-      "issues_description": "현재 Issue 사용량과 서버에서 반환한 유효 한도입니다.",
+      "issues": "태스크 수",
+      "issues_description": "현재 태스크 사용량과 서버에서 반환한 유효 한도입니다.",
       "autopilots": "자동화 실행",
       "autopilots_description": "현재 자동화 사용량과 서버에서 반환한 초기화 시각입니다.",
       "unlimited": "무제한",

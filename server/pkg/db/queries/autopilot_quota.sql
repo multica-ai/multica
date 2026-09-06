@@ -47,6 +47,15 @@ WHERE workspace_id = @workspace_id
   AND period_end = @period_end
 RETURNING *;
 
+-- name: MarkAutopilotQuotaRejectionNotified :one
+UPDATE autopilot_quota_period
+SET rejection_notified_at = COALESCE(rejection_notified_at, now()),
+	updated_at = now()
+WHERE workspace_id = @workspace_id
+	AND period_start = @period_start
+	AND period_end = @period_end
+RETURNING *;
+
 -- name: ConsumeAutopilotQuotaReservation :one
 -- used_count is monotonic within a period: consuming a reserved slot is the
 -- only write that changes it, and no release path decrements it.

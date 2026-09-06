@@ -10,6 +10,7 @@ import {
   CardContent,
   CardFooter,
 } from "@multica/ui/components/ui/card";
+import { Alert, AlertDescription } from "@multica/ui/components/ui/alert";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { Label } from "@multica/ui/components/ui/label";
@@ -118,12 +119,22 @@ export function LoginPage({
   // Tracks how the existing session was detected so handleCliAuthorize
   // uses the matching token source (cookie → issueCliToken, localStorage → direct).
   const authSourceRef = useRef<"cookie" | "localStorage">("cookie");
+  // The last session ended because the server rejected its credential, not
+  // because the user asked to leave. Without saying so, landing here reads as
+  // the app having lost their work for no reason.
+  const sessionExpired = useAuthStore((state) => state.expired);
 
   // Check for existing session when CLI callback is present.
   // Prioritises cookie auth (= current browser session) to avoid authorising
   // the CLI with a stale or mismatched localStorage token.
   useEffect(() => {
     if (!cliCallback) return;
+
+    // Snapshot the token before probing. The probe below is *expected* to 401
+    // for a token-mode session, and a 401 ends the session — clearing this
+    // very key — so reading it after the probe would always come back null
+    // and the fallback could never run.
+    const storedToken = localStorage.getItem("multica_token");
 
     // Ensure no stale bearer token interferes — we want to test the cookie first.
     api.setToken(null);
@@ -136,11 +147,11 @@ export function LoginPage({
         setStep("cli_confirm");
       })
       .catch(() => {
-        // Cookie auth failed — fall back to localStorage token
-        const token = localStorage.getItem("multica_token");
-        if (!token) return;
+        // Cookie auth failed — fall back to the token this browser had.
+        if (!storedToken) return;
 
-        api.setToken(token);
+        localStorage.setItem("multica_token", storedToken);
+        api.setToken(storedToken);
         api
           .getMe()
           .then((user) => {
@@ -418,7 +429,14 @@ export function LoginPage({
             {t(($) => $.signin.description)}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {sessionExpired && (
+            <Alert>
+              <AlertDescription>
+                {t(($) => $.errors.session_expired)}
+              </AlertDescription>
+            </Alert>
+          )}
           <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="login-email">{t(($) => $.common.email)}</Label>

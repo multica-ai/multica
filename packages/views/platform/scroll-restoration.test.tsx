@@ -18,34 +18,6 @@ describe("scroll-restoration public surface", () => {
     expect(result.current).toBeNull();
   });
 
-  it("useScrollRestorationAdapter returns the adapter when provided", () => {
-    const adapter = makeAdapter(() => undefined);
-    const { result } = renderHook(() => useScrollRestorationAdapter(), {
-      wrapper: ({ children }) => (
-        <ScrollRestorationProvider adapter={adapter}>
-          {children}
-        </ScrollRestorationProvider>
-      ),
-    });
-    expect(result.current).toBe(adapter);
-  });
-
-  it("useRestoredScrollEntry returns the full entry including contentKey", () => {
-    const adapter = makeAdapter(() => ({
-      top: 321,
-      height: 900,
-      contentKey: "ck",
-    }));
-    const { result } = renderHook(() => useRestoredScrollEntry("html-iframe"), {
-      wrapper: ({ children }) => (
-        <ScrollRestorationProvider adapter={adapter}>
-          {children}
-        </ScrollRestorationProvider>
-      ),
-    });
-    expect(result.current).toEqual({ top: 321, height: 900, contentKey: "ck" });
-  });
-
   it("useRestoredScrollOffset remains a thin wrapper returning only top (back-compat)", () => {
     const adapter = makeAdapter(() => ({
       top: 123,

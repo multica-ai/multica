@@ -206,42 +206,15 @@ func TestGitRootLockTimeoutDoesNotAdviseDeletingTheLock(t *testing.T) {
 	}
 }
 
-// Losing the index-lock race used to end the task. It is a millisecond-scale
-// condition owned by the user's own tools, so the capture rides it out.
-func TestCaptureDirtyStateRetriesUntilTheIndexLockClears(t *testing.T) {
+// The index-lock race that used to end the task cannot happen any more: the
+// snapshot is built in a private index inside the task's env root, so the only
+// index lock it takes is on its own file. This is the regression test for the
+// property, not for the retry that used to work around the absence of it
+// (#7434).
+func TestCaptureUserSnapshotIgnoresTheRepositoryIndexLock(t *testing.T) {
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "edited by the user\n")
-
-	lock := filepath.Join(repo, ".git", "index.lock")
-	if err := os.WriteFile(lock, nil, 0o644); err != nil {
-		t.Fatalf("hold index.lock: %v", err)
-	}
-	cleared := make(chan struct{})
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		_ = os.Remove(lock)
-		close(cleared)
-	}()
-
-	sha, err := captureDirtyState(repo, worktreeTestLogger())
-	<-cleared
-	if err != nil {
-		t.Fatalf("captureDirtyState: %v", err)
-	}
-	if sha == "" {
-		t.Fatal("captured no stash commit for a dirty tree")
-	}
-	// The capture must be readable as a real commit carrying the user's edit.
-	if got := gitRun(t, repo, "show", sha+":tracked.txt"); got != "edited by the user" {
-		t.Fatalf("stash commit content = %q, want the user's edit", got)
-	}
-}
-
-// git reports this failure as a bare exit status 1 with NOTHING on stderr, so
-// the error has to name the index lock itself or there is nothing to act on.
-func TestCaptureDirtyStateNamesTheIndexLockHolder(t *testing.T) {
-	repo := newTestRepo(t)
-	writeFile(t, filepath.Join(repo, "tracked.txt"), "edited by the user\n")
+	writeFile(t, filepath.Join(repo, "brand-new.txt"), "untracked\n")
 
 	lock := filepath.Join(repo, ".git", "index.lock")
 	if err := os.WriteFile(lock, nil, 0o644); err != nil {
@@ -249,16 +222,20 @@ func TestCaptureDirtyStateNamesTheIndexLockHolder(t *testing.T) {
 	}
 	defer os.Remove(lock)
 
-	_, err := captureDirtyState(repo, worktreeTestLogger())
-	if err == nil {
-		t.Fatal("captureDirtyState succeeded while index.lock was held")
+	head := gitRun(t, repo, "rev-parse", "HEAD")
+	snapshot, err := captureUserSnapshot(repo, t.TempDir(), head, worktreeTestLogger())
+	if err != nil {
+		t.Fatalf("captureUserSnapshot with index.lock held: %v", err)
 	}
-	msg := err.Error()
-	if !strings.Contains(msg, "index.lock") {
-		t.Errorf("error does not name the index lock, so it is not actionable: %v", err)
+	if got := gitRun(t, repo, "show", snapshot+":tracked.txt"); got != "edited by the user" {
+		t.Errorf("snapshot tracked.txt = %q, want the user's edit", got)
 	}
-	if !strings.Contains(msg, "times") {
-		t.Errorf("error does not report that the capture was retried: %v", err)
+	if got := gitRun(t, repo, "show", snapshot+":brand-new.txt"); got != "untracked" {
+		t.Errorf("snapshot brand-new.txt = %q, want the untracked file", got)
+	}
+	// The user's own index is theirs; the capture may not have touched it.
+	if _, err := os.Stat(lock); err != nil {
+		t.Errorf("the capture removed the user's index.lock: %v", err)
 	}
 }
 

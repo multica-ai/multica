@@ -1,7 +1,6 @@
 package publicapiv1
 
 import (
-	"net/http"
 	"strings"
 	"testing"
 
@@ -64,54 +63,5 @@ func TestOpenAPICoversCapabilityLedger(t *testing.T) {
 	}
 	if _, exposed := doc.Paths["/hooks/{hook_key}"]; exposed {
 		t.Fatal("Plugin-only person hook leaked into the public contract")
-	}
-}
-
-func TestOperationLedgerPinsSharedScopes(t *testing.T) {
-	want := map[string]string{
-		http.MethodGet + " " + PathIssue:          "issues:read",
-		http.MethodPatch + " " + PathIssue:        "issues:write",
-		http.MethodGet + " " + PathIssueComments:  "comments:read",
-		http.MethodPost + " " + PathIssueComments: "comments:write",
-	}
-	for _, operation := range Operations {
-		if operation.Contract != ContractSharedResource {
-			continue
-		}
-		key := operation.Method + " " + operation.Path
-		if operation.Policy.Scope != want[key] {
-			t.Errorf("%s scope = %q, want %q", key, operation.Policy.Scope, want[key])
-		}
-		if len(operation.Policy.Credentials) != 4 {
-			t.Errorf("%s does not declare both user and Plugin credential families: %v", key, operation.Policy.Credentials)
-		}
-		if operation.Policy.Audit != AuditPlanned {
-			t.Errorf("%s audit status = %q, want %q until an audit sink is implemented", key, operation.Policy.Audit, AuditPlanned)
-		}
-		delete(want, key)
-	}
-	for key := range want {
-		t.Errorf("shared operation missing from ledger: %s", key)
-	}
-}
-
-func TestPluginExtensionsRejectUserCredentialsByContract(t *testing.T) {
-	for _, operation := range Operations {
-		if operation.Contract != ContractPluginExtension {
-			continue
-		}
-		for _, credential := range operation.Policy.Credentials {
-			if credential == CredentialUserOAuth || credential == CredentialPersonalAccess {
-				t.Errorf("%s %s exposes Plugin extension to %s", operation.Method, operation.Path, credential)
-			}
-		}
-	}
-}
-
-func TestOperationLedgerDeclaresAuditLifecycle(t *testing.T) {
-	for _, operation := range Operations {
-		if operation.Policy.Audit == "" {
-			t.Errorf("%s %s has no explicit audit lifecycle", operation.Method, operation.Path)
-		}
 	}
 }

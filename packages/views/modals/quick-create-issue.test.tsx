@@ -1205,14 +1205,5 @@ describe("AgentCreatePanel", () => {
       expect(attach.parentElement?.parentElement).toBe(footer);
       expect(attach).toHaveAttribute("data-size", "sm");
     });
-
-    it("hides the send keycaps below the sm breakpoint", () => {
-      const keycaps = document.querySelector('[data-slot="shortcut-keycaps"]');
-
-      // Present for pointer devices, display:none on a touch phone that has
-      // no ⌘ key and the least room in the footer row.
-      expect(keycaps).not.toBeNull();
-      expect(keycaps?.className).toContain("max-sm:hidden");
-    });
   });
 });

@@ -442,6 +442,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// Ensure the stderr copier has drained before consulting the
 		// provider-error sniffer; see hermes.go for the failure mode.
 		<-stderrDone
+		// Flush any partial stderr line that arrived without a trailing '\n'
+		// before the pipe closed (P1 from multica#5785 review Aug 10).
+		providerErr.Finalize()
 		streamingCurrentTurn.Store(false)
 
 		finalOutput, providerErrorOutput := deliverable.result()
@@ -455,6 +458,16 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// deliverable, so a give-up turn that lands before a tool call
 		// stays visible.
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
+		// A poisoned session history (400 "assistant must not be empty") is
+		// unresumable — every resume replays the identical body and reproduces
+		// the same 400 — so signal the daemon to drop the session and retry
+		// fresh. Guard on ResumeSessionID: only a resume can inherit a poisoned
+		// history; a fresh run cannot reproduce it deterministically. This is
+		// the positive backend signal; taskfailure.UnresumableHistory keys off
+		// the surfaced Result.Error string as the backend-agnostic path (#6083).
+		if finalStatus == "failed" && opts.ResumeSessionID != "" && providerErr.isPoisonedHistory() {
+			resumeRejected = true
+		}
 
 		u := c.accumulatedUsage()
 

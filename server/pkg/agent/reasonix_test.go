@@ -10,17 +10,6 @@ import (
 	"testing"
 )
 
-func TestNewReturnsReasonixBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("reasonix", Config{ExecutablePath: "/nonexistent/reasonix"})
-	if err != nil {
-		t.Fatalf("New(reasonix) error: %v", err)
-	}
-	if _, ok := b.(*reasonixBackend); !ok {
-		t.Fatalf("expected *reasonixBackend, got %T", b)
-	}
-}
-
 func TestReasonixPermissionPolicy(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

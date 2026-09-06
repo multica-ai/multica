@@ -179,12 +179,6 @@ func (r *ChannelMediaReconciler) RunOnce(ctx context.Context) {
 		}
 		r.settle(ctx, row, leaseToken)
 	}
-	if r.Metrics != nil {
-		if counts, err := r.Queries.CountChannelMediaPendingObjects(ctx); err == nil {
-			r.Metrics.Backlog.Set(float64(counts.PendingObjects))
-			r.Metrics.Tombstones.Set(float64(counts.TombstonedObjects))
-		}
-	}
 }
 
 // settle runs the row the caller just claimed. The lease it holds only has to

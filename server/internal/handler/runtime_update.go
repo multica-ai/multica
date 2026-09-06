@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 )
 
 // ---------------------------------------------------------------------------
@@ -211,7 +212,7 @@ func (s *InMemoryUpdateStore) Fail(_ context.Context, id string, errMsg string) 
 // InitiateUpdate creates a new CLI update request (protected route, called by frontend).
 func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, member, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
 	if !ok {
 		return
 	}
@@ -261,7 +262,7 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 // GetUpdate returns the status of an update request (protected route, called by frontend).
 func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, member, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeUpdatePoll, runtimeID)
 	if !ok {
 		return
 	}

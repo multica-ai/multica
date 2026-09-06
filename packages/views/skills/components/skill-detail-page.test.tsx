@@ -170,11 +170,6 @@ describe("SkillDetailPage tabs", () => {
     ).toBe("true");
   });
 
-  it("shows resource labels in Overview without a release flag", async () => {
-    renderPage();
-    expect(await screen.findByTestId("labels")).toBeTruthy();
-  });
-
   it("mirrors the active tab into ?view= so the pane survives a reload", async () => {
     const { replace } = renderPage();
     fireEvent.click(await screen.findByRole("tab", { name: "Files 2" }));

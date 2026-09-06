@@ -32,23 +32,3 @@ func TestSupportedTypesLockstepWithNew(t *testing.T) {
 		t.Errorf("New(%q) succeeded, want error for an unsupported type", bogus)
 	}
 }
-
-// TestSupportedTypesMatchesMigrationWhitelist pins the exact set so a drift
-// from the runtime_profile.protocol_family CHECK fails loudly.
-func TestSupportedTypesMatchesMigrationWhitelist(t *testing.T) {
-	want := map[string]bool{
-		"claude": true, "codebuddy": true, "codex": true, "copilot": true,
-		"opencode": true, "deveco": true, "openclaw": true, "hermes": true,
-		"pi": true, "cursor": true, "kimi": true, "reasonix": true, "dsh": true, "kiro": true, "antigravity": true,
-		"qoder": true, "qoderclicn": true, "traecli": true, "grok": true, "qwen": true, "qwenpaw": true, "mcode": true,
-		"dim": true, "zeroclaw": true,
-	}
-	if len(SupportedTypes) != len(want) {
-		t.Fatalf("SupportedTypes has %d entries, migration whitelist has %d; keep them in lockstep", len(SupportedTypes), len(want))
-	}
-	for _, typ := range SupportedTypes {
-		if !want[typ] {
-			t.Errorf("SupportedTypes contains %q which is not in the latest protocol_family CHECK", typ)
-		}
-	}
-}

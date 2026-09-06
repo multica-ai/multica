@@ -30,7 +30,7 @@ not a Multica problem.
 
 | Library | Path | Last release | Verdict for Multica |
 |---|---|---|---|
-| [`react-native-enriched-markdown`](https://github.com/software-mansion-labs/react-native-enriched-markdown) | A | v0.5.0 (Apr 2026) | **Selected for prose.** Expo officially recommends it in [Edit rich text](https://docs.expo.dev/guides/editing-richtext/) — A-tier endorsement. Software Mansion (same team as Reanimated / Gesture Handler) |
+| [`react-native-enriched-markdown`](https://github.com/software-mansion/enriched-markdown) | A | v0.6.0 (May 2026) | **Selected for prose.** Expo officially recommends it in [Edit rich text](https://docs.expo.dev/guides/editing-richtext/) — A-tier endorsement. Software Mansion (same team as Reanimated / Gesture Handler) |
 | [`react-native-streamdown`](https://github.com/software-mansion-labs/react-native-streamdown) | A + worklets | active 2026 | Not adopted. Built on enriched-markdown, optimised for AI streaming. Web/desktop don't use a streaming-specific renderer either, mobile streaming isn't currently a top product pain |
 | [`react-native-marked`](https://github.com/gmsgowtham/react-native-marked) | B | v8.1.0 (2026-05-14) | Not adopted. v7 removed `CustomToken`, v8 added "React component embedding" but no token-level customisation. Pure `<Text>` tree → would trigger nested-text bugs |
 | [`amilmohd155/react-native-markdown`](https://github.com/amilmohd155/react-native-markdown) | B | v0.8.5 (Jan 2026) | Not adopted. Same nested-`<Text>` constraint as `react-native-marked`. 14 ⭐, single maintainer, not production-validated |
@@ -106,9 +106,10 @@ enriched-markdown's `normalizeMarkdownStyle.js` carries a frozen table of
 ~30 hardcoded **light-mode** color defaults. Fields not explicitly
 overridden in `useMarkdownStyle()` use those hardcoded values and
 disappear (or render garishly) in dark mode. Every color field must be
-explicitly mapped to a `THEME[scheme]` token. **When upgrading
-enriched-markdown (v0.6+), re-audit `normalizeMarkdownStyle.js` for
-newly-added color fields** — they will also ship light-mode defaults.
+explicitly mapped to a `THEME[scheme]` token. Version 0.6.0 adds a transparent
+link background plus link-variant, superscript, and subscript defaults; none
+introduce a new opaque color. Re-audit `normalizeMarkdownStyle.js` on every
+upgrade because newly-added color fields may ship light-mode defaults.
 
 ---
 

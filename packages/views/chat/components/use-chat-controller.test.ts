@@ -143,11 +143,8 @@ describe("isStillOnComposeTarget", () => {
   });
 
   it("is true for a new chat the user is still sitting in", () => {
-    // Both null: ensureSession creates the row but does not publish it as
-    // active, so a user who stayed put is still looking at the new-chat box.
     expect(isStillOnComposeTarget(null, null)).toBe(true);
   });
-
   it("is false once the user opens a different session mid-send", () => {
     expect(isStillOnComposeTarget("session-2", sid)).toBe(false);
   });

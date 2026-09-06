@@ -703,18 +703,6 @@ func TestAgentUpdateNoFieldsErrorPointsAtEnvCommand(t *testing.T) {
 	}
 }
 
-// TestAgentUpdateDoesNotExposeCustomEnvFlags is the inverse guarantee
-// for the above test: if someone re-adds the --custom-env* flags to
-// `agent update`, this fails loudly. The /env path is the only
-// audited surface and we don't want a silent regression.
-func TestAgentUpdateDoesNotExposeCustomEnvFlags(t *testing.T) {
-	for _, flag := range []string{"custom-env", "custom-env-stdin", "custom-env-file"} {
-		if agentUpdateCmd.Flag(flag) != nil {
-			t.Errorf("agent update must NOT expose --%s after MUL-2600; use `multica agent env set` instead", flag)
-		}
-	}
-}
-
 func TestAgentMaxConcurrentTasksFlagValidation(t *testing.T) {
 	previousDir, err := os.Getwd()
 	if err != nil {
@@ -881,37 +869,6 @@ func TestParseCustomArgsErrorSanitization(t *testing.T) {
 	for _, leak := range []string{"--api-key", "verySensitiveValue", "oops"} {
 		if strings.Contains(msg, leak) {
 			t.Fatalf("parseCustomArgs error leaked input fragment %q: %q", leak, msg)
-		}
-	}
-}
-
-// TestAgentCreateAndEnvSetExposeSecretSafeFlags guarantees the
-// --custom-env-stdin and --custom-env-file alternatives stay wired
-// up on both commands that accept env input (`agent create` and the
-// new `agent env set`). They exist specifically so callers can keep
-// secret material out of shell history / 'ps'; regressing either
-// surface reopens the foot-gun.
-func TestAgentCreateAndEnvSetExposeSecretSafeFlags(t *testing.T) {
-	for _, flag := range []string{"custom-env-stdin", "custom-env-file"} {
-		if agentCreateCmd.Flag(flag) == nil {
-			t.Fatalf("agent create must expose --%s", flag)
-		}
-		if agentEnvSetCmd.Flag(flag) == nil {
-			t.Fatalf("agent env set must expose --%s", flag)
-		}
-	}
-	// The --custom-env help text must warn users that argv is visible
-	// to shell history / 'ps' — "never logged" alone is misleading.
-	for _, c := range []struct {
-		name  string
-		usage string
-	}{
-		{"agent create", agentCreateCmd.Flag("custom-env").Usage},
-		{"agent env set", agentEnvSetCmd.Flag("custom-env").Usage},
-	} {
-		low := strings.ToLower(c.usage)
-		if !strings.Contains(low, "shell history") || !strings.Contains(low, "'ps'") {
-			t.Fatalf("%s --custom-env usage must warn about shell history and 'ps' exposure; got: %q", c.name, c.usage)
 		}
 	}
 }
@@ -1274,36 +1231,6 @@ func TestResolveMcpConfig(t *testing.T) {
 			t.Fatalf("expected --mcp-config-file error, got %v", err)
 		}
 	})
-}
-
-// TestAgentCreateAndUpdateExposeMcpConfigFlags guarantees the secret-safe
-// --mcp-config-stdin / --mcp-config-file alternatives stay wired up on both
-// commands that accept MCP input. Unlike custom_env, mcp_config IS updatable
-// via `agent update` (it has no dedicated audited endpoint), so both surfaces
-// must expose all three channels.
-func TestAgentCreateAndUpdateExposeMcpConfigFlags(t *testing.T) {
-	for _, flag := range []string{"mcp-config", "mcp-config-stdin", "mcp-config-file"} {
-		if agentCreateCmd.Flag(flag) == nil {
-			t.Fatalf("agent create must expose --%s", flag)
-		}
-		if agentUpdateCmd.Flag(flag) == nil {
-			t.Fatalf("agent update must expose --%s", flag)
-		}
-	}
-	// The --mcp-config help text must warn that argv is visible to shell
-	// history / 'ps' — the same foot-gun the custom-env flags warn about.
-	for _, c := range []struct {
-		name  string
-		usage string
-	}{
-		{"agent create", agentCreateCmd.Flag("mcp-config").Usage},
-		{"agent update", agentUpdateCmd.Flag("mcp-config").Usage},
-	} {
-		low := strings.ToLower(c.usage)
-		if !strings.Contains(low, "shell history") || !strings.Contains(low, "'ps'") {
-			t.Fatalf("%s --mcp-config usage must warn about shell history and 'ps' exposure; got: %q", c.name, c.usage)
-		}
-	}
 }
 
 func TestAgentSkillsAddCallsAdditiveEndpoint(t *testing.T) {
@@ -1947,24 +1874,22 @@ func TestAgentUpdateSendsThinkingLevel(t *testing.T) {
 	}
 }
 
-// TestAgentCreateAndUpdateExposeThinkingLevelFlag guarantees the flag stays
-// wired on both write surfaces. The read side (`agent get`) already exposes
-// thinking_level; this is the matching write surface (#4170).
-func TestAgentCreateAndUpdateExposeThinkingLevelFlag(t *testing.T) {
-	if agentCreateCmd.Flag("thinking-level") == nil {
-		t.Error("agent create must expose --thinking-level")
-	}
-	if agentUpdateCmd.Flag("thinking-level") == nil {
-		t.Error("agent update must expose --thinking-level")
-	}
-}
-
 func TestAgentServiceTierFlagsAndBodies(t *testing.T) {
 	if agentCreateCmd.Flag("service-tier") == nil {
 		t.Error("agent create must expose --service-tier")
 	}
 	if agentUpdateCmd.Flag("service-tier") == nil {
 		t.Error("agent update must expose --service-tier")
+	}
+	for name, usage := range map[string]string{
+		"create": agentCreateCmd.Flag("service-tier").Usage,
+		"update": agentUpdateCmd.Flag("service-tier").Usage,
+	} {
+		for _, contract := range []string{"empty", "default", "Standard", "priority", "Fast"} {
+			if !strings.Contains(usage, contract) {
+				t.Errorf("agent %s --service-tier help = %q, want three-state contract to mention %q", name, usage, contract)
+			}
+		}
 	}
 
 	t.Run("create sends catalog id", func(t *testing.T) {

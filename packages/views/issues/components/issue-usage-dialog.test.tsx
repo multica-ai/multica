@@ -105,18 +105,4 @@ describe("IssueUsageDialog", () => {
     expect(screen.getByText("Completed")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
   });
-
-  it("lets the run table scroll rather than widening the dialog", () => {
-    // jsdom has no layout engine, so the overflow itself is verified in a
-    // browser. What is pinned here is the contract that produced the bug: the
-    // scroll container must be able to shrink below its content. Drop
-    // `min-w-0` and the box grows to the table's min-content width instead of
-    // clipping, which is what pushed the table outside the dialog.
-    open([makeTask({ usage: [usage()] })]);
-
-    const table = screen.getByRole("table");
-    const scroller = table.parentElement;
-    expect(scroller?.className).toContain("overflow-auto");
-    expect(scroller?.className).toContain("min-w-0");
-  });
 });

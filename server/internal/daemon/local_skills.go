@@ -159,6 +159,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 			providerRoot = filepath.Join(home, ".copilot", "skills")
 		case "opencode":
 			providerRoot = filepath.Join(home, ".config", "opencode", "skills")
+		case "codearts":
+			providerRoot = filepath.Join(home, ".codeartsdoer", "skills")
 		case "deveco":
 			providerRoot = filepath.Join(home, ".config", "deveco", "skills")
 		case "openclaw":

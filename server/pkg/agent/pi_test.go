@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -161,6 +162,54 @@ func TestPiExecuteRejectsEmptyPrompt(t *testing.T) {
 	}
 }
 
+func TestPiExecuteRejectsConcurrentSessionWriter(t *testing.T) {
+	t.Parallel()
+
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("create session file: %v", err)
+	}
+	claim, locked, err := tryLockPiSessionFile(sessionPath)
+	if err != nil {
+		t.Fatalf("lock session file: %v", err)
+	}
+	if !locked {
+		t.Fatal("first session-file lock was unexpectedly busy")
+	}
+	defer releasePiSessionFileLock(claim)
+
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate test executable: %v", err)
+	}
+	backend, err := New("pi", Config{ExecutablePath: executable, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("New(pi): %v", err)
+	}
+	session, err := backend.Execute(t.Context(), "follow-up", ExecOptions{ResumeSessionID: sessionPath})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result, ok := <-session.Result
+	if !ok {
+		t.Fatal("result channel closed without a value")
+	}
+	if result.Status != "failed" || !result.ResumeRejectedTransient {
+		t.Fatalf("result = %+v, want failed ResumeRejectedTransient", result)
+	}
+	if result.ResumeRejected {
+		t.Fatal("a busy session is still healthy and must not be permanently rejected")
+	}
+	if result.SessionID != "" {
+		t.Fatalf("SessionID = %q, want empty so the live transcript is not republished", result.SessionID)
+	}
+	if !strings.Contains(result.Error, "already in use") {
+		t.Fatalf("error = %q, want session-in-use diagnostic", result.Error)
+	}
+}
+
 // TestPiExecuteAttachesStdinPipe verifies that the Pi backend spawns the child
 // with an explicit stdin pipe, writes the task prompt, and closes it. Closing
 // delivers both the end-of-prompt signal and the EOF that keeps Pi from
@@ -225,6 +274,14 @@ func TestPiExecuteAttachesStdinPipe(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
 	}
+	claim, locked, err := tryLockPiSessionFile(sessionPath)
+	if err != nil {
+		t.Fatalf("lock completed session: %v", err)
+	}
+	if !locked {
+		t.Fatal("Pi backend returned its result before releasing the session-file lock")
+	}
+	releasePiSessionFileLock(claim)
 }
 
 // piEventStreamScript builds a sh script that prints each JSON event on

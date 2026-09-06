@@ -129,6 +129,7 @@ func TestClassifyRules(t *testing.T) {
 		{"pi request timed out", "Request timed out.", ReasonAgentProviderNetwork},
 		{"pi request timed out with exit status wins over process failure", "Request timed out.; pi exited with error: exit status 1", ReasonAgentProviderNetwork},
 		{"omp connection error with exit status wins over process failure", "Connection error.; omp exited with error: exit status 1", ReasonAgentProviderNetwork},
+		{"codearts step open at EOF", "codearts stream ended without a terminal signal (step still open at EOF)", ReasonAgentProviderNetwork},
 
 		// 8. Model not found / unavailable.
 		{"model not found", "Error: model claude-3-opus-99 not found", ReasonAgentModelNotFoundOrUnavailable},

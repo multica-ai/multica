@@ -28,6 +28,9 @@ const (
 	// latency-sensitive 30-second liveness path. GC remains independently
 	// bounded by runtimeGCTickTimeout once each hourly round begins.
 	runtimeGCSweepInterval = time.Hour
+	// delegatedFailureRecoverySweepInterval keeps the low-probability durable
+	// recovery scan off the latency-sensitive runtime liveness path.
+	delegatedFailureRecoverySweepInterval = 5 * time.Minute
 	// staleThresholdSeconds marks runtimes offline if no heartbeat for this
 	// long. The heartbeat timing derivation lives with the shared service
 	// constant so every task release path uses the same eligibility window.
@@ -56,10 +59,6 @@ const (
 	// 500 preserves a theoretical capacity of 12,000 candidates per day; the
 	// round timeout remains the hard bound on actual work.
 	runtimeGCBatchSize = 500
-	// runtimeGCBacklogScanLimit bounds the observability query as well. The
-	// reason-bucket gauges sample at most this many oldest stale runtimes rather
-	// than turning a safety signal into an unbounded recurring scan.
-	runtimeGCBacklogScanLimit = 1000
 	// runtimeGCTickTimeout bounds each independent hourly GC round so lock
 	// contention cannot occupy its worker indefinitely.
 	runtimeGCTickTimeout = 15 * time.Second
@@ -111,6 +110,7 @@ type runtimeGCTxStarter interface {
 type runtimeGCEventPublisher interface {
 	PublishRuntimeTeardown(context.Context, service.RuntimeTeardownResult, string, string, string, string, bool)
 	PublishRuntimeRefresh(string, string, string, string)
+	NotifyRuntimeGone(string)
 }
 
 type runtimeSweepStageStats struct {
@@ -159,17 +159,20 @@ func runPeriodicSweep(ctx context.Context, interval time.Duration, sweep func())
 // stale window — that is the original behavior.
 func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration) {
 	runPeriodicSweep(ctx, sweepInterval, func() {
-		// These stages retain the existing cadence and ordering in PR1 so the
-		// rollout changes no business predicate or recovery semantics. Runtime
-		// GC is the one exception: its seven-day retention work now runs in the
-		// independent hourly loop below and cannot delay this liveness path.
+		// These stages retain their existing cadence and ordering. Runtime GC and
+		// delegated-failure recovery run in independent lower-frequency loops.
 		sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 		sweepOfflineRuntimeTasks(ctx, queries, taskSvc, reconnectGrace)
 		sweepExpiredRuntimeReconnectRetries(ctx, queries, taskSvc, reconnectGrace)
 		sweepStaleTasks(ctx, queries, taskSvc, bus, reconnectGrace)
 		sweepExpiredQueuedTasks(ctx, queries, taskSvc, reconnectGrace)
-		sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
 		sweepDeferredChatFinalizations(ctx, queries, taskSvc)
+	})
+}
+
+func runDelegatedFailureRecoverySweeper(ctx context.Context, taskSvc *service.TaskService) {
+	runPeriodicSweep(ctx, delegatedFailureRecoverySweepInterval, func() {
+		sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
 	})
 }
 
@@ -180,9 +183,9 @@ func runRuntimeGCSweeper(ctx context.Context, txStarter runtimeGCTxStarter, quer
 }
 
 // sweepPendingDelegatedFailureRecoveries retries durable coordinator handoffs
-// that were not acquired by an executable task. It runs even when no stale
-// task was found in this tick, which is what repairs a recovery dispatch lost
-// before a server restart.
+// that were not acquired by an executable task. It runs independently of
+// stale-task discovery, which is what repairs a recovery dispatch lost before
+// a server restart.
 func sweepPendingDelegatedFailureRecoveries(ctx context.Context, taskSvc *service.TaskService) (stats runtimeSweepStageStats) {
 	startedAt := time.Now()
 	defer func() {
@@ -301,7 +304,7 @@ func sweepOfflineRuntimeTasks(ctx context.Context, queries *db.Queries, taskSvc 
 		observeRuntimeSweepStage(taskServiceMetrics(taskSvc), obsmetrics.RuntimeSweepStageOfflineTasks, startedAt, stats)
 	}()
 
-	failedTasks, err := queries.FailTasksForOfflineRuntimes(ctx, db.FailTasksForOfflineRuntimesParams{
+	failedTasks, err := taskSvc.FailTasksForOfflineRuntimes(ctx, db.FailTasksForOfflineRuntimesParams{
 		ReconnectGraceSecs: reconnectGrace.Seconds(),
 		MaxPerTick:         offlineTaskFailBatchSize,
 	})
@@ -329,7 +332,7 @@ func sweepExpiredRuntimeReconnectRetries(ctx context.Context, queries *db.Querie
 		observeRuntimeSweepStage(taskServiceMetrics(taskSvc), obsmetrics.RuntimeSweepStageReconnectRetries, startedAt, stats)
 	}()
 
-	failedTasks, err := queries.FailExpiredRuntimeReconnectRetries(ctx, db.FailExpiredRuntimeReconnectRetriesParams{
+	failedTasks, err := taskSvc.FailExpiredRuntimeReconnectRetries(ctx, db.FailExpiredRuntimeReconnectRetriesParams{
 		ReconnectGraceSecs: reconnectGrace.Seconds(),
 		RuntimeStaleSecs:   staleThresholdSeconds,
 		MaxPerTick:         reconnectRetryExpireBatchSize,
@@ -399,52 +402,6 @@ func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, que
 	gcCtx, cancelGC := context.WithTimeout(ctx, budget)
 	defer cancelGC()
 
-	blockedCtx, cancelBlocked := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
-	blocked, err := queries.CountStaleOfflineRuntimesBlockedByTasks(blockedCtx, db.CountStaleOfflineRuntimesBlockedByTasksParams{
-		StaleSeconds: offlineRuntimeTTLSeconds,
-		MaxRows:      runtimeGCBacklogScanLimit,
-	})
-	cancelBlocked()
-	if err != nil {
-		slog.Warn("runtime GC: failed to count task-blocked runtimes", "error", err)
-		metrics.RecordRuntimeGCBlockedObservationFailed()
-	} else {
-		metrics.SetRuntimeGCBlocked(blocked)
-		if blocked > 0 {
-			slog.Debug("runtime GC: stale runtimes blocked by non-terminal tasks",
-				"count", blocked, "count_capped", blocked == runtimeGCBacklogScanLimit)
-		}
-	}
-
-	countCtx, cancelCount := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
-	backlog, err := queries.CountStaleOfflineRuntimeGCBacklogByReason(countCtx, db.CountStaleOfflineRuntimeGCBacklogByReasonParams{
-		StaleSeconds: offlineRuntimeTTLSeconds,
-		MaxRows:      runtimeGCBacklogScanLimit,
-	})
-	cancelCount()
-	if err != nil {
-		slog.Warn("runtime GC: failed to classify stale runtime backlog", "error", err)
-		metrics.RecordRuntimeGCBlockedObservationFailed()
-	} else {
-		for _, reason := range []string{
-			obsmetrics.RuntimeGCBacklogActiveAgent,
-			obsmetrics.RuntimeGCBacklogNonTerminalTask,
-			obsmetrics.RuntimeGCBacklogWorkspaceMismatch,
-			obsmetrics.RuntimeGCBacklogEligible,
-		} {
-			metrics.SetRuntimeGCBacklog(reason, 0)
-		}
-		var sampled int64
-		for _, row := range backlog {
-			metrics.SetRuntimeGCBacklog(row.Reason, row.Count)
-			sampled += row.Count
-		}
-		if sampled > 0 {
-			slog.Debug("runtime GC: classified stale runtime backlog",
-				"sampled", sampled, "sample_capped", sampled == runtimeGCBacklogScanLimit)
-		}
-	}
-
 	listCtx, cancelList := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
 	candidates, err := queries.ListStaleOfflineRuntimeGCCandidates(listCtx, db.ListStaleOfflineRuntimeGCCandidatesParams{
 		StaleSeconds: offlineRuntimeTTLSeconds,
@@ -497,6 +454,7 @@ func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, que
 		metrics.RecordRuntimeGCDeleted()
 		gcWorkspaces[result.workspaceID] = true
 		if publisher != nil {
+			publisher.NotifyRuntimeGone(util.UUIDToString(runtimeID))
 			publisher.PublishRuntimeTeardown(gcCtx, result.teardown, result.workspaceID, "system", "", "runtime_gc", false)
 		}
 	}
@@ -635,7 +593,7 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 		observeRuntimeSweepStage(taskServiceMetrics(taskSvc), obsmetrics.RuntimeSweepStageStaleTasks, startedAt, stats)
 	}()
 
-	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
+	failedTasks, err := taskSvc.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: dispatchTimeoutSeconds,
 		RunningTimeoutSecs:  runningTimeoutSeconds,
 		// Reuse the runtime stale window so the running-task backstop
@@ -672,7 +630,7 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 		observeRuntimeSweepStage(taskServiceMetrics(taskSvc), obsmetrics.RuntimeSweepStageQueuedExpiry, startedAt, stats)
 	}()
 
-	failedTasks, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+	failedTasks, err := taskSvc.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
 		ReconnectGraceSecs: reconnectGrace.Seconds(),
 		MaxPerTick:         queuedExpireBatchSize,
 	})

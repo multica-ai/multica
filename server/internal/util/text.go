@@ -1,6 +1,8 @@
 package util
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -109,8 +111,8 @@ func sanitizeJSONValue(v any, depth int) any {
 		return SanitizeTextForPostgres(t)
 	case map[string]any:
 		out := make(map[string]any, len(t))
-		for k, val := range t {
-			out[SanitizeTextForPostgres(k)] = sanitizeJSONValue(val, depth+1)
+		for k, safeKey := range sanitizePostgresJSONMapKeys(t) {
+			out[safeKey] = sanitizeJSONValue(t[k], depth+1)
 		}
 		return out
 	case []any:
@@ -123,4 +125,52 @@ func sanitizeJSONValue(v any, depth int) any {
 		// Numbers, bools, nil — nothing a TEXT/JSONB column can choke on.
 		return v
 	}
+}
+
+// sanitizePostgresJSONMapKeys returns a stable one-to-one mapping from raw
+// object keys to PostgreSQL-safe keys. Unchanged keys reserve their spelling
+// first; transformed keys that would collide receive the first free numeric
+// suffix instead of silently overwriting another entry.
+func sanitizePostgresJSONMapKeys(values map[string]any) map[string]string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	mapped := make(map[string]string, len(keys))
+	used := make(map[string]struct{}, len(keys))
+	nextSuffix := make(map[string]int)
+	changed := make([]string, 0, len(keys))
+	for _, key := range keys {
+		candidate := SanitizeTextForPostgres(key)
+		if candidate == key {
+			mapped[key] = key
+			used[key] = struct{}{}
+			continue
+		}
+		changed = append(changed, key)
+	}
+
+	for _, key := range changed {
+		base := SanitizeTextForPostgres(key)
+		candidate := base
+		if _, exists := used[candidate]; exists {
+			suffix := nextSuffix[base]
+			if suffix == 0 {
+				suffix = 2
+			}
+			for {
+				candidate = fmt.Sprintf("%s#%d", base, suffix)
+				if _, exists := used[candidate]; !exists {
+					nextSuffix[base] = suffix + 1
+					break
+				}
+				suffix++
+			}
+		}
+		mapped[key] = candidate
+		used[candidate] = struct{}{}
+	}
+	return mapped
 }

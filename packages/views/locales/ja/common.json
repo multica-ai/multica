@@ -121,6 +121,11 @@
     "error_not_member": "サインインしている Multica アカウントはこのワークスペースのメンバーではありません。",
     "error_unknown": "問題が発生しました。もう一度試し、それでも解決しない場合はワークスペース管理者にお問い合わせください。"
   },
+  "not_found": {
+    "title": "ページが見つかりません",
+    "description": "お探しのページは存在しないか、移動しました。",
+    "back_to_multica": "Multicaに戻る"
+  },
   "navigation": {
     "open_in_new_tab": "新しいタブで開く"
   }

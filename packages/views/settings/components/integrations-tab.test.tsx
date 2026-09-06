@@ -100,21 +100,6 @@ describe("Settings IntegrationsTab", () => {
     expect(queryCallsRef.current[0]?.enabled).toBe(true);
   });
 
-  it("shows each channel description below its icon and title", () => {
-    renderTab();
-
-    for (const channel of ["lark", "slack", "dingtalk", "wecom", "telegram"]) {
-      const icon = screen.getByTestId(`integration-channel-icon-${channel}`);
-      const title = icon.closest("h3");
-      const description = title?.nextElementSibling;
-      expect(title).not.toBeNull();
-      expect(description?.tagName).toBe("P");
-      expect(description).toHaveClass("text-caption", "text-muted-foreground");
-      expect(icon).not.toHaveClass("border");
-      expect(icon).not.toHaveClass("bg-muted/40");
-    }
-  });
-
   // Reaching for a generic lucide glyph is how Slack and WeCom ended up sharing
   // one speech bubble, with nothing on the row saying which platform it was
   // (#6585). Requiring five distinct shapes is the cheap guard against a

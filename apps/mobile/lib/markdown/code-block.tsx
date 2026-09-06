@@ -69,16 +69,26 @@ export function CodeBlock({ code, lang, selectable = true }: Props) {
   const { isDarkColorScheme } = useColorScheme();
   const theme = isDarkColorScheme ? SHIKI_THEME_DARK : SHIKI_THEME_LIGHT;
   const resolvedLang = resolveLang(lang);
-  const [lines, setLines] = useState<HighlightedLine[] | null>(null);
+  const [highlighted, setHighlighted] = useState<{
+    code: string;
+    lang: string;
+    theme: string;
+    lines: HighlightedLine[];
+  } | null>(null);
+  const lines =
+    highlighted?.code === code &&
+    highlighted.lang === resolvedLang &&
+    highlighted.theme === theme
+      ? highlighted.lines
+      : null;
 
   useEffect(() => {
-    if (!resolvedLang) {
-      setLines(null);
-      return;
-    }
+    if (!resolvedLang) return;
     let cancelled = false;
     void highlight(code, resolvedLang, theme).then((result) => {
-      if (!cancelled) setLines(result);
+      if (!cancelled && result) {
+        setHighlighted({ code, lang: resolvedLang, theme, lines: result });
+      }
     });
     return () => {
       cancelled = true;
@@ -88,7 +98,14 @@ export function CodeBlock({ code, lang, selectable = true }: Props) {
   return (
     <View className={CODE_BLOCK_CONTAINER_CLASS}>
       <CodeBlockHeader code={code} lang={lang} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      {/* RN's horizontal ScrollView defaults to flexGrow: 1. In a recycled,
+          self-sized chat bubble that lets the child outgrow the FlashList
+          cell instead of sizing to its code. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0 }}
+      >
         {lines ? (
           <HighlightedCode lines={lines} selectable={selectable} />
         ) : (

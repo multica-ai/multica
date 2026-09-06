@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -160,6 +161,30 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	}
 	if e, ok := probe("MULTICA_OPENCODE_PATH", "opencode", "MULTICA_OPENCODE_MODEL"); ok {
 		agents["opencode"] = e
+	}
+	if e, ok := probe("MULTICA_CODEARTS_PATH", "codearts", "MULTICA_CODEARTS_MODEL"); ok {
+		agents["codearts"] = e
+	} else if strings.TrimSpace(os.Getenv("MULTICA_CODEARTS_PATH")) == "" {
+		// The native CodeArts installer may update PATH only for future
+		// terminals. A GUI-launched daemon can still discover its stable
+		// user-level launcher. An explicit but invalid override remains a hard
+		// miss and never falls back here.
+		home, err := os.UserHomeDir()
+		if err == nil {
+			for _, name := range []string{"codearts.cmd", "codearts"} {
+				candidate := filepath.Join(home, ".codeartsdoer", "installers", name)
+				path, resolveErr := resolveAgentExecutablePath(candidate)
+				if resolveErr != nil {
+					continue
+				}
+				agents["codearts"] = AgentEntry{
+					Path:    path,
+					Command: "codearts",
+					Model:   strings.TrimSpace(os.Getenv("MULTICA_CODEARTS_MODEL")),
+				}
+				break
+			}
+		}
 	}
 	if e, ok := probe("MULTICA_DEVECO_PATH", "deveco", "MULTICA_DEVECO_MODEL"); ok {
 		agents["deveco"] = e

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createLiveEndFollow,
   FOLLOW_EDGE_THRESHOLD,
@@ -46,17 +46,62 @@ export function isAtLiveEnd(m: ScrollMetrics): boolean {
   return distanceFromBottom(m) <= FOLLOW_EDGE_THRESHOLD;
 }
 
-/** Returns a downward-only scroll target, or `null` when no scrolling is needed. */
-export function bottomPinTarget(m: ScrollMetrics): number | null {
-  const target = Math.max(0, m.scrollHeight - m.clientHeight);
-  return target > m.scrollTop ? target : null;
+/**
+ * Marks the newest row so the list can tell "the reader is looking at the
+ * newest message" from "the viewport is where that message was predicted to
+ * be". See `useStickToBottom`'s `hasReachedLiveEnd`.
+ */
+export const LIVE_END_ROW_ATTR = "data-chat-live-end";
+
+/**
+ * Whether the newest row's own box has arrived at the bottom of the viewport.
+ *
+ * Measured, never predicted: scroll geometry is derived from `scrollHeight`,
+ * which is an estimate over the unrendered rows, and while that estimate is
+ * still wrong it reports the viewport as being at the live end. The row's
+ * rect comes from layout, so it only lines up once the rows underneath it
+ * have actually been measured.
+ */
+export function isShowingLiveEndRow(scrollEl: HTMLElement): boolean {
+  const row = scrollEl.querySelector(`[${LIVE_END_ROW_ATTR}]`);
+  if (!row) return false;
+  const viewport = scrollEl.getBoundingClientRect();
+  const rect = row.getBoundingClientRect();
+  // Its end is on screen — at or above the fold (the footer inset keeps it a
+  // little above the edge), and not scrolled off the top.
+  return rect.bottom <= viewport.bottom + 1 && rect.bottom > viewport.top;
 }
+
+/**
+ * How long the newest message must sit at the fold, with the scroll extent
+ * unchanged, before the list is revealed.
+ *
+ * Reaching the live end once is not enough: rows keep settling after their
+ * first paint (an image decodes, a code block highlights, a font swaps), and
+ * each one moves the content under a reader who is pinned to the bottom. This
+ * is the window the list waits for that to stop — raise it to absorb slower
+ * content at the cost of showing the conversation later, lower it to paint
+ * sooner and let late arrivals shift the view.
+ */
+const LIVE_END_SETTLE_MS = 120;
+
+// A list whose content never stops moving must not stay hidden. Past this,
+// reveal whatever Virtuoso has: a shift beats a blank chat.
+const REVEAL_DEADLINE_MS = 1000;
 
 export interface StickToBottom {
   /** For `followOutput`: the reader is still following the live end. */
   isFollowing(): boolean;
   /** Wire to Virtuoso's `totalListHeightChanged`: the content resized. */
   onContentHeightChanged(): void;
+  /**
+   * False until the newest message has actually arrived at the bottom of the
+   * viewport. Keep the list hidden until then: Virtuoso opens it by scrolling
+   * to where it PREDICTS that message is, paints there, and only then
+   * measures and corrects — so the first painted frame shows the wrong part
+   * of the conversation and the next one jumps (MUL-6879).
+   */
+  hasReachedLiveEnd: boolean;
 }
 
 /**
@@ -64,8 +109,24 @@ export interface StickToBottom {
  * end. Viewport resizes (the composer) are observed here; content resizes
  * (streaming) must be reported through `onContentHeightChanged`, because a
  * ResizeObserver on the container never sees its scroll extent.
+ *
+ * `pinToLiveEnd` applies the correction and MUST scroll through Virtuoso
+ * (`scrollToIndex` at the last row), never by writing `scrollTop` here. In a
+ * virtualised list `scrollHeight` covers unrendered rows with an ESTIMATE, so
+ * `scrollHeight - clientHeight` is not the bottom. Jumping there drops
+ * Virtuoso outside its rendered window; it measures the rows it lands on, the
+ * estimate moves, the "bottom" moves with it, and the next height change pins
+ * again — a correction that never converges. Worse, each of those jumps
+ * reaches the latch as displacement no input can account for, so the reader's
+ * own wheel scrolls are refused attribution and pinned away: the follow never
+ * releases and the list cannot be scrolled at all (MUL-6879). An index-based
+ * scroll to the last row is what Virtuoso's own `followOutput` does, and it
+ * converges because Virtuoso measures that row before deciding where to stop.
  */
-export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
+export function useStickToBottom(
+  scrollEl: HTMLElement | null,
+  pinToLiveEnd: () => void,
+): StickToBottom {
   const followRef = useRef<LiveEndFollow | null>(null);
   if (followRef.current === null) {
     followRef.current = createLiveEndFollow();
@@ -76,11 +137,44 @@ export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
   }
   const follow = followRef.current;
 
+  const pinRef = useRef(pinToLiveEnd);
+  pinRef.current = pinToLiveEnd;
   const pin = useCallback(() => {
-    if (!scrollEl) return;
-    const target = bottomPinTarget(scrollEl);
-    if (target !== null) scrollEl.scrollTop = target;
-  }, [scrollEl]);
+    pinRef.current();
+  }, []);
+
+  // Polled rather than driven off Virtuoso's callbacks: `atBottomStateChange`
+  // still reads true from before the rows existed, `itemsRendered` reports
+  // rows that a measuring pass is about to unmount again, and neither fires
+  // on the frame the correcting scroll lands. A frame loop that stops as soon
+  // as the list holds still costs a handful of rect reads at open.
+  const [hasReachedLiveEnd, setHasReachedLiveEnd] = useState(false);
+  useEffect(() => {
+    if (!scrollEl || hasReachedLiveEnd) return;
+    let frame = 0;
+    // The scroll extent is the cheapest proxy for "some row changed size":
+    // every late arrival that would shift the view also moves it.
+    let lastHeight = -1;
+    let steadySince: number | null = null;
+    const poll = (now: number) => {
+      const height = scrollEl.scrollHeight;
+      const steady = height === lastHeight && isShowingLiveEndRow(scrollEl);
+      lastHeight = height;
+      if (!steady) steadySince = null;
+      else if (steadySince === null) steadySince = now;
+      else if (now - steadySince >= LIVE_END_SETTLE_MS) {
+        setHasReachedLiveEnd(true);
+        return;
+      }
+      frame = requestAnimationFrame(poll);
+    };
+    frame = requestAnimationFrame(poll);
+    const deadline = setTimeout(() => setHasReachedLiveEnd(true), REVEAL_DEADLINE_MS);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(deadline);
+    };
+  }, [scrollEl, hasReachedLiveEnd]);
 
   // Content grew or the viewport resized — displacement with no scroll event,
   // so it can never promote staged reader input.
@@ -206,7 +300,8 @@ export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
     () => ({
       isFollowing: () => follow.isFollowing(),
       onContentHeightChanged: onResize,
+      hasReachedLiveEnd,
     }),
-    [follow, onResize],
+    [follow, onResize, hasReachedLiveEnd],
   );
 }

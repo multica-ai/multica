@@ -79,8 +79,13 @@ export interface GithubRepoResourceRef {
  *   one at a time — a second task waits in `waiting_local_directory`. Edits
  *   land in the user's working copy.
  * - `worktree`: each task gets its own git worktree of that repo inside the
- *   runtime's workspace, so tasks run concurrently and deliver their work as an
- *   `agent/<agent>/<task>` branch instead of touching the working copy.
+ *   runtime's workspace, so tasks run concurrently and deliver their work as a
+ *   branch instead of touching the working copy. Every task of one conversation
+ *   shares that branch — `agent/<agent>/<issue>` — so a follow-up continues the
+ *   previous turn's work; a task with no conversation behind it gets
+ *   `agent/<agent>/<task>`. Continuation is decided by an ownership record in
+ *   the repo, not by the branch name, so a same-named branch the user made is
+ *   never adopted.
  *
  * Absent means `in_place`: resources created before the mode existed keep their
  * original behavior, so this is optional rather than defaulted on the server.

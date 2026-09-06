@@ -95,7 +95,7 @@ import {
   ToolDetailSurface,
 } from "./detail-surfaces";
 import { languageForPath } from "./diff-highlight";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import {
   formatTokens,
   formatUsd,
@@ -159,8 +159,8 @@ function formatOffset(ms: number): string {
   return `+${hours}:${String(minutes % 60).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function formatRunTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
+function formatRunTime(iso: string, locale: string): string {
+  return new Date(iso).toLocaleString(locale, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -307,6 +307,7 @@ export function AgentTranscriptDialog({
   headerSlot,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
+  const locale = useLocale();
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set());
   const [query, setQuery] = useState("");
@@ -800,16 +801,16 @@ export function AgentTranscriptDialog({
           ? t(($) => $.transcript.trigger_chat)
           : task.kind === "quick_create"
             ? t(($) => $.transcript.trigger_quick_create)
-            : task.kind === "direct" || task.handoff_note
+            : task.kind === "direct"
               ? t(($) => $.transcript.trigger_direct)
               : t(($) => $.transcript.trigger_initial);
 
   // Diagnostic detail for the ⓘ popover: everything a reader needs only when
   // debugging this specific run, kept off the always-visible surface.
   const providerLabel = runtimeInfo?.provider ? transcriptProviderLabel(runtimeInfo.provider) : null;
-  const createdLabel = task.created_at ? formatRunTime(task.created_at) : null;
-  const startedLabel = task.started_at ? formatRunTime(task.started_at) : null;
-  const completedLabel = task.completed_at ? formatRunTime(task.completed_at) : null;
+  const createdLabel = task.created_at ? formatRunTime(task.created_at, locale) : null;
+  const startedLabel = task.started_at ? formatRunTime(task.started_at, locale) : null;
+  const completedLabel = task.completed_at ? formatRunTime(task.completed_at, locale) : null;
   const hasTriggeredBy = !!task.attribution?.initiator;
   // This run's own spend. Present on transcripts opened from the issue
   // execution log (the endpoint that hydrates usage); absent elsewhere, where
@@ -1372,12 +1373,13 @@ function TranscriptRow(props: TranscriptRowProps) {
 
 /** The offset column: where in the run this happened. */
 function OffsetCell({ startedAt, runStartMs }: { startedAt?: string; runStartMs?: number }) {
+  const locale = useLocale();
   const at = timeMs(startedAt);
   const label = at !== undefined && runStartMs !== undefined ? formatOffset(at - runStartMs) : "";
   return (
     <span
       className="w-11 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
-      title={startedAt ? new Date(startedAt).toLocaleString() : undefined}
+      title={startedAt ? new Date(startedAt).toLocaleString(locale) : undefined}
     >
       {label}
     </span>

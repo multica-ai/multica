@@ -23,21 +23,21 @@ import { Callout } from "fumadocs-ui/components/callout";
 - **用 Desktop**：Desktop 会自动把这台电脑注册为运行时，并检测已安装的 AI 编程工具。刚安装的工具，点"刷新"重新检测。
 - **用 Web，或需要添加另一台电脑**：点右上角的 **添加电脑**，在目标电脑的终端里运行弹窗给出的两条命令：
 
-  **macOS / Linux**
+ **macOS / Linux**
 
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-  multica setup
-  ```
+ ```bash
+ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+ multica setup
+ ```
 
-  **Windows PowerShell**
+ **Windows PowerShell**
 
-  ```powershell
-  irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
-  multica setup
-  ```
+ ```powershell
+ irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+ multica setup
+ ```
 
-  `multica setup` 会打开浏览器完成登录，然后让守护进程在后台运行。守护进程上线后，弹窗通常在一分钟内自动检测到这台电脑。
+ `multica setup` 会打开浏览器完成登录，然后让守护进程在后台运行。守护进程上线后，弹窗通常在一分钟内自动检测到这台电脑。
 
 **成功标志**：运行时列表里出现一台在线的电脑。
 
@@ -60,23 +60,23 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ![创建智能体的起点选择页：Start blank 与 Build with AI](/images/docs/quickstart-new-agent.webp)
 
-## 4. 把第一个 issue 交给它
+## 4. 把第一个任务交给它
 
-点侧边栏顶部的 **新建 issue**（或按快捷键 `C`）。在默认的智能体模式下：
+点侧边栏顶部的 **新建任务**（或按快捷键 `C`）。在默认的智能体模式下：
 
 1. 在 **创建者** 中选择刚创建的智能体；
 2. 用一两句话描述要做的事，例如"介绍一下这个工作区可以怎么用"；
-3. 提交。Multica 会创建 issue、把智能体设为负责人并立即开始执行。
+3. 提交。Multica 会创建任务、把智能体设为负责人并立即开始执行。
 
-![新建 issue 弹窗的智能体模式：Created by 已选中 Multica Assistant](/images/docs/quickstart-new-issue.webp)
+![新建任务弹窗的智能体模式：Created by 已选中 Multica Assistant](/images/docs/quickstart-new-issue.webp)
 
 ## 5. 查看进度和结果
 
-提交后打开这条 issue：执行日志显示运行状态，智能体的进展和回复出现在时间线中。
+提交后打开这条任务：执行日志显示运行状态，智能体的进展和回复出现在时间线中。
 
 **成功标志**：执行日志状态变为"已完成"，时间线中出现智能体的回复。需要查看完整过程时，点"查看记录"。
 
-![issue 中智能体的回复与已完成的执行日志](/images/docs/quickstart-run-result.webp)
+![任务中智能体的回复与已完成的执行日志](/images/docs/quickstart-run-result.webp)
 
 ## 常见问题
 
@@ -84,12 +84,12 @@ import { Callout } from "fumadocs-ui/components/callout";
 |---|---|
 | 没有找到运行时 | 确认 AI 编程工具已经安装并能在终端中运行。Desktop 点"刷新"；CLI 方式重新运行 `multica setup`。 |
 | 运行时显示离线 | Desktop 保持打开；CLI 方式运行 `multica daemon status`，未启动时运行 `multica daemon start`。 |
-| issue 一直排队 | 确认智能体使用的运行时在线。运行时达到并发上限时，新任务会继续排队。 |
+| 任务一直排队 | 确认智能体使用的运行时在线。运行时达到并发上限时，新运行会继续排队。 |
 
 更多情况见[故障排查](/troubleshooting)。
 
 ## 接下来
 
 - [核心概念](/concepts) — 三分钟认识 Multica 的全部核心对象。
-- [Multica 的工作方式](/how-multica-works) — 理解 issue、智能体、运行时和每次执行之间的关系。
+- [Multica 的工作方式](/how-multica-works) — 理解任务、智能体、运行时和每次执行之间的关系。
 - [让智能体开始工作](/triggering-agents) — 除了分配，还有 @评论、对话和自动化三种触发方式。

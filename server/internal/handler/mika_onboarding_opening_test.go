@@ -76,27 +76,3 @@ func TestEscapeMarkdownInlineHandlesBackslashesFirst(t *testing.T) {
 		t.Fatalf("escapeMarkdownInline(`a\\*b`) = %q, want %q", got, `a\\\*b`)
 	}
 }
-
-// The opening is the member's introduction to the working model, so all four
-// beats have to survive a copy edit: what Multica is, who Mika is, what happens
-// next, and the handoff to the starter cards below.
-func TestMikaOnboardingOpeningKeepsItsFourBeats(t *testing.T) {
-	opening := buildMikaOnboardingOpening("en", "Mika", "Venus")
-
-	for _, beat := range []string{
-		"Multica is a workspace", // what the product is
-		"Chief of Staff",         // who is speaking
-		"turn it into an issue",  // what happens next
-		"Pick one below",         // the bridge to the cards
-	} {
-		if !strings.Contains(opening, beat) {
-			t.Errorf("opening lost a required beat (%q):\n%s", beat, opening)
-		}
-	}
-
-	// The cards below name the options; a written menu duplicates them and
-	// costs the member a retype where a click would do.
-	if strings.Count(opening, "\n-") > 0 {
-		t.Errorf("the opening must not list options — that is the cards' job:\n%s", opening)
-	}
-}

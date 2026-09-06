@@ -1,6 +1,7 @@
 agy
 claude
 codebuddy
+codearts
 codex
 copilot
 cursor-agent

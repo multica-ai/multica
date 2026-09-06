@@ -195,7 +195,6 @@ type TaskContextForEnv struct {
 	AutopilotSource         string
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
-	HandoffNote             string // assignment handoff instruction; rendered into issue_context.md (MUL-3375)
 	IsSquadLeader           bool   // true when THIS TASK runs the agent in the squad-leader role (may exit silently on no_action); derived from the claim's is_leader_task / squad_id, never sniffed from instructions text (MUL-5811)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
@@ -336,7 +335,7 @@ type Environment struct {
 	// GC reclaimed between turns, a switched Hermes profile and an operator's
 	// `rm` all mount cleanly onto nothing. The daemon reads THIS, not the store
 	// path, as the answer to "can a prior session id still resolve here?" — see
-	// gateResumeToReusedWorkdir.
+	// gateResumeToReachableSession.
 	HermesSessionHistoryPresent bool
 	// QwenpawWorkspace is the path to the per-task QwenPaw workspace directory
 	// (set only for the qwenpaw provider). It is populated with the bound skills
@@ -530,6 +529,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		wtParams.EnvRoot = envRoot
 		wtParams.AgentName = params.AgentName
 		wtParams.TaskID = params.TaskID
+		wtParams.ConversationKey, wtParams.ConversationID = localWorktreeConversation(params)
+		wtParams.WorkspaceID = params.WorkspaceID
+		wtParams.AgentID = params.Task.AgentID
 		var err error
 		localWorktree, err = PrepareLocalWorktree(wtParams, logger)
 		if err != nil {
@@ -851,8 +853,9 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	}
 
 	// Roll back the previous dispatch's sidecar writes before refreshing.
-	// On reuse the workdir still holds the prior run's issue_context.md and
-	// skill directories; without clearing them first, writeSkillFiles sees
+	// On reuse the workdir still holds the prior run's skill directories (and,
+	// for a workdir prepared before MUL-6984, its issue_context.md); without
+	// clearing them first, writeSkillFiles sees
 	// its own earlier output occupying the canonical slug and falls back to
 	// a collision-free sibling (issue-review, issue-review-multica,
 	// issue-review-multica-2, …), accumulating a fresh duplicate on every
@@ -870,8 +873,10 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	//      the agent populated (correct on the local_directory teardown path),
 	//      which would otherwise keep the canonical slug occupied and push the
 	//      refresh back to issue-review-multica.
-	//   2. CleanupSidecars rolls back the remaining sidecar files
-	//      (issue_context.md, project resources) and the manifest itself.
+	//   2. CleanupSidecars rolls back the remaining sidecar files (project
+	//      resources today, plus any issue_context.md recorded by a manifest
+	//      an older build wrote — legacy upgrade cleanup, not a live writer)
+	//      and the manifest itself.
 	//
 	// No-op when RootDir is empty (legacy local_directory reuse, which the
 	// daemon skips anyway) or when no prior manifest exists (older build).
@@ -884,7 +889,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		}
 	}
 
-	// Refresh context files (issue_context.md, skills). Reuse tracks a
+	// Refresh context files (skills, project resources). Reuse tracks a
 	// fresh manifest under env.RootDir so a later CleanupSidecars sees
 	// the up-to-date list of writes (an old manifest from a prior run
 	// would otherwise reference files this Reuse no longer creates). For

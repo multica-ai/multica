@@ -115,6 +115,40 @@ describe("mobile issue revision gates", () => {
     });
   });
 
+  it("preserves hydrated actor identity when replacing a comment snapshot", () => {
+    const qc = new QueryClient();
+    const key = issueKeys.timeline(wsId, issueId);
+    qc.setQueryData<TimelineEntry[]>(key, [
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "member",
+        actor_id: "departed-user",
+        actor_name: "Former Member",
+        actor_avatar_url: "https://profiles.example.com/former.png",
+        created_at: "2026-01-01T00:00:00Z",
+        content: "before",
+        revision: 1,
+      },
+    ]);
+
+    replaceCommentTimelineEntry(qc, wsId, issueId, {
+      type: "comment",
+      id: "comment-1",
+      actor_type: "member",
+      actor_id: "departed-user",
+      created_at: "2026-01-01T00:00:00Z",
+      content: "after",
+      revision: 2,
+    });
+
+    expect(qc.getQueryData<TimelineEntry[]>(key)?.[0]).toMatchObject({
+      content: "after",
+      actor_name: "Former Member",
+      actor_avatar_url: "https://profiles.example.com/former.png",
+    });
+  });
+
   it("invalidates after a partial owner event without replacing the full snapshot revision", () => {
     const qc = new QueryClient();
     qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), {

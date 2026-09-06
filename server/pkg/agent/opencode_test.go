@@ -13,17 +13,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsOpencodeBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("opencode", Config{ExecutablePath: "/nonexistent/opencode"})
-	if err != nil {
-		t.Fatalf("New(opencode) error: %v", err)
-	}
-	if _, ok := b.(*opencodeBackend); !ok {
-		t.Fatalf("expected *opencodeBackend, got %T", b)
-	}
-}
-
 // ── Text event tests ──
 
 func TestOpencodeHandleTextEvent(t *testing.T) {

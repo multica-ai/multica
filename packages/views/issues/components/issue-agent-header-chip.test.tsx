@@ -301,9 +301,9 @@ describe("IssueAgentHeaderChip", () => {
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
 
     expect(
-      screen.getByRole("button", { name: "2 agents working" }),
+      screen.getByRole("button", { name: "2 active agents" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("2 agents working")).toHaveLength(2);
+    expect(screen.getAllByText("2 active agents")).toHaveLength(2);
     expect(screen.getAllByTestId("active-task-row")).toHaveLength(2);
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
@@ -316,6 +316,20 @@ describe("IssueAgentHeaderChip", () => {
     });
 
     expect(screen.getByText("Walt 在工作")).toBeInTheDocument();
+  });
+
+  it("hides the visible label on mobile while preserving a larger tap target and accessible name", () => {
+    mockState.tasks = [makeTask({ status: "queued" })];
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const trigger = screen.getByRole("button", { name: "Walt is queued" });
+    expect(trigger.querySelector("[data-slot='avatar']")).not.toBeNull();
+    expect(trigger.className).toContain("h-9 min-w-9");
+    expect(trigger.className).toContain("md:h-7 md:min-w-0");
+    const label = screen.getByText("Walt is queued");
+    expect(label.className).toContain("hidden");
+    expect(label.className).toContain("md:inline");
   });
 
   it("does not render when the issue has only terminal tasks", () => {

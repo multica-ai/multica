@@ -20,6 +20,10 @@ import (
 // invoked with a real agent CLI's argv: TestMain runs before the testing
 // package parses flags, so arguments like `run --format json` never reach it.
 func TestMain(m *testing.M) {
+	if os.Getenv(codeartsModelHelperEnv) == "1" {
+		runFakeCodeArtsModelHelper()
+		os.Exit(0)
+	}
 	if os.Getenv(opencodeStdinHelperEnv) == "1" {
 		runFakeOpencodeStdinHelper()
 		os.Exit(0)

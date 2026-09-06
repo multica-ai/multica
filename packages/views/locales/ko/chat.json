@@ -60,6 +60,7 @@
       "manual": "이 답변이 취소되었습니다.",
       "skill_bundle_unavailable": "에이전트의 skill을 내려받지 못해 답변을 시작하지 못했습니다. 대개 네트워크 연결 문제입니다. 다시 시도해 주세요.",
       "runtime_cli_timeout": "로컬 OpenClaw CLI가 제한 시간 안에 응답하지 않아 이번 실행이 시작되지 못했습니다. 네트워크 문제가 아니라 로컬 실행 지연입니다. CLI가 빨라지거나 제한 시간(MULTICA_OPENCLAW_CLI_TIMEOUT)을 늘리기 전에는 다시 시도해도 실패합니다.",
+      "environment_prepare_failed": "에이전트를 실행하는 머신에서 이번 실행을 준비하지 못해 시작되지 못했습니다. 무엇이 실패했는지는 아래 오류에 나옵니다 — 디스크 공간, 권한, 사용 중인 폴더, 읽을 수 없는 로컬 설정 등이 흔합니다. 에이전트나 모델 제공자의 문제가 아닙니다.",
       "provider_network": "모델 서비스와의 연결이 끊겨 답변을 완료하지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.",
       "provider_auth_or_access": "에이전트의 모델 계정 로그인이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.",
       "provider_quota_limit": "에이전트의 모델 계정 잔액이 부족합니다. 충전하거나 계정을 변경한 뒤 시도해 주세요.",
@@ -78,6 +79,7 @@
     "copy_failed_toast": "복사 실패",
     "loading_older": "이전 메시지를 불러오는 중…",
     "quick_actions_heading": "후속 질문",
+    "quick_actions_aria": "추천 후속 질문",
     "quick_actions_regenerate": "제안 다시 생성",
     "quick_actions_regenerate_failed": "제안을 다시 생성하지 못했습니다. 다시 시도해 주세요."
   },
@@ -100,8 +102,8 @@
     },
     "stop_dialog": {
       "title": "이 실행을 중지할까요?",
-      "description_with_title": "\"{{title}}\"의 현재 에이전트 작업을 취소합니다. 이미 생성된 내용은 채팅에 남습니다.",
-      "description_default": "현재 에이전트 작업을 취소합니다. 이미 생성된 내용은 채팅에 남습니다.",
+      "description_with_title": "\"{{title}}\"의 현재 에이전트 실행을 취소합니다. 이미 생성된 내용은 채팅에 남습니다.",
+      "description_default": "현재 에이전트 실행을 취소합니다. 이미 생성된 내용은 채팅에 남습니다.",
       "cancel": "계속 실행",
       "confirm": "실행 중지",
       "confirming": "중지하는 중..."
@@ -153,8 +155,8 @@
       "prompt": "가장 잘 도울 수 있는 일을 간단히 알려 주세요."
     },
     "first_task": {
-      "label": "첫 태스크 추천",
-      "prompt": "당신에게 맡길 수 있는 유용한 태스크 세 가지를 추천해 주세요."
+      "label": "첫 이슈 추천",
+      "prompt": "당신에게 할당할 만한 유용한 이슈 세 가지를 추천해 주세요."
     },
     "recommend": {
       "label": "작업 추천",

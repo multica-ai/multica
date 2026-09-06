@@ -19,6 +19,16 @@ import (
 // that remains is the `--status todo` vs `--status backlog` rule for
 // creating sub-issues, which is unrelated to the notification path.
 
+// platformSkillFixture is the built-in every issue brief expects to be able to
+// point at. The pointer is resolved from the task's actual skills, so a brief
+// built without it deliberately carries no pointer at all.
+func platformSkillFixture() SkillContextForEnv {
+	return SkillContextForEnv{
+		Name:    "multica-platform",
+		Content: "---\nname: multica-platform\n---\n\nbody",
+	}
+}
+
 func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -27,13 +37,17 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 	}{
 		{
 			name: "assignment-triggered",
-			ctx:  TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"},
+			ctx: TaskContextForEnv{
+				IssueID:     "11111111-2222-3333-4444-555555555555",
+				AgentSkills: []SkillContextForEnv{platformSkillFixture()},
+			},
 		},
 		{
 			name: "comment-triggered",
 			ctx: TaskContextForEnv{
 				IssueID:          "22222222-3333-4444-5555-666666666666",
 				TriggerCommentID: "33333333-4444-5555-6666-777777777777",
+				AgentSkills:      []SkillContextForEnv{platformSkillFixture()},
 			},
 		},
 	}
@@ -48,15 +62,14 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 			}
 			for _, want := range []string{
 				// MUL-5442 demotes the full todo/backlog/stage playbook to the
-				// multica-working-on-issues skill. The brief keeps a one-line
-				// map (all three flags stay discoverable, MUL-3508 follow-up)
-				// plus the skill pointer; the skill side of the contract is
-				// asserted in internal/service
-				// (TestWorkingOnIssuesSkillCoversIssueLoopContracts).
+				// multica-platform skill. The brief keeps a one-line map (all
+				// three flags stay discoverable, MUL-3508 follow-up) plus the
+				// skill pointer; the skill side of the contract is asserted in
+				// internal/service (TestPlatformSkillCoversPlatformContracts).
 				"`--status todo` starts an agent-assigned child immediately",
 				"`--status backlog` parks it",
 				"`--stage <N>` groups children into ordered stages",
-				"read the `multica-working-on-issues` skill",
+				"read `references/issues.md` in the `multica-platform` skill",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("[%s] section missing %q", tc.name, want)
@@ -310,13 +323,52 @@ func TestPerRunCommentContextStaysOutOfBrief(t *testing.T) {
 	hint := BuildNewCommentsHint(issueID, "reply-abc", "thread-abc", since, 4)
 	for _, want := range []string{
 		"4 new comment(s) on this issue since your last run",
-		"blindly",
+		"across all threads",
 		"--thread thread-abc --since " + since + " --compact --output json",
 		"--tail 30",
 	} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("BuildNewCommentsHint missing %q\n---\n%s", want, hint)
 		}
+	}
+}
+
+// TestCommentHintsCarryNoModality pins MUL-6984: the per-turn comment hints
+// carry this turn's facts and exact commands and never decide whether the
+// wide read happens — workflow step 2 owns that. Each hint hands the scan over
+// (or, on the resumed no-delta path, reports the server-computed answer to
+// it); none of them makes it conditional on the agent's own guess.
+func TestCommentHintsCarryNoModality(t *testing.T) {
+	t.Parallel()
+	const issueID = "55555555-6666-7777-8888-999999999999"
+	hints := map[string]string{
+		"cold":    BuildColdCommentsHint(issueID, "trigger-1", "thread-root-1"),
+		"warm":    BuildNewCommentsHint(issueID, "trigger-1", "thread-root-1", "2026-05-28T11:00:00Z", 4),
+		"resumed": BuildResumedCommentsHint(issueID, "trigger-1", "thread-root-1"),
+	}
+	for name, hint := range hints {
+		if hint == "" {
+			t.Fatalf("%s hint rendered empty", name)
+		}
+		for _, banned := range []string{
+			"Only if you need",
+			"Need cross-thread background",
+			"If your reply depends on thread context",
+			"read them all blindly",
+			"only if needed",
+		} {
+			if strings.Contains(hint, banned) {
+				t.Errorf("%s hint must not make the wide read optional (%q):\n%s", name, banned, hint)
+			}
+		}
+	}
+	for _, name := range []string{"cold", "warm"} {
+		if !strings.Contains(hints[name], "--roots-only --summary") {
+			t.Errorf("%s hint must hand over the scan step 2 requires:\n%s", name, hints[name])
+		}
+	}
+	if !strings.Contains(hints["resumed"], "issue-wide delta is empty") {
+		t.Errorf("resumed hint must report the empty delta as the scan's answer:\n%s", hints["resumed"])
 	}
 }
 
@@ -346,8 +398,8 @@ func TestResumedCommentsHintSkipsDefaultThreadRead(t *testing.T) {
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"If your reply depends on thread context",
-		"do not rely only on resumed session memory",
+		"issue-wide delta is empty",
+		"if resumed memory is not enough",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
 		if !strings.Contains(hint, want) {
@@ -362,8 +414,8 @@ func TestResumedCommentsHintSkipsDefaultThreadRead(t *testing.T) {
 	if strings.Contains(hint, "scoped to the triggering thread") {
 		t.Errorf("resumed/no-delta hint must not claim the delta is thread-scoped, got:\n%s", hint)
 	}
-	if strings.Contains(hint, "Read the triggering conversation first") {
-		t.Errorf("resumed/no-delta hint must not use the cold-start forced-read wording, got:\n%s", hint)
+	if strings.Contains(hint, "in place of `--thread ... --tail 30`") {
+		t.Errorf("resumed/no-delta hint must not render the reconstruction (cold) hint, got:\n%s", hint)
 	}
 }
 
@@ -1000,6 +1052,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"codex", "AGENTS.md"},
 		{"copilot", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
+		{"codearts", "AGENTS.md"},
 		{"openclaw", "AGENTS.md"},
 		{"hermes", "AGENTS.md"},
 		{"pi", "AGENTS.md"},
@@ -1379,6 +1432,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"codex", "AGENTS.md"},
 		{"copilot", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
+		{"codearts", "AGENTS.md"},
 		{"openclaw", "AGENTS.md"},
 		{"hermes", "AGENTS.md"},
 		{"pi", "AGENTS.md"},
@@ -1913,6 +1967,74 @@ func firstBriefDiff(want, got string) string {
 		"\n--- variant ---\n" + got[lo:hiG]
 }
 
+// TestAutopilotBriefByteIdenticalAcrossRunScopedFields is the invariant
+// MUL-6984 actually moved, and the one TestBriefByteIdenticalAcrossRunsForEveryKind
+// cannot see: its autopilot row pins run-1 / ap-1 and its variants only mutate
+// the generic resume / initiator / connected-app fields, so reinserting the
+// autopilot title, source, payload or description into the brief would leave
+// it green.
+//
+// Every field below identifies ONE run. The brief lands in messages[0], ahead
+// of the whole conversation, so a per-run value here throws away the prompt
+// cache for the entire history on resume (MUL-5377) — and it also gives a
+// second hand-maintained copy somewhere to drift from the per-turn one, which
+// is how MUL-5696 happened. Two runs of the same autopilot, and two runs of
+// different autopilots, must all produce the same bytes.
+func TestAutopilotBriefByteIdenticalAcrossRunScopedFields(t *testing.T) {
+	t.Parallel()
+
+	base := TaskContextForEnv{AgentID: "a-1", AgentName: "Eve", AutopilotRunID: "run-1", AutopilotID: "ap-1"}
+
+	runs := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{"baseline", base},
+		{"second run of the same autopilot", func() TaskContextForEnv {
+			c := base
+			c.AutopilotRunID = "run-2"
+			c.AutopilotTitle = "Nightly dependency sweep"
+			c.AutopilotSource = "schedule"
+			c.AutopilotDescription = "Check dependencies and report outdated packages."
+			c.AutopilotTriggerPayload = `{"schedule":"0 3 * * *"}`
+			return c
+		}()},
+		{"run of a different autopilot", func() TaskContextForEnv {
+			c := base
+			c.AutopilotRunID = "run-3"
+			c.AutopilotID = "ap-2"
+			c.AutopilotTitle = "Triage inbound issues"
+			c.AutopilotSource = "webhook"
+			c.AutopilotDescription = "Read the payload and file one issue per report."
+			c.AutopilotTriggerPayload = `{"action":"opened","issue":{"number":7,"title":"crash on start"}}`
+			return c
+		}()},
+	}
+
+	want := buildMetaSkillContent("claude", runs[0].ctx)
+	for _, r := range runs[1:] {
+		if got := buildMetaSkillContent("claude", r.ctx); got != want {
+			t.Errorf("autopilot brief changed for %q — a per-run value reached the cache prefix\n%s",
+				r.name, firstBriefDiff(want, got))
+		}
+	}
+
+	// Byte-identity alone would also hold if the brief rendered none of these
+	// AND the values never reached the agent at all. Pin the other half here:
+	// the brief must not carry them, and daemon.TestBuildPromptAutopilotRunOnly
+	// pins the per-turn message as the surface that does.
+	for _, banned := range []string{
+		"run-1", "ap-1", "Nightly dependency sweep", "Triage inbound issues",
+		"schedule", "webhook", "Check dependencies", "0 3 * * *", "crash on start",
+	} {
+		for _, r := range runs {
+			if strings.Contains(buildMetaSkillContent("claude", r.ctx), banned) {
+				t.Errorf("autopilot brief (%s) carries the run-scoped value %q; the per-turn message owns it", r.name, banned)
+			}
+		}
+	}
+}
+
 // TestBriefByteIdenticalAcrossRunsForEveryKind extends the MUL-5377 guarantee
 // past issue runs.
 //
@@ -2043,6 +2165,171 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 			}
 			if !strings.Contains(out, "discovered automatically") {
 				t.Errorf("brief lost the native-discovery framing:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestBriefIssuePointerFollowsTheInstalledSkill covers the compatibility
+// direction the server cannot reach (MUL-6986).
+//
+// The brief is assembled here, in the daemon, from a binary the user installs
+// on their own schedule. A backend deploy does not rewrite it, and an app
+// update does not wait for a deploy, so both skews happen:
+//
+//   - old daemon, new backend — the server ships a redirect stub under the old
+//     name, because this code is already frozen on that machine;
+//   - new daemon, old backend — the server has no idea the merge happened, so
+//     THIS code has to cope, which is why the pointer is resolved from the
+//     skills the task actually received rather than hardcoded.
+//
+// The third case is the one that matters most: when neither skill is installed
+// the brief says nothing. Naming a skill the agent does not have is worse than
+// omitting the pointer — it sends the agent hunting, and on a miss it may skip
+// the contract altogether.
+func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
+	t.Parallel()
+
+	skill := func(name string) SkillContextForEnv {
+		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+	}
+
+	cases := []struct {
+		name   string
+		skills []SkillContextForEnv
+		want   string // exact pointer text; "" = no pointer at all
+	}{
+		{
+			name:   "current backend",
+			skills: []SkillContextForEnv{skill("multica-platform")},
+			want:   "`references/issues.md` in the `multica-platform` skill",
+		},
+		{
+			// New daemon against a backend that has not been deployed yet.
+			name:   "pre-merge backend",
+			skills: []SkillContextForEnv{skill("multica-working-on-issues")},
+			want:   "the `multica-working-on-issues` skill",
+		},
+		{
+			// Mid-transition: the redirect stub rides along with the merged
+			// skill. The merged skill wins — the stub is only a signpost.
+			name:   "merged skill wins over the redirect stub",
+			skills: []SkillContextForEnv{skill("multica-working-on-issues"), skill("multica-platform")},
+			want:   "`references/issues.md` in the `multica-platform` skill",
+		},
+		{
+			name:   "neither installed",
+			skills: []SkillContextForEnv{skill("pr-review")},
+			want:   "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", TaskContextForEnv{
+				IssueID:     "issue-1",
+				AgentSkills: tc.skills,
+			})
+
+			// The flags themselves are unconditional: they stay discoverable
+			// with or without a skill to point at.
+			for _, always := range []string{
+				"`--status todo` starts an agent-assigned child immediately",
+				"`--stage <N>` groups children into ordered stages",
+				"never secrets or long content",
+			} {
+				if !strings.Contains(out, always) {
+					t.Errorf("brief lost unconditional content %q", always)
+				}
+			}
+
+			if tc.want == "" {
+				for _, banned := range []string{"Full write discipline:", "Before creating sub-issues, read"} {
+					if strings.Contains(out, banned) {
+						t.Errorf("brief points at a skill with none installed (%q):\n%s", banned, out)
+					}
+				}
+				return
+			}
+			if !strings.Contains(out, "Full write discipline: "+tc.want+".") {
+				t.Errorf("metadata pointer does not name %q:\n%s", tc.want, out)
+			}
+			if !strings.Contains(out, "Before creating sub-issues, read "+tc.want+" —") {
+				t.Errorf("sub-issue pointer does not name %q:\n%s", tc.want, out)
+			}
+		})
+	}
+}
+
+// TestBriefPointsAtThePlatformSkill pins the one recall hint the Skills section
+// carries (MUL-6986).
+//
+// Eight domain skills advertised eight descriptions in the always-loaded
+// listing; they are now one skill with one description, which is cheaper but
+// gives an agent one name to guess instead of eight. This line is what pays
+// that back, so it must appear whenever the skill does — an agent that cannot
+// find the platform contracts is strictly worse off than before the merge.
+//
+// Naming is by bare name, on the stated assumption that no workspace skill
+// shares a built-in's name (see builtinSlug).
+func TestBriefPointsAtThePlatformSkill(t *testing.T) {
+	t.Parallel()
+
+	skill := func(name string) SkillContextForEnv {
+		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+	}
+
+	cases := []struct {
+		name   string
+		skills []SkillContextForEnv
+		want   string // the slug the pointer must name; "" = no pointer
+	}{
+		{
+			name:   "platform skill present",
+			skills: []SkillContextForEnv{skill("multica-platform")},
+			want:   "multica-platform",
+		},
+		{
+			name:   "alongside workspace skills",
+			skills: []SkillContextForEnv{skill("pr-review"), skill("multica-platform")},
+			want:   "multica-platform",
+		},
+		{
+			name:   "platform skill absent",
+			skills: []SkillContextForEnv{skill("pr-review")},
+			want:   "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", TaskContextForEnv{
+				IssueID:     "issue-1",
+				AgentName:   "Eve",
+				AgentID:     "eve-1",
+				AgentSkills: tc.skills,
+			})
+			if tc.want == "" {
+				if strings.Contains(out, "skill and open the reference") {
+					t.Errorf("brief emitted a platform pointer with no built-in platform skill present:\n%s", out)
+				}
+				return
+			}
+			want := "load the `" + tc.want + "` skill"
+			if !strings.Contains(out, want) {
+				t.Errorf("brief does not point at %q:\n%s", tc.want, out)
+			}
+			// Pinned as "the domains your task touches", never a count: a task
+			// that spans squads + issues + mentions needs all three, and
+			// wording that implies one would make the agent act on contracts
+			// it has not read.
+			if !strings.Contains(out, "for the domains your task touches") {
+				t.Errorf("pointer does not route by domain:\n%s", out)
+			}
+			if strings.Contains(out, "the one reference") {
+				t.Errorf("pointer narrows on-demand reading to a single reference:\n%s", out)
 			}
 		})
 	}

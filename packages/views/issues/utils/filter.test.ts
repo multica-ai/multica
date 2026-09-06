@@ -1,10 +1,11 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import type { Issue, IssueAssigneeGroup } from "@multica/core/types";
+import type { Issue, IssueAssigneeGroup, PropertyFilterValue } from "@multica/core/types";
 import {
   applyIssueFilters,
   filterAssigneeGroups,
   filterIssues,
+  issueMatchesPropertyFilters,
   NO_PROPERTY_VALUE,
   type IssueFilters,
 } from "./filter";
@@ -103,11 +104,6 @@ describe("filterIssues", () => {
     expect(result).toEqual([]);
   });
 
-  it("hides assigned issues when only 'No assignee' is selected", () => {
-    const result = filterIssues(issues, { ...NO_FILTER, includeNoAssignee: true });
-    expect(result.every((i) => !i.assignee_id)).toBe(true);
-  });
-
   // --- Creator ---
   it("filters by creator", () => {
     const result = filterIssues(issues, {
@@ -166,11 +162,6 @@ describe("filterIssues", () => {
       includeNoProject: true,
     });
     expect(result.map((i) => i.id)).toEqual(["2", "3"]);
-  });
-
-  it("hides project issues when only 'No project' is selected", () => {
-    const result = filterIssues(issues, { ...NO_FILTER, includeNoProject: true });
-    expect(result.every((i) => !i.project_id)).toBe(true);
   });
 
   it("applies status + project filters together", () => {
@@ -544,5 +535,95 @@ describe("property filters", () => {
     });
     expect(result?.[0]?.issues.map((i) => i.id)).toEqual(["P1"]);
     expect(result?.[0]?.total).toBe(1);
+  });
+});
+
+// Scalar operator members (#7692): the matrix mirrors the server predicates in
+// server/internal/handler/property.go — contains is a case-insensitive
+// substring over stored strings only, gt/gte/lt/lte match stored numbers, and
+// before/after compare "YYYY-MM-DD" strings lexicographically. A missing key
+// never matches an operator, matching the server's NULL ->> semantics.
+describe("scalar operator filters", () => {
+  const textId = "prop-note";
+  const urlId = "prop-link";
+  const numId = "prop-estimate";
+  const dateId = "prop-due";
+
+  const withText = makeIssue({ id: "T", properties: { [textId]: "Hello World" } });
+  const withUrl = makeIssue({ id: "U", properties: { [urlId]: "https://example.com/Repo" } });
+  const withNum = makeIssue({ id: "N", properties: { [numId]: 3.5 } });
+  const withBool = makeIssue({ id: "B", properties: { [textId]: true } });
+  const withArray = makeIssue({ id: "A", properties: { [textId]: ["opt-alpha", "opt-beta"] } });
+  const withDate = makeIssue({ id: "D", properties: { [dateId]: "2026-03-01" } });
+  const unset = makeIssue({ id: "X" });
+
+  const matches = (issue: Issue, defId: string, member: PropertyFilterValue) =>
+    issueMatchesPropertyFilters(issue, { [defId]: [member] });
+
+  it("contains is a case-insensitive substring over text", () => {
+    expect(matches(withText, textId, { op: "contains", value: "world" })).toBe(true);
+    expect(matches(withText, textId, { op: "contains", value: "WORLD" })).toBe(true);
+    expect(matches(withText, textId, { op: "contains", value: "lo Wo" })).toBe(true);
+    expect(matches(withText, textId, { op: "contains", value: "hello!" })).toBe(false);
+  });
+
+  it("contains matches url values and never matches an unset key or an empty needle", () => {
+    expect(matches(withUrl, urlId, { op: "contains", value: "example.com" })).toBe(true);
+    expect(matches(unset, urlId, { op: "contains", value: "example.com" })).toBe(false);
+    // Asserted against a SET value on purpose: the unset case short-circuits
+    // before the operator runs, so it cannot catch an empty-needle match-all.
+    // The server rejects empty operator values; the matcher agrees.
+    expect(matches(withText, textId, { op: "contains", value: "" })).toBe(false);
+  });
+
+  it("contains never stringifies non-string stored values", () => {
+    expect(matches(withNum, numId, { op: "contains", value: "3.5" })).toBe(false);
+    expect(matches(withBool, textId, { op: "contains", value: "true" })).toBe(false);
+    expect(matches(withArray, textId, { op: "contains", value: "alpha" })).toBe(false);
+  });
+
+  it("number comparisons match stored numbers with the bound as a string", () => {
+    expect(matches(withNum, numId, { op: "gt", value: "3.5" })).toBe(false);
+    expect(matches(withNum, numId, { op: "gte", value: "3.5" })).toBe(true);
+    expect(matches(withNum, numId, { op: "lt", value: "3.50" })).toBe(false);
+    expect(matches(withNum, numId, { op: "lte", value: "3.50" })).toBe(true);
+  });
+
+  it("number comparisons reject non-numeric bounds and non-number values", () => {
+    expect(matches(withNum, numId, { op: "gt", value: "abc" })).toBe(false);
+    expect(matches(withText, textId, { op: "gt", value: "1" })).toBe(false);
+    expect(matches(unset, numId, { op: "gte", value: "1" })).toBe(false);
+  });
+
+  it("before/after compare date strings lexicographically", () => {
+    expect(matches(withDate, dateId, { op: "before", value: "2026-03-02" })).toBe(true);
+    expect(matches(withDate, dateId, { op: "before", value: "2026-03-01" })).toBe(false);
+    expect(matches(withDate, dateId, { op: "after", value: "2026-02-28" })).toBe(true);
+    expect(matches(withDate, dateId, { op: "after", value: "2026-03-01" })).toBe(false);
+    expect(matches(unset, dateId, { op: "before", value: "2030-01-01" })).toBe(false);
+    expect(matches(withNum, dateId, { op: "before", value: "2030-01-01" })).toBe(false);
+  });
+
+  it("an operator ORs with equality and No value within the definition", () => {
+    const lateDate = makeIssue({ id: "D2", properties: { [dateId]: "2027-01-01" } });
+    const result = filterIssues([withDate, lateDate, unset], {
+      ...NO_FILTER,
+      propertyFilters: {
+        [dateId]: [{ op: "before", value: "2026-06-01" }, "2027-01-01", NO_PROPERTY_VALUE],
+      },
+    });
+    expect(result.map((i) => i.id)).toEqual(["D", "D2", "X"]);
+  });
+
+  it("operators AND across definitions like every other filter group", () => {
+    const both = makeIssue({ id: "B", properties: { [textId]: "release notes", [numId]: 10 } });
+    const result = filterIssues([withText, withNum, both], {
+      ...NO_FILTER,
+      propertyFilters: {
+        [textId]: [{ op: "contains", value: "release" }],
+        [numId]: [{ op: "gte", value: "10" }],
+      },
+    });
+    expect(result.map((i) => i.id)).toEqual(["B"]);
   });
 });

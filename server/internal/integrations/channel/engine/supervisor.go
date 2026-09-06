@@ -179,15 +179,33 @@ type Config struct {
 	LeaseMetrics LeaseMetrics
 }
 
+// The defaults are named and exported because they are not private taste:
+// other packages are sized against them. The WeCom cross-replica dispatcher
+// re-offers a frame until a lease has finished moving, which takes one
+// DefaultPollInterval, and drains inside a shutdown bounded by
+// DefaultShutdownTimeout. A copy of either number over there would be a second
+// definition free to drift from this one.
+const (
+	// DefaultLeaseTTL is how long a lease grant stays valid unrenewed.
+	DefaultLeaseTTL = 180 * time.Second
+	// DefaultPollInterval is how often a Supervisor scans for installations it
+	// should be holding, and therefore how long a lease takes to move to
+	// another replica.
+	DefaultPollInterval = 30 * time.Second
+	// DefaultShutdownTimeout bounds how long Wait blocks joining the
+	// per-installation goroutines.
+	DefaultShutdownTimeout = 15 * time.Second
+)
+
 func (c Config) withDefaults() Config {
 	if c.LeaseTTL == 0 {
-		c.LeaseTTL = 180 * time.Second
+		c.LeaseTTL = DefaultLeaseTTL
 	}
 	if c.LeaseRenewInterval == 0 {
 		c.LeaseRenewInterval = min(60*time.Second, c.LeaseTTL/3)
 	}
 	if c.PollInterval == 0 {
-		c.PollInterval = min(30*time.Second, c.LeaseRenewInterval/2)
+		c.PollInterval = min(DefaultPollInterval, c.LeaseRenewInterval/2)
 	}
 	if c.LeaseErrorRetryInterval == 0 {
 		c.LeaseErrorRetryInterval = min(5*time.Second, c.LeaseRenewInterval/4)
@@ -214,7 +232,7 @@ func (c Config) withDefaults() Config {
 		c.RotationWaitTimeout = c.DisconnectTimeout + c.LeaseReleaseTimeout
 	}
 	if c.ShutdownTimeout == 0 {
-		c.ShutdownTimeout = 15 * time.Second
+		c.ShutdownTimeout = DefaultShutdownTimeout
 	}
 	if c.Now == nil {
 		c.Now = time.Now

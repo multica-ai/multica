@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import { Virtuoso, type Components } from "react-virtuoso";
+import { Virtuoso, type Components, type VirtuosoHandle } from "react-virtuoso";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -49,7 +49,7 @@ import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
-import { useStickToBottom } from "./stick-to-bottom";
+import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
@@ -191,7 +191,17 @@ export function ChatMessageList({
     scrollRef.current = node;
     setScrollContainerEl(node);
   }, []);
-  const { isFollowing, onContentHeightChanged } = useStickToBottom(scrollContainerEl);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // The bottom-stick corrects through Virtuoso, never by writing `scrollTop`
+  // on the container: `scrollHeight` is an estimate over the unrendered rows,
+  // so the pixel bottom moves as Virtuoso measures (see stick-to-bottom.ts).
+  const pinToLiveEnd = useCallback(() => {
+    virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end" });
+  }, []);
+  const { isFollowing, onContentHeightChanged, hasReachedLiveEnd } = useStickToBottom(
+    scrollContainerEl,
+    pinToLiveEnd,
+  );
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
@@ -264,6 +274,7 @@ export function ChatMessageList({
   }, [messages, hasLive, pendingTaskId]);
 
   const firstIndex = renderItems.length > 0 ? firstItemIndex : 0;
+  const liveEndKey = renderItems[renderItems.length - 1]?.key ?? null;
 
   const listContext: ChatListContext = {
     isFetchingOlderMessages,
@@ -301,7 +312,11 @@ export function ChatMessageList({
       // The gutter lives on the scroll container, so it applies once to the
       // whole list — rows, header, footer — and the scrollbar still rides the
       // surface edge rather than being inset with the text.
-      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER)}
+      // Hidden until Virtuoso has actually landed on the newest message. The
+      // container paints nothing for that whole window anyway — the rows are
+      // not measured yet — so this costs no visible time and spares the
+      // reader a frame of the wrong messages (see stick-to-bottom.ts).
+      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER, !hasReachedLiveEnd && "invisible")}
     >
       {/* Already inside the gutter + column, so this pre-mount frame renders the
        *  skeleton BODY rather than <ChatMessageSkeleton>, which brings its own
@@ -316,6 +331,7 @@ export function ChatMessageList({
       // otherwise a diagram only starts loading once it is already on screen.
       <RichContentScrollRootProvider scrollRoot={scrollContainerEl}>
       <Virtuoso
+        ref={virtuosoRef}
         customScrollParent={scrollContainerEl}
         data={renderItems}
         firstItemIndex={firstIndex}
@@ -353,7 +369,10 @@ export function ChatMessageList({
         context={listContext}
         components={LIST_COMPONENTS}
         itemContent={(_, item) => (
-          <div className={cn(CHAT_COLUMN, "py-2")}>
+          <div
+            className={cn(CHAT_COLUMN, "py-2")}
+            {...(item.key === liveEndKey ? { [LIVE_END_ROW_ATTR]: "" } : {})}
+          >
             <MessageBubble
               item={item}
               isPending={!!pendingTaskId && item.taskId === pendingTaskId}
@@ -718,7 +737,10 @@ function QuickActions({
 
   return (
     <div className="mt-2 border-t border-border/40 pt-2 animate-in fade-in slide-in-from-bottom-1 duration-300">
-      <div className="flex flex-wrap items-center gap-2" aria-label="Suggested follow-ups">
+      <div
+        className="flex flex-wrap items-center gap-2"
+        aria-label={t(($) => $.message_list.quick_actions_aria)}
+      >
         <QuickActionsHeading />
         {actions.slice(0, 3).map((action, index) => (
           // The whole pill previews its hidden prompt on hover: clicking
@@ -961,6 +983,7 @@ function FailureBubble({
     cancelled: t(($) => $.message_list.failure.manual),
     skill_bundle_unavailable: t(($) => $.message_list.failure.skill_bundle_unavailable),
     runtime_cli_timeout: t(($) => $.message_list.failure.runtime_cli_timeout),
+    environment_prepare_failed: t(($) => $.message_list.failure.environment_prepare_failed),
     "agent_error.provider_network": t(($) => $.message_list.failure.provider_network),
     "agent_error.provider_auth_or_access": t(($) => $.message_list.failure.provider_auth_or_access),
     "agent_error.provider_quota_limit": t(($) => $.message_list.failure.provider_quota_limit),

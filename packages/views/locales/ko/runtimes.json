@@ -41,7 +41,7 @@
     "filters": {
       "all": "전체",
       "online": "온라인",
-      "issues": "이슈"
+      "issues": "문제"
     },
     "section_local": "로컬",
     "section_remote": "원격",
@@ -64,7 +64,7 @@
       "runtimes_hint_other": "온라인 {{count}}개",
       "health": "상태",
       "health_clear": "문제 없음",
-      "health_issues_other": "이슈 {{count}}개",
+      "health_issues_other": "문제 {{count}}개",
       "workload": "작업량",
       "workload_value_idle": "유휴",
       "workload_idle": "모두 유휴",
@@ -90,7 +90,7 @@
   "health": {
     "online": {
       "label": "온라인",
-      "description": "최근 45초 안에 heartbeat를 받았습니다. 작업을 디스패치할 준비가 되었습니다."
+      "description": "최근 45초 안에 heartbeat를 받았습니다. 실행을 디스패치할 준비가 되었습니다."
     },
     "recently_lost": {
       "label": "최근 연결 끊김",
@@ -149,11 +149,11 @@
       },
       "cascade": {
         "title_other": "에이전트 {{count}}개의 런타임 연결을 해제하고 이 런타임을 삭제할까요?",
-        "description": "\"{{name}}\"을 삭제합니다. 아래 에이전트는 유지되며 지침, 채팅, 작업 기록도 그대로 남습니다. 다만 런타임 연결이 해제되어 다른 런타임에 연결할 때까지 실행할 수 없습니다. 대기 중이거나 실행 중인 작업은 취소되고, 그다음 런타임이 삭제됩니다.",
-        "warning": "대기 중과 실행 중인 작업은 취소되며, 런타임에 연결하기 전까지 이 에이전트에 새 작업을 할당할 수 없습니다.",
+        "description": "\"{{name}}\"을 삭제합니다. 아래 에이전트는 유지되며 지침, 채팅, 실행 기록도 그대로 남습니다. 다만 런타임 연결이 해제되어 다른 런타임에 연결할 때까지 실행할 수 없습니다. 대기 중이거나 진행 중인 실행은 취소되고, 그다음 런타임이 삭제됩니다.",
+        "warning": "대기 중과 진행 중인 실행은 취소되며, 런타임에 연결하기 전까지 이 에이전트에 새 작업을 할당할 수 없습니다.",
         "notice_runtime_has_active_agents": "이 대화상자를 연 뒤 활성 에이전트가 추가되었습니다. 새 계획을 확인한 뒤 승인하세요.",
         "notice_runtime_delete_plan_changed": "대화상자가 열린 동안 활성 에이전트 목록이 바뀌었습니다. 새 계획을 확인한 뒤 승인하세요.",
-        "checkbox_other": "이 에이전트 {{count}}개의 런타임 연결이 해제되어 런타임에 연결할 때까지 실행할 수 없고, 대기 중이거나 실행 중인 작업이 취소된다는 점을 이해했습니다.",
+        "checkbox_other": "이 에이전트 {{count}}개의 런타임 연결이 해제되어 런타임에 연결할 때까지 실행할 수 없고, 대기 중이거나 진행 중인 실행이 취소된다는 점을 이해했습니다.",
         "cancel": "취소",
         "confirm_other": "에이전트 {{count}}개 연결 해제 후 런타임 삭제",
         "submitting": "연결 해제 후 삭제 중...",
@@ -205,7 +205,7 @@
     "copy_aria": "복사",
     "cancel": "취소",
     "success_title": "컴퓨터 연결됨",
-    "success_description": "컴퓨터가 온라인이며 준비되었습니다. 에이전트를 만들면 여기서 작업을 맡을 수 있습니다.",
+    "success_description": "컴퓨터가 온라인이며 준비되었습니다. 에이전트를 만들면 여기서 실행을 시작할 수 있습니다.",
     "view_runtime": "런타임 보기",
     "create_agent": "에이전트 만들기"
   },

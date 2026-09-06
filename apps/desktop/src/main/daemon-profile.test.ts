@@ -11,6 +11,7 @@ import {
   profileConfigPath,
   profileDir,
   profileLogPath,
+  profilePidPath,
   profileUserIdPath,
 } from "./daemon-profile";
 
@@ -45,6 +46,9 @@ describe("profile paths", () => {
     expect(profileLogPath("desktop-api.multica.ai")).toBe(
       join(dir, "daemon.log"),
     );
+    expect(profilePidPath("desktop-api.multica.ai")).toBe(
+      join(dir, "daemon.pid"),
+    );
     expect(profileUserIdPath("desktop-api.multica.ai")).toBe(
       join(dir, ".desktop-user-id"),
     );
@@ -56,6 +60,7 @@ describe("profile paths", () => {
     expect(() => profileDir("")).toThrow(/unresolved/);
     expect(() => profileConfigPath("")).toThrow(/unresolved/);
     expect(() => profileLogPath("")).toThrow(/unresolved/);
+    expect(() => profilePidPath("")).toThrow(/unresolved/);
     expect(() => profileUserIdPath("")).toThrow(/unresolved/);
   });
 

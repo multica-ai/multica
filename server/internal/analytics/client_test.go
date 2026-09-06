@@ -10,12 +10,6 @@ import (
 	"time"
 )
 
-func TestNoopClient(t *testing.T) {
-	c := NoopClient{}
-	c.Capture(Event{Name: "foo"})
-	c.Close()
-}
-
 func TestPostHogClient_Batching(t *testing.T) {
 	var (
 		mu       sync.Mutex

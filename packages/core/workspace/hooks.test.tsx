@@ -133,6 +133,7 @@ describe("useActorName", () => {
     expect(third).toBe(first);
     // A stable resolver over an empty directory still resolves gracefully.
     expect(first("member", "user-1")).toBe("Unknown");
+    expect(result.current.hasActor("member", "user-1")).toBeUndefined();
   });
 
   it("resolves names once the directories are loaded", () => {
@@ -158,5 +159,7 @@ describe("useActorName", () => {
     expect(result.current.getActorName("member", "user-1")).toBe("Ada");
     expect(result.current.getActorName("agent", "agent-1")).toBe("Walt");
     expect(result.current.getActorName("squad", "squad-1")).toBe("Core");
+    expect(result.current.hasActor("member", "user-1")).toBe(true);
+    expect(result.current.hasActor("member", "departed-user")).toBe(false);
   });
 });

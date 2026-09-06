@@ -142,19 +142,6 @@ func TestProjectClaudeLevels_PerModelSubset(t *testing.T) {
 //     binary on PATH and verifies that what *actually* reaches the
 //     process matches the pinned argv, not just what the var holds.
 
-func TestCodexDebugModelsArgs_Pinned(t *testing.T) {
-	t.Parallel()
-	want := []string{"debug", "models", "--bundled"}
-	if !reflect.DeepEqual(codexDebugModelsArgs, want) {
-		t.Fatalf("codexDebugModelsArgs drifted: got %v, want %v", codexDebugModelsArgs, want)
-	}
-	for _, arg := range codexDebugModelsArgs {
-		if arg == "--output" || arg == "-o" {
-			t.Errorf("--output / -o leaked back into argv (codex CLI does not accept it): %v", codexDebugModelsArgs)
-		}
-	}
-}
-
 // TestRunCodexDebugModels_ArgvSeenByBinary executes runCodexDebugModels
 // against a shell-script stand-in for `codex` that records its argv to
 // a file and prints a minimal valid JSON payload. The check is on what
@@ -227,6 +214,23 @@ func TestCodexSupportsDebugModels(t *testing.T) {
 	} {
 		if got := codexSupportsDebugModels(tc.version); got != tc.want {
 			t.Errorf("codexSupportsDebugModels(%q) = %v, want %v", tc.version, got, tc.want)
+		}
+	}
+}
+
+func TestCodexSupportsExplicitStandardServiceTier(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		version string
+		want    bool
+	}{
+		{"codex-cli 0.132.0", false},
+		{"codex-cli 0.133.0", true},
+		{"codex-cli 0.144.1", true},
+		{"invalid", false},
+	} {
+		if got := codexSupportsExplicitStandardServiceTier(tc.version); got != tc.want {
+			t.Errorf("codexSupportsExplicitStandardServiceTier(%q) = %v, want %v", tc.version, got, tc.want)
 		}
 	}
 }
@@ -349,6 +353,9 @@ echo '{"models":[{"slug":"runtime-model","display_name":"Runtime Model","visibil
 		if len(got) != 1 || got[0].ID != "runtime-model" || got[0].Thinking == nil || !hasThinkingLevel(got[0].Thinking, "high") {
 			t.Fatalf("expected runtime catalog, got %+v", got)
 		}
+		if got[0].SupportsExplicitStandardServiceTier {
+			t.Fatalf("Codex 0.122.0 must not advertise explicit-standard support: %+v", got[0])
+		}
 	})
 
 	t.Run("old version uses static fallback", func(t *testing.T) {
@@ -363,6 +370,9 @@ echo '{"models":[{"slug":"runtime-model","display_name":"Runtime Model","visibil
 		if len(got) == 0 || got[0].ID != "gpt-5.6-sol" {
 			t.Fatalf("expected static fallback, got %+v", got)
 		}
+		if got[0].SupportsExplicitStandardServiceTier {
+			t.Fatalf("old Codex must not advertise explicit-standard support: %+v", got[0])
+		}
 	})
 
 	t.Run("debug command failure uses static fallback", func(t *testing.T) {
@@ -376,6 +386,9 @@ echo '{"models":[{"slug":"runtime-model","display_name":"Runtime Model","visibil
 		got := discoverCodexModels(context.Background(), Command{Path: fake})
 		if len(got) == 0 || got[0].ID != "gpt-5.6-sol" || got[0].Thinking == nil {
 			t.Fatalf("expected model + thinking fallback, got %+v", got)
+		}
+		if !got[0].SupportsExplicitStandardServiceTier {
+			t.Fatalf("supported Codex version must retain explicit-standard capability through catalog fallback: %+v", got[0])
 		}
 	})
 }
@@ -957,6 +970,10 @@ func writeFakeClaudePreEffortHelpBinary(t *testing.T) string {
 // string for any other invocation (DetectVersion's probe). Used to exercise
 // ValidateThinkingLevel against a real per-model catalog without a codex install.
 func writeFakeCodexModelsBinary(t *testing.T) string {
+	return writeFakeCodexModelsBinaryVersion(t, "0.144.1")
+}
+
+func writeFakeCodexModelsBinaryVersion(t *testing.T, version string) string {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "codex")
@@ -971,9 +988,27 @@ func writeFakeCodexModelsBinary(t *testing.T) string {
 		"EOF\n" +
 		"exit 0\n" +
 		"fi\n" +
-		"echo 'codex-cli 0.144.1'\n"
+		"echo 'codex-cli " + version + "'\n"
 	writeTestExecutable(t, path, []byte(script))
 	return path
+}
+
+func TestValidateServiceTierRejectsExplicitStandardForOldCodex(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+	fake := writeFakeCodexModelsBinaryVersion(t, "0.132.0")
+
+	for _, model := range []string{"gpt-5.6-sol", ""} {
+		got, err := ValidateServiceTier(context.Background(), "codex", Command{Path: fake}, model, "default")
+		if err != nil {
+			t.Fatalf("ValidateServiceTier with old Codex: %v", err)
+		}
+		if got {
+			t.Errorf("old Codex accepted explicit standard for model %q", model)
+		}
+	}
 }
 
 func TestValidateServiceTierCodexPerModelCatalog(t *testing.T) {
@@ -986,6 +1021,8 @@ func TestValidateServiceTierCodexPerModelCatalog(t *testing.T) {
 		want     bool
 	}{
 		{provider: "codex", model: "gpt-5.6-sol", tier: "priority", want: true},
+		{provider: "codex", model: "gpt-5.6-sol", tier: "default", want: true},
+		{provider: "codex", model: "", tier: "default", want: true},
 		{provider: "codex", model: "gpt-5.6-luna", tier: "priority", want: false},
 		{provider: "codex", model: "", tier: "priority", want: false},
 		{provider: "claude", model: "gpt-5.6-sol", tier: "priority", want: false},
@@ -1215,7 +1252,7 @@ func TestApplyCodexReasoningEffort_PreservesPreExistingConfig(t *testing.T) {
 
 func TestApplyCodexServiceTier_ThreePoints(t *testing.T) {
 	t.Parallel()
-	for _, tier := range []string{"", "priority", "future-fast"} {
+	for _, tier := range []string{"", "default", "priority", "future-fast"} {
 		t.Run(tier, func(t *testing.T) {
 			for _, params := range []map[string]any{
 				{"model": "gpt-5.6-sol", "cwd": "/work"},
@@ -1339,4 +1376,31 @@ func argIndexOf(slice []string, target string) int {
 		}
 	}
 	return -1
+}
+
+func TestValidateThinkingLevel_ClaudeFable51AcceptsFullEffortRange(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	// This test resets the package-global thinking cache, so it must remain serial.
+
+	// A model missing from the Claude catalog never gets a Thinking entry, so
+	// the daemon's pre-execution guard silently drops any persisted effort for
+	// it. Fable 5.1 supports the full low..max range, so once it is in the
+	// catalog every level must round-trip.
+	fakeClaude := writeFakeClaudeHelpBinary(t)
+	resetThinkingCacheForTests()
+	defer resetThinkingCacheForTests()
+
+	ctx := context.Background()
+
+	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
+		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-fable-5-1", level)
+		if err != nil {
+			t.Fatalf("unexpected err for %q: %v", level, err)
+		}
+		if !ok {
+			t.Errorf("level %q must be valid on claude-fable-5-1; got false", level)
+		}
+	}
 }

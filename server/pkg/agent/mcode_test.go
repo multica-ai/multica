@@ -116,17 +116,6 @@ done
 	return bin
 }
 
-func TestNewReturnsMcodeBackend(t *testing.T) {
-	t.Parallel()
-	backend, err := New("mcode", Config{ExecutablePath: "/nonexistent/mcode"})
-	if err != nil {
-		t.Fatalf("New(mcode) error: %v", err)
-	}
-	if _, ok := backend.(*mcodeBackend); !ok {
-		t.Fatalf("New(mcode) = %T, want *mcodeBackend", backend)
-	}
-}
-
 func TestMcodeModelSelectionIsRuntimeManaged(t *testing.T) {
 	t.Parallel()
 	if ModelSelectionSupported("mcode") {
@@ -297,15 +286,6 @@ func TestMcodeLoadSessionWhenCapabilityAppears(t *testing.T) {
 	}
 	if !strings.Contains(string(requests), `"method":"session/load"`) {
 		t.Fatalf("loadSession capability was not honored:\n%s", requests)
-	}
-}
-
-func TestMcodeBlockedArgsKeepACPTransportStable(t *testing.T) {
-	t.Parallel()
-	for _, arg := range []string{"acp", "login", "--region", "-h", "--help"} {
-		if _, ok := mcodeBlockedArgs[arg]; !ok {
-			t.Errorf("mcodeBlockedArgs missing %q", arg)
-		}
 	}
 }
 

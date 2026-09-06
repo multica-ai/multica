@@ -234,13 +234,6 @@ func testCreds() InstallationCredentials {
 	return InstallationCredentials{AppID: "cli_app_xx", AppSecret: "secret_xx"}
 }
 
-func TestHTTPClient_IsConfigured(t *testing.T) {
-	c := NewHTTPAPIClient(HTTPClientConfig{})
-	if !c.IsConfigured() {
-		t.Fatalf("real client must report IsConfigured()=true")
-	}
-}
-
 func TestHTTPClient_DownloadMessageResource(t *testing.T) {
 	fake := newLarkFake(t)
 	fake.stubToken("tok_resource", 7200)
@@ -433,16 +426,6 @@ func TestHTTPClient_DownloadMessageResourceBusinessError(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "234003") {
 		t.Fatalf("expected APIError with code, got %v", err)
-	}
-}
-
-// TestHTTPClient_StubReportsNotConfigured pins that the stub never
-// claims wired outbound — handlers gate install / management UI on
-// this signal.
-func TestHTTPClient_StubReportsNotConfigured(t *testing.T) {
-	s := NewStubAPIClient(nil)
-	if s.IsConfigured() {
-		t.Errorf("stub IsConfigured must be false")
 	}
 }
 

@@ -5,7 +5,7 @@ description: 把 Multica 智能体接入飞书、Lark、Slack、钉钉、企业�
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-聊天集成让团队不用打开 Multica，也能直接向智能体提问、在群聊中 @它，或从聊天窗口创建 issue。
+聊天集成让团队不用打开 Multica，也能直接向智能体提问、在群聊中 @它，或从聊天窗口创建任务。
 
 目前支持飞书/Lark、Slack、钉钉、企业微信和 Telegram。它们使用相同的会话、身份和执行机制，但安装方式不同。
 
@@ -16,7 +16,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 | 安装方式 | 在 Multica 中生成二维码，用飞书扫码授权 | 在 Slack 创建 app，再把两个 token 填入 Multica | 创建企业内部应用和 Stream 模式机器人，再把 AppKey 与 AppSecret 填入 Multica | 在企业微信管理后台创建智能机器人并开启长连接，再把 Bot ID 与 Secret 填入 Multica | 用 @BotFather 创建 Bot，再把 token 填入 Multica |
 | 私聊智能体 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | 群聊或频道 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 或回复 Bot 后触发 |
-| 创建 issue | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 |
+| 创建任务 | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 |
 | 新建 Chat | `/new [消息]` | 私聊：`/new [消息]`；频道/thread：`@Multica /new [消息]` | `/new [消息]` | `/new [消息]` | `/new [消息]` |
 | 清空当前 Chat 上下文 | `/clear [消息]` | 私聊：`/clear [消息]`；频道/thread：`@Multica /clear [消息]` | `/clear [消息]` | `/clear [消息]` | `/clear [消息]` |
 | 连接方式 | 平台长连接 | Socket Mode | Stream 模式 | 平台长连接 | `getUpdates` 长轮询 |
@@ -25,7 +25,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 每个 Bot 绑定一个 Multica 智能体。需要在同一个聊天平台中使用多个智能体时，要分别连接多个 Bot。
 
-钉钉、企业微信和 Telegram [由社区维护](/community-maintained)：随每个版本发布，但没有官方支持 SLA。遇到问题请提交 [GitHub issue](https://github.com/multica-ai/multica/issues)。
+钉钉、企业微信和 Telegram [由社区维护](/community-maintained)：随每个版本发布，但没有官方支持 SLA。遇到问题请提交 [GitHub 任务](https://github.com/multica-ai/multica/issues)。
 
 企业微信目前只处理文字消息。语音、图片和文件消息会收到一句说明，不会转交给智能体。
 
@@ -43,7 +43,7 @@ Telegram 目前只处理文字消息。不支持的媒体消息会收到一句�
 1. Multica 根据 Bot 找到对应的工作区和智能体。
 2. 在群聊或频道中，只有明确 @ Bot 的消息会继续处理；私聊不需要 @。
 3. Multica 校验发送者的账号绑定和工作区成员身份。
-4. 消息进入一段[智能体对话](/chat)，并创建一次执行任务。
+4. 消息进入一段[智能体对话](/chat)，并创建一次运行。
 5. 智能体的回复回到原来的私聊或讨论串。
 
 没有 @ Bot 的频道消息不会触发智能体，也不会被加入它的对话上下文。
@@ -98,7 +98,12 @@ MULTICA_TELEGRAM_SECRET_KEY=<base64 编码的 32 字节密钥>
 
 这些密钥用于加密保存 Bot 凭据。生成、保存和轮换方法见[环境变量](/environment-variables)。Multica Cloud 已完成这项配置。
 
-企业微信还要求后端**只部署单个副本**：它的出站只有一条路径，即某个进程持有的 WebSocket，因此在其他副本上产生的回复会被丢弃。在跨副本出站路由实现之前，请不要对启用企业微信的后端做多副本部署。
+企业微信的出站只有一条路径——某个进程持有的 WebSocket。回复产生在**其他副本**上时会发生什么，取决于实时中继（realtime relay）的模式：
+
+- **分片或双写中继模式**（配置了 `REDIS_URL`，有 Redis 时的默认）：回复会转发给持有连接的副本并送达，**支持多副本部署**。
+- **legacy 中继模式，或没有 Redis**：回复会被丢弃。这种配置下请把启用企业微信的后端保持单副本。
+
+任何模式下都有一个残留窗口：回复产生时**没有任何副本**持有活连接（全部在重连中），这条回复不会送达。但它会被记录下来——转发它的副本事后会去确认有没有副本认领过这次投递，没有就给 `multica_wecom_outbound_dropped_total{reason="no_live_connection"}` 加一，所以这个窗口有多大是能实测出来的。如果这种丢失不可接受，单副本仍是最保守的部署方式。
 
 ## 接下来
 

@@ -19,13 +19,14 @@ export type ModelChangeUpdate = {
 /**
  * Builds the single PATCH body for a model change on the settings page.
  *
- * `thinking_level` / `service_tier` are per-model capabilities: keeping a value
- * the new model never advertised leaves an orphan override that the daemon
- * silently drops at execution time, so the settings page would claim a tier
- * that never ran (MUL-5390). Clearing unconditionally is worse though — moving
- * between two models that both support Fast would throw the user's choice away,
- * and clearing while the catalog is unknown would delete a value the daemon
- * would have honoured.
+ * `thinking_level` and catalog service tiers are per-model capabilities:
+ * keeping a value the new model never advertised leaves an orphan override
+ * that the daemon silently drops at execution time, so the settings page would
+ * claim a tier that never ran (MUL-5390). Explicit Standard is the exception:
+ * its advertised capability belongs to the installed Codex CLI. Clearing
+ * unconditionally is worse though — moving between two models that both
+ * support Fast would throw the user's choice away, and clearing while the
+ * catalog is unknown would delete a value the daemon would have honoured.
  *
  * So: clear only what the authoritative catalog says the new model does not
  * support. Unknown catalog, unknown model, or an empty model ("follow the
@@ -60,9 +61,13 @@ export function buildModelChangeUpdate(input: {
   );
   if (input.thinkingLevel && !supportsThinking) update.thinking_level = "";
 
-  const supportsTier = (entry.service_tiers ?? []).some(
-    (tier) => tier.id === input.serviceTier,
-  );
+  const supportsTier =
+    (entry.service_tiers ?? []).some((tier) => tier.id === input.serviceTier) ||
+    (input.serviceTier === "default" &&
+      input.catalog.some(
+        (candidate) =>
+          candidate.supports_explicit_standard_service_tier === true,
+      ));
   if (input.serviceTier && !supportsTier) update.service_tier = "";
 
   return update;

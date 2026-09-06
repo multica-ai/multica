@@ -9,7 +9,17 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+type runtimeLocalSkillPendingWorkRecorder struct {
+	hints []string
+}
+
+func (r *runtimeLocalSkillPendingWorkRecorder) NotifyPendingWork(runtimeID, kind string) {
+	r.hints = append(r.hints, runtimeID+":"+kind)
+}
 
 func newRequestAsUser(userID, method, path string, body any) *http.Request {
 	var buf bytes.Buffer
@@ -265,6 +275,32 @@ func TestListLocalSkills_AllowsNonOwnerForPublicRuntime(t *testing.T) {
 	}
 }
 
+func TestInitiateListLocalSkills_WakesDaemon(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	recorder := &runtimeLocalSkillPendingWorkRecorder{}
+	h := *testHandler
+	h.DaemonPendingWork = recorder
+
+	w := httptest.NewRecorder()
+	req := withURLParams(
+		newRequestAsUser(testUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills", nil),
+		"runtimeId", runtimeID,
+	)
+
+	h.InitiateListLocalSkills(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	want := runtimeID + ":" + protocol.PendingWorkKindLocalSkills
+	if len(recorder.hints) != 1 || recorder.hints[0] != want {
+		t.Fatalf("pending-work hints = %v, want [%s]", recorder.hints, want)
+	}
+}
+
 func TestListLocalSkills_RejectsNonMember(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -316,6 +352,49 @@ func TestInitiateImportLocalSkill_RequiresRuntimeOwner(t *testing.T) {
 	testHandler.InitiateImportLocalSkill(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestInitiateImportLocalSkill_WakesDaemonAfterValidEnqueue(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	recorder := &runtimeLocalSkillPendingWorkRecorder{}
+	h := *testHandler
+	h.DaemonPendingWork = recorder
+
+	w := httptest.NewRecorder()
+	req := withURLParams(
+		newRequestAsUser(testUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills/import", map[string]any{
+			"skill_key": "review-helper",
+		}),
+		"runtimeId", runtimeID,
+	)
+
+	h.InitiateImportLocalSkill(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	want := runtimeID + ":" + protocol.PendingWorkKindLocalSkillImport
+	if len(recorder.hints) != 1 || recorder.hints[0] != want {
+		t.Fatalf("pending-work hints = %v, want [%s]", recorder.hints, want)
+	}
+
+	w = httptest.NewRecorder()
+	req = withURLParams(
+		newRequestAsUser(testUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills/import", map[string]any{
+			"skill_key": "",
+		}),
+		"runtimeId", runtimeID,
+	)
+	h.InitiateImportLocalSkill(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(recorder.hints) != 1 {
+		t.Fatalf("rejected enqueue must not send another hint, got %v", recorder.hints)
 	}
 }
 

@@ -5,16 +5,18 @@ description: 了解 Multica 的客户端、Go 服务、执行守护进程和共�
 
 Multica 由一个 Go backend、多种客户端和运行在执行电脑上的守护进程组成。PostgreSQL 保存协作数据；守护进程领取 task，并调用本机的 AI 编程工具。
 
+本页聚焦实现，因此正文中的 **task** 指产品 **Run**（运行）背后的内部调度、API 和数据库实体。界面与产品文档统一称为 Run；`TaskService`、`task_id` 等标识为兼容性保持不变。
+
 ```text
 Web / Desktop / Mobile / CLI
-             │
-       HTTP + WebSocket
-             │
-      Go API ───────── PostgreSQL
-             │
-      daemon WebSocket
-             │
-     本机守护进程 ─── AI 编程工具
+ │
+ HTTP + WebSocket
+ │
+ Go API ───────── PostgreSQL
+ │
+ daemon WebSocket
+ │
+ 本机守护进程 ─── AI 编程工具
 ```
 
 面向产品用户的解释见 [Multica 的工作方式](/how-multica-works)。本页关注代码如何分层。
@@ -23,7 +25,7 @@ Web / Desktop / Mobile / CLI
 
 | 目录 | 职责 | 主要技术 |
 | --- | --- | --- |
-| `server/` | API、认证、任务调度、集成、CLI 和守护进程 | Go、Chi、sqlc、gorilla/websocket |
+| `server/` | API、认证、task 调度、集成、CLI 和守护进程 | Go、Chi、sqlc、gorilla/websocket |
 | `apps/web/` | 浏览器客户端和 landing page | Next.js App Router |
 | `apps/desktop/` | 桌面客户端和本机进程管理 | Electron、electron-vite |
 | `apps/mobile/` | 独立的 iOS 客户端 | Expo、React Native |
@@ -45,12 +47,12 @@ Web 和 Desktop 共用三层：
 
 路由、cookie 和 Electron IPC 等平台能力留在应用层。共享页面通过 `NavigationAdapter` 导航，不直接导入 `next/*` 或 `react-router-dom`。
 
-例如，一项 Web 与 Desktop 都需要的 issue 功能通常会涉及：
+例如，一项 Web 与 Desktop 都需要的任务功能通常会涉及：
 
 ```text
-packages/core/issues/      查询、mutation、缓存更新
-packages/views/issues/     页面和业务组件
-apps/web/platform/         Next.js 路由适配
+packages/core/issues/ 查询、mutation、缓存更新
+packages/views/issues/ 页面和业务组件
+apps/web/platform/ Next.js 路由适配
 apps/desktop/.../platform/ Electron 路由适配
 ```
 
@@ -60,7 +62,7 @@ Mobile 不复用这些 React 页面。它可以导入 `@multica/core` 的类型�
 
 服务端数据和客户端状态分开管理：
 
-- **TanStack Query** 保存 issue、智能体、成员、收件箱等服务端数据；
+- **TanStack Query** 保存任务、智能体、成员、收件箱等服务端数据；
 - **Zustand** 保存筛选条件、草稿、弹窗和布局等客户端状态；
 - 当前工作区由路由决定，只在平台层为请求、持久化命名空间和重连做必要镜像；
 - React Context 只传递工作区 ID、导航适配器等平台 plumbing。
@@ -100,20 +102,20 @@ PostgreSQL 是业务数据的权威来源。Redis 是可选组件，用于跨实
 
 Multica 有两条不同的 WebSocket 路径：
 
-- `internal/realtime/` 把 issue、评论、收件箱等变化推送给用户客户端；
+- `internal/realtime/` 把任务、评论、收件箱等变化推送给用户客户端；
 - `internal/daemonws/` 连接守护进程，用于唤醒运行时和执行 daemon RPC。
 
 WebSocket 负责降低延迟，数据库仍然是最终状态。客户端重连后需要通过查询重新校准；守护进程也保留轮询路径，避免一次断线让 queued task 永久停住。
 
 ## 一次执行的代码路径
 
-1. 用户分配 issue、提及智能体，或由自动化触发；
+1. 用户分配任务、提及智能体，或由自动化触发；
 2. `TaskService` 创建 queued task，并通知对应运行时；
 3. 守护进程通过 daemon API 领取 task；
 4. 服务端签发绑定 task 和智能体的临时凭据；
 5. 守护进程准备本地目录，调用 `pkg/agent` 中对应的 provider backend；
 6. 工具在本地运行，守护进程上传进度、消息和最终状态；
-7. 服务端更新 task 与 issue，并通过实时事件刷新客户端。
+7. 服务端更新 task 与任务，并通过实时事件刷新客户端。
 
 provider 适配层统一了不同 AI 编程工具的启动、流式事件、取消和用量数据，但本地目录与会话仍由守护进程管理。
 
@@ -121,7 +123,7 @@ provider 适配层统一了不同 AI 编程工具的启动、流式事件、取�
 
 业务查询必须限定 `workspace_id`，请求进入工作区路由前会检查成员身份。`X-Workspace-ID` 选择当前工作区，但不能替代权限检查。
 
-Issue 的负责人是多态关系，可以指向成员、智能体或小队。新增查询、缓存 key 或实时事件时，都要保留工作区与负责人类型，不能只按资源 ID 假设全局唯一上下文。
+任务的负责人是多态关系，可以指向成员、智能体或小队。新增查询、缓存 key 或实时事件时，都要保留工作区与负责人类型，不能只按资源 ID 假设全局唯一上下文。
 
 ## 接下来
 

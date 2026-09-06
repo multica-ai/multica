@@ -170,6 +170,7 @@ type ShardedStreamRelay struct {
 	streamGeneration []atomic.Uint64
 
 	daemonRuntime DaemonRuntimeDeliverer
+	wecomOutbound WecomOutboundDeliverer
 }
 
 func NewShardedStreamRelay(hub *Hub, writeRDB, readRDB *redis.Client, config ShardedStreamRelayConfig) *ShardedStreamRelay {
@@ -191,6 +192,10 @@ func NewShardedStreamRelay(hub *Hub, writeRDB, readRDB *redis.Client, config Sha
 }
 
 func (r *ShardedStreamRelay) NodeID() string { return r.nodeID }
+
+func (r *ShardedStreamRelay) SetWecomOutboundDeliverer(d WecomOutboundDeliverer) {
+	r.wecomOutbound = d
+}
 
 func (r *ShardedStreamRelay) SetDaemonRuntimeDeliverer(d DaemonRuntimeDeliverer) {
 	r.daemonRuntime = d
@@ -478,7 +483,7 @@ func (r *ShardedStreamRelay) deliverMessage(msg redis.XMessage) {
 	if !ok || ev.Scope == "" || ev.ScopeID == "" {
 		return
 	}
-	deliverEnvelope(r.hub, r.daemonRuntime, ev)
+	deliverEnvelope(r.hub, r.daemonRuntime, r.wecomOutbound, ev)
 }
 
 func (r *ShardedStreamRelay) heartbeatLoop(ctx context.Context) {

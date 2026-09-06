@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1105,6 +1106,11 @@ var detectVersionTimeout = 10 * time.Second
 func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
+	if runtime.GOOS == "windows" {
+		if native := resolveCodeArtsNativeFromShim(runtimeCmd.Path, os.Stat); native != "" {
+			runtimeCmd.Path = native
+		}
+	}
 
 	// outputOwned, not the collector in run_collect_quiet.go, and the difference
 	// is which signal means "the answer is in". A broken CLI (node/bun shim) can

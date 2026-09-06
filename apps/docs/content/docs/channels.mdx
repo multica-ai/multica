@@ -43,7 +43,7 @@ Step-by-step guides:
 1. Multica resolves the Bot to its workspace and agent.
 2. In a group or channel, only messages that explicitly @-mention the Bot continue; DMs need no mention.
 3. Multica verifies the sender's account binding and workspace membership.
-4. The message joins an [agent chat](/chat) session, and a task is created.
+4. The message joins an [agent chat](/chat) session, and a run is created.
 5. The agent's reply goes back to the original DM or thread.
 
 Channel messages that don't @-mention the Bot never trigger the agent and are not added to its conversation context.
@@ -98,7 +98,12 @@ MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
 
 These keys encrypt stored Bot credentials. See [Environment variables](/environment-variables) for how to generate, store, and rotate them. Multica Cloud already has this configured.
 
-WeCom additionally requires a **single backend replica**: its only outbound path is the WebSocket held by one process, so replies produced on another replica are dropped. Run the WeCom-enabled backend unreplicated until cross-replica outbound routing lands.
+WeCom's only outbound path is the WebSocket held by one process, so what happens to a reply produced on a *different* replica depends on the realtime relay:
+
+- **Sharded or dual relay mode** (`REDIS_URL` set — the default with Redis): the reply is forwarded to the replica holding the connection and delivered. Multi-replica WeCom is supported.
+- **Legacy relay mode, or no Redis**: the reply is dropped. Run the WeCom-enabled backend as a single replica in this configuration.
+
+In every mode, a reply produced while *no* replica holds a live connection (all mid-reconnect) is not delivered. It is counted as `multica_wecom_outbound_dropped_total{reason="no_live_connection"}` by the replica that routed it, so the size of that window is measurable; if the loss is unacceptable, a single replica remains the most conservative deployment.
 
 ## Next steps
 

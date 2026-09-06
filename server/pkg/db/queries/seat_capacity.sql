@@ -186,17 +186,6 @@ FROM due
 WHERE outbox.operation_token = due.operation_token
 RETURNING outbox.*;
 
--- name: SeatCapacityOutboxStats :many
-SELECT action,
-       count(*) FILTER (WHERE dead_lettered_at IS NULL)::bigint AS pending_count,
-       count(*) FILTER (WHERE dead_lettered_at IS NOT NULL)::bigint AS dead_lettered_count,
-       COALESCE(
-           EXTRACT(EPOCH FROM now() - min(created_at) FILTER (WHERE dead_lettered_at IS NULL)),
-           0
-       )::double precision AS oldest_pending_age_seconds
-FROM seat_capacity_outbox
-GROUP BY action;
-
 -- name: MarkSeatCapacityIntentDelivered :exec
 UPDATE seat_capacity_outbox
 SET delivered_at = now(),

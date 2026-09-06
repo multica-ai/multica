@@ -47,11 +47,9 @@ import (
 // The test connects to whatever DATABASE_URL points at (default
 // postgres://multica:multica@localhost:5432/multica?sslmode=disable),
 // matching the harness pattern already used in
-// server/internal/handler/handler_test.go and
-// server/internal/metrics/business_sampler_pgsleep_test.go. If
-// Postgres is unreachable the suite skips cleanly, the same way every
-// other live-Postgres test in the repo skips, so CI without a database
-// sees SKIP rather than failure.
+// server/internal/handler/handler_test.go. If Postgres is unreachable the
+// suite skips cleanly, the same way every other live-Postgres test in the
+// repo skips, so CI without a database sees SKIP rather than failure.
 //
 // Each test isolates itself by creating a unique throwaway schema
 // (migrate_test_<timestamp>_<rand>) and using a unique advisory-lock

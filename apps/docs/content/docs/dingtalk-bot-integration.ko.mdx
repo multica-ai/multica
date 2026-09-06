@@ -5,7 +5,7 @@ description: 에이전트를 DingTalk에 연결해 DM이나 그룹 채팅에서 
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-[에이전트](/agents)를 DingTalk에 연결하면 해당 에이전트가 속한 워크스페이스의 멤버는 봇에게 DM을 보내거나, 그룹에서 @ 멘션하거나, `/issue` 명령으로 Multica [태스크](/issues)를 바로 만들 수 있습니다. 대화와 실행 기록은 Multica 워크스페이스에 저장됩니다.
+[에이전트](/agents)를 DingTalk에 연결하면 해당 에이전트가 속한 워크스페이스의 멤버는 봇에게 DM을 보내거나, 그룹에서 @ 멘션하거나, `/issue` 명령으로 Multica [작업](/issues)를 바로 만들 수 있습니다. 대화와 실행 기록은 Multica 워크스페이스에 저장됩니다.
 
 <Callout type="info">
 DingTalk 연동은 [커뮤니티가 유지관리](/community-maintained)하며 공식 지원 SLA는 제공되지 않습니다. 문제가 있으면 [GitHub issues](https://github.com/multica-ai/multica/issues)에 보고해 주세요.
@@ -54,9 +54,9 @@ DingTalk에서 봇에게 DM을 보내거나 그룹에서 @ 멘션해 계정 연�
 
 DM과 그룹 채팅 모두 텍스트와 이미지가 함께 있는 메시지를 지원합니다. PNG, JPEG, GIF, WebP, BMP 형식을 지원하며 메시지당 최대 4장, 이미지당 최대 10 MB까지 보낼 수 있습니다. 파일과 음성 메시지는 아직 지원하지 않습니다.
 
-### `/issue`로 태스크 만들기
+### `/issue`로 작업 만들기
 
-`/issue <제목>` 또는 `/issue <제목>{줄 바꿈}<상세 설명>`을 보내면 새 Multica 태스크가 만들어지고 봇에 연결된 에이전트에 자동으로 할당됩니다. 같은 메시지의 이미지도 첨부 파일로 태스크에 추가됩니다. 일반 대화 메시지와 달리 `/issue` 명령은 Multica의 “[채팅](/chat)”에 기록을 남기지 않습니다.
+`/issue <제목>` 또는 `/issue <제목>{줄 바꿈}<상세 설명>`을 보내면 새 Multica 작업이 만들어지고 봇에 연결된 에이전트에 자동으로 할당됩니다. 같은 메시지의 이미지도 첨부 파일로 작업에 추가됩니다. 일반 대화 메시지와 달리 `/issue` 명령은 Multica의 “[채팅](/chat)”에 기록을 남기지 않습니다.
 
 ### `/new`로 새 Chat 시작하기
 
@@ -94,5 +94,5 @@ API 서비스를 재시작한 뒤 DingTalk에 연결하세요. 이 키는 계속
 ## 다음
 
 - [채팅 연동](/channels) —— Channel 엔진, 세션, 권한 부여 방식
-- [에이전트](/agents) · [Chat](/chat) · [태스크](/issues)
+- [에이전트](/agents) · [Chat](/chat) · [작업](/issues)
 - [환경 변수](/environment-variables) —— 전체 자체 호스팅 설정 참조

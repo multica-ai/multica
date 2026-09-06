@@ -163,3 +163,50 @@ func TestArchiveAllReadInboxUsesNewestIssueRow(t *testing.T) {
 		t.Fatalf("archived rows in unread issue = %d, want the whole group untouched", got)
 	}
 }
+
+func TestArchiveCompletedInboxExpandsCustomTerminalStatuses(t *testing.T) {
+	workspaceID := dbfx.Workspace(t, "Archive custom completed", "archive-custom-completed-"+uuid.NewString())
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+	dbfx.Insert(t, "issue_status", testutil.Cols{
+		"workspace_id": workspaceID,
+		"key":          "verified_complete",
+		"name":         "Verified complete",
+		"category":     "done",
+		"color":        "#22c55e",
+		"is_system":    false,
+		"position":     1,
+	})
+	completedIssueID := dbfx.Issue(t, "Custom completed issue", testutil.Cols{
+		"workspace_id": workspaceID,
+		"status":       "verified_complete",
+	})
+	openIssueID := dbfx.Issue(t, "Open issue", testutil.Cols{
+		"workspace_id": workspaceID,
+		"status":       "todo",
+	})
+	for _, issueID := range []string{completedIssueID, openIssueID} {
+		dbfx.Insert(t, "inbox_item", testutil.Cols{
+			"workspace_id":   workspaceID,
+			"recipient_type": "member",
+			"recipient_id":   testUserID,
+			"type":           "status_changed",
+			"severity":       "info",
+			"issue_id":       issueID,
+			"title":          "Status changed",
+			"archived":       false,
+		})
+	}
+
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ArchiveCompletedInbox),
+		inboxRequest(http.MethodPost, "/api/inbox/archive-completed", workspaceID)).
+		Want(http.StatusOK)
+
+	if got := dbfx.Count(t,
+		"SELECT count(*) FROM inbox_item WHERE issue_id = $1 AND archived = true", completedIssueID); got != 1 {
+		t.Fatalf("archived rows for custom completed issue = %d, want 1", got)
+	}
+	if got := dbfx.Count(t,
+		"SELECT count(*) FROM inbox_item WHERE issue_id = $1 AND archived = true", openIssueID); got != 0 {
+		t.Fatalf("archived rows for open issue = %d, want 0", got)
+	}
+}

@@ -575,50 +575,6 @@ func (q *Queries) PrepareSeatCapacityOperationReleasesForWorkspaceDeletion(ctx c
 	return err
 }
 
-const seatCapacityOutboxStats = `-- name: SeatCapacityOutboxStats :many
-SELECT action,
-       count(*) FILTER (WHERE dead_lettered_at IS NULL)::bigint AS pending_count,
-       count(*) FILTER (WHERE dead_lettered_at IS NOT NULL)::bigint AS dead_lettered_count,
-       COALESCE(
-           EXTRACT(EPOCH FROM now() - min(created_at) FILTER (WHERE dead_lettered_at IS NULL)),
-           0
-       )::double precision AS oldest_pending_age_seconds
-FROM seat_capacity_outbox
-GROUP BY action
-`
-
-type SeatCapacityOutboxStatsRow struct {
-	Action                  string  `json:"action"`
-	PendingCount            int64   `json:"pending_count"`
-	DeadLetteredCount       int64   `json:"dead_lettered_count"`
-	OldestPendingAgeSeconds float64 `json:"oldest_pending_age_seconds"`
-}
-
-func (q *Queries) SeatCapacityOutboxStats(ctx context.Context) ([]SeatCapacityOutboxStatsRow, error) {
-	rows, err := q.db.Query(ctx, seatCapacityOutboxStats)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []SeatCapacityOutboxStatsRow{}
-	for rows.Next() {
-		var i SeatCapacityOutboxStatsRow
-		if err := rows.Scan(
-			&i.Action,
-			&i.PendingCount,
-			&i.DeadLetteredCount,
-			&i.OldestPendingAgeSeconds,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const transitionClaimedSeatCapacityIntent = `-- name: TransitionClaimedSeatCapacityIntent :execrows
 UPDATE seat_capacity_outbox
 SET action = $1,

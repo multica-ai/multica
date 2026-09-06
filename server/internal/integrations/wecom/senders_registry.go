@@ -24,6 +24,10 @@ import (
 )
 
 // sendersRegistry is a goroutine-safe installation_id → wsSender map.
+// SendersRegistry is exported only so boot can mint one before the relay's
+// shard readers start; every method stays unexported.
+type SendersRegistry = sendersRegistry
+
 type sendersRegistry struct {
 	mu    sync.RWMutex
 	byKey map[string]*wsSender
@@ -38,7 +42,7 @@ func newSendersRegistry() *sendersRegistry {
 // same registry into both the wecom ChannelDeps (writer side) and the
 // OutboundReplier (reader side). Kept exported so router.go can wire it
 // without importing an unexported type.
-func NewSendersRegistry() *sendersRegistry { return newSendersRegistry() }
+func NewSendersRegistry() *SendersRegistry { return newSendersRegistry() }
 
 func (r *sendersRegistry) set(id pgtype.UUID, s *wsSender) {
 	r.mu.Lock()

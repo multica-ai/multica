@@ -36,21 +36,21 @@ import {
 import { resolveClickIntent, useOptionalNavigation } from "../../navigation";
 import { createLogger } from "@multica/core/logger";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 
 const apiLogger = createLogger("chat.api");
 
 // IM-style timestamp: today → clock, this year → M/D, else full date.
-function formatChatTime(dateStr: string): string {
+function formatChatTime(dateStr: string, locale: string): string {
   const d = new Date(dateStr);
   const now = new Date();
   if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   }
   if (d.getFullYear() === now.getFullYear()) {
-    return d.toLocaleDateString([], { month: "numeric", day: "numeric" });
+    return d.toLocaleDateString(locale, { month: "numeric", day: "numeric" });
   }
-  return d.toLocaleDateString();
+  return d.toLocaleDateString(locale);
 }
 
 // Collapse a (possibly markdown / multi-line) message into a one-line preview.
@@ -95,6 +95,7 @@ export function ChatThreadList({
   onArchive: (session: ChatSession) => void;
 }) {
   const { t } = useT("chat");
+  const locale = useLocale();
   const wsId = useWorkspaceId();
   // Null-safe slug (not useWorkspacePaths, which throws): the list renders in
   // tests outside a workspace route; without a slug the web modifier-click
@@ -220,7 +221,9 @@ export function ChatThreadList({
     const isConfirmingAction = isConfirmingDelete || isConfirmingStop;
     const titleText = session.title?.trim() || t(($) => $.window.untitled);
     const last = session.last_message ?? null;
-    const timeText = last ? formatChatTime(last.created_at) : formatChatTime(session.updated_at);
+    const timeText = last
+      ? formatChatTime(last.created_at, locale)
+      : formatChatTime(session.updated_at, locale);
 
     // The second line: typing/waiting → failed → preview.
     let previewNode: React.ReactNode;

@@ -2544,6 +2544,67 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestResolveCodexHandshakeTimeouts(t *testing.T) {
+	tests := []struct {
+		name       string
+		opts       ExecOptions
+		wantBase   time.Duration
+		wantThread time.Duration
+	}{
+		{
+			name:       "separate defaults",
+			wantBase:   defaultCodexHandshakeTimeout,
+			wantThread: defaultCodexThreadHandshakeTimeout,
+		},
+		{
+			name:       "legacy global override remains global",
+			opts:       ExecOptions{HandshakeTimeout: 42 * time.Second},
+			wantBase:   42 * time.Second,
+			wantThread: 42 * time.Second,
+		},
+		{
+			name: "dedicated thread override wins",
+			opts: ExecOptions{
+				HandshakeTimeout:       30 * time.Second,
+				ThreadHandshakeTimeout: 75 * time.Second,
+			},
+			wantBase:   30 * time.Second,
+			wantThread: 75 * time.Second,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			base, thread := resolveCodexHandshakeTimeouts(tc.opts)
+			if base != tc.wantBase || thread != tc.wantThread {
+				t.Fatalf("timeouts = (%s, %s), want (%s, %s)", base, thread, tc.wantBase, tc.wantThread)
+			}
+		})
+	}
+}
+
+func TestCodexHandshakeTimeoutFor(t *testing.T) {
+	c := &codexClient{
+		handshakeTimeout:       30 * time.Second,
+		threadHandshakeTimeout: 60 * time.Second,
+	}
+	for _, method := range []string{"thread/start", "thread/resume"} {
+		if got := c.handshakeTimeoutFor(method); got != 60*time.Second {
+			t.Fatalf("handshakeTimeoutFor(%q) = %s, want 60s", method, got)
+		}
+	}
+	for _, method := range []string{"initialize", "thread/name/set", "turn/start"} {
+		if got := c.handshakeTimeoutFor(method); got != 30*time.Second {
+			t.Fatalf("handshakeTimeoutFor(%q) = %s, want 30s", method, got)
+		}
+	}
+	c.threadHandshakeTimeout = 0
+	for _, method := range []string{"thread/start", "thread/resume"} {
+		if got := c.handshakeTimeoutFor(method); got != 30*time.Second {
+			t.Fatalf("zero thread timeout handshakeTimeoutFor(%q) = %s, want base 30s fallback", method, got)
+		}
+	}
+}
+
 func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
@@ -2629,6 +2690,73 @@ func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "secret prompt must not be logged") {
 		t.Fatalf("prompt leaked into lifecycle logs: %s", logs.String())
+	}
+}
+
+func TestCodexExecuteThreadResumeTimeoutUsesThreadBudgetAndLifecycle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`echo 1 > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`sleep 5`+"\n")
+
+	var logs bytes.Buffer
+	backend, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.New(slog.NewJSONHandler(&logs, nil)),
+		TaskID:         "task-thread-resume-timeout",
+		RuntimeID:      "runtime-thread-resume-timeout",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+		Timeout:                   5 * time.Second,
+		HandshakeTimeout:          3 * time.Second,
+		ThreadHandshakeTimeout:    500 * time.Millisecond,
+		SemanticInactivityTimeout: time.Second,
+		ResumeSessionID:           "thr-prior",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" || !strings.Contains(result.Error, "thread/resume did not respond after 500ms") {
+		t.Fatalf("expected thread/resume timeout failure, got %+v", result)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+
+	entries := parseJSONLogEntries(t, logs.String())
+	sent := findCodexLifecyclePhase(t, entries, "thread_resume_sent")
+	failure := findCodexLifecyclePhase(t, entries, "thread_resume_failure")
+	for key, want := range map[string]any{
+		"task_id":    "task-thread-resume-timeout",
+		"runtime_id": "runtime-thread-resume-timeout",
+		"attempt":    float64(1),
+		"method":     "thread/resume",
+	} {
+		if got := sent[key]; got != want {
+			t.Fatalf("sent[%s]=%v, want %v; entry=%v", key, got, want, sent)
+		}
+	}
+	if failure["cleanup_confirmed"] != true || failure["reaped"] != true {
+		t.Fatalf("failure lacks confirmed cleanup/reap: %v", failure)
+	}
+	if failure["retry_safe"] != false || failure["retry_attempted"] != false {
+		t.Fatalf("thread/resume timeout must remain fail-closed: %v", failure)
 	}
 }
 

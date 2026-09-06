@@ -35,7 +35,7 @@ var runtimeUsageCmd = &cobra.Command{
 
 var runtimeActivityCmd = &cobra.Command{
 	Use:   "activity <runtime-id>",
-	Short: "Get hourly task activity for a runtime",
+	Short: "Get hourly run activity for a runtime",
 	Args:  exactArgs(1),
 	RunE:  runRuntimeActivity,
 }
@@ -62,8 +62,8 @@ var runtimeDeleteCmd = &cobra.Command{
 	Short: "Delete a runtime from the workspace",
 	Long: "Delete a runtime registration from the workspace.\n\n" +
 		"By default this refuses when active agents are still bound to the runtime. " +
-		"Pass --cascade to unbind those agents, cancel their queued/running tasks, and delete the runtime. " +
-		"Unbound agents keep their configuration, chats and task history; bind them to another runtime to run them again.",
+		"Pass --cascade to unbind those agents, cancel their queued or active runs, and delete the runtime. " +
+		"Unbound agents keep their configuration, chats and run history; bind them to another runtime to run them again.",
 	Args: exactArgs(1),
 	RunE: runRuntimeDelete,
 }
@@ -96,7 +96,7 @@ func init() {
 	runtimeRenameCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// runtime delete
-	runtimeDeleteCmd.Flags().Bool("cascade", false, "Unbind active agents from the runtime, cancel their tasks, then delete the runtime")
+	runtimeDeleteCmd.Flags().Bool("cascade", false, "Unbind active agents from the runtime, cancel their runs, then delete the runtime")
 	runtimeDeleteCmd.Flags().String("output", "table", "Output format: table or json")
 }
 

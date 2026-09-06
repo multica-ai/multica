@@ -16,10 +16,16 @@ function makeWc(initialLevel = 0) {
 function key(
   k: string,
   mods: Partial<Pick<ShortcutInput, "control" | "meta" | "alt" | "shift">> = {},
+  code = /^[0-9]$/.test(k)
+    ? `Digit${k}`
+    : /^[a-z]$/i.test(k)
+      ? `Key${k.toUpperCase()}`
+      : "",
 ): ShortcutInput {
   return {
     type: "keyDown",
     key: k,
+    code,
     control: false,
     meta: false,
     alt: false,
@@ -143,6 +149,149 @@ describe("handleAppShortcut — reset zoom", () => {
     const wc = makeWc(2);
     expect(handleAppShortcut(key("0"), wc, "darwin")).toBe(false);
     expect(wc.setZoomLevel).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleAppShortcut — direct tab selection (Cmd/Ctrl+1..9)", () => {
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9] as const)(
+    "maps Cmd+%i on macOS",
+    (shortcutKey) => {
+      const wc = makeWc();
+      expect(
+        handleAppShortcut(
+          key(String(shortcutKey), { meta: true }),
+          wc,
+          "darwin",
+        ),
+      ).toEqual({ action: "select-tab", key: shortcutKey });
+      expect(wc.setZoomLevel).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["linux", "win32"] as const)(
+    "maps Ctrl+1..9 on %s",
+    (platform) => {
+      const wc = makeWc();
+      for (let shortcutKey = 1; shortcutKey <= 9; shortcutKey += 1) {
+        expect(
+          handleAppShortcut(
+            key(String(shortcutKey), { control: true }),
+            wc,
+            platform,
+          ),
+        ).toEqual({ action: "select-tab", key: shortcutKey });
+      }
+    },
+  );
+
+  it("does not capture a missing primary modifier or the wrong platform modifier", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("1"), wc, "darwin")).toBe(false);
+    expect(
+      handleAppShortcut(key("1", { control: true }), wc, "darwin"),
+    ).toBe(false);
+    expect(
+      handleAppShortcut(key("1", { meta: true }), wc, "win32"),
+    ).toBe(false);
+  });
+
+  it("accepts layout-required Shift while rejecting secondary modifiers", () => {
+    const wc = makeWc();
+    expect(
+      handleAppShortcut(
+        key("1", { meta: true, shift: true }, "Digit1"),
+        wc,
+        "darwin",
+      ),
+    ).toEqual({ action: "select-tab", key: 1 });
+    expect(
+      handleAppShortcut(key("1", { meta: true, alt: true }), wc, "darwin"),
+    ).toBe(false);
+    expect(
+      handleAppShortcut(
+        key("1", { meta: true, control: true }),
+        wc,
+        "darwin",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not consume logical punctuation from a physical number-row key", () => {
+    const wc = makeWc();
+    expect(
+      handleAppShortcut(
+        key("&", { control: true }, "Digit1"),
+        wc,
+        "win32",
+      ),
+    ).toBe(false);
+    expect(
+      handleAppShortcut(
+        key("ç", { control: true }, "Digit9"),
+        wc,
+        "win32",
+      ),
+    ).toBe(false);
+    expect(wc.setZoomLevel).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9] as const)(
+    "maps Numpad%i when its logical key is numeric",
+    (shortcutKey) => {
+      const wc = makeWc();
+      expect(
+        handleAppShortcut(
+          key(
+            String(shortcutKey),
+            { control: true },
+            `Numpad${shortcutKey}`,
+          ),
+          wc,
+          "linux",
+        ),
+      ).toEqual({ action: "select-tab", key: shortcutKey });
+    },
+  );
+
+  it("does not consume a nonnumeric numpad key", () => {
+    const wc = makeWc();
+    expect(
+      handleAppShortcut(
+        key("End", { control: true }, "Numpad1"),
+        wc,
+        "win32",
+      ),
+    ).toBe(false);
+  });
+
+  it("uses a logical digit even when the physical key was remapped", () => {
+    const wc = makeWc();
+    expect(
+      handleAppShortcut(
+        key("1", { meta: true }, "KeyA"),
+        wc,
+        "darwin",
+      ),
+    ).toEqual({ action: "select-tab", key: 1 });
+  });
+
+  it("swallows auto-repeat without issuing another selection", () => {
+    const wc = makeWc();
+    expect(
+      handleAppShortcut(
+        { ...key("9", { meta: true }), isAutoRepeat: true },
+        wc,
+        "darwin",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps Cmd/Ctrl+0 assigned to zoom reset", () => {
+    const wc = makeWc(2);
+    expect(handleAppShortcut(key("0", { meta: true }), wc, "darwin")).toBe(
+      true,
+    );
+    expect(wc.currentLevel()).toBe(0);
   });
 });
 

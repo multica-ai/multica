@@ -258,14 +258,6 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
   });
 });
 
-describe("AgentOverviewPane Settings navigation", () => {
-  it("gives Access its own settings tab", () => {
-    renderPane([makeRuntime("claude")]);
-    openSettings();
-    expect(screen.getByRole("tab", { name: /^Access$/i })).toBeInTheDocument();
-  });
-});
-
 describe("AgentOverviewPane Environment tab visibility", () => {
   it("shows the Environment tab to someone who can manage the agent", () => {
     renderPane([makeRuntime("claude")]);

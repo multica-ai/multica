@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/url"
 	"os"
+	"reflect"
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/dbstartup"
 )
@@ -36,6 +37,46 @@ const (
 	// Both values are overridable via DATABASE_MAX_CONNS / DATABASE_MIN_CONNS.
 	defaultMaxConns int32 = 25
 	defaultMinConns int32 = 5
+
+	// The optional replica has its own connection budget. Ten connections allow
+	// a small burst of the first Dashboard aggregation workload without cloning
+	// the primary's 25-connection ceiling. MinConns=0 avoids idle connections
+	// before any business opts into replica reads.
+	defaultReplicaMaxConns int32 = 10
+	defaultReplicaMinConns int32 = 0
+
+	// pgx validates target_session_attrs only when a connection is established.
+	// Five minutes bounds how long a pooled replica connection can survive a
+	// promotion without being revalidated, instead of pgx's one-hour default.
+	defaultReplicaMaxConnLifetime = 5 * time.Minute
+)
+
+type dbPoolSizing struct {
+	maxConnsEnv            string
+	minConnsEnv            string
+	defaultMaxConns        int32
+	defaultMinConns        int32
+	defaultMaxConnLifetime time.Duration
+	allowZeroMin           bool
+	requireReadOnly        bool
+}
+
+var (
+	primaryPoolSizing = dbPoolSizing{
+		maxConnsEnv:     "DATABASE_MAX_CONNS",
+		minConnsEnv:     "DATABASE_MIN_CONNS",
+		defaultMaxConns: defaultMaxConns,
+		defaultMinConns: defaultMinConns,
+	}
+	replicaPoolSizing = dbPoolSizing{
+		maxConnsEnv:            "DATABASE_REPLICA_MAX_CONNS",
+		minConnsEnv:            "DATABASE_REPLICA_MIN_CONNS",
+		defaultMaxConns:        defaultReplicaMaxConns,
+		defaultMinConns:        defaultReplicaMinConns,
+		defaultMaxConnLifetime: defaultReplicaMaxConnLifetime,
+		allowZeroMin:           true,
+		requireReadOnly:        true,
+	}
 )
 
 // newDBPool builds a pgxpool with sane production defaults and env overrides.
@@ -54,34 +95,73 @@ const (
 // pgx's own built-in default (max(4, NumCPU)) is intentionally NOT used as a
 // fallback — it is the value that caused the prod incident.
 func newDBPool(ctx context.Context, dbURL string, connectTimeout time.Duration) (*pgxpool.Pool, error) {
+	return newSizedDBPool(ctx, dbURL, connectTimeout, primaryPoolSizing)
+}
+
+func newReplicaDBPool(ctx context.Context, dbURL string, connectTimeout time.Duration) (*pgxpool.Pool, error) {
+	return newSizedDBPool(ctx, dbURL, connectTimeout, replicaPoolSizing)
+}
+
+func newSizedDBPool(ctx context.Context, dbURL string, connectTimeout time.Duration, sizing dbPoolSizing) (*pgxpool.Pool, error) {
 	cfg, err := dbstartup.ParsePoolConfig(dbURL, connectTimeout)
 	if err != nil {
 		return nil, err
 	}
+	applyPoolSizing(cfg, dbURL, sizing)
+	return pgxpool.NewWithConfig(ctx, cfg)
+}
 
+func applyPoolSizing(cfg *pgxpool.Config, dbURL string, sizing dbPoolSizing) {
 	urlParams := poolParamsFromURL(dbURL)
+	if sizing.requireReadOnly {
+		// Standby validation is stricter than read-only validation, so preserve
+		// an operator's explicit target_session_attrs=standby. Every other value
+		// is replaced with read-only to keep the replica contract fail-closed.
+		if !sameValidateConnect(
+			cfg.ConnConfig.Config.ValidateConnect,
+			pgconn.ValidateConnectTargetSessionAttrsStandby,
+		) {
+			cfg.ConnConfig.Config.ValidateConnect = pgconn.ValidateConnectTargetSessionAttrsReadOnly
+		}
+	}
+	if sizing.defaultMaxConnLifetime > 0 && !urlParams["pool_max_conn_lifetime"] {
+		cfg.MaxConnLifetime = sizing.defaultMaxConnLifetime
+	}
 
 	// Compute the non-env fallback first: honor URL pool_* params if the
 	// operator set them, otherwise use our code default. This fallback is
 	// also what an *invalid* env value falls back to — never pgx's built-in
 	// default of 4/0, which is the value that caused the prod incident.
-	maxFallback := defaultMaxConns
+	maxFallback := sizing.defaultMaxConns
 	if urlParams["pool_max_conns"] {
 		maxFallback = cfg.MaxConns
 	}
-	cfg.MaxConns = envInt32("DATABASE_MAX_CONNS", maxFallback)
+	cfg.MaxConns = envInt32(sizing.maxConnsEnv, maxFallback)
 
-	minFallback := defaultMinConns
+	minFallback := sizing.defaultMinConns
 	if urlParams["pool_min_conns"] {
 		minFallback = cfg.MinConns
 	}
-	cfg.MinConns = envInt32("DATABASE_MIN_CONNS", minFallback)
+	if sizing.allowZeroMin {
+		cfg.MinConns = envNonNegativeInt32(sizing.minConnsEnv, minFallback)
+	} else {
+		cfg.MinConns = envInt32(sizing.minConnsEnv, minFallback)
+	}
 
 	if cfg.MinConns > cfg.MaxConns {
 		cfg.MinConns = cfg.MaxConns
 	}
+}
 
-	return pgxpool.NewWithConfig(ctx, cfg)
+func sameValidateConnect(got, want pgconn.ValidateConnectFunc) bool {
+	if got == nil || want == nil {
+		return got == nil && want == nil
+	}
+	// pgx exposes its parsed target_session_attrs choice only as this callback.
+	// Comparing the URL would miss PGTARGETSESSIONATTRS and service-file input.
+	// Value.Pointer is not a general unique function identity guarantee; use it
+	// narrowly for pgx's distinct package-level validator functions.
+	return reflect.ValueOf(got).Pointer() == reflect.ValueOf(want).Pointer()
 }
 
 // poolParamsFromURL returns the set of pool_* query params present on the
@@ -116,13 +196,28 @@ func envInt32(name string, def int32) int32 {
 	return int32(v)
 }
 
+func envNonNegativeInt32(name string, def int32) int32 {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || v < 0 {
+		slog.Warn("invalid env var, using default",
+			"name", name, "value", raw, "default", def, "error", err)
+		return def
+	}
+	return int32(v)
+}
+
 // logPoolConfig prints the effective pgxpool configuration once at startup.
 // Surfacing this is critical because pgxpool defaults are surprisingly small
 // (MaxConns = max(4, NumCPU)) — without seeing the value in the log it's
 // easy to mistake pool exhaustion for "the database is slow".
-func logPoolConfig(pool *pgxpool.Pool) {
+func logPoolConfig(role string, pool *pgxpool.Pool) {
 	cfg := pool.Config()
 	slog.Info("db pool config",
+		"role", role,
 		"max_conns", cfg.MaxConns,
 		"min_conns", cfg.MinConns,
 		"max_conn_lifetime", cfg.MaxConnLifetime.String(),
@@ -137,7 +232,7 @@ func logPoolConfig(pool *pgxpool.Pool) {
 // exhaustion (a request had to wait because no idle conn was available) and
 // the smoking gun we're looking for to confirm the slow /tasks/claim
 // hypothesis.
-func runDBStatsLogger(ctx context.Context, pool *pgxpool.Pool) {
+func runDBStatsLogger(ctx context.Context, role string, pool *pgxpool.Pool) {
 	ticker := time.NewTicker(dbStatsInterval)
 	defer ticker.Stop()
 
@@ -169,6 +264,7 @@ func runDBStatsLogger(ctx context.Context, pool *pgxpool.Pool) {
 		}
 
 		fields := []any{
+			"role", role,
 			"max_conns", s.MaxConns(),
 			"total_conns", s.TotalConns(),
 			"acquired_conns", s.AcquiredConns(),
@@ -191,34 +287,4 @@ func runDBStatsLogger(ctx context.Context, pool *pgxpool.Pool) {
 		lastAcquireDur = s.AcquireDuration()
 		lastCanceled = s.CanceledAcquireCount()
 	}
-}
-
-// samplerMaxConns is the cap for the dedicated /metrics sampler pool. The
-// sampler issues at most one acquire per scrape and Prometheus typically
-// scrapes once per 15s — two connections is plenty for two replicas
-// scraping in parallel without ever competing with the main pool.
-const samplerMaxConns int32 = 2
-
-// newSamplerDBPool builds a tiny pgxpool aimed exclusively at the
-// BusinessSamplerCollector. Keeping it isolated from the main pool means a
-// stalled sampler scrape can never starve business traffic — the worst
-// case is the next /metrics returning stale numbers, which is exactly the
-// safety contract documented on BusinessSamplerOptions.
-//
-// The pool is built from the same DATABASE_URL as the main pool so it
-// hits the same database; the sizing knobs (DATABASE_MAX_CONNS et al.) on
-// the main pool are intentionally NOT honored here. A sampler that grew
-// to 25 connections per replica during an incident would defeat the
-// purpose of running it on a separate pool in the first place.
-func newSamplerDBPool(ctx context.Context, dbURL string) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(dbURL)
-	if err != nil {
-		return nil, fmt.Errorf("parse database url for sampler: %w", err)
-	}
-	cfg.MaxConns = samplerMaxConns
-	cfg.MinConns = 0
-	// A dedicated short-lived idle window — the sampler runs every
-	// scrape (~15s) so connections shouldn't sit warm forever.
-	cfg.MaxConnIdleTime = 5 * time.Minute
-	return pgxpool.NewWithConfig(ctx, cfg)
 }

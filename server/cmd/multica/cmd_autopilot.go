@@ -127,7 +127,7 @@ func init() {
 
 	// create
 	autopilotCreateCmd.Flags().String("title", "", "Autopilot title (required)")
-	autopilotCreateCmd.Flags().String("description", "", "Autopilot description (used as task prompt)")
+	autopilotCreateCmd.Flags().String("description", "", "Autopilot description (used as the run prompt)")
 	autopilotCreateCmd.Flags().String("agent", "", "Assignee agent (name or ID) — required")
 	autopilotCreateCmd.Flags().String("mode", "", "Execution mode: create_issue or run_only (required)")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")

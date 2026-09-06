@@ -55,6 +55,17 @@ SELECT * FROM skill_file
 WHERE skill_id = $1
 ORDER BY path ASC;
 
+-- name: ListSkillFilesBySkillIDs :many
+-- Batch variant of ListSkillFiles: loads every file for a set of skills in one
+-- round trip so LoadAgentSkills doesn't issue one query per skill on the
+-- task-claim hot path. Ordered by skill_id so the caller can group in a single
+-- linear pass. Like ListSkillFiles it returns full file bodies — callers that
+-- only need metadata must use ListSkillFileMetadata instead. Uses
+-- idx_skill_file_skill.
+SELECT * FROM skill_file
+WHERE skill_id = ANY(sqlc.arg('skill_ids')::uuid[])
+ORDER BY skill_id, path ASC;
+
 -- name: ListSkillFileMetadata :many
 -- Metadata-only variant of ListSkillFiles: path, byte size and content hash
 -- without the body. Same reason as ListSkillSummariesByWorkspace — a skill
@@ -101,6 +112,20 @@ DELETE FROM skill_file WHERE skill_id = $1;
 SELECT s.* FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1 AND ask.enabled = TRUE
+ORDER BY s.name ASC;
+
+-- name: ListAgentSkillsByIDs :many
+-- Scoped variant of ListAgentSkills: the same junction predicate, narrowed to
+-- a set of requested skill IDs. The skill-bundle resolve path asks for one
+-- skill per request, so loading the agent's whole set there costs a full read
+-- and hash of every skill on every request. The junction predicate is also the
+-- authorization: an ID the agent does not have enabled simply returns no row,
+-- which the caller reports as not-found.
+SELECT s.* FROM skill s
+JOIN agent_skill ask ON ask.skill_id = s.id
+WHERE ask.agent_id = $1
+  AND ask.enabled = TRUE
+  AND s.id = ANY(sqlc.arg('skill_ids')::uuid[])
 ORDER BY s.name ASC;
 
 -- name: ListAgentSkillSummaries :many

@@ -41,20 +41,22 @@ export function ServiceTierSettingField({
   const modelsQuery = useQuery(
     runtimeModelsOptions(runtimeOnline ? runtimeId : null),
   );
-  const entry = findModelCapabilityEntry(
-    modelsQuery.data?.models ?? [],
-    model,
-    provider,
-  );
+  const models = modelsQuery.data?.models ?? [];
+  const entry = findModelCapabilityEntry(models, model, provider);
   const tiers = entry?.service_tiers ?? [];
+  const supportsExplicitStandard = models.some(
+    (candidate) =>
+      candidate.supports_explicit_standard_service_tier === true,
+  );
 
-  if (tiers.length === 0 && !value) return null;
+  if (tiers.length === 0 && !supportsExplicitStandard && !value) return null;
 
   return (
     <SettingsRow label={label} size="select-wide">
       <ServiceTierPicker
         value={value}
         tiers={tiers}
+        supportsExplicitStandard={supportsExplicitStandard}
         canEdit={canEdit}
         onChange={onChange}
       />
@@ -65,17 +67,33 @@ export function ServiceTierSettingField({
 function ServiceTierPicker({
   value,
   tiers,
+  supportsExplicitStandard,
   canEdit,
   onChange,
 }: {
   value: string;
   tiers: RuntimeModelServiceTier[];
+  supportsExplicitStandard: boolean;
   canEdit: boolean;
   onChange: (next: string) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
-  const selected = value ? tiers.find((tier) => tier.id === value) : undefined;
+  const availableTiers = supportsExplicitStandard
+    ? [
+          {
+            id: "default",
+            name: t(($) => $.pickers.service_tier_standard),
+            description: t(
+              ($) => $.pickers.service_tier_standard_description,
+            ),
+          },
+          ...tiers.filter((tier) => tier.id !== "default"),
+      ]
+    : tiers;
+  const selected = value
+    ? availableTiers.find((tier) => tier.id === value)
+    : undefined;
   const triggerLabel =
     selected?.name || value || t(($) => $.pickers.service_tier_default);
   const triggerTitle = t(($) => $.pickers.service_tier_tooltip, {
@@ -125,7 +143,7 @@ function ServiceTierPicker({
         </>
       }
     >
-      {tiers.map((tier) => (
+      {availableTiers.map((tier) => (
         <PickerItem
           key={tier.id}
           selected={tier.id === value}

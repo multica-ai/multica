@@ -95,10 +95,9 @@ jobs:
               # mode for everyone with no error anywhere, so a change to the
               # frontend half must run the backend suite.
               - 'packages/core/runtimes/cli-version.ts'
-              # internal/daemon/agent_command_names_test.go reads both of
-              # these as test inputs; the guard script is additionally the
-              # entry point scripts/test-go.sh runs, and the names file is
-              # the data that guard consumes.
+              # internal/daemon/agent_command_names_test.go exercises the
+              # guard script; scripts/test-go.sh also uses it as the backend
+              # test entry point, and the script reads the command names file.
               - 'scripts/agent-cli-command-names.txt'
               - 'scripts/go-test-with-agent-cli-guard.sh'
               - 'scripts/helm-config.test.sh'
@@ -522,6 +521,16 @@ jobs:
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go build ./...
 
+      # The `agentintegration` files execute real agent CLIs, so no CI job runs
+      # them. Nothing compiled them either, which let them rot silently: a
+      # helper renamed in an ordinary test file, or two branches each defining
+      # the same helper in one package, breaks the tagged build with every
+      # untagged job still green. vet type-checks test files, so this is the
+      # cheapest gate that keeps them honest without needing an agent CLI.
+      - name: Vet tag-gated agent integration tests
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: cd server && go vet -tags agentintegration ./...
+
       - name: Run migrations
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go run ./cmd/migrate up
@@ -655,7 +664,7 @@ jobs:
         # still reports cleanup as unconfirmed, and that a descendant holding
         # inherited stdout neither keeps Result blocked nor survives cleanup.
         # -v makes RUN/PASS evidence explicit in CI logs.
-        run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree)$' -count=1 -timeout=5m
+        run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree|TestCodeArtsWindowsCancellationTerminatesDescendants)$' -count=1 -timeout=5m
 
       - name: Test bounded CLI output collection on Windows
         if: ${{ needs.changes.outputs.backend == 'true' }}
@@ -671,6 +680,19 @@ jobs:
         # -v so a skip (a -run pattern that stops matching) is visible in the log
         # instead of passing as "ok".
         run: go test ./pkg/agent -v -run '^TestWindowsRunCollect' -count=1 -timeout=5m
+
+      - name: Test Windows Pi session lock leaves the transcript readable
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        # #7840: the session lock claimed the transcript itself, and Windows
+        # byte-range locks are mandatory. Pi's own read of the file we hand it
+        # through --session failed with EBUSY, so every Pi/omp task on Windows
+        # died ~0.5s after launch. Unix flock is advisory and never reproduces
+        # it, which is exactly how the regression shipped; the tests are
+        # windows-tagged and therefore run nowhere else today.
+        # -v so a skip (a -run pattern that stops matching) is visible in the
+        # log instead of passing as "ok".
+        run: go test ./pkg/agent -v -run '^TestPiSessionFileLock' -count=1 -timeout=5m
 
       - name: Test Windows OpenClaw npm shim interpreter resolution
         if: ${{ needs.changes.outputs.backend == 'true' }}

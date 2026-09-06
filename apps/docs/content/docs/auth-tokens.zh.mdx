@@ -28,7 +28,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 完整值无法找回，丢失时吊销旧令牌并创建新的。
 
 <Callout type="warning">
-不要把 PAT 写入仓库、issue、评论、截图或日志，也不要直接放进会被保存的 shell 命令中。
+不要把 PAT 写入仓库、任务、评论、截图或日志，也不要直接放进会被保存的 shell 命令中。
 </Callout>
 
 ## CLI 与 PAT
@@ -56,15 +56,15 @@ multica login --token
 export MULTICA_TOKEN='mul_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
 
 curl https://api.multica.ai/api/me \
-  -H "Authorization: Bearer $MULTICA_TOKEN"
+ -H "Authorization: Bearer $MULTICA_TOKEN"
 ```
 
 调用工作区级 API 时，还需要按接口要求提供工作区：
 
 ```bash
 curl https://api.multica.ai/api/issues \
-  -H "Authorization: Bearer $MULTICA_TOKEN" \
-  -H "X-Workspace-ID: $MULTICA_WORKSPACE_ID"
+ -H "Authorization: Bearer $MULTICA_TOKEN" \
+ -H "X-Workspace-ID: $MULTICA_WORKSPACE_ID"
 ```
 
 脚本中的令牌取自 secret manager 或受保护的环境变量，不要硬编码。自托管实例把域名替换为自己的公开 API 地址。
@@ -77,7 +77,7 @@ curl https://api.multica.ai/api/issues \
 
 ## 智能体执行的临时令牌
 
-守护进程领取 task 后，服务器会为这次执行创建一个以 `mat_` 开头的临时令牌。它绑定当前用户、工作区、智能体和 task，最长有效 24 小时，并在 task 结束时清理。
+守护进程领取运行后，服务器会为这次执行创建一个以 `mat_` 开头的临时令牌。它绑定当前用户、工作区、智能体和运行，最长有效 24 小时，并在运行结束时清理。
 
 守护进程把这个临时令牌注入 AI 编程工具，而不是把用户 PAT 交给智能体。因此，智能体发出的请求会记录为智能体行为，也不能借此调用只允许用户或 owner 执行的敏感操作。
 

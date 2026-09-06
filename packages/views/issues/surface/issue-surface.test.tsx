@@ -77,6 +77,7 @@ vi.mock("@multica/core/auth", () => ({
 }));
 
 vi.mock("../../i18n", () => ({
+  useLocale: () => "en",
   // TableView also reads `i18n.language` for its date formatting.
   useT: () => ({ t: mockTranslate, i18n: { language: "en" } }),
   useTimeAgo: () => () => "now",

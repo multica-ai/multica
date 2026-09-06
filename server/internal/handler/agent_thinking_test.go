@@ -759,7 +759,7 @@ func TestAcpThinkingDecision(t *testing.T) {
 	withCatalog := func(t *testing.T, models []ModelEntry) *Handler {
 		t.Helper()
 		cache := NewInMemoryModelCatalogCache()
-		if err := cache.Put(ctx, uuidToString(runtimeID), models, true); err != nil {
+		if err := cache.Put(ctx, uuidToString(runtimeID), models, nil, true); err != nil {
 			t.Fatalf("seed catalog: %v", err)
 		}
 		return &Handler{ModelCatalogCache: cache}

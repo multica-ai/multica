@@ -54,20 +54,20 @@ multica daemon restart
 multica config show
 ```
 
-## Issue 未开始执行
+## 任务未开始执行
 
-打开 issue 的**执行日志**，先看执行任务的当前状态和等待原因。
+打开任务的**执行日志**，先看运行的当前状态和等待原因。
 
 ### `queued` 状态
 
-`queued` 表示执行任务还在等待运行时领取。依次检查：
+`queued` 表示运行还在等待运行时领取。依次检查：
 
 1. 智能体绑定的运行时是否在线；
 2. 运行时是否检测到了该智能体配置的 AI 编程工具；
 3. 智能体是否还有可用并发额度；
 4. 守护进程是否还有全局执行容量。
 
-智能体默认最多同时执行 6 条执行任务；单个守护进程默认最多同时执行 20 条。达到上限时，新执行任务会留在队列中，等已有执行结束后再开始。运行时离线时，执行任务也会继续排队；只有该运行时心跳缺席超过重连宽限期、且该执行任务自己也已等满这么久时才会失败；所以排在忙碌运行时后面的长队列不会因为等太久而被判失败，指派给已经离线的机器时也仍然留有完整一个宽限期把它唤醒。
+智能体默认最多同时执行 6 次运行；单个守护进程默认最多同时执行 20 次。达到上限时，新运行会留在队列中，等已有执行结束后再开始。运行时离线时，运行也会继续排队；只有该运行时心跳缺席超过重连宽限期、且该运行自己也已等满这么久时才会失败；所以排在忙碌运行时后面的长队列不会因为等太久而被判失败，指派给已经离线的机器时也仍然留有完整一个宽限期把它唤醒。
 
 ```bash
 multica daemon status --output json
@@ -79,11 +79,11 @@ multica issue runs <issue-id>
 
 ### `waiting_local_directory` 状态
 
-这表示另一条在途执行任务正在使用同一个本地目录。Multica 会等待目录锁释放，避免两个智能体同时修改同一份文件。
+这表示另一条在途运行正在使用同一个本地目录。Multica 会等待目录锁释放，避免两个智能体同时修改同一份文件。
 
-这种等待只存在于目录的 `in_place`（“原地”）模式。如果这个目录是 git 仓库，把资源切到 `worktree`（“并行”）就没有队列了：每条任务拿到自己的 worktree，并以分支形式交回结果，谁都不用等谁。见[项目资源](/project-resources#任务如何共享这个目录)。
+这种等待只存在于目录的 `in_place`（“原地”）模式。如果这个目录是 git 仓库，把资源切到 `worktree`（“并行”）就没有队列了：每次运行拿到自己的 worktree，并以分支形式交回结果，谁都不用等谁。见[项目资源](/project-resources#task-如何共享这个目录)。
 
-否则通常只需等前一条执行任务结束。若前一条已经卡住，可以从它的执行日志中停止；也可以为当前智能体选择其他本地目录。这个目录互斥由守护进程在内存中维护，不写磁盘锁文件；怀疑锁状态异常时运行 `multica daemon restart` 即可释放，没有需要手动删除的文件。
+否则通常只需等前一次运行结束。若前一次已经卡住，可以从它的执行日志中停止；也可以为当前智能体选择其他本地目录。这个目录互斥由守护进程在内存中维护，不写磁盘锁文件；怀疑锁状态异常时运行 `multica daemon restart` 即可释放，没有需要手动删除的文件。
 
 ## AI 编程工具启动失败
 
@@ -95,11 +95,11 @@ multica issue runs <issue-id>
 - 本地工作目录是否存在并且可写；
 - 智能体的自定义参数或环境变量是否有效。
 
-先在执行电脑的终端中直接运行同一款工具。工具自身也无法开始时，先修复工具登录或配置，再从执行日志重试执行任务。
+先在执行电脑的终端中直接运行同一款工具。工具自身也无法开始时，先修复工具登录或配置，再从执行日志重试运行。
 
 ## 实时更新失效
 
-任务仍能执行、但评论和状态不能实时出现，通常是 WebSocket 没有连通。
+运行仍能执行、但评论和状态不能实时出现，通常是 WebSocket 没有连通。
 
 在浏览器开发者工具的 **Network → WS** 中查看 `/ws` 连接。自托管部署重点检查：
 
@@ -136,7 +136,7 @@ curl -fsS <server-url>/health
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs backend \
-  | grep "EmailService:"
+ | grep "EmailService:"
 ```
 
 - **DEV mode**：邮件不会发出，验证码和邀请链接只写入 backend 日志；
@@ -162,7 +162,7 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 
 ## 用量（Usage）为 0
 
-Usage 页面读取按小时汇总的数据，不直接读取每条执行任务的原始用量。先确认原始数据和汇总表：
+Usage 页面读取按小时汇总的数据，不直接读取每次运行的原始用量。先确认原始数据和汇总表：
 
 ```sql
 SELECT count(*) FROM task_usage;
@@ -201,8 +201,8 @@ DATABASE_URL='postgres://...' go run ./cmd/backfill_task_usage_hourly
 本地常用端口包括 API 的 `8080`、Web 的 `3000` 和守护进程健康检查端口。先找出占用者：
 
 ```bash
-lsof -nP -iTCP:8080 -sTCP:LISTEN   # macOS / Linux
-netstat -ano | findstr :8080       # Windows
+lsof -nP -iTCP:8080 -sTCP:LISTEN # macOS / Linux
+netstat -ano | findstr :8080 # Windows
 ```
 
 如果它是另一个 Multica checkout，先在那个目录运行 `make stop`。否则正常停止占用端口的程序，或修改当前服务端口。公网 80/443 由 Caddy、Nginx 等反向代理监听。
@@ -228,10 +228,10 @@ multica daemon stop
 multica daemon start --foreground
 ```
 
-仍然无法定位时，到 [GitHub Issues](https://github.com/multica-ai/multica/issues) 搜索已有问题或提交新的 issue。
+仍然无法定位时，到 [GitHub 任务](https://github.com/multica-ai/multica/issues) 搜索已有问题或提交新的任务。
 
 ## 接下来
 
 - [守护进程与运行时](/daemon-runtimes) — 运行时注册与在线状态机制。
-- [执行任务](/tasks) — 状态、超时与失败原因参考。
+- [运行](/tasks) — 状态、超时与失败原因参考。
 - [环境变量](/environment-variables) — 自托管配置的完整参考。

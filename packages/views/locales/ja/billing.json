@@ -175,8 +175,8 @@
     "limits": {
       "title": "使用量と上限",
       "description": "上限と使用量は、サーバーの現在の entitlement とクォータ集計に基づきます。",
-      "issues": "Issue 数",
-      "issues_description": "現在の Issue 使用量とサーバーから返された有効な上限です。",
+      "issues": "タスク数",
+      "issues_description": "現在のタスク使用量とサーバーから返された有効な上限です。",
       "autopilots": "自動化の実行",
       "autopilots_description": "現在の自動化使用量とサーバーから返されたリセット時刻です。",
       "unlimited": "無制限",

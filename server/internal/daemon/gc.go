@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -320,21 +321,41 @@ func (d *Daemon) gcWorkspaceIssues(ctx context.Context, workspaceID string, cand
 // reconciliation request is in flight.
 func (d *Daemon) applyGCAction(taskDir string, action gcAction, stats *gcStats) int {
 	if action != gcActionSkip {
+		if _, err := d.gcTaskDirOwner(taskDir); err != nil {
+			d.logger.Warn("gc: refusing to mutate unowned task directory", "dir", taskDir, "error", err)
+			stats.skipped++
+			return 0
+		}
 		release, ok := d.reserveEnvRootForGC(taskDir)
 		if !ok {
 			stats.skipped++
 			return 0
 		}
 		defer release()
+		// Re-read provenance after taking the exclusion lock so a concurrent
+		// reset cannot change ownership between validation and mutation.
+		if _, err := d.gcTaskDirOwner(taskDir); err != nil {
+			d.logger.Warn("gc: refusing to mutate task directory after ownership changed", "dir", taskDir, "error", err)
+			stats.skipped++
+			return 0
+		}
 	}
 	switch action {
 	case gcActionClean:
-		bytes := d.cleanTaskDir(taskDir)
+		bytes, removed := d.cleanTaskDir(taskDir)
+		if !removed {
+			stats.skipped++
+			return 0
+		}
 		stats.cleaned++
 		stats.bytesReclaimed += bytes
 		return 1
 	case gcActionOrphan:
-		bytes := d.cleanTaskDir(taskDir)
+		bytes, removed := d.cleanTaskDir(taskDir)
+		if !removed {
+			stats.skipped++
+			return 0
+		}
 		stats.orphaned++
 		stats.bytesReclaimed += bytes
 		return 1
@@ -393,6 +414,10 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 
 	meta, err := execenv.ReadGCMeta(taskDir)
 	if err != nil {
+		if _, ownerErr := d.gcTaskDirOwner(taskDir); ownerErr != nil {
+			d.logger.Warn("gc: skipping directory without valid task ownership", "dir", taskDir, "error", ownerErr)
+			return gcActionSkip
+		}
 		return d.orphanByMTime(taskDir, "no meta")
 	}
 
@@ -814,23 +839,60 @@ func isAgentTaskTerminal(status string) bool {
 	}
 }
 
-// cleanTaskDir removes a task directory, logs the reclaimed bytes, and returns
-// that count for the cycle summary. A failed removal reports zero reclaimed.
-func (d *Daemon) cleanTaskDir(taskDir string) int64 {
-	bytes := dirSize(taskDir)
-	owner, ownerErr := execenv.ReadEnvRootOwner(taskDir)
+// gcTaskDirOwner returns authoritative provenance only when both the marker
+// and its position under WorkspacesRoot agree. Missing GC metadata is not
+// ownership proof: partially prepared roots have .task_owner, while arbitrary
+// user directories do not.
+func (d *Daemon) gcTaskDirOwner(taskDir string) (*execenv.EnvRootOwner, error) {
+	owner, err := execenv.ReadEnvRootOwner(taskDir)
+	if err != nil {
+		return nil, fmt.Errorf("read task owner: %w", err)
+	}
+	if owner == nil {
+		return nil, errors.New("task owner is missing")
+	}
+	validated := *owner
+	if validated.WorkspaceID == "" && validated.TaskID != "" {
+		// Legacy owner markers contain only the task ID. Completion metadata can
+		// supply the missing workspace identity without weakening the hard
+		// requirement that a Prepare-time owner marker exists.
+		meta, metaErr := execenv.ReadGCMeta(taskDir)
+		if metaErr != nil || strings.TrimSpace(meta.WorkspaceID) == "" {
+			return nil, errors.New("legacy task owner has no workspace identity or valid GC metadata")
+		}
+		validated.WorkspaceID = strings.TrimSpace(meta.WorkspaceID)
+	}
+	if err := execenv.ValidateEnvRootOwnerPath(d.cfg.WorkspacesRoot, taskDir, validated); err != nil {
+		return nil, err
+	}
+	return &validated, nil
+}
+
+// cleanTaskDir removes a proven daemon-owned task directory, logs the
+// reclaimed bytes, and returns that count for the cycle summary. A failed or
+// refused removal reports removed=false.
+func (d *Daemon) cleanTaskDir(taskDir string) (bytes int64, removed bool) {
+	// Measure first, prove ownership second. dirSize walks the entire tree,
+	// which on a large task directory takes long enough for the validated
+	// directory to be replaced underneath us — checking before that walk would
+	// hand RemoveAll a path last proven ours tens of seconds earlier. This is
+	// the defense-in-depth check, so it sits immediately before the removal.
+	bytes = dirSize(taskDir)
+	owner, ownerErr := d.gcTaskDirOwner(taskDir)
+	if ownerErr != nil {
+		d.logger.Warn("gc: refusing to remove unowned task directory", "dir", taskDir, "error", ownerErr)
+		return 0, false
+	}
 	if err := os.RemoveAll(taskDir); err != nil {
 		d.logger.Warn("gc: remove task dir failed", "dir", taskDir, "error", err)
-		return 0
+		return 0, false
 	} else {
 		d.logger.Info("gc: removed", "dir", taskDir, "bytes_reclaimed", bytes)
 	}
-	if ownerErr == nil && owner != nil {
-		if err := execenv.RemoveRootDirRecord(d.cfg.WorkspacesRoot, taskDir, *owner); err != nil {
-			d.logger.Warn("gc: remove stable task root record failed", "dir", taskDir, "error", err)
-		}
+	if err := execenv.RemoveRootDirRecord(d.cfg.WorkspacesRoot, taskDir, *owner); err != nil {
+		d.logger.Warn("gc: remove stable task root record failed", "dir", taskDir, "error", err)
 	}
-	return bytes
+	return bytes, true
 }
 
 // linkedDirModes are the mode bits that mark a directory entry as a link to

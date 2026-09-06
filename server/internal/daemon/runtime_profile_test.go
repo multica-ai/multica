@@ -258,6 +258,48 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	}
 }
 
+// TestRegisterRuntimes_ProfileReusesDiscoveredProviderCommand verifies that a
+// bare profile command can use the matching provider path already found by the
+// daemon's richer discovery logic. GUI-launched daemons may not have a CLI on
+// PATH even when discovery found it through a login shell or a provider's
+// stable user install directory.
+func TestRegisterRuntimes_ProfileReusesDiscoveredProviderCommand(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{})
+
+	profiles := []RuntimeProfile{{
+		ID:             "prof-codearts",
+		WorkspaceID:    "ws-1",
+		DisplayName:    "CodeArts Profile",
+		ProtocolFamily: "codearts",
+		CommandName:    "codearts",
+		Enabled:        true,
+	}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"codearts": {
+			Path:    `C:\Users\tester\.codeartsdoer\installers\codearts.cmd`,
+			Command: "codearts",
+		},
+	}
+
+	if _, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+
+	got := d.profileLaunchSpecs["prof-codearts"]
+	if got.path != `C:\Users\tester\.codeartsdoer\installers\codearts.cmd` {
+		t.Errorf("profileLaunchSpecs[prof-codearts].path = %q, want discovered CodeArts path", got.path)
+	}
+	if len(fx.sentRuntimes) != 2 {
+		t.Fatalf("sent runtimes = %d, want built-in plus profile: %+v", len(fx.sentRuntimes), fx.sentRuntimes)
+	}
+	if fx.sentRuntimes[1]["profile_id"] != "prof-codearts" || fx.sentRuntimes[1]["type"] != "codearts" {
+		t.Fatalf("profile runtime = %+v, want CodeArts prof-codearts", fx.sentRuntimes[1])
+	}
+}
+
 // TestRegisterRuntimes_ReportsProfileNotOnPath verifies a profile whose command
 // is missing on this host is reported to the server as a failed profile so the
 // UI can show an actionable registration error.

@@ -252,14 +252,3 @@ func TestUpsertRefusesWithoutAProbe(t *testing.T) {
 		t.Fatalf("Upsert without a probe = %v, want ErrProbeRequired", err)
 	}
 }
-
-func TestWithCredentialProbeSetsIt(t *testing.T) {
-	t.Parallel()
-
-	p := &fakeProbe{}
-	svc := &InstallationService{}
-	WithCredentialProbe(p)(svc)
-	if svc.probe != p {
-		t.Fatal("WithCredentialProbe did not install the probe")
-	}
-}

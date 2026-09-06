@@ -4,6 +4,7 @@ import type { InboxItem } from "@multica/core/types";
 import {
   getInboxDisplayTitle,
   getQuickCreateOutcomeDetail,
+  isAutopilotQuotaNotice,
   isQuickCreateOutcome,
   resolveDetailItem,
   stripQuickCreatePrefix,
@@ -102,6 +103,11 @@ describe("inbox display helpers", () => {
     expect(getInboxDisplayTitle(unconfirmedItem)).toBe(
       "File a bug about the flaky test",
     );
+  });
+
+  it("keeps paused autopilot title and body on the same server fallback path", () => {
+    expect(isAutopilotQuotaNotice("autopilot_paused")).toBe(false);
+    expect(isAutopilotQuotaNotice("autopilot_quota_exceeded")).toBe(true);
   });
 });
 

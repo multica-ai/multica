@@ -114,7 +114,7 @@ Multica's product nouns split into two categories:
 - **Everyday noun** — the word a user would say out loud for it. **Translate fully**, whether or not it is a database entity: `issue` → 任务, `workspace` → 工作区, `project` → 项目.
 - **Multica-specific term** — a concept no local word carries (`skill`), or a schema-level identifier a user may have to type or match (`todo`, `in_progress`, `task_id`). Render as **lowercase English** so it reads like a type name.
 
-The Chinese pages under `apps/docs/content/docs/*.zh.mdx` are the de facto voice standard for everything else on this page. They still carry the old English `issue` in prose and are being swept separately — follow the table below, not those pages, for this term.
+The Chinese pages under `apps/docs/content/docs/*.zh.mdx` are the de facto voice standard for everything else on this page. The `*.zh.mdx`, `*.ja.mdx`, and `*.ko.mdx` prose now follows the table below as well.
 
 ### `issue` is the product's task — translate it
 
@@ -122,24 +122,24 @@ The Chinese pages under `apps/docs/content/docs/*.zh.mdx` are the de facto voice
 
 | Entity | en | zh-Hans | ja | ko |
 | --- | --- | --- | --- | --- |
-| the filed unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** |
-| one agent execution run (`task`) | Task | `task` | **作業** | **작업** |
+| the tracked unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** |
+| one agent execution record (`task` in API / DB) | **Run** | **运行** | **実行** | **실행** |
 
-Both nouns are user-visible and they are **not** the same thing — an issue can carry many runs. Never let one locale spell both with the same word, which is why the run keeps a visually distinct form in each locale.
+Both concepts are user-visible and they are **not** the same thing — an issue can carry many runs. Never let one locale spell both with the same word. `Task` is no longer a user-facing product noun for an agent run; it remains only as the established internal identifier.
 
 What does not move:
 
-- **API / DB fields** stay `issue` / `task` / `skill` everywhere: `issue_status`, `task_id`, `skill_uuid`.
+- **API / DB fields** stay `issue` / `task` / `skill` everywhere: `issue_status`, `task_id`, `skill_uuid`. Developer prose calls the product object a Run and may clarify it as “Run (`task_id` in the API)” when the identifier matters.
 - **Code references and literal commands** stay English: `multica issue ...`, the `/issue` Slack and Lark slash command.
 - **`skill`** keeps lowercase English in Chinese text — a Multica-specific concept with no established Chinese term; titles may capitalize as `Skills`.
-- **`issue` in the "problem" sense** (runtime health) is a plain noun, not the entity: `{{count}} issues` on a machine card is `{{count}} 个异常`, not `任务`.
+- **`issue` in the "problem" sense** (runtime health) is a plain noun, not the entity: `{{count}} issues` on a machine card is `{{count}} 个异常` / `問題 {{count}} 件` / `문제 {{count}}개`, never the entity word.
 
 **Why `issue` is translated while `skill` is not**: users file and read issues all day, and "issue" has no meaning in Chinese, Japanese, or Korean outside of dev jargon. The everyday task word is what people already say for this. `skill` is a Multica-specific concept where no local word carries the meaning.
 
 Other product nouns follow the same "translate what has a settled local word" test:
 
 - **`project` → "项目"**: settled mainstream Chinese word. Feishu / Tower / Teambition / PingCode / GitHub Projects — every Chinese product translates it. No product keeps `project` in Chinese context.
-- **`autopilot` → "自动化"**: in Chinese, "autopilot" associates with Tesla's "自动驾驶" and doesn't match what the feature does (run tasks on a schedule). Notion and Feishu both use "自动化"; that's the industry consensus.
+- **`autopilot` → "自动化"**: in Chinese, "autopilot" associates with Tesla's "自动驾驶" and doesn't match what the feature does (start agent runs on a schedule). Notion and Feishu both use "自动化"; that's the industry consensus.
 
 ### Don't translate — brands and acronyms
 

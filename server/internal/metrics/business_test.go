@@ -18,7 +18,7 @@ func TestBusinessMetricsLifecycleCountersAndGauge(t *testing.T) {
 
 	m.RecordTaskEnqueued("issue", "local")
 	for i := 0; i < 100; i++ {
-		m.RecordTaskDispatched("task-"+strconv.Itoa(i), "issue", "local", 2.5)
+		m.RecordTaskDispatched("task-"+strconv.Itoa(i), "issue", "local", 2.5, 0.5)
 	}
 	m.RecordTaskStarted("issue", "local", "codex")
 	m.RecordTaskTerminal("task-0", "issue", "local", "completed", 10, 20, 1)
@@ -43,6 +43,9 @@ func TestBusinessMetricsLifecycleCountersAndGauge(t *testing.T) {
 	}
 	if got := testutil.CollectAndCount(m.taskQueueWait); got != 1 {
 		t.Fatalf("queue wait series count = %d, want 1", got)
+	}
+	if got := testutil.CollectAndCount(m.taskClaimableWait); got != 1 {
+		t.Fatalf("claimable wait series count = %d, want 1", got)
 	}
 	if got := testutil.CollectAndCount(m.taskRunSeconds); got != 1 {
 		t.Fatalf("run seconds series count = %d, want 1", got)
@@ -126,7 +129,7 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	registry.MustRegister(m.Collectors()...)
 
 	m.RecordTaskEnqueued("issue", "local")
-	m.RecordTaskDispatched("task-1", "issue", "local", 1)
+	m.RecordTaskDispatched("task-1", "issue", "local", 1, 0.25)
 	m.RecordTaskStarted("issue", "local", "codex")
 	m.RecordTaskTerminal("task-1", "issue", "local", "completed", 2, 3, 1)
 	m.RecordTaskFailed("issue", "local", taskfailure.ReasonTimeout.String())
@@ -208,12 +211,6 @@ func TestBusinessMetricsRuntimeGC(t *testing.T) {
 	m.RecordRuntimeGCDeleted()
 	m.RecordRuntimeGCFailed()
 	m.RecordRuntimeGCSkipped(RuntimeGCSkipNonTerminalTask)
-	m.SetRuntimeGCBlocked(3)
-	m.SetRuntimeGCBacklog(RuntimeGCBacklogActiveAgent, 2)
-	m.SetRuntimeGCBacklog(RuntimeGCBacklogNonTerminalTask, 3)
-	m.SetRuntimeGCBacklog(RuntimeGCBacklogWorkspaceMismatch, 1)
-	m.SetRuntimeGCBacklog(RuntimeGCBacklogEligible, 4)
-	m.RecordRuntimeGCBlockedObservationFailed()
 
 	if got := testutil.ToFloat64(m.runtimeGCDeleted); got != 1 {
 		t.Fatalf("runtime GC deleted = %v, want 1", got)
@@ -223,22 +220,6 @@ func TestBusinessMetricsRuntimeGC(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(m.runtimeGCSkipped.WithLabelValues(RuntimeGCSkipNonTerminalTask)); got != 1 {
 		t.Fatalf("runtime GC skipped = %v, want 1", got)
-	}
-	if got := testutil.ToFloat64(m.runtimeGCBlocked); got != 3 {
-		t.Fatalf("runtime GC blocked = %v, want 3", got)
-	}
-	for reason, want := range map[string]float64{
-		RuntimeGCBacklogActiveAgent:       2,
-		RuntimeGCBacklogNonTerminalTask:   3,
-		RuntimeGCBacklogWorkspaceMismatch: 1,
-		RuntimeGCBacklogEligible:          4,
-	} {
-		if got := testutil.ToFloat64(m.runtimeGCBacklog.WithLabelValues(reason)); got != want {
-			t.Fatalf("runtime GC backlog %s = %v, want %v", reason, got, want)
-		}
-	}
-	if got := testutil.ToFloat64(m.runtimeGCBlockedObservationFailed); got != 1 {
-		t.Fatalf("runtime GC blocked observation failures = %v, want 1", got)
 	}
 }
 

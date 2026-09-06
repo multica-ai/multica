@@ -457,6 +457,20 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });
 
+  it("renders dedicated copy for a failed environment preparation", async () => {
+    // #7913. Without an entry of its own this reason has no agent_error
+    // family to degrade into, so it would land on the generic fallback —
+    // and the one thing the reader needs to know is that the problem is on
+    // the machine running the agent, which the fallback cannot say.
+    renderFailure("environment_prepare_failed");
+    expect(
+      await screen.findByText(
+        enChat.message_list.failure.environment_prepare_failed,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
+  });
+
   it("renders dedicated copy for a refined reason the map names", async () => {
     renderFailure("agent_error.provider_network");
     expect(
