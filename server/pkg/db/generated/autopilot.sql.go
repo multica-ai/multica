@@ -1847,57 +1847,98 @@ const selectAutopilotsExceedingFailureThreshold = `-- name: SelectAutopilotsExce
 
 WITH stats AS (
     SELECT autopilot_id,
-           count(*) FILTER (WHERE status IN ('completed', 'failed')) AS total,
-           count(*) FILTER (WHERE status = 'failed') AS failed
+           count(*) FILTER (WHERE status IN ('completed', 'failed', 'skipped')) AS total,
+           count(*) FILTER (WHERE status = 'failed') AS failed,
+           count(*) FILTER (WHERE status = 'skipped') AS skipped
     FROM autopilot_run
-    WHERE created_at >= $3::timestamptz
+    WHERE created_at >= $4::timestamptz
+    GROUP BY autopilot_id
+), recent_natural_runs AS (
+    SELECT autopilot_id,
+           status,
+           row_number() OVER (
+               PARTITION BY autopilot_id
+               ORDER BY COALESCE(planned_at, triggered_at, created_at) DESC, id DESC
+           ) AS position
+    FROM autopilot_run
+    WHERE created_at >= $4::timestamptz
+      AND source = 'schedule'
+), natural_streaks AS (
+    SELECT autopilot_id,
+           count(*) FILTER (WHERE position <= $3::bigint) AS recent_natural_runs,
+           count(*) FILTER (
+               WHERE position <= $3::bigint
+                 AND status = 'skipped'
+           ) AS recent_skipped_runs
+    FROM recent_natural_runs
     GROUP BY autopilot_id
 )
 SELECT a.id, a.workspace_id, a.title, a.assignee_id,
        a.created_by_type, a.created_by_id,
        s.total::bigint  AS total_runs,
-       s.failed::bigint AS failed_runs
+       s.failed::bigint AS failed_runs,
+       s.skipped::bigint AS skipped_runs,
+       COALESCE(ns.recent_natural_runs, 0)::bigint AS recent_natural_runs,
+       COALESCE(ns.recent_skipped_runs, 0)::bigint AS recent_skipped_runs
 FROM autopilot a
 JOIN stats s ON s.autopilot_id = a.id
+LEFT JOIN natural_streaks ns ON ns.autopilot_id = a.id
 WHERE a.status = 'active'
-  AND s.total >= $1::bigint
-  AND s.failed::float8 / NULLIF(s.total, 0)::float8 >= $2::float8
-ORDER BY s.failed DESC, a.id ASC
+  AND (
+      (
+          s.total >= $1::bigint
+          AND (s.failed + s.skipped)::float8 / NULLIF(s.total, 0)::float8
+              >= $2::float8
+      )
+      OR (
+          COALESCE(ns.recent_natural_runs, 0) >= $3::bigint
+          AND ns.recent_skipped_runs = ns.recent_natural_runs
+      )
+  )
+ORDER BY (s.failed + s.skipped) DESC, a.id ASC
 `
 
 type SelectAutopilotsExceedingFailureThresholdParams struct {
 	MinRuns            int64              `json:"min_runs"`
 	FailRatioThreshold float64            `json:"fail_ratio_threshold"`
+	SkipStreak         int64              `json:"skip_streak"`
 	Since              pgtype.Timestamptz `json:"since"`
 }
 
 type SelectAutopilotsExceedingFailureThresholdRow struct {
-	ID            pgtype.UUID `json:"id"`
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	Title         string      `json:"title"`
-	AssigneeID    pgtype.UUID `json:"assignee_id"`
-	CreatedByType string      `json:"created_by_type"`
-	CreatedByID   pgtype.UUID `json:"created_by_id"`
-	TotalRuns     int64       `json:"total_runs"`
-	FailedRuns    int64       `json:"failed_runs"`
+	ID                pgtype.UUID `json:"id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	Title             string      `json:"title"`
+	AssigneeID        pgtype.UUID `json:"assignee_id"`
+	CreatedByType     string      `json:"created_by_type"`
+	CreatedByID       pgtype.UUID `json:"created_by_id"`
+	TotalRuns         int64       `json:"total_runs"`
+	FailedRuns        int64       `json:"failed_runs"`
+	SkippedRuns       int64       `json:"skipped_runs"`
+	RecentNaturalRuns int64       `json:"recent_natural_runs"`
+	RecentSkippedRuns int64       `json:"recent_skipped_runs"`
 }
 
 // =====================
 // Failure-rate auto-pause
 // =====================
-// Find active autopilots whose recent run failure rate exceeds the threshold.
-// Counts only "real" terminal runs (completed | failed). 'skipped' is
-// excluded from BOTH numerator and denominator: an admission-skipped run
-// (e.g. assignee runtime offline at dispatch time, MUL-1899) is neither a
-// success nor a failure, so it must not dilute the failure ratio (which
-// would let a 100%-failing autopilot mask itself behind a wall of skips)
-// nor inflate it. issue_created/running are still excluded so in-flight
-// work isn't penalised.
-// Used by the failure monitor to auto-pause sustained-failure autopilots
-// (the canonical example from MUL-1336 was an autopilot scheduled every 5 min
-// that 100% failed for days, burning ~1.5k useless tasks per week).
+// Find active autopilots whose real terminal runs exceed the failure threshold,
+// or whose latest natural schedule rounds form a skipped streak. A skipped
+// admission is still an unsuccessful scheduled obligation: it must count with
+// a failed run instead of providing a loophole that hides a dead autopilot.
+// In-flight rows remain excluded from the rate and break a natural-run streak.
+//
+// The streak is deliberately schedule-only. Manual, webhook, and API runs are
+// not natural rounds, so they must neither mask nor manufacture this alert.
+// Used by the failure monitor to pause both a hot failure loop and a silently
+// skipped automation before it can disappear behind an apparently active rule.
 func (q *Queries) SelectAutopilotsExceedingFailureThreshold(ctx context.Context, arg SelectAutopilotsExceedingFailureThresholdParams) ([]SelectAutopilotsExceedingFailureThresholdRow, error) {
-	rows, err := q.db.Query(ctx, selectAutopilotsExceedingFailureThreshold, arg.MinRuns, arg.FailRatioThreshold, arg.Since)
+	rows, err := q.db.Query(ctx, selectAutopilotsExceedingFailureThreshold,
+		arg.MinRuns,
+		arg.FailRatioThreshold,
+		arg.SkipStreak,
+		arg.Since,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1914,6 +1955,9 @@ func (q *Queries) SelectAutopilotsExceedingFailureThreshold(ctx context.Context,
 			&i.CreatedByID,
 			&i.TotalRuns,
 			&i.FailedRuns,
+			&i.SkippedRuns,
+			&i.RecentNaturalRuns,
+			&i.RecentSkippedRuns,
 		); err != nil {
 			return nil, err
 		}
@@ -2066,17 +2110,22 @@ func (q *Queries) SetAutopilotTriggerWebhookToken(ctx context.Context, arg SetAu
 
 const systemPauseAutopilot = `-- name: SystemPauseAutopilot :one
 UPDATE autopilot
-SET status = 'paused', pause_reason = NULL, updated_at = now()
+SET status = 'paused', pause_reason = $2, updated_at = now()
 WHERE id = $1 AND status = 'active'
 RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, pause_reason
 `
 
-// Atomically pauses an autopilot only if it is currently active. Returns no
-// rows when the autopilot was already paused/archived (or another worker
-// raced first), letting the caller treat that as a benign no-op rather than
-// an error.
-func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, error) {
-	row := q.db.QueryRow(ctx, systemPauseAutopilot, id)
+type SystemPauseAutopilotParams struct {
+	ID          pgtype.UUID `json:"id"`
+	PauseReason pgtype.Text `json:"pause_reason"`
+}
+
+// Atomically pauses an autopilot only if it is currently active, retaining the
+// machine-readable reason so the active/paused dashboard state is actionable.
+// Returns no rows when the autopilot was already paused/archived (or another
+// worker raced first), letting the caller treat that as a benign no-op.
+func (q *Queries) SystemPauseAutopilot(ctx context.Context, arg SystemPauseAutopilotParams) (Autopilot, error) {
+	row := q.db.QueryRow(ctx, systemPauseAutopilot, arg.ID, arg.PauseReason)
 	var i Autopilot
 	err := row.Scan(
 		&i.ID,
