@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS lifeos_secretary_projection_workspace_idx;

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS lifeos_secretary_instruction_sequence_idx;

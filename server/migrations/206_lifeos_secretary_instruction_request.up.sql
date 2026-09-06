@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY lifeos_secretary_instruction_request_idx ON lifeos_secretary_instruction (workspace_id, request_id);

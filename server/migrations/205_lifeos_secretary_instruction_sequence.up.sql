@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY lifeos_secretary_instruction_sequence_idx ON lifeos_secretary_instruction (sequence);

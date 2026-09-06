@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY lifeos_secretary_projection_workspace_idx ON lifeos_secretary_projection (workspace_id);
