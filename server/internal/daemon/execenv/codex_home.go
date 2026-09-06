@@ -269,6 +269,18 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
+	// Codex's plugin startup sync materialises Git marketplace checkouts and
+	// the curated plugin repository under .tmp. Leaving that directory absent
+	// in a per-task home makes every task clone the same hundreds of MiB again.
+	// Share the whole directory, rather than only its large children, so Codex's
+	// adjacent lock and revision files coordinate concurrent task/Desktop syncs.
+	if err := exposeSharedCodexCacheDir(
+		filepath.Join(sharedHome, ".tmp"),
+		filepath.Join(codexHome, ".tmp"),
+	); err != nil {
+		logger.Warn("execenv: codex-home temporary cache exposure failed", "error", err)
+	}
+
 	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
 		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
 	}
@@ -1233,31 +1245,46 @@ func resolveCodexConfigPath(configPath, sharedHome, key string) (string, error) 
 func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
 	src := filepath.Join(sharedHome, "plugins", "cache")
 	dst := filepath.Join(codexHome, "plugins", "cache")
+	return exposeSharedCodexCacheDir(src, dst)
+}
+
+// exposeSharedCodexCacheDir makes one daemon-created cache path resolve to the
+// user's shared Codex cache. Cache state is intentionally shared; config,
+// sessions, skills, and other task state remain isolated elsewhere in the
+// per-task CODEX_HOME.
+//
+// A reused home may still contain a regular directory produced by an older
+// daemon. Remove that duplicate before linking. When dst is already a link,
+// remove only the link itself — never follow it into the shared Codex home.
+func exposeSharedCodexCacheDir(src, dst string) error {
 	if err := os.MkdirAll(src, 0o755); err != nil {
-		return fmt.Errorf("create shared plugin cache dir: %w", err)
+		return fmt.Errorf("create shared cache dir %s: %w", src, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return fmt.Errorf("create codex plugin dir: %w", err)
+		return fmt.Errorf("create codex cache parent %s: %w", filepath.Dir(dst), err)
 	}
 
 	if fi, err := os.Lstat(dst); err == nil {
-		isLink := fi.Mode()&os.ModeSymlink != 0
+		// Go reports Windows directory junctions as ModeDir|ModeIrregular.
+		isLink := fi.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0
 		if isLink {
 			if target, readlinkErr := os.Readlink(dst); readlinkErr == nil && target == src {
 				return nil
 			}
 			if err := os.Remove(dst); err != nil {
-				return fmt.Errorf("remove stale plugin cache link: %w", err)
+				return fmt.Errorf("remove stale cache link %s: %w", dst, err)
 			}
 		} else {
 			if err := os.RemoveAll(dst); err != nil {
-				return fmt.Errorf("remove stale plugin cache path: %w", err)
+				return fmt.Errorf("remove stale cache path %s: %w", dst, err)
 			}
 		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect cache path %s: %w", dst, err)
 	}
 
 	if err := createDirLink(src, dst); err != nil {
-		return fmt.Errorf("expose shared plugin cache: %w", err)
+		return fmt.Errorf("link shared cache %s to %s: %w", src, dst, err)
 	}
 	return nil
 }

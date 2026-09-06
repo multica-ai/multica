@@ -2715,12 +2715,18 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sharedPluginCache, "superpowers", "SKILL.md"), []byte("Use superpowers."), 0o644); err != nil {
 		t.Fatalf("write shared plugin skill: %v", err)
 	}
-	sharedMarketplace := filepath.Join(sharedHome, ".tmp", "marketplaces", "test-marketplace")
-	if err := os.MkdirAll(sharedMarketplace, 0o755); err != nil {
-		t.Fatalf("create shared marketplace cache: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(sharedMarketplace, "manifest.json"), []byte(`{"name":"test"}`), 0o644); err != nil {
-		t.Fatalf("write shared marketplace manifest: %v", err)
+	for _, rel := range []string{
+		filepath.Join("marketplaces", "test-marketplace"),
+		filepath.Join("bundled-marketplaces", "openai-bundled"),
+		filepath.Join("plugins", "curated"),
+	} {
+		cacheDir := filepath.Join(sharedHome, ".tmp", rel)
+		if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+			t.Fatalf("create shared temporary cache %s: %v", rel, err)
+		}
+		if err := os.WriteFile(filepath.Join(cacheDir, "marker"), []byte(rel), 0o644); err != nil {
+			t.Fatalf("write shared temporary cache marker %s: %v", rel, err)
+		}
 	}
 
 	// Point CODEX_HOME to our fake shared home.
@@ -2822,11 +2828,41 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 		t.Errorf("plugin cache skill content = %q", data)
 	}
 
-	// Marketplace checkouts contain executable plugin code and must not be
-	// linked into a task home where one task could mutate another task's state.
-	marketplacePath := filepath.Join(codexHome, ".tmp", "marketplaces")
-	if _, err := os.Lstat(marketplacePath); !os.IsNotExist(err) {
-		t.Fatalf("shared marketplace cache exposed in task home: %v", err)
+	// Codex's complete temporary plugin cache is shared. Linking the root also
+	// shares the adjacent sync lock/revision files, preventing concurrent tasks
+	// from mutating one checkout under independent per-task locks.
+	tmpPath := filepath.Join(codexHome, ".tmp")
+	sharedTmpPath := filepath.Join(sharedHome, ".tmp")
+	tmpInfo, err := os.Lstat(tmpPath)
+	if err != nil {
+		t.Fatalf("temporary plugin cache not exposed: %v", err)
+	}
+	if runtime.GOOS != "windows" && tmpInfo.Mode()&os.ModeSymlink == 0 {
+		t.Error("temporary plugin cache should be a symlink")
+	}
+	for _, rel := range []string{
+		filepath.Join("marketplaces", "test-marketplace"),
+		filepath.Join("bundled-marketplaces", "openai-bundled"),
+		filepath.Join("plugins", "curated"),
+	} {
+		data, err := os.ReadFile(filepath.Join(tmpPath, rel, "marker"))
+		if err != nil {
+			t.Fatalf("temporary cache %s not visible through task home: %v", rel, err)
+		}
+		if string(data) != rel {
+			t.Errorf("temporary cache %s marker = %q", rel, data)
+		}
+	}
+	sharedInfo, err := os.Stat(sharedTmpPath)
+	if err != nil {
+		t.Fatalf("stat shared temporary cache: %v", err)
+	}
+	taskInfo, err := os.Stat(tmpPath)
+	if err != nil {
+		t.Fatalf("stat task temporary cache: %v", err)
+	}
+	if !os.SameFile(sharedInfo, taskInfo) {
+		t.Error("task temporary cache does not resolve to the shared cache")
 	}
 }
 
@@ -3388,7 +3424,7 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	}
 
 	// Directory should contain task-local sessions, the model-cache config
-	// binding, and auto-generated config.toml.
+	// binding, auto-generated config.toml, and shared cache links.
 	entries, err := os.ReadDir(codexHome)
 	if err != nil {
 		t.Fatalf("failed to read codex-home: %v", err)
@@ -3406,11 +3442,14 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	if !entryNames["plugins"] {
 		t.Error("expected plugins directory for plugin cache exposure")
 	}
+	if !entryNames[".tmp"] {
+		t.Error("expected .tmp directory link for temporary plugin cache exposure")
+	}
 	if !entryNames[codexModelsCacheBindingFile] {
 		t.Error("expected models cache config binding")
 	}
 	for name := range entryNames {
-		if name != "sessions" && name != "config.toml" && name != "plugins" && name != codexModelsCacheBindingFile {
+		if name != "sessions" && name != "config.toml" && name != "plugins" && name != ".tmp" && name != codexModelsCacheBindingFile {
 			t.Errorf("unexpected entry: %s", name)
 		}
 	}
@@ -3429,6 +3468,44 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(codexHome, "plugins", "cache")); err != nil {
 		t.Fatalf("missing shared plugin cache exposure should still be tolerated and created: %v", err)
+	}
+}
+
+// A home created by an older daemon may already contain a full task-local
+// .tmp clone. Preparing it again must replace the duplicate with the shared
+// cache rather than preserving hundreds of MiB indefinitely.
+func TestPrepareCodexHomeReplacesTaskLocalTemporaryCacheOnReuse(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	sharedMarker := filepath.Join(sharedHome, ".tmp", "marketplaces", "shared")
+	if err := os.MkdirAll(filepath.Dir(sharedMarker), 0o755); err != nil {
+		t.Fatalf("create shared marketplace cache: %v", err)
+	}
+	if err := os.WriteFile(sharedMarker, []byte("shared"), 0o644); err != nil {
+		t.Fatalf("write shared marker: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	staleMarker := filepath.Join(codexHome, ".tmp", "marketplaces", "stale-task-copy")
+	if err := os.MkdirAll(filepath.Dir(staleMarker), 0o755); err != nil {
+		t.Fatalf("create stale task cache: %v", err)
+	}
+	if err := os.WriteFile(staleMarker, []byte("duplicate"), 0o644); err != nil {
+		t.Fatalf("write stale task marker: %v", err)
+	}
+
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+	if _, err := os.Stat(staleMarker); !os.IsNotExist(err) {
+		t.Fatalf("stale task-local cache survived reuse: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(codexHome, ".tmp", "marketplaces", "shared")); err != nil {
+		t.Fatalf("shared cache is not exposed after reuse: %v", err)
+	} else if string(data) != "shared" {
+		t.Fatalf("shared cache marker = %q, want shared", data)
 	}
 }
 
@@ -4393,6 +4470,13 @@ func TestReuseRestoresCodexPluginCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sharedPluginCache, "superpowers", "SKILL.md"), []byte("Use superpowers."), 0o644); err != nil {
 		t.Fatalf("write shared plugin skill: %v", err)
 	}
+	sharedTmpMarker := filepath.Join(sharedHome, ".tmp", "marketplaces", "shared-marker")
+	if err := os.MkdirAll(filepath.Dir(sharedTmpMarker), 0o755); err != nil {
+		t.Fatalf("create shared temporary cache: %v", err)
+	}
+	if err := os.WriteFile(sharedTmpMarker, []byte("shared"), 0o644); err != nil {
+		t.Fatalf("write shared temporary cache marker: %v", err)
+	}
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	workspacesRoot := t.TempDir()
@@ -4412,6 +4496,9 @@ func TestReuseRestoresCodexPluginCache(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(env.CodexHome, "plugins")); err != nil {
 		t.Fatalf("remove codex plugins dir: %v", err)
 	}
+	if err := os.RemoveAll(filepath.Join(env.CodexHome, ".tmp")); err != nil {
+		t.Fatalf("remove codex temporary cache link: %v", err)
+	}
 
 	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-plugin-test"}}, testLogger())
 	if reused == nil {
@@ -4424,6 +4511,11 @@ func TestReuseRestoresCodexPluginCache(t *testing.T) {
 	}
 	if string(data) != "Use superpowers." {
 		t.Errorf("reused plugin cache skill content = %q", data)
+	}
+	if data, err := os.ReadFile(filepath.Join(reused.CodexHome, ".tmp", "marketplaces", "shared-marker")); err != nil {
+		t.Fatalf("reused codex temporary cache not restored: %v", err)
+	} else if string(data) != "shared" {
+		t.Errorf("reused temporary cache marker = %q", data)
 	}
 }
 
