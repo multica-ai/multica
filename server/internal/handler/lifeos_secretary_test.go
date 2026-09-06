@@ -87,6 +87,13 @@ func TestSecretaryProjectionAtomicAndMemberInstructions(t *testing.T) {
 	if w := publish(req); w.Code != 200 {
 		t.Fatalf("second material publication: %d %s", w.Code, w.Body.String())
 	}
+	var originalTitle string
+	if err := testPool.QueryRow(t.Context(), `SELECT metadata->>'lifeos_original_title' FROM issue WHERE id=$1`, id).Scan(&originalTitle); err != nil {
+		t.Fatal(err)
+	}
+	if originalTitle != "secretary original" {
+		t.Fatal("rewriting the summary lost or replaced the original source")
+	}
 	command := secretaryInstructionRequest{RequestID: uuid.NewString(), ItemKey: "a", Kind: "complete", ExpectedRevision: 1, Note: "已提交，等接收"}
 	send := func(c secretaryInstructionRequest) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()

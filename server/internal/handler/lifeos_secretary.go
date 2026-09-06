@@ -237,7 +237,19 @@ func (h *Handler) PutLifeOSSecretary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		metadata, _ := json.Marshal(update.Metadata)
-		tag, updateErr := tx.Exec(r.Context(), `UPDATE issue SET title=$3, description=$4, metadata=metadata||$5::jsonb, status=COALESCE($7,status), updated_at=now() WHERE workspace_id=$1 AND id=$2 AND updated_at=$6`, ws, id, update.Title, update.Description, metadata, update.ExpectedUpdatedAt, update.Status)
+		// Preserve the source body atomically on the first secretary publication.
+		// These reserved fields cannot be supplied through projection metadata.
+		tag, updateErr := tx.Exec(r.Context(), `
+            UPDATE issue SET title=$3, description=$4,
+              metadata=(CASE WHEN metadata ? 'lifeos_original_description' THEN metadata
+                ELSE metadata || jsonb_build_object(
+                  'lifeos_original_title', title,
+                  'lifeos_original_description', COALESCE(description,''),
+                  'lifeos_original_captured_at', updated_at)
+                END) || $5::jsonb,
+              status=COALESCE($7,status), updated_at=now()
+            WHERE workspace_id=$1 AND id=$2 AND updated_at=$6`,
+			ws, id, update.Title, update.Description, metadata, update.ExpectedUpdatedAt, update.Status)
 		if updateErr != nil {
 			writeError(w, 500, "failed to update source presentation")
 			return
