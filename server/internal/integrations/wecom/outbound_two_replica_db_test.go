@@ -333,42 +333,57 @@ func (f *fanoutRelay) replayTo(r *RelayOutbound) {
 // in the test, surviving a "restart" because the process it models does not
 // own it. That is the whole property the in-process seen-set lacked.
 type sharedDedupe struct {
-	mu    sync.Mutex
-	held  map[string]bool
-	fail  bool
-	calls int
+	mu     sync.Mutex
+	values map[string]string
+	fail   bool
+	calls  int
 
-	// releaseFails makes Release report failure and keep the key, the way a
-	// Redis DEL that did not go through leaves it to its TTL.
+	// releaseFails makes Release report failure and keep the key: a DEL that
+	// never reached the server.
 	releaseFails bool
+	// releaseErrAfterDelete makes Release delete the key AND report failure:
+	// a DEL the server executed whose response was lost. The outcome the
+	// caller sees is the same error as above; what the store holds is not.
+	releaseErrAfterDelete bool
+	// settleFails makes Settle report failure and leave the key as it is.
+	settleFails bool
 }
 
-func newSharedDedupe() *sharedDedupe { return &sharedDedupe{held: map[string]bool{}} }
+func newSharedDedupe() *sharedDedupe { return &sharedDedupe{values: map[string]string{}} }
 
-func (d *sharedDedupe) Claim(_ context.Context, key string, _ time.Duration) (bool, error) {
+func (d *sharedDedupe) Claim(_ context.Context, key, token string, _ time.Duration) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.calls++
 	if d.fail {
 		return false, errors.New("dedupe unavailable")
 	}
-	if d.held[key] {
-		return false, nil
+	v, ok := d.values[key]
+	if !ok {
+		d.values[key] = token
+		return true, nil
 	}
-	d.held[key] = true
-	return true, nil
+	return v == token, nil
 }
 
+// holds reports whether the key is present at all, in any state.
 func (d *sharedDedupe) holds(key string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.held[key]
+	_, ok := d.values[key]
+	return ok
+}
+
+func (d *sharedDedupe) valueOf(key string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.values[key]
 }
 
 func (d *sharedDedupe) heldCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return len(d.held)
+	return len(d.values)
 }
 
 func (d *sharedDedupe) claimCount() int {
@@ -377,27 +392,59 @@ func (d *sharedDedupe) claimCount() int {
 	return d.calls
 }
 
-func (d *sharedDedupe) Release(_ context.Context, key string) error {
+func (d *sharedDedupe) Release(_ context.Context, key, token string) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.releaseFails {
-		return errors.New("dedupe: DEL failed")
+		return false, errors.New("dedupe: DEL failed")
 	}
-	delete(d.held, key)
-	return nil
+	if d.values[key] != token {
+		return false, nil
+	}
+	delete(d.values, key)
+	if d.releaseErrAfterDelete {
+		return false, errors.New("dedupe: DEL response lost")
+	}
+	return true, nil
+}
+
+func (d *sharedDedupe) Settle(_ context.Context, key, token string) (bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.settleFails {
+		return false, errors.New("dedupe: SET failed")
+	}
+	switch d.values[key] {
+	case token:
+		d.values[key] = claimSettledValue
+		return true, nil
+	case claimSettledValue:
+		return true, nil
+	}
+	return false, nil
 }
 
 // ClaimBudget is a fake's budget: small, because it is what sizes the outcome
 // grace these tests wait out and nothing here talks to a real server.
 func (d *sharedDedupe) ClaimBudget() time.Duration { return 20 * time.Millisecond }
 
-func (d *sharedDedupe) Held(_ context.Context, key string) (bool, error) {
+func (d *sharedDedupe) Resolve(_ context.Context, key string) (claimState, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.fail {
-		return false, errors.New("dedupe unavailable")
+		return claimAbsent, errors.New("dedupe unavailable")
 	}
-	return d.held[key], nil
+	v, ok := d.values[key]
+	switch {
+	case !ok:
+		return claimAbsent, nil
+	case v == claimSettledValue:
+		return claimSettled, nil
+	case v == claimLostValue:
+		return claimLost, nil
+	}
+	d.values[key] = claimLostValue
+	return claimHeld, nil
 }
 
 // relayReplica is one backend process wired for cross-replica routing.
@@ -756,7 +803,7 @@ func TestDeliverRelayed_ContextErrorsDoNotRelease(t *testing.T) {
 		Kind: relayKindReply, InstallationID: util.UUIDToString(instID),
 		ChatID: "CHAT_1", ChatType: chatTypeSingleInt, Content: "hello",
 	})
-	if got == outcomeProvablyNotSent {
+	if got.outcome == outcomeProvablyNotSent {
 		t.Fatal("a context error released the claim; it is ambiguous and must not")
 	}
 }
@@ -838,8 +885,8 @@ func TestRelay_LeaseMoveMidFlightIsRescuedByRetry(t *testing.T) {
 type flipHandler struct{}
 
 func (*flipHandler) ownsSocket(string) bool { return true }
-func (*flipHandler) deliverRelayed(context.Context, relayFrame) deliveryOutcome {
-	return outcomeNotOurs
+func (*flipHandler) deliverRelayed(context.Context, relayFrame) relayResult {
+	return relayResult{outcome: outcomeNotOurs}
 }
 
 // waitLong is waitFor with room for the retry backoff schedule.
@@ -889,7 +936,7 @@ func TestRelayedInboxPushDoesNotMoveTheReplyCounters(t *testing.T) {
 	if got := ok.deliverRelayed(context.Background(), relayFrame{
 		Kind: relayKindInbox, InstallationID: util.UUIDToString(instID),
 		ChatID: "T-USER", ChatType: chatTypeSingleInt, Content: "you were mentioned",
-	}); got != outcomeDone {
+	}); got.outcome != outcomeDone {
 		t.Fatalf("outcome = %v, want done", got)
 	}
 	if n := okConn.frameCount(); n != 1 {
@@ -952,5 +999,88 @@ func TestDrainDeliversOnlyWhileSocketsLive(t *testing.T) {
 		if got := conn.frameCount(); got != want {
 			t.Fatalf("live=%v: frames = %d, want %d", live, got, want)
 		}
+	}
+}
+
+// The round-2 case on #7953, end to end: the holder's first write fails before
+// the frame leaves, its Release DELETES the key but the response is lost, and
+// then another replica — or the holder's own re-offer, whichever the timing
+// gives — claims and delivers. On the round-2 code that ended with
+// outbound_dropped = 1 beside outbound_delivered = 1. It must be exactly one
+// record, across every replica and the publisher.
+//
+// REVERSE VERIFICATION: record a drop on a Release error in perform and this
+// fails on the dropped count; make Resolve report claimAbsent for a settled
+// key and it fails on a second drop from the publisher.
+func TestTwoReplicas_AReleaseThatLandedButErroredEndsWithExactlyOneRecord(t *testing.T) {
+	pool := twoReplicaDB(t)
+	turn := seedBoundTurn(t, pool)
+	relay, dedupe := &fanoutRelay{}, newSharedDedupe()
+	dedupe.releaseErrAfterDelete = true
+	cfg := RelayConfig{Shards: 1, LeaseSettle: 120 * time.Millisecond, RetryBackoff: 20 * time.Millisecond, DeliveryBudget: 20 * time.Millisecond}
+
+	// flaky holds the socket on a connection whose FIRST write fails before
+	// the frame leaves; steady holds one that always works. Both read the
+	// frame the publisher routes; the claim decides who delivers.
+	flaky := newRelayReplicaWith(t, pool, turn.instID, false, relay, dedupe, cfg)
+	flakyConn := &deadlineFlakyConn{failOn: func(n int) bool { return n == 1 }}
+	flaky.reg.set(flaky.instID, flakyConn.newSender())
+	steady := newRelayReplicaWith(t, pool, turn.instID, true, relay, dedupe, cfg)
+	publisher := newRelayReplicaWith(t, pool, turn.instID, false, relay, dedupe, cfg)
+
+	publisher.bus.Publish(chatDoneFor(turn))
+
+	delivered := func() int { return flaky.mx.get("outbound_delivered") + steady.mx.get("outbound_delivered") }
+	dropped := func() int {
+		return flaky.mx.get("outbound_dropped") + steady.mx.get("outbound_dropped") + publisher.mx.get("outbound_dropped")
+	}
+	waitLong(t, "one replica to deliver", func() bool { return delivered() == 1 })
+	// Past the publisher's grace, so its Resolve has run too.
+	time.Sleep(publisher.router.outcomeGrace() + 200*time.Millisecond)
+
+	if got := delivered(); got != 1 {
+		t.Fatalf("outbound_delivered = %d across replicas, want 1", got)
+	}
+	if got := dropped(); got != 0 {
+		t.Fatalf("outbound_dropped = %d across replicas and publisher, want 0: the reply was delivered", got)
+	}
+	if got := len(sentTexts(t, steady.conn)) + len(flakyConn.sent()); got != 1 {
+		t.Fatalf("%d messages reached the chat, want 1", got)
+	}
+}
+
+// A claim stranded under a holder that never manages to record anything —
+// every write fails before the frame leaves, every release errors and the key
+// keeps the token — is resolved by the publisher at the end of its grace, and
+// only there: one transport_error drop, nothing from the holder.
+//
+// REVERSE VERIFICATION: make Resolve return claimSettled for a key that holds
+// a token and this fails with no record at all.
+func TestTwoReplicas_AStrandedClaimIsResolvedOnceByThePublisher(t *testing.T) {
+	pool := twoReplicaDB(t)
+	turn := seedBoundTurn(t, pool)
+	relay, dedupe := &fanoutRelay{}, newSharedDedupe()
+	dedupe.releaseFails = true
+	cfg := RelayConfig{Shards: 1, LeaseSettle: 120 * time.Millisecond, RetryBackoff: 20 * time.Millisecond, DeliveryBudget: 20 * time.Millisecond}
+
+	holder := newRelayReplicaWith(t, pool, turn.instID, false, relay, dedupe, cfg)
+	conn := &deadlineFlakyConn{failOn: func(int) bool { return true }}
+	holder.reg.set(holder.instID, conn.newSender())
+	publisher := newRelayReplicaWith(t, pool, turn.instID, false, relay, dedupe, cfg)
+
+	publisher.bus.Publish(chatDoneFor(turn))
+
+	waitLong(t, "the publisher to resolve the stranded claim", func() bool {
+		return publisher.mx.get("outbound_dropped") == 1
+	})
+	time.Sleep(200 * time.Millisecond)
+	if got := publisher.mx.get("outbound_dropped"); got != 1 {
+		t.Fatalf("publisher outbound_dropped = %d, want 1", got)
+	}
+	if got := holder.mx.get("outbound_dropped") + holder.mx.get("outbound_delivered"); got != 0 {
+		t.Fatalf("the holder recorded %d outcome(s) for a claim it could never settle, want 0", got)
+	}
+	if v := dedupe.valueOf(dedupeKey(relayEventID(chatDoneFor(turn), mustParseTaskUUID(t, turn.taskID)))); v != claimLostValue {
+		t.Fatalf("claim value = %q, want %q: Resolve fences a stranded claim so a late holder records nothing", v, claimLostValue)
 	}
 }

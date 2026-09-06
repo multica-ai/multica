@@ -32,11 +32,11 @@ type ownsSocketHandler struct {
 }
 
 func (h *ownsSocketHandler) ownsSocket(string) bool { return h.owns }
-func (h *ownsSocketHandler) deliverRelayed(_ context.Context, f relayFrame) deliveryOutcome {
+func (h *ownsSocketHandler) deliverRelayed(_ context.Context, f relayFrame) relayResult {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.calls = append(h.calls, f)
-	return outcomeDone
+	return relayResult{outcome: outcomeDone}
 }
 func (h *ownsSocketHandler) sent() []relayFrame {
 	h.mu.Lock()

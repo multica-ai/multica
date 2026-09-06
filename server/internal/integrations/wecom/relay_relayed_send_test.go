@@ -135,7 +135,7 @@ type relaySendRig struct {
 // relayRetryConfig is a whole retry chain measured in milliseconds, so a test
 // can watch one run out. LeaseSettle/RetryBackoff are the only two knobs the
 // chain is built from, and retryPlan is asked for the length rather than told.
-var relayRetryConfig = RelayConfig{Shards: 1, LeaseSettle: 40 * time.Millisecond, RetryBackoff: 5 * time.Millisecond}
+var relayRetryConfig = RelayConfig{Shards: 1, LeaseSettle: 40 * time.Millisecond, RetryBackoff: 5 * time.Millisecond, DeliveryBudget: 20 * time.Millisecond}
 
 func newRelaySendRig(t *testing.T, failOn func(n int) bool) *relaySendRig {
 	t.Helper()
@@ -186,6 +186,10 @@ func (r *relaySendRig) route(t *testing.T, content string) {
 	}
 	r.router.DeliverWecomOutbound(util.UUIDToString(r.instID), body, "ev-1")
 }
+
+// lastEventID is the id route hands every frame, which is what its claim is
+// keyed on.
+func (r *relaySendRig) lastEventID() string { return "ev-1" }
 
 // stop cancels the dispatcher and waits for it, which drains whatever is parked
 // waiting out a backoff. Used where the assertion is that NOTHING is parked:
@@ -273,42 +277,62 @@ func TestRelayedReply_ARetryThatSucceedsIsNotAlsoADrop(t *testing.T) {
 // 2. a re-offer must not repeat what the user already read
 // ---------------------------------------------------------------------------
 
-// A claim that cannot be given back is not "still claimed" in any useful
-// sense. The key survives to its TTL, every re-offer loses it and never
-// reaches the socket, and the publisher's settle reads it as taken — so a
-// reply nobody can deliver any more would end with delivered, dropped and
-// unconfirmed all at zero. The replica holding the claim is the only party
-// left that can record the ending, and it does so exactly once.
+// A release whose result is UNKNOWN — the DEL never reached the server, the
+// key still holds this replica's token — is not a verdict. The next offer's
+// Claim finds its own token and re-takes the claim, the delivery runs again,
+// and the reply ends with one record: delivered.
 //
-// REVERSE VERIFICATION: ignore Release's error in perform (drop the
-// strandedClaim branch) and this fails with outbound_dropped = 0 — the reply
-// is re-offered, loses the claim every time, and nothing counts it.
-func TestRelayedReply_AClaimThatCannotBeReleasedIsCountedOnceAndNotReoffered(t *testing.T) {
+// REVERSE VERIFICATION: make Claim refuse a key that holds the caller's own
+// token (drop the `v == ARGV[1]` / `v == token` branch) and this fails: every
+// re-offer loses the claim and nothing is ever delivered or counted.
+func TestRelayedReply_AReleaseWhoseResultIsUnknownIsReclaimedByTheNextOffer(t *testing.T) {
 	t.Parallel()
 	dedupe := newSharedDedupe()
-	dedupe.releaseFails = true
-	// The first write fails before the frame leaves — provably not sent — so
-	// the claim has to go back; and it cannot.
+	dedupe.releaseFails = true // the DEL never lands; the key keeps our token
 	rig := newRelaySendRigWithDedupe(t, func(n int) bool { return n == 1 }, dedupe)
 
 	rig.route(t, "the agent reply")
-	waitFor(t, "the stranded claim to be recorded", func() bool {
-		return rig.mx.get("outbound_dropped") >= 1
+	waitFor(t, "the re-offer to deliver", func() bool {
+		return rig.mx.get("outbound_delivered") == 1
 	})
-	// Long enough for the whole retry chain to have run, had one been
-	// scheduled.
 	time.Sleep(rig.router.outcomeGrace())
 
-	if got := rig.mx.get("outbound_dropped"); got != 1 {
-		t.Fatalf("outbound_dropped = %d, want exactly 1", got)
+	if got := rig.mx.get("outbound_dropped"); got != 0 {
+		t.Fatalf("outbound_dropped = %d, want 0: an unknown release is not a loss", got)
 	}
-	if got := rig.mx.get("outbound_delivered"); got != 0 {
-		t.Fatalf("outbound_delivered = %d, want 0", got)
+	if got := rig.conn.writeAttempts(); got != 2 {
+		t.Fatalf("%d offers, want 2: the failed one and the re-claimed one", got)
 	}
-	if got := rig.conn.writeAttempts(); got != 1 {
-		t.Fatalf("the frame was offered %d times, want 1: a claim that cannot be released is not offered again", got)
+	if dedupe.heldCount() != 1 || dedupe.valueOf(dedupeKey(rig.lastEventID())) != claimSettledValue {
+		t.Fatalf("claim store holds %d key(s) with value %q, want the one key settled by its holder",
+			dedupe.heldCount(), dedupe.valueOf(dedupeKey(rig.lastEventID())))
 	}
-	if dedupe.heldCount() != 1 {
-		t.Fatalf("%d claim keys held, want the 1 that could not be released", dedupe.heldCount())
+}
+
+// The other face of an unknown release: the DEL DID land and only its response
+// was lost. The key is gone, the next offer's Claim takes it fresh, and the
+// reply again ends with exactly one record. Nothing was recorded on the
+// strength of the error — that is the whole point.
+//
+// REVERSE VERIFICATION: record a drop on a Release error in perform (the
+// round-2 shape) and this fails with outbound_dropped = 1 beside
+// outbound_delivered = 1.
+func TestRelayedReply_AReleaseThatLandedButErroredIsTakenFreshByTheNextOffer(t *testing.T) {
+	t.Parallel()
+	dedupe := newSharedDedupe()
+	dedupe.releaseErrAfterDelete = true
+	rig := newRelaySendRigWithDedupe(t, func(n int) bool { return n == 1 }, dedupe)
+
+	rig.route(t, "the agent reply")
+	waitFor(t, "the re-offer to deliver", func() bool {
+		return rig.mx.get("outbound_delivered") == 1
+	})
+	time.Sleep(rig.router.outcomeGrace())
+
+	if got := rig.mx.get("outbound_dropped"); got != 0 {
+		t.Fatalf("outbound_dropped = %d, want 0", got)
+	}
+	if got := rig.conn.writeAttempts(); got != 2 {
+		t.Fatalf("%d offers, want 2", got)
 	}
 }

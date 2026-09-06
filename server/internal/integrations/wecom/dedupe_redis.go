@@ -7,9 +7,11 @@ package wecom
 // cross-replica routing and nothing to deduplicate. A deployment that never
 // needed Redis is not asked for it now.
 //
-// SET NX PX is the claim. One key per turn, keyed on the same event id the
-// stream entry carries, so a frame replayed after a restart and a frame read
-// by two replicas mid-lease-move meet the same key.
+// One key per turn, keyed on the same event id the stream entry carries, so a
+// frame replayed after a restart and a frame read by two replicas
+// mid-lease-move meet the same key. The value is the owner's token while the
+// delivery is in flight, then "settled" (its holder recorded the outcome) or
+// "lost" (the publisher did).
 
 import (
 	"context"
@@ -52,33 +54,100 @@ const defaultClaimBudget = 2 * time.Second
 // sizes RelayOutbound.outcomeGrace.
 func (d *redisDedupe) ClaimBudget() time.Duration { return d.budget }
 
-func (d *redisDedupe) Claim(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+// Every mutation is one Lua operation keyed on the owner token, the same
+// shape engine.RedisLeaseStore uses for channel leases: compare and act in the
+// server, so a command the client re-sends after a lost response can never
+// act on a claim a later owner holds. That is what makes Release safe to
+// retry and lets a DEL whose response was lost be answered by the next
+// Claim rather than guessed at.
+const (
+	redisClaimSource = `
+local v = redis.call('GET', KEYS[1])
+if (not v) then
+  redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+  return 1
+end
+if v == ARGV[1] then
+  return 1
+end
+return 0
+`
+	redisReleaseSource = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`
+	redisSettleSource = `
+local v = redis.call('GET', KEYS[1])
+if v == ARGV[1] then
+  redis.call('SET', KEYS[1], ARGV[2], 'KEEPTTL')
+  return 1
+end
+if v == ARGV[2] then
+  return 1
+end
+return 0
+`
+	// Resolve reads the state and, for a key still held by a token, fences
+	// it as lost in the same operation. Return codes are claimState values.
+	redisResolveSource = `
+local v = redis.call('GET', KEYS[1])
+if (not v) then
+  return 0
+end
+if v == ARGV[1] then
+  return 2
+end
+if v == ARGV[2] then
+  return 3
+end
+redis.call('SET', KEYS[1], ARGV[2], 'KEEPTTL')
+return 1
+`
+)
+
+var (
+	redisClaim   = redis.NewScript(redisClaimSource)
+	redisRelease = redis.NewScript(redisReleaseSource)
+	redisSettle  = redis.NewScript(redisSettleSource)
+	redisResolve = redis.NewScript(redisResolveSource)
+)
+
+func (d *redisDedupe) Claim(ctx context.Context, key, token string, ttl time.Duration) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, d.budget)
 	defer cancel()
-	return d.rdb.SetNX(ctx, key, "1", ttl).Result()
+	n, err := redisClaim.Run(ctx, d.rdb, []string{key}, token, ttl.Milliseconds()).Int()
+	return n == 1, err
 }
 
-// Held reports whether a claim is currently taken. One EXISTS, on the same
-// bounded budget as the claim itself: the caller is deciding whether to record
-// a lost reply, and a Redis that cannot answer must not become evidence.
-func (d *redisDedupe) Held(ctx context.Context, key string) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, d.budget)
-	defer cancel()
-	n, err := d.rdb.Exists(ctx, key).Result()
-	return n > 0, err
-}
-
-// Release gives a claim back for a delivery that provably did not happen.
-// Best effort by design: a Release that fails leaves a key that expires on its
-// own, which costs one un-retried delivery in the replay window rather than a
-// duplicate in somebody's chat.
-func (d *redisDedupe) Release(ctx context.Context, key string) error {
+// Release is a compare-and-delete on the token. An error means the outcome is
+// unknown; the caller reads it as exactly that (RelayOutbound.perform).
+func (d *redisDedupe) Release(ctx context.Context, key, token string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.budget)
 	defer cancel()
-	if err := d.rdb.Del(ctx, key).Err(); err != nil {
-		d.log.WarnContext(ctx, "wecom relay: could not release a delivery claim",
+	n, err := redisRelease.Run(ctx, d.rdb, []string{key}, token).Int()
+	if err != nil {
+		d.log.WarnContext(ctx, "wecom relay: claim release outcome unknown",
 			"error", err, "key", key)
-		return err
+		return false, err
 	}
-	return nil
+	return n == 1, nil
+}
+
+func (d *redisDedupe) Settle(ctx context.Context, key, token string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.budget)
+	defer cancel()
+	n, err := redisSettle.Run(ctx, d.rdb, []string{key}, token, claimSettledValue).Int()
+	return n == 1, err
+}
+
+func (d *redisDedupe) Resolve(ctx context.Context, key string) (claimState, error) {
+	ctx, cancel := context.WithTimeout(ctx, d.budget)
+	defer cancel()
+	n, err := redisResolve.Run(ctx, d.rdb, []string{key}, claimSettledValue, claimLostValue).Int()
+	if err != nil {
+		return claimAbsent, err
+	}
+	return claimState(n), nil
 }
