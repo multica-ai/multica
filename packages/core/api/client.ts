@@ -1,6 +1,12 @@
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { configStore } from "../config";
+import {
+  SecretaryResponseSchema,
+  SecretaryReceiptSchema,
+  type SecretaryResponse,
+  type SecretaryInstructionInput,
+} from "../secretary/contract";
 import type {
   Issue,
   IssuePriority,
@@ -1241,6 +1247,37 @@ export class ApiClient {
     return parseWithFallback(raw, SearchProjectsResponseSchema, EMPTY_SEARCH_PROJECTS_RESPONSE, {
       endpoint: "GET /api/projects/search",
     });
+  }
+
+  async getSecretary(): Promise<SecretaryResponse | null> {
+    const raw = await this.fetch<unknown>("/api/lifeos/secretary");
+    return parseWithFallback<SecretaryResponse | null>(
+      raw,
+      SecretaryResponseSchema,
+      null,
+      { endpoint: "GET /api/lifeos/secretary" },
+    );
+  }
+
+  async saveSecretaryInstruction(data: SecretaryInstructionInput) {
+    const raw = await this.fetch<unknown>(
+      "/api/lifeos/secretary/instructions",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+    const receipt = parseWithFallback<{
+      sequence: number;
+      request_id: string;
+    } | null>(raw, SecretaryReceiptSchema, null, {
+      endpoint: "POST /api/lifeos/secretary/instructions",
+    });
+    if (!receipt) {
+      throw new Error("没有收到保存确认，请保留输入并重试。");
+    }
+    return receipt;
   }
 
   /**

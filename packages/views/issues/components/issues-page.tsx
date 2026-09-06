@@ -1,6 +1,10 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@multica/core/api";
+import { Button } from "@multica/ui/components/ui/button";
+import { SecretaryPage } from "../../secretary/secretary-page";
 import { ListTodo } from "lucide-react";
 import type {
   Issue,
@@ -71,6 +75,13 @@ function IssuesSurfaceHeader({
 }
 
 export function IssuesPage() {
+  const [original, setOriginal] = useState(false);
+  const config = useQuery({ queryKey: ["app-config"], queryFn: () => api.getConfig(), staleTime: 60_000 });
+  if (config.data?.local_mode && !original) return <SecretaryPage onOriginalRecords={() => setOriginal(true)} />;
+  return <div className="flex flex-1 min-h-0 flex-col">{original && <Button variant="ghost" className="self-start m-2" onClick={() => setOriginal(false)}>返回秘书安排</Button>}<OriginalIssuesPage /></div>;
+}
+
+function OriginalIssuesPage() {
   const { t } = useT("issues");
   const scope = useIssuesScope("issues");
   const [focus, setFocus] = useLifeOSFocus();

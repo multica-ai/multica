@@ -1,0 +1,2 @@
+DROP TABLE lifeos_secretary_instruction;
+DROP TABLE lifeos_secretary_projection;

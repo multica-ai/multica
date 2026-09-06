@@ -19,6 +19,8 @@ import {
   X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { api } from "@multica/core/api";
+import { SecretaryPage } from "../../secretary/secretary-page";
 import { toast } from "sonner";
 import {
   projectListOptions,
@@ -795,6 +797,13 @@ function ProjectBatchToolbar({
 // ---------------------------------------------------------------------------
 
 export function ProjectsPage() {
+  const [original, setOriginal] = useState(false);
+  const config = useQuery({ queryKey: ["app-config"], queryFn: () => api.getConfig(), staleTime: 60_000 });
+  if (config.data?.local_mode && !original) return <SecretaryPage initialView="matters" originalLabel="原项目目录" onOriginalRecords={() => setOriginal(true)} />;
+  return <div className="flex flex-1 min-h-0 flex-col">{original && <Button variant="ghost" className="self-start m-2" onClick={() => setOriginal(false)}>返回具体事项</Button>}<OriginalProjectsPage /></div>;
+}
+
+function OriginalProjectsPage() {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();

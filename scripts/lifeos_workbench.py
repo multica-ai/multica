@@ -579,6 +579,7 @@ def implementation_deployment_environment(
     """Create a non-secret commit binding while Git metadata is accessible."""
     workbench_path = REPO / "scripts/lifeos_workbench.py"
     controller_path = controller_root / "scripts/lifeos_controller.py"
+    secretary_path = controller_root / "scripts/secretary_service.py"
     return {
         WORKBENCH_DEPLOYED_HEAD_ENV: _committed_implementation_revision(
             REPO,
@@ -590,6 +591,8 @@ def implementation_deployment_environment(
             "scripts/lifeos_controller.py",
         ),
         CONTROLLER_DEPLOYED_SHA_ENV: _sha256_file(controller_path),
+        "LIFEOS_SECRETARY_DEPLOYED_HEAD": _committed_implementation_revision(controller_root, "scripts/secretary_service.py"),
+        "LIFEOS_SECRETARY_DEPLOYED_SHA256": _sha256_file(secretary_path),
     }
 
 
@@ -629,6 +632,7 @@ def ensure_autostart_deployment(
 def implementation_provenance(controller_root: Path) -> Dict[str, object]:
     workbench_path = REPO / "scripts/lifeos_workbench.py"
     controller_path = controller_root / "scripts/lifeos_controller.py"
+    secretary_path = controller_root / "scripts/secretary_service.py"
     return {
         "status": "committed",
         "workbench_git_head": _committed_implementation_revision(
@@ -645,6 +649,11 @@ def implementation_provenance(controller_root: Path) -> Dict[str, object]:
             deployed_sha256=os.environ.get(CONTROLLER_DEPLOYED_SHA_ENV),
         ),
         "controller_script_sha256": _sha256_file(controller_path),
+        "secretary_git_head": _committed_implementation_revision(
+            controller_root, "scripts/secretary_service.py",
+            deployed_head=os.environ.get("LIFEOS_SECRETARY_DEPLOYED_HEAD"),
+            deployed_sha256=os.environ.get("LIFEOS_SECRETARY_DEPLOYED_SHA256")),
+        "secretary_script_sha256": _sha256_file(secretary_path),
     }
 
 
@@ -747,6 +756,7 @@ def background_sync(
         if not processed and not triaged:
             raise WorkbenchError("LifeOS 后台同步队列未取得进展，请检查本机日志")
 
+    secretary_projection = _controller_json(lifeos_root, controller_root, "secretary-reconcile")
     end_provenance = implementation_provenance(controller_root)
     if end_provenance != start_provenance:
         raise WorkbenchError("LifeOS 后台实现提交在同步期间发生变化")
@@ -766,7 +776,7 @@ def background_sync(
         "coverage": coverage,
         "raw_content_stored": False,
         "codex_task_created": False,
-        "action_projection": "deferred_to_visible_sync",
+        "action_projection": secretary_projection,
         "implementation_provenance": end_provenance,
     }
     receipt_path = persist_background_sync_receipt(result)

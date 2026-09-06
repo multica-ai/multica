@@ -167,6 +167,8 @@ class ContextDatabaseTests(unittest.TestCase):
                         "ceo_reviews_pending": 0,
                     },
                 }
+            if arguments[0] == "secretary-reconcile":
+                return {"revision": 1, "created": []}
             raise AssertionError(arguments)
 
         provenance = {
@@ -204,9 +206,9 @@ class ContextDatabaseTests(unittest.TestCase):
         self.assertFalse(result["codex_task_created"])
         self.assertEqual(
             [call[0] for call in calls],
-            ["process-summaries", "triage-ceo"],
+            ["process-summaries", "triage-ceo", "secretary-reconcile"],
         )
-        self.assertEqual(result["action_projection"], "deferred_to_visible_sync")
+        self.assertEqual(result["action_projection"], {"revision": 1, "created": []})
         self.assertEqual(result["implementation_provenance"], provenance)
         self.assertEqual(
             result["receipt_ref"],
@@ -263,6 +265,8 @@ class ContextDatabaseTests(unittest.TestCase):
                         "summary_dead_letters": 2,
                     },
                 }
+            if arguments[0] == "secretary-reconcile":
+                return {"revision": 1, "created": []}
             raise AssertionError(arguments)
 
         provenance = {
@@ -371,11 +375,11 @@ class ContextDatabaseTests(unittest.TestCase):
             ), mock.patch.object(
                 lifeos_workbench,
                 "_committed_implementation_revision",
-                side_effect=["a" * 40, "b" * 40],
+                side_effect=["a" * 40, "b" * 40, "b" * 40],
             ), mock.patch.object(
                 lifeos_workbench,
                 "_sha256_file",
-                side_effect=["c" * 64, "d" * 64],
+                side_effect=["c" * 64, "d" * 64, "e" * 64],
             ):
                 environment = (
                     lifeos_workbench.implementation_deployment_environment(
@@ -390,6 +394,8 @@ class ContextDatabaseTests(unittest.TestCase):
                 lifeos_workbench.WORKBENCH_DEPLOYED_SHA_ENV: "c" * 64,
                 lifeos_workbench.CONTROLLER_DEPLOYED_HEAD_ENV: "b" * 40,
                 lifeos_workbench.CONTROLLER_DEPLOYED_SHA_ENV: "d" * 64,
+                "LIFEOS_SECRETARY_DEPLOYED_HEAD": "b" * 40,
+                "LIFEOS_SECRETARY_DEPLOYED_SHA256": "e" * 64,
             },
         )
 
@@ -402,6 +408,8 @@ class ContextDatabaseTests(unittest.TestCase):
                 lifeos_workbench.WORKBENCH_DEPLOYED_SHA_ENV: "b" * 64,
                 lifeos_workbench.CONTROLLER_DEPLOYED_HEAD_ENV: "c" * 40,
                 lifeos_workbench.CONTROLLER_DEPLOYED_SHA_ENV: "d" * 64,
+                "LIFEOS_SECRETARY_DEPLOYED_HEAD": "b" * 40,
+                "LIFEOS_SECRETARY_DEPLOYED_SHA256": "e" * 64,
             }
             with plist_path.open("wb") as handle:
                 plistlib.dump({"EnvironmentVariables": installed}, handle)

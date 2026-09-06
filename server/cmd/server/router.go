@@ -1885,6 +1885,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Local LifeOS repair loop. The handler remains unavailable when
 			// local mode is disabled even though the route is registered here.
 			r.Post("/api/lifeos/comments/reconcile", h.ReconcileLifeOSComments)
+			r.Get("/api/lifeos/secretary", h.GetLifeOSSecretary)
+			r.Put("/api/lifeos/secretary", h.PutLifeOSSecretary)
+			r.With(handler.RequireHumanActor).Post("/api/lifeos/secretary/instructions", h.CreateLifeOSSecretaryInstruction)
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
