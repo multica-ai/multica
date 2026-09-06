@@ -756,7 +756,10 @@ def background_sync(
         if not processed and not triaged:
             raise WorkbenchError("LifeOS 后台同步队列未取得进展，请检查本机日志")
 
-    secretary_projection = _controller_json(lifeos_root, controller_root, "secretary-reconcile")
+    # launchd cannot read the protected Documents ledger. Canonical reconciliation
+    # belongs to the authorized Codex secretary schedule; the server immediately
+    # resolves member feedback for the UI. Background indexing keeps its own scope.
+    secretary_projection = "deferred_to_secretary_schedule"
     end_provenance = implementation_provenance(controller_root)
     if end_provenance != start_provenance:
         raise WorkbenchError("LifeOS 后台实现提交在同步期间发生变化")

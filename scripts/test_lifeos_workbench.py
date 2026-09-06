@@ -167,8 +167,6 @@ class ContextDatabaseTests(unittest.TestCase):
                         "ceo_reviews_pending": 0,
                     },
                 }
-            if arguments[0] == "secretary-reconcile":
-                return {"revision": 1, "created": []}
             raise AssertionError(arguments)
 
         provenance = {
@@ -206,9 +204,9 @@ class ContextDatabaseTests(unittest.TestCase):
         self.assertFalse(result["codex_task_created"])
         self.assertEqual(
             [call[0] for call in calls],
-            ["process-summaries", "triage-ceo", "secretary-reconcile"],
+            ["process-summaries", "triage-ceo"],
         )
-        self.assertEqual(result["action_projection"], {"revision": 1, "created": []})
+        self.assertEqual(result["action_projection"], "deferred_to_secretary_schedule")
         self.assertEqual(result["implementation_provenance"], provenance)
         self.assertEqual(
             result["receipt_ref"],
@@ -265,8 +263,6 @@ class ContextDatabaseTests(unittest.TestCase):
                         "summary_dead_letters": 2,
                     },
                 }
-            if arguments[0] == "secretary-reconcile":
-                return {"revision": 1, "created": []}
             raise AssertionError(arguments)
 
         provenance = {
