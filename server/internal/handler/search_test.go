@@ -337,6 +337,9 @@ func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
 	if !strings.Contains(multiQuery, "BOOL_OR((LOWER(c.content) LIKE") || !strings.Contains(multiQuery, "AS comment_all_terms") {
 		t.Errorf("multi-term query does not retain the same-comment all-terms flag:\n%s", multiQuery)
 	}
+	if !strings.Contains(multiQuery, "ARRAY_AGG(c.id ORDER BY c.created_at DESC, c.id DESC)") {
+		t.Errorf("snippet selection has no deterministic comment-ID tie-breaker:\n%s", multiQuery)
+	}
 }
 
 func TestBuildSearchQuery_HydratesOnlyTheSelectedPage(t *testing.T) {

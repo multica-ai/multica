@@ -725,8 +725,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		)
 		commentSnippetPredicate += " OR " + commentAllTerms
 	}
+	// Keep the ordered aggregate in the measured single comment pass. Replacing
+	// it with DISTINCT ON/window ranking changes that production-tested plan;
+	// looking the ID up later would repeat text predicates after pagination.
+	// The aggregate stores matching UUIDs per issue (not content), and the ID
+	// tie-break makes equal created_at values deterministic.
 	commentFlagColumns = append(commentFlagColumns, fmt.Sprintf(
-		"(ARRAY_AGG(c.id ORDER BY c.created_at DESC) FILTER (WHERE %s))[1] AS snippet_comment_id",
+		"(ARRAY_AGG(c.id ORDER BY c.created_at DESC, c.id DESC) FILTER (WHERE %s))[1] AS snippet_comment_id",
 		commentSnippetPredicate,
 	))
 

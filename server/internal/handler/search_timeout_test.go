@@ -32,6 +32,33 @@ func TestIsSearchStatementTimeout(t *testing.T) {
 	}
 }
 
+func TestParseSearchWorkMemMB(t *testing.T) {
+	tests := []struct {
+		name   string
+		raw    string
+		want   int
+		wantOK bool
+	}{
+		{name: "unset uses default", want: defaultSearchWorkMemMB, wantOK: true},
+		{name: "disable local override", raw: "0", want: 0, wantOK: true},
+		{name: "lower cap", raw: " 16 ", want: 16, wantOK: true},
+		{name: "default explicitly", raw: "64", want: 64, wantOK: true},
+		{name: "negative rejected", raw: "-1", want: defaultSearchWorkMemMB},
+		{name: "higher cap rejected", raw: "65", want: defaultSearchWorkMemMB},
+		{name: "unit suffix rejected", raw: "16MB", want: defaultSearchWorkMemMB},
+		{name: "invalid rejected", raw: "large", want: defaultSearchWorkMemMB},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseSearchWorkMemMB(tt.raw)
+			if got != tt.want || ok != tt.wantOK {
+				t.Fatalf("parseSearchWorkMemMB(%q) = (%d, %t), want (%d, %t)", tt.raw, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
 // TestRunSearchQuery_StatementTimeoutFires exercises the safety net end
 // to end against a live Postgres, proving that a deliberately hung
 // pg_sleep query is cut off by SET LOCAL statement_timeout (SQLSTATE
@@ -102,8 +129,12 @@ func TestRunSearchQuery_WorkMemIsTransactionLocal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run search query: %v", err)
 	}
-	if during != searchWorkMem {
-		t.Fatalf("work_mem during search = %q, want %q", during, searchWorkMem)
+	wantDuring := before
+	if configured := searchWorkMemValue(); configured != "" {
+		wantDuring = configured
+	}
+	if during != wantDuring {
+		t.Fatalf("work_mem during search = %q, want %q", during, wantDuring)
 	}
 
 	var after string

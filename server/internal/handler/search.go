@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -31,16 +35,57 @@ import (
 const (
 	searchStatementTimeout = 3 * time.Second
 
-	// searchWorkMem removes the candidate-first comment aggregation spill seen
-	// at Postgres' 4 MB default. work_mem is a per-node ceiling, not a
-	// reservation: the production plan's material sort used about 9 MB. At the
-	// default 25-connection pool ceiling, 25 simultaneous searches would use
-	// about 225 MB for that node; the theoretical per-node ceiling is 1.6 GB.
-	// Keep this transaction-local so unrelated pooled work retains its configured
-	// database default, and keep the 3 s timeout above as the lifetime bound.
-	searchWorkMem    = "64MB"
-	searchWorkMemSQL = "SET LOCAL work_mem = '" + searchWorkMem + "'"
+	searchWorkMemEnv       = "DATABASE_SEARCH_WORK_MEM_MB"
+	defaultSearchWorkMemMB = 64
 )
+
+// configuredSearchWorkMemMB removes the candidate-first comment aggregation
+// spill seen at Postgres' 4 MB default. work_mem is a per-node ceiling, not a
+// reservation: the production plan's dominant sort used about 9 MB, but the
+// query has roughly three memory-using sort/hash nodes. With the default 25
+// primary connections, the theoretical ceiling is therefore about 4.8 GB per
+// API process's connection set, not 1.6 GB for the whole query set. Actual use
+// is demand-driven and was much lower in the measured plan.
+//
+// runSearchQuery backs both issue and project search. Project search inherits
+// the same ceiling, but its indexed candidate and small sort do not approach it;
+// no memory is reserved merely by setting the ceiling. Keep this transaction-
+// local so unrelated pooled work retains its database default. Self-hosted
+// operators can set DATABASE_SEARCH_WORK_MEM_MB to 0 to keep that default or to
+// 1-64 to lower the cap; higher values are rejected to avoid expanding risk.
+var configuredSearchWorkMemMB = searchWorkMemMBFromEnv()
+
+func parseSearchWorkMemMB(raw string) (int, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultSearchWorkMemMB, true
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 || value > defaultSearchWorkMemMB {
+		return defaultSearchWorkMemMB, false
+	}
+	return value, true
+}
+
+func searchWorkMemMBFromEnv() int {
+	raw := os.Getenv(searchWorkMemEnv)
+	value, ok := parseSearchWorkMemMB(raw)
+	if !ok {
+		slog.Warn("invalid search work_mem; using default",
+			"name", searchWorkMemEnv,
+			"value", raw,
+			"default_mb", defaultSearchWorkMemMB,
+		)
+	}
+	return value
+}
+
+func searchWorkMemValue() string {
+	if configuredSearchWorkMemMB == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%dMB", configuredSearchWorkMemMB)
+}
 
 // searchStatementTimeoutOverride, when non-zero, replaces
 // searchStatementTimeout for the duration of a test. Never read outside
@@ -55,10 +100,10 @@ func effectiveSearchStatementTimeout() time.Duration {
 }
 
 // runSearchQuery executes a search SQL query inside a short-lived read-only
-// transaction with SET LOCAL statement_timeout as the safety net. rowsFn
-// receives each pgx.Rows result and is responsible for scanning /
-// accumulating results before returning; runSearchQuery handles
-// commit / rollback and returns the first error encountered.
+// transaction with transaction-local timeout and working-memory settings.
+// rowsFn receives each pgx.Rows result and is responsible for scanning and
+// accumulating results before returning; runSearchQuery handles commit /
+// rollback and returns the first error encountered.
 //
 // tx uses IsoLevel ReadCommitted (Postgres default) and AccessMode ReadOnly
 // so a stuck search cannot hold row locks against writers.
@@ -89,8 +134,12 @@ func runSearchQuery(
 	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL statement_timeout = %d", timeoutMs)); err != nil {
 		return fmt.Errorf("set search statement_timeout: %w", err)
 	}
-	if _, err := tx.Exec(ctx, searchWorkMemSQL); err != nil {
-		return fmt.Errorf("set search work_mem: %w", err)
+	if workMem := searchWorkMemValue(); workMem != "" {
+		// workMem is constructed only from the bounded integer parsed above, so
+		// interpolating it cannot introduce SQL syntax or user input.
+		if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL work_mem = '%s'", workMem)); err != nil {
+			return fmt.Errorf("set search work_mem: %w", err)
+		}
 	}
 	// The read-only mode is applied here rather than via TxOptions so we
 	// keep the txStarter interface signature (Begin only) intact. It's

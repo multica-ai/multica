@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -161,6 +162,34 @@ func TestBuildSearchQuery_CandidateFirstParity(t *testing.T) {
 				t.Fatalf("candidate-first rows differ from legacy semantics\ncandidate: %#v\nlegacy:    %#v", candidateRows, legacyRows)
 			}
 		})
+	}
+
+	// Legacy ordering is undefined when two matching comments have the same
+	// created_at. Candidate-first makes that case deterministic by choosing the
+	// greater UUID, matching the timeline's established (created_at, id) order.
+	tiedSnippetIssueID := dbfx.Issue(t, "tied snippet source", testutil.Cols{
+		"updated_at": baseTime.Add(17 * time.Minute),
+	})
+	firstCommentID, secondCommentID := uuid.NewString(), uuid.NewString()
+	lowCommentID, highCommentID := firstCommentID, secondCommentID
+	if lowCommentID > highCommentID {
+		lowCommentID, highCommentID = highCommentID, lowCommentID
+	}
+	tiedCommentTime := baseTime.Add(17 * time.Minute)
+	dbfx.Comment(t, tiedSnippetIssueID, token+" tied snippet low", testutil.Cols{
+		"id":         lowCommentID,
+		"created_at": tiedCommentTime,
+	})
+	highCommentContent := token + " tied snippet high"
+	dbfx.Comment(t, tiedSnippetIssueID, highCommentContent, testutil.Cols{
+		"id":         highCommentID,
+		"created_at": tiedCommentTime,
+	})
+	tiedRows := runBuiltSearchForParity(t, token+" tied snippet", true, nil, 50, 0)
+	if row, ok := findSearchParityRow(tiedRows, tiedSnippetIssueID); !ok {
+		t.Fatal("tied-comment match is missing")
+	} else if row.matchedCommentContent != highCommentContent {
+		t.Fatalf("tied-comment snippet = %q, want greater-ID comment %q", row.matchedCommentContent, highCommentContent)
 	}
 
 	splitRows := runBuiltSearchForParity(t, token+" same all", true, nil, 50, 0)

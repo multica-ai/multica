@@ -33,6 +33,7 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `DATABASE_URL` | local `multica` database | PostgreSQL connection string |
 | `DATABASE_MAX_CONNS` | `25` | Maximum database connections per API process |
 | `DATABASE_MIN_CONNS` | `5` | Minimum connections each API process keeps |
+| `DATABASE_SEARCH_WORK_MEM_MB` | `64` | PostgreSQL `work_mem` ceiling in MB for each search plan node; set `1`-`64` to lower it or `0` to keep the database/session default |
 | `DATABASE_REPLICA_URL` | empty | Optional PostgreSQL read-only replica connection string; new connections are validated as read-only, while businesses must explicitly opt into eventual-consistency reads in code |
 | `DATABASE_REPLICA_MAX_CONNS` | `10` | Maximum replica connections per API process |
 | `DATABASE_REPLICA_MIN_CONNS` | `0` | Minimum replica connections each API process keeps |
