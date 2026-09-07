@@ -25,11 +25,16 @@ import (
 )
 
 type fakeTelegramOutboundQueries struct {
+	mu            sync.Mutex
 	deliveryErr   error
 	channelOrigin bool
 	binding       db.ChannelChatSessionBinding
 	bindings      map[[16]byte]db.ChannelChatSessionBinding
 	installation  db.ChannelInstallation
+	assistant     db.ChatMessage
+	assistantErr  error
+	provenance    []db.SetChatMessageChannelOutboundProvenanceByTaskParams
+	recorded      []db.RecordChannelOutboundMessageParams
 }
 
 func (f *fakeTelegramOutboundQueries) GetChannelTaskDelivery(_ context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error) {
@@ -54,6 +59,30 @@ func (f *fakeTelegramOutboundQueries) GetChannelTaskDelivery(_ context.Context, 
 
 func (f *fakeTelegramOutboundQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
 	return f.installation, nil
+}
+
+func (f *fakeTelegramOutboundQueries) GetChatMessageByTaskAssistant(context.Context, pgtype.UUID) (db.ChatMessage, error) {
+	if f.assistantErr != nil {
+		return db.ChatMessage{}, f.assistantErr
+	}
+	if !f.assistant.ID.Valid {
+		return db.ChatMessage{}, pgx.ErrNoRows
+	}
+	return f.assistant, nil
+}
+
+func (f *fakeTelegramOutboundQueries) SetChatMessageChannelOutboundProvenanceByTask(_ context.Context, arg db.SetChatMessageChannelOutboundProvenanceByTaskParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.provenance = append(f.provenance, arg)
+	return 1, nil
+}
+
+func (f *fakeTelegramOutboundQueries) RecordChannelOutboundMessage(_ context.Context, arg db.RecordChannelOutboundMessageParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recorded = append(f.recorded, arg)
+	return nil
 }
 
 func telegramTestUUID(b byte) pgtype.UUID {
@@ -284,6 +313,253 @@ func TestOutboundStreamsBySendingThenEditingTheSameQuotedMessage(t *testing.T) {
 	}
 	if _, exists := o.streams[taskID]; exists {
 		t.Fatal("completed stream state was not cleared")
+	}
+}
+
+func TestOutboundDeduplicatesSameTaskCompletion(t *testing.T) {
+	var sends atomic.Int32
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/sendMessage") {
+			sends.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":99,"chat":{"id":42,"type":"private"},"date":0,"text":"reply"}}`))
+	}))
+	defer api.Close()
+
+	q := newTelegramOutboundQueries()
+	q.channelOrigin = true
+	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
+	e := telegramTestEvent()
+	o.enqueueTerminalReply(e)
+	o.enqueueTerminalReply(e)
+
+	o.terminalMu.Lock()
+	queued := o.queuedTerminalReplyCount
+	o.terminalMu.Unlock()
+	if queued != 1 {
+		t.Fatalf("duplicate completion queued %d replies, want 1", queued)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	o.Start(ctx)
+	defer func() {
+		cancel()
+		if !o.WaitWithTimeout(time.Second) {
+			t.Fatal("terminal workers did not stop")
+		}
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for sends.Load() < 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := sends.Load(); got != 1 {
+		t.Fatalf("same EventChatDone produced %d sendMessage calls, want 1", got)
+	}
+}
+
+func TestOutboundRetriesAmbiguousEditWithoutSendingDuplicateMessage(t *testing.T) {
+	var methods []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		methods = append(methods, method)
+		w.Header().Set("Content-Type", "application/json")
+		switch len(methods) {
+		case 1:
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":99,"chat":{"id":42,"type":"private"},"date":0,"text":"reply"}}`))
+		case 2:
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":500,"description":"Internal Server Error"}`))
+		default:
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message is not modified"}`))
+		}
+	}))
+	defer api.Close()
+
+	q := newTelegramOutboundQueries()
+	q.channelOrigin = true
+	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
+	current := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
+	o.now = func() time.Time { return current }
+	o.wait = func(_ context.Context, delay time.Duration) error {
+		current = current.Add(delay)
+		return nil
+	}
+
+	e := telegramTestEvent()
+	o.handleTaskMessage(events.Event{
+		TaskID: e.TaskID,
+		Type:   protocol.EventTaskMessage,
+		Payload: protocol.TaskMessagePayload{
+			TaskID: e.TaskID, Type: "text", Content: "reply",
+		},
+	})
+	current = current.Add(editInterval)
+	if err := sendTerminalReplySynchronouslyForTest(context.Background(), o, e); err != nil {
+		t.Fatalf("terminal reply: %v", err)
+	}
+	if got := strings.Join(methods, ","); got != "sendMessage,editMessageText,editMessageText" {
+		t.Fatalf("methods = %s, want idempotent edit retry without a second sendMessage", got)
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.provenance) != 1 || len(q.provenance[0].MessageIds) != 1 || q.provenance[0].MessageIds[0] != "42:99" {
+		t.Fatalf("provenance = %+v, want the original streamed message only", q.provenance)
+	}
+}
+
+func TestOutboundHTMLParseFailureEditsOriginalMessageAsPlainText(t *testing.T) {
+	type requestRecord struct {
+		method    string
+		parseMode string
+	}
+	var requests []requestRecord
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ParseMode string `json:"parse_mode"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		requests = append(requests, requestRecord{method: method, parseMode: body.ParseMode})
+		w.Header().Set("Content-Type", "application/json")
+		switch len(requests) {
+		case 1:
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":99,"chat":{"id":42,"type":"private"},"date":0,"text":"reply"}}`))
+		case 2:
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: can’t parse entities"}`))
+		default:
+			_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+		}
+	}))
+	defer api.Close()
+
+	q := newTelegramOutboundQueries()
+	q.channelOrigin = true
+	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
+	current := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
+	o.now = func() time.Time { return current }
+	o.wait = func(_ context.Context, delay time.Duration) error {
+		current = current.Add(delay)
+		return nil
+	}
+	e := telegramTestEvent()
+	o.handleTaskMessage(events.Event{
+		TaskID: e.TaskID,
+		Type:   protocol.EventTaskMessage,
+		Payload: protocol.TaskMessagePayload{
+			TaskID: e.TaskID, Type: "text", Content: "reply",
+		},
+	})
+	current = current.Add(editInterval)
+	if err := sendTerminalReplySynchronouslyForTest(context.Background(), o, e); err != nil {
+		t.Fatalf("terminal reply: %v", err)
+	}
+	if len(requests) != 3 || requests[0].method != "sendMessage" ||
+		requests[1] != (requestRecord{method: "editMessageText", parseMode: "HTML"}) ||
+		requests[2] != (requestRecord{method: "editMessageText"}) {
+		t.Fatalf("requests = %+v, want send then HTML edit then plain-text edit", requests)
+	}
+}
+
+func TestOutboundIgnoresLatePartialAfterTerminalClaim(t *testing.T) {
+	var requests atomic.Int32
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":99,"chat":{"id":42,"type":"private"},"date":0,"text":"reply"}}`))
+	}))
+	defer api.Close()
+
+	q := newTelegramOutboundQueries()
+	q.channelOrigin = true
+	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
+	e := telegramTestEvent()
+	o.enqueueTerminalReply(e)
+	o.handleTaskMessage(events.Event{
+		TaskID: e.TaskID,
+		Type:   protocol.EventTaskMessage,
+		Payload: protocol.TaskMessagePayload{
+			TaskID: e.TaskID, Type: "text", Content: "late reply",
+		},
+	})
+
+	o.mu.Lock()
+	_, streamExists := o.streams[e.TaskID]
+	o.mu.Unlock()
+	if streamExists || requests.Load() != 0 {
+		t.Fatalf("late partial created stream=%v requests=%d, want neither", streamExists, requests.Load())
+	}
+}
+
+func TestOutboundSkipsTaskWithDurableTelegramProvenance(t *testing.T) {
+	var requests atomic.Int32
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":100,"chat":{"id":42,"type":"private"},"date":0,"text":"duplicate"}}`))
+	}))
+	defer api.Close()
+
+	q := newTelegramOutboundQueries()
+	q.channelOrigin = true
+	q.assistant = db.ChatMessage{
+		ID:                            telegramTestUUID(9),
+		ChannelOutboundType:           pgtype.Text{String: string(TypeTelegram), Valid: true},
+		ChannelOutboundInstallationID: telegramTestUUID(1),
+		ChannelOutboundChatID:         pgtype.Text{String: "42", Valid: true},
+		ChannelOutboundMessageIds:     []string{"42:99"},
+	}
+	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
+	if err := sendTerminalReplySynchronouslyForTest(context.Background(), o, telegramTestEvent()); err != nil {
+		t.Fatalf("terminal reply: %v", err)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("durably delivered task made %d Telegram requests, want 0", requests.Load())
+	}
+}
+
+func TestOutboundMissingEditTargetFallsBackOnce(t *testing.T) {
+	var methods []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		methods = append(methods, method)
+		w.Header().Set("Content-Type", "application/json")
+		switch len(methods) {
+		case 1:
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":99,"chat":{"id":42,"type":"private"},"date":0,"text":"partial"}}`))
+		case 2:
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message to edit not found"}`))
+		default:
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":100,"chat":{"id":42,"type":"private"},"date":0,"text":"reply"}}`))
+		}
+	}))
+	defer api.Close()
+
+	q := newTelegramOutboundQueries()
+	q.channelOrigin = true
+	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
+	current := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
+	o.now = func() time.Time { return current }
+	o.wait = func(_ context.Context, delay time.Duration) error {
+		current = current.Add(delay)
+		return nil
+	}
+	e := telegramTestEvent()
+	o.handleTaskMessage(events.Event{
+		TaskID: e.TaskID,
+		Type:   protocol.EventTaskMessage,
+		Payload: protocol.TaskMessagePayload{
+			TaskID: e.TaskID, Type: "text", Content: "partial",
+		},
+	})
+	current = current.Add(editInterval)
+	if err := sendTerminalReplySynchronouslyForTest(context.Background(), o, e); err != nil {
+		t.Fatalf("terminal reply: %v", err)
+	}
+	if got := strings.Join(methods, ","); got != "sendMessage,editMessageText,sendMessage" {
+		t.Fatalf("methods = %s, want one safe fallback after missing target", got)
 	}
 }
 
