@@ -27,7 +27,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { cn } from "@multica/ui/lib/utils";
-import { PAGE_GUTTER } from "../../layout/page-header";
+import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
 import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
@@ -328,11 +328,11 @@ export function AgentOverviewPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div
-        className={cn("shrink-0 overflow-x-auto border-b", PAGE_GUTTER)}
+        className="shrink-0 overflow-x-auto border-b"
         role="tablist"
         aria-label={t(($) => $.tabs.page_navigation_aria)}
       >
-        <div className="flex items-center gap-6">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-6")}>
           {TOP_TABS.map((tab) => (
             <button
               key={tab.id}
@@ -353,14 +353,22 @@ export function AgentOverviewPane({
         </div>
       </div>
 
-      {/* One leading edge for the whole page: the header, the tab bar and
-          every panel start at PAGE_GUTTER (MUL-7107). The chrome used to sit
-          on a centred `max-w-[1440px]` rail while the panels did not, so above
-          ~1730px the tabs walked right and left the content behind them.
+      {/* Header, tab bar, banners and every panel read PAGE_RAIL, so the page
+          is one centred column at every width (MUL-7107). The first pass put
+          the chrome on the rail and left the panels off it, which is the bug;
+          the second put everything full-bleed, which aligned the leading edge
+          and then stretched this two-column layout to 2200px and stranded the
+          summary card 1200px from the list it summarises.
 
-          A panel caps its width by anchoring, never by centring — a centred cap
-          drifts away from that edge as the window grows. Lists stay full-bleed
-          (an issue table wants the width); reading and form content takes a cap.
+          A detail page is a document about one entity, not a table. Genuine
+          list surfaces — Issues, My Issues, member detail — stay full-bleed on
+          PAGE_GUTTER alone; `runtimes` and skill detail read the same rail.
+
+          Panels that own no inner gutter take PAGE_GUTTER on the rail element
+          itself; Work and the secondary nav layout take a bare rail because
+          their toolbar and nav rail already carry it. Below ~1730px the rail
+          is wider than the viewport, so it costs small and medium screens
+          nothing.
 
           Overview/Work scroll as one page. Sidebar views split scrolling on
           md+ (nav rail pinned, content pane scrolls) like settings-page.tsx;
@@ -373,10 +381,7 @@ export function AgentOverviewPane({
       >
         {effectiveView === "overview" && (
           <div
-            className={cn(
-              "w-full max-w-[1440px] py-4 sm:py-6",
-              PAGE_GUTTER,
-            )}
+            className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6")}
           >
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
               <ActivityTab agent={agent} showPerformance={false} />
@@ -390,13 +395,13 @@ export function AgentOverviewPane({
         )}
 
         {effectiveView === "work" && (
-          <div className="flex min-h-[620px] flex-col">
+          <div className={cn(PAGE_RAIL, "flex min-h-[620px] flex-col")}>
             <ActorIssuesPanel actorType="agent" actorId={agent.id} />
           </div>
         )}
 
         {secondaryTabs.length > 0 && activeSecondaryTab && (
-          <div className="flex min-h-full flex-col md:h-full md:flex-row">
+          <div className={cn(PAGE_RAIL, "flex min-h-full flex-col md:h-full md:flex-row")}>
             {/* Content-surface color, no shell tint — same rule as the settings
                 nav: in-card panels must not break the desktop tab merge (MUL-4439). */}
             <aside

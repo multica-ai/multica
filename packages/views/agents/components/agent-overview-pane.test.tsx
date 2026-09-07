@@ -11,9 +11,16 @@ import {
   NavigationProvider,
   type NavigationAdapter,
 } from "../../navigation";
-import { PAGE_GUTTER } from "../../layout/page-header";
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
+
+const RAIL_SENTINEL = "rail-sentinel";
+const GUTTER_SENTINEL = "gutter-sentinel";
+vi.mock("../../layout/page-header", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../layout/page-header")>()),
+  PAGE_RAIL: "rail-sentinel",
+  PAGE_GUTTER: "gutter-sentinel",
+}));
 
 // AgentOverviewPane pulls in ActorIssuesPanel which in turn touches the api
 // layer. The test only cares about which top-of-pane tab buttons render,
@@ -286,39 +293,52 @@ describe("AgentOverviewPane Environment tab visibility", () => {
 // centred rail and a panel on the page gutter agreed at 1440px and drifted
 // hundreds of pixels apart above it. A cap must be anchored, never centred.
 describe("AgentOverviewPane horizontal alignment", () => {
-  const centredCap = (root: HTMLElement) =>
-    Array.from(root.querySelectorAll<HTMLElement>(".mx-auto")).filter((el) =>
-      Array.from(el.classList).some((c) => c.startsWith("max-w-")),
-    );
+  // Every band on the page has to read the SAME rail: chrome on the rail with
+  // panels off it is the original bug, and panels on it with chrome off it is
+  // the mirror image. Both were shipped once (MUL-7107).
+  //
+  // The constants are overridden with sentinels rather than compared against
+  // their real values, which are ordinary Tailwind classes a hand-written
+  // element could match by accident. Only an element that reads the constant
+  // picks a sentinel up.
+  const panelFor = (container: HTMLElement) =>
+    container.querySelector('[role="tablist"]')?.nextElementSibling
+      ?.firstElementChild;
 
-  it("puts the tab bar on the shared page gutter, not a centred rail", () => {
+  it("puts the tab bar row on the rail", () => {
     const { container } = renderPane([makeRuntime("claude")]);
-    const tablist = container.querySelector('[role="tablist"]');
+    const row = container.querySelector('[role="tablist"] > div');
 
-    expect(tablist).toHaveClass(PAGE_GUTTER);
-    expect(centredCap(container as HTMLElement)).toEqual([]);
+    expect(row).toHaveClass(RAIL_SENTINEL);
+    expect(row).toHaveClass(GUTTER_SENTINEL);
   });
 
-  it("starts the Overview panel on that same gutter", () => {
+  it("puts the Overview panel on the same rail", () => {
     const { container } = renderPane([makeRuntime("claude")]);
-    const tablist = container.querySelector('[role="tablist"]');
-    const panel = tablist?.nextElementSibling?.firstElementChild;
 
-    expect(panel).toHaveClass(PAGE_GUTTER);
-    expect(panel).not.toHaveClass("mx-auto");
+    expect(panelFor(container as HTMLElement)).toHaveClass(RAIL_SENTINEL);
+    expect(panelFor(container as HTMLElement)).toHaveClass(GUTTER_SENTINEL);
+  });
+
+  it("puts the Work panel on the same rail", () => {
+    const { container } = renderPane([makeRuntime("claude")]);
+    fireEvent.click(screen.getByRole("tab", { name: /^Work$/i }));
+
+    // Work takes a bare rail: the issues toolbar inside it carries the gutter
+    // already, so adding one here would inset it past the tabs.
+    expect(panelFor(container as HTMLElement)).toHaveClass(RAIL_SENTINEL);
   });
 
   it.each([
     ["Capabilities", openCapabilities],
     ["Settings", openSettings],
-  ])("starts the %s nav rail on that same gutter", (_name, open) => {
+  ])("puts the %s nav-and-content row on the same rail", (_name, open) => {
     const { container } = renderPane([makeRuntime("claude")]);
     open();
 
-    // The rail is the leftmost thing in these panels, so it — not the content
-    // pane behind it — is what has to line up with the tabs above.
-    const rail = container.querySelector("aside");
-    expect(rail).toHaveClass(PAGE_GUTTER);
-    expect(centredCap(container as HTMLElement)).toEqual([]);
+    // Bare rail for the same reason as Work — the nav aside carries the gutter,
+    // and that aside, not the form behind it, is what meets the tabs above.
+    expect(panelFor(container as HTMLElement)).toHaveClass(RAIL_SENTINEL);
+    expect(container.querySelector("aside")).toHaveClass(GUTTER_SENTINEL);
   });
 });
