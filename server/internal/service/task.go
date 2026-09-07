@@ -5247,6 +5247,16 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 	if taskfailure.AuthMethodUnresolved(errorText) {
 		return true
 	}
+	// Same defense-in-depth for a runtime rejecting the recorded session id
+	// outright ("Invalid session identifier ...", qodercli at session/resume):
+	// the daemon-side fix flags ResumeRejected and retires the pointer, but
+	// rows an older daemon wrote carry only the error text. Keep it in sync
+	// with the GetLastTaskSession / GetLastChatTaskSession /
+	// GetLastMultiAgentChatTaskSession resume queries; the phrase itself lives
+	// in taskfailure.InvalidSessionIdentifier.
+	if taskfailure.InvalidSessionIdentifier(errorText) {
+		return true
+	}
 	// Same defense-in-depth for the provider-agnostic empty-message shape:
 	// a daemon too old to carry classifyPoisonedError's new branch reports
 	// agent_error.unknown, and without this the manual-retry path would

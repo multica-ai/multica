@@ -75,6 +75,30 @@ func AuthMethodUnresolved(errText string) bool {
 // with %v rather than replacing it.
 const authMethodUnresolvedPhrase = "could not resolve authentication method"
 
+// InvalidSessionIdentifier reports whether an agent error is the runtime
+// refusing to resume the recorded session id outright ("Invalid session
+// identifier <id>", observed from qodercli 1.1.25 at session/resume). The id
+// names a session that was never persisted — a conversation that died before
+// its first prompt — so every retry of the recorded pointer reproduces the
+// same rejection; only a fresh session recovers.
+//
+// Deliberately the exact phrase and nothing looser: "invalid session id"
+// shaped errors that are NOT about persistence (e.g. a malformed id sent by a
+// future client bug) should surface loudly rather than be silently retried
+// with lost context. Erring toward NOT matching keeps healthy pointers.
+//
+// This is the single source of truth for the phrase. Keep it in sync with the
+// GetLastTaskSession / GetLastChatTaskSession / GetLastMultiAgentChatTaskSession
+// resume queries (pkg/db/queries), which apply the same guard server-side so
+// rows written by a daemon too old to flag ResumeRejected are still excluded
+// from resume.
+func InvalidSessionIdentifier(errText string) bool {
+	if errText == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(errText), "invalid session identifier")
+}
+
 // emptyContentRe matches the provider's complaint that a content field is
 // empty, in the wordings observed across providers.
 var emptyContentRe = regexp.MustCompile(`(?i)must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty`)

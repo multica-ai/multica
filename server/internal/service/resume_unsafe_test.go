@@ -67,6 +67,27 @@ func TestResumeUnsafeFailureEmptyHistoryMessage(t *testing.T) {
 			want:          true,
 		},
 		{
+			// A runtime rejecting the recorded session id outright (qodercli
+			// "Invalid session identifier ..." at session/resume) can only be
+			// cured by a fresh session. Rows a fixed daemon writes carry
+			// ResumeRejected and never reach here, but an un-upgraded daemon
+			// writes agent_error.unknown with this text — the text guard is the
+			// only thing that stops a rerun from replaying the dead pointer.
+			name:          "invalid session identifier text flips resume even when the reason is unknown",
+			failureReason: "agent_error.unknown",
+			errorText:     `qoder session/resume failed: session/resume: Invalid session identifier "27d8031c". Searched for sessions in ~/.qoder/projects/-tmp. (code=-32602)`,
+			want:          true,
+		},
+		{
+			// The predicate is deliberately the full phrase: a session-shaped
+			// complaint that is NOT about the runtime refusing the recorded id
+			// must stay resumable.
+			name:          "shorter invalid-session wording stays resumable",
+			failureReason: "agent_error.unknown",
+			errorText:     "invalid session id supplied by client",
+			want:          false,
+		},
+		{
 			// Transient failures must stay resumable: the whole point of
 			// reusing the session on retry is to keep the conversation.
 			name:          "provider network drop stays resumable",
