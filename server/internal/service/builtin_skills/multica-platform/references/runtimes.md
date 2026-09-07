@@ -24,6 +24,20 @@ The chain is:
 
 ## CLI
 
+Desktop offers an explicit built-in runtime installation during onboarding and
+on the Runtimes page. It downloads and verifies a managed Pi runtime, starts the
+local daemon if needed, and asks the user to connect a model with their API key.
+The runtime binary is downloaded on demand, not bundled in the installer.
+Installation alone does not supply model credentials. The connection form
+validates the provider, endpoint, model, and key before saving; users can defer
+that step and return to Runtimes later. Keys are write-only in runtime responses.
+
+The equivalent human/local command is `multica daemon install-runtime pi
+--output json`. It reuses a usable user-installed Pi before downloading a managed
+copy. The command itself installs only; Desktop coordinates daemon startup.
+Agents executing tasks must not call this command or ask users to paste keys
+into task comments. Use the model connection UI for credentials.
+
 ```bash
 multica runtime list --output json
 multica runtime usage <runtime-id> --output json
@@ -86,7 +100,7 @@ context:
 - Human/local profile and daemon commands — including `login`, `logout`,
   `setup`, `workspace switch`, local runtime profile path mutation,
   `daemon start` / `stop` / `restart`, `daemon logs`, and
-  `daemon probe-runtimes` — are unavailable. `daemon stop` in particular would
+  `daemon probe-runtimes` / `daemon install-runtime` — are unavailable. `daemon stop` in particular would
   terminate the daemon running this task and every sibling task on it.
 
 `MULTICA_DAEMON_PORT` alone is a weak, defense-in-depth signal for task-safe API

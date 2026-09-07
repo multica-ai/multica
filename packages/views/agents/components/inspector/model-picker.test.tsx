@@ -46,7 +46,7 @@ vi.mock("@multica/core/runtimes", async (importOriginal) => ({
     mockRefreshRuntimeModels(...args),
 }));
 
-function renderPicker() {
+function renderPicker(props: Partial<Parameters<typeof ModelPicker>[0]> = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -59,6 +59,7 @@ function renderPicker() {
           runtimeOnline
           value=""
           onChange={onChange}
+          {...props}
         />
       </QueryClientProvider>
     </I18nProvider>,
@@ -73,6 +74,18 @@ function openPicker(container: HTMLElement) {
 }
 
 describe("ModelPicker (inspector)", () => {
+  it("does not let runtime metadata bypass the caller's discovery access gate", () => {
+    const discover = vi.fn(async () => CLAUDE_CATALOG);
+    discovery = discover;
+    const { container } = renderPicker({
+      runtimeOnline: false,
+      runtime: { id: "rt-claude", provider: "claude", status: "online" } as NonNullable<Parameters<typeof ModelPicker>[0]["runtime"]>,
+    });
+    openPicker(container);
+    expect(discover).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: enAgents.pickers.model_refresh })).toBeDisabled();
+  });
+
   afterEach(() => {
     cleanup();
     discovery = async () => CLAUDE_CATALOG;

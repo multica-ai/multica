@@ -539,6 +539,7 @@
       "error_rate_limited": "The provider is rate-limiting this key. Try again shortly.",
       "error_model": "The account can't use this model.",
       "error_endpoint": "Couldn't reach that provider's API.",
+      "error_request": "Couldn't complete the model connection. Try again.",
       "error_network": "Couldn't reach the provider. Check your network.",
       "error_generic": "The provider rejected the request."
     }

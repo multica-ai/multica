@@ -62,9 +62,8 @@ export function ModelPicker({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const resolvedRuntimeId = runtime?.id ?? runtimeId;
-  const resolvedRuntimeOnline = runtime
-    ? runtime.status === "online"
-    : runtimeOnline;
+  // The caller also gates discovery by runtime access, not just liveness.
+  const resolvedRuntimeOnline = runtimeOnline && (!runtime || runtime.status === "online");
   const runtimeDefault = useMemo(
     () => runtimeDefaultModelDisplay(runtime),
     [runtime],
@@ -138,8 +137,8 @@ export function ModelPicker({
   };
 
   const refresh = () => {
-    if (!runtimeId || !runtimeOnline) return;
-    void refreshRuntimeModels(queryClient, runtimeId).catch(() => {
+    if (!resolvedRuntimeId || !resolvedRuntimeOnline) return;
+    void refreshRuntimeModels(queryClient, resolvedRuntimeId).catch(() => {
       // React Query retains the last catalog and owns the error state. Avoid
       // turning a failed button action into an unhandled promise rejection.
     });
@@ -256,7 +255,7 @@ export function ModelPicker({
           onChange={setSearch}
           onRefresh={refresh}
           refreshing={modelsQuery.isFetching}
-          refreshDisabled={!runtimeOnline || !runtimeId}
+          refreshDisabled={!resolvedRuntimeOnline || !resolvedRuntimeId}
           compact
         />
       }

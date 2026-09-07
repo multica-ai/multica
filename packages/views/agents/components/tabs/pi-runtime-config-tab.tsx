@@ -259,6 +259,7 @@ export function PiRuntimeConfigTab({
                 provider: event.target.value,
               }))
             }
+            // eslint-disable-next-line no-restricted-syntax -- Provider/model identifiers are literal API values.
             placeholder="openai"
             className="font-mono text-caption"
           />
@@ -316,6 +317,7 @@ export function PiRuntimeConfigTab({
                 model: event.target.value,
               }))
             }
+            // eslint-disable-next-line no-restricted-syntax -- Provider/model identifiers are literal API values.
             placeholder="gpt-5"
             className="font-mono text-caption"
           />

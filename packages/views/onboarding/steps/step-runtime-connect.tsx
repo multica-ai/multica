@@ -52,6 +52,7 @@ export function StepRuntimeConnect({
   currentUserId,
   onInstallBuiltInRuntime,
   managedRuntimeSetup,
+  localDaemonId,
 }: {
   wsId: string;
   /** Desktop-only: installs the Multica-managed runtime on this machine.
@@ -60,6 +61,7 @@ export function StepRuntimeConnect({
   onInstallBuiltInRuntime?: () => Promise<{ success: boolean; error?: string }>;
   /** Desktop-only local install state; never written into the server cache. */
   managedRuntimeSetup?: ManagedRuntimeSetupStatus | null;
+  localDaemonId?: string | null;
   /** Slug of the target workspace. Sent explicitly so the runtime list reads
    *  the workspace being set up rather than whichever one the app is currently
    *  showing. */
@@ -95,6 +97,7 @@ export function StepRuntimeConnect({
       runtimesPending={runtimesPending}
       onInstallBuiltInRuntime={onInstallBuiltInRuntime}
       managedRuntimeSetup={managedRuntimeSetup}
+      localDaemonId={localDaemonId}
     />
   );
 }
@@ -129,6 +132,7 @@ function FancyView({
   currentUserId,
   onInstallBuiltInRuntime,
   managedRuntimeSetup,
+  localDaemonId,
 }: {
   wsId: string;
   runtimes: AgentRuntime[];
@@ -143,6 +147,7 @@ function FancyView({
   currentUserId?: string | null;
   onInstallBuiltInRuntime?: () => Promise<{ success: boolean; error?: string }>;
   managedRuntimeSetup?: ManagedRuntimeSetupStatus | null;
+  localDaemonId?: string | null;
 }) {
   const { t } = useT("onboarding");
   const qc = useQueryClient();
@@ -193,6 +198,7 @@ function FancyView({
   const builtInPhase = builtInRuntimeSetupPhase({
     runtimes,
     setup: managedRuntimeSetup,
+    localDaemonId,
   });
   const builtInInProgress = builtInActive && builtInPhase !== "ready";
 
@@ -293,6 +299,7 @@ function FancyView({
             wsId={wsId}
             runtimes={runtimes}
             setup={managedRuntimeSetup}
+            localDaemonId={localDaemonId}
             onInstall={onInstallBuiltInRuntime}
             onSkipKey={() => setBuiltInDeferred(true)}
           />
@@ -302,6 +309,7 @@ function FancyView({
             wsId={wsId}
             runtimes={runtimes}
             setup={managedRuntimeSetup}
+            localDaemonId={localDaemonId}
             onInstallBuiltInRuntime={
               onInstallBuiltInRuntime
                 ? async () => {
@@ -471,6 +479,7 @@ function EmptyView({
   wsId,
   runtimes,
   setup,
+  localDaemonId,
   onInstallBuiltInRuntime,
   onSkip,
   onRefresh,
@@ -479,6 +488,7 @@ function EmptyView({
   wsId: string;
   runtimes: AgentRuntime[];
   setup?: ManagedRuntimeSetupStatus | null;
+  localDaemonId?: string | null;
   onInstallBuiltInRuntime?: () => Promise<{ success: boolean; error?: string }>;
   onSkip: () => void;
   onRefresh: () => void;
@@ -514,6 +524,7 @@ function EmptyView({
             wsId={wsId}
             runtimes={runtimes}
             setup={setup}
+            localDaemonId={localDaemonId}
             onInstall={onInstallBuiltInRuntime}
             onConnected={() => {}}
           />
@@ -539,12 +550,14 @@ function BuiltInRuntimeView({
   wsId,
   runtimes,
   setup,
+  localDaemonId,
   onInstall,
   onSkipKey,
 }: {
   wsId: string;
   runtimes: AgentRuntime[];
   setup?: ManagedRuntimeSetupStatus | null;
+  localDaemonId?: string | null;
   onInstall: () => Promise<{ success: boolean; error?: string }>;
   onSkipKey: () => void;
 }) {
@@ -559,6 +572,7 @@ function BuiltInRuntimeView({
           wsId={wsId}
           runtimes={runtimes}
           setup={setup}
+          localDaemonId={localDaemonId}
           onInstall={onInstall}
           onConnected={() => {}}
           onSkipKey={onSkipKey}

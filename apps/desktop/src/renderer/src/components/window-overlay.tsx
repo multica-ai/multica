@@ -43,7 +43,7 @@ function WindowOverlayInner() {
   const runtimesPending = useLocalRuntimesPending();
   // Live install state for the Multica-managed runtime, so the runtime step
   // can show progress and the reason behind a failure.
-  const { managedRuntimeSetup } = useDesktopRuntimeContext();
+  const { managedRuntimeSetup, localDaemonId } = useDesktopRuntimeContext();
 
   if (!overlay) return null;
 
@@ -78,6 +78,7 @@ function WindowOverlayInner() {
           runtimesPending={runtimesPending}
           onInstallBuiltInRuntime={installBuiltInRuntime}
           managedRuntimeSetup={managedRuntimeSetup}
+          localDaemonId={localDaemonId}
           onComplete={(ws, destination) => {
             close();
             if (ws && destination?.kind === "chat") {
@@ -120,6 +121,7 @@ function WindowOverlayInner() {
           runtimesPending={runtimesPending}
           onInstallBuiltInRuntime={installBuiltInRuntime}
           managedRuntimeSetup={managedRuntimeSetup}
+          localDaemonId={localDaemonId}
         />
       )}
     </div>

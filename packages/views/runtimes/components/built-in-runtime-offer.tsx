@@ -28,6 +28,7 @@ import type { ManagedRuntimeSetupStatus } from "./managed-runtime-setup";
 export function BuiltInRuntimeOffer({
   runtimes,
   wsId,
+  localDaemonId,
   setup,
   onInstall,
   onConnected,
@@ -36,6 +37,7 @@ export function BuiltInRuntimeOffer({
 }: {
   runtimes: readonly AgentRuntime[];
   wsId: string;
+  localDaemonId?: string | null;
   setup?: ManagedRuntimeSetupStatus | null;
   /** Platform-injected: only Desktop can install a local runtime. */
   onInstall: () => Promise<{ success: boolean; error?: string }>;
@@ -47,8 +49,8 @@ export function BuiltInRuntimeOffer({
   const { t } = useT("runtimes");
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const phase = builtInRuntimeSetupPhase({ runtimes, setup });
-  const runtime = findBuiltInRuntime(runtimes);
+  const phase = builtInRuntimeSetupPhase({ runtimes, setup, localDaemonId });
+  const runtime = findBuiltInRuntime(runtimes, localDaemonId);
 
   const install = async () => {
     if (starting) return;
@@ -59,6 +61,12 @@ export function BuiltInRuntimeOffer({
       if (!result.success) {
         setStartError(result.error ?? t(($) => $.built_in.install_failed_generic));
       }
+    } catch (error) {
+      setStartError(
+        error instanceof Error
+          ? error.message
+          : t(($) => $.built_in.install_failed_generic),
+      );
     } finally {
       setStarting(false);
     }
@@ -118,22 +126,23 @@ export function BuiltInRuntimeOffer({
   }
 
   const failureReason = setup?.error ?? startError;
+  const failed = phase === "failed" || startError !== null;
 
   return (
     <section className="flex flex-col gap-3">
       <div className="rounded-lg border bg-card p-5">
         <h3 className="text-body font-medium">
-          {phase === "failed"
+          {failed
             ? t(($) => $.built_in.failed_title)
             : t(($) => $.built_in.offer_title)}
         </h3>
         <p className="mt-1 text-caption leading-[1.55] text-muted-foreground">
-          {phase === "failed"
+          {failed
             ? t(($) => $.built_in.failed_subtitle)
             : t(($) => $.built_in.offer_subtitle)}
         </p>
 
-        {phase === "failed" && failureReason && (
+        {failed && failureReason && (
           <p
             role="alert"
             className="mt-3 flex items-start gap-2 rounded-md bg-destructive/5 p-3 text-caption text-destructive"
@@ -146,12 +155,12 @@ export function BuiltInRuntimeOffer({
         <Button className="mt-4 w-full" disabled={starting} onClick={() => void install()}>
           {starting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
-          ) : phase === "failed" ? (
+          ) : failed ? (
             <RotateCw className="h-4 w-4" />
           ) : (
             <Download className="h-4 w-4" />
           )}
-          {phase === "failed"
+          {failed
             ? t(($) => $.built_in.retry_action)
             : t(($) => $.built_in.offer_action)}
         </Button>

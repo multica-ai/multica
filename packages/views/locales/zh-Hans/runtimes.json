@@ -523,6 +523,7 @@
       "error_rate_limited": "提供商正在限流，请稍后再试。",
       "error_model": "这个账户无法使用该模型。",
       "error_endpoint": "无法访问该提供商的 API。",
+      "error_request": "无法完成模型连接，请重试。",
       "error_network": "连接不上提供商，请检查网络。",
       "error_generic": "提供商拒绝了这次请求。"
     }

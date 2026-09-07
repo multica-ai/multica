@@ -22,7 +22,8 @@ export type BuiltInRuntimeSetupPhase =
   | "ready";
 
 /**
- * The registered built-in runtime, if the daemon has reported one.
+ * The registered built-in runtime on this Desktop daemon. An unknown local
+ * identity must never pick a teammate's runtime or another computer.
  *
  * Excludes the synthetic row the Runtimes list renders during install (it has
  * no server identity, so nothing can be configured on it) and custom-profile
@@ -30,10 +31,15 @@ export type BuiltInRuntimeSetupPhase =
  */
 export function findBuiltInRuntime(
   runtimes: readonly AgentRuntime[],
+  localDaemonId: string | null | undefined,
 ): AgentRuntime | null {
+  if (!localDaemonId) return null;
   return (
     runtimes.find(
       (runtime) =>
+        runtime.daemon_id === localDaemonId &&
+        runtime.runtime_mode === "local" &&
+        runtime.status === "online" &&
         runtime.provider === BUILT_IN_RUNTIME_PROVIDER &&
         !runtime.profile_id &&
         !isPendingManagedRuntime(runtime),
@@ -44,11 +50,13 @@ export function findBuiltInRuntime(
 export function builtInRuntimeSetupPhase({
   runtimes,
   setup,
+  localDaemonId,
 }: {
   runtimes: readonly AgentRuntime[];
+  localDaemonId?: string | null;
   setup?: ManagedRuntimeSetupStatus | null;
 }): BuiltInRuntimeSetupPhase {
-  const runtime = findBuiltInRuntime(runtimes);
+  const runtime = findBuiltInRuntime(runtimes, localDaemonId);
   if (runtime) {
     // Once the runtime exists, the install outcome stops mattering: what the
     // user still needs is a model, or nothing at all.
@@ -70,7 +78,8 @@ export function builtInRuntimeSetupPhase({
  */
 export function builtInRuntimeIsUsable(
   runtimes: readonly AgentRuntime[],
+  localDaemonId: string | null | undefined,
 ): boolean {
-  const runtime = findBuiltInRuntime(runtimes);
+  const runtime = findBuiltInRuntime(runtimes, localDaemonId);
   return runtime !== null && isPiRuntimeModelConfigured(runtime);
 }

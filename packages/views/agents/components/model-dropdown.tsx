@@ -58,9 +58,8 @@ export function ModelDropdown({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const resolvedRuntimeId = runtime?.id ?? runtimeId;
-  const resolvedRuntimeOnline = runtime
-    ? runtime.status === "online"
-    : runtimeOnline;
+  // The caller also gates discovery by runtime access, not just liveness.
+  const resolvedRuntimeOnline = runtimeOnline && (!runtime || runtime.status === "online");
   const runtimeDefault = useMemo(
     () => runtimeDefaultModelDisplay(runtime),
     [runtime],
@@ -137,8 +136,8 @@ export function ModelDropdown({
   };
 
   const refresh = () => {
-    if (!runtimeId || !runtimeOnline) return;
-    void refreshRuntimeModels(queryClient, runtimeId).catch(() => {
+    if (!resolvedRuntimeId || !resolvedRuntimeOnline) return;
+    void refreshRuntimeModels(queryClient, resolvedRuntimeId).catch(() => {
       // React Query owns the error state rendered below. Swallow the returned
       // promise rejection so a failed manual refresh is not also unhandled.
     });
@@ -232,7 +231,7 @@ export function ModelDropdown({
               onChange={setSearch}
               onRefresh={refresh}
               refreshing={modelsQuery.isFetching}
-              refreshDisabled={!runtimeOnline || !runtimeId}
+              refreshDisabled={!resolvedRuntimeOnline || !resolvedRuntimeId}
             />
           </div>
           <div className="max-h-72 overflow-y-auto p-1">

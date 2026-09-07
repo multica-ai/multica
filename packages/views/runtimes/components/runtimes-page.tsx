@@ -174,6 +174,7 @@ export function RuntimesPage({
   const builtInPhase = builtInRuntimeSetupPhase({
     runtimes,
     setup: managedRuntimeSetup,
+    localDaemonId,
   });
   const builtInOffer =
     onInstallBuiltInRuntime && builtInPhase !== "ready" ? (
@@ -182,6 +183,7 @@ export function RuntimesPage({
           wsId={wsId}
           runtimes={runtimes}
           setup={managedRuntimeSetup}
+          localDaemonId={localDaemonId}
           onInstall={onInstallBuiltInRuntime}
           onConnected={() => {
             qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });

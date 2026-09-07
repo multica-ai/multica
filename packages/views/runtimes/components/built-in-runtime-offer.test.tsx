@@ -52,6 +52,7 @@ function renderOffer(props: Partial<Parameters<typeof BuiltInRuntimeOffer>[0]> =
   render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <BuiltInRuntimeOffer
+        localDaemonId={runtime.daemon_id}
         wsId="workspace-1"
         runtimes={[]}
         setup={null}
@@ -70,6 +71,16 @@ beforeEach(() => {
 });
 
 describe("BuiltInRuntimeOffer", () => {
+  it.each(["returned", "thrown"])("shows a %s install failure even without a status event", async (mode) => {
+    const onInstall = mode === "returned"
+      ? vi.fn().mockResolvedValue({ success: false, error: "CLI unavailable" })
+      : vi.fn().mockRejectedValue(new Error("CLI unavailable"));
+    renderOffer({ onInstall });
+    await userEvent.click(screen.getByRole("button", { name: enRuntimes.built_in.offer_action }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("CLI unavailable");
+    expect(screen.getByRole("button", { name: enRuntimes.built_in.retry_action })).toBeEnabled();
+  });
+
   it("never installs without an explicit click", async () => {
     const { onInstall } = renderOffer();
     // The whole point of moving the trigger out of daemon startup: rendering
@@ -162,6 +173,20 @@ describe("BuiltInRuntimeOffer", () => {
     );
     expect(saveMutateAsync).not.toHaveBeenCalled();
     expect(onConnected).not.toHaveBeenCalled();
+  });
+
+  it.each(["validation", "save"])("keeps the form retryable when the %s request fails", async (stage) => {
+    validateMutateAsync.mockResolvedValue({ valid: true });
+    saveMutateAsync.mockResolvedValue({});
+    (stage === "validation" ? validateMutateAsync : saveMutateAsync)
+      .mockRejectedValue(new Error("Transport failed"));
+    const { onConnected } = renderOffer({ runtimes: [runtime] });
+    await userEvent.type(screen.getByLabelText(/API key/i), "sk-key");
+    await userEvent.click(screen.getByRole("button", { name: enRuntimes.built_in.connect.submit }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(enRuntimes.built_in.connect.error_request);
+    expect(onConnected).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: enRuntimes.built_in.connect.submit })).toBeEnabled();
+    if (stage === "validation") expect(saveMutateAsync).not.toHaveBeenCalled();
   });
 
   it("explains an outcome a newer backend introduced rather than showing nothing", async () => {

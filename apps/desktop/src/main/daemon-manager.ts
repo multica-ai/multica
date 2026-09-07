@@ -93,7 +93,6 @@ let statusPollInProgress = false;
 let cachedCliBinary: string | null | undefined = undefined;
 let cliResolvePromise: Promise<string | null> | null = null;
 const managedRuntimeInstallPromises = new Map<string, Promise<void>>();
-const managedRuntimeSetupFailures = new Set<string>();
 let cachedCliBinaryVersion: string | null | undefined = undefined;
 // Set when a CLI version mismatch was detected but the running daemon is
 // busy executing tasks. The poll loop retries the check on each tick and
@@ -645,7 +644,6 @@ async function ensureManagedRuntime(
             version: result.version,
             source: result.source,
           });
-          managedRuntimeSetupFailures.delete(provider);
           console.log(
             `[daemon] ${provider} runtime ready at ${result.path} (${result.source}${result.installed ? ", installed" : ""})`,
           );
@@ -660,7 +658,6 @@ async function ensureManagedRuntime(
   try {
     await install;
   } catch (err) {
-    managedRuntimeSetupFailures.add(provider);
     // The reason has to reach the UI. Without it the user sees "Installation
     // failed" and cannot tell a dead network from a full disk.
     setManagedRuntimeSetup({
@@ -1485,24 +1482,38 @@ export function setupDaemonManager(
   });
   ipcMain.handle("daemon:get-status", async () => withManagedRuntimeSetup(await fetchHealth()));
   ipcMain.handle("daemon:probe-runtimes", () => probeLocalRuntimes());
-  // Explicit, user-initiated install of a Multica-managed runtime. Retrying
-  // after a failure is the same call: the process-local failure cache only
-  // guards the automatic path, and there no longer is one.
+  // Installing is a foreground lifecycle intent: serialize it with recovery
+  // and start the daemon afterwards, including on machines with no prior CLI.
+  // An already-running daemon discovers the new binary on its periodic scan;
+  // startDaemon leaves it running so active tasks are never interrupted.
   ipcMain.handle(
     "daemon:install-runtime",
     async (_event, provider: string): Promise<{ success: boolean; error?: string }> => {
-      const bin = await resolveCliBinary();
-      if (!bin) return { success: false, error: "multica CLI is not installed" };
-      managedRuntimeSetupFailures.delete(provider);
-      try {
-        await ensureManagedRuntime(bin, provider);
-        return { success: true };
-      } catch (err) {
-        return {
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
-        };
-      }
+      setDesiredDaemonRunning(true, true);
+      return lifecycleOperations.runForeground(async () => {
+        const startedAt = new Date().toISOString();
+        try {
+          const active = await ensureActiveProfile();
+          if (!active) throw new Error("Waiting for the service address");
+          if (await lifecycleBlockedByForeignDaemon()) {
+            throw new Error("Install the runtime on the computer running your daemon");
+          }
+          const bin = await resolveCliBinary();
+          if (!bin) throw new Error("multica CLI is not installed");
+          await ensureManagedRuntime(bin, provider);
+          // The download can outlive a stop, sign-out, or service switch.
+          // Recheck the original profile and current intent before starting.
+          const result = await startDaemon(active);
+          if (!result.success) throw new Error(result.error ?? "Daemon failed to start");
+          return result;
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          setManagedRuntimeSetup({ provider, phase: "failed", startedAt, error });
+          return { success: false, error };
+        } finally {
+          scheduleStatusRefresh();
+        }
+      });
     },
   );
   // The host's OS name, available regardless of daemon state. The Runtimes

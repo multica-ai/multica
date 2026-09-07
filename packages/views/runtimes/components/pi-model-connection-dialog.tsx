@@ -314,6 +314,7 @@ export function PiModelConnectionDialog({
                   id="pi-connection-provider"
                   label={t(($) => $.detail.model_connection.provider_id_label)}
                   value={draft.provider}
+                  // eslint-disable-next-line no-restricted-syntax -- Provider/model identifiers are literal API values.
                   placeholder="openai"
                   onChange={(provider) =>
                     setDraft((current) => ({ ...current, provider }))
@@ -356,6 +357,7 @@ export function PiModelConnectionDialog({
                   id="pi-connection-custom-model"
                   label={t(($) => $.detail.model_connection.model_label)}
                   value={draft.model}
+                  // eslint-disable-next-line no-restricted-syntax -- Provider/model identifiers are literal API values.
                   placeholder="model-id"
                   onChange={(model) =>
                     setDraft((current) => ({ ...current, model }))

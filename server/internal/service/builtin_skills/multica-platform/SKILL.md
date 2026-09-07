@@ -25,7 +25,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 | `references/squads.md` | Squads: leader routing, roster, recording leader activity, why a squad did or did not run |
 | `references/autopilots.md` | Autopilots: schedule / webhook / manual triggers, `create_issue` vs `run_only`, why one did not fire |
 | `references/projects.md` | Projects and their durable resources (`github_repo`, `local_directory`, worktree mode) |
-| `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
+| `references/runtimes.md` | Runtimes, Desktop's opt-in model connection, daemons, `repo checkout`, and the task CLI boundary |
 | `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
 
 Open what the task needs. A single-domain task usually needs one; a task that

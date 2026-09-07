@@ -52,7 +52,7 @@ export function BuiltInRuntimeConnectForm({
   const [showAllPresets, setShowAllPresets] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [failure, setFailure] = useState<{
-    outcome: ModelConnectionProbeOutcome;
+    outcome: ModelConnectionProbeOutcome | "request_failed";
     detail?: string;
   } | null>(null);
 
@@ -78,22 +78,27 @@ export function BuiltInRuntimeConnectForm({
     // Verify before writing. A key that is wrong, expired, or out of credit
     // has to fail here — where the user is still holding it — rather than
     // inside the first task they run.
-    const verdict = await validate.mutateAsync({
-      ...connection,
-      api_key: trimmedKey,
-    });
-    if (!verdict.valid) {
-      setFailure({
-        outcome: verdict.outcome ?? "unknown",
-        detail: verdict.detail,
+    try {
+      const verdict = await validate.mutateAsync({
+        ...connection,
+        api_key: trimmedKey,
       });
+      if (!verdict.valid) {
+        setFailure({
+          outcome: verdict.outcome ?? "unknown",
+          detail: verdict.detail,
+        });
+        return;
+      }
+
+      await save.mutateAsync({
+        runtimeId: runtime.id,
+        connection: { ...connection, api_key: trimmedKey },
+      });
+    } catch {
+      setFailure({ outcome: "request_failed" });
       return;
     }
-
-    await save.mutateAsync({
-      runtimeId: runtime.id,
-      connection: { ...connection, api_key: trimmedKey },
-    });
     onConnected();
   };
 
@@ -217,9 +222,11 @@ type Translate = ReturnType<typeof useT<"runtimes">>["t"];
 
 function connectFailureMessage(
   t: Translate,
-  outcome: ModelConnectionProbeOutcome,
+  outcome: ModelConnectionProbeOutcome | "request_failed",
 ): string {
   switch (outcome) {
+    case "request_failed":
+      return t(($) => $.built_in.connect.error_request);
     case "invalid_key":
       return t(($) => $.built_in.connect.error_invalid_key);
     case "insufficient_quota":

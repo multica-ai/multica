@@ -182,6 +182,9 @@ type daemonRuntimeInstallOutput struct {
 }
 
 func runDaemonInstallRuntime(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("daemon install-runtime"); err != nil {
+		return err
+	}
 	provider := strings.ToLower(strings.TrimSpace(args[0]))
 	descriptor, supported := managedruntime.DescriptorFor(provider)
 	if !supported {

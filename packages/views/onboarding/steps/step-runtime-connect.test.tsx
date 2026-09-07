@@ -5,8 +5,9 @@ import type { AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enOnboarding from "../../locales/en/onboarding.json";
+import enRuntimes from "../../locales/en/runtimes.json";
 
-const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding } };
+const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding, runtimes: enRuntimes } };
 
 // Drive the runtime picker via a hoisted mock so the step renders without a
 // live daemon. (The onboarding_runtime_detected PostHog event this file used
@@ -37,7 +38,7 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
   } as AgentRuntime;
 }
 
-function renderStep(props: { runtimesPending?: boolean } = {}) {
+function renderStep(props: Partial<Parameters<typeof StepRuntimeConnect>[0]> = {}) {
   const onNext = vi.fn();
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -48,7 +49,7 @@ function renderStep(props: { runtimesPending?: boolean } = {}) {
         <StepRuntimeConnect
           wsId="ws_test"
           onNext={onNext}
-          runtimesPending={props.runtimesPending}
+          {...props}
         />
       </I18nProvider>
     </QueryClientProvider>,
@@ -74,6 +75,23 @@ describe("StepRuntimeConnect", () => {
     expect(
       screen.queryByRole("button", { name: /start with mika/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps the local installation in model setup until a key is configured", () => {
+    const pi = makeRuntime({
+      id: "local-pi", provider: "pi", daemon_id: "local-daemon", runtime_mode: "local",
+      default_model_config: {}, has_default_model_api_key: false,
+    });
+    mocks.pickerState.runtimes = [pi];
+    mocks.pickerState.selected = pi;
+    mocks.pickerState.selectedId = pi.id;
+    renderStep({
+      localDaemonId: "local-daemon",
+      managedRuntimeSetup: { provider: "pi", phase: "ready", startedAt: "2026-09-07T00:00:00Z" },
+      onInstallBuiltInRuntime: vi.fn(),
+    });
+    expect(screen.getByLabelText(/API key/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /start with mika/i })).not.toBeInTheDocument();
   });
 
   it("flips to the empty state after the idle timeout when no pending signal is given", () => {

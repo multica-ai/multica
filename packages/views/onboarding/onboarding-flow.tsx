@@ -129,6 +129,7 @@ interface OnboardingFlowProps {
   onInstallBuiltInRuntime?: () => Promise<{ success: boolean; error?: string }>;
   /** Desktop-only live install state for the built-in runtime. */
   managedRuntimeSetup?: ManagedRuntimeSetupStatus | null;
+  localDaemonId?: string | null;
 }
 
 export function OnboardingFlow(props: OnboardingFlowProps) {
@@ -144,6 +145,7 @@ function OnboardingStepFlow({
   runtimesPending,
   onInstallBuiltInRuntime,
   managedRuntimeSetup,
+  localDaemonId,
 }: OnboardingFlowProps) {
   const { t, i18n } = useT("onboarding");
   const user = useAuthStore((s) => s.user);
@@ -424,6 +426,7 @@ function OnboardingStepFlow({
             runtimesPending={runtimesPending}
             onInstallBuiltInRuntime={onInstallBuiltInRuntime}
             managedRuntimeSetup={managedRuntimeSetup}
+            localDaemonId={localDaemonId}
           />
         ) : (
           <StepPlatformFork
