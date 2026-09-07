@@ -471,83 +471,83 @@ function OverviewTab({
   return (
     <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6 md:py-8")}>
       <div className="w-full max-w-3xl">
-      <section>
-        <h2 className="text-title-sm font-medium">{t(($) => $.detail.overview.properties)}</h2>
-        <p className="mt-1 text-caption text-muted-foreground">
-          {t(($) => $.detail.overview.properties_hint)}
+        <section>
+          <h2 className="text-title-sm font-medium">{t(($) => $.detail.overview.properties)}</h2>
+          <p className="mt-1 text-caption text-muted-foreground">
+            {t(($) => $.detail.overview.properties_hint)}
+          </p>
+          <div className="mt-4 divide-y">
+            <PropertyRow label={t(($) => $.detail.overview.name)} htmlFor="skill-name">
+              <Input
+                id="skill-name"
+                value={name}
+                readOnly={!canEdit}
+                onChange={(e) => onNameChange(e.target.value)}
+                placeholder={t(($) => $.detail.name_placeholder)}
+                className="font-mono text-body read-only:cursor-default"
+              />
+            </PropertyRow>
+
+            <PropertyRow
+              label={t(($) => $.detail.overview.description)}
+              htmlFor="skill-description"
+            >
+              {/* Real descriptions run 500–900 characters (they carry the
+                  trigger vocabulary an agent matches on), so this field is
+                  sized for the data rather than the two rows it had before. */}
+              <Textarea
+                id="skill-description"
+                value={description}
+                readOnly={!canEdit}
+                onChange={(e) => onDescriptionChange(e.target.value)}
+                placeholder={t(($) => $.detail.description_placeholder)}
+                rows={6}
+                className="text-body leading-relaxed read-only:cursor-default"
+              />
+              <p className="mt-1.5 text-caption text-muted-foreground">
+                {t(($) => $.detail.overview.description_hint, {
+                  count: description.length,
+                })}
+              </p>
+            </PropertyRow>
+
+            <PropertyRow label={t(($) => $.detail.overview.labels)}>
+              <ResourceLabelPicker
+                resourceType="skill"
+                resourceId={skill.id}
+                canEdit={canEdit}
+              />
+            </PropertyRow>
+          </div>
+        </section>
+
+        <section className="mt-10">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="min-w-0 text-title-sm font-medium">
+              {t(($) => $.detail.overview.used_by, { count: skillAgents.length })}
+            </h2>
+            <Button
+              variant="outline"
+              size="xs"
+              className="shrink-0 gap-1"
+              onClick={onAddToAgents}
+            >
+              <UserPlus className="h-3 w-3" />
+              {t(($) => $.actions.add_to_agent)}
+            </Button>
+          </div>
+          <div className="mt-3">
+            <UsedByList agents={skillAgents} />
+          </div>
+        </section>
+
+        <p className="mt-10 rounded-lg bg-muted px-3 py-2.5 text-caption leading-relaxed text-muted-foreground">
+          {canEdit
+            ? t(($) => $.detail.overview.permissions_owner)
+            : creatorName
+              ? t(($) => $.detail.overview.permissions_locked_creator, { name: creatorName })
+              : t(($) => $.detail.overview.permissions_locked)}
         </p>
-        <div className="mt-4 divide-y">
-          <PropertyRow label={t(($) => $.detail.overview.name)} htmlFor="skill-name">
-            <Input
-              id="skill-name"
-              value={name}
-              readOnly={!canEdit}
-              onChange={(e) => onNameChange(e.target.value)}
-              placeholder={t(($) => $.detail.name_placeholder)}
-              className="font-mono text-body read-only:cursor-default"
-            />
-          </PropertyRow>
-
-          <PropertyRow
-            label={t(($) => $.detail.overview.description)}
-            htmlFor="skill-description"
-          >
-            {/* Real descriptions run 500–900 characters (they carry the
-                trigger vocabulary an agent matches on), so this field is
-                sized for the data rather than the two rows it had before. */}
-            <Textarea
-              id="skill-description"
-              value={description}
-              readOnly={!canEdit}
-              onChange={(e) => onDescriptionChange(e.target.value)}
-              placeholder={t(($) => $.detail.description_placeholder)}
-              rows={6}
-              className="text-body leading-relaxed read-only:cursor-default"
-            />
-            <p className="mt-1.5 text-caption text-muted-foreground">
-              {t(($) => $.detail.overview.description_hint, {
-                count: description.length,
-              })}
-            </p>
-          </PropertyRow>
-
-          <PropertyRow label={t(($) => $.detail.overview.labels)}>
-            <ResourceLabelPicker
-              resourceType="skill"
-              resourceId={skill.id}
-              canEdit={canEdit}
-            />
-          </PropertyRow>
-        </div>
-      </section>
-
-      <section className="mt-10">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="min-w-0 text-title-sm font-medium">
-            {t(($) => $.detail.overview.used_by, { count: skillAgents.length })}
-          </h2>
-          <Button
-            variant="outline"
-            size="xs"
-            className="shrink-0 gap-1"
-            onClick={onAddToAgents}
-          >
-            <UserPlus className="h-3 w-3" />
-            {t(($) => $.actions.add_to_agent)}
-          </Button>
-        </div>
-        <div className="mt-3">
-          <UsedByList agents={skillAgents} />
-        </div>
-      </section>
-
-      <p className="mt-10 rounded-lg bg-muted px-3 py-2.5 text-caption leading-relaxed text-muted-foreground">
-        {canEdit
-          ? t(($) => $.detail.overview.permissions_owner)
-          : creatorName
-            ? t(($) => $.detail.overview.permissions_locked_creator, { name: creatorName })
-            : t(($) => $.detail.overview.permissions_locked)}
-      </p>
       </div>
     </div>
   );
@@ -1230,7 +1230,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       />
 
       {!canEdit && (
-        <div className="px-4 pt-3 sm:px-6">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "pt-3")}>
           <CapabilityBanner
             reason={skillPermissions.canEdit.reason}
             resource="skill"
@@ -1292,15 +1292,15 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           className="shrink-0 border-b border-warning/30 bg-warning/10 py-2 text-caption"
         >
           <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-start gap-2")}>
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-          <div className="flex-1">
-            <div className="font-medium text-foreground">
-              {t(($) => $.detail.conflict_banner.title)}
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+            <div className="flex-1">
+              <div className="font-medium text-foreground">
+                {t(($) => $.detail.conflict_banner.title)}
+              </div>
+              <div className="mt-0.5 text-muted-foreground">
+                {t(($) => $.detail.conflict_banner.body)}
+              </div>
             </div>
-            <div className="mt-0.5 text-muted-foreground">
-              {t(($) => $.detail.conflict_banner.body)}
-            </div>
-          </div>
           </div>
         </div>
       )}

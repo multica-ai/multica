@@ -371,14 +371,16 @@ export function RuntimeDetailPage({
 function MachineDetailSkeleton() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b px-6 pb-5 pt-3">
-        <Skeleton className="h-3 w-36" />
-        <div className="mt-4 flex items-start gap-4">
-          <Skeleton className="h-14 w-14 rounded-xl" />
-          <div className="flex-1">
-            <Skeleton className="h-7 w-64" />
-            <Skeleton className="mt-2 h-4 w-40" />
-            <Skeleton className="mt-3 h-3 w-72" />
+      <div className="border-b pb-5 pt-3">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
+          <Skeleton className="h-3 w-36" />
+          <div className="mt-4 flex items-start gap-4">
+            <Skeleton className="h-14 w-14 rounded-xl" />
+            <div className="flex-1">
+              <Skeleton className="h-7 w-64" />
+              <Skeleton className="mt-2 h-4 w-40" />
+              <Skeleton className="mt-3 h-3 w-72" />
+            </div>
           </div>
         </div>
       </div>
