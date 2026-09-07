@@ -174,13 +174,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const update = payload as CommentFollowUpsUpdatedPayload;
         if (update.issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
-          old?.map((entry) =>
-            entry.id === update.comment_id
-              ? { ...entry, suggested_follow_ups: update.suggested_follow_ups }
-              : entry,
-          ),
-        );
+        // Generation can publish after a newer edit cleared these suggestions.
+        // This infrequent enrichment event has no revision: refetch rather
+        // than restoring stale action IDs into the authoritative snapshot.
+        void qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
       },
       [qc, issueId],
     ),

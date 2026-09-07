@@ -5,10 +5,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import enIssues from "../../locales/en/issues.json";
+import type { TimelineEntry } from "@multica/core/types";
+import { toast } from "sonner";
 
-const { runFollowUpMock } = vi.hoisted(() => ({
+const { runFollowUpMock, followUpState } = vi.hoisted(() => ({
   runFollowUpMock: vi.fn(),
+  followUpState: { isPending: false, variables: undefined as { actionId: string } | undefined },
 }));
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
 vi.mock("@multica/core/issues", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/issues")>();
@@ -16,8 +21,7 @@ vi.mock("@multica/core/issues", async (importOriginal) => {
     ...actual,
     useRunIssueCommentFollowUp: () => ({
       mutateAsync: runFollowUpMock,
-      isPending: false,
-      variables: undefined,
+      ...followUpState,
     }),
   };
 });
@@ -81,7 +85,11 @@ function renderFollowUps(ui: ReactElement) {
   );
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  followUpState.isPending = false;
+  followUpState.variables = undefined;
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe("AttachmentList — standalone HTML attachment routes through AttachmentBlock", () => {
@@ -166,23 +174,19 @@ describe("AttachmentList — inline attachment filtering", () => {
 });
 
 describe("CommentFollowUps", () => {
+  const entry: TimelineEntry = {
+    type: "comment", id: "comment-1", actor_type: "agent", actor_id: "agent-1",
+    created_at: "2026-08-31T00:00:00Z", content: "The first pass is ready.",
+    suggested_follow_ups: [
+      { id: "continue-1", label: "Continue", prompt: "Continue the implementation.", primary: true },
+      { id: "review-1", label: "Review", prompt: "Review the current result." },
+    ],
+  };
+
   it("renders two safe actions and runs the selected server action id", async () => {
     runFollowUpMock.mockResolvedValueOnce({
       trigger_outcomes: [{ status: "queued" }],
     });
-    const entry = {
-      type: "comment",
-      id: "comment-1",
-      actor_type: "agent",
-      actor_id: "agent-1",
-      created_at: "2026-08-31T00:00:00Z",
-      content: "The first pass is ready.",
-      suggested_follow_ups: [
-        { id: "continue-1", label: "Continue", prompt: "Continue the implementation.", primary: true },
-        { id: "review-1", label: "Review", prompt: "Review the current result." },
-      ],
-    } as any;
-
     renderFollowUps(<CommentFollowUps issueId="issue-1" entry={entry} active />);
 
     expect(screen.getByRole("button", { name: /Continue/i })).toBeTruthy();
@@ -198,17 +202,43 @@ describe("CommentFollowUps", () => {
   });
 
   it("hides stale actions when the comment is not the active thread tail", () => {
-    const entry = {
-      id: "comment-1",
-      suggested_follow_ups: [
-        { id: "continue-1", label: "Continue", prompt: "Continue." },
-        { id: "review-1", label: "Review", prompt: "Review." },
-      ],
-    } as any;
-
     renderFollowUps(<CommentFollowUps issueId="issue-1" entry={entry} active={false} />);
 
     expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
+  });
+
+  it("disables all actions while the selected action is pending", () => {
+    followUpState.isPending = true;
+    followUpState.variables = { actionId: "continue-1" };
+    renderFollowUps(<CommentFollowUps issueId="issue-1" entry={entry} active />);
+    for (const button of screen.getAllByRole("button")) {
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+    }
+    expect(runFollowUpMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["queued", "success", enIssues.detail.quick_action_queued],
+    ["coalesced", "info", enIssues.detail.quick_action_coalesced],
+    ["deferred", "info", enIssues.detail.quick_action_deferred],
+    ["blocked", "error", enIssues.detail.quick_action_blocked],
+    ["future-status", "info", enIssues.detail.quick_action_posted],
+    [undefined, "info", enIssues.detail.quick_action_posted],
+  ] as const)("reports %s dispatch honestly", async (status, kind, message) => {
+    runFollowUpMock.mockResolvedValueOnce({ trigger_outcomes: status ? [{ status }] : [] });
+    renderFollowUps(<CommentFollowUps issueId="issue-1" entry={entry} active />);
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
+    await waitFor(() => expect(toast[kind]).toHaveBeenCalledWith(message.replace("{{name}}", "Builder")));
+    if (kind !== "success") expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("reports a stale-action error without a success notification", async () => {
+    runFollowUpMock.mockRejectedValueOnce(new Error("a newer reply already exists in this thread"));
+    renderFollowUps(<CommentFollowUps issueId="issue-1" entry={entry} active />);
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("a newer reply already exists in this thread"));
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });
