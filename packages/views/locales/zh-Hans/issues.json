@@ -400,24 +400,6 @@
     "unpin_tooltip": "从侧边栏取消固定",
     "thread_nav_label": "快速跳转到讨论",
     "thread_nav_resolved_label": "{{title}}（已解决）",
-    "thread_nav": {
-      "button_label_other": "讨论（{{count}}）",
-      "search_placeholder": "搜索讨论或作者",
-      "match_count_other": "{{count}} 条命中",
-      "filter_all": "全部",
-      "filter_unresolved": "未解决",
-      "filter_resolved": "已解决",
-      "filter_mine": "@我",
-      "group": {
-        "today": "今天",
-        "yesterday": "昨天",
-        "earlier": "更早"
-      },
-      "empty": "没有匹配的讨论",
-      "hint_select": "选择",
-      "hint_jump": "跳转",
-      "hint_close": "关闭"
-    },
     "sidebar_tooltip": "切换右侧边栏",
     "find": {
       "placeholder": "在任务中查找...",

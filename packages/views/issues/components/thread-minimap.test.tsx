@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import type { TimelineEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { ThreadMinimap, commentPreview, waveScale } from "./thread-minimap";
@@ -7,6 +7,8 @@ import { ThreadMinimap, commentPreview, waveScale } from "./thread-minimap";
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
     getActorName: (type: string, id: string) => `${type}:${id}`,
+    getActorInitials: (_type: string, _id: string, name: string) => name.slice(0, 1),
+    getActorAvatarUrl: () => null,
   }),
 }));
 
@@ -74,9 +76,9 @@ describe("waveScale", () => {
 
 describe("ThreadMinimap", () => {
   const threads = [
-    { id: "c1", entry: comment("c1", "First thread opener\nwith details"), resolved: false },
-    { id: "c2", entry: comment("c2", "Second thread opener"), resolved: false },
-    { id: "c3", entry: comment("c3", ""), resolved: false },
+    { id: "c1", entry: comment("c1", "First thread opener\nwith details"), resolved: false, participants: [] },
+    { id: "c2", entry: comment("c2", "Second thread opener"), resolved: false, participants: [] },
+    { id: "c3", entry: comment("c3", ""), resolved: false, participants: [] },
   ];
 
   it("renders nothing below the thread threshold", () => {
@@ -100,7 +102,7 @@ describe("ThreadMinimap", () => {
     expect(screen.getByRole("button", { name: "member:author-c3" })).toBeInTheDocument();
   });
 
-  it("opens the shared preview card after the intent delay and closes after the leave grace", () => {
+  it("opens all thread titles after the intent delay and closes after the leave grace", () => {
     vi.useFakeTimers({
       toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],
     });
@@ -113,16 +115,21 @@ describe("ThreadMinimap", () => {
       // jsdom rects are all zero → the nearest tick resolves to index 0.
       fireEvent.pointerMove(nav, { clientY: 0 });
       act(() => vi.advanceTimersByTime(30)); // rAF flush — arms the intent timer
-      expect(screen.queryByText("with details")).not.toBeInTheDocument();
+      expect(screen.queryByRole("list")).not.toBeInTheDocument();
 
       act(() => vi.advanceTimersByTime(150)); // intent delay elapses → card opens
-      expect(screen.getByText("with details")).toBeInTheDocument();
+      const list = screen.getByRole("list");
+      expect(within(list).getAllByRole("button")).toHaveLength(3);
+      expect(within(list).getByText("First thread opener")).toBeInTheDocument();
+      expect(within(list).getByText("Second thread opener")).toBeInTheDocument();
+      expect(within(list).getByText("member:author-c3")).toBeInTheDocument();
+      expect(screen.queryByText("with details")).not.toBeInTheDocument();
 
       fireEvent.pointerLeave(nav);
       act(() => vi.advanceTimersByTime(30)); // wave-clear frame
-      expect(screen.getByText("with details")).toBeInTheDocument(); // grace keeps it up
+      expect(screen.getByRole("list")).toBeInTheDocument(); // grace keeps it up
       act(() => vi.advanceTimersByTime(150)); // grace elapses → card closes
-      expect(screen.queryByText("with details")).not.toBeInTheDocument();
+      expect(screen.queryByRole("list")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -147,7 +154,7 @@ describe("ThreadMinimap", () => {
       fireEvent.pointerMove(nav, { clientY: 0 });
       act(() => vi.advanceTimersByTime(30 + 150)); // rAF flush + intent delay
 
-      const card = screen.getByText("with details").closest("div");
+      const card = screen.getByRole("list").closest("div");
       expect(card).toHaveClass("right-8");
       expect(card?.className).not.toMatch(/(?:^|\s)left-/);
     } finally {
@@ -155,7 +162,7 @@ describe("ThreadMinimap", () => {
     }
   });
 
-  it("badges the preview card of a resolved thread, and only that one", () => {
+  it("marks resolved threads in the complete outline", () => {
     vi.useFakeTimers({
       toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],
     });
@@ -173,16 +180,137 @@ describe("ThreadMinimap", () => {
       // resolved thread.
       fireEvent.pointerMove(nav, { clientY: 0 });
       act(() => vi.advanceTimersByTime(30 + 150)); // rAF flush + intent delay
-      expect(screen.getByText("Resolved")).toBeInTheDocument();
+      expect(screen.getByLabelText("Resolved")).toBeInTheDocument();
 
-      // The badge belongs to the hovered thread, not to the card: closing it
-      // must take the badge with it.
+      // Closing the outline removes its resolution indicator too.
       fireEvent.pointerLeave(nav);
       act(() => vi.advanceTimersByTime(30 + 150));
-      expect(screen.queryByText("Resolved")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Resolved")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps the outline open while moving onto it and jumps from any title", () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],
+    });
+    try {
+      const onJump = vi.fn();
+      renderWithI18n(
+        <ThreadMinimap threads={threads} scrollContainerEl={null} onJump={onJump} />,
+      );
+      const nav = screen.getByRole("navigation");
+      fireEvent.pointerMove(nav, { clientY: 0 });
+      act(() => vi.advanceTimersByTime(180));
+      const list = screen.getByRole("list");
+      fireEvent.pointerLeave(nav);
+      fireEvent.pointerEnter(list.parentElement!);
+      act(() => vi.advanceTimersByTime(180));
+      expect(list).toBeInTheDocument();
+      const second = within(list).getByRole("button", { name: "Second thread opener" });
+      fireEvent.pointerEnter(second);
+      expect(second).toHaveAttribute("data-active");
+      fireEvent.click(second);
+      expect(onJump).toHaveBeenCalledWith("c2");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["rail", "outline"])("closes after clicking the %s and moving away", (target) => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],
+    });
+    try {
+      const onJump = vi.fn();
+      renderWithI18n(
+        <ThreadMinimap threads={threads} scrollContainerEl={null} onJump={onJump} />,
+      );
+      const nav = screen.getByRole("navigation");
+      fireEvent.pointerMove(nav, { clientY: 0 });
+      act(() => vi.advanceTimersByTime(180));
+      const card = screen.getByRole("list").parentElement!;
+      const button = within(target === "rail" ? nav : card)
+        .getByRole("button", { name: "Second thread opener" });
+      if (target === "outline") {
+        fireEvent.pointerLeave(nav);
+        fireEvent.pointerEnter(card);
+      }
+      // Native mouse clicks focus buttons before dispatching click.
+      act(() => button.focus());
+      fireEvent.click(button, { detail: 1 });
+      expect(onJump).toHaveBeenCalledWith("c2");
+      act(() => vi.advanceTimersByTime(180));
+      expect(screen.getByRole("list")).toBeInTheDocument();
+      fireEvent.pointerLeave(target === "rail" ? nav : card);
+      act(() => vi.advanceTimersByTime(180));
+      expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps keyboard focus after activating an outline title", () => {
+    vi.useFakeTimers();
+    try {
+      const onJump = vi.fn();
+      renderWithI18n(
+        <ThreadMinimap threads={threads} scrollContainerEl={null} onJump={onJump} />,
+      );
+      act(() => screen.getByRole("button", { name: "First thread opener" }).focus());
+      const card = screen.getByRole("list").parentElement!;
+      const button = within(card).getByRole("button", { name: "Second thread opener" });
+      act(() => button.focus());
+      fireEvent.click(button, { detail: 0 });
+      fireEvent.pointerLeave(card);
+      act(() => vi.advanceTimersByTime(180));
+      expect(onJump).toHaveBeenCalledWith("c2");
+      expect(button).toHaveFocus();
+      expect(screen.getByRole("list")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("opens on keyboard focus and dismisses with Escape, returning focus to the matching tick", () => {
+    renderWithI18n(
+      <ThreadMinimap threads={threads} scrollContainerEl={null} onJump={vi.fn()} />,
+    );
+    const nav = screen.getByRole("navigation");
+    act(() => within(nav).getByRole("button", { name: "First thread opener" }).focus());
+    const list = screen.getByRole("list");
+    const second = within(list).getByRole("button", { name: "Second thread opener" });
+    act(() => second.focus());
+    fireEvent.keyDown(second, { key: "Escape" });
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "Second thread opener" })).toHaveFocus();
+  });
+
+  it("shows member and agent avatars with overflow alongside resolution", () => {
+    const participants = [
+      { ...comment("alice", ""), actor_name: "Alice", actor_avatar_url: "https://example.com/alice.png" },
+      { ...comment("agent", ""), actor_type: "agent", actor_name: "Design agent" },
+      { ...comment("bob", ""), actor_name: "Bob" },
+      { ...comment("carol", ""), actor_name: "Carol" },
+    ];
+    renderWithI18n(
+      <ThreadMinimap
+        threads={[{ ...threads[0]!, resolved: true, participants }, ...threads.slice(1)]}
+        scrollContainerEl={null}
+        onJump={vi.fn()}
+      />,
+    );
+    act(() => screen.getByRole("button", { name: "First thread opener (resolved)" }).focus());
+    const row = within(screen.getByRole("list"))
+      .getByRole("button", { name: "First thread opener (resolved)" });
+    expect(row).toHaveAttribute("aria-description", "Alice, Design agent, Bob, Carol");
+    expect(within(row).getByAltText("Alice")).toHaveAttribute("src", "https://example.com/alice.png");
+    expect(within(row).getByTitle("Design agent").querySelector(".lucide-bot")).not.toBeNull();
+    expect(within(row).getByTitle("Bob")).toBeInTheDocument();
+    expect(within(row).getByTitle("Carol")).toHaveTextContent("+1");
+    expect(within(row).getByLabelText("Resolved")).toBeInTheDocument();
+    expect(within(row).queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("carries the resolved state in the tick's accessible name", () => {
@@ -194,7 +322,7 @@ describe("ThreadMinimap", () => {
       />,
     );
 
-    // The card is visual only — a screen reader gets the state from the tick.
+    // The collapsed rail announces resolution before the outline is opened.
     expect(
       screen.getByRole("button", { name: "First thread opener (resolved)" }),
     ).toBeInTheDocument();

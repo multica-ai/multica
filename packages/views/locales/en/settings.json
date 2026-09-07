@@ -183,10 +183,6 @@
         "label": "Find in issue",
         "description": "Search within the open issue detail."
       },
-      "openThreadNav": {
-        "label": "Open thread navigator",
-        "description": "List, search, and jump between the comment threads of the open issue."
-      },
       "archiveInboxItem": {
         "label": "Archive notification",
         "description": "Archive the open inbox notification, or restore it while reading the archive."

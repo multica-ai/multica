@@ -402,24 +402,6 @@
     "unpin_tooltip": "사이드바 고정 해제",
     "thread_nav_label": "스레드로 이동",
     "thread_nav_resolved_label": "{{title}} (해결됨)",
-    "thread_nav": {
-      "button_label_other": "스레드 ({{count}})",
-      "search_placeholder": "스레드 또는 작성자 검색",
-      "match_count_other": "{{count}}개 일치",
-      "filter_all": "전체",
-      "filter_unresolved": "미해결",
-      "filter_resolved": "해결됨",
-      "filter_mine": "@나",
-      "group": {
-        "today": "오늘",
-        "yesterday": "어제",
-        "earlier": "이전"
-      },
-      "empty": "일치하는 스레드가 없습니다",
-      "hint_select": "선택",
-      "hint_jump": "이동",
-      "hint_close": "닫기"
-    },
     "sidebar_tooltip": "오른쪽 사이드바 열기/닫기",
     "find": {
       "placeholder": "태스크에서 찾기...",

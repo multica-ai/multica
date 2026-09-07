@@ -406,26 +406,6 @@
     "unpin_tooltip": "Unpin from sidebar",
     "thread_nav_label": "Jump to comment thread",
     "thread_nav_resolved_label": "{{title}} (resolved)",
-    "thread_nav": {
-      "button_label_one": "Comment threads ({{count}})",
-      "button_label_other": "Comment threads ({{count}})",
-      "search_placeholder": "Search threads or authors",
-      "match_count_one": "{{count}} match",
-      "match_count_other": "{{count}} matches",
-      "filter_all": "All",
-      "filter_unresolved": "Unresolved",
-      "filter_resolved": "Resolved",
-      "filter_mine": "@me",
-      "group": {
-        "today": "Today",
-        "yesterday": "Yesterday",
-        "earlier": "Earlier"
-      },
-      "empty": "No threads match",
-      "hint_select": "select",
-      "hint_jump": "jump",
-      "hint_close": "close"
-    },
     "sidebar_tooltip": "Toggle right sidebar",
     "find": {
       "placeholder": "Find in issue...",
