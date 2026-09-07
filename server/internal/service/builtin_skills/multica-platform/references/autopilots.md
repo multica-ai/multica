@@ -75,6 +75,20 @@ keeps write/execute but cannot re-grant or revoke peers. `get` stamps two
 per-caller booleans — `can_write` and the narrower `can_manage_access` — read
 those rather than inferring from role.
 
+## Failure monitoring
+
+The server auto-pauses an active autopilot when either of these guards fires:
+
+- failed and skipped terminal runs together exceed the configured failure-rate
+  threshold; skipped work carries the same weight as failed work;
+- the latest two natural schedule runs are both skipped, independent of the
+  minimum sample size used by the rate threshold.
+
+Manual, webhook, and API runs do not break or manufacture the natural schedule
+streak. A later completed natural schedule run breaks it. The paused autopilot's
+`pause_reason` distinguishes `auto_paused_high_failure_rate` from
+`auto_paused_consecutive_skips`, and the owner receives an inbox notification.
+
 ## Side effects
 
 These mutate durable state or start work: `create`, `update`, `delete`, trigger

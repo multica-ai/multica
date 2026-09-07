@@ -23,8 +23,8 @@ import (
 
 // failureMonitorConfig is the tunable knob set for the autopilot failure
 // monitor. Defaults match the proposal in MUL-1336 §6 action item #2:
-// pause autopilots whose recent run history is dominated by failures and that
-// have run enough times that the failure rate is statistically meaningful.
+// pause autopilots whose recent run history is dominated by unsuccessful
+// terminal runs, plus a low-volume guard for consecutive schedule skips.
 //
 // All values can be overridden via env vars (see envFailureMonitorConfig).
 // Setting Interval <= 0 disables the monitor entirely.
@@ -33,6 +33,7 @@ type failureMonitorConfig struct {
 	Lookback     time.Duration
 	MinRuns      int64
 	FailRatio    float64
+	SkipStreak   int64
 	StartupDelay time.Duration
 }
 
@@ -42,6 +43,7 @@ func defaultFailureMonitorConfig() failureMonitorConfig {
 		Lookback:     7 * 24 * time.Hour,
 		MinRuns:      50,
 		FailRatio:    0.9,
+		SkipStreak:   2,
 		StartupDelay: 1 * time.Minute,
 	}
 }
@@ -57,13 +59,16 @@ func envFailureMonitorConfig() failureMonitorConfig {
 	if v, ok := envFloatInUnitInterval("AUTOPILOT_FAIL_MONITOR_FAIL_RATIO"); ok {
 		cfg.FailRatio = v
 	}
+	if v, ok := envInt64Positive("AUTOPILOT_FAIL_MONITOR_SKIP_STREAK"); ok {
+		cfg.SkipStreak = v
+	}
 	return cfg
 }
 
 // runAutopilotFailureMonitor periodically pauses autopilots whose recent run
-// history exceeds the configured failure threshold. This stops runaway
-// scheduled autopilots from burning tasks/tokens on a hot loop (e.g. the
-// `Registro de ls cada 5 min` case in MUL-1336: 1,475 / 1,476 runs failed
+// history exceeds the configured failure threshold or skip-streak threshold.
+// This stops runaway scheduled autopilots from burning tasks/tokens on a hot
+// loop (e.g. the `Registro de ls cada 5 min` case in MUL-1336: 1,475 / 1,476 runs failed
 // over 7 days, still firing every 5 min). The monitor leaves a
 // `severity=attention` inbox notification for the autopilot's creator (or the
 // agent's owner if the autopilot was created by an agent) so somebody human
@@ -82,6 +87,7 @@ func runAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *e
 		"lookback", cfg.Lookback.String(),
 		"min_runs", cfg.MinRuns,
 		"fail_ratio", cfg.FailRatio,
+		"skip_streak", cfg.SkipStreak,
 	)
 
 	// Stagger startup so we don't all-or-nothing hit the DB the moment the
@@ -120,6 +126,7 @@ func tickAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *
 		db.SelectAutopilotsExceedingFailureThresholdParams{
 			MinRuns:            cfg.MinRuns,
 			FailRatioThreshold: cfg.FailRatio,
+			SkipStreak:         cfg.SkipStreak,
 			Since:              pgtype.Timestamptz{Time: since, Valid: true},
 		},
 	)
@@ -134,7 +141,11 @@ func tickAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *
 	slog.Info("autopilot failure monitor: candidates", "count", len(candidates))
 
 	for _, c := range candidates {
-		paused, err := queries.SystemPauseAutopilot(ctx, c.ID)
+		reason := autopilotPauseReason(c, cfg)
+		paused, err := queries.SystemPauseAutopilot(ctx, db.SystemPauseAutopilotParams{
+			ID:          c.ID,
+			PauseReason: pgtype.Text{String: reason, Valid: true},
+		})
 		if err != nil {
 			// pgx returns ErrNoRows when the WHERE status='active' clause
 			// matched zero rows — i.e. another caller (manual UI action,
@@ -160,9 +171,12 @@ func tickAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *
 				"autopilot_id", util.UUIDToString(paused.ID), "error", verr)
 		}
 
+		unsuccessfulRuns := c.FailedRuns + c.SkippedRuns
+		unsuccessfulPct := 100.0
 		failPct := 100.0
 		if c.TotalRuns > 0 {
-			failPct = math.Round(float64(c.FailedRuns)/float64(c.TotalRuns)*1000) / 10 // one decimal place
+			unsuccessfulPct = math.Round(float64(unsuccessfulRuns)/float64(c.TotalRuns)*1000) / 10 // one decimal place
+			failPct = math.Round(float64(c.FailedRuns)/float64(c.TotalRuns)*1000) / 10
 		}
 
 		slog.Info(
@@ -171,11 +185,14 @@ func tickAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *
 			"workspace_id", util.UUIDToString(c.WorkspaceID),
 			"title", c.Title,
 			"failed_runs", c.FailedRuns,
+			"skipped_runs", c.SkippedRuns,
 			"total_runs", c.TotalRuns,
 			"fail_pct", failPct,
+			"unsuccessful_pct", unsuccessfulPct,
+			"reason", reason,
 		)
 
-		emitAutopilotPausedNotifications(ctx, queries, bus, paused, c, cfg, failPct)
+		emitAutopilotPausedNotifications(ctx, queries, bus, paused, c, cfg, reason, unsuccessfulPct)
 
 		// Fan out the status change so any open UI updates the autopilot row.
 		workspaceID := util.UUIDToString(paused.WorkspaceID)
@@ -185,10 +202,22 @@ func tickAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *
 			ActorType:   "system",
 			Payload: map[string]any{
 				"autopilot": autopilotEventPayload(paused),
-				"reason":    "auto_paused_high_failure_rate",
+				"reason":    reason,
 			},
 		})
 	}
+}
+
+const (
+	autopilotPauseReasonFailureRate = "auto_paused_high_failure_rate"
+	autopilotPauseReasonSkipStreak  = "auto_paused_consecutive_skips"
+)
+
+func autopilotPauseReason(c db.SelectAutopilotsExceedingFailureThresholdRow, cfg failureMonitorConfig) string {
+	if c.RecentNaturalRuns >= cfg.SkipStreak && c.RecentSkippedRuns == c.RecentNaturalRuns {
+		return autopilotPauseReasonSkipStreak
+	}
+	return autopilotPauseReasonFailureRate
 }
 
 // emitAutopilotPausedNotifications creates one inbox_item per relevant
@@ -210,7 +239,8 @@ func emitAutopilotPausedNotifications(
 	autopilot db.Autopilot,
 	candidate db.SelectAutopilotsExceedingFailureThresholdRow,
 	cfg failureMonitorConfig,
-	failPct float64,
+	reason string,
+	unsuccessfulPct float64,
 ) {
 	recipients := resolveAutopilotPausedRecipients(ctx, queries, autopilot)
 	if len(recipients) == 0 {
@@ -218,20 +248,34 @@ func emitAutopilotPausedNotifications(
 	}
 
 	title := fmt.Sprintf("Autopilot paused: %s", autopilot.Title)
-	body := fmt.Sprintf(
-		"Auto-paused after %d of %d runs failed (%.1f%%) in the last %s. Investigate the failures, fix the root cause, then re-enable from the autopilot page.",
-		candidate.FailedRuns, candidate.TotalRuns, failPct, formatLookback(cfg.Lookback),
-	)
+	unsuccessfulRuns := candidate.FailedRuns + candidate.SkippedRuns
+	body := ""
+	if reason == autopilotPauseReasonSkipStreak {
+		body = fmt.Sprintf(
+			"Auto-paused after the latest %d natural schedule runs were skipped. Skipped runs are treated as failures; investigate the recorded skip reason, fix it, then re-enable from the autopilot page.",
+			candidate.RecentSkippedRuns,
+		)
+	} else {
+		body = fmt.Sprintf(
+			"Auto-paused after %d of %d runs failed or were skipped (%.1f%%) in the last %s. Investigate the failures or skips, fix the root cause, then re-enable from the autopilot page.",
+			unsuccessfulRuns, candidate.TotalRuns, unsuccessfulPct, formatLookback(cfg.Lookback),
+		)
+	}
 	details, _ := json.Marshal(map[string]any{
-		"autopilot_id":         util.UUIDToString(autopilot.ID),
-		"autopilot_title":      autopilot.Title,
-		"failed_runs":          candidate.FailedRuns,
-		"total_runs":           candidate.TotalRuns,
-		"fail_pct":             failPct,
-		"lookback_seconds":     int64(cfg.Lookback.Seconds()),
-		"threshold_min_runs":   cfg.MinRuns,
-		"threshold_fail_ratio": cfg.FailRatio,
-		"reason":               "auto_paused_high_failure_rate",
+		"autopilot_id":          util.UUIDToString(autopilot.ID),
+		"autopilot_title":       autopilot.Title,
+		"failed_runs":           candidate.FailedRuns,
+		"skipped_runs":          candidate.SkippedRuns,
+		"total_runs":            candidate.TotalRuns,
+		"fail_pct":              failurePercent(candidate.FailedRuns, candidate.TotalRuns),
+		"unsuccessful_pct":      unsuccessfulPct,
+		"recent_natural_runs":   candidate.RecentNaturalRuns,
+		"recent_skipped_runs":   candidate.RecentSkippedRuns,
+		"skip_streak_threshold": cfg.SkipStreak,
+		"lookback_seconds":      int64(cfg.Lookback.Seconds()),
+		"threshold_min_runs":    cfg.MinRuns,
+		"threshold_fail_ratio":  cfg.FailRatio,
+		"reason":                reason,
 	})
 
 	workspaceID := util.UUIDToString(autopilot.WorkspaceID)
@@ -277,6 +321,13 @@ func emitAutopilotPausedNotifications(
 			Payload:     map[string]any{"item": inboxItemToResponse(item)},
 		})
 	}
+}
+
+func failurePercent(part, total int64) float64 {
+	if total <= 0 {
+		return 100
+	}
+	return math.Round(float64(part)/float64(total)*1000) / 10
 }
 
 func resolveAutopilotPausedRecipients(

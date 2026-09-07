@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -76,6 +78,23 @@ func seedAutopilotRuns(t *testing.T, autopilotID pgtype.UUID, total, failed int,
 	}
 }
 
+func seedAutopilotRun(t *testing.T, autopilotID pgtype.UUID, status string, runAt time.Time) {
+	seedAutopilotRunWithSource(t, autopilotID, "schedule", status, runAt)
+}
+
+func seedAutopilotRunWithSource(t *testing.T, autopilotID pgtype.UUID, source, status string, runAt time.Time) {
+	t.Helper()
+	fixture := testutil.New(testPool, testWorkspaceID, testUserID)
+	fixture.Insert(t, "autopilot_run", testutil.Cols{
+		"autopilot_id": util.UUIDToString(autopilotID),
+		"source":       source,
+		"status":       status,
+		"created_at":   runAt,
+		"triggered_at": runAt,
+		"completed_at": runAt,
+	})
+}
+
 func reloadAutopilotStatus(t *testing.T, queries *db.Queries, id pgtype.UUID) string {
 	t.Helper()
 	ap, err := queries.GetAutopilot(context.Background(), id)
@@ -90,10 +109,11 @@ func TestAutopilotFailureMonitor_PausesOffenderAndNotifiesCreator(t *testing.T) 
 	bus := events.New()
 
 	cfg := failureMonitorConfig{
-		Interval:  time.Hour,
-		Lookback:  7 * 24 * time.Hour,
-		MinRuns:   10,
-		FailRatio: 0.9,
+		Interval:   time.Hour,
+		Lookback:   7 * 24 * time.Hour,
+		MinRuns:    10,
+		FailRatio:  0.9,
+		SkipStreak: 2,
 	}
 
 	agentID := pickFixtureAgent(t)
@@ -165,10 +185,11 @@ func TestAutopilotFailureMonitor_LeavesAlreadyPausedAlone(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
 	cfg := failureMonitorConfig{
-		Interval:  time.Hour,
-		Lookback:  7 * 24 * time.Hour,
-		MinRuns:   10,
-		FailRatio: 0.9,
+		Interval:   time.Hour,
+		Lookback:   7 * 24 * time.Hour,
+		MinRuns:    10,
+		FailRatio:  0.9,
+		SkipStreak: 2,
 	}
 
 	agentID := pickFixtureAgent(t)
@@ -197,10 +218,11 @@ func TestAutopilotFailureMonitor_AgentCreatorRoutesToOwner(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
 	cfg := failureMonitorConfig{
-		Interval:  time.Hour,
-		Lookback:  7 * 24 * time.Hour,
-		MinRuns:   10,
-		FailRatio: 0.9,
+		Interval:   time.Hour,
+		Lookback:   7 * 24 * time.Hour,
+		MinRuns:    10,
+		FailRatio:  0.9,
+		SkipStreak: 2,
 	}
 
 	agentID := pickFixtureAgent(t)
@@ -234,10 +256,11 @@ func TestAutopilotFailureMonitor_FormerCreatorFallsBackToWorkspaceManagers(t *te
 	queries := db.New(testPool)
 	bus := events.New()
 	cfg := failureMonitorConfig{
-		Interval:  time.Hour,
-		Lookback:  7 * 24 * time.Hour,
-		MinRuns:   10,
-		FailRatio: 0.9,
+		Interval:   time.Hour,
+		Lookback:   7 * 24 * time.Hour,
+		MinRuns:    10,
+		FailRatio:  0.9,
+		SkipStreak: 2,
 	}
 	agentID := pickFixtureAgent(t)
 	autopilot := seedAutopilot(
@@ -275,10 +298,11 @@ func TestAutopilotFailureMonitor_BelowThresholdNoOp(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
 	cfg := failureMonitorConfig{
-		Interval:  time.Hour,
-		Lookback:  7 * 24 * time.Hour,
-		MinRuns:   10,
-		FailRatio: 0.9,
+		Interval:   time.Hour,
+		Lookback:   7 * 24 * time.Hour,
+		MinRuns:    10,
+		FailRatio:  0.9,
+		SkipStreak: 2,
 	}
 
 	agentID := pickFixtureAgent(t)
@@ -298,5 +322,128 @@ func TestAutopilotFailureMonitor_BelowThresholdNoOp(t *testing.T) {
 	}
 	if len(inboxEvents) != 0 {
 		t.Fatalf("expected no inbox events, got %d", len(inboxEvents))
+	}
+}
+
+func TestAutopilotFailureMonitor_ConsecutiveNaturalSkipsPauseAndRecoveryClearsCandidate(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	cfg := failureMonitorConfig{
+		Interval:   time.Hour,
+		Lookback:   7 * 24 * time.Hour,
+		MinRuns:    50, // The two-run schedule streak, not the rate threshold, must fire.
+		FailRatio:  0.9,
+		SkipStreak: 2,
+	}
+
+	agentID := pickFixtureAgent(t)
+	streak := seedAutopilot(t, queries, "Failure monitor: consecutive skipped schedules", "member", parseUUID(testUserID), agentID)
+	recovered := seedAutopilot(t, queries, "Failure monitor: recovered schedule", "member", parseUUID(testUserID), agentID)
+	now := time.Now()
+	seedAutopilotRun(t, streak.ID, "skipped", now.Add(-2*time.Minute))
+	seedAutopilotRunWithSource(t, streak.ID, "manual", "completed", now.Add(-90*time.Second))
+	seedAutopilotRun(t, streak.ID, "skipped", now.Add(-1*time.Minute))
+	seedAutopilotRun(t, recovered.ID, "skipped", now.Add(-2*time.Minute))
+	seedAutopilotRun(t, recovered.ID, "completed", now.Add(-1*time.Minute))
+
+	candidates, err := queries.SelectAutopilotsExceedingFailureThreshold(context.Background(), db.SelectAutopilotsExceedingFailureThresholdParams{
+		MinRuns:            cfg.MinRuns,
+		FailRatioThreshold: cfg.FailRatio,
+		SkipStreak:         cfg.SkipStreak,
+		Since:              pgtype.Timestamptz{Time: now.Add(-cfg.Lookback), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("select failure candidates: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ID != streak.ID {
+		t.Fatalf("candidates = %#v, want only the consecutive-skip autopilot %s", candidates, util.UUIDToString(streak.ID))
+	}
+	if got := autopilotPauseReason(candidates[0], cfg); got != autopilotPauseReasonSkipStreak {
+		t.Fatalf("pause reason = %q, want %q", got, autopilotPauseReasonSkipStreak)
+	}
+
+	var inboxEvents []events.Event
+	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+		inboxEvents = append(inboxEvents, e)
+	})
+	tickAutopilotFailureMonitor(context.Background(), queries, bus, cfg)
+
+	paused, err := queries.GetAutopilot(context.Background(), streak.ID)
+	if err != nil {
+		t.Fatalf("reload paused autopilot: %v", err)
+	}
+	if paused.Status != "paused" || paused.PauseReason.String != autopilotPauseReasonSkipStreak {
+		t.Fatalf("paused autopilot = status %q, pause_reason %q; want paused/%q", paused.Status, paused.PauseReason.String, autopilotPauseReasonSkipStreak)
+	}
+	if len(inboxEvents) != 1 {
+		t.Fatalf("inbox events = %d, want 1", len(inboxEvents))
+	}
+	item := inboxEvents[0].Payload.(map[string]any)["item"].(map[string]any)
+	var details map[string]any
+	if err := json.Unmarshal(item["details"].(json.RawMessage), &details); err != nil {
+		t.Fatalf("decode notification details: %v", err)
+	}
+	if got := details["reason"]; got != autopilotPauseReasonSkipStreak {
+		t.Fatalf("notification reason = %v, want %q", got, autopilotPauseReasonSkipStreak)
+	}
+	if got := reloadAutopilotStatus(t, queries, recovered.ID); got != "active" {
+		t.Fatalf("completed natural run must clear the skip-streak candidate; status = %q", got)
+	}
+
+	fixture := testutil.New(testPool, testWorkspaceID, testUserID)
+	fixture.Exec(t, `UPDATE autopilot SET status = 'active', pause_reason = NULL WHERE id = $1`, util.UUIDToString(streak.ID))
+	seedAutopilotRun(t, streak.ID, "completed", now)
+	tickAutopilotFailureMonitor(context.Background(), queries, bus, cfg)
+
+	restored, err := queries.GetAutopilot(context.Background(), streak.ID)
+	if err != nil {
+		t.Fatalf("reload restored autopilot: %v", err)
+	}
+	if restored.Status != "active" || restored.PauseReason.Valid {
+		t.Fatalf("restored autopilot = status %q, pause_reason %q; want active with no alert", restored.Status, restored.PauseReason.String)
+	}
+	if len(inboxEvents) != 1 {
+		t.Fatalf("recovery emitted another inbox event; got %d total, want the original 1", len(inboxEvents))
+	}
+}
+
+func TestAutopilotFailureMonitor_SkipsCarryFailureRateWeight(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	cfg := failureMonitorConfig{
+		Interval:   time.Hour,
+		Lookback:   7 * 24 * time.Hour,
+		MinRuns:    10,
+		FailRatio:  0.9,
+		SkipStreak: 2,
+	}
+
+	agentID := pickFixtureAgent(t)
+	autopilot := seedAutopilot(t, queries, "Failure monitor: skip has failure weight", "member", parseUUID(testUserID), agentID)
+	now := time.Now()
+	for i := 0; i < 8; i++ {
+		seedAutopilotRun(t, autopilot.ID, "failed", now.Add(time.Duration(i-10)*time.Minute))
+	}
+	seedAutopilotRun(t, autopilot.ID, "skipped", now.Add(-2*time.Minute))
+	seedAutopilotRun(t, autopilot.ID, "completed", now.Add(-1*time.Minute))
+
+	var updateEvents []events.Event
+	bus.Subscribe(protocol.EventAutopilotUpdated, func(e events.Event) {
+		updateEvents = append(updateEvents, e)
+	})
+	tickAutopilotFailureMonitor(context.Background(), queries, bus, cfg)
+
+	paused, err := queries.GetAutopilot(context.Background(), autopilot.ID)
+	if err != nil {
+		t.Fatalf("reload paused autopilot: %v", err)
+	}
+	if paused.Status != "paused" || paused.PauseReason.String != autopilotPauseReasonFailureRate {
+		t.Fatalf("paused autopilot = status %q, pause_reason %q; want paused/%q", paused.Status, paused.PauseReason.String, autopilotPauseReasonFailureRate)
+	}
+	if len(updateEvents) != 1 {
+		t.Fatalf("update events = %d, want 1", len(updateEvents))
+	}
+	if got := updateEvents[0].Payload.(map[string]any)["reason"]; got != autopilotPauseReasonFailureRate {
+		t.Fatalf("update reason = %v, want %q", got, autopilotPauseReasonFailureRate)
 	}
 }
