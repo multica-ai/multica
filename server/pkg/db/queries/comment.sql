@@ -50,9 +50,21 @@ SELECT pg_advisory_xact_lock(
 -- name: GetCommentInWorkspaceForUpdate :one
 -- Pin the source comment while a follow-up is validated and inserted so an
 -- edit cannot replace or clear its server-owned suggestions mid-execution.
-SELECT * FROM comment
-WHERE id = @id AND workspace_id = @workspace_id
-FOR UPDATE;
+-- Lock its owner first, matching CreateComment, UpdateComment and teardown.
+-- The dependency on the materialized owner prevents comment -> issue lock
+-- inversion when a follow-up races an edit or deletion.
+WITH locked_issue AS MATERIALIZED (
+    SELECT issue.id
+    FROM issue
+    JOIN comment ON comment.issue_id = issue.id
+      AND comment.workspace_id = issue.workspace_id
+    WHERE comment.id = @id AND comment.workspace_id = @workspace_id
+    FOR UPDATE OF issue
+)
+SELECT comment.* FROM comment
+JOIN locked_issue ON comment.issue_id = locked_issue.id
+WHERE comment.id = @id AND comment.workspace_id = @workspace_id
+FOR UPDATE OF comment;
 
 -- name: SetCommentSuggestedFollowUps :one
 UPDATE comment

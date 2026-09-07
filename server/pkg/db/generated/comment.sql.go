@@ -435,9 +435,18 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 }
 
 const getCommentInWorkspaceForUpdate = `-- name: GetCommentInWorkspaceForUpdate :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, suggested_follow_ups FROM comment
-WHERE id = $1 AND workspace_id = $2
-FOR UPDATE
+WITH locked_issue AS MATERIALIZED (
+    SELECT issue.id
+    FROM issue
+    JOIN comment ON comment.issue_id = issue.id
+      AND comment.workspace_id = issue.workspace_id
+    WHERE comment.id = $1 AND comment.workspace_id = $2
+    FOR UPDATE OF issue
+)
+SELECT comment.id, comment.issue_id, comment.author_type, comment.author_id, comment.content, comment.type, comment.created_at, comment.updated_at, comment.parent_id, comment.workspace_id, comment.resolved_at, comment.resolved_by_type, comment.resolved_by_id, comment.source_task_id, comment.quick_action_id, comment.via_plugin_id, comment.revision, comment.recovery_settled_at, comment.suggested_follow_ups FROM comment
+JOIN locked_issue ON comment.issue_id = locked_issue.id
+WHERE comment.id = $1 AND comment.workspace_id = $2
+FOR UPDATE OF comment
 `
 
 type GetCommentInWorkspaceForUpdateParams struct {
@@ -447,6 +456,9 @@ type GetCommentInWorkspaceForUpdateParams struct {
 
 // Pin the source comment while a follow-up is validated and inserted so an
 // edit cannot replace or clear its server-owned suggestions mid-execution.
+// Lock its owner first, matching CreateComment, UpdateComment and teardown.
+// The dependency on the materialized owner prevents comment -> issue lock
+// inversion when a follow-up races an edit or deletion.
 func (q *Queries) GetCommentInWorkspaceForUpdate(ctx context.Context, arg GetCommentInWorkspaceForUpdateParams) (Comment, error) {
 	row := q.db.QueryRow(ctx, getCommentInWorkspaceForUpdate, arg.ID, arg.WorkspaceID)
 	var i Comment
