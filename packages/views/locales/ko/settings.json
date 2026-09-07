@@ -930,6 +930,7 @@
       "state_stopping": "중지 중...",
       "state_cli_not_found": "설정 실패",
       "state_installing_cli": "설정 중...",
+      "state_installing_runtime": "런타임 설치 중...",
       "state_recovery_paused": "복구 일시 중지",
       "state_auth_expired": "로그인 필요",
       "start_failed": "데몬을 시작하지 못했습니다",

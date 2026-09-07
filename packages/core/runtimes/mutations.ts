@@ -1,5 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import type {
+  UpdateRuntimeModelConnectionRequest,
+  ValidateModelConnectionRequest,
+} from "../types";
+import { runtimeModelsKeys } from "./models";
 import { runtimeKeys } from "./queries";
 import { workspaceKeys } from "../workspace/queries";
 import { agentTaskSnapshotKeys } from "../agents/queries";
@@ -62,6 +67,51 @@ export function useUpdateRuntime(wsId: string) {
     }) => api.updateRuntime(runtimeId, patch),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+    },
+  });
+}
+
+export function useUpdateRuntimeModelConnection(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      runtimeId,
+      connection,
+    }: {
+      runtimeId: string;
+      connection: UpdateRuntimeModelConnectionRequest;
+    }) => api.updateRuntimeModelConnection(runtimeId, connection),
+    onSettled: (_data, _error, variables) => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+      qc.invalidateQueries({
+        queryKey: runtimeModelsKeys.forRuntime(variables.runtimeId),
+      });
+    },
+  });
+}
+
+/**
+ * Verifies a candidate model connection before it is saved.
+ *
+ * Not cached: the answer depends on provider-side state (key revoked, balance
+ * spent) that can change between attempts, and a stale "valid" is exactly the
+ * wrong thing to reuse.
+ */
+export function useValidateModelConnection() {
+  return useMutation({
+    mutationFn: (request: ValidateModelConnectionRequest) =>
+      api.validateModelConnection(request),
+  });
+}
+
+export function useDeleteRuntimeModelConnection(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runtimeId: string) =>
+      api.deleteRuntimeModelConnection(runtimeId),
+    onSettled: (_data, _error, runtimeId) => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: runtimeModelsKeys.forRuntime(runtimeId) });
     },
   });
 }

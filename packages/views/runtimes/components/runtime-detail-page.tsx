@@ -25,6 +25,10 @@ import {
 import { RenameMachineDialog } from "./rename-machine-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import { pendingRuntimesForProfiles } from "./pending-runtime";
+import {
+  runtimesWithManagedRuntimeSetup,
+  type ManagedRuntimeSetupStatus,
+} from "./managed-runtime-setup";
 import { MachineCliSection } from "./machine-cli-section";
 import { HealthIcon, useHealthLabel } from "./shared";
 import { useT, useTimeAgo } from "../../i18n";
@@ -37,6 +41,8 @@ export interface RuntimeDetailPageProps {
   localMachineActions?: React.ReactNode;
   hasLocalMachine?: boolean;
   bootstrapping?: boolean;
+  /** Desktop-only local setup state; never written into the server cache. */
+  managedRuntimeSetup?: ManagedRuntimeSetupStatus | null;
 }
 
 function useNowTick(intervalMs = 30_000): number {
@@ -84,6 +90,7 @@ export function RuntimeDetailPage({
   localMachineActions,
   hasLocalMachine,
   bootstrapping,
+  managedRuntimeSetup,
 }: RuntimeDetailPageProps) {
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
@@ -142,14 +149,23 @@ export function RuntimeDetailPage({
   const machineRuntimes = useMemo(() => {
     if (!baseMachine) return [];
     if (baseMachine.mode !== "local") return baseMachine.runtimes;
-    return pendingRuntimesForProfiles({
+    const withProfiles = pendingRuntimesForProfiles({
       pendingProfiles: profileRows,
       runtimes: baseMachine.runtimes,
       localDaemonId: baseMachine.daemonId,
       localMachineName: baseMachine.title,
       fallbackMachineName: baseMachine.title,
     });
-  }, [baseMachine, profileRows]);
+    if (!baseMachine.isCurrent) return withProfiles;
+    return runtimesWithManagedRuntimeSetup({
+      runtimes: withProfiles,
+      setup: managedRuntimeSetup,
+      workspaceId: wsId,
+      localDaemonId: baseMachine.daemonId,
+      localMachineName: baseMachine.title,
+      fallbackMachineName: t(($) => $.machine.this_machine),
+    });
+  }, [baseMachine, managedRuntimeSetup, profileRows, t, wsId]);
   const machine = baseMachine;
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });

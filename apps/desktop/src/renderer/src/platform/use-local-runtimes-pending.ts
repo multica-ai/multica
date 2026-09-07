@@ -3,7 +3,8 @@ import type { DaemonStatus } from "../../../shared/daemon-types";
 
 /**
  * True while the local daemon is still expected to produce agent runtimes: it
- * is booting (`starting` / `installing_cli`) or it is running and reports agent
+ * is booting (`starting` / `installing_cli` / `installing_runtime`) or it is
+ * running and reports agent
  * CLIs detected on this host that may not have finished registering yet.
  *
  * The onboarding runtime step reads this so it keeps showing the scanning
@@ -28,6 +29,7 @@ export function useLocalRuntimesPending(): boolean {
       setPending(
         s.state === "starting" ||
           s.state === "installing_cli" ||
+          s.state === "installing_runtime" ||
           (s.state === "running" && (s.agents?.length ?? 0) > 0),
       );
     };

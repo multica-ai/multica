@@ -89,6 +89,9 @@ vi.mock("@multica/core/runtimes", async () => ({
   runtimeProfileListOptions: (wsId: string) => ({
     queryKey: ["runtime-profiles", wsId],
   }),
+  runtimeSupportsDefaultModelConnection: () => false,
+  isPiRuntimeModelConfigured: () => false,
+  runtimeDefaultPiConfig: () => ({}),
   parseRuntimeProfileBoundConflict: () => null,
   useDeleteRuntimeProfile: () => ({
     mutate: vi.fn(),

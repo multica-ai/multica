@@ -28,6 +28,11 @@ export function DesktopRuntimesPage() {
       // consistent with every other machine row.
       hasLocalMachine
       bootstrapping={context.bootstrapping}
+      // Second home for the built-in runtime offer. Onboarding is where most
+      // people meet it, but a user who skipped it there needs a way back —
+      // otherwise one decline puts them permanently back in the old dead end.
+      onInstallBuiltInRuntime={() => window.daemonAPI.installRuntime("pi")}
+      managedRuntimeSetup={context.managedRuntimeSetup}
     />
   );
 }

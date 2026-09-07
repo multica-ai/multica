@@ -2,11 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Cpu, Loader2, Plus } from "lucide-react";
+import { Check, ChevronDown, Cpu, Loader2, Plus } from "lucide-react";
 import {
+  runtimeDisplayLabel,
   refreshRuntimeModels,
   runtimeModelsOptions,
 } from "@multica/core/runtimes";
+import type { AgentRuntime } from "@multica/core/types";
 import { Label } from "@multica/ui/components/ui/label";
 import {
   PickerItem,
@@ -14,6 +16,11 @@ import {
 } from "../../../issues/components/pickers";
 import { CHIP_CLASS } from "./chip";
 import { useT } from "../../../i18n";
+import { runtimeDefaultModelDisplay } from "../model-display";
+import {
+  isPiModelDiscoveryNoise,
+  visibleRuntimeModels,
+} from "../model-options";
 import { UnavailableModelsNote } from "../unavailable-models-note";
 import { ModelSearchHeader } from "../model-search-header";
 
@@ -31,6 +38,7 @@ import { ModelSearchHeader } from "../model-search-header";
  * future model-less runtime.
  */
 export function ModelPicker({
+  runtime,
   runtimeId,
   runtimeOnline,
   value,
@@ -39,6 +47,7 @@ export function ModelPicker({
   showLabel = true,
   onChange,
 }: {
+  runtime?: AgentRuntime | null;
   runtimeId: string | null;
   runtimeOnline: boolean;
   value: string;
@@ -52,9 +61,16 @@ export function ModelPicker({
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const resolvedRuntimeId = runtime?.id ?? runtimeId;
+  // The caller also gates discovery by runtime access, not just liveness.
+  const resolvedRuntimeOnline = runtimeOnline && (!runtime || runtime.status === "online");
+  const runtimeDefault = useMemo(
+    () => runtimeDefaultModelDisplay(runtime),
+    [runtime],
+  );
 
   const modelsQuery = useQuery(
-    runtimeModelsOptions(runtimeOnline ? runtimeId : null),
+    runtimeModelsOptions(resolvedRuntimeOnline ? resolvedRuntimeId : null),
   );
   const supported = modelsQuery.data?.supported ?? true;
   // Memoise the model list so every downstream useMemo gets a stable
@@ -66,8 +82,8 @@ export function ModelPicker({
     [modelsQuery.data],
   );
   const models = useMemo(
-    () => modelsQuery.data?.models ?? [],
-    [modelsQuery.data],
+    () => visibleRuntimeModels(modelsQuery.data?.models ?? [], runtime),
+    [modelsQuery.data, runtime],
   );
 
   const filtered = useMemo(() => {
@@ -82,11 +98,37 @@ export function ModelPicker({
   const trimmedSearch = search.trim();
   const exactMatch = models.some(
     (m) => m.id === trimmedSearch || m.label === trimmedSearch,
+  ) || Boolean(
+    runtimeDefault &&
+      (runtimeDefault.model === trimmedSearch ||
+        (runtimeDefault.provider
+          ? `${runtimeDefault.provider}/${runtimeDefault.model}`
+          : runtimeDefault.model) === trimmedSearch),
   );
-  const canCreate = trimmedSearch.length > 0 && !exactMatch;
+  const canCreate =
+    trimmedSearch.length > 0 &&
+    !exactMatch &&
+    !(runtime?.provider === "pi" && isPiModelDiscoveryNoise(trimmedSearch));
 
-  const triggerLabel = value || t(($) => $.pickers.model_default);
+  const triggerLabel =
+    value ||
+    (runtimeDefault
+      ? t(($) => $.model_dropdown.runtime_default_value, {
+          model: runtimeDefault.model,
+        })
+      : t(($) => $.pickers.model_default));
   const triggerTitle = t(($) => $.pickers.model_tooltip, { value: triggerLabel });
+  const runtimeDefaultSubtitle =
+    runtimeDefault && runtime
+      ? runtimeDefault.provider
+        ? t(($) => $.model_dropdown.runtime_default_subtitle, {
+            provider: runtimeDefault.provider,
+            runtime: runtimeDisplayLabel(runtime),
+          })
+        : t(($) => $.model_dropdown.runtime_default_subtitle_no_provider, {
+            runtime: runtimeDisplayLabel(runtime),
+          })
+      : "";
 
   const select = async (id: string) => {
     setOpen(false);
@@ -95,8 +137,8 @@ export function ModelPicker({
   };
 
   const refresh = () => {
-    if (!runtimeId || !runtimeOnline) return;
-    void refreshRuntimeModels(queryClient, runtimeId).catch(() => {
+    if (!resolvedRuntimeId || !resolvedRuntimeOnline) return;
+    void refreshRuntimeModels(queryClient, resolvedRuntimeId).catch(() => {
       // React Query retains the last catalog and owns the error state. Avoid
       // turning a failed button action into an unhandled promise rejection.
     });
@@ -183,15 +225,20 @@ export function ModelPicker({
               aria-hidden="true"
             />
           ) : null}
-          <span
-            className={
-              variant === "field"
-                ? "min-w-0 flex-1 truncate font-mono"
-                : "min-w-0 truncate font-mono text-micro"
-            }
-          >
-            {triggerLabel}
-          </span>
+          {variant === "field" ? (
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-mono">{triggerLabel}</span>
+              {!value && runtimeDefaultSubtitle ? (
+                <span className="block truncate text-caption text-muted-foreground">
+                  {runtimeDefaultSubtitle}
+                </span>
+              ) : null}
+            </span>
+          ) : (
+            <span className="min-w-0 truncate font-mono text-micro">
+              {triggerLabel}
+            </span>
+          )}
           {variant === "field" ? (
             <ChevronDown
               className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
@@ -208,7 +255,7 @@ export function ModelPicker({
           onChange={setSearch}
           onRefresh={refresh}
           refreshing={modelsQuery.isFetching}
-          refreshDisabled={!runtimeOnline || !runtimeId}
+          refreshDisabled={!resolvedRuntimeOnline || !resolvedRuntimeId}
           compact
         />
       }
@@ -221,6 +268,32 @@ export function ModelPicker({
           />
           {t(($) => $.pickers.model_discovering)}
         </div>
+      )}
+
+      {runtimeDefault && (
+        <PickerItem
+          selected={value === ""}
+          onClick={() => void select("")}
+          tooltip={
+            runtimeDefault.provider
+              ? `${runtimeDefault.provider}/${runtimeDefault.model}`
+              : runtimeDefault.model
+          }
+        >
+          <span className="block min-w-0 flex-1 text-left">
+            <span className="block truncate text-label font-medium">
+              {t(($) => $.model_dropdown.runtime_default_option)}
+            </span>
+            <span className="mt-0.5 block truncate font-mono text-micro leading-snug text-muted-foreground">
+              {runtimeDefault.provider
+                ? `${runtimeDefault.model} · ${runtimeDefault.provider}`
+                : runtimeDefault.model}
+            </span>
+          </span>
+          {value === "" && (
+            <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
+          )}
+        </PickerItem>
       )}
 
       {!modelsQuery.isLoading &&
@@ -252,7 +325,10 @@ export function ModelPicker({
           </PickerItem>
         ))}
 
-      {!modelsQuery.isLoading && filtered.length === 0 && !canCreate && (
+      {!modelsQuery.isLoading &&
+        filtered.length === 0 &&
+        !canCreate &&
+        !runtimeDefault && (
         <p className="px-3 py-3 text-center text-caption text-muted-foreground">
           {t(($) => $.pickers.model_empty)}
         </p>
@@ -283,9 +359,15 @@ export function ModelPicker({
           type="button"
           onClick={() => void select("")}
           className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
-          title={t(($) => $.pickers.model_clear_title)}
+          title={
+            runtimeDefault
+              ? t(($) => $.pickers.model_clear_runtime_default_title)
+              : t(($) => $.pickers.model_clear_title)
+          }
         >
-          {t(($) => $.pickers.model_clear)}
+          {runtimeDefault
+            ? t(($) => $.pickers.model_clear_runtime_default)
+            : t(($) => $.pickers.model_clear)}
         </button>
       )}
     </PropertyPicker>

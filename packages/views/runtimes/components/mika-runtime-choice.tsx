@@ -82,6 +82,7 @@ export function MikaRuntimeChoice({
         />
       )}
       <ModelDropdown
+        runtime={selected}
         runtimeId={value.runtimeId || null}
         runtimeOnline={selected?.status === "online"}
         value={value.model}

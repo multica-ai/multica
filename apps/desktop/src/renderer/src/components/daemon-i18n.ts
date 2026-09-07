@@ -20,6 +20,8 @@ export function daemonStateLabel(
       return t(($) => $.desktop.daemon.state_cli_not_found);
     case "installing_cli":
       return t(($) => $.desktop.daemon.state_installing_cli);
+    case "installing_runtime":
+      return t(($) => $.desktop.daemon.state_installing_runtime);
     case "recovery_paused":
       return t(($) => $.desktop.daemon.state_recovery_paused);
     case "auth_expired":

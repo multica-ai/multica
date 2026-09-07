@@ -280,6 +280,27 @@ describe("AgentOverviewPane Environment tab visibility", () => {
   });
 });
 
+describe("AgentOverviewPane Runtime settings navigation", () => {
+  it.each(["openclaw", "pi"])(
+    "does not show Runtime settings for the %s provider",
+    (provider) => {
+      renderPane([makeRuntime(provider)]);
+      openSettings();
+      expect(
+        screen.queryByRole("tab", { name: /^Runtime$/i }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it("does not show Runtime settings for read-only Pi agents", () => {
+    renderPane([makeRuntime("pi")], { canEdit: false });
+    openSettings();
+    expect(
+      screen.queryByRole("tab", { name: /^Runtime$/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
 // MUL-7107: the header, the tab bar and every panel share one leading edge.
 // The regression these guard against is a centred width cap: `mx-auto` plus a
 // `max-w-*` moves an element's edge as the viewport grows, so chrome on a

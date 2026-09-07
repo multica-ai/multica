@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/managedruntime"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -113,7 +114,7 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// still lets a CLI installed into a login-shell-only PATH dir (nvm, fnm,
 	// ~/.local/bin via ~/.zshrc) be discovered without a restart (MUL-5439).
 	getShellResolved := cachedShellResolvedAgents
-	probe := func(envVar, defaultCmd, modelEnv string) (AgentEntry, bool) {
+	probe := func(provider, envVar, defaultCmd, modelEnv string) (AgentEntry, bool) {
 		cmd := envOrDefault(envVar, defaultCmd)
 		if path, err := resolveAgentExecutablePath(cmd); err == nil {
 			return AgentEntry{
@@ -136,6 +137,20 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 				Model:   strings.TrimSpace(os.Getenv(modelEnv)),
 			}, true
 		}
+		// User-managed installs always win. Only after the explicit path, the
+		// daemon PATH, and the login shell all miss do we consult Multica's
+		// stable managed-runtime path. Keeping that path stable lets a live
+		// daemon discover an install on its next periodic probe without
+		// inheriting a changed PATH or restarting.
+		if managedPath, err := managedruntime.ManagedExecutablePath(provider); err == nil {
+			if path, err := resolveAgentExecutablePath(managedPath); err == nil {
+				return AgentEntry{
+					Path:    path,
+					Command: managedPath,
+					Model:   strings.TrimSpace(os.Getenv(modelEnv)),
+				}, true
+			}
+		}
 		if defaultCmd == "codex" && cmd == defaultCmd {
 			// Codex Desktop bundles its CLI inside the macOS app instead of
 			// installing it onto PATH.
@@ -153,16 +168,16 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	}
 
 	agents := map[string]AgentEntry{}
-	if e, ok := probe("MULTICA_CLAUDE_PATH", "claude", "MULTICA_CLAUDE_MODEL"); ok {
+	if e, ok := probe("claude", "MULTICA_CLAUDE_PATH", "claude", "MULTICA_CLAUDE_MODEL"); ok {
 		agents["claude"] = e
 	}
-	if e, ok := probe("MULTICA_CODEX_PATH", "codex", "MULTICA_CODEX_MODEL"); ok {
+	if e, ok := probe("codex", "MULTICA_CODEX_PATH", "codex", "MULTICA_CODEX_MODEL"); ok {
 		agents["codex"] = e
 	}
-	if e, ok := probe("MULTICA_OPENCODE_PATH", "opencode", "MULTICA_OPENCODE_MODEL"); ok {
+	if e, ok := probe("opencode", "MULTICA_OPENCODE_PATH", "opencode", "MULTICA_OPENCODE_MODEL"); ok {
 		agents["opencode"] = e
 	}
-	if e, ok := probe("MULTICA_CODEARTS_PATH", "codearts", "MULTICA_CODEARTS_MODEL"); ok {
+	if e, ok := probe("codearts", "MULTICA_CODEARTS_PATH", "codearts", "MULTICA_CODEARTS_MODEL"); ok {
 		agents["codearts"] = e
 	} else if strings.TrimSpace(os.Getenv("MULTICA_CODEARTS_PATH")) == "" {
 		// The native CodeArts installer may update PATH only for future
@@ -186,16 +201,16 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 			}
 		}
 	}
-	if e, ok := probe("MULTICA_DEVECO_PATH", "deveco", "MULTICA_DEVECO_MODEL"); ok {
+	if e, ok := probe("deveco", "MULTICA_DEVECO_PATH", "deveco", "MULTICA_DEVECO_MODEL"); ok {
 		agents["deveco"] = e
 	}
-	if e, ok := probe("MULTICA_OPENCLAW_PATH", "openclaw", "MULTICA_OPENCLAW_MODEL"); ok {
+	if e, ok := probe("openclaw", "MULTICA_OPENCLAW_PATH", "openclaw", "MULTICA_OPENCLAW_MODEL"); ok {
 		agents["openclaw"] = e
 	}
-	if e, ok := probe("MULTICA_HERMES_PATH", "hermes", "MULTICA_HERMES_MODEL"); ok {
+	if e, ok := probe("hermes", "MULTICA_HERMES_PATH", "hermes", "MULTICA_HERMES_MODEL"); ok {
 		agents["hermes"] = e
 	}
-	if e, ok := probe("MULTICA_PI_PATH", "pi", "MULTICA_PI_MODEL"); ok {
+	if e, ok := probe("pi", "MULTICA_PI_PATH", "pi", "MULTICA_PI_MODEL"); ok {
 		agents["pi"] = e
 	}
 	// Built-in runtime identities (e.g. omp) are derived from the descriptor
@@ -203,42 +218,44 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// separate CLI independently so a host with both pi and omp installed gets
 	// two runtimes. The env prefix and default command come from the
 	// descriptor, so adding a new fork is a descriptor entry, not a probe edit.
+	// The descriptor ID doubles as the managed-runtime provider key, so a fork
+	// that Multica can install is discovered through the same fallback.
 	for _, desc := range agent.BuiltinRuntimes {
 		pathEnv := desc.EnvPrefix + "_PATH"
 		modelEnv := desc.EnvPrefix + "_MODEL"
-		if e, ok := probe(pathEnv, desc.DefaultCommand, modelEnv); ok {
+		if e, ok := probe(desc.ID, pathEnv, desc.DefaultCommand, modelEnv); ok {
 			agents[desc.ID] = e
 		}
 	}
-	if e, ok := probe("MULTICA_CURSOR_PATH", "cursor-agent", "MULTICA_CURSOR_MODEL"); ok {
+	if e, ok := probe("cursor", "MULTICA_CURSOR_PATH", "cursor-agent", "MULTICA_CURSOR_MODEL"); ok {
 		agents["cursor"] = e
 	}
-	if e, ok := probe("MULTICA_COPILOT_PATH", "copilot", "MULTICA_COPILOT_MODEL"); ok {
+	if e, ok := probe("copilot", "MULTICA_COPILOT_PATH", "copilot", "MULTICA_COPILOT_MODEL"); ok {
 		agents["copilot"] = e
 	}
-	if e, ok := probe("MULTICA_KIMI_PATH", "kimi", "MULTICA_KIMI_MODEL"); ok {
+	if e, ok := probe("kimi", "MULTICA_KIMI_PATH", "kimi", "MULTICA_KIMI_MODEL"); ok {
 		agents["kimi"] = e
 	}
-	if e, ok := probe("MULTICA_REASONIX_PATH", "reasonix", "MULTICA_REASONIX_MODEL"); ok {
+	if e, ok := probe("reasonix", "MULTICA_REASONIX_PATH", "reasonix", "MULTICA_REASONIX_MODEL"); ok {
 		agents["reasonix"] = e
 	}
 	// DSH is registered only when its Multica runtime profile is installed.
 	// A bare dsh binary is not enough: without the bundle it has no --stdio
 	// protocol and every task would fail after being advertised as healthy.
-	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok && probeDshMulticaProfile(e.Path) {
+	if e, ok := probe("dsh", "MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok && probeDshMulticaProfile(e.Path) {
 		agents["dsh"] = e
 	}
-	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
+	if e, ok := probe("kiro", "MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
-	if e, ok := probe("MULTICA_CODEBUDDY_PATH", "codebuddy", "MULTICA_CODEBUDDY_MODEL"); ok {
+	if e, ok := probe("codebuddy", "MULTICA_CODEBUDDY_PATH", "codebuddy", "MULTICA_CODEBUDDY_MODEL"); ok {
 		agents["codebuddy"] = e
 	}
 	// agy 1.0.6 added a `--model` flag (MUL-3125), so Antigravity now takes a
 	// model env like every other backend. MULTICA_ANTIGRAVITY_MODEL seeds the
 	// daemon-wide default; its value is the exact `agy models` display string
 	// (e.g. "Claude Opus 4.6 (Thinking)"), not a provider/model slug.
-	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
+	if e, ok := probe("antigravity", "MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
 		agents["antigravity"] = e
 	}
 	// Qoder CLI ships as the `qodercli` binary (Qoder Desktop does not put it
@@ -247,32 +264,32 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// fallback applies: a GUI/Launchpad-started daemon does not inherit the
 	// interactive shell PATH, and without the fallback a perfectly good
 	// qodercli install stayed invisible across restarts (MUL-5524).
-	if e, ok := probe("MULTICA_QODER_PATH", "qodercli", "MULTICA_QODER_MODEL"); ok {
+	if e, ok := probe("qoder", "MULTICA_QODER_PATH", "qodercli", "MULTICA_QODER_MODEL"); ok {
 		agents["qoder"] = e
 	}
 	// Qoder CN CLI exposes the same ACP transport as Qoder CLI under a
 	// separate `qoderclicn` binary and account/config root. Register it as an
 	// independent provider so hosts with either or both editions get the
 	// matching runtime without a custom profile.
-	if e, ok := probe("MULTICA_QODERCLICN_PATH", "qoderclicn", "MULTICA_QODERCLICN_MODEL"); ok {
+	if e, ok := probe("qoderclicn", "MULTICA_QODERCLICN_PATH", "qoderclicn", "MULTICA_QODERCLICN_MODEL"); ok {
 		agents["qoderclicn"] = e
 	}
 	// ByteDance official TRAE CLI (the `traecli` binary from https://docs.trae.cn/cli),
 	// driven over ACP via `traecli acp serve --yolo`. MULTICA_TRAECLI_MODEL seeds
 	// the daemon-wide default model (a model id from the user's logged-in traecli
 	// catalog).
-	if e, ok := probe("MULTICA_TRAECLI_PATH", "traecli", "MULTICA_TRAECLI_MODEL"); ok {
+	if e, ok := probe("traecli", "MULTICA_TRAECLI_PATH", "traecli", "MULTICA_TRAECLI_MODEL"); ok {
 		agents["traecli"] = e
 	}
 	// xAI Grok Build CLI (`grok`), driven over ACP via
 	// `grok agent --always-approve stdio`. MULTICA_GROK_MODEL seeds the
 	// daemon-wide default (e.g. grok-4.5).
-	if e, ok := probe("MULTICA_GROK_PATH", "grok", "MULTICA_GROK_MODEL"); ok {
+	if e, ok := probe("grok", "MULTICA_GROK_PATH", "grok", "MULTICA_GROK_MODEL"); ok {
 		agents["grok"] = e
 	}
 	// Qwen Code (`qwen`) runs headlessly with -p and stream-json. Its native
 	// QWEN.md and .qwen/skills task context is prepared by execenv.
-	if e, ok := probe("MULTICA_QWEN_PATH", "qwen", "MULTICA_QWEN_MODEL"); ok {
+	if e, ok := probe("qwen", "MULTICA_QWEN_PATH", "qwen", "MULTICA_QWEN_MODEL"); ok {
 		agents["qwen"] = e
 	}
 	// QwenPaw (`qwenpaw`) is the QwenPaw CLI agent, driven over ACP via
@@ -280,18 +297,18 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// session/set_model (it would rewrite QwenPaw's shared agent config), so
 	// ExecOptions.Model is ignored — see ModelSelectionSupported. Reading one
 	// here would only advertise a knob that silently does nothing.
-	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
+	if e, ok := probe("qwenpaw", "MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
 		agents["qwenpaw"] = e
 	}
 	// Dim (`dim`) is the DimCode CLI agent, driven over ACP via `dim acp`.
 	// MULTICA_DIM_MODEL seeds the daemon-wide default (a model id from the
 	// user's logged-in dim catalog).
-	if e, ok := probe("MULTICA_DIM_PATH", "dim", "MULTICA_DIM_MODEL"); ok {
+	if e, ok := probe("dim", "MULTICA_DIM_PATH", "dim", "MULTICA_DIM_MODEL"); ok {
 		agents["dim"] = e
 	}
 	// MiniMax Code (`mcode`) exposes an ACP v1 server through `mcode acp`.
 	// Model selection is owned by the MCode runtime, so there is no model env.
-	if e, ok := probe("MULTICA_MCODE_PATH", "mcode", ""); ok {
+	if e, ok := probe("mcode", "MULTICA_MCODE_PATH", "mcode", ""); ok {
 		agents["mcode"] = e
 	}
 	// ZeroClaw (`zeroclaw`) is a Rust-based generic agent CLI, driven over
@@ -300,10 +317,22 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// comes from ZeroClaw's own agent profile and ExecOptions.Model can never
 	// be applied — see ModelSelectionSupported. Reading one here would only
 	// advertise a knob that silently does nothing.
-	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
+	if e, ok := probe("zeroclaw", "MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
 		agents["zeroclaw"] = e
 	}
 	return agents
+}
+
+// ProbeAgentCLIs exposes the daemon's single source of truth to local CLI
+// setup commands. The returned map is a copy so callers cannot mutate the
+// process-wide probe stub or a future cached implementation.
+func ProbeAgentCLIs() map[string]AgentEntry {
+	probed := probeAgentCLIs()
+	out := make(map[string]AgentEntry, len(probed))
+	for provider, entry := range probed {
+		out[provider] = entry
+	}
+	return out
 }
 
 func probeDshMulticaProfile(executablePath string) bool {

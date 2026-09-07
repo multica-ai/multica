@@ -19,6 +19,7 @@ var MinVersions = map[string]string{
 	"dim":      "0.3.10",  // cross-run session/load: per-process lock releases on graceful exit
 	"mcode":    "0.1.2",   // ACP v1 session/new, prompt, MCP capability forwarding
 	"zeroclaw": "0.8.0",   // persistent ACP sessions and session/resume were added in 0.8.0
+	"pi":       "0.67.2",  // JSON event mode + task-local AGENTS.md flow verified by the Pi backend
 }
 
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against

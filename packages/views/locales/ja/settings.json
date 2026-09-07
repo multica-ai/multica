@@ -1192,6 +1192,7 @@
       "state_stopping": "停止中…",
       "state_cli_not_found": "セットアップに失敗しました",
       "state_installing_cli": "セットアップ中…",
+      "state_installing_runtime": "ランタイムをインストール中…",
       "state_recovery_paused": "復旧を一時停止",
       "state_auth_expired": "ログインが必要です",
       "start_failed": "デーモンを起動できませんでした",

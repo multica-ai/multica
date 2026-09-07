@@ -147,7 +147,9 @@ export function DaemonRuntimeActions() {
   const isAuthExpired = status.state === "auth_expired";
   const isTransitioning =
     status.state === "starting" || status.state === "stopping";
-  const isInstalling = status.state === "installing_cli";
+  const isInstalling =
+    status.state === "installing_cli" ||
+    status.state === "installing_runtime";
 
   return (
     <>

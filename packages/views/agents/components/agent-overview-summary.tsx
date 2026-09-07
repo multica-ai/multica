@@ -11,6 +11,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 import { VisibilityBadge } from "./visibility-badge";
 import { AgentPerformanceSummary } from "./tabs/activity-tab";
+import { modelDisplayLabel } from "./model-display";
 
 interface AgentOverviewSummaryProps {
   agent: Agent;
@@ -30,6 +31,13 @@ export function AgentOverviewSummary({
 }: AgentOverviewSummaryProps) {
   const { t } = useT("agents");
   const runtimeOnline = runtime?.status === "online";
+  const modelLabel = modelDisplayLabel({
+    model: agent.model,
+    runtime,
+    fallback: t(($) => $.pickers.model_default),
+    runtimeDefaultPrefix: (model) =>
+      t(($) => $.model_dropdown.runtime_default_value, { model }),
+  });
 
   return (
     <aside className="self-start rounded-xl border border-surface-border bg-surface p-5 shadow-[var(--surface-shadow)] xl:sticky xl:top-6">
@@ -72,9 +80,7 @@ export function AgentOverviewSummary({
           <SummaryRow label={t(($) => $.inspector.prop_model)}>
             <span className="flex min-w-0 items-center gap-1.5 text-foreground">
               <Bot className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <span className="truncate">
-                {agent.model || t(($) => $.pickers.model_default)}
-              </span>
+              <span className="truncate">{modelLabel}</span>
             </span>
           </SummaryRow>
           <SummaryRow label={t(($) => $.inspector.prop_concurrency)}>

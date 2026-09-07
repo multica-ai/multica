@@ -33,7 +33,8 @@ const CODEX_MODELS: RuntimeModelsResult = {
 let discovery: () => Promise<RuntimeModelsResult> = async () => CODEX_MODELS;
 const mockRefreshRuntimeModels = vi.hoisted(() => vi.fn());
 
-vi.mock("@multica/core/runtimes", () => ({
+vi.mock("@multica/core/runtimes", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/runtimes")>(),
   runtimeModelsOptions: (runtimeId: string | null) => ({
     enabled: Boolean(runtimeId),
     queryKey: ["runtime-models", runtimeId, discoveryKey],

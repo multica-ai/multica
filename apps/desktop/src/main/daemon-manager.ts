@@ -20,10 +20,12 @@ import type {
   DaemonStatus,
   DaemonPrefs,
   LocalRuntimeProbe,
+  ManagedRuntimeSetupStatus,
 } from "../shared/daemon-types";
 import { daemonStatusAlive } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
+import { parseManagedRuntimeInstallResult } from "./managed-runtime-install-result";
 import {
   deriveProfileName,
   healthPortForProfile,
@@ -90,6 +92,7 @@ let getMainWindow: () => BrowserWindow | null = () => null;
 let statusPollInProgress = false;
 let cachedCliBinary: string | null | undefined = undefined;
 let cliResolvePromise: Promise<string | null> | null = null;
+const managedRuntimeInstallPromises = new Map<string, Promise<void>>();
 let cachedCliBinaryVersion: string | null | undefined = undefined;
 // Set when a CLI version mismatch was detected but the running daemon is
 // busy executing tasks. The poll loop retries the check on each tick and
@@ -97,6 +100,7 @@ let cachedCliBinaryVersion: string | null | undefined = undefined;
 let pendingVersionRestart = false;
 let targetApiBaseUrl: string | null = null;
 let activeProfile: ActiveProfile | null = null;
+let managedRuntimeSetup: ManagedRuntimeSetupStatus | null = null;
 // Recovery is intentionally process-local: it keeps a daemon alive while the
 // Desktop main process is running, but is not an OS service/watchdog.
 let desiredDaemonRunning = false;
@@ -165,7 +169,18 @@ function urlsMatch(a: string, b: string): boolean {
 
 function sendStatus(status: DaemonStatus): void {
   const win = getMainWindow();
-  win?.webContents.send("daemon:status", status);
+  win?.webContents.send("daemon:status", withManagedRuntimeSetup(status));
+}
+
+function withManagedRuntimeSetup(status: DaemonStatus): DaemonStatus {
+  return managedRuntimeSetup
+    ? { ...status, managedRuntimeSetup }
+    : status;
+}
+
+function setManagedRuntimeSetup(status: ManagedRuntimeSetupStatus): void {
+  managedRuntimeSetup = status;
+  sendStatus({ state: currentState });
 }
 
 interface HealthPayload {
@@ -319,7 +334,11 @@ async function fetchHealth(): Promise<DaemonStatus> {
   // While the CLI is being downloaded or has permanently failed, short-circuit
   // polling — there's nothing to probe yet and /health calls would just return
   // "stopped", which would overwrite the correct setup state in the UI.
-  if (currentState === "installing_cli" || currentState === "cli_not_found") {
+  if (
+    currentState === "installing_cli" ||
+    currentState === "installing_runtime" ||
+    currentState === "cli_not_found"
+  ) {
     return { state: currentState };
   }
 
@@ -578,6 +597,93 @@ async function getCliBinaryVersion(): Promise<string | null> {
   }
   cachedCliBinaryVersion = await probeCliBinary(bin, "path");
   return cachedCliBinaryVersion;
+}
+
+/**
+ * Installs a managed runtime and reports every transition to the renderer.
+ *
+ * Only ever reached from an explicit user action (onboarding's "install the
+ * built-in runtime", or the same offer on the Runtimes page). It is
+ * deliberately NOT called on daemon start: downloading a runtime is a
+ * decision, and a user who already has Claude Code should never pay for it.
+ */
+async function ensureManagedRuntime(
+  bin: string,
+  provider: string,
+): Promise<void> {
+  const inFlight = managedRuntimeInstallPromises.get(provider);
+  if (inFlight) return inFlight;
+
+  const startedAt = new Date().toISOString();
+  // Surface the install in the daemon state machine too, so the status pill
+  // says "Installing runtime…" instead of looking idle for the whole download.
+  const stateBeforeInstall = currentState;
+  currentState = "installing_runtime";
+  setManagedRuntimeSetup({ provider, phase: "installing", startedAt });
+
+  const install = new Promise<void>((resolve, reject) => {
+    execFile(
+      bin,
+      ["daemon", "install-runtime", provider, "--output", "json"],
+      {
+        timeout: 190_000,
+        env: desktopSpawnEnv(),
+        maxBuffer: 64 * 1024,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(managedRuntimeFailureReason(error, stderr)));
+          return;
+        }
+        try {
+          const result = parseManagedRuntimeInstallResult(stdout, provider);
+          setManagedRuntimeSetup({
+            provider,
+            phase: "ready",
+            startedAt,
+            version: result.version,
+            source: result.source,
+          });
+          console.log(
+            `[daemon] ${provider} runtime ready at ${result.path} (${result.source}${result.installed ? ", installed" : ""})`,
+          );
+          resolve();
+        } catch (parseError) {
+          reject(parseError);
+        }
+      },
+    );
+  });
+  managedRuntimeInstallPromises.set(provider, install);
+  try {
+    await install;
+  } catch (err) {
+    // The reason has to reach the UI. Without it the user sees "Installation
+    // failed" and cannot tell a dead network from a full disk.
+    setManagedRuntimeSetup({
+      provider,
+      phase: "failed",
+      startedAt,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  } finally {
+    managedRuntimeInstallPromises.delete(provider);
+    if (currentState === "installing_runtime") {
+      currentState = stateBeforeInstall;
+    }
+  }
+}
+
+/** Keeps the most useful line of a failed install for the user to read. */
+function managedRuntimeFailureReason(error: Error, stderr: string): string {
+  const stderrLine = stderr
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .pop();
+  const message = stderrLine || error.message || "installation failed";
+  return message.length > 300 ? `${message.slice(0, 300)}…` : message;
 }
 
 /**
@@ -1374,8 +1480,42 @@ export function setupDaemonManager(
     setDesiredDaemonRunning(true, true);
     return lifecycleOperations.runForeground(() => restartDaemon());
   });
-  ipcMain.handle("daemon:get-status", () => fetchHealth());
+  ipcMain.handle("daemon:get-status", async () => withManagedRuntimeSetup(await fetchHealth()));
   ipcMain.handle("daemon:probe-runtimes", () => probeLocalRuntimes());
+  // Installing is a foreground lifecycle intent: serialize it with recovery
+  // and start the daemon afterwards, including on machines with no prior CLI.
+  // An already-running daemon discovers the new binary on its periodic scan;
+  // startDaemon leaves it running so active tasks are never interrupted.
+  ipcMain.handle(
+    "daemon:install-runtime",
+    async (_event, provider: string): Promise<{ success: boolean; error?: string }> => {
+      setDesiredDaemonRunning(true, true);
+      return lifecycleOperations.runForeground(async () => {
+        const startedAt = new Date().toISOString();
+        try {
+          const active = await ensureActiveProfile();
+          if (!active) throw new Error("Waiting for the service address");
+          if (await lifecycleBlockedByForeignDaemon()) {
+            throw new Error("Install the runtime on the computer running your daemon");
+          }
+          const bin = await resolveCliBinary();
+          if (!bin) throw new Error("multica CLI is not installed");
+          await ensureManagedRuntime(bin, provider);
+          // The download can outlive a stop, sign-out, or service switch.
+          // Recheck the original profile and current intent before starting.
+          const result = await startDaemon(active);
+          if (!result.success) throw new Error(result.error ?? "Daemon failed to start");
+          return result;
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          setManagedRuntimeSetup({ provider, phase: "failed", startedAt, error });
+          return { success: false, error };
+        } finally {
+          scheduleStatusRefresh();
+        }
+      });
+    },
+  );
   // The host's OS name, available regardless of daemon state. The Runtimes
   // page uses it as a fallback identity for "this machine" when no
   // app-managed daemon is reporting a device name (e.g. the daemon runs

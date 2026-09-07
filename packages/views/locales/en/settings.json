@@ -1195,6 +1195,7 @@
       "state_stopping": "Stopping…",
       "state_cli_not_found": "Setup Failed",
       "state_installing_cli": "Setting up…",
+      "state_installing_runtime": "Installing runtime…",
       "state_recovery_paused": "Recovery paused",
       "state_auth_expired": "Sign-in required",
       "start_failed": "Failed to start daemon",

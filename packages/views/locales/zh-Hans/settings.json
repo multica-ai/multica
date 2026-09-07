@@ -1192,6 +1192,7 @@
       "state_stopping": "正在停止...",
       "state_cli_not_found": "设置失败",
       "state_installing_cli": "正在设置...",
+      "state_installing_runtime": "正在安装运行时...",
       "state_recovery_paused": "恢复已暂停",
       "state_auth_expired": "需要登录",
       "start_failed": "启动守护进程失败",
