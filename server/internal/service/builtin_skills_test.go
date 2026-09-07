@@ -452,8 +452,10 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// The only sanctioned pr_url reference is the negative
 				// compatibility warning about pre-existing data — not a write
 				// recommendation (MUL-5442 owner ruling: no curated key
-				// vocabulary).
-				"`pr_url` metadata (which can be",
+				// vocabulary). MUL-6966 makes the legacy framing explicit:
+				// the bag is no longer taught, but `issue get` still returns
+				// whatever an older run left in it.
+				"a `pr_url` metadata key left on the issue by an older run",
 				// MUL-5442: the brief's Sub-issue Creation section is a
 				// one-line map pointing here. These anchors are the demoted
 				// playbook — if they leave, the brief pointer dangles.
@@ -461,19 +463,13 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"`--stage <N>`",
 				"when a whole stage finishes",
 				"multica issue status <child-id> todo",
-				// MUL-5442: the brief's Issue Metadata section defers the full
-				// write discipline here. Every relocated ban is anchored
-				// individually — both defining categories AND each example —
-				// so no single item or category boundary can be dropped while
-				// the brief still points here.
-				"Never store secrets, tokens, or API keys",
-				"Not metadata: logs or summaries",
-				"bookkeeping such as timestamps",
-				"attempt counts, or agent IDs",
-				"other single-run details",
-				"files touched and investigation notes",
-				"belong in the result comment",
-				"the platform curates no vocabulary",
+				// MUL-6966 phase 1 retired the metadata write discipline
+				// along with the brief section that pointed here. What the
+				// bans were protecting still needs a home, so the
+				// where-state-belongs bullet under custom properties keeps
+				// the routing rule they encoded.
+				"workflow state a human should see and filter by goes in",
+				"goes in the result comment",
 				// #7768: nothing about concurrent runs is pushed into the
 				// prompt any more (MUL-6984), so the skill has to carry the
 				// pull path itself. All three anchors are load-bearing — the
@@ -486,6 +482,14 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Nothing here reserves an issue or serialises anything",
 			},
 			notWant: []string{
+				// MUL-6966 phase 1: the skill must not teach the KV bag at
+				// all. The `pr_url` line above is the one surviving mention
+				// and it is a warning about legacy data, not a write path.
+				"## Metadata: durable custom state",
+				"multica issue metadata set",
+				"multica issue metadata delete",
+				"Never store secrets, tokens, or API keys",
+				"Property vs metadata",
 				// A curated key list is the "recommended fields" concept the
 				// owner ruled out on MUL-5442.
 				"High-signal keys",

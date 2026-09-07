@@ -8,9 +8,9 @@ allowed-tools: Bash(multica *)
 # Moved into `multica-platform`
 
 Multica's platform contracts are now one skill. Everything this skill used to
-carry — PR linking vs close intent, reading a linked PR's real state, metadata
-write discipline, custom properties, status side effects, sub-issues and stages,
-and finding who else is running — lives in:
+carry — PR linking vs close intent, reading a linked PR's real state, custom
+properties, status side effects, sub-issues and stages, and finding who else is
+running — lives in:
 
 ```text
 multica-platform  →  references/issues.md

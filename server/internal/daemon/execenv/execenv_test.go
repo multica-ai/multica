@@ -6071,74 +6071,40 @@ func TestInjectRuntimeConfigCatchUpScansRootsFirst(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigIssueMetadataSectionScope locks in MUL-2017:
-// the `## Issue Metadata` section (semantic guide + recommended keys +
-// pin/clear rules) and the metadata-read guidance on the issue-get step
-// are emitted only when the task carries a real issue id (comment-triggered
-// or assignment-triggered). Chat / quick-create / run-only autopilot don't
-// have an issue, so injecting the section there would just guarantee a
-// failed CLI call on every entry. The discovery line in Available
-// Commands → Core is global and must appear everywhere so that the agent
-// can still reach the commands if a future workflow path needs them.
-func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
+// TestBriefCarriesNoMetadataGuidance locks in MUL-6966 phase 1: the runtime
+// brief teaches issue metadata nowhere, on any task kind.
+//
+// This inverts TestInjectRuntimeConfigIssueMetadataSectionScope, which pinned
+// the opposite contract from MUL-2017 — the `## Issue Metadata` section plus
+// the read/pin steps on the issue kinds, absent everywhere else. Every anchor
+// that test required is required absent here, so the removal cannot be undone
+// by half.
+//
+// What is NOT asserted, deliberately: the CLI, the API, the UI, and the stored
+// bags all keep working. Phase 1 only stops the platform from recruiting new
+// writes; phase 2 removes the surface once the remaining consumers are known
+// to have migrated.
+func TestBriefCarriesNoMetadataGuidance(t *testing.T) {
 	t.Parallel()
 
-	// Discovery lines in Available Commands → Core appear in every runtime
-	// config except quick-create (whose minimal Available Commands lists
-	// only `issue create`). These are the single discovery point for the
-	// CLI when an agent decides to read or write metadata outside the
-	// numbered workflow.
-	coreDiscoveryLines := []string{
+	// Every anchor the retired section, its two workflow steps, and the
+	// Available Commands discovery block used to emit.
+	banned := []string{
+		"## Issue Metadata",
+		"**Read on entry.**",
+		"**Write on exit.**",
+		"Hints, not truth",
+		"never secrets or long content",
+		"Full write discipline:",
 		"multica issue metadata list <issue-id>",
 		"multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]",
 		"multica issue metadata delete <issue-id> --key <k>",
-	}
-
-	type wantSection struct {
-		// sentinel substrings that MUST appear when the Issue Metadata
-		// section is in scope
-		present []string
-		// substrings that MUST NOT appear (would mean the section leaked
-		// into a context where there's no issue id to act on)
-		absent []string
-	}
-
-	withSection := wantSection{
-		present: []string{
-			"## Issue Metadata",
-			"**Read on entry.**",
-			"**Write on exit.**",
-			"Hints, not truth",
-			// MUL-5442: the brief keeps only what the interface cannot
-			// express — the read stance, the re-read bar, and the two
-			// write-time boundaries (secrets, length). The full ban list
-			// and the key-naming conventions live in the multica-platform
-			// skill, pinned by TestPlatformSkillCoversPlatformContracts.
-			// The pointer names whichever skill this task actually received
-			// and is omitted when neither is installed
-			// (TestBriefIssuePointerFollowsTheInstalledSkill), so it cannot
-			// dangle in either upgrade direction. The recommended-keys block was
-			// removed outright: metadata is deliberately free-form custom
-			// state (owner decision on MUL-5442), not a vocabulary the
-			// platform curates in every brief.
-			"never secrets or long content",
-			"multica issue metadata delete",
-			"`references/issues.md` in the `multica-platform` skill",
-		},
-	}
-	withoutSection := wantSection{
-		// We can't simply require `multica issue metadata list` absent
-		// because the Available Commands → Core discovery line is
-		// global (it uses `<issue-id>` placeholder text). What MUST be
-		// absent is the semantic section itself plus the workflow-step
-		// pointer back to it.
-		absent: []string{
-			"## Issue Metadata",
-			"high-signal scratchpad",
-			"**Read on entry.**",
-			"**Write on exit.**",
-			"the bar in `## Issue Metadata`",
-		},
+		"its JSON already carries the issue's `metadata` bag",
+		"What to look for: `## Issue Metadata`",
+		"the bar in `## Issue Metadata`",
+		// The standalone read step retired by #7016 must not come back
+		// through the phase-1 rewrite either.
+		"Read the metadata bag (`multica issue metadata list`)",
 	}
 
 	cases := []struct {
@@ -6146,16 +6112,6 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 		ctx      TaskContextForEnv
 		provider string
 		filename string
-		// workflowStepPresent is matched when the section is in scope —
-		// each entry must appear in the workflow numbered list to prove
-		// the metadata read step is wired in.
-		workflowStepPresent []string
-		// workflowAbsent lists workflow substrings that must NOT appear:
-		// in non-issue contexts, any metadata-list step that leaked into
-		// a workflow with no issue id; in issue contexts, the standalone
-		// metadata-list read step retired by #7016.
-		workflowAbsent []string
-		want           wantSection
 	}{
 		{
 			name: "comment_triggered",
@@ -6166,31 +6122,6 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			},
 			provider: "claude",
 			filename: "CLAUDE.md",
-			workflowStepPresent: []string{
-				// #7016: the standalone `metadata list` read was folded
-				// into the issue-get step — `issue get` already returns
-				// the metadata bag, so the entry read costs zero extra
-				// calls. The old step's "CLI failures are normal"
-				// best-effort clause retired with it: when `issue get`
-				// itself fails, there is no bootstrap to unblock.
-				"its JSON already carries the issue's `metadata` bag",
-				// Both steps point at the section instead of restating its
-				// rules (MUL-5442); the entry step names what to look for,
-				// the exit step names the write bar.
-				"What to look for: `## Issue Metadata`",
-				"the bar in `## Issue Metadata`",
-				// Exit step must show both write and delete, not just
-				// "set" — stale-key cleanup is the half that keeps
-				// metadata from rotting.
-				"multica issue metadata set",
-				"multica issue metadata delete",
-				"Before exiting",
-			},
-			workflowAbsent: []string{
-				// The redundant standalone read must not come back (#7016).
-				"Read the metadata bag (`multica issue metadata list`)",
-			},
-			want: withSection,
 		},
 		{
 			name: "assignment_triggered",
@@ -6200,46 +6131,27 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			},
 			provider: "claude",
 			filename: "CLAUDE.md",
-			workflowStepPresent: []string{
-				"its JSON already carries the issue's `metadata` bag",
-				"What to look for: `## Issue Metadata`",
-				"the bar in `## Issue Metadata`",
-				"multica issue metadata set",
-				"multica issue metadata delete",
-				"Before exiting",
-			},
-			workflowAbsent: []string{
-				"Read the metadata bag (`multica issue metadata list`)",
-			},
-			want: withSection,
 		},
 		{
-			name: "quick_create_no_metadata_section",
-			ctx: TaskContextForEnv{
-				QuickCreatePrompt: "create a task about X",
-			},
+			name:     "quick_create",
+			ctx:      TaskContextForEnv{QuickCreatePrompt: "create a task about X"},
 			provider: "codex",
 			filename: "AGENTS.md",
-			want:     withoutSection,
 		},
 		{
-			name: "run_only_autopilot_no_metadata_section",
+			name: "run_only_autopilot",
 			ctx: TaskContextForEnv{
 				AutopilotRunID: "run-md-1",
 				AutopilotID:    "autopilot-md-1",
 			},
 			provider: "codex",
 			filename: "AGENTS.md",
-			want:     withoutSection,
 		},
 		{
-			name: "chat_no_metadata_section",
-			ctx: TaskContextForEnv{
-				ChatSessionID: "chat-md-1",
-			},
+			name:     "chat",
+			ctx:      TaskContextForEnv{ChatSessionID: "chat-md-1"},
 			provider: "claude",
 			filename: "CLAUDE.md",
-			want:     withoutSection,
 		},
 	}
 
@@ -6257,49 +6169,36 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			}
 			s := string(data)
 
-			// Global Core discovery lines apply everywhere EXCEPT
-			// quick-create, whose minimal Available Commands
-			// intentionally advertises only `issue create` — the hard
-			// guardrails forbid every other CLI call for that kind.
-			if tc.ctx.QuickCreatePrompt == "" {
-				for _, want := range coreDiscoveryLines {
-					if !strings.Contains(s, want) {
-						t.Errorf("Available Commands → Core missing %q\n---\n%s", want, s)
-					}
+			for _, b := range banned {
+				if strings.Contains(s, b) {
+					t.Errorf("%s brief still teaches metadata: %q\n---\n%s", tc.name, b, s)
 				}
 			}
 
-			for _, want := range tc.want.present {
+			// The steps the metadata clauses were spliced into must survive
+			// the removal — this is a deletion of guidance, not of workflow.
+			if tc.ctx.IssueID == "" {
+				return
+			}
+			for _, want := range []string{
+				"1. Read the issue (`multica issue get`) to understand the context.",
+				"5. Before exiting, confirm the status still matches where things actually stand.",
+			} {
 				if !strings.Contains(s, want) {
-					t.Errorf("expected %q in %s output\n---\n%s", want, tc.name, s)
-				}
-			}
-			for _, banned := range tc.want.absent {
-				if strings.Contains(s, banned) {
-					t.Errorf("%s output should NOT contain %q\n---\n%s", tc.name, banned, s)
-				}
-			}
-			for _, want := range tc.workflowStepPresent {
-				if !strings.Contains(s, want) {
-					t.Errorf("workflow step missing %q in %s\n---\n%s", want, tc.name, s)
-				}
-			}
-			for _, banned := range tc.workflowAbsent {
-				if strings.Contains(s, banned) {
-					t.Errorf("%s workflow should NOT contain %q\n---\n%s", tc.name, banned, s)
+					t.Errorf("%s workflow lost %q\n---\n%s", tc.name, want, s)
 				}
 			}
 		})
 	}
 }
 
-// TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged guarantees
-// that the new metadata wiring does not break the codex-specific comment
-// formatting rules (--content-file on every host, post-#4182). The
-// comment-formatting block lives below the metadata write step in the
-// workflow, so any reordering or accidental absorption of the codex
-// section would surface here.
-func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) {
+// TestInjectRuntimeConfigCodexCommentFormattingUnchanged guards the
+// codex-specific comment formatting rules (--content-file on every host,
+// post-#4182). It was written against the metadata write step, which sat
+// directly above the comment-formatting block and so would surface any
+// reordering or accidental absorption of the codex section; MUL-6966 removed
+// that step, and the assertions it existed to protect stay here.
+func TestInjectRuntimeConfigCodexCommentFormattingUnchanged(t *testing.T) {
 	// Not parallel: mutates the package-level runtimeGOOS.
 	oldGOOS := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = oldGOOS })
@@ -6320,18 +6219,7 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 		}
 		s := string(data)
 
-		// Metadata wiring is present...
-		if !strings.Contains(s, "## Issue Metadata") {
-			t.Fatalf("Issue Metadata section missing\n---\n%s", s)
-		}
-		if !strings.Contains(s, "its JSON already carries the issue's `metadata` bag") {
-			t.Fatalf("metadata-in-issue-get guidance missing\n---\n%s", s)
-		}
-		// The standalone read step retired by #7016 must not reappear.
-		if strings.Contains(s, "Read the metadata bag (`multica issue metadata list`)") {
-			t.Fatalf("redundant metadata list step present\n---\n%s", s)
-		}
-		// ...AND the post-#4182 file-first rule is still emitted on Linux.
+		// The post-#4182 file-first rule is still emitted on Linux...
 		if !strings.Contains(s, "always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`") {
 			t.Fatalf("codex linux --content-file rule missing\n---\n%s", s)
 		}
@@ -6358,9 +6246,6 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 		}
 		s := string(data)
 
-		if !strings.Contains(s, "## Issue Metadata") {
-			t.Fatalf("Issue Metadata section missing on windows\n---\n%s", s)
-		}
 		if !strings.Contains(s, "always write the comment body to a UTF-8 file") {
 			t.Fatalf("codex Windows --content-file rule missing\n---\n%s", s)
 		}
