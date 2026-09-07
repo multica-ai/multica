@@ -74,6 +74,47 @@ func TestRunSearchQuery_StatementTimeoutFires(t *testing.T) {
 	}
 }
 
+func TestRunSearchQuery_WorkMemIsTransactionLocal(t *testing.T) {
+	if testPool == nil {
+		t.Skip("DATABASE_URL not set; skipping live-Postgres search work_mem test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := testPool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire dedicated connection: %v", err)
+	}
+	defer conn.Release()
+
+	var before string
+	if err := conn.QueryRow(ctx, "SHOW work_mem").Scan(&before); err != nil {
+		t.Fatalf("read baseline work_mem: %v", err)
+	}
+
+	var during string
+	err = runSearchQuery(ctx, conn, "SELECT current_setting('work_mem')", nil, func(rows pgx.Rows) error {
+		if !rows.Next() {
+			return rows.Err()
+		}
+		return rows.Scan(&during)
+	})
+	if err != nil {
+		t.Fatalf("run search query: %v", err)
+	}
+	if during != searchWorkMem {
+		t.Fatalf("work_mem during search = %q, want %q", during, searchWorkMem)
+	}
+
+	var after string
+	if err := conn.QueryRow(ctx, "SHOW work_mem").Scan(&after); err != nil {
+		t.Fatalf("read work_mem after search: %v", err)
+	}
+	if after != before {
+		t.Fatalf("transaction-local work_mem leaked: before=%q after=%q", before, after)
+	}
+}
+
 // setSearchStatementTimeoutForTest is a package-private hook used only
 // by the live-Postgres timeout test above. Kept out of the public
 // surface to prevent handlers from accidentally raising the cap.

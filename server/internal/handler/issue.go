@@ -617,7 +617,9 @@ type searchResult struct {
 
 // buildSearchQuery builds a two-stage, workspace-scoped candidate pipeline for issue search.
 // Search patterns are lowercased and escaped in Go so every flag uses the same
-// case-insensitive LIKE semantics as the legacy query.
+// case-insensitive LIKE semantics as the legacy query. The pipeline deliberately
+// trades the title, description, and comment content GIN fast paths for one
+// predictable pass over each relation within the selected workspace.
 func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
@@ -659,9 +661,10 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	limitParam := nextArg(nil)
 	offsetParam := nextArg(nil)
 
-	// Stage one scans this workspace's issues once and materializes only the
-	// narrow flags and sort fields needed to choose a page. Full issue rows are
-	// hydrated after LIMIT/OFFSET below.
+	// Stage one scans this workspace's issues once and retains only the narrow
+	// flags and sort fields needed to choose a page. Do not force this CTE to be
+	// MATERIALIZED: production EXPLAIN showed 28-68% lower execution time after
+	// removing that fence. Full issue rows are hydrated after LIMIT/OFFSET below.
 	issueFlagColumns := []string{
 		"i.id AS issue_id",
 		"i.status",
@@ -685,17 +688,20 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	if terminalStatusesParam != "" {
 		issueWhere += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
 	}
-	issueMatchesCTE := fmt.Sprintf(`issue_matches AS MATERIALIZED (
+	issueMatchesCTE := fmt.Sprintf(`issue_matches AS (
 		SELECT %s
 		FROM issue i
 		WHERE %s
 	)`, strings.Join(issueFlagColumns, ",\n\t\t\t"), issueWhere)
 
-	// Comments are also scanned once, workspace-first. Aggregation retains only
-	// per-issue flags plus the latest matching comment ID; content is fetched by
-	// primary key only after the final page is known. Per-term BOOL_OR flags keep
-	// the legacy eligibility rule where terms may be spread across comments,
-	// while comment_all_terms keeps ranking/snippet tied to one comment.
+	// Comments are also scanned once, workspace-first. This intentionally avoids
+	// the legacy planner choice between global content GIN postings and repeated
+	// correlated/hashed subplans (MUL-4059); idx_comment_workspace bounds the
+	// candidate scan instead. Aggregation retains only per-issue flags plus the
+	// latest matching comment ID, and content is fetched by primary key after the
+	// final page is known. Per-term BOOL_OR flags keep the legacy eligibility rule
+	// where terms may be spread across comments, while comment_all_terms keeps
+	// ranking/snippet tied to one comment.
 	commentFlagColumns := []string{
 		"c.issue_id",
 		fmt.Sprintf("BOOL_OR(LOWER(c.content) LIKE %s) AS comment_phrase", phraseContainsParam),
@@ -791,6 +797,9 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 	rankExpr := "CASE " + strings.Join(rankCases, " ") + " ELSE 9 END"
 
+	// title_exact deliberately preserves the legacy escapeLike quirk: a title
+	// containing _, %, or \\ is still searchable, but the escaped phrase does
+	// not compare equal and therefore is not treated as a cancelled direct hit.
 	directHitParts := []string{"im.title_exact"}
 	if hasNum {
 		directHitParts = append(directHitParts, "im.number_exact")

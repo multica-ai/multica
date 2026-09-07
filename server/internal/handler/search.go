@@ -12,24 +12,35 @@ import (
 
 // searchStatementTimeout bounds every /search request at the Postgres level.
 //
-// The two search handlers (SearchIssues, SearchProjects) run LOWER(col) LIKE
-// '%pattern%' queries whose fast path depends on pg_bigm / pg_trgm GIN
-// indexes (see migrations 032, 033, 036, 137–142). When those extensions are
-// missing — as they were on every self-hosted deployment using the bundled
-// pgvector/pgvector:pg17 image before migration 137 shipped — Postgres
-// falls back to a Seq Scan on `issue` plus correlated Seq Scans on
-// `comment`. On workspaces with thousands of rows the query takes long
-// enough that the frontend Loader2 spinner appears to hang forever
-// ("搜索卡死没有任何反应", MUL-4059).
+// SearchProjects runs LOWER(col) LIKE '%pattern%' queries whose fast path
+// depends on pg_bigm / pg_trgm GIN indexes (see migrations 032, 033, 036,
+// 137–142). SearchIssues instead deliberately uses a candidate-first plan that
+// scans each selected workspace's issues and comments once, avoiding repeated
+// global GIN/hashed-subplan work at the cost of giving up content-index
+// selectivity. Missing extensions or an unexpectedly large workspace can
+// therefore still make either path slow enough that the frontend appears to
+// hang ("搜索卡死没有任何反应", MUL-4059).
 //
-// The 3 s cap is generous compared to a properly indexed search (typically
-// <50 ms) and short enough that the frontend's implicit request timeout
-// (browser default, ~30 s) never kicks in. On timeout the caller sees a
-// 503 with a descriptive error rather than a stalled connection —
-// SearchIssues / SearchProjects map SQLSTATE 57014 to
-// http.StatusServiceUnavailable so the frontend can distinguish this
-// from a generic 500.
-const searchStatementTimeout = 3 * time.Second
+// The 3 s cap leaves margin above the production-observed candidate-first
+// maximum (1.72 s in the MUL-7055 matrix) and is short enough that the
+// frontend's implicit request timeout (browser default, ~30 s) never kicks in.
+// On timeout the caller sees a 503 with a descriptive error rather than a
+// stalled connection — SearchIssues / SearchProjects map SQLSTATE 57014 to
+// http.StatusServiceUnavailable so the frontend can distinguish this from a
+// generic 500.
+const (
+	searchStatementTimeout = 3 * time.Second
+
+	// searchWorkMem removes the candidate-first comment aggregation spill seen
+	// at Postgres' 4 MB default. work_mem is a per-node ceiling, not a
+	// reservation: the production plan's material sort used about 9 MB. At the
+	// default 25-connection pool ceiling, 25 simultaneous searches would use
+	// about 225 MB for that node; the theoretical per-node ceiling is 1.6 GB.
+	// Keep this transaction-local so unrelated pooled work retains its configured
+	// database default, and keep the 3 s timeout above as the lifetime bound.
+	searchWorkMem    = "64MB"
+	searchWorkMemSQL = "SET LOCAL work_mem = '" + searchWorkMem + "'"
+)
 
 // searchStatementTimeoutOverride, when non-zero, replaces
 // searchStatementTimeout for the duration of a test. Never read outside
@@ -72,11 +83,14 @@ func runSearchQuery(
 	}()
 
 	// SET LOCAL is transaction-scoped, so pgxpool can safely hand this
-	// connection back out after COMMIT without the timeout leaking to
-	// unrelated queries.
+	// connection back out after COMMIT without search-specific settings leaking
+	// to unrelated queries.
 	timeoutMs := int(effectiveSearchStatementTimeout() / time.Millisecond)
 	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL statement_timeout = %d", timeoutMs)); err != nil {
 		return fmt.Errorf("set search statement_timeout: %w", err)
+	}
+	if _, err := tx.Exec(ctx, searchWorkMemSQL); err != nil {
+		return fmt.Errorf("set search work_mem: %w", err)
 	}
 	// The read-only mode is applied here rather than via TxOptions so we
 	// keep the txStarter interface signature (Begin only) intact. It's

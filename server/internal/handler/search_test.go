@@ -342,8 +342,11 @@ func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
 func TestBuildSearchQuery_HydratesOnlyTheSelectedPage(t *testing.T) {
 	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"})
 
-	if !strings.Contains(query, "issue_matches AS MATERIALIZED") || !strings.Contains(query, "page_candidates AS MATERIALIZED") {
-		t.Fatalf("query does not materialize narrow issue flags and the selected page:\n%s", query)
+	if strings.Contains(query, "issue_matches AS MATERIALIZED") {
+		t.Fatalf("issue flag CTE must remain inlineable; forced materialization spills in production:\n%s", query)
+	}
+	if !strings.Contains(query, "issue_matches AS (") || !strings.Contains(query, "page_candidates AS MATERIALIZED") {
+		t.Fatalf("query does not retain narrow issue flags and materialize the selected page:\n%s", query)
 	}
 	limitAt := strings.Index(query, "LIMIT ")
 	issueHydrationAt := strings.Index(query, "JOIN issue i ON i.id = pc.issue_id")
