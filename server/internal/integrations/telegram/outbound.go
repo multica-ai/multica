@@ -72,10 +72,14 @@ type outboundQueries interface {
 
 // streamState tracks one in-flight streamed reply.
 type streamState struct {
-	chatID      int64
-	threadID    int64
-	replyTo     int64
-	messageID   int64 // placeholder message being edited; 0 until first send
+	chatID    int64
+	threadID  int64
+	replyTo   int64
+	messageID int64 // placeholder message being edited; 0 until first send
+	// sending marks the placeholder's sendMessage as in flight: Telegram
+	// already has the message but its id only lands when the call returns.
+	// Terminal delivery waits for that instead of reading messageID as 0.
+	sending     bool
 	accumulated string
 	schedule    *chatSchedule
 }
@@ -166,6 +170,7 @@ const (
 	terminalWorkerCount                = 4
 	maxBotFallbacks                    = 1024
 	chatCapacityRetry                  = time.Second
+	placeholderSettleRetry             = 250 * time.Millisecond
 	maxQueuedTerminalReplies           = 64
 	maxQueuedTerminalRepliesPerSession = 8
 	maxQueuedTerminalReplyBytes        = 16 << 20
@@ -295,7 +300,20 @@ func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *str
 		// reply is delivered in chunks by the final EventChatDone send.
 		text = chunkMessage(text, maxMessageUnits)[0]
 	}
+	// Re-read the id under the lock that guards it — the caller's snapshot was
+	// taken before this send was serialized behind schedule.mu — and publish a
+	// first send while it is in flight, so EventChatDone can tell "no
+	// placeholder yet" from "placeholder sent, id still in the air".
+	o.mu.Lock()
+	msgID = st.messageID
+	st.sending = msgID == 0
+	o.mu.Unlock()
 	if msgID == 0 {
+		defer func() {
+			o.mu.Lock()
+			st.sending = false
+			o.mu.Unlock()
+		}()
 		var reply *replyParameters
 		if st.replyTo != 0 {
 			reply = &replyParameters{MessageID: st.replyTo, AllowSendingWithoutReply: true}
@@ -572,7 +590,19 @@ func (o *Outbound) sendNextTerminalRequest(ctx context.Context, reply *terminalR
 		st := o.streams[target.streamKey]
 		var schedule *chatSchedule
 		if st != nil {
+			if st.sending {
+				// The placeholder is mid-sendMessage: Telegram has it, but its
+				// id arrives only when the call returns. Reading 0 here would
+				// skip the edit path below and post the whole reply a second
+				// time while the placeholder stayed in the chat — the
+				// duplicate in GH #8049. Retry instead of blocking: the wait
+				// spans one Telegram round trip and the worker stays free for
+				// another session.
+				o.mu.Unlock()
+				return terminalRequestResult{retryAt: o.now().Add(placeholderSettleRetry)}
+			}
 			schedule = st.schedule
+			reply.streamedMessageID = st.messageID
 		} else {
 			schedule = o.retainChatLocked(target.botKey, target.chatID)
 			if schedule == nil {
@@ -587,9 +617,6 @@ func (o *Outbound) sendNextTerminalRequest(ctx context.Context, reply *terminalR
 		reply.target = target
 		reply.schedule = schedule
 		reply.chunks = chunkMessage(chatDoneContent(reply.event.Payload), maxMessageUnits)
-		if st != nil {
-			reply.streamedMessageID = st.messageID
-		}
 		if len(reply.chunks) == 0 {
 			return terminalRequestResult{done: true}
 		}
