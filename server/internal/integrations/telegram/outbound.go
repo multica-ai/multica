@@ -597,8 +597,12 @@ type terminalRequestResult struct {
 func (o *Outbound) sendNextTerminalRequest(ctx context.Context, reply *terminalReply) terminalRequestResult {
 	if !reply.initialized {
 		if reply.target == nil {
-			// Resolved once and cached: the retries below re-enter here, and
-			// every resolve is two queries plus a credential decrypt.
+			// Cached for the placeholder-settle retry only: that wait is
+			// bounded by the partial's own send context, and re-resolving it
+			// every 250ms costs two queries plus a credential decrypt. The
+			// capacity retry below drops the cache again, because that wait is
+			// unbounded and re-resolving is what re-checks the installation's
+			// status and picks up a rotated bot token.
 			target, err := o.resolveTarget(ctx, reply.event, false)
 			if err != nil {
 				return terminalRequestResult{done: true, err: err}
@@ -631,6 +635,10 @@ func (o *Outbound) sendNextTerminalRequest(ctx context.Context, reply *terminalR
 			schedule = o.retainChatLocked(target.botKey, target.chatID)
 			if schedule == nil {
 				o.mu.Unlock()
+				// Re-resolve on the next attempt: an installation revoked (or
+				// re-keyed) while this reply waited for capacity must not be
+				// delivered to from a target resolved before the change.
+				reply.target = nil
 				return terminalRequestResult{retryAt: o.now().Add(chatCapacityRetry)}
 			}
 		}

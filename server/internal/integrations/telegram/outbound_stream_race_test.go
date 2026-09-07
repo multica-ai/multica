@@ -200,3 +200,56 @@ func TestOutboundPartialSkipsSendAfterTerminalConsumedTheStream(t *testing.T) {
 		t.Fatalf("partial posted a placeholder for a reply it no longer owned: %v", methods)
 	}
 }
+
+// A reply waiting for chat-schedule capacity waits without a bound, so it must
+// re-resolve its delivery target each attempt: an installation revoked during
+// that wait must stop the reply, not be delivered to from a target resolved
+// before the revocation.
+func TestOutboundCapacityRetryRechecksInstallation(t *testing.T) {
+	api, calls, _, release := gatedTelegramAPI(t)
+	release() // nothing to gate here
+	ctx := context.Background()
+
+	q := newTelegramOutboundQueries()
+	q.channelOrigin = true
+	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
+
+	// Saturate the schedule cache with in-use entries so this reply's chat
+	// cannot be retained and delivery has to wait for capacity.
+	o.mu.Lock()
+	for chatID := int64(1); chatID <= maxChatSchedules; chatID++ {
+		o.retainChatLocked("bot-filler", chatID)
+	}
+	o.mu.Unlock()
+
+	done := telegramTestEvent()
+	done.Payload = protocol.ChatDonePayload{
+		TaskID: done.TaskID, ChatSessionID: done.ChatSessionID, Content: "hello world",
+	}
+	reply := &terminalReply{event: done, byteSize: len(chatDoneContent(done.Payload))}
+
+	result := o.sendNextTerminalRequest(ctx, reply)
+	if result.done || !result.retryAt.After(o.now()) {
+		t.Fatalf("delivery did not wait for capacity: %+v", result)
+	}
+	if reply.initialized {
+		t.Fatal("delivery initialized without a chat schedule")
+	}
+
+	// The installation is revoked while the reply waits, and a slot frees up.
+	q.installation.Status = "revoked"
+	o.mu.Lock()
+	delete(o.chats, chatScheduleKey{botKey: "bot-filler", chatID: 1})
+	o.mu.Unlock()
+
+	result = o.sendNextTerminalRequest(ctx, reply)
+	if reply.initialized {
+		t.Fatal("delivery initialized against a revoked installation")
+	}
+	if !result.done || result.err != nil {
+		t.Fatalf("delivery to a revoked installation was not dropped: %+v", result)
+	}
+	if methods, _ := calls(); len(methods) != 0 {
+		t.Fatalf("delivered to a revoked installation: %v", methods)
+	}
+}
