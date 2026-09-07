@@ -450,6 +450,13 @@ func TestUpdateComment_CancelsAndRequeuesWhenEditedInputIsCoalesced(t *testing.T
 	}
 
 	assertRepairedCommentBatch(t, fixture, fixture.commentID[0], fixture.commentID[1:])
+	original, err := testHandler.Queries.GetAgentTask(context.Background(), parseUUID(fixture.taskID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !taskToResponse(original, testWorkspaceID).CancelledByCommentChange {
+		t.Fatal("edited input must identify the cancelled run as invalidated by a comment change")
+	}
 }
 
 func TestDeleteComment_CancelsAndRequeuesWhenDeletedInputIsCoalesced(t *testing.T) {

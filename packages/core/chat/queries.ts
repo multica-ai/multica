@@ -1,4 +1,5 @@
-import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { api } from "../api";
 import type { TaskMessagePayload } from "../types/events";
 import type {
@@ -211,6 +212,22 @@ export function taskMessagesOptions(taskId: string) {
         next as TaskMessagePayload[],
       ),
   });
+}
+
+/** A visible run follows WS updates and backfills on mount and completion. */
+export function useTaskMessages(taskId: string, isLive: boolean) {
+  const query = useQuery({
+    ...taskMessagesOptions(taskId),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+  });
+  const previousLive = useRef(isLive);
+  const { refetch } = query;
+  useEffect(() => {
+    if (previousLive.current && !isLive && isTaskMessageTaskId(taskId)) void refetch();
+    previousLive.current = isLive;
+  }, [taskId, isLive, refetch]);
+  return query;
 }
 
 /**

@@ -187,6 +187,12 @@ result comment on the autopilot issue can still wake the leader), and it survive
 a busy target: if the mentioned agent is already running, the delegation is
 replayed at that run's completion under the same authority, so it is never lost.
 
+Editing or deleting input cancels active runs that contain that comment and
+re-evaluates surviving inputs. These cancelled runs expose
+`cancelled_by_comment_change: true` in task responses. Unstarted runs without
+replies remain in execution history but do not create cancelled comment blocks;
+manual cancellations and runs that already executed remain visible.
+
 An edit is treated as a fresh action — it re-derives the comment's lineage from
 the editing action. Only the agent author editing its OWN comment re-stamps the
 lineage to the editing task; any other editor — including a workspace owner/admin

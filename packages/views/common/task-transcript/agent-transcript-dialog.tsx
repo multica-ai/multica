@@ -68,7 +68,6 @@ import {
   isCallStep,
   isGroupRow,
   rowCalls,
-  shouldShowTimeline,
   toolKindTotals,
   type TraceCallStep,
   type TraceGroupRow,
@@ -523,9 +522,6 @@ export function AgentTranscriptDialog({
   const runEnd = task.completed_at ?? lastStamp;
 
   const lanes = useMemo(() => buildLanes(steps, runStart, runEnd), [steps, runStart, runEnd]);
-  // A short run's timeline says less than the durations already on each row,
-  // so it does not render at all.
-  const showTimeline = shouldShowTimeline(steps, lanes);
   const toolKinds = useMemo(() => toolKindTotals(steps), [steps]);
   const outcome = useMemo(() => buildRunOutcome(steps), [steps]);
 
@@ -1070,7 +1066,7 @@ export function AgentTranscriptDialog({
         <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
 
         {/* ── Where the time went ────────────────────────────────────── */}
-        {showTimeline && lanes && (
+        {lanes && (
           <RunTimeline
             lanes={lanes}
             toolKinds={toolKinds}
@@ -1731,7 +1727,7 @@ function InspectorSection({ label, children }: { label: string; children: React.
 }
 
 /** One payload, rendered as what it is. */
-function StepBody({ item }: { item: TimelineItem }) {
+export function StepBody({ item }: { item: TimelineItem }) {
   const { t } = useT("agents");
   const detail = useMemo(() => traceEventDetail(item), [item]);
   const image = useMemo(() => readImageResult(item.output), [item.output]);

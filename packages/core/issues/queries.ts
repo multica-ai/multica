@@ -20,6 +20,16 @@ import type {
 } from "../types";
 import { ALL_STATUSES } from "./config";
 
+export function issueTasksOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.tasks(issueId),
+    queryFn: () => api.listTasksByIssue(issueId),
+    enabled: !!issueId,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
 export interface IssueSortParam {
   sort_by?: ListIssuesParams["sort_by"];
   sort_direction?: ListIssuesParams["sort_direction"];

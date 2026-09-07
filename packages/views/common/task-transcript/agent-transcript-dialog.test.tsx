@@ -431,26 +431,27 @@ describe("AgentTranscriptDialog", () => {
     expect(screen.getByText("1 of 3 steps")).toBeInTheDocument();
   });
 
-  it("hides the timeline for a run too short for it to say anything", () => {
+  it("hides the timeline when steps have no timestamps", () => {
     renderDialog();
 
     expect(screen.queryByText("Model")).not.toBeInTheDocument();
     expect(screen.queryByText("Tools")).not.toBeInTheDocument();
   });
 
-  it("shows model and tool lanes once a run is long enough to have spent time", () => {
+  it.each([{ count: 1, seconds: 20 }, { count: 8, seconds: 30 }, { count: 8, seconds: 320 }])("shows the timeline for $count steps over $seconds seconds", ({ count, seconds }) => {
     const at = (seconds: number) =>
       new Date(Date.parse("2026-06-08T08:00:00Z") + seconds * 1000).toISOString();
     const longRun: TimelineItem[] = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < count; i++) {
+      const start = (seconds / count) * i;
       longRun.push(
-        { seq: i * 2 + 1, type: "tool_use", tool: "Bash", input: { command: `step ${i}` }, created_at: at(i * 40) },
-        { seq: i * 2 + 2, type: "tool_result", tool: "Bash", output: "ok", created_at: at(i * 40 + 20) },
+        { seq: i * 2 + 1, type: "tool_use", tool: "Bash", input: { command: `step ${i}` }, created_at: at(start) },
+        { seq: i * 2 + 2, type: "tool_result", tool: "Bash", output: "ok", created_at: at(start + seconds / count / 2) },
       );
     }
 
     renderDialog(longRun, {
-      task: { ...baseTask, started_at: at(0), completed_at: at(320) },
+      task: { ...baseTask, started_at: at(0), completed_at: at(seconds) },
     });
 
     expect(screen.getByText("Model")).toBeInTheDocument();

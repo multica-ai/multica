@@ -346,6 +346,8 @@ type TaskIssueStatusData struct {
 }
 
 type AgentTaskResponse struct {
+	CancelledByCommentChange bool `json:"cancelled_by_comment_change,omitempty"`
+
 	ID                   string                 `json:"id"`
 	AgentID              string                 `json:"agent_id"`
 	RuntimeID            string                 `json:"runtime_id"`
@@ -752,6 +754,10 @@ type TaskAgentData struct {
 // derivation; pass "" only on daemon-facing paths that genuinely don't have
 // it, in which case RelativeWorkDir falls back to the existing WorkDir.
 func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
+	var cancellation struct {
+		TaskID string `json:"comment_change_cancelled_task_id"`
+	}
+	_ = json.Unmarshal(t.Context, &cancellation)
 	var result any
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
@@ -777,6 +783,9 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		handoffNote = t.HandoffNote.String
 	}
 	return AgentTaskResponse{
+		// Task-scoped provenance must not transfer through copied retry context.
+		CancelledByCommentChange: t.Status == "cancelled" && cancellation.TaskID != "" && cancellation.TaskID == uuidToString(t.ID),
+
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),
 		RuntimeID:              uuidToString(t.RuntimeID),
