@@ -5932,8 +5932,8 @@ func TestInjectRuntimeConfigBriefOmitsResumedThreadAnchor(t *testing.T) {
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"If your reply depends on thread context",
-		"do not rely only on resumed session memory",
+		"issue-wide delta is empty",
+		"if resumed memory is not enough",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
 		if !strings.Contains(hint, want) {
@@ -6112,16 +6112,18 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			// MUL-5442: the brief keeps only what the interface cannot
 			// express — the read stance, the re-read bar, and the two
 			// write-time boundaries (secrets, length). The full ban list
-			// and the key-naming conventions live in the
-			// multica-working-on-issues skill, pinned by
-			// TestWorkingOnIssuesSkillCoversIssueLoopContracts so this
-			// pointer cannot dangle. The recommended-keys block was
+			// and the key-naming conventions live in the multica-platform
+			// skill, pinned by TestPlatformSkillCoversPlatformContracts.
+			// The pointer names whichever skill this task actually received
+			// and is omitted when neither is installed
+			// (TestBriefIssuePointerFollowsTheInstalledSkill), so it cannot
+			// dangle in either upgrade direction. The recommended-keys block was
 			// removed outright: metadata is deliberately free-form custom
 			// state (owner decision on MUL-5442), not a vocabulary the
 			// platform curates in every brief.
 			"never secrets or long content",
 			"multica issue metadata delete",
-			"the `multica-working-on-issues` skill",
+			"`references/issues.md` in the `multica-platform` skill",
 		},
 	}
 	withoutSection := wantSection{
@@ -6160,6 +6162,7 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			ctx: TaskContextForEnv{
 				IssueID:          "issue-md-1",
 				TriggerCommentID: "comment-md-1",
+				AgentSkills:      []SkillContextForEnv{platformSkillFixture()},
 			},
 			provider: "claude",
 			filename: "CLAUDE.md",
@@ -6190,8 +6193,11 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			want: withSection,
 		},
 		{
-			name:     "assignment_triggered",
-			ctx:      TaskContextForEnv{IssueID: "issue-md-2"},
+			name: "assignment_triggered",
+			ctx: TaskContextForEnv{
+				IssueID:     "issue-md-2",
+				AgentSkills: []SkillContextForEnv{platformSkillFixture()},
+			},
 			provider: "claude",
 			filename: "CLAUDE.md",
 			workflowStepPresent: []string{

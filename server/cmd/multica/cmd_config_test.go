@@ -71,6 +71,7 @@ func TestRunConfigShowIncludesProfileAndDefaults(t *testing.T) {
 		"workspaces_root:",
 		"max_concurrent_tasks:",
 		"poll_interval:",
+		"ws_claim_poll_interval:",
 		"heartbeat_interval:",
 		"agent_timeout:",
 		"codex_semantic_inactivity_timeout:",
@@ -207,6 +208,7 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 		{"workspaces_root", workspacesRoot},
 		{"max_concurrent_tasks", "4"},
 		{"poll_interval", "10s"},
+		{"ws_claim_poll_interval", "3m"},
 		{"heartbeat_interval", "5s"},
 		{"codex_semantic_inactivity_timeout", "15m"},
 		{"codex_handshake_timeout", "45s"},
@@ -224,6 +226,7 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 		cfg.WorkspacesRoot != workspacesRoot ||
 		cfg.MaxConcurrentTasks != 4 ||
 		cfg.PollInterval != "10s" ||
+		cfg.WSClaimPollInterval != "3m" ||
 		cfg.HeartbeatInterval != "5s" ||
 		cfg.CodexSemanticInactivityTimeout != "15m" ||
 		cfg.CodexHandshakeTimeout != "45s" ||
@@ -262,6 +265,7 @@ func TestApplyConfigSetPositiveDurationRoundTripsToDaemonResolver(t *testing.T) 
 		key  string
 		read func(cli.CLIConfig) string
 	}{
+		{"ws_claim_poll_interval", func(cfg cli.CLIConfig) string { return cfg.WSClaimPollInterval }},
 		{"heartbeat_interval", func(cfg cli.CLIConfig) string { return cfg.HeartbeatInterval }},
 		{"codex_semantic_inactivity_timeout", func(cfg cli.CLIConfig) string { return cfg.CodexSemanticInactivityTimeout }},
 		{"codex_handshake_timeout", func(cfg cli.CLIConfig) string { return cfg.CodexHandshakeTimeout }},
@@ -345,6 +349,8 @@ func TestApplyConfigSetRejectsBadValues(t *testing.T) {
 		{"poll bad duration", "poll_interval", "10", "duration"},
 		{"poll zero", "poll_interval", "0s", "positive"},
 		{"poll negative", "poll_interval", "-5s", "positive"},
+		{"ws claim poll bad duration", "ws_claim_poll_interval", "three", "duration"},
+		{"ws claim poll zero", "ws_claim_poll_interval", "0s", "positive"},
 		{"heartbeat bad duration", "heartbeat_interval", "abc", "duration"},
 		{"heartbeat zero", "heartbeat_interval", "0s", "positive"},
 		{"codex semantic zero", "codex_semantic_inactivity_timeout", "0s", "positive"},

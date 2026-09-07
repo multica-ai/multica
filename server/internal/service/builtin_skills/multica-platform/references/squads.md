@@ -1,15 +1,22 @@
----
-name: multica-squads
-description: "Use when creating, inspecting, updating, assigning to, or debugging a Multica squad, including how leader routing picks who runs."
-user-invocable: false
-allowed-tools: Bash(multica *)
----
+# Squads
 
-# Multica Squads
+A squad is a workspace routing and coordination object. It is not an agent and
+it does not run work by itself.
 
-## Quick start
+- [Debugging a squad that did or did not run](#debugging-a-squad-that-did-or-did-not-run)
+- [Core model](#core-model)
+- [CLI](#cli)
+- [Squad fields](#squad-fields)
+- [Creation and leader membership](#creation-and-leader-membership)
+- [Leader briefing](#leader-briefing)
+- [Issue assignment behavior](#issue-assignment-behavior)
+- [Comment and mention behavior](#comment-and-mention-behavior)
+- [Autopilot behavior](#autopilot-behavior)
+- [Common wrong assumptions](#common-wrong-assumptions)
 
-If debugging why a squad did or did not run, inspect first:
+## Debugging a squad that did or did not run
+
+Inspect first:
 
 ```bash
 multica issue get <issue-id> --output json
@@ -19,28 +26,13 @@ multica issue comment list <issue-id> --roots-only --summary --output json
 multica issue comment list <issue-id> --thread <thread-id> --tail 30 --output json
 ```
 
-The two comment reads are a sequence: scan the roots first, then open the threads that look relevant — mention triggers, failure reasons, and user instructions usually live in the replies, which the roots scan never returns.
-
-If the command shape is unclear, check help instead of guessing:
-
-```bash
-multica squad --help
-multica squad member --help
-multica issue update --help
-multica issue comment add --help
-```
-
-Do not assign, comment, mention, update, delete, or record squad activity just
-to test. These can mutate workspace state or trigger agent runs.
+The two comment reads are a sequence: scan the roots first, then open the
+threads that look relevant — mention triggers, failure reasons, and user
+instructions usually live in the replies, which the roots scan never returns.
 
 ## Core model
 
-A Multica squad is a workspace routing and coordination object.
-
-A squad is not an agent. It does not run work by itself. Current behavior:
-squad-routed work runs through the squad's `leader_id` agent.
-
-Important consequences:
+Squad-routed work runs through the squad's `leader_id` agent. Consequences:
 
 - assigning an issue to a squad routes to the leader;
 - mentioning a squad routes to the leader;
@@ -81,11 +73,11 @@ Use it only when acting as the squad leader after evaluating a trigger.
 Which issue it accepts: **the issue your current turn is running on**. The
 target issue does NOT need to be assigned to your squad — a `@squad` mention on
 an issue owned by an individual agent, or a leader task bound to a child issue,
-all record fine. What the server checks is your task row (`is_leader_task` plus
-a stamped `squad_id`), not the issue's assignee. A leader woken by a stage
-barrier runs on the PARENT issue, so record against the parent, not the child
-you just read; passing an unrelated issue id is rejected and the error names the
-issue you should have used.
+all record fine. What the server checks is your task's leader flag and stamped
+squad id, not the issue's assignee. A leader woken by a stage barrier runs on
+the PARENT issue, so record against the parent, not the child you just read;
+passing an unrelated issue id is rejected and the error names the issue you
+should have used.
 
 If the call fails, do not exit silently — the comment prohibition on `no_action`
 only applies once the recording succeeded. Post one short comment with the
@@ -101,10 +93,8 @@ multica issue comment list <issue-id> --roots-only --summary --output json
 multica issue comment add <issue-id> --help
 ```
 
-Comment reads stay bounded — the scan-then-expand sequence from the quick
-start above — never one unbounded `issue comment list` pull.
-
-Prefer `--output json` for reads. Use `--help` before writes.
+Comment reads stay bounded — the scan-then-expand sequence above, never one
+unbounded pull.
 
 ## Squad fields
 
@@ -112,7 +102,7 @@ Prefer `--output json` for reads. Use `--help` before writes.
 - `workspace_id` — workspace the squad belongs to.
 - `name` — display name; unique per workspace.
 - `description` — human-facing metadata/display text. Do not assume runtime
-  prompt impact unless source proves a consumer.
+  prompt impact.
 - `instructions` — squad-level instructions added to the squad leader briefing.
   They are not directly injected into every squad member.
 - `avatar_url` — optional squad avatar URL.
@@ -132,9 +122,8 @@ write it as if every member automatically receives it.
 
 - `member_type` — `agent` or `member`.
 - `member_id` — ID of the agent or workspace member.
-- `role` — roster role label. Current behavior: non-empty `role` appears in the
-  leader briefing roster. Do not assume it creates scheduling, permissions, or
-  routing behavior.
+- `role` — roster role label. A non-empty `role` appears in the leader briefing
+  roster. It does not create scheduling, permissions, or routing behavior.
 
 ## Creation and leader membership
 
@@ -161,7 +150,7 @@ Roster entries include member name, member type, mention markdown, and non-empty
 role. For agent members the roster also lists their assigned skills
 (`skills: a, b`, or `no skills assigned` when the agent has none) so the leader
 can delegate by capability instead of guessing from the role label; human
-members carry no skills segment. Builtin `multica-*` skills are not listed —
+members carry no skills segment. Built-in `multica-*` skills are not listed —
 only the workspace skills explicitly attached to the agent. Archived agent
 members are skipped from the briefing roster.
 
@@ -186,7 +175,7 @@ Current behavior:
   the leader's first assignment turn should move the parent to `in_progress`
   and keep it there while members work; the leader moves the parent to
   `in_review` only when a later re-trigger confirms the overall goal is met.
-  Completing a leader `task` (including the first dispatch) does not itself
+  Completing a leader task (including the first dispatch) does not itself
   change issue status;
 - that status authority is granted only when the issue's `assignee_type` /
   `assignee_id` point at THIS squad. The leader briefing is injected on every
@@ -194,9 +183,8 @@ Current behavior:
   — on those paths the protocol instead carries an explicit "do not change this
   issue's status".
 
-The status names above are category rules: a workspace may define custom
-statuses beyond the built-ins, and each one inherits its category's behavior in
-full (the runtime brief lists the workspace catalog when any exist).
+The status names above are category rules: a custom status inherits its
+category's behavior in full.
 
 Assignment validation rejects a missing type/id pair, non-existent squad,
 archived squad, archived leader, and private leader when the actor cannot access
@@ -231,24 +219,6 @@ and `assignee_id = <squad-id>`, while the actual executing agent is the resolved
 leader. For `run_only` autopilots, no issue is created; the task is created
 directly for the resolved leader agent.
 
-## Handling complaints or product gaps
-
-When the user says squad behavior is wrong, confusing, or disappointing, do not
-immediately assume code is broken and do not defend current behavior just because
-it exists. Classify first:
-
-- expected current behavior;
-- configuration issue;
-- product limitation;
-- actual bug.
-
-Explain the current source-backed behavior. If the behavior is technically
-correct but product-wise bad, say so and propose a scoped product/code change.
-
-Do not silently change squad routing, member fan-out, leader briefing, autopilot
-behavior, or comment-trigger behavior without confirmation. These are product
-contract changes with side effects.
-
 ## Side effects
 
 These actions can trigger agent work or mutate durable state:
@@ -264,10 +234,7 @@ These actions can trigger agent work or mutate durable state:
 - mentioning a squad;
 - creating or triggering squad-assigned autopilots;
 - recording squad activity with `multica squad activity`;
-- deleting/archive squad.
-
-Do not perform side-effecting actions as tests unless the user explicitly
-authorizes them.
+- deleting/archiving a squad.
 
 ## Common wrong assumptions
 
@@ -277,7 +244,7 @@ authorizes them.
 - Squad assignment routes to the leader, not every member.
 - Squad autopilot resolves to the leader as executable agent.
 - `instructions` are leader briefing content, not automatic member prompts.
-- `description` is not proven runtime prompt content.
+- `description` has no proven runtime prompt effect.
 - `role` is roster context, not automatic scheduling.
 - Backlog assignment does not immediately start work.
 - First leader dispatch is not parent completion — parent stays `in_progress`
@@ -287,11 +254,3 @@ authorizes them.
 - Getting the leader briefing does NOT imply status authority. A squad
   `@`-mentioned into an issue assigned to someone else is a guest: roster and
   delegation rules yes, `multica issue status` no.
-
-## References
-
-For source paths, tests, edge cases, and exact routing details, see:
-
-```text
-references/squad-source-map.md
-```

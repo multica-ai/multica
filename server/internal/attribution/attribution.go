@@ -453,6 +453,18 @@ type SubscriptionFacts struct {
 	// stamp and the origin task's originator_user_id, loaded by the caller.
 	OriginType       string
 	OriginOriginator pgtype.UUID
+
+	// OriginRootSource is the originator_source of the CHAIN ROOT behind the
+	// origin task — the run that actually resolved OriginOriginator, not the hop
+	// that copied it. The caller walks delegated_from_task_id to find it
+	// (GetDelegatedSubscriptionFacts); an unreachable or unlabelled root leaves
+	// it empty, which the rule reads as "not a direct human act".
+	//
+	// It exists because OriginOriginator alone stopped answering "did a human ask
+	// for this?" in MUL-6951: an armed autopilot trigger now carries its
+	// creator's authorization, so the two cases became indistinguishable by
+	// value. See DelegatedSubscriber.
+	OriginRootSource Source
 }
 
 // DelegatedSubscriber resolves the human who should be auto-subscribed to an
@@ -463,11 +475,21 @@ type SubscriptionFacts struct {
 // attribution and notification disagreeing about that (MUL-5483). The waterfall
 // is narrower than ClassifyDirect's on purpose:
 //
-//   - OriginOriginator valid → subscribe. A human authorized this chain, and
-//     because attribution COPIES the accountable human across every agent hop
-//     rather than chaining it (see SourceDelegation), this resolves the ORIGINAL
-//     human at any depth. No depth cap: depth is exactly where a lost signal
-//     hurts most, and the delivery tier — not a cap — is what bounds the noise.
+//   - OriginOriginator valid AND the chain root is a DIRECT human act →
+//     subscribe. Because attribution COPIES the accountable human across every
+//     agent hop rather than chaining it (see SourceDelegation), the originator
+//     resolves the ORIGINAL human at any depth, and the delivery tier — not a
+//     depth cutoff — is what bounds the noise a deep chain makes. The root check
+//     is what keeps "has a human" from being read as "a human asked", see below.
+//
+//     WHO the human is therefore has no depth limit; proving the chain BEGAN
+//     with them does: the caller reads the root by walking the lineage, and that
+//     walk stops after 32 hops (GetDelegatedSubscriptionFacts). Past that the
+//     root is reported as unproven and nobody is subscribed, which is a real
+//     truncation and not a formality — accepted deliberately (MUL-7051, Bohan's
+//     call) because no observed chain approaches it. Raising it is a one-number
+//     change; moving the root onto the run at enqueue time would remove the
+//     limit outright.
 //
 //   - quick_create → reason 'creator', agent_create → reason 'delegated'. The
 //     quick-create human asked for THAT issue by name, so it is direct intent and
@@ -480,8 +502,27 @@ type SubscriptionFacts struct {
 //     to arm the trigger — is the intended audience for its issues. Degraded
 //     attribution (owner_fallback / unattributed) is excluded for the same
 //     reason it is degraded: we do not fabricate a human to notify.
+//
+// WHY the root source is checked at all (MUL-7051). This rule was written when
+// SourceDirectHuman was the only root that left an originator behind, so "the
+// origin run carries a human" and "a human asked for this work" were the same
+// statement and only the first had to be tested. MUL-6951 separated them: an
+// armed schedule/webhook trigger now runs with its creator's authorization
+// (SourceTriggerOwner), and that human is copied down the whole chain exactly
+// like a requester would be. The untested half of the old equivalence is what
+// broke — every issue an autopilot's agent filed started subscribing whoever
+// armed the trigger, which is the case the origin_type='autopilot' exclusion
+// above already says must not happen, arriving one hop lower.
+//
+// So the condition is stated as what it means — the chain BEGAN with a member
+// acting — and it is a whitelist. A future root that resolves a human some other
+// way stays silent here until someone decides it should subscribe people, rather
+// than turning this rule on for a population nobody chose.
 func DelegatedSubscriber(f SubscriptionFacts) (pgtype.UUID, string, bool) {
 	if f.CreatorType != "agent" || !f.OriginOriginator.Valid {
+		return pgtype.UUID{}, "", false
+	}
+	if f.OriginRootSource != SourceDirectHuman {
 		return pgtype.UUID{}, "", false
 	}
 	switch f.OriginType {

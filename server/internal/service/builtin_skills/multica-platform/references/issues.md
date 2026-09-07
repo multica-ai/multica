@@ -1,20 +1,16 @@
----
-name: multica-working-on-issues
-description: "Use when acting on a Multica issue beyond what the brief covers: PR linking vs close intent, reading a linked PR's real state, metadata keys, status-change side effects, sub-issue todo vs backlog."
-user-invocable: false
-allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
----
+# Issues
 
-# Working on Multica issues
+Product contracts the runtime brief does not fully encode.
 
-Product contracts the runtime brief does not fully encode: PR linking vs close
-intent, reading linked-PR state, metadata keys, status side effects, and
-sub-issue enqueue behavior.
-
-For building mention links, load `multica-mentioning` instead — not this skill.
-
-Every contract below is traced to source in
-`references/working-on-issues-source-map.md`.
+- [PR linking and close intent are two distinct contracts](#pr-linking-and-close-intent-are-two-distinct-contracts)
+- [Reading a linked PR's real state](#reading-a-linked-prs-real-state)
+- [Metadata: durable custom state](#metadata-durable-custom-state)
+- [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
+- [Status changes have server side effects](#status-changes-have-server-side-effects)
+- [Claim ownership without duplicating a run](#claim-ownership-without-duplicating-a-run)
+- [Who else is running right now](#who-else-is-running-right-now)
+- [Sub-issues: todo starts work now, backlog parks it](#sub-issues-todo-starts-work-now-backlog-parks-it)
+- [Incorrect to correct](#incorrect-to-correct)
 
 ## PR linking and close intent are two distinct contracts
 
@@ -22,14 +18,14 @@ The GitHub webhook runs two separate scans over an incoming PR. They are not the
 same gate and they read different fields.
 
 **Linking** scans the PR **title, body, OR branch** for a routable issue key
-(`PREFIX-NUMBER`, e.g. `MUL-2759`). Each match writes an issue ↔ PR link row.
+(`PREFIX-NUMBER`, e.g. `MUL-123`). Each match writes an issue to PR link row.
 This is the link that `multica issue pull-requests` reads back — but see the
 reference-only rule below: a key that appears **only** as a bare mention in the
 body is linked yet hidden from that list.
 
 ```text
-MUL-2759: add built-in issue working skill        # title prefix → links, shown
-agent/matt/mul-2759-working-on-issues             # branch ref   → links, shown
+MUL-123: add the thing the issue asks for        # title prefix → links, shown
+agent/dana/mul-123-add-the-thing             # branch ref   → links, shown
 ```
 
 **Close intent** is stricter and is a separate scan over **title or body only —
@@ -39,10 +35,10 @@ adjacency is what sets the link row's close-intent flag, the gate that
 auto-advances the issue to `done` when the PR merges.
 
 ```text
-Closes MUL-2759                                    # links AND records close intent
-Fixes MUL-2759
-Resolves MUL-2759
-Fix login MUL-2759                                 # links only — keyword not adjacent
+Closes MUL-123                                    # links AND records close intent
+Fixes MUL-123
+Resolves MUL-123
+Fix login MUL-123                                 # links only — keyword not adjacent
 ```
 
 Consequence: a bare title prefix or a branch reference links the PR but does not
@@ -54,14 +50,14 @@ records close intent; on merge, that close intent can move the linked issue to
 as a bare mention in the body — no closing keyword, and not in the title or
 branch — still writes a link row, but the row is flagged `reference_only` and
 **excluded from `multica issue pull-requests`** (and the issue's right-side PR
-list in the UI). This keeps passing mentions like `Related MUL-2759` or
-`Follow up in MUL-2759` from surfacing an unrelated PR as if it were working on
+list in the UI). This keeps passing mentions like `Related MUL-123` or
+`Follow up in MUL-123` from surfacing an unrelated PR as if it were working on
 that issue. To make a PR show up for an issue, put the key in the title, the
 branch, or after a closing keyword in the body — not as a loose body reference.
 
 ```text
-Closes MUL-2759 in the body                        # links and shown
-Related to MUL-2759 in the body (no title/branch)  # links but reference_only → hidden
+Closes MUL-123 in the body                        # links and shown
+Related to MUL-123 in the body (no title/branch)  # links but reference_only → hidden
 ```
 
 ### Default for code-changing issue work
@@ -78,8 +74,8 @@ the PR back to the issue. If the PR should close the issue on merge, put the key
 immediately after a closing keyword in the title or body, for example:
 
 ```text
-MUL-2759: fix login redirect        # links only
-Closes MUL-2759                     # links and records close intent
+MUL-123: fix login redirect        # links only
+Closes MUL-123                     # links and records close intent
 ```
 
 In the final issue comment, include the PR URL when a PR exists. If the task did
@@ -205,21 +201,18 @@ multica issue list --sort property:Impact --direction desc --output json
 ## Status changes have server side effects
 
 A status change is not cosmetic — the server enqueues or skips agent work based
-on it. These are the contracts, not advice:
+on it. These are the contracts, not advice.
 
-A workspace may define custom statuses beyond the seven built-ins; when any
-exist, the runtime brief's Available Commands section lists this workspace's
-catalog. A custom status inherits its category's behavior in full, and each
-built-in key below is also the name of its category — so read these bullets as
-category rules. Two writes are literal-key exceptions, not category rules: the
-failed-task rollback below writes the literal `todo` key, and a merged PR with
-close intent writes the literal `done` key.
+Read them as category rules: a custom status inherits its category's behavior in
+full. Two writes are literal-key exceptions, not category rules — the failed-task
+rollback below writes the literal `todo` key, and a merged PR with close intent
+writes the literal `done` key.
 
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
   the assigned agent then.
-- **`in_progress` / `in_review`** are agent-managed CLI mutations, not
-  `StartTask` / `CompleteTask` side effects. The runtime brief asks agents to
+- **`in_progress` / `in_review`** are agent-managed CLI mutations, not automatic
+  side effects of a task starting or finishing. The runtime brief asks agents to
   write the state the issue is in whenever their work changes it — not from
   the trigger type or the run's lifecycle, and not gated on being the
   assignee. Writes happen whenever the state changes, mid-turn included: a
@@ -244,8 +237,8 @@ close intent writes the literal `done` key.
   itself on merge — you do not also need to flip it manually.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
-  flight — a run in progress keeps going (MUL-4465). To stop a running task,
-  cancel the task itself.
+  flight — a run in progress keeps going. To stop a running task, cancel the
+  task itself.
 - **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
   `todo` when no active task / retry remains — that is the main server-owned
   status write on the agent-run path.
@@ -254,8 +247,7 @@ close intent writes the literal `done` key.
 
 Assigning an active issue to an agent normally starts a run. When the work is
 already underway and the write only records ownership or progress, pass
-`--no-start` on every command in that flow — suppressing the assignment alone
-does not suppress a later status update:
+`--no-start` on every command in that flow:
 
 ```bash
 multica issue assign <issue-id> --to-id <agent-id> --no-start
@@ -264,10 +256,10 @@ multica issue status <issue-id> in_progress --no-start
 ```
 
 Before self-assigning, check the target issue's comment history for an existing
-claim. The server also suppresses a trusted self-assignment when the
-exact target `(issue, agent)` pair already has a non-terminal task, but it
-deliberately keeps same-agent handoffs to a fresh issue starting runs: cross-issue
-serial chains and triage batches rely on that.
+claim. The server also suppresses a trusted self-assignment when the exact
+target `(issue, agent)` pair already has a non-terminal task, but it
+deliberately keeps same-agent handoffs to a fresh issue starting runs:
+cross-issue serial chains and triage batches rely on that.
 
 ## Who else is running right now
 
@@ -301,7 +293,7 @@ a run you see may finish a second later, and one you don't see may start a
 second later. Coordinate through the issue's comments — the reads tell you whom
 to coordinate with.
 
-## Sub-issues: `todo` starts work now, `backlog` parks it
+## Sub-issues: todo starts work now, backlog parks it
 
 On an agent-assigned issue, create status decides whether the assignee fires
 immediately. A non-backlog status (e.g. `todo`) enqueues the agent at create
@@ -324,7 +316,7 @@ Creating every serial step as `todo` enqueues the whole chain at once.
 
 ### Stages: order sub-issues into barrier groups
 
-`--stage <N>` (N ≥ 1) groups sub-issues under the same parent into ordered
+`--stage <N>` (N >= 1) groups sub-issues under the same parent into ordered
 stages. The parent assignee is woken **once, when a whole stage finishes** —
 i.e. every sub-issue in the lowest unfinished stage has reached a terminal
 status (`done`/`cancelled`). A completion that does not close a stage is silent
@@ -352,23 +344,22 @@ multica issue children <parent-id>             # sub-issues grouped by stage
 multica issue status <stage-2-child-id> todo   # promote when its deps are met
 ```
 
-`issue children --output json` reports per-stage `done` counts. A workspace may
-define custom statuses beyond the 7 built-ins; a custom status counts as done
-here when its category is `done` or `cancelled`, which is what `status_category`
-on each child carries. Read `status_category` rather than matching `status`
-against the built-in names.
+`issue children --output json` reports per-stage `done` counts. A custom status
+counts as done here when its category is `done` or `cancelled`, which is what
+`status_category` on each child carries. Read `status_category` rather than
+matching `status` against the built-in names.
 
 Read each sub-issue's description before promoting and only promote items whose
 stated dependencies are met; if a description conflicts with the parent's
 breakdown, leave it `backlog` and comment to confirm first.
 
-## Incorrect → correct
+## Incorrect to correct
 
 PR title (link the issue):
 
 ```text
 Fix login redirect                  # incorrect — no issue key, won't link
-MUL-2759: fix login redirect        # correct — links the PR
+MUL-123: fix login redirect        # correct — links the PR
 ```
 
 Serial / phased sub-issues (don't start the whole chain at once):
@@ -384,13 +375,3 @@ multica issue create --title "Step 1" --parent <issue-id> --assignee <agent> --s
 multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --stage 2 --status backlog
 multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --stage 3 --status backlog
 ```
-
-## References
-
-`references/working-on-issues-source-map.md` — accurate `file:line` for every
-contract above: the `pull-requests` CLI and route, the PR response field list,
-`derivePRState`, the two-path link (`extractIdentifiers`) vs close-intent
-(`extractClosingIdentifiers`) proof, the backlog enqueue lines, child-done
-notify, the stage column / `stageBarrierClosed` barrier and the `--stage` /
-`issue children` CLI, and the metadata CLI. Re-derive before depending on an
-exact line.

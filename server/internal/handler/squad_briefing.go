@@ -29,8 +29,7 @@ import (
 // it changes here. Do not restate it on another surface, and do not say so
 // inside the text: this const is sent to the model on every leader turn, so
 // a note addressed to maintainers is tokens the leader pays for and cannot
-// act on. multica-squads/references/squad-source-map.md records the same
-// ownership for anyone reading from the skill side.
+// act on.
 const squadOperatingProtocolHeader = `## Squad Operating Protocol
 
 **If you are reading this section, you have been activated as a squad LEADER

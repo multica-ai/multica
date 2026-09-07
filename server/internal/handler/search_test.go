@@ -44,6 +44,22 @@ func TestBuildSearchQuery_SingleTerm(t *testing.T) {
 	}
 }
 
+func TestBuildSearchQuery_OmitsUnusedExactTotal(t *testing.T) {
+	query, _ := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, []string{"done", "cancelled"})
+
+	if strings.Contains(query, "COUNT(*) OVER()") || strings.Contains(query, "total_count") {
+		t.Fatalf("search query should not calculate an unused exact total:\n%s", query)
+	}
+}
+
+func TestBuildProjectSearchQuery_OmitsUnusedExactTotal(t *testing.T) {
+	query, _ := buildProjectSearchQuery("Hello", []string{"Hello"}, false)
+
+	if strings.Contains(query, "COUNT(*) OVER()") || strings.Contains(query, "total_count") {
+		t.Fatalf("project search query should not calculate an unused exact total:\n%s", query)
+	}
+}
+
 func TestBuildSearchQuery_CustomTerminalStatuses(t *testing.T) {
 	terminalStatusKeys := []string{"done", "cancelled", "verified"}
 	query, args := buildSearchQuery(

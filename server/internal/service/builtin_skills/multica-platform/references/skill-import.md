@@ -1,22 +1,21 @@
----
-name: multica-skill-importing
-description: "Use when asked to import or install a specific skill into this Multica workspace from a URL or slug. Not for choosing which skill the user needs; never treat a local installer such as `npx skills add` as the final install."
-user-invocable: false
-allowed-tools: Bash(multica *)
----
+# Importing skills
 
-# Importing skills into Multica
+Use this when the user already provided a skill URL, slug, or a clear intent to
+import a specific skill into the current Multica workspace. It does not help you
+decide WHICH skill the user needs — if they only described a capability and no
+URL is known, external search may produce candidates, but importing starts only
+once a URL or concrete target exists.
 
-Use this skill when the user already provided a skill URL, slug, or a clear intent
-to import a specific skill into the current Multica workspace.
-
-Do not use this skill to decide which skill the user needs. If the user only
-describes a capability and no URL is known, external search may produce candidate
-URLs, but this import skill starts only once a URL or concrete import target is
-known.
-
-Every claim below is traced to source in
-`references/skill-importing-source-map.md`. When in doubt, read that file.
+- [The invariant](#the-invariant)
+- [Supported URL source families](#supported-url-source-families)
+- [Local archive import](#local-archive-import)
+- [Direct URL flow](#direct-url-flow)
+- [Additive add vs replace-all set](#additive-add-vs-replace-all-set)
+- [Reserved SKILL.md supporting file](#reserved-skillmd-supporting-file)
+- [Same-name conflicts: --on-conflict](#same-name-conflicts---on-conflict)
+- [Updating an already-imported skill](#updating-an-already-imported-skill)
+- [Reading a skill back](#reading-a-skill-back)
+- [Incorrect to correct](#incorrect-to-correct)
 
 ## The invariant
 
@@ -47,7 +46,7 @@ environment, not the Multica workspace DB, so Multica cannot manage or bind it.
 
 ## Supported URL source families
 
-`detectImportSource` accepts these hosts (and `www.` variants). Pass any of these
+The import endpoint accepts these hosts (and `www.` variants). Pass any of these
 forms to `multica skill import --url <url> --output json`:
 
 ```bash
@@ -64,7 +63,7 @@ multica skill import --url github.com/owner/repo/blob/main/path/to/SKILL.md --ou
 - A bare ClawHub slug (no host) is accepted and routed to ClawHub.
 - Any other host is rejected with a 400 naming the supported sources.
 
-## Local archive import (`.skill` / `.zip`)
+## Local archive import
 
 `multica skill import --file <path> --output json` imports a skill from a local
 archive instead of a hosted URL. A `.skill` file is a standard zip — the format
@@ -103,14 +102,13 @@ structured import result envelope:
 {
   "status": "created|updated|conflict|skipped|failed",
   "reason": "...",
-  "skill": { "...": "SkillWithFilesResponse when created/updated" },
+  "skill": { "...": "the workspace skill, with its files, when created/updated" },
   "existing_skill": { "id": "...", "name": "...", "can_overwrite": true }
 }
 ```
 
-For `created` / `updated`, `skill` is a workspace `SkillWithFilesResponse`: it
-embeds the standard `SkillResponse` and adds the supporting `files` array. Report
-the relevant fields:
+For `created` / `updated`, `skill` is the workspace skill record plus a `files`
+array of its supporting files. Report the relevant fields:
 
 - `status` and `reason` when present.
 - `skill.id` / `skill.name` / `skill.description`.
@@ -137,21 +135,21 @@ target skill id is present before claiming the skill is available to that agent.
 
 ## Additive add vs replace-all set
 
-`multica agent skills add` is additive: the server inserts the assignments without
-clearing existing ones (`AddAgentSkills`).
+`multica agent skills add` is additive: the server inserts the assignments
+without clearing existing ones.
 
 `multica agent skills set` is replace-all: the server clears every current
-assignment, then re-adds exactly the ids you pass (`SetAgentSkills`).
-`set` is the replacement path. Passing only one id to `set` leaves the agent with
-only that one skill and drops every previous assignment.
+assignment, then re-adds exactly the ids you pass. `set` is the replacement
+path. Passing only one id to `set` leaves the agent with only that one skill and
+drops every previous assignment.
 
 ## Reserved SKILL.md supporting file
 
-A skill's primary content is its `SKILL.md`. That filename is reserved: the daemon
-writes the primary content to `SKILL.md` itself when preparing the execution
-environment, so a *supporting* file may not also be named `SKILL.md`
-(`IsReservedContentPath`; the check cleans the path and is case-insensitive, so
-`./SKILL.md` and `sub/../SKILL.md` are caught too).
+A skill's primary content is its `SKILL.md`. That filename is reserved: the
+daemon writes the primary content to `SKILL.md` itself when preparing the
+execution environment, so a *supporting* file may not also be named `SKILL.md`.
+The check cleans the path and is case-insensitive, so `./SKILL.md` and
+`sub/../SKILL.md` are caught too.
 
 Practical effect when importing or creating a skill: if the manifest lists a
 supporting file named `SKILL.md`, the server silently drops it — the import still
@@ -161,7 +159,7 @@ rename it to a non-reserved path. (The hard `400` rejection — "SKILL.md is res
 for the primary skill content" — only fires on the dedicated single-file endpoint
 `PUT /api/skills/{id}/files`, not on import.)
 
-## Same-name conflicts: `--on-conflict`
+## Same-name conflicts: --on-conflict
 
 Default behavior is safe: `multica skill import --url <url>` is equivalent to
 `--on-conflict fail`. If the imported skill name already exists, the command
@@ -234,7 +232,7 @@ Then report that the skill already exists and include its `id` / `name`. Do not
 retry in a loop, and do not create a second skill under a different name just to
 dodge the conflict.
 
-## Updating an already-imported skill: `multica skill refresh`
+## Updating an already-imported skill
 
 When the goal is to pull the latest version of a skill that is already in the
 workspace, prefer `refresh` over re-typing the import URL:
@@ -255,9 +253,9 @@ skill in place:
 - Permission: the skill's creator or a workspace `owner`/`admin` — broader than
   `import --on-conflict overwrite`, which stays creator-only.
 
-The success response is the plain `SkillWithFilesResponse` (same shape as
-`multica skill get --with-content`), not the import result envelope. Failure modes to report
-instead of retrying in a loop:
+The success response is the plain skill-with-files shape (same as
+`multica skill get --with-content`), not the import result envelope. Failure
+modes to report instead of retrying in a loop:
 
 - `422`: the skill has no refreshable provenance (created manually, imported
   from a local archive, or copied from a local runtime). Re-import instead.
@@ -267,13 +265,13 @@ instead of retrying in a loop:
 - `502` / `503` / `504` / `413`: upstream fetch failed (gone, unavailable,
   timed out, or now exceeds import caps); the skill is left untouched.
 
-## Reading a skill back: metadata by default
+## Reading a skill back
 
 `multica skill get` and `multica skill files list` return **metadata only** —
 path, byte size and content hash per file, plus the size and hash of the
 SKILL.md body. That is what the conflict and verification steps above need, and
 it is what keeps a large skill inspectable at all: inlining every body made a
-~600KB skill impossible to fetch over a slow link (GH #7498).
+~600KB skill impossible to fetch over a slow link.
 
 ```bash
 multica skill get <skill-id> --output json                  # metadata
@@ -285,7 +283,7 @@ Reach for `--with-content` only when you are going to read the content. To find
 out why a skill is large, the default output already answers it: the `size`
 column names the file.
 
-## Incorrect → correct
+## Incorrect to correct
 
 Incorrect (bypasses Multica):
 
@@ -296,9 +294,8 @@ npx skills add https://skills.sh/owner/repo/skill
 The skill may exist locally, but Multica cannot manage it as a workspace skill.
 
 Incorrect agent binding for a normal add (replaces every existing assignment):
-
-Using `set` with only the new skill id wipes the agent's other skills. For an add,
-use `add`.
+using `set` with only the new skill id wipes the agent's other skills. For an
+add, use `add`.
 
 Correct import:
 
@@ -313,8 +310,3 @@ agent's skill assignments:
 multica agent skills add <agent-id> --skill-ids <skill-id> --output json
 multica agent skills list <agent-id> --output json
 ```
-
-## References
-
-- `references/skill-importing-source-map.md` — every behavior above mapped to
-  `file:line` in `server/`, plus the verification command to re-derive the lines.

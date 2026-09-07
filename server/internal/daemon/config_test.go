@@ -142,6 +142,46 @@ func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *tes
 	}
 }
 
+func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
+	t.Setenv("MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL", "")
+	base := Overrides{ServerURL: "http://localhost:0", WorkspacesRoot: t.TempDir()}
+
+	cfg, err := LoadConfig(base)
+	if err != nil {
+		t.Fatalf("LoadConfig default: %v", err)
+	}
+	if cfg.WSClaimPollInterval != DefaultWSClaimPollInterval {
+		t.Fatalf("default WSClaimPollInterval = %s, want %s", cfg.WSClaimPollInterval, DefaultWSClaimPollInterval)
+	}
+
+	t.Setenv("MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL", "75s")
+	cfg, err = LoadConfig(base)
+	if err != nil {
+		t.Fatalf("LoadConfig env: %v", err)
+	}
+	if cfg.WSClaimPollInterval != 75*time.Second {
+		t.Fatalf("env WSClaimPollInterval = %s, want 75s", cfg.WSClaimPollInterval)
+	}
+
+	base.WSClaimPollInterval = 2 * time.Minute
+	cfg, err = LoadConfig(base)
+	if err != nil {
+		t.Fatalf("LoadConfig override: %v", err)
+	}
+	if cfg.WSClaimPollInterval != 2*time.Minute {
+		t.Fatalf("override WSClaimPollInterval = %s, want 2m", cfg.WSClaimPollInterval)
+	}
+
+	base.WSClaimPollInterval = 0
+	t.Setenv("MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL", "0s")
+	if _, err := LoadConfig(base); err == nil || !strings.Contains(err.Error(), "must be positive") {
+		t.Fatalf("LoadConfig zero WS claim poll error = %v, want positive-duration validation", err)
+	}
+}
+
 func TestLoadConfig_CompletedTaskTTLDefaultsBoundedOnOfficialCloud(t *testing.T) {
 	stageFakeAgent(t)
 	t.Setenv("HOME", t.TempDir())

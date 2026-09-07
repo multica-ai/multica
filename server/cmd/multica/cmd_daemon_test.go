@@ -105,6 +105,20 @@ func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestBuildDaemonStartArgsForwardsWSClaimPollInterval(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Duration("ws-claim-poll-interval", 0, "")
+	if err := cmd.Flags().Set("ws-claim-poll-interval", "3m"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{"daemon", "start", "--foreground", "--ws-claim-poll-interval", (3 * time.Minute).String()}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
 func TestBuildDaemonStartArgsForwardsWorkspacesRoot(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("workspaces-root", "", "")

@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -81,13 +81,39 @@ describe("McpTab", () => {
     mockDelete.mockResolvedValue({});
   });
 
-  it("lists the library servers with their transport", () => {
+  it("shows each transport as visible text beside its labeled icon", async () => {
+    const user = userEvent.setup();
+    data.servers[1] = server({ id: "srv-2", name: "local-tool", transport: "stdio", enabled: false });
     render(<McpTab />, { wrapper: Wrapper });
 
     expect(screen.getByText("linear")).toBeInTheDocument();
-    expect(screen.getByText("HTTP")).toBeInTheDocument();
+    expect(screen.getByLabelText("Streamable HTTP")).toBeInTheDocument();
     expect(screen.getByText("local-tool")).toBeInTheDocument();
-    expect(screen.getByText("stdio")).toBeInTheDocument();
+    expect(screen.getByLabelText("STDIO")).toBeInTheDocument();
+    expect(screen.getByText("Streamable HTTP")).toBeVisible();
+    expect(screen.getByText("STDIO")).toBeVisible();
+    expect(screen.getByText("Disabled")).toBeVisible();
+    const replaceButton = screen.getByRole("button", {
+      name: "Replace configuration linear",
+    });
+    expect(replaceButton).toHaveTextContent(/^$/);
+    await user.hover(replaceButton);
+    expect(await screen.findByText("Replace configuration", { exact: true })).toBeVisible();
+  });
+
+  it.each([
+    ["linear", "Server URL", "https://mcp.example.com/mcp"],
+    ["local-tool", "Command", "npx"],
+  ])("provides a connection example when replacing %s", async (name, label, example) => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(
+      screen.getByRole("button", { name: `Replace configuration ${name}` }),
+    );
+
+    expect(screen.getByLabelText(label)).toHaveValue("");
+    expect(screen.getByLabelText(label)).toHaveAttribute("placeholder", example);
   });
 
   it("adds a server to the library", async () => {
@@ -95,85 +121,378 @@ describe("McpTab", () => {
     render(<McpTab />, { wrapper: Wrapper });
 
     await user.click(screen.getByRole("button", { name: /Add server/ }));
-    await user.type(screen.getByLabelText("Name"), "github");
+    await user.type(screen.getByLabelText("Server name"), "github");
     // The shared dialog defaults to the STDIO transport.
     await user.type(screen.getByLabelText("Command"), "github-mcp");
-    await user.click(screen.getByRole("button", { name: "Add Server" }));
+    await user.click(screen.getByRole("button", { name: "Add argument" }));
+    await user.type(screen.getByLabelText("Startup arguments 1"), "   ");
+    await user.click(screen.getByRole("button", { name: "Add argument" }));
+    await user.type(screen.getByLabelText("Startup arguments 2"), "--stdio");
+    await user.click(
+      screen.getByRole("button", { name: "Add environment variable" }),
+    );
+    await user.type(
+      screen.getByLabelText("Environment variables: Variable name 1"),
+      "EMPTY_VALUE",
+    );
+    await user.type(
+      screen.getByLabelText("Environment variables: Value 1"),
+      "   ",
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() =>
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({ name: "github" }),
       ),
     );
-    // The entry is sent on its own — the client never holds, and therefore
-    // never resends, anything else.
+    // Every added row is explicit user input. Whitespace and empty values can
+    // carry meaning for process arguments and environment variables.
     const call = mockCreate.mock.calls[0]![0] as { config: Record<string, unknown> };
-    expect(call.config).not.toHaveProperty("mcpServers");
+    expect(call.config).toEqual({
+      command: "github-mcp",
+      args: ["   ", "--stdio"],
+      env: { EMPTY_VALUE: "   " },
+    });
   });
 
-  // Renaming is safe in this model — assignments key off the server id — so
-  // the name field stays editable and the update targets the opened entry.
-  it("edits a library server by id, so a rename keeps its assignments", async () => {
+  it("opens a new shared dialog without displaying validation errors", async () => {
     const user = userEvent.setup();
     render(<McpTab />, { wrapper: Wrapper });
 
-    await user.click(screen.getAllByRole("button", { name: "Edit server" })[0]!);
+    await user.click(screen.getByRole("button", { name: /Add server/ }));
 
-    const nameInput = screen.getByLabelText("Name") as HTMLInputElement;
-    expect(nameInput.value).toBe("linear");
-    expect(nameInput).not.toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Server name")).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByLabelText("Command")).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText("Enter a server name.")).toBeNull();
+    expect(screen.queryByText(/Enter the command used/)).toBeNull();
+  });
+
+  it("waits for an explicit save attempt before showing inline validation", async () => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(screen.getByRole("button", { name: /Add server/ }));
+    const nameInput = screen.getByLabelText("Server name");
+    await user.click(nameInput);
+    await user.tab();
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(nameInput).not.toHaveAttribute("aria-invalid");
+
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    const error = screen.getByText("Enter a server name.");
+    expect(error).toHaveTextContent("Enter a server name.");
+    expect(nameInput).toHaveAttribute("aria-describedby", error.id);
+    expect(error.parentElement).toBe(nameInput.parentElement);
+    expect(nameInput).toHaveFocus();
+  });
+
+  it("focuses the missing connection field after a save attempt", async () => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(screen.getByRole("button", { name: /Add server/ }));
+    await user.type(screen.getByLabelText("Server name"), "github");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(screen.getByLabelText("Command")).toHaveFocus();
+    expect(
+      screen.getByText("Enter the command used to launch this server."),
+    ).toBeInTheDocument();
+  });
+
+  it("focuses a missing URL and clears the error when transport changes", async () => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(screen.getByRole("button", { name: /Add server/ }));
+    await user.type(screen.getByLabelText("Server name"), "remote");
+    await user.click(screen.getByRole("button", { name: /^Streamable HTTP/ }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    const urlInput = screen.getByLabelText("Server URL");
+    expect(urlInput).toHaveFocus();
+    expect(screen.getByText("Enter the MCP server URL.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^STDIO/ }));
+    expect(screen.queryByText("Enter the MCP server URL.")).toBeNull();
+    expect(screen.getByLabelText("Command")).not.toHaveAttribute("aria-invalid");
+  });
+
+  it.each([
+    ["invalid name", "Use only letters, numbers, hyphens, and underscores."],
+    ["linear", "A server with this name already exists."],
+  ])("rejects the server name %s with its precise inline error", async (name, message) => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(screen.getByRole("button", { name: /Add server/ }));
+    const nameInput = screen.getByLabelText("Server name");
+    await user.type(nameInput, name);
+    await user.type(screen.getByLabelText("Command"), "tool");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    const error = screen.getByText(message);
+    expect(nameInput).toHaveFocus();
+    expect(nameInput).toHaveAttribute("aria-describedby", error.id);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["[]", "The server configuration must be a JSON object."],
+    ["{}", "The server configuration must include a command or URL."],
+  ])("rejects semantic JSON error for %s", async (json, message) => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(screen.getByRole("button", { name: /Add server/ }));
+    await user.type(screen.getByLabelText("Server name"), "github");
+    await user.click(screen.getByRole("tab", { name: "JSON" }));
+    const jsonInput = screen.getByLabelText("MCP server JSON configuration");
+    fireEvent.change(jsonInput, { target: { value: json } });
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    const error = screen.getByText(message);
+    expect(jsonInput).toHaveFocus();
+    expect(jsonInput).toHaveAttribute("aria-describedby", error.id);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the footer outside the scroll area and caps the dialog to the viewport", async () => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+
+    const expectStableDialogLayout = () => {
+      const dialog = screen.getByRole("dialog");
+      const scrollArea = dialog.querySelector<HTMLElement>(
+        '[data-slot="mcp-dialog-scroll-area"]',
+      );
+      const footer = dialog.querySelector<HTMLElement>(
+        '[data-slot="mcp-dialog-footer"]',
+      );
+      const submit = screen.getByRole("button", { name: "Add" });
+
+      expect(dialog).toHaveClass("flex", "max-h-[88vh]", "flex-col");
+      expect(scrollArea).toHaveClass("overflow-y-auto");
+      expect(scrollArea).not.toContainElement(footer);
+      expect(footer).toHaveClass("shrink-0", "border-t", "bg-muted/30");
+      expect(submit).toHaveAttribute("form", scrollArea?.id);
+    };
+
+    await user.click(screen.getByRole("button", { name: /Add server/ }));
+    expectStableDialogLayout();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    await user.click(screen.getByRole("button", { name: /Add server/ }));
+    expectStableDialogLayout();
+  });
+
+  it("renames a library server inline without replacing its config", async () => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(
+      screen.getAllByRole("button", { name: /Rename server/ })[0]!,
+    );
+
+    const nameInput = screen.getByRole("textbox", { name: "Rename server" });
+    expect(nameInput).toHaveValue("linear");
+    expect(screen.queryByRole("dialog")).toBeNull();
 
     await user.clear(nameInput);
     await user.type(nameInput, "linear-v2");
-    await user.type(screen.getByLabelText("Server URL"), "https://linear-v2.example");
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save name" }));
 
     await waitFor(() =>
-      expect(mockUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ serverId: "srv-1", name: "linear-v2" }),
-      ),
+      expect(mockUpdate).toHaveBeenCalledWith({
+        serverId: "srv-1",
+        name: "linear-v2",
+      }),
     );
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
+  it("validates every inline rename branch and cancels a no-op", async () => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(
+      screen.getAllByRole("button", { name: /Rename server/ })[1]!,
+    );
+    const nameInput = screen.getByRole("textbox", { name: "Rename server" });
+
+    await user.clear(nameInput);
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+    expect(screen.getByText("Enter a server name.")).toBeInTheDocument();
+    expect(nameInput).toHaveAttribute("aria-invalid", "true");
+
+    await user.type(nameInput, "bad name");
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+    expect(
+      screen.getByText("Use only letters, numbers, hyphens, and underscores."),
+    ).toBeInTheDocument();
+
+    await user.clear(nameInput);
+    await user.type(nameInput, "linear");
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+
+    expect(
+      screen.getByText("A server with this name already exists."),
+    ).toBeInTheDocument();
+    expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    expect(mockUpdate).not.toHaveBeenCalled();
+
+    await user.clear(nameInput);
+    await user.type(nameInput, "local-tool");
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+    expect(screen.queryByRole("textbox", { name: "Rename server" })).toBeNull();
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { reason: "an API error", error: new Error("Rename failed"), message: "Rename failed" },
+    { reason: "an empty error", error: new Error(""), message: "Could not rename the shared MCP server" },
+    { reason: "a non-Error rejection", error: null, message: "Could not rename the shared MCP server" },
+  ])("keeps inline rename open after $reason", async ({ error, message }) => {
+    const user = userEvent.setup();
+    mockUpdate.mockRejectedValueOnce(error);
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(
+      screen.getAllByRole("button", { name: /Rename server/ })[0]!,
+    );
+    const nameInput = screen.getByRole("textbox", { name: "Rename server" });
+    await user.clear(nameInput);
+    await user.type(nameInput, "linear-v2");
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(nameInput).toHaveValue("linear-v2");
+    expect(nameInput).not.toBeDisabled();
+  });
+
+  it("blocks competing library actions while an inline rename is pending", async () => {
+    const user = userEvent.setup();
+    let finishRename!: () => void;
+    mockUpdate.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRename = () => resolve({});
+        }),
+    );
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(
+      screen.getAllByRole("button", { name: /Rename server/ })[0]!,
+    );
+    const nameInput = screen.getByRole("textbox", { name: "Rename server" });
+    await user.clear(nameInput);
+    await user.type(nameInput, "linear-v2");
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledOnce());
+    expect(nameInput).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save name" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel rename" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Add server/ })).toBeDisabled();
+
+    finishRename();
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: "Rename server" })).toBeNull(),
+    );
+  });
+
+  it("replaces the full config without sending a name change", async () => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(
+      screen.getAllByRole("button", {
+        name: /^Replace configuration /,
+      })[0]!,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Replace configuration for linear" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Server name")).toBeNull();
+    expect(screen.queryByText("Name", { exact: true })).toBeNull();
+    expect(screen.getByRole("dialog")).toHaveTextContent("linear");
+    expect(screen.getByLabelText("Server URL")).toHaveValue("");
+
+    await user.type(screen.getByLabelText("Server URL"), "https://linear-v2.example");
+    await user.click(screen.getByRole("button", { name: "Replace configuration" }));
+
+    await waitFor(() =>
+      expect(mockUpdate).toHaveBeenCalledWith({
+        serverId: "srv-1",
+        config: { type: "http", url: "https://linear-v2.example" },
+      }),
+    );
+  });
+
+  it("keeps an in-progress replacement when the settings page rerenders", async () => {
+    const user = userEvent.setup();
+    const view = render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(
+      screen.getAllByRole("button", {
+        name: /^Replace configuration /,
+      })[0]!,
+    );
+    const urlInput = screen.getByLabelText("Server URL");
+    await user.type(urlInput, "https://draft.example/mcp");
+
+    view.rerender(<McpTab />);
+
+    expect(urlInput).toHaveValue("https://draft.example/mcp");
+  });
+
   // The saved entry cannot be read back, but the safe summary still knows the
-  // transport — so the empty form must open on the right one instead of
-  // defaulting a stdio server to HTTP.
-  it("opens the edit form on the server's own transport", async () => {
+  // transport — so the blank replacement form opens on the right one.
+  it("opens the replacement form on the server's own transport", async () => {
     const user = userEvent.setup();
     render(<McpTab />, { wrapper: Wrapper });
 
     // Row 1 is the stdio server.
-    await user.click(screen.getAllByRole("button", { name: "Edit server" })[1]!);
+    await user.click(
+      screen.getAllByRole("button", {
+        name: /^Replace configuration /,
+      })[1]!,
+    );
 
-    expect(screen.getByRole("button", { name: "STDIO" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /^STDIO/ })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect(screen.getByLabelText("Command")).toBeInTheDocument();
+    expect(screen.getByLabelText("Command")).toHaveValue("");
   });
 
-  // Regression: the guided form only speaks stdio/http and REWRITES the entry
-  // on save (`type: "http"`), so editing an SSE server through it would change
-  // its protocol and can break the server. The server returns `sse`, so this is
-  // reachable, not hypothetical — those entries take the JSON path instead.
+  // Unknown transports start in JSON because that best reflects the inventory,
+  // but replacement is explicit, so the user may intentionally switch to the
+  // visual editor and replace it with STDIO or HTTP.
   it.each(["sse", "websocket"])(
-    "edits a %s server through JSON, never the transport-rewriting form",
+    "starts a %s replacement in JSON while keeping the visual editor available",
     async (transport) => {
       const user = userEvent.setup();
       data.servers = [server({ name: "streamy", transport })];
       render(<McpTab />, { wrapper: Wrapper });
 
-      await user.click(screen.getByRole("button", { name: "Edit server" }));
+      await user.click(
+        screen.getByRole("button", { name: /^Replace configuration / }),
+      );
 
       expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
         "aria-selected",
         "true",
       );
-      // Not merely unselected: switching to the form would rewrite the entry.
-      expect(screen.getByRole("tab", { name: "Form" })).toHaveAttribute(
+      expect(screen.getByRole("tab", { name: "Visual editor" })).toHaveAttribute(
         "aria-disabled",
-        "true",
+        "false",
       );
       expect(screen.queryByLabelText("Server URL")).toBeNull();
     },
@@ -183,7 +502,9 @@ describe("McpTab", () => {
     const user = userEvent.setup();
     render(<McpTab />, { wrapper: Wrapper });
 
-    await user.click(screen.getAllByRole("button", { name: "Remove server" })[0]!);
+    await user.click(
+      screen.getAllByRole("button", { name: /Remove server/ })[0]!,
+    );
     await user.click(screen.getByRole("button", { name: "Remove" }));
 
     await waitFor(() => expect(mockDelete).toHaveBeenCalledWith("srv-1"));
@@ -196,8 +517,11 @@ describe("McpTab", () => {
     // The inventory itself stays visible — it carries no credential material.
     expect(screen.getByText("linear")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Add server/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Edit server" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Remove server" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Rename server/ })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /^Replace configuration / }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /Remove server/ })).toBeNull();
     expect(
       screen.getByText(/Only workspace owners and admins/),
     ).toBeInTheDocument();

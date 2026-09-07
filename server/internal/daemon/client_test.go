@@ -43,6 +43,14 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 			// is cancelled with an upgrade prompt (MUL-5707). Pin it here so
 			// dropping it from the list can never be a silent change.
 			protocol.DaemonCapabilityLocalWorktreeV1,
+			// Same shape, opposite default: this daemon's brief names the
+			// merged multica-platform skill, and advertising that is what
+			// stops the server shipping it a redirect stub under the old name
+			// (MUL-6986). Dropping it would silently hand every task on this
+			// machine a skill it does not need; the failure is extra payload
+			// and a stale signpost, neither of which any other test would
+			// notice.
+			protocol.DaemonCapabilityPlatformSkillV1,
 		} {
 			if !capabilities[want] {
 				t.Errorf("X-Client-Capabilities missing %q: %v", want, capabilities)
