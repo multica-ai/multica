@@ -552,6 +552,22 @@
     "stop_tooltip": "エージェントを停止",
     "cancel_failed": "実行をキャンセルできませんでした"
   },
+  "agent_question": {
+    "title": "{{name}} から質問があります",
+    "title_fallback": "エージェントから質問があります",
+    "pick_single": "1つ選択",
+    "pick_multiple": "該当するものをすべて選択",
+    "other_option": "その他",
+    "other_placeholder": "自分の回答を書く",
+    "submit": "回答を送信",
+    "sending": "送信中…",
+    "submit_failed": "回答を送信できませんでした",
+    "answered": "回答済み",
+    "resume_hint": "返信するとエージェントがすぐに再開します。",
+    "waiting_chip": "{{name}} があなたの回答を待っています",
+    "waiting_chip_fallback": "エージェントがあなたの回答を待っています",
+    "option_group_label": "「{{question}}」の選択肢"
+  },
   "execution_log": {
     "section": "実行ログ",
     "show_past": "過去の実行を表示 ({{count}})",

@@ -5,6 +5,25 @@ export type CommentType = "comment" | "status_change" | "progress_update" | "sys
 // author_id; render paths should branch on author_type rather than the UUID.
 export type CommentAuthorType = "member" | "agent" | "system";
 
+/** One selectable answer of an agent question. */
+export interface AgentQuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** One question with its options. `multi_select` allows several labels. */
+export interface AgentQuestion {
+  question: string;
+  header?: string;
+  multi_select?: boolean;
+  options: AgentQuestionOption[];
+}
+
+/** The stored shape of comment.question_payload. */
+export interface AgentQuestionPayload {
+  questions: AgentQuestion[];
+}
+
 export interface Reaction {
   id: string;
   comment_id: string;
@@ -40,6 +59,11 @@ export interface Comment {
   // keys off the id rather than a dedicated `type`, because `type` is
   // client-supplied on the generic comment endpoint and would be forgeable.
   quick_action_id?: string | null;
+  // The structured question an agent asked through AskUserQuestion (GitHub
+  // #8048). Same contract as quick_action_id: server-set only, unforgeable
+  // through the generic comment endpoint. The timeline renders an interactive
+  // answer card off it; the markdown `content` is the plain-text fallback.
+  question_payload?: AgentQuestionPayload | null;
   // Per-target result of every explicit @agent / @squad mention in this comment
   // (MUL-4525 §2). Present only on create/edit responses; older servers omit it.
   trigger_outcomes?: CommentTriggerOutcome[];

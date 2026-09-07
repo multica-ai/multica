@@ -552,6 +552,22 @@
     "stop_tooltip": "에이전트 중지",
     "cancel_failed": "실행을 취소하지 못했습니다"
   },
+  "agent_question": {
+    "title": "{{name}}의 질문",
+    "title_fallback": "에이전트의 질문",
+    "pick_single": "하나 선택",
+    "pick_multiple": "해당하는 항목 모두 선택",
+    "other_option": "기타",
+    "other_placeholder": "직접 답변 작성",
+    "submit": "답변 보내기",
+    "sending": "보내는 중…",
+    "submit_failed": "답변을 보내지 못했습니다",
+    "answered": "답변 완료",
+    "resume_hint": "답변하면 에이전트가 바로 다시 시작합니다.",
+    "waiting_chip": "{{name}}이(가) 답변을 기다리고 있습니다",
+    "waiting_chip_fallback": "에이전트가 답변을 기다리고 있습니다",
+    "option_group_label": "\"{{question}}\" 선택지"
+  },
   "execution_log": {
     "section": "실행 로그",
     "show_past": "이전 실행 보기 ({{count}})",

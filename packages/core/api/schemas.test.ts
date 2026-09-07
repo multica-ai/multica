@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CommentSchema,
   AppConfigSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
@@ -2101,5 +2102,38 @@ describe("issue status catalog schemas", () => {
       { endpoint: "POST /api/issue-statuses" },
     );
     expect(parsed).toEqual(EMPTY_ISSUE_STATUS_ENTRY);
+  });
+});
+
+describe("CommentSchema question_payload (GitHub #8048)", () => {
+  const baseComment = {
+    id: "c-1",
+    issue_id: "i-1",
+    author_type: "agent",
+    author_id: "a-1",
+    content: "**Flag** — Which flag name?",
+    type: "comment",
+    parent_id: null,
+    created_at: "2026-09-07T10:00:00Z",
+    updated_at: "2026-09-07T10:00:00Z",
+  };
+
+  it("keeps a well-formed payload", () => {
+    const parsed = CommentSchema.parse({
+      ...baseComment,
+      question_payload: {
+        questions: [{ question: "Which flag name?", header: "Flag", multi_select: false, options: [{ label: "--dry-run", description: "Conventional" }] }],
+      },
+    });
+    expect(parsed.question_payload?.questions[0]?.options[0]?.label).toBe("--dry-run");
+  });
+
+  it("degrades a malformed payload to no card without dropping the comment", () => {
+    const parsed = CommentSchema.parse({ ...baseComment, question_payload: { questions: "nope" } });
+    expect(parsed.question_payload).toBeUndefined();
+    expect(parsed.id).toBe("c-1");
+
+    const empty = CommentSchema.parse({ ...baseComment, question_payload: { questions: [] } });
+    expect(empty.question_payload).toBeUndefined();
   });
 });

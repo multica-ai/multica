@@ -552,6 +552,22 @@
     "stop_tooltip": "停止智能体",
     "cancel_failed": "取消运行失败"
   },
+  "agent_question": {
+    "title": "{{name}} 有一个问题",
+    "title_fallback": "智能体有一个问题",
+    "pick_single": "选择一项",
+    "pick_multiple": "选择所有适用项",
+    "other_option": "其他",
+    "other_placeholder": "写下你自己的回答",
+    "submit": "发送回答",
+    "sending": "发送中…",
+    "submit_failed": "回答发送失败",
+    "answered": "已回答",
+    "resume_hint": "你回复后智能体会立即继续。",
+    "waiting_chip": "{{name}} 正在等待你的回答",
+    "waiting_chip_fallback": "有智能体正在等待你的回答",
+    "option_group_label": "「{{question}}」的选项"
+  },
   "execution_log": {
     "section": "执行日志",
     "show_past": "显示历史运行（{{count}}）",

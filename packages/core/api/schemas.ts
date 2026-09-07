@@ -994,6 +994,21 @@ export const EMPTY_CREATE_FEEDBACK_RESPONSE: CreateFeedbackResponse = {
   created_at: "",
 };
 
+// Agent question payload (GitHub #8048). Additive display data: a malformed
+// payload degrades to "no card" (the markdown body still renders) rather than
+// dropping the whole comment, hence .catch(undefined) at the use site.
+export const AgentQuestionPayloadSchema = z.object({
+  questions: z.array(z.object({
+    question: z.string(),
+    header: z.string().optional(),
+    multi_select: z.boolean().optional(),
+    options: z.array(z.object({
+      label: z.string(),
+      description: z.string().optional(),
+    })).default([]),
+  })).min(1),
+}).loose();
+
 export const CommentSchema = z.object({
   id: z.string(),
   issue_id: z.string(),
@@ -1010,6 +1025,8 @@ export const CommentSchema = z.object({
   source_task_id: z.string().nullable().optional(),
   // Set only on comments a quick action produced (MUL-5465). Server-only.
   quick_action_id: z.string().nullable().optional(),
+  // Set only on agent question comments (GitHub #8048). Server-only.
+  question_payload: AgentQuestionPayloadSchema.nullable().optional().catch(undefined),
 }).loose();
 
 export const CommentsListSchema = z.array(CommentSchema);
