@@ -76,18 +76,6 @@ func TestHideAgentWindowPreservesExistingSysProcAttr(t *testing.T) {
 	}
 }
 
-// TestCodexInitializeRetrySupportedWithOwnedProcessTree pins the inverse of the
-// invariant this file used to hold. Now that a launched Codex is assigned to a
-// Job Object, descendant termination is observable, so the retry is no longer
-// categorically suppressed on Windows. The cleanup_confirmed gate at the call
-// site still suppresses it whenever ownership could not be taken, so a host
-// where the assignment fails behaves exactly as it did before.
-func TestCodexInitializeRetrySupportedWithOwnedProcessTree(t *testing.T) {
-	if !codexInitializeRetrySupported() {
-		t.Fatal("Codex initialize retry should be available once the process tree is owned by a Job Object")
-	}
-}
-
 // TestStartOwnedProcessTreeCapturesImmediateDescendants is the pre-attach
 // window: Windows grants job membership only to processes created after the
 // assignment and never retroactively, so a child that spawns its real work

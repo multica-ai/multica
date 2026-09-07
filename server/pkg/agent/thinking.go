@@ -703,7 +703,13 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 		}
 	}
 	for _, m := range models {
-		if m.ID != target {
+		// Normalise the catalog side too, not just the requested model. Claude
+		// discovery reports what the CLI would really run, and that includes
+		// the context-window tag (`claude-opus-5[1m]`), while target has
+		// already had it stripped. Comparing raw IDs would miss every tagged
+		// entry and fail the level closed, silently dropping the user's
+		// --effort (MUL-6961).
+		if modelIDForCapabilityLookup(providerType, m.ID) != target {
 			continue
 		}
 		if m.Thinking == nil {

@@ -18,7 +18,7 @@
     "last_run_empty": "--",
     "empty": {
       "title": "还没有自动化",
-      "hint": "为你的智能体安排周期性 task。从模板选一个，或从空白开始。"
+      "hint": "为你的智能体安排周期性工作。从模板选一个，或从空白开始。"
     },
     "scope_all": "全部",
     "no_matches": "没有匹配的自动化",
@@ -259,7 +259,7 @@
     "sr_edit": "编辑自动化",
     "header_create": "新建自动化",
     "header_edit": "编辑自动化",
-    "subtitle": "周期性的 AI task",
+    "subtitle": "周期性的 AI 工作",
     "expand": "展开",
     "collapse": "收起",
     "close": "关闭",

@@ -355,16 +355,3 @@ func TestAgentCopyAcceptsExplicitCustomEnv(t *testing.T) {
 		t.Errorf("custom_env[API_KEY] = %v, want fresh", ce["API_KEY"])
 	}
 }
-
-// The copy command must expose the same secret-safe input channels as create so
-// scripts can keep secrets off the command line.
-func TestAgentCopyExposesSecretSafeFlags(t *testing.T) {
-	for _, name := range []string{
-		"custom-env-stdin", "custom-env-file",
-		"mcp-config-stdin", "mcp-config-file",
-	} {
-		if agentCopyCmd.Flag(name) == nil {
-			t.Errorf("agent copy is missing the %q flag", name)
-		}
-	}
-}

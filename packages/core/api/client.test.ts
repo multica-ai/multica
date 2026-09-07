@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createAuthStore } from "../auth";
 import { configStore } from "../config";
+import type { StorageAdapter, User } from "../types";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
 import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
@@ -2118,6 +2120,19 @@ describe("ApiClient model discovery response schema", () => {
     expect(result.cached_at).toBe("2026-07-29T00:00:00Z");
   });
 
+  it("requests a live model list when force refresh is selected", async () => {
+    stubJSON(completed);
+
+    await new ApiClient("https://api.example.test").initiateListModels("rt-1", {
+      force: true,
+    });
+
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/runtimes/rt-1/models?force=true",
+    );
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
+  });
+
   // The picker drives a state machine off `status`, so a malformed body must
   // become an explicit failure — not a fabricated empty catalog, and not an
   // endless "discovering models" spinner.
@@ -2612,5 +2627,61 @@ describe("clientErrorMessage", () => {
   it("withholds a transport failure, whose message says nothing actionable", () => {
     expect(clientErrorMessage(new TypeError("Failed to fetch"))).toBeUndefined();
     expect(clientErrorMessage(undefined)).toBeUndefined();
+  });
+});
+
+// The wiring this exercises is the one CoreProvider installs: the client's
+// 401 hook drives the auth store's session teardown. Before MUL-7028 the hook
+// only dropped the stored token, so the shell stayed mounted with a live
+// `user` and every following request came back "missing authorization" with
+// no way for the user to get to the login page.
+describe("ApiClient session expiry", () => {
+  function makeStorage(
+    initial: Record<string, string> = {},
+  ): StorageAdapter {
+    const values = { ...initial };
+    return {
+      getItem: (key) => values[key] ?? null,
+      setItem: (key, value) => {
+        values[key] = value;
+      },
+      removeItem: (key) => {
+        delete values[key];
+      },
+    };
+  }
+
+  it("ends the session when the server rejects the credential mid-flight", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "missing authorization" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const storage = makeStorage({ multica_token: "live-token" });
+    // The client is constructed before the store it notifies, exactly as
+    // CoreProvider's initCore does; the hook only ever runs from a request.
+    const session: { store?: ReturnType<typeof createAuthStore> } = {};
+    const client = new ApiClient("https://api.example.test", {
+      onUnauthorized: () => session.store?.getState().sessionExpired(),
+    });
+    const store = createAuthStore({ api: client, storage });
+    session.store = store;
+    store.setState({
+      user: { id: "u1", email: "a@example.com" } as User,
+      isLoading: false,
+      status: "authenticated",
+    });
+    client.setToken("live-token");
+
+    await expect(client.listProjects()).rejects.toBeInstanceOf(ApiError);
+
+    expect(store.getState().user).toBeNull();
+    expect(store.getState().status).toBe("unauthenticated");
+    expect(store.getState().expired).toBe(true);
+    expect(storage.getItem("multica_token")).toBeNull();
   });
 });

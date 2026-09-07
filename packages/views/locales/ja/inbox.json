@@ -48,6 +48,8 @@
     "original_input": "元の入力",
     "retry_with_context": "コンテキストを保持して再試行",
     "edit_advanced": "詳細フォームで編集",
+    "autopilot_quota_exceeded_body": "このワークスペースは現在の期間の自動化実行上限 {{limit}} 回に達しました。実行枠が {{resetAt}} にリセットされるまで、以降の自動化は開始されません。",
+    "autopilot_quota_upgrade": "アップグレード方法を見る",
     "archive": "アーカイブ",
     "unarchive": "アーカイブ解除"
   },
@@ -63,14 +65,16 @@
     "new_comment": "新しいコメント",
     "mentioned": "メンションされました",
     "review_requested": "レビューを依頼",
-    "task_completed": "作業完了",
-    "task_failed": "作業失敗",
+    "task_completed": "実行完了",
+    "task_failed": "実行失敗",
     "agent_blocked": "エージェントがブロック",
     "agent_completed": "エージェントが完了",
     "reaction_added": "リアクションあり",
     "quick_create_done": "エージェントで作成",
     "quick_create_failed": "エージェントでの作成に失敗",
-    "quick_create_unconfirmed": "エージェントでの作成結果は未確認"
+    "quick_create_unconfirmed": "エージェントでの作成結果は未確認",
+    "autopilot_paused": "自動化を一時停止しました",
+    "autopilot_quota_exceeded": "自動化の実行上限に達しました"
   },
   "labels": {
     "set_status_to": "ステータスを変更:",
@@ -83,7 +87,8 @@
     "removed_due_date": "期限を削除",
     "reacted_to_comment": "あなたのコメントに {{emoji}} のリアクションをしました",
     "created_with_agent": "エージェントで作成: {{identifier}}",
-    "failed_with_detail": "失敗: {{detail}}"
+    "failed_with_detail": "失敗: {{detail}}",
+    "autopilot_quota_blocked": "上限に達したため実行をブロックしました"
   },
   "toasts": {
     "source_context_retry_started": "元のコンテキストで再試行を開始しました",

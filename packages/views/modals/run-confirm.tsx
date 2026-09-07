@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -12,22 +11,17 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
-import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import type { IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import { useUpdateIssue, useBatchUpdateIssues } from "@multica/core/issues/mutations";
 import { errorCode } from "@multica/core/api";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
-import { runtimeListOptions, readRuntimeCliVersion, handoffSupported } from "@multica/core/runtimes";
 import { useShortcut, shortcutMatchesEvent, isPlainShortcut } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useStatusLabel } from "../issues/utils/status-label";
 import { useT } from "../i18n";
-
-const MAX_HANDOFF_NOTE = 2000;
 
 // i18next inlines {{name}} / {{status}} into the sentence, but their position
 // varies by language ("{{name}} 会…" vs "Once assigned, {{name}} will…" vs
@@ -80,11 +74,11 @@ interface RunConfirmData {
  *
  * The rule is "dialog = you are handing this to an agent", NOT "you are
  * confirming N runs" (MUL-5010). It therefore does no pre-flight prediction:
- * opening it fires no request, so the note box and buttons are usable on the
- * first frame. Previously it called POST /api/issues/preview-trigger on open
- * and blocked the whole dialog behind a "检查中…" spinner; because that query is
- * keyed per issue id with staleTime 0, every new issue was a guaranteed cache
- * miss and the wait was unavoidable.
+ * opening it fires no request, so the buttons are usable on the first frame.
+ * Previously it called POST /api/issues/preview-trigger on open and blocked the
+ * whole dialog behind a "检查中…" spinner; because that query is keyed per issue
+ * id with staleTime 0, every new issue was a guaranteed cache miss and the wait
+ * was unavoidable.
  *
  * Completion is silent: the assignee/status change and any run it starts
  * surface through the issue's normal updates, so the confirm adds no result
@@ -107,52 +101,18 @@ export function RunConfirmModal({
   const d = (data ?? {}) as RunConfirmData;
   const issueIds = d.issueIds ?? [];
 
-  const [note, setNote] = useState("");
   // Which footer action is in flight, so only the clicked button shows a
-  // spinner (the request runs an agent on the server for note assigns, so it is
-  // not instant — the disabled-only state read as frozen).
+  // spinner (the write is not instant — the disabled-only state read as frozen).
   const [pendingAction, setPendingAction] = useState<"go" | "suppress" | null>(null);
   const submitting = pendingAction !== null;
 
   const updateIssue = useUpdateIssue();
   const batchUpdate = useBatchUpdateIssues();
 
-  // Handoff-support verdict, resolved entirely from warm client caches
-  // (useWorkspacePresencePrefetch keeps agents / squads / runtimes hot), so the
-  // note box settles on the first frame with no round-trip — the same shape as
-  // the quick-create version gate. An agent assignee targets its own runtime; a
-  // squad targets its leader's, which the squad list gives us directly, so both
-  // are knowable locally. `null` means "cannot tell" (assignee not in cache
-  // yet, or no runtime bound) and leaves the box enabled: the note is a soft
-  // gate, and a spurious warning is worse than a note an old daemon drops.
   const wsId = useWorkspaceId();
   // Built-ins resolve through i18n, custom statuses through the catalog, so the
   // promotion headline reads the same way the picker the user just used does.
   const statusLabel = useStatusLabel(wsId);
-  const { data: agents = [] } = useQuery({ ...agentListOptions(wsId), enabled: !!wsId });
-  const { data: runtimes = [] } = useQuery({ ...runtimeListOptions(wsId), enabled: !!wsId });
-  const { data: squads = [] } = useQuery({ ...squadListOptions(wsId), enabled: !!wsId });
-  const localHandoff = useMemo<boolean | null>(() => {
-    if (!d.assigneeId) return null;
-    let agentId: string | undefined;
-    if (d.assigneeType === "agent") {
-      agentId = d.assigneeId;
-    } else if (d.assigneeType === "squad") {
-      // A squad run is executed by its leader, so the leader's runtime is the
-      // one that has to render the note.
-      agentId = squads.find((s) => s.id === d.assigneeId)?.leader_id;
-    }
-    if (!agentId) return null;
-    const agent = agents.find((a) => a.id === agentId);
-    if (!agent?.runtime_id) return null;
-    const runtime = runtimes.find((r) => r.id === agent.runtime_id);
-    if (!runtime) return null;
-    return handoffSupported(readRuntimeCliVersion(runtime.metadata));
-  }, [d.assigneeType, d.assigneeId, agents, runtimes, squads]);
-
-  // Soft gate: an old runtime can't render the note. Disable the box but let
-  // the assignment proceed (MUL-3375 §6.3).
-  const noteDisabled = localHandoff === false;
 
   // A promotion carries the status and nothing else: the owner is already on
   // the issue, and re-sending the same assignee would turn a status write into
@@ -178,10 +138,7 @@ export function RunConfirmModal({
   const submit = async (suppressRun: boolean) => {
     if (issueIds.length === 0 || submitting) return;
     setPendingAction(suppressRun ? "suppress" : "go");
-    const payload = applyTo({
-      ...(suppressRun ? { suppress_run: true } : {}),
-      ...(!suppressRun && !noteDisabled && note.trim() ? { handoff_note: note.trim() } : {}),
-    });
+    const payload = applyTo(suppressRun ? { suppress_run: true } : {});
     try {
       // Completion is silent, exactly as before: the assignee and any run show
       // up through the issue's normal assignee / run-status updates, so there is
@@ -212,11 +169,10 @@ export function RunConfirmModal({
    * The configured `send` chord confirms the assignment, the same chord that
    * creates from the issue composer (MUL-5694).
    *
-   * Bound on the dialog, not on the note box, because the chord means "run the
-   * primary action" no matter which control has focus — and the note box is
-   * not always where focus is. An old runtime disables it, which hands initial
-   * focus to the footer instead, and that is precisely where the keycap on the
-   * confirm button would otherwise be advertising a dead key.
+   * Bound on the dialog, not on a single control, because the chord means "run
+   * the primary action" no matter which control has focus — and with only the
+   * footer left to focus, that is precisely where the keycap on the confirm
+   * button would otherwise be advertising a dead key.
    */
   const onDialogKeyDown = (e: React.KeyboardEvent) => {
     // A held chord submits once, and the Enter that commits an IME
@@ -266,26 +222,6 @@ export function RunConfirmModal({
           </DialogTitle>
           <DialogDescription>{headline}</DialogDescription>
         </DialogHeader>
-
-        {/* Always mounted and always usable on the first frame — nothing about
-            this box depends on a server answer. */}
-        <div className="grid gap-1.5">
-          <label className="text-body font-medium" htmlFor="handoff-note">
-            {t(($) => $.run_confirm.note_label)}
-          </label>
-          <Textarea
-            id="handoff-note"
-            value={note}
-            maxLength={MAX_HANDOFF_NOTE}
-            disabled={submitting || noteDisabled}
-            placeholder={t(($) => $.run_confirm.note_placeholder)}
-            onChange={(e) => setNote(e.target.value)}
-            rows={3}
-          />
-          {noteDisabled ? (
-            <p className="text-caption text-muted-foreground">{t(($) => $.run_confirm.note_unsupported)}</p>
-          ) : null}
-        </div>
 
         {/* The only spinner left is on the button the user just pressed, and it
             reflects the write in flight — never a pre-flight check. */}

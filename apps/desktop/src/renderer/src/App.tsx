@@ -20,6 +20,7 @@ import { IssueWindow } from "./components/issue-window";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useOpenSettingsShortcut } from "./hooks/use-open-settings-shortcut";
+import { useTabSelectionShortcut } from "./hooks/use-tab-selection-shortcut";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { syncDaemonOnLogin } from "./platform/daemon-login-sync";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
@@ -29,6 +30,11 @@ import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
 import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
 import { flushFreezeBreadcrumb } from "./freeze-flush";
 import { DesktopAuthSessionBridge } from "./platform/auth-session-bridge";
+import {
+  tearDownOnLogout,
+  tearDownOnSessionExpiry,
+  type SessionTeardown,
+} from "./platform/session-teardown";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
 // apps/web/app/layout.tsx HTML_LANG. index.html ships a static lang="en";
@@ -349,30 +355,25 @@ function BlockingRuntimeConfigError({ message }: { message: string }) {
   );
 }
 
-// On logout, wipe desktop-only in-memory state and stop the daemon so that
-// a subsequent login as a different user never inherits the previous user's
-// tabs, overlay, or credentials. Zustand persist only writes to localStorage;
-// useLogout clears the storage key, but the live stores stay populated until
-// we explicitly reset them here.
-async function handleDaemonLogout() {
-  // Report synchronously before async daemon cleanup so a rapidly closed main
-  // window cannot leave authenticated issue renderers behind.
-  window.desktopAPI.reportAuthSession?.(null);
-  useTabStore.getState().reset();
-  useWindowOverlayStore.getState().close();
-  // Drop any post-onboarding welcome signal so user B logging in next
-  // doesn't inherit user A's pending modal state.
-  useWelcomeStore.getState().reset();
-  try {
-    await window.daemonAPI.clearToken();
-  } catch {
-    // Best-effort — clearing is followed by stop which also hardens state.
-  }
-  try {
-    await window.daemonAPI.stop();
-  } catch {
-    // Daemon may already be stopped.
-  }
+// Binds the teardown steps to this renderer's real stores and IPC. Which of
+// them each path runs — and why logout stops the daemon while an expiry
+// leaves it running — lives in platform/session-teardown.
+const sessionTeardown: SessionTeardown = {
+  reportAuthSession: (userId) =>
+    window.desktopAPI.reportAuthSession?.(userId),
+  resetTabs: () => useTabStore.getState().reset(),
+  closeOverlay: () => useWindowOverlayStore.getState().close(),
+  resetWelcome: () => useWelcomeStore.getState().reset(),
+  clearDaemonToken: () => window.daemonAPI.clearToken(),
+  stopDaemon: () => window.daemonAPI.stop(),
+};
+
+function handleDaemonLogout() {
+  return tearDownOnLogout(sessionTeardown);
+}
+
+function handleSessionExpired() {
+  tearDownOnSessionExpiry(sessionTeardown);
 }
 
 export default function App() {
@@ -387,6 +388,9 @@ export default function App() {
   // Mounted at the App root for the same reason as Cmd+W: the chord has to
   // work in every renderer state, not only inside the tab shell.
   useOpenSettingsShortcut();
+  // Fixed browser-style tab selection is also owned by main so it remains
+  // available while focus sits inside editors, inputs, menus, or dialogs.
+  useTabSelectionShortcut();
 
   // Flush a freeze/crash breadcrumb the main process parked from a previous
   // session. A true hang or process death can't report itself when it happens
@@ -456,6 +460,9 @@ export default function App() {
           wsUrl={runtimeConfigResult.config.wsUrl}
           onLogout={
             windowContext.kind === "main" ? handleDaemonLogout : undefined
+          }
+          onSessionExpired={
+            windowContext.kind === "main" ? handleSessionExpired : undefined
           }
           identity={identity}
           locale={locale}

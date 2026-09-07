@@ -2,5 +2,10 @@
   "attach_file": "ファイルを添付",
   "toggle_sidebar": "左サイドバーの開閉",
   "copy_code": "コードをコピー",
-  "plain_text": "プレーンテキスト"
+  "plain_text": "プレーンテキスト",
+  "error_boundary": {
+    "title": "このセクションを表示できませんでした。",
+    "description": "予期しないエラーが発生しました。",
+    "try_again": "もう一度試す"
+  }
 }

@@ -315,12 +315,18 @@ VALUES ($1, $2, gen_random_uuid(), gen_random_uuid(), 's3://workspace-delete/sou
 
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
 	req = withURLParam(req, "id", wsID)
-	testutil.Call(t, testHandler.DeleteWorkspace, req).Want(http.StatusNoContent)
+	notifier := &recordingRuntimeGoneNotifier{}
+	h := *testHandler
+	h.DaemonRuntimeGone = notifier
+	testutil.Call(t, h.DeleteWorkspace, req).Want(http.StatusNoContent)
 
 	var exists bool
 	dbfx.QueryRow(t, `SELECT EXISTS (SELECT 1 FROM workspace WHERE id = $1)`, wsID).Scan(&exists)
 	if exists {
 		t.Fatal("workspace still exists after owner DELETE")
+	}
+	if len(notifier.runtimeIDs) != 1 || notifier.runtimeIDs[0] != runtimeID {
+		t.Fatalf("runtime-gone notifications = %v, want [%s]", notifier.runtimeIDs, runtimeID)
 	}
 
 	var pendingCount int

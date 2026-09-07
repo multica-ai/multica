@@ -8,6 +8,27 @@
  */
 import type { InboxItem } from "@multica/core/types";
 
+function formatResetAt(value: string | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+export function getAutopilotQuotaBody(item: InboxItem): string | null {
+  if (item.type !== "autopilot_quota_exceeded") return item.body;
+  const details = item.details ?? {};
+  const resetAt = formatResetAt(details.reset_at);
+  if (!details.limit || !resetAt) return item.body;
+  if (details.autopilot_title) {
+    return `Autopilot “${details.autopilot_title}” was not started because this workspace has reached its limit of ${details.limit} runs for the current period. The allowance resets ${resetAt}.`;
+  }
+  return `This workspace has reached its limit of ${details.limit} autopilot runs for the current period. This execution was not started. The allowance resets ${resetAt}.`;
+}
+
 function singleLine(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -35,6 +56,12 @@ export function stripQuickCreatePrefix(
 
 export function getInboxDisplayTitle(item: InboxItem): string {
   const details = item.details ?? {};
+  // Mobile is English-only today. Mirror web's localized system-notice titles
+  // rather than exposing backend fallback copy that can include raw counts.
+  switch (item.type) {
+    case "autopilot_quota_exceeded":
+      return "Autopilot run limit reached";
+  }
   if (item.type === "quick_create_done") {
     const cleanedTitle = stripQuickCreatePrefix(item.title, details.identifier);
     if (cleanedTitle) return cleanedTitle;
@@ -49,6 +76,35 @@ export function getInboxDisplayTitle(item: InboxItem): string {
     if (prompt) return prompt;
   }
   return item.title;
+}
+
+export function getInboxNavigationTarget(
+  item: InboxItem,
+  workspace: string | null,
+  historyToken: string,
+) {
+  if (!workspace) return null;
+  if (item.issue_id) {
+    return {
+      pathname: "/[workspace]/issue/[id]" as const,
+      params: {
+        workspace,
+        id: item.issue_id,
+        highlight: item.details?.comment_id,
+        h: historyToken,
+      },
+    };
+  }
+  if (
+    item.type === "autopilot_quota_exceeded" ||
+    item.type === "autopilot_paused"
+  ) {
+    return {
+      pathname: "/[workspace]/inbox/[id]" as const,
+      params: { workspace, id: item.id },
+    };
+  }
+  return null;
 }
 
 /**

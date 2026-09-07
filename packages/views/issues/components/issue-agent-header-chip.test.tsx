@@ -301,9 +301,9 @@ describe("IssueAgentHeaderChip", () => {
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
 
     expect(
-      screen.getByRole("button", { name: "2 agents working" }),
+      screen.getByRole("button", { name: "2 active agents" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("2 agents working")).toHaveLength(2);
+    expect(screen.getAllByText("2 active agents")).toHaveLength(2);
     expect(screen.getAllByTestId("active-task-row")).toHaveLength(2);
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });

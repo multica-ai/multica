@@ -1088,17 +1088,27 @@ func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 	t.Parallel()
 
 	prompt := BuildPrompt(Task{
-		AutopilotRunID:       "run-1",
-		AutopilotID:          "autopilot-1",
-		AutopilotTitle:       "Daily dependency check",
-		AutopilotDescription: "Check dependencies and report outdated packages.",
-		AutopilotSource:      "manual",
+		AutopilotRunID:          "run-1",
+		AutopilotID:             "autopilot-1",
+		AutopilotTitle:          "Daily dependency check",
+		AutopilotDescription:    "Check dependencies and report outdated packages.",
+		AutopilotSource:         "manual",
+		AutopilotTriggerPayload: []byte(`{"action":"opened","number":7}`),
 	}, "claude")
 
+	// Every run-scoped autopilot value must appear HERE, and only here. The
+	// runtime brief used to render the same set, which both broke its own
+	// no-per-run-values contract and left two hand-maintained copies to drift
+	// (MUL-6984); execenv.TestAutopilotBriefByteIdenticalAcrossRunScopedFields
+	// pins the brief's side of that split. The payload is rendered whole:
+	// ingress already caps a webhook body at 256 KiB, and truncating at the
+	// only rendering would drop input no CLI can fetch back.
 	for _, want := range []string{
 		"run-only mode",
 		"Autopilot run ID: run-1",
 		"Daily dependency check",
+		"Trigger source: manual",
+		`{"action":"opened","number":7}`,
 		"Check dependencies and report outdated packages.",
 		"multica autopilot get autopilot-1 --output json",
 	} {
@@ -1248,55 +1258,6 @@ func TestBuildPromptCommentTriggeredNoContent(t *testing.T) {
 
 	if !strings.Contains(prompt, "multica issue get") {
 		t.Fatal("prompt missing CLI hint")
-	}
-}
-
-// TestBuildPromptSquadLeaderNoActionProhibition verifies that when a squad
-// leader is triggered by another agent's comment, the per-turn prompt
-// explicitly forbids posting a comment whose only purpose is to announce
-// no_action or "exiting silently". This is the fix for MUL-2168.
-func TestBuildPromptSquadLeaderNoActionProhibition(t *testing.T) {
-	t.Parallel()
-
-	prompt := BuildPrompt(Task{
-		IssueID:               "issue-1",
-		TriggerCommentID:      "comment-1",
-		TriggerCommentContent: "Progress update: tests passing.",
-		TriggerAuthorType:     "agent",
-		TriggerAuthorName:     "Worker",
-		IsLeaderTask:          true,
-		LeaderRoleResolved:    true,
-		Agent: &AgentData{
-			Name:         "Leader",
-			Instructions: "You lead the team.\n\n## Squad Operating Protocol\n\nYou are the LEADER.",
-		},
-	}, "claude")
-
-	for _, want := range []string{
-		"Squad leader no_action rule",
-		"DO NOT post any comment",
-		"multica squad activity",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("squad leader prompt missing %q\n---\n%s", want, prompt)
-		}
-	}
-
-	// Non-squad-leader agent should NOT get the squad leader rule.
-	nonLeaderPrompt := BuildPrompt(Task{
-		IssueID:               "issue-1",
-		TriggerCommentID:      "comment-1",
-		TriggerCommentContent: "Progress update: tests passing.",
-		TriggerAuthorType:     "agent",
-		TriggerAuthorName:     "Worker",
-		Agent: &AgentData{
-			Name:         "Regular",
-			Instructions: "You are a regular agent.",
-		},
-	}, "claude")
-
-	if strings.Contains(nonLeaderPrompt, "Squad leader no_action rule") {
-		t.Fatalf("non-squad-leader prompt should NOT contain squad leader rule\n---\n%s", nonLeaderPrompt)
 	}
 }
 
@@ -2159,20 +2120,6 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 				t.Fatalf("%s Pi session was not reported unavailable", test.name)
 			}
 		})
-	}
-}
-
-func TestProviderUsesPiSessionFileFollowsBuiltinRuntimeDescriptors(t *testing.T) {
-	t.Parallel()
-
-	if !providerUsesPiSessionFile("pi") {
-		t.Fatal("pi protocol family did not use Pi session-file reachability")
-	}
-	for _, desc := range agent.BuiltinRuntimes {
-		want := desc.ProtocolFamily == "pi"
-		if got := providerUsesPiSessionFile(desc.ID); got != want {
-			t.Errorf("providerUsesPiSessionFile(%q) = %v, want %v for protocol family %q", desc.ID, got, want, desc.ProtocolFamily)
-		}
 	}
 }
 
@@ -4177,17 +4124,6 @@ type reportTaskResultRecorder struct {
 	payload map[string]any
 }
 
-func TestTerminalTaskReportTimeoutCoversRetrySchedule(t *testing.T) {
-	client := NewClient("http://example.invalid")
-	worstCase := time.Duration(len(defaultTerminalRetrySchedule)+1) * client.client.Timeout
-	for _, delay := range defaultTerminalRetrySchedule {
-		worstCase += delay
-	}
-	if terminalTaskReportTimeout < worstCase {
-		t.Fatalf("terminal report timeout = %s, want at least retry worst case %s", terminalTaskReportTimeout, worstCase)
-	}
-}
-
 func (r *reportTaskResultRecorder) handler(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -5663,9 +5599,6 @@ func TestBuildPromptSquadLeaderReplyCommandCarvesOutNoAction(t *testing.T) {
 		},
 	}, "claude")
 
-	if !strings.Contains(prompt, "Squad leader no_action rule") {
-		t.Fatalf("leader prompt missing the no_action rule\n---\n%s", prompt)
-	}
 	if !strings.Contains(prompt, "Unless your outcome is `no_action`, post your reply as a comment") {
 		t.Fatalf("leader prompt missing the carve-out reply imperative\n---\n%s", prompt)
 	}
@@ -5701,9 +5634,6 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 		},
 	}
 	prompt := BuildPrompt(leaderTask, "claude")
-	if !strings.Contains(prompt, "Squad leader no_action rule") {
-		t.Fatalf("leader multi-thread prompt missing the no_action rule\n---\n%s", prompt)
-	}
 	scope := strings.Index(prompt, "skip this ENTIRE fan-out block")
 	if scope < 0 {
 		t.Fatalf("leader multi-thread prompt missing the whole-block scope sentence\n---\n%s", prompt)

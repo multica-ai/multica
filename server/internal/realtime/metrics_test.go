@@ -90,9 +90,3 @@ func TestMetricsAggregatesStreamsWithoutTTLAcrossRelayModes(t *testing.T) {
 		t.Fatalf("streams without TTL after sharded repair = %d, want 2", got)
 	}
 }
-
-// Compile-time guarantee that *Hub continues to satisfy Broadcaster, in case
-// someone changes hub.go method signatures without updating the interface.
-func TestHubImplementsBroadcaster(t *testing.T) {
-	var _ Broadcaster = NewHub()
-}

@@ -108,7 +108,7 @@ multica issue create --title "Upgrade notes" --description-stdin < notes.md
 multica issue comment add MUL-123 --content-stdin < review.md
 ```
 
-View the messages of a single run, or stop a task:
+View the messages of a single run, or stop one:
 
 ```bash
 multica issue run-messages <task-id> --issue MUL-123
@@ -154,7 +154,7 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
-Deleting a runtime that still has active agents bound to it is refused by default. `multica runtime delete <id> --cascade` unbinds those agents, preserves their configuration and history, and cancels their active tasks.
+Deleting a runtime that still has active agents bound to it is refused by default. `multica runtime delete <id> --cascade` unbinds those agents, preserves their configuration and history, and cancels their active runs.
 
 See [Daemon and runtimes](/daemon-runtimes) for how it works and for custom profiles.
 
@@ -232,7 +232,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 
 | Command | Subcommand | Purpose | Key flags |
 | --- | --- | --- | --- |
-| `issue` | `list` | List issues | `--status`, `--priority`, `--assignee`, `--project`, `--metadata` (repeatable), `--limit`, `--offset`, `--sort`, `--full-id` |
+| `issue` | `list` | List issues | `--status`, `--priority`, `--assignee`, `--project`, `--metadata` (repeatable), `--property` (repeatable, `"Name=Value"`; `__none__` matches unset), `--limit`, `--offset`, `--sort` (incl. `property:<name-or-id>`), `--full-id` |
 | | `get <id>` | Show a single issue | |
 | | `create` | Create an issue | `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable) |
 | | `update <id>` | Update issue fields | Same fields as `create`, plus `--position`, `--no-start` |
@@ -251,7 +251,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `run-messages <task-id>` | View the messages of a single run | `--since`, `--issue` |
 | | `usage <issue-id>` | View aggregated token usage | |
 | | `rerun <id>` | Re-enqueue a run for the current assignee | |
-| | `cancel-task <task-id>` | Cancel a running or queued task | `--issue` |
+| | `cancel-task <task-id>` | Cancel a running or queued run | `--issue` |
 | `project` | `list/get/create/update/delete` | Manage projects | |
 | | `status <id> <status>` | Change project status | |
 | | `resource list/add/update/remove` | Manage project resources | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` for a local directory) |
@@ -259,7 +259,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option` (repeatable, select types only); `list`: `--include-archived`; the type cannot be changed after creation |
 | `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
 | | `copy <agent-id>` | Copy into a new agent; the original is untouched | `--name` (defaults to the original name plus ` (copy)`), `--runtime-id` (copying to another runtime also requires `--model`), `--no-skills`; secret configuration such as `custom_env`, `mcp_config`, and `runtime_config` is not copied — re-provide it with the same flags as `create` |
-| | `tasks <id>` | View an agent's tasks | |
+| | `tasks <id>` | View an agent's runs | |
 | | `avatar <id>` | Upload an avatar | |
 | | `env get/set <agent-id>` | Read and write custom environment variables (owner and admin only) | |
 | | `skills list/set/add <agent-id>` | Manage attached skills | `--skill-ids` (`set` replaces the full list, `add` appends) |
@@ -289,7 +289,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `stop` / `status` / `restart` | Stop, check status, restart (`restart` takes the same flags as `start`) | |
 | | `logs` | View daemon logs | `--follow`, `--lines` |
 | | `disk-usage` | View local disk usage | `--by-workspace`, `--by-task`, `--top` |
-| `runtime` | `list/usage/activity/update/rename/delete` | View and manage runtimes | `delete`: `--cascade` (unbinds bound agents, preserves their data, and cancels their tasks) |
+| `runtime` | `list/usage/activity/update/rename/delete` | View and manage runtimes | `delete`: `--cascade` (unbinds bound agents, preserves their data, and cancels their runs) |
 | | `profile list/create/update/delete` | Manage custom runtime profiles | |
 | | `profile set-path/unset-path <profile-id>` | Pin a local executable path (local only, never uploaded to the server) | |
 
@@ -325,5 +325,5 @@ Markdown instructions.
 
 - [Multica CLI skill](https://github.com/multica-ai/multica-cli) — operate Multica from Codex, Claude Code, or Cursor.
 - [Authentication and tokens](/auth-tokens) — creating, renewing, and revoking PATs.
-- [Troubleshooting](/troubleshooting) — diagnosing command errors and tasks that never start.
+- [Troubleshooting](/troubleshooting) — diagnosing command errors and runs that never start.
 - [Create and configure an agent](/agents-create) — the full semantics of every `agent create` field.

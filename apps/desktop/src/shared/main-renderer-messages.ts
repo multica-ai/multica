@@ -6,11 +6,28 @@
 export const MAIN_RENDERER_CHANNEL_STATE_CHANNEL =
   "main-renderer:channel-state";
 
+export const TAB_SELECTION_SHORTCUT_CHANNEL = "tab:select-by-shortcut";
+
+export const TAB_SELECTION_SHORTCUT_KEYS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
+
+export type TabSelectionShortcutKey =
+  (typeof TAB_SELECTION_SHORTCUT_KEYS)[number];
+
+export function parseTabSelectionShortcutKey(
+  value: unknown,
+): TabSelectionShortcutKey | null {
+  return typeof value === "number" &&
+    TAB_SELECTION_SHORTCUT_KEYS.includes(value as TabSelectionShortcutKey)
+    ? (value as TabSelectionShortcutKey)
+    : null;
+}
+
 export const MAIN_RENDERER_MESSAGE_CHANNELS = [
   "auth:token",
   "invite:open",
   "inbox:open",
   "settings:open",
+  TAB_SELECTION_SHORTCUT_CHANNEL,
 ] as const;
 
 export type MainRendererMessageChannel =

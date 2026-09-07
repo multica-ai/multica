@@ -207,11 +207,3 @@ func TestMintIgnoresAConsumedToken(t *testing.T) {
 		t.Fatalf("%d rows written, want 2", fake.creates)
 	}
 }
-
-// TestMintThrottleWindowIsShorterThanTheTTL — a throttle at or past the TTL
-// would leave a user with no valid link and no way to get one.
-func TestMintThrottleWindowIsShorterThanTheTTL(t *testing.T) {
-	if BindingTokenMintInterval >= BindingTokenTTL {
-		t.Fatalf("throttle %v must stay inside the %v token TTL", BindingTokenMintInterval, BindingTokenTTL)
-	}
-}

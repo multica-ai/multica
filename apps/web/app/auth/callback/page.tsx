@@ -7,6 +7,7 @@ import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
+import { createLogger } from "@multica/core/logger";
 import { validateCliCallback, redirectToCliCallback } from "@multica/views/auth";
 import {
   Card,
@@ -16,26 +17,36 @@ import {
   CardContent,
 } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
+import { useT } from "@multica/views/i18n";
 import { Loader2 } from "lucide-react";
+import { callbackErrorFrom, type CallbackError } from "./callback-error";
+
+const authLogger = createLogger("auth.callback");
 
 function CallbackContent() {
+  const { t } = useT("auth");
   const router = useRouter();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<CallbackError | null>(null);
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
 
   useEffect(() => {
     const code = searchParams.get("code");
-    if (!code) {
-      setError("Missing authorization code");
+    const errorParam = searchParams.get("error");
+    if (errorParam) {
+      authLogger.warn("Google OAuth returned an error parameter", errorParam);
+      setError(
+        errorParam === "access_denied"
+          ? { kind: "access_denied" }
+          : { kind: "login_failed" },
+      );
       return;
     }
 
-    const errorParam = searchParams.get("error");
-    if (errorParam) {
-      setError(errorParam === "access_denied" ? "Access denied" : errorParam);
+    if (!code) {
+      setError({ kind: "missing_code" });
       return;
     }
 
@@ -77,7 +88,8 @@ function CallbackContent() {
           redirectToCliCallback(cliCallback, token, cliState);
         })
         .catch((err) => {
-          setError(err instanceof Error ? err.message : "Login failed");
+          authLogger.error("CLI Google OAuth callback failed", err);
+          setError(callbackErrorFrom(err));
         });
     } else if (isDesktop) {
       // Desktop flow: exchange code for token, then redirect via deep link
@@ -88,7 +100,8 @@ function CallbackContent() {
           window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
         })
         .catch((err) => {
-          setError(err instanceof Error ? err.message : "Login failed");
+          authLogger.error("Desktop Google OAuth callback failed", err);
+          setError(callbackErrorFrom(err));
         });
     } else {
       // Normal web flow
@@ -138,20 +151,46 @@ function CallbackContent() {
           router.push(resolvePostAuthDestination(wsList, onboarded));
         })
         .catch((err) => {
-          setError(err instanceof Error ? err.message : "Login failed");
+          authLogger.error("Web Google OAuth callback failed", err);
+          setError(callbackErrorFrom(err));
         });
     }
   }, [searchParams, loginWithGoogle, router, qc]);
+
+  const errorDescription = (() => {
+    if (!error) return null;
+    switch (error.kind) {
+      case "raw":
+        return error.text;
+      case "missing_code":
+        return t(($) => $.web.callback.missing_code);
+      case "access_denied":
+        return t(($) => $.web.callback.access_denied);
+      case "login_failed":
+        return t(($) => $.web.callback.login_failed);
+      case "account_disabled":
+        return t(($) => $.web.callback.account_disabled);
+      case "signup_prohibited":
+        return t(($) => $.web.callback.signup_prohibited);
+      case "email_not_allowed":
+        return t(($) => $.web.callback.email_not_allowed);
+      case "google_account_no_email":
+        return t(($) => $.web.callback.google_account_no_email);
+      case "oauth_code_invalid":
+        return t(($) => $.web.callback.oauth_code_invalid);
+    }
+  })();
 
   if (desktopToken) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            <CardTitle className="text-display-sm">Opening Multica</CardTitle>
+            <CardTitle className="text-display-sm">
+              {t(($) => $.web.desktop_handoff.opening_title)}
+            </CardTitle>
             <CardDescription>
-              You should see a prompt to open the Multica desktop app. If
-              nothing happens, click the button below.
+              {t(($) => $.web.desktop_handoff.opening_description)}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
@@ -161,7 +200,7 @@ function CallbackContent() {
                 window.location.href = `multica://auth/callback?token=${encodeURIComponent(desktopToken)}`;
               }}
             >
-              Open Multica Desktop
+              {t(($) => $.web.desktop_handoff.open_button)}
             </Button>
           </CardContent>
         </Card>
@@ -174,12 +213,16 @@ function CallbackContent() {
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            <CardTitle className="text-display-sm">Login Failed</CardTitle>
-            <CardDescription>{error}</CardDescription>
+            <CardTitle className="text-display-sm">
+              {t(($) => $.web.callback.failed_title)}
+            </CardTitle>
+            <CardDescription>
+              {errorDescription}
+            </CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
             <a href={paths.login()} className="text-primary underline-offset-4 hover:underline">
-              Back to login
+              {t(($) => $.web.callback.back_to_login)}
             </a>
           </CardContent>
         </Card>
@@ -191,8 +234,12 @@ function CallbackContent() {
     <div className="flex min-h-screen items-center justify-center">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-display-sm">Signing in...</CardTitle>
-          <CardDescription>Please wait while we complete your login</CardDescription>
+          <CardTitle className="text-display-sm">
+            {t(($) => $.web.callback.signing_in)}
+          </CardTitle>
+          <CardDescription>
+            {t(($) => $.web.callback.signing_in_description)}
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex justify-center">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

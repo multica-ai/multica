@@ -159,9 +159,8 @@ func (h *Handler) RunIssueCommentFollowUp(w http.ResponseWriter, r *http.Request
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status, "issue_revision": created.IssueRevision,
 	})
-	delegationAuthority := h.autopilotDelegationAuthorityFromRequest(r, issue, actorType, actorID)
 	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, createdComment, &lockedComment,
-		actorType, actorID, originatorUserID, delegationAuthority, nil)
+		actorType, actorID, originatorUserID, nil)
 	if h.TaskService != nil {
 		root, rootErr := h.Queries.GetThreadRoot(r.Context(), db.GetThreadRootParams{
 			CommentID: comment.ID, WorkspaceID: issue.WorkspaceID,

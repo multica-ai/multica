@@ -1,6 +1,6 @@
 ---
 title: Install AI coding tools
-description: Install and sign in to a supported AI coding tool so Multica can execute tasks on your machine.
+description: Install and sign in to a supported AI coding tool so Multica can execute runs on your machine.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -47,7 +47,7 @@ Multica currently detects these commands:
 
 After installing, launch the tool once in a terminal on its own and complete its sign-in or model provider setup. If the tool cannot complete requests in the terminal, the daemon's invocations fail the same way.
 
-For CodeArts, verify the non-interactive path with `codearts run --model provider/model "Reply OK"`, not only the TUI. The current CodeArts CLI can let a custom provider work in the TUI while `run`, `models`, and `serve` still require [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html). Multica can discover custom models from `~/.codeartsdoer/codearts_cli.json` or `.jsonc`, but task execution uses `codearts run` and therefore follows its authorization requirements.
+For CodeArts, verify the non-interactive path with `codearts run --model provider/model "Reply OK"`, not only the TUI. The current CodeArts CLI can let a custom provider work in the TUI while `run`, `models`, and `serve` still require [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html). Multica can discover custom models from `~/.codeartsdoer/codearts_cli.json` or `.jsonc`, but agent runs use `codearts run` and therefore follow its authorization requirements.
 
 For Reasonix, run `reasonix setup` and configure a default provider and model before starting the daemon.
 

@@ -19,9 +19,13 @@ import (
 )
 
 const (
-	DefaultServerURL         = "ws://localhost:8080/ws"
-	DefaultPollInterval      = 30 * time.Second
-	DefaultHeartbeatInterval = 15 * time.Second
+	DefaultServerURL    = "ws://localhost:8080/ws"
+	DefaultPollInterval = 30 * time.Second
+	// DefaultWSClaimPollInterval is the upper bound for missed-event safety
+	// polls while task availability and claims use a healthy WebSocket. The
+	// poller applies downward-only jitter before each sleep.
+	DefaultWSClaimPollInterval = 3 * time.Minute
+	DefaultHeartbeatInterval   = 15 * time.Second
 	// DefaultAgentTimeout is the optional absolute wall-clock cap on a single
 	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdog
 	// (DefaultAgentIdleWatchdog), so a session that keeps emitting events is
@@ -125,6 +129,7 @@ type Config struct {
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
 	AutoReloadEnabled              bool                  // restart when the multica binary on disk no longer matches the running version (default: true for CLI-launched daemons)
 	PollInterval                   time.Duration
+	WSClaimPollInterval            time.Duration // upper bound for healthy WS batch-claim safety polls; actual sleeps use downward-only jitter
 	HeartbeatInterval              time.Duration
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
@@ -157,10 +162,11 @@ type Config struct {
 // Overrides allows CLI flags to override environment variables and defaults.
 // Zero values are ignored and the env/default value is used instead.
 type Overrides struct {
-	ServerURL         string
-	WorkspacesRoot    string
-	PollInterval      time.Duration
-	HeartbeatInterval time.Duration
+	ServerURL           string
+	WorkspacesRoot      string
+	PollInterval        time.Duration
+	WSClaimPollInterval time.Duration
+	HeartbeatInterval   time.Duration
 	// AgentTimeout is a pointer so an explicit `--agent-timeout 0` (no cap) is
 	// distinguishable from "flag not passed". nil = use env/default.
 	AgentTimeout                   *time.Duration
@@ -288,6 +294,16 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if overrides.PollInterval > 0 {
 		pollInterval = overrides.PollInterval
+	}
+	wsClaimPollInterval, err := durationFromEnv("MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL", DefaultWSClaimPollInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	if overrides.WSClaimPollInterval > 0 {
+		wsClaimPollInterval = overrides.WSClaimPollInterval
+	}
+	if wsClaimPollInterval <= 0 {
+		return Config{}, fmt.Errorf("MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL must be positive (got %s)", wsClaimPollInterval)
 	}
 
 	heartbeatInterval, err := durationFromEnv("MULTICA_DAEMON_HEARTBEAT_INTERVAL", DefaultHeartbeatInterval)
@@ -612,6 +628,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		HealthPort:                      healthPort,
 		MaxConcurrentTasks:              maxConcurrentTasks,
 		PollInterval:                    pollInterval,
+		WSClaimPollInterval:             wsClaimPollInterval,
 		HeartbeatInterval:               heartbeatInterval,
 		AgentTimeout:                    agentTimeout,
 		CodexSemanticInactivityTimeout:  codexSemanticInactivityTimeout,

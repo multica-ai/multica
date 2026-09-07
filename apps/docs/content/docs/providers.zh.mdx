@@ -37,7 +37,7 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 | OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
 | Pi | `pi` | ✓ | — | `.pi/skills/` |
-| Oh-My-Pi | `omp` | ✓ | — | `.omp/skills/` |
+| Oh-My-Pi | `omp` | ✓ | ✓ | `.omp/skills/` |
 | Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | `.qwen/skills/` |
@@ -64,11 +64,11 @@ DeepSeek Harness 的模型目录由运行时自身提供（`dsh --profile multic
 
 ## 会话恢复
 
-表格中标记 ✓ 的工具支持在后续执行中继续已有会话。前提是原来的会话仍然存在，并且 task 由能够访问它的运行时执行。MiniMax Code 0.1.2 尚未通过 ACP 声明会话加载能力，因此后续执行会新建 MCode 会话。
+表格中标记 ✓ 的工具支持在后续执行中继续已有会话。前提是原来的会话仍然存在，并且运行由能够访问它的运行时执行。MiniMax Code 0.1.2 尚未通过 ACP 声明会话加载能力，因此后续执行会新建 MCode 会话。
 
 Multica 会保存工具返回的会话标识。下一次在同一任务中继续工作时，运行时会尝试恢复这段会话；无法恢复时，会创建一个新会话继续执行。Pi 保存的是本地会话文件路径，因此更依赖原来的电脑和文件。
 
-有关重试和会话恢复的规则，见 [Task](/tasks#手动重试)。
+有关重试和会话恢复的规则，见 [运行](/tasks#手动重试)。
 
 ## MCP 配置
 
@@ -87,8 +87,8 @@ MCP server 的命令、参数和环境变量会随智能体配置保存在服务
 Codex、Hermes 和 OpenClaw 的处理稍有不同：
 
 - Codex 使用单次执行的 `CODEX_HOME`，不会把 skill 写进系统级 Codex 目录。
-- Hermes 使用单次执行的 `HERMES_HOME`。已有的本地配置仍然可以被读取，但绑定的 skill 与会话数据按 task 隔离。这套隔离只在智能体绑定了 skill 时启用，没有绑定 skill 的 task 使用本机原有的 Hermes 主目录。
-- OpenClaw 使用当前 task 工作目录下的 `skills/`，并由单次执行配置把该目录设为工作区。
+- Hermes 使用单次执行的 `HERMES_HOME`。已有的本地配置仍然可以被读取，但绑定的 skill 与会话数据按运行隔离。这套隔离只在智能体绑定了 skill 时启用，没有绑定 skill 的运行使用本机原有的 Hermes 主目录。
+- OpenClaw 使用当前执行工作目录下的 `skills/`，并由单次执行配置把该目录设为工作区。
 
 如何创建和绑定 skill，见 [Skills](/skills)。
 

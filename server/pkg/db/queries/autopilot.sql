@@ -168,23 +168,44 @@ ORDER BY created_at ASC;
 SELECT * FROM autopilot_trigger
 WHERE id = $1;
 
+-- name: GetAutopilotTriggerForAutopilot :one
+-- Trigger lookup BOUND to both the autopilot it must belong to AND that
+-- autopilot's workspace. Since MUL-6951 the trigger row decides which human a run
+-- acts as, so an unbound `WHERE id = $1` would let a trigger id from another
+-- autopilot select the principal. The workspace join closes the other half: the
+-- caller's membership check proves the resolved human belongs to the workspace it
+-- passed, not that the AUTOPILOT does, and a member of two workspaces would
+-- satisfy the former while the trigger came from the other tenant. Callers
+-- resolving an authorization principal must use this, not GetAutopilotTrigger.
+SELECT t.* FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.id = $1 AND t.autopilot_id = $2 AND a.workspace_id = $3;
+
 -- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
     next_run_at, webhook_token, label, provider, event_filters,
-    published_by_type, published_by_id
+    published_by_type, published_by_id,
+    created_by_type, created_by_id
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
     COALESCE(sqlc.narg('provider')::text, 'generic'),
     sqlc.narg('event_filters'),
-    sqlc.narg('published_by_type'), sqlc.narg('published_by_id')
+    sqlc.narg('published_by_type'), sqlc.narg('published_by_id'),
+    sqlc.narg('created_by_type'), sqlc.narg('created_by_id')
 ) RETURNING *;
 
 -- name: SetAutopilotTriggerPublisher :exec
 -- Re-stamp a single trigger's responsible publisher after a substantive edit of
--- THAT trigger (cron / filter / enabled / webhook security). Future runs it fires
--- become accountable to this member (MUL-4302 trigger_owner transfer).
+-- THAT trigger (cron / filter / enabled / webhook security), recording who is now
+-- responsible for its config (MUL-4302).
+--
+-- Since MUL-6951 this changes NOTHING about the runs it fires: they act as, and
+-- are accountable to, the trigger's immutable created_by. An edit must not be able
+-- to re-authorize the automation as the editor (Bohan's ruling), so this statement
+-- deliberately does not touch created_by, and published_by is now a config-audit
+-- column only.
 UPDATE autopilot_trigger
 SET published_by_type = $2, published_by_id = $3, updated_at = now()
 WHERE id = $1;

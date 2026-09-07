@@ -124,7 +124,7 @@
     "more_members_other": "+{{count}} more"
   },
   "instructions_tab": {
-    "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
+    "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every run.",
     "unsaved_changes": "Unsaved changes",
     "save_button": "Save",
     "placeholder": "e.g. Always start by writing a failing test. Prefer small, atomic commits."

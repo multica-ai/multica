@@ -449,10 +449,20 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if !cfg.FeatureFlags["settings_resource_labels"] {
 		t.Fatalf("settings_resource_labels: want true for installed clients, got false")
 	}
+	if !cfg.FeatureFlags["agents_agent_builder"] {
+		t.Fatalf("agents_agent_builder: want true for installed clients, got false")
+	}
+	// MUL-5345: hang stack capture is gone from this build, but v0.4.13–v0.4.18 are
+	// installed and still hold a debugger channel open on every renderer whenever
+	// this key arrives as `true`. Those clients are fail-closed on absence, so NOT
+	// publishing the key is what disarms them — re-adding it would put a flag flip
+	// back within reach of a fleet that can no longer produce a usable stack.
+	if _, published := cfg.FeatureFlags["desktop_hang_stack_capture"]; published {
+		t.Fatalf("desktop_hang_stack_capture: must stay unpublished so installed clients keep their debugger channels closed")
+	}
 	// Deliberately unpublished: pre-v0.4.33 clients gate their "New status"
 	// button on this key and fail closed, which is how a client that predates
-	// the v0.4.31 rendering fixes is kept from creating one. See
-	// featureflags.TestCustomIssueStatusesIsNotPublished.
+	// the v0.4.31 rendering fixes is kept from creating one.
 	if _, published := cfg.FeatureFlags["custom_issue_statuses"]; published {
 		t.Fatalf("custom_issue_statuses: want unpublished, got %v", cfg.FeatureFlags["custom_issue_statuses"])
 	}

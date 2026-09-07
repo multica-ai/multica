@@ -209,7 +209,8 @@ func TestResolveTaskSkillBundles_BuiltinRefTouchesNoWorkspaceQuery(t *testing.T)
 	spy := &skillQuerySpy{inner: testPool}
 	runtimeID, taskID, _ := resolveScopeFixture(t, ctx, "resolvebuiltin", "resolvebuiltin-alpha")
 
-	builtins := testHandler.TaskService.BuiltinSkills()
+	// The unscoped set: resolution deliberately serves any built-in by id.
+	builtins := testHandler.TaskService.AllBuiltinSkills()
 	if len(builtins) == 0 {
 		t.Skip("no builtin skills embedded in this build")
 	}

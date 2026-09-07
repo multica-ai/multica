@@ -1,6 +1,6 @@
 {
   "name": "@multica/web",
-  "version": "0.4.37",
+  "version": "0.4.40",
   "private": true,
   "type": "module",
   "scripts": {

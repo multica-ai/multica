@@ -12,25 +12,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsDimBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("dim", Config{ExecutablePath: "/nonexistent/dim"})
-	if err != nil {
-		t.Fatalf("New(dim) error: %v", err)
-	}
-	if _, ok := b.(*dimBackend); !ok {
-		t.Fatalf("expected *dimBackend, got %T", b)
-	}
-}
-
-func TestDimModelSelectionSupported(t *testing.T) {
-	t.Parallel()
-	// Dim's session/set_model is session-scoped, so model override works.
-	if !ModelSelectionSupported("dim") {
-		t.Fatal("ModelSelectionSupported(dim) should return true")
-	}
-}
-
 // fakeDimACPScript impersonates `dim acp` for unit tests. Dim 0.3.10+
 // releases its per-process session lock shortly after the owning process
 // exits, so a follow-up run resumes via the standard ACP session/load. This

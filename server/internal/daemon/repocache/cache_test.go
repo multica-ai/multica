@@ -827,6 +827,81 @@ func TestCreateWorktreeWithIsolatedGitMetadata(t *testing.T) {
 	}
 }
 
+func TestCreateIsolatedCheckoutImportsFetchedTipFromShallowCache(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	originPath := filepath.Join(root, "origin.git")
+	workPath := filepath.Join(root, "work")
+	cachePath := filepath.Join(root, "cache.git")
+	checkoutPath := filepath.Join(root, "checkout")
+
+	if err := runGit("init", "--bare", originPath); err != nil {
+		t.Fatalf("init bare origin: %v", err)
+	}
+	if err := os.Mkdir(workPath, 0o755); err != nil {
+		t.Fatalf("create work repo directory: %v", err)
+	}
+	createTestRepoAt(t, workPath)
+	branch := currentBranchName(t, workPath)
+	runGitAuthored(t, workPath, "remote", "add", "origin", originPath)
+	runGitAuthored(t, workPath, "push", "-u", "origin", branch)
+	if err := runGit("-C", originPath, "symbolic-ref", "HEAD", "refs/heads/"+branch); err != nil {
+		t.Fatalf("set origin HEAD: %v", err)
+	}
+
+	originURL := "file://" + originPath
+	if out, err := runGitCombinedOutput("clone", "--bare", "--depth=1", originURL, cachePath); err != nil {
+		t.Fatalf("create shallow cache: %s: %v", strings.TrimSpace(string(out)), err)
+	}
+	if out, err := runGitOutput("-C", cachePath, "rev-parse", "--is-shallow-repository"); err != nil {
+		t.Fatalf("inspect shallow cache: %v", err)
+	} else if got := strings.TrimSpace(string(out)); got != "true" {
+		t.Fatalf("test cache is shallow = %q, want true", got)
+	}
+
+	oldTip := gitHead(t, workPath)
+	if err := runGit("-C", cachePath, "config", "remote.origin.fetch", modernFetchRefspec); err != nil {
+		t.Fatalf("set cache fetch refspec: %v", err)
+	}
+
+	addEmptyCommit(t, workPath, "advance origin")
+	newTip := gitHead(t, workPath)
+	runGitAuthored(t, workPath, "push", "origin", branch)
+	if err := runGitFetch(cachePath); err != nil {
+		t.Fatalf("fetch updated origin into shallow cache: %v", err)
+	}
+
+	baseRef := "refs/remotes/origin/" + branch
+	if got := gitRefCommit(t, cachePath, "refs/heads/"+branch); got != oldTip {
+		t.Fatalf("cache local head = %s, want stale tip %s", got, oldTip)
+	}
+	if got := gitRefCommit(t, cachePath, baseRef); got != newTip {
+		t.Fatalf("cache remote-tracking head = %s, want fetched tip %s", got, newTip)
+	}
+	if err := runGit("-C", cachePath, "cat-file", "-e", newTip+"^{commit}"); err != nil {
+		t.Fatalf("fetched tip is missing from shallow cache: %v", err)
+	}
+
+	const taskBranch = "agent/test/shallow-cache"
+	actualBranch, err := createIsolatedCheckout(
+		cachePath,
+		originURL,
+		checkoutPath,
+		taskBranch,
+		baseRef,
+		newTip,
+	)
+	if err != nil {
+		t.Fatalf("create isolated checkout from shallow cache: %v", err)
+	}
+	if actualBranch != taskBranch {
+		t.Fatalf("isolated branch = %q, want %q", actualBranch, taskBranch)
+	}
+	if got := gitHead(t, checkoutPath); got != newTip {
+		t.Fatalf("isolated checkout HEAD = %s, want fetched tip %s", got, newTip)
+	}
+}
+
 func TestCreateWorktreeReusesIsolatedGitMetadata(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)

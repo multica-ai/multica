@@ -35,16 +35,17 @@ type activeTaskLabels struct {
 }
 
 type BusinessMetrics struct {
-	taskEnqueued     *prometheus.CounterVec
-	taskDispatched   *prometheus.CounterVec
-	taskStarted      *prometheus.CounterVec
-	taskTerminal     *prometheus.CounterVec
-	taskFailed       *prometheus.CounterVec
-	taskQueueWait    *prometheus.HistogramVec
-	taskRunSeconds   *prometheus.HistogramVec
-	taskTotalSeconds *prometheus.HistogramVec
-	taskInProgress   *prometheus.GaugeVec
-	taskIterations   *prometheus.HistogramVec
+	taskEnqueued      *prometheus.CounterVec
+	taskDispatched    *prometheus.CounterVec
+	taskStarted       *prometheus.CounterVec
+	taskTerminal      *prometheus.CounterVec
+	taskFailed        *prometheus.CounterVec
+	taskQueueWait     *prometheus.HistogramVec
+	taskClaimableWait *prometheus.HistogramVec
+	taskRunSeconds    *prometheus.HistogramVec
+	taskTotalSeconds  *prometheus.HistogramVec
+	taskInProgress    *prometheus.GaugeVec
+	taskIterations    *prometheus.HistogramVec
 
 	llmTokens         *prometheus.CounterVec
 	llmCostUSD        *prometheus.CounterVec
@@ -124,6 +125,13 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Help:      "Time agent tasks spent queued before dispatch.",
 			Buckets:   taskDurationBuckets,
 		}, metricLabels("multica_agent_task_queue_wait_seconds")),
+		taskClaimableWait: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "multica",
+			Subsystem: "agent_task",
+			Name:      "claimable_wait_seconds",
+			Help:      "Time from an agent task's scheduled claimability (creation or fire_at) to dispatch.",
+			Buckets:   taskDurationBuckets,
+		}, metricLabels("multica_agent_task_claimable_wait_seconds")),
 		taskRunSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: "multica",
 			Subsystem: "agent_task",
@@ -302,6 +310,7 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.taskTerminal,
 		m.taskFailed,
 		m.taskQueueWait,
+		m.taskClaimableWait,
 		m.taskRunSeconds,
 		m.taskTotalSeconds,
 		m.taskInProgress,
@@ -465,7 +474,7 @@ func (m *BusinessMetrics) RecordTaskEnqueued(source, runtimeMode string) {
 	m.taskEnqueued.WithLabelValues(NormalizeTaskSource(source), NormalizeRuntimeMode(runtimeMode)).Inc()
 }
 
-func (m *BusinessMetrics) RecordTaskDispatched(taskID, source, runtimeMode string, queueWaitSeconds float64) {
+func (m *BusinessMetrics) RecordTaskDispatched(taskID, source, runtimeMode string, queueWaitSeconds, claimableWaitSeconds float64) {
 	if m == nil {
 		return
 	}
@@ -474,6 +483,9 @@ func (m *BusinessMetrics) RecordTaskDispatched(taskID, source, runtimeMode strin
 	m.taskDispatched.WithLabelValues(source, runtimeMode).Inc()
 	if queueWaitSeconds >= 0 {
 		m.taskQueueWait.WithLabelValues(source, runtimeMode).Observe(queueWaitSeconds)
+	}
+	if claimableWaitSeconds >= 0 {
+		m.taskClaimableWait.WithLabelValues(source, runtimeMode).Observe(claimableWaitSeconds)
 	}
 	m.markTaskInProgress(taskID, source, runtimeMode)
 }

@@ -231,6 +231,8 @@ function ThreadRow({
       <ActorAvatar
         actorType={thread.entry.actor_type}
         actorId={thread.entry.actor_id}
+        name={thread.entry.actor_name}
+        avatarUrl={thread.entry.actor_avatar_url}
         size="sm"
         profileLink={false}
         className="mt-0.5 shrink-0"
@@ -348,7 +350,9 @@ export function ThreadNavPanel({
           ? cached.preview
           : commentPreview(thread.entry.content ?? "");
       nextCache.set(thread.id, { content: thread.entry.content, preview });
-      const authorName = getActorName(thread.entry.actor_type, thread.entry.actor_id);
+      const authorName =
+        thread.entry.actor_name ||
+        getActorName(thread.entry.actor_type, thread.entry.actor_id);
       const title = preview.title || authorName;
       return {
         thread,

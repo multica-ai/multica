@@ -154,7 +154,7 @@ func init() {
 	projectResourceAddCmd.Flags().String("local-path", "", "Shortcut: absolute path to the working directory (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("daemon-id", "", "Shortcut: id of the daemon that owns the local path (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("ref-label", "", "Shortcut: optional label embedded in resource_ref (only used when --type local_directory)")
-	projectResourceAddCmd.Flags().String("execution-mode", "", "Shortcut: how tasks share the directory — in_place (default, one task at a time) or worktree (each task gets its own git worktree; requires a git repo) (only used when --type local_directory)")
+	projectResourceAddCmd.Flags().String("execution-mode", "", "Shortcut: how runs share the directory — in_place (default, one run at a time) or worktree (each run gets its own git worktree; requires a git repo) (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("ref", "", "Generic JSON resource_ref payload, or a github_repo checkout ref when used with --url")
 	projectResourceAddCmd.Flags().String("label", "", "Optional human-readable label")
 	projectResourceAddCmd.Flags().String("output", "json", "Output format: table or json")

@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -450,16 +454,38 @@ func resolveActorPropertyRef(ctx context.Context, client *cli.APIClient, raw str
 		return "", fmt.Errorf("actor value cannot be empty")
 	}
 	if kind, id, found := strings.Cut(token, ":"); found && kind == "member" {
-		if _, err := uuid.Parse(strings.TrimSpace(id)); err != nil {
+		parsed, err := uuid.Parse(strings.TrimSpace(id))
+		if err != nil {
 			return "", fmt.Errorf("actor id in %q must be a UUID", token)
 		}
-		return kind + ":" + strings.TrimSpace(id), nil
+		// Return the canonical lowercase-hyphenated spelling. Stored actor
+		// values are normalized on write, and the issue list filter matches
+		// the stored string exactly — an uppercase or braced input would
+		// store fine via `property set` but silently miss as a filter.
+		return kind + ":" + parsed.String(), nil
 	}
 	actorType, actorID, err := resolveAssignee(ctx, client, token, memberOnlyKinds)
 	if err != nil {
 		return "", err
 	}
 	return actorType + ":" + actorID, nil
+}
+
+// resolveSelectOptionRef matches a select/multi_select value reference
+// against a definition's options by id first, then case-insensitive name —
+// the same addressing contract resolvePropertyRef gives definitions.
+func resolveSelectOptionRef(property propertyDTO, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	for _, opt := range property.Config.Options {
+		if opt.ID == ref || strings.EqualFold(opt.Name, ref) {
+			return opt.ID, nil
+		}
+	}
+	optionNames := make([]string, len(property.Config.Options))
+	for i, opt := range property.Config.Options {
+		optionNames[i] = opt.Name
+	}
+	return "", fmt.Errorf("option %q not found on property %q; valid options: %s", ref, property.Name, strings.Join(optionNames, ", "))
 }
 
 // encodeIssuePropertyValue converts the CLI --value string into the typed
@@ -470,19 +496,10 @@ func encodeIssuePropertyValue(ctx context.Context, client *cli.APIClient, proper
 	for i, opt := range property.Config.Options {
 		optionNames[i] = opt.Name
 	}
-	resolveOption := func(ref string) (string, error) {
-		ref = strings.TrimSpace(ref)
-		for _, opt := range property.Config.Options {
-			if opt.ID == ref || strings.EqualFold(opt.Name, ref) {
-				return opt.ID, nil
-			}
-		}
-		return "", fmt.Errorf("option %q not found on property %q; valid options: %s", ref, property.Name, strings.Join(optionNames, ", "))
-	}
 
 	switch property.Type {
 	case "select":
-		id, err := resolveOption(raw)
+		id, err := resolveSelectOptionRef(property, raw)
 		if err != nil {
 			return nil, err
 		}
@@ -494,7 +511,7 @@ func encodeIssuePropertyValue(ctx context.Context, client *cli.APIClient, proper
 			if strings.TrimSpace(part) == "" {
 				continue
 			}
-			id, err := resolveOption(part)
+			id, err := resolveSelectOptionRef(property, part)
 			if err != nil {
 				return nil, err
 			}
@@ -793,4 +810,161 @@ func runIssuePropertyUnset(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "Property %q unset.\n", property.Name)
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// issue list --property / --sort property:<ref>
+// ---------------------------------------------------------------------------
+
+// propertyNoValueSentinel is the server's reserved filter value meaning "the
+// property is not set" (see parsePropertiesFilterParam in
+// internal/handler/property.go). It short-circuits value resolution for every
+// property type, so an option or member literally named "__none__" can only be
+// filtered by its UUID.
+const propertyNoValueSentinel = "__none__"
+
+// Store-side caps from validatePropertyValue in internal/handler/property.go.
+// A filter value past them could never match anything.
+const (
+	maxPropertyTextValueLen = 2000 // runes
+	maxPropertyURLValueLen  = 2048 // bytes
+)
+
+// issueSortablePropertyTypes are the property types the server gives a
+// meaningful ORDER BY (see propertySortExpr). This is an allowlist on purpose:
+// a type the CLI does not know — multi_select, checkbox, actor kinds, or a
+// future type from a newer backend — would be silently degraded to position
+// order by the server, and a passed-but-ignored flag is a footgun in scripts.
+var issueSortablePropertyTypes = []string{"select", "number", "date", "text", "url"}
+
+// buildPropertiesFilterQueryParam converts repeated `--property Name=Value`
+// flags into the JSON object passed as the `properties` query parameter to
+// /api/issues. Each flag carries exactly one value; repeating the same
+// property ORs its values (server semantics: OR within a definition, AND
+// across definitions), keyed by the RESOLVED definition id so name and UUID
+// addressing aggregate into one entry.
+func buildPropertiesFilterQueryParam(ctx context.Context, client *cli.APIClient, properties []propertyDTO, pairs []string) (string, error) {
+	filter := make(map[string][]string, len(pairs))
+	for _, pair := range pairs {
+		name, rawValue, found := strings.Cut(pair, "=")
+		if !found || strings.TrimSpace(name) == "" {
+			return "", fmt.Errorf(`--property %q must be in "Name=Value" form`, pair)
+		}
+		// Reserved so scripts never come to depend on "Impact>" resolving as a
+		// property name once >=, <=, != mean comparison filters.
+		if n := strings.TrimSpace(name); strings.HasSuffix(n, "<") || strings.HasSuffix(n, ">") || strings.HasSuffix(n, "!") {
+			return "", fmt.Errorf(`--property %q: comparison operators are not supported yet; only "Name=Value" is accepted`, pair)
+		}
+		if strings.TrimSpace(rawValue) == "" {
+			return "", fmt.Errorf("--property %s: value cannot be empty (use %s to match issues where the property is unset)", name, propertyNoValueSentinel)
+		}
+		property, err := resolvePropertyRef(properties, name)
+		if err != nil {
+			return "", err
+		}
+		if property.Archived {
+			return "", fmt.Errorf("property %q is archived; archived properties are hidden from filtering (matching the web UI) — restore it with `multica property unarchive` if you need it", property.Name)
+		}
+		value, err := resolvePropertyFilterValue(ctx, client, property, rawValue)
+		if err != nil {
+			return "", err
+		}
+		duplicate := false
+		for _, existing := range filter[property.ID] {
+			if existing == value {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			filter[property.ID] = append(filter[property.ID], value)
+		}
+	}
+	buf, err := json.Marshal(filter)
+	if err != nil {
+		return "", fmt.Errorf("encode properties filter: %w", err)
+	}
+	return string(buf), nil
+}
+
+// resolvePropertyFilterValue turns one human-facing filter value into the
+// string the server matches stored values against. The CLI filters the same
+// property types the web UI offers — see isFilterablePropertyType in
+// packages/core/types/property.ts.
+//
+// Scalars match by exact containment, so whatever we send has to be spelled
+// the way the value was stored. validatePropertyValue keeps text as written,
+// trims url and only stores http(s), holds date to YYYY-MM-DD, and caps text
+// and url length; the branches below follow it. A value that could never
+// match is rejected here rather than sent, because an empty result reads
+// like a real answer.
+func resolvePropertyFilterValue(ctx context.Context, client *cli.APIClient, property propertyDTO, raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == propertyNoValueSentinel {
+		return propertyNoValueSentinel, nil
+	}
+	switch property.Type {
+	case "select", "multi_select":
+		return resolveSelectOptionRef(property, trimmed)
+	case "checkbox":
+		if trimmed != "true" && trimmed != "false" {
+			return "", fmt.Errorf("--property %s: value %q is not a valid bool (expected true or false)", property.Name, trimmed)
+		}
+		return trimmed, nil
+	case "actor", "multi_actor":
+		return resolveActorPropertyRef(ctx, client, trimmed)
+	case "number":
+		num, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil {
+			return "", fmt.Errorf("--property %s: value %q is not a valid number", property.Name, trimmed)
+		}
+		if math.IsNaN(num) || math.IsInf(num, 0) {
+			// NaN and infinity have no JSON spelling, so the server never
+			// builds a numeric match for them and the filter would come
+			// back empty for the wrong reason.
+			return "", fmt.Errorf("--property %s: value %q is not a finite number", property.Name, trimmed)
+		}
+		return trimmed, nil
+	case "date":
+		if _, err := time.Parse("2006-01-02", trimmed); err != nil {
+			return "", fmt.Errorf("--property %s: value %q is not a date in YYYY-MM-DD form", property.Name, trimmed)
+		}
+		return trimmed, nil
+	case "url":
+		if len(trimmed) > maxPropertyURLValueLen {
+			return "", fmt.Errorf("--property %s: value must be %d characters or fewer", property.Name, maxPropertyURLValueLen)
+		}
+		if u, err := url.Parse(trimmed); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return "", fmt.Errorf("--property %s: value %q is not an http(s) URL", property.Name, trimmed)
+		}
+		return trimmed, nil
+	case "text":
+		if utf8.RuneCountInString(raw) > maxPropertyTextValueLen {
+			return "", fmt.Errorf("--property %s: value must be %d characters or fewer", property.Name, maxPropertyTextValueLen)
+		}
+		// Text is stored exactly as written, so trimming here would miss a
+		// value that genuinely has spaces around it.
+		return raw, nil
+	default: // a property type only a newer backend knows about
+		return "", fmt.Errorf("--property %s: this CLI does not know how to filter %s properties; update with `multica update`, or use the %s unset filter", property.Name, property.Type, propertyNoValueSentinel)
+	}
+}
+
+// resolveSortableProperty resolves a `--sort property:<ref>` target and
+// applies the loud-failure guards for cases the server would silently degrade
+// to position order: archived definitions and types with no sort order.
+func resolveSortableProperty(properties []propertyDTO, ref string) (propertyDTO, error) {
+	property, err := resolvePropertyRef(properties, ref)
+	if err != nil {
+		return propertyDTO{}, err
+	}
+	if property.Archived {
+		return propertyDTO{}, fmt.Errorf("property %q is archived and the server would fall back to position order; restore it first with `multica property unarchive`", property.Name)
+	}
+	for _, sortable := range issueSortablePropertyTypes {
+		if property.Type == sortable {
+			return property, nil
+		}
+	}
+	return propertyDTO{}, fmt.Errorf("%s property %q has no server-side sort order; sortable property types: %s", property.Type, property.Name, strings.Join(issueSortablePropertyTypes, ", "))
 }

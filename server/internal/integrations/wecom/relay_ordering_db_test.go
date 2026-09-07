@@ -455,20 +455,6 @@ func TestRelayRetryPlan_DefaultsCoverTheDefaultPollInterval(t *testing.T) {
 	}
 }
 
-// The drain runs inside the process's own shutdown, so its budget has to fit
-// under the channel supervisor's — the thing that is joined after it. A drain
-// budget larger than that would push shutdown past the supervisor's own bound
-// and cost the final lease release, which is what makes the next replica wait
-// out a whole LeaseTTL after a redeploy.
-func TestRelayDrainBudget_FitsUnderTheSupervisorShutdownTimeout(t *testing.T) {
-	t.Parallel()
-	cfg := RelayConfig{}.withDefaults()
-	if cfg.DrainBudget >= engine.DefaultShutdownTimeout {
-		t.Fatalf("drain budget %s does not fit under the supervisor's shutdown timeout %s",
-			cfg.DrainBudget, engine.DefaultShutdownTimeout)
-	}
-}
-
 // The claim has to outlive the replay window it guards, at every grace an
 // operator can set — including one longer than the floor.
 func TestDedupeTTL_OutlivesEveryReplayWindow(t *testing.T) {

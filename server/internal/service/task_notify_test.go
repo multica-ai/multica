@@ -3,10 +3,69 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestTaskClaimableWaitSecondsExcludesDeferredDelay(t *testing.T) {
+	createdAt := time.Unix(1_000, 0)
+	fireAt := createdAt.Add(10 * time.Minute)
+	dispatchedAt := fireAt.Add(3 * time.Second)
+	task := db.AgentTaskQueue{
+		CreatedAt:    pgtype.Timestamptz{Time: createdAt, Valid: true},
+		FireAt:       pgtype.Timestamptz{Time: fireAt, Valid: true},
+		DispatchedAt: pgtype.Timestamptz{Time: dispatchedAt, Valid: true},
+	}
+
+	if got := taskClaimableWaitSeconds(task); got != 3 {
+		t.Fatalf("taskClaimableWaitSeconds() = %v, want 3", got)
+	}
+	task.FireAt = pgtype.Timestamptz{}
+	if got := taskClaimableWaitSeconds(task); got != 603 {
+		t.Fatalf("immediate task claimable wait = %v, want 603", got)
+	}
+}
+
+func TestEnqueueDeferredAssigneeFallbackRefreshesRuntimeSchedule(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, issueID := seedAttributionFixture(t, pool)
+	fx := testutil.New(pool, workspaceID, userID)
+	triggerCommentID := fx.Comment(t, issueID, "fallback trigger")
+	agent, err := q.GetAgent(ctx, util.MustParseUUID(agentID))
+	if err != nil {
+		t.Fatalf("GetAgent: %v", err)
+	}
+	primaryTaskID := fx.Task(t, agentID, testutil.Cols{
+		"runtime_id":         util.UUIDToString(agent.RuntimeID),
+		"issue_id":           issueID,
+		"status":             "running",
+		"trigger_comment_id": triggerCommentID,
+	})
+	issue, err := q.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	wakeup := &stubWakeup{}
+	svc := &TaskService{Queries: q, TxStarter: pool, Wakeup: wakeup}
+
+	task, err := svc.EnqueueDeferredAssigneeFallback(ctx, issue, util.MustParseUUID(agentID), pgtype.UUID{}, util.MustParseUUID(primaryTaskID), util.MustParseUUID(triggerCommentID), time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("EnqueueDeferredAssigneeFallback: %v", err)
+	}
+	fx.Cleanup(t, `DELETE FROM agent_task_queue WHERE id = $1`, task.ID)
+	if task.Status != "deferred" || len(wakeup.calls) != 1 {
+		t.Fatalf("fallback task/status wakeups = %q/%+v, want deferred with one schedule refresh", task.Status, wakeup.calls)
+	}
+	if wakeup.calls[0].runtimeID != util.UUIDToString(task.RuntimeID) || wakeup.calls[0].taskID != "" {
+		t.Fatalf("fallback schedule wakeup = %+v, want runtime %s without task id", wakeup.calls[0], util.UUIDToString(task.RuntimeID))
+	}
+}
 
 // stubWakeup records every call so the test can assert that notify
 // reaches the daemon hub and carries the right runtime / task IDs.

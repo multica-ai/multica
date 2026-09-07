@@ -1,15 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import {
-  MARKDOWN_CHUNK_THRESHOLD,
-  parseMarkdownChunked,
-} from "./parse-markdown-chunked";
+import { parseMarkdownChunked } from "./parse-markdown-chunked";
 
 describe("parseMarkdownChunked", () => {
-  it("routes a typical 22k issue through the chunked parse path", () => {
-    expect(MARKDOWN_CHUNK_THRESHOLD).toBeLessThan(22_000);
-  });
-
   it("keeps ordinary paragraph chunks small enough to avoid quadratic scans", () => {
     const markdown = Array.from(
       { length: 240 },

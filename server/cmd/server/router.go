@@ -96,6 +96,7 @@ var corsExposedHeaders = []string{
 	"X-Request-ID",
 	handler.HeaderCommentsTruncated,
 	handler.HeaderTimelineTruncated,
+	handler.HeaderActiveRunsTruncated,
 }
 
 func registerPluginActionRoutes(r chi.Router, h *handler.Handler) {
@@ -489,6 +490,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		}
 		if notifier, ok := opts.DaemonWakeup.(handler.DaemonPendingWorkNotifier); ok {
 			h.DaemonPendingWork = notifier
+		}
+		if notifier, ok := opts.DaemonWakeup.(handler.RuntimeGoneNotifier); ok {
+			h.DaemonRuntimeGone = notifier
 		}
 	}
 	if rdb != nil {

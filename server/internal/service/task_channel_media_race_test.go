@@ -491,7 +491,8 @@ func TestDeferredChannelIssueTaskPromotesAfterMediaSettlement(t *testing.T) {
 	bus := events.New()
 	queued := 0
 	bus.Subscribe(protocol.EventTaskQueued, func(events.Event) { queued++ })
-	svc := &TaskService{Queries: q, TxStarter: pool, Bus: bus}
+	wakeup := &stubWakeup{}
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: bus, Wakeup: wakeup}
 	deadline := time.Now().Add(time.Minute)
 	task, err := svc.EnqueueDeferredChannelIssueTask(ctx, db.Issue{
 		ID:           issueID,
@@ -507,6 +508,9 @@ func TestDeferredChannelIssueTaskPromotesAfterMediaSettlement(t *testing.T) {
 	}
 	if task.Status != "deferred" || !task.FireAt.Valid {
 		t.Fatalf("task = status %q fire_at %v, want deferred", task.Status, task.FireAt)
+	}
+	if len(wakeup.calls) != 1 || wakeup.calls[0].runtimeID != util.UUIDToString(task.RuntimeID) || wakeup.calls[0].taskID != "" {
+		t.Fatalf("deferred schedule wakeups = %+v, want one runtime wakeup without a ready task id", wakeup.calls)
 	}
 	if queued != 0 {
 		t.Fatalf("queued events before media settlement = %d, want 0", queued)
@@ -550,6 +554,9 @@ func TestDeferredChannelIssueTaskPromotesAfterMediaSettlement(t *testing.T) {
 	}
 	if queued != 1 {
 		t.Fatalf("queued events after promotion = %d, want 1", queued)
+	}
+	if len(wakeup.calls) != 2 || wakeup.calls[1].taskID != util.UUIDToString(task.ID) {
+		t.Fatalf("promotion wakeups = %+v, want schedule refresh then ready task", wakeup.calls)
 	}
 	var status string
 	var fireAt pgtype.Timestamptz

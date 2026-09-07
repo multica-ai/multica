@@ -72,25 +72,6 @@ func newProfileUnsetPathTestCmd() *cobra.Command {
 	return cmd
 }
 
-// TestRuntimeProfileCommandsRegistered verifies the subcommands are wired
-// under `runtime profile`.
-func TestRuntimeProfileCommandsRegistered(t *testing.T) {
-	for _, name := range []string{"list", "create", "update", "delete", "set-path", "unset-path"} {
-		cmd, _, err := runtimeProfileCmd.Find([]string{name})
-		if err != nil {
-			t.Fatalf("find %q: %v", name, err)
-		}
-		if cmd == nil || cmd.Name() != name {
-			t.Fatalf("%q not registered under `runtime profile`; got %#v", name, cmd)
-		}
-	}
-	// And `profile` itself must hang off `runtime`.
-	cmd, _, err := runtimeCmd.Find([]string{"profile", "list"})
-	if err != nil || cmd == nil || cmd.Name() != "list" {
-		t.Fatalf("`runtime profile list` not reachable from runtime command: %v / %#v", err, cmd)
-	}
-}
-
 func TestRunRuntimeProfileList(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")

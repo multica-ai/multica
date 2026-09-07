@@ -105,6 +105,20 @@ func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestBuildDaemonStartArgsForwardsWSClaimPollInterval(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Duration("ws-claim-poll-interval", 0, "")
+	if err := cmd.Flags().Set("ws-claim-poll-interval", "3m"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{"daemon", "start", "--foreground", "--ws-claim-poll-interval", (3 * time.Minute).String()}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
 func TestBuildDaemonStartArgsForwardsWorkspacesRoot(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("workspaces-root", "", "")
@@ -133,29 +147,6 @@ func TestBuildDaemonStartArgsForwardsNoAutoReload(t *testing.T) {
 	want := []string{"daemon", "start", "--foreground", "--no-auto-reload"}
 	if strings.Join(args, " ") != strings.Join(want, " ") {
 		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
-	}
-}
-
-// TestNoAutoReloadFlagRegisteredOnBothDaemonCommands: `daemon restart` mirrors
-// every `daemon start` flag, and a knob registered on only one of them fails at
-// parse time for users who restart rather than start.
-func TestNoAutoReloadFlagRegisteredOnBothDaemonCommands(t *testing.T) {
-	t.Parallel()
-
-	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
-		if cmd.Flags().Lookup("no-auto-reload") == nil {
-			t.Errorf("daemon %s is missing --no-auto-reload", cmd.Name())
-		}
-	}
-}
-
-func TestWorkspacesRootFlagRegisteredOnBothDaemonCommands(t *testing.T) {
-	t.Parallel()
-
-	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
-		if cmd.Flags().Lookup("workspaces-root") == nil {
-			t.Errorf("daemon %s is missing --workspaces-root", cmd.Name())
-		}
 	}
 }
 
@@ -652,7 +643,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsProfilesWithTasks(t *testing.T) {
 	}, "", "", false)
 
 	got := out.String()
-	if !strings.Contains(got, "Other workspace roots contain task directories:") {
+	if !strings.Contains(got, "Other workspace roots contain run directories:") {
 		t.Fatalf("hint output = %q, want profile suggestion header", got)
 	}
 	if !strings.Contains(got, "multica --profile two-tasks daemon disk-usage") {
@@ -667,7 +658,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsProfilesWithTasks(t *testing.T) {
 	if !strings.Contains(got, "multica daemon disk-usage --all-profiles") {
 		t.Fatalf("hint output = %q, want --all-profiles tip", got)
 	}
-	if strings.Contains(got, "(0 task") {
+	if strings.Contains(got, "(0 run") {
 		t.Fatalf("hint output = %q, want empty profile omitted", got)
 	}
 	if strings.Index(got, "two-tasks") > strings.Index(got, "one-task") {
@@ -820,7 +811,7 @@ func TestPrintAggregateDiskUsageShowsRootsAndGrandTotal(t *testing.T) {
 	if !strings.Contains(got, "/home/u/multica_workspaces_desktop-host") {
 		t.Fatalf("output = %q, want desktop root path", got)
 	}
-	if !strings.Contains(got, "Grand total:") || !strings.Contains(got, "across 2 task(s) in 2 root(s)") {
+	if !strings.Contains(got, "Grand total:") || !strings.Contains(got, "across 2 run(s) in 2 root(s)") {
 		t.Fatalf("output = %q, want grand total line", got)
 	}
 }

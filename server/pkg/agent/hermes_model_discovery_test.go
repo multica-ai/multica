@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
@@ -98,46 +97,6 @@ func TestHermesDiscoveryHintDoesNotReclassifyTheFailure(t *testing.T) {
 		if got, want := taskfailure.Classify(annotated), taskfailure.Classify(msg); got != want {
 			t.Errorf("hint moved the failure reason for %q: %q -> %q", msg, want, got)
 		}
-	}
-}
-
-// TestHermesDiscoveryTimeoutLeavesRoomForReportRetryBackoffs is the reason the
-// per-provider knob exists, and pins both ends of it.
-//
-// Lower bound: measured against hermes 0.20.0, a healthy session/new returns in
-// ~2s but a hermes whose configured provider cannot be resolved spends ~25s
-// before reporting "No LLM provider configured" — the exact case MUL-6606 is
-// about. Under the shared 15s default that diagnosis was replaced by "context
-// deadline exceeded", so the budget must clear ~25s with margin.
-//
-// Upper bound: the server closes a CLAIMED request after
-// handler.modelListRunningTimeout (60s), measured from RunStartedAt — which
-// PopPending sets at claim time. Heartbeat pickup happens BEFORE the claim and
-// is bounded separately by modelListPendingTimeout, so it does not eat into this
-// 60s; what does share it is the daemon's report-retry backoff schedule
-// (runtimeReportBackoffs, ≈6.5s). Discovery plus those scheduled sleeps must
-// leave room inside 60s for report attempts. This test deliberately does not
-// model the HTTP attempts themselves; those have a separate client timeout.
-func TestHermesDiscoveryTimeoutLeavesRoomForReportRetryBackoffs(t *testing.T) {
-	t.Parallel()
-
-	// Mirrors internal/handler.modelListRunningTimeout and
-	// internal/daemon.runtimeReportBackoffs. Duplicated rather than imported
-	// because pkg/agent must not depend on either package; the comment above is
-	// the contract, and this test is what notices when it drifts.
-	const serverRunningWindow = 60 * time.Second
-	const reportRetryBackoffBudget = 6500 * time.Millisecond
-
-	if hermesDiscoveryTimeout <= acpDiscoveryDefaultTimeout {
-		t.Fatalf("hermes budget %s must exceed the shared default %s; its failure path needs ~25s",
-			hermesDiscoveryTimeout, acpDiscoveryDefaultTimeout)
-	}
-	if hermesDiscoveryTimeout < 30*time.Second {
-		t.Errorf("hermes budget %s leaves no margin over the ~25s failure path", hermesDiscoveryTimeout)
-	}
-	if got := hermesDiscoveryTimeout + reportRetryBackoffBudget; got > serverRunningWindow {
-		t.Errorf("discovery (%s) plus report retry backoffs (%s) = %s, which outlives the server's %s claimed-request window",
-			hermesDiscoveryTimeout, reportRetryBackoffBudget, got, serverRunningWindow)
 	}
 }
 

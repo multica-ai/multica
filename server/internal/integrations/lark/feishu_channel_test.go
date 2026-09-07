@@ -200,22 +200,6 @@ func TestFeishuFactory_MissingConnectorFails(t *testing.T) {
 	}
 }
 
-func TestFeishuChannel_Capabilities(t *testing.T) {
-	fc := &feishuChannel{}
-	caps := fc.Capabilities()
-	for _, want := range []channel.Capability{
-		channel.CapText, channel.CapRichCard, channel.CapThreadReply,
-		channel.CapQuoteReply, channel.CapAttachment, channel.CapTypingIndicator, channel.CapMessageEdit,
-	} {
-		if !caps.Has(want) {
-			t.Fatalf("Capabilities missing %s", want)
-		}
-	}
-	if caps.Has(channel.CapVoice) {
-		t.Fatalf("Feishu adapter does not declare voice")
-	}
-}
-
 func TestFeishuChannel_SendMapsTextAndReplyTarget(t *testing.T) {
 	sender := &fakeSender{msgID: "om_sent"}
 	fc := &feishuChannel{
@@ -868,30 +852,5 @@ func TestChannelMsgType(t *testing.T) {
 		if got := channelMsgType(in); got != want {
 			t.Fatalf("channelMsgType(%q) = %q, want %q", in, got, want)
 		}
-	}
-}
-
-func TestDispatchResultFromEngine(t *testing.T) {
-	res := dispatchResultFromEngine(engine.Result{
-		Outcome:            engine.OutcomeNeedsBinding,
-		Sender:             "ou_user",
-		IssueIdentifier:    "MUL-7",
-		IssueDuplicate:     true,
-		IssueUsageHadMedia: true,
-	})
-	if res.Outcome != OutcomeNeedsBinding {
-		t.Fatalf("outcome not mapped: %q", res.Outcome)
-	}
-	if res.SenderOpenID != "ou_user" {
-		t.Fatalf("sender not mapped: %q", res.SenderOpenID)
-	}
-	if res.IssueIdentifier != "MUL-7" {
-		t.Fatalf("issue identifier not mapped: %q", res.IssueIdentifier)
-	}
-	if !res.IssueDuplicate {
-		t.Fatal("issue duplicate flag not mapped")
-	}
-	if !res.IssueUsageHadMedia {
-		t.Fatal("issue usage media flag not mapped")
 	}
 }

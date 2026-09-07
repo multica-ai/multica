@@ -121,6 +121,11 @@
     "error_not_member": "You're signed in to a Multica account that isn't a member of this workspace.",
     "error_unknown": "Something went wrong. Try again, and if the problem persists, contact the workspace admin."
   },
+  "not_found": {
+    "title": "Page not found",
+    "description": "The page you are looking for doesn't exist or has been moved.",
+    "back_to_multica": "Back to Multica"
+  },
   "navigation": {
     "open_in_new_tab": "Open in new tab"
   }
