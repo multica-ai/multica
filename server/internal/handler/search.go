@@ -169,10 +169,10 @@ func runSearchQuery(
 }
 
 // isSearchStatementTimeout reports whether err is the canonical Postgres
-// query_canceled error (SQLSTATE 57014). Both `SET LOCAL statement_timeout`
-// firing and a client-side context cancellation surface as 57014 — the two
-// are indistinguishable from the client side, which is intentional in the
-// pgx layer.
+// query_canceled error (SQLSTATE 57014) produced when the transaction-local
+// statement timeout fires. A client-side context cancellation surfaces from
+// pgx as context.Canceled instead, so it is intentionally not classified as a
+// database statement timeout here.
 func isSearchStatementTimeout(err error) bool {
 	if err == nil {
 		return false
