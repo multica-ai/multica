@@ -283,6 +283,12 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
 		agents["qwenpaw"] = e
 	}
+	// CommandCode (`cmd`) runs headlessly with --output-format json and the
+	// prompt on stdin. MULTICA_COMMANDCODE_MODEL seeds the daemon-wide default
+	// model (a model id from the user's `cmd --list-models` catalog).
+	if e, ok := probe("MULTICA_COMMANDCODE_PATH", "cmd", "MULTICA_COMMANDCODE_MODEL"); ok {
+		agents["commandcode"] = e
+	}
 	// Dim (`dim`) is the DimCode CLI agent, driven over ACP via `dim acp`.
 	// MULTICA_DIM_MODEL seeds the daemon-wide default (a model id from the
 	// user's logged-in dim catalog).

@@ -269,6 +269,14 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
 		return Catalog{Models: []Model{}}, nil
+	case "commandcode":
+		// CommandCode (`cmd`) prints a human-readable model table, not JSON, so
+		// discovery scrapes `cmd --list-models`. On any failure (binary
+		// missing, non-zero exit, unparseable output) it degrades to an empty
+		// catalog so the UI keeps manual model entry available.
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discovered(discoverCommandCodeModels(ctx, runtimeCmd))
+		})
 	case "qwenpaw":
 		// QwenPaw's model selection is unsupported (session/set_model
 		// persists to agent scope, not session scope), so there is no
