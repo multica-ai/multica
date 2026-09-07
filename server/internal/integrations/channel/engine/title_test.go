@@ -45,6 +45,13 @@ func TestChatTitleSourceConsumesOnlyAppliedFreshDirective(t *testing.T) {
 		{"new body is literal", "<recent_context>history</recent_context>\n\n/clear answer", "/clear answer", "/clear answer", false},
 		{"native fresh", "<recent_context>history</recent_context>\n\nanswer", "answer", "answer", true},
 		{"media fresh", "[Image]", "/clear", "", true},
+		// Known gap, NOT desired behavior: with no current source the selector
+		// falls back to Body, which is the enriched text this fix exists to keep
+		// out of titles. Still reachable when a directive consumes the whole
+		// instruction and only media follows; #8058 records it as out of scope.
+		// Do not read this row as a contract — a later fix that returns "" here
+		// and lets the attachment path name the Chat should change this
+		// expectation rather than work around it.
 		{"missing current text", "body fallback", "  ", "body fallback", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

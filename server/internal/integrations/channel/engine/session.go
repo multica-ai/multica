@@ -359,9 +359,19 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 
 // AppendInput is the channel-agnostic input for AppendUserMessage. Body is the
 // full stored text (including any platform enrichment); CommandText is the
-// user's OWN typed text used for `/issue` parsing (empty falls back to Body) —
-// the adapter supplies it because enrichment is platform-specific. ClaimToken
-// is the dedup owner-fence: when valid, the Mark runs inside this method's tx.
+// user's OWN typed text, used for `/issue` parsing AND for first-title
+// selection (empty falls back to Body) — the adapter supplies it because
+// enrichment is platform-specific. ClaimToken is the dedup owner-fence: when
+// valid, the Mark runs inside this method's tx.
+//
+// With ForceFresh set, CommandText must carry the WHOLE original source
+// INCLUDING the leading /clear directive rather than the bare directive:
+// chatTitleSource consumes exactly one already-applied directive from it, so a
+// bare "/clear" leaves nothing behind and the Chat silently keeps an empty
+// title. Router-driven channels satisfy this because Router never rewrites
+// CommandText for /clear; an adapter handling a native slash command has
+// already split the two and must rejoin them (slackDMControlStarter's
+// ClearSlackDMContext is the one such caller today).
 //
 // MessageID and ThreadID are the REAL platform message id and thread id of this
 // trigger — the outbound reply target recorded on the binding (last_message_id /

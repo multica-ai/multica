@@ -192,8 +192,19 @@ var ErrNoResolverSet = errors.New("channel router: no resolver set for channel t
 // needs-binding, …) are not errors.
 func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 	// Preserve the user's original normalized text before any shared command
-	// rewrites. Session binders pass this source to command classifiers while
-	// Text remains the agent-readable body.
+	// rewrites. Session binders pass this source to command classifiers and to
+	// first-title selection (chatTitleSource) while Text remains the
+	// agent-readable body.
+	//
+	// INVARIANT: an adapter that enriches Text with content the member did not
+	// type — a quoted reply, recent group history — MUST set CommandText itself
+	// before its message reaches Router. This fallback assigns the ALREADY
+	// enriched Text, so an enriching adapter that leaves CommandText empty
+	// silently reinstates #8058 (the enrichment prefix becomes the Chat title)
+	// while every title test stays green. lark and telegram are today's only
+	// enriching adapters and both comply: lark maps the decoder's
+	// pre-enrichment CommandBody, telegram the cleaned instruction captured
+	// before enrichWithQuotedHumanMessage.
 	if msg.CommandText == "" {
 		msg.CommandText = msg.Text
 	}
