@@ -272,6 +272,10 @@ type Environment struct {
 	// ({RootDir}/workdir/); when the task is bound to a local_directory
 	// project_resource, it is the user's path instead. See LocalDirectory.
 	WorkDir string
+	// PreparedSkillNames contains the allocated invocation name for each input
+	// task skill, in order. It crosses the preparation-helper JSON boundary so
+	// the daemon can render names that match the files the provider discovers.
+	PreparedSkillNames []string
 	// LocalDirectory is true when WorkDir points at a user-supplied path
 	// outside RootDir (the local_directory flow). Callers that key behavior
 	// on "may I remove WorkDir as scratch?" must check this — for example
@@ -572,13 +576,13 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// local_directory detection logic ever drifts.
 	manifest := &sidecarManifest{}
 
-	// Arm the rollback BEFORE the first write, not after writeContextFiles
-	// returns. writeContextFiles puts the daemon task marker down as its very
-	// first act and can then fail on any later step — .agent_context, skill
-	// files, project resources — so a defer registered after it returns would
-	// miss exactly the failures that strand a marker with nothing else around
-	// it. Rolling back an empty manifest is a no-op, which is what makes it
-	// safe to arm this early.
+	// Arm the rollback BEFORE the first write, not after
+	// writeContextFilesWithSkillNames returns. That function puts the daemon
+	// task marker down as its very first act and can then fail on any later
+	// step — skill files or project resources. A defer registered after it
+	// returns would miss exactly the failures that strand a marker with nothing
+	// else around it. Rolling back an empty manifest is a no-op, which is what
+	// makes it safe to arm this early.
 	//
 	// The manifest that records these writes is not persisted until the end of
 	// Prepare, and the caller receives no Environment on any failure path, so
@@ -602,9 +606,11 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}()
 	}
 
-	if err := writeContextFiles(workDir, params.Provider, params.Task, manifest); err != nil {
+	preparedSkillNames, err := writeContextFilesWithSkillNames(workDir, params.Provider, params.Task, manifest)
+	if err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
+	env.PreparedSkillNames = preparedSkillNames
 	if err := prepareOmpMcpConfig(workDir, params.Provider, params.McpConfig, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: prepare omp mcp config: %w", err)
 	}
@@ -635,14 +641,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "" || params.LocalWorktree != nil, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
-		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
+		if env.PreparedSkillNames, err = hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
 			return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
 		}
 		env.CodexHome = codexHome
 	}
 
 	if params.Provider == "claude" {
-		settingsPath, err := prepareClaudeSkillSettings(envRoot, params.Task.DisabledRuntimeSkills, params.Task.AgentSkills)
+		preparedTask := ApplyPreparedSkillNames(params.Task, env.PreparedSkillNames)
+		settingsPath, err := prepareClaudeSkillSettings(envRoot, params.Task.DisabledRuntimeSkills, preparedTask.AgentSkills)
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare claude skill settings: %w", err)
 		}
@@ -679,6 +686,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: prepare qwenpaw workspace: %w", err)
 		}
 		env.QwenpawWorkspace = qwenpawWorkspace
+		// The private discovery directory is rebuilt independently of workdir sidecars.
+		env.PreparedSkillNames = resolveSkillSlugs(params.Task.AgentSkills)
 	}
 
 	// For Reasonix, deny the `ask` tool for this task through a project-scoped
@@ -719,7 +728,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 
 	// For OpenClaw, synthesize a per-task config that pins workspace to
 	// workDir. The skill scanner then reads {workDir}/skills/ (written by
-	// writeContextFiles above). Fail closed on errors: a malformed user
+	// writeContextFilesWithSkillNames above). Fail closed on errors: a malformed user
 	// config that the openclaw CLI can't read is a real problem and
 	// silently degrading to a minimal config would mask it by booting
 	// OpenClaw without the agents / providers / API keys it expects.
@@ -804,7 +813,8 @@ type ReuseParams struct {
 }
 
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
-// Returns nil if the workdir does not exist (caller should fall back to Prepare).
+// Returns nil if the workdir does not exist or a required refresh cannot finish;
+// the caller should fall back to Prepare.
 func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if _, err := os.Stat(params.WorkDir); err != nil {
 		return nil
@@ -900,9 +910,21 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// legacy local_directory Reuse fallback — skip the persist in that
 	// case to avoid creating a stray manifest at the filesystem root.
 	manifest := &sidecarManifest{}
-	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task, manifest); err != nil {
-		logger.Warn("execenv: refresh context files failed", "error", err)
+	rollbackRefreshedSidecars := func() {
+		if rollbackErr := rollBackPreparedSidecars(*manifest); rollbackErr != nil {
+			logger.Warn("execenv: roll back incomplete reused sidecars failed", "error", rollbackErr)
+		}
 	}
+	preparedSkillNames, err := writeContextFilesWithSkillNames(params.WorkDir, params.Provider, params.Task, manifest)
+	if err != nil {
+		if preparedSkillNames == nil {
+			logger.Warn("execenv: refresh context files failed before skill materialization completed; forcing fresh prepare", "error", err)
+			rollbackRefreshedSidecars()
+			return nil
+		}
+		logger.Warn("execenv: refresh project resources failed (non-fatal)", "error", err)
+	}
+	env.PreparedSkillNames = preparedSkillNames
 	if err := prepareOmpMcpConfig(params.WorkDir, params.Provider, params.McpConfig, manifest); err != nil {
 		logger.Warn("execenv: refresh omp mcp config failed; forcing fresh prepare", "error", err)
 		return nil
@@ -914,22 +936,35 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
-			logger.Warn("execenv: refresh codex-home failed", "error", err)
-		} else {
-			env.CodexHome = codexHome
-			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
-				logger.Warn("execenv: refresh codex skills failed", "error", err)
-			}
+			logger.Warn("execenv: refresh codex-home failed; forcing fresh prepare", "error", err)
+			rollbackRefreshedSidecars()
+			return nil
 		}
+		env.CodexHome = codexHome
+		preparedSkillNames, err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger)
+		if err != nil && preparedSkillNames == nil {
+			logger.Warn("execenv: refresh codex skills failed before materialization completed; forcing fresh prepare", "error", err)
+			if cleanupErr := os.RemoveAll(filepath.Join(codexHome, "skills")); cleanupErr != nil {
+				logger.Warn("execenv: remove incomplete reused codex skills failed", "error", cleanupErr)
+			}
+			rollbackRefreshedSidecars()
+			return nil
+		}
+		if err != nil {
+			logger.Warn("execenv: refresh codex skill policy failed (non-fatal)", "error", err)
+		}
+		env.PreparedSkillNames = preparedSkillNames
 	}
 
 	if params.Provider == "claude" && env.RootDir != "" {
-		settingsPath, err := prepareClaudeSkillSettings(env.RootDir, params.Task.DisabledRuntimeSkills, params.Task.AgentSkills)
+		preparedTask := ApplyPreparedSkillNames(params.Task, env.PreparedSkillNames)
+		settingsPath, err := prepareClaudeSkillSettings(env.RootDir, params.Task.DisabledRuntimeSkills, preparedTask.AgentSkills)
 		if err != nil {
-			logger.Warn("execenv: refresh claude skill settings failed", "error", err)
-		} else {
-			env.ClaudeSettingsPath = settingsPath
+			logger.Warn("execenv: refresh claude skill settings failed; forcing fresh prepare", "error", err)
+			rollbackRefreshedSidecars()
+			return nil
 		}
+		env.ClaudeSettingsPath = settingsPath
 	}
 
 	// Re-deny Reasonix's `ask` tool on reuse: CleanupSidecars above removed the
@@ -950,6 +985,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			return nil
 		}
 		env.QwenpawWorkspace = qwenpawWorkspace
+		env.PreparedSkillNames = resolveSkillSlugs(params.Task.AgentSkills)
 	}
 
 	// Refresh (or tear down) the per-task HERMES_HOME on reuse. With skills
@@ -1035,6 +1071,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 // both user-installed skills (from the shared ~/.codex/skills/) and
 // workspace-assigned skills. Workspace skills win on name conflict — they are
 // written last and seedUserCodexSkills already pre-filters their names.
+// Returns the workspace names actually allocated after user skills are seeded.
 //
 // The skills directory is wiped first so two stale-state classes that the
 // Reuse path would otherwise leak are gone:
@@ -1051,20 +1088,24 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 // user's real ~/.codex/. Other runtimes leave HOME untouched and discover
 // user-level skills natively (see context.go for the workdir-local paths
 // they use for workspace skills).
-func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, disabledRuntimeSkills []RuntimeSkillRefForEnv, logger *slog.Logger) error {
+func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, disabledRuntimeSkills []RuntimeSkillRefForEnv, logger *slog.Logger) ([]string, error) {
 	skillsDir := filepath.Join(codexHome, "skills")
 	if err := os.RemoveAll(skillsDir); err != nil {
-		return fmt.Errorf("clear codex skills dir: %w", err)
+		return nil, fmt.Errorf("clear codex skills dir: %w", err)
 	}
 	if err := seedUserCodexSkills(codexHome, workspaceSkills, logger); err != nil {
 		logger.Warn("execenv: seed user codex skills failed", "error", err)
 	}
+	preparedSkillNames := resolveSkillSlugs(workspaceSkills)
 	if len(workspaceSkills) > 0 {
-		if err := writeSkillFiles(skillsDir, workspaceSkills, nil); err != nil {
-			return err
+		var err error
+		preparedSkillNames, err = writeSkillFilesWithNames(skillsDir, workspaceSkills, nil)
+		if err != nil {
+			return nil, err
 		}
 	}
-	return ensureCodexDisabledSkillsConfig(filepath.Join(codexHome, "config.toml"), codexHome, disabledRuntimeSkills, workspaceSkills)
+	preparedTask := ApplyPreparedSkillNames(TaskContextForEnv{AgentSkills: workspaceSkills}, preparedSkillNames)
+	return preparedSkillNames, ensureCodexDisabledSkillsConfig(filepath.Join(codexHome, "config.toml"), codexHome, disabledRuntimeSkills, preparedTask.AgentSkills)
 }
 
 // GCMetaKind identifies which kind of parent record a task workdir belongs to.

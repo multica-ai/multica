@@ -293,8 +293,8 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		// so the fail-closed policy just computed above would only exist in
 		// memory while the effective config silently stays loose. Abort rather
 		// than launch Codex with an unenforced sandbox: on fresh Prepare this
-		// fails the task; on Reuse the caller leaves env.CodexHome unset, which
-		// configureCodexTaskShellEnvironment then refuses to start (MUL-4957).
+		// fails the task; on Reuse the caller falls back to a fresh Prepare
+		// (MUL-4957).
 		return fmt.Errorf("ensure codex sandbox config: %w", err)
 	}
 
