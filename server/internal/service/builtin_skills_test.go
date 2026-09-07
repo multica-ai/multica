@@ -312,6 +312,17 @@ func TestLegacyRedirectsFollowTheDaemonsBrief(t *testing.T) {
 	if !strings.Contains(body, PlatformSkillName) || !strings.Contains(body, "references/issues.md") {
 		t.Errorf("redirect stub does not name where the contracts went:\n%s", body)
 	}
+	// MUL-6966: the stub used to promise "Nothing was dropped in the move".
+	// The metadata guidance since was dropped, and the daemons that reach
+	// this stub are exactly the ones whose frozen brief still sends them
+	// here for it — so the one place the claim is read is the one place it
+	// is false. It has to state the replacement rule instead.
+	if strings.Contains(body, "Nothing was dropped") {
+		t.Errorf("redirect stub still promises nothing was dropped:\n%s", body)
+	}
+	if !strings.Contains(body, "goes in the result comment") {
+		t.Errorf("redirect stub does not say where the retired state now belongs:\n%s", body)
+	}
 	if n := strings.Count(body, "\n") + 1; n > 40 {
 		t.Errorf("redirect stub is %d lines; a signpost that grows contracts will rot against the real reference", n)
 	}
