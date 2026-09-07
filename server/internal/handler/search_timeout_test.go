@@ -59,10 +59,16 @@ func TestParseSearchWorkMemMB(t *testing.T) {
 	}
 }
 
+func TestSearchStatementTimeoutDefault(t *testing.T) {
+	if got, want := searchStatementTimeout, 5*time.Second; got != want {
+		t.Fatalf("searchStatementTimeout = %s, want %s", got, want)
+	}
+}
+
 // TestRunSearchQuery_StatementTimeoutFires exercises the safety net end
 // to end against a live Postgres, proving that a deliberately hung
 // pg_sleep query is cut off by SET LOCAL statement_timeout (SQLSTATE
-// 57014) before the 3 s search cap could ever be reached. Skips
+// 57014) before the production search cap could ever be reached. Skips
 // gracefully if the database is not reachable — mirrors the pattern in
 // handler_test.go so CI without a DB stays green.
 func TestRunSearchQuery_StatementTimeoutFires(t *testing.T) {
