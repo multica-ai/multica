@@ -310,8 +310,11 @@ func TestQoderBackendSetModelFailureFailsTask(t *testing.T) {
 		if !strings.Contains(result.Error, "model not available") {
 			t.Errorf("expected error to surface upstream message, got %q", result.Error)
 		}
-		if result.SessionID != "ses_fake" {
-			t.Errorf("expected session id to be preserved on failure, got %q", result.SessionID)
+		if result.SessionID != "" {
+			// The session died before its first prompt, so its id must NOT be
+			// published: qodercli may never have persisted it, and a pointer
+			// to it would be a ghost every follow-up fails to resume.
+			t.Errorf("expected empty session id on fresh-session set_model failure, got %q", result.SessionID)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
@@ -995,6 +998,83 @@ func TestQoderBackendClearsSessionIDWhenResumedSessionNotFoundAtSetModel(t *test
 		}
 		if result.SessionID != "" {
 			t.Errorf("expected empty session id so the daemon's fresh-session retry fires, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// fakeQoderACPGhostResumeScript impersonates qodercli 1.1.25 rejecting, at
+// session/resume, an id it never persisted — the ghost-pointer shape produced
+// by a session that died at set_model before its first prompt. The error
+// frame mirrors the real CLI (verified by driving `qodercli --yolo --acp` by
+// hand): invalid_params (-32602) "Invalid session identifier <id>" with data
+// {"code":"INVALID_SESSION_IDENTIFIER"}.
+func fakeQoderACPGhostResumeScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"Invalid session identifier ses_ghost. Searched for sessions in /Users/hawk/.qoder/projects/-tmp.","data":{"code":"INVALID_SESSION_IDENTIFIER","sessionId":"ses_ghost","projectRoot":"/tmp"}}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestQoderBackendSignalsResumeRejectedAtResume pins the ghost-session loop
+// fix: qodercli rejects an unknown id directly at session/resume (unlike the
+// sibling runtimes, which surface it at set_model/prompt), so that failure
+// must carry ResumeRejected=true for the daemon's fresh-session retry to fire
+// and retire the dead pointer. Before the fix the flag stayed false, no retry
+// fired, and every follow-up re-requested the same dead id forever.
+func TestQoderBackendSignalsResumeRejectedAtResume(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "qodercli")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPGhostResumeScript()))
+
+	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         30 * time.Second,
+		ResumeSessionID: "ses_ghost",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "Invalid session identifier") {
+			t.Errorf("expected error to surface the runtime's rejection, got %q", result.Error)
+		}
+		if !result.ResumeRejected {
+			t.Fatal("expected ResumeRejected=true so the daemon's fresh-session retry fires")
+		}
+		if result.SessionID != "" {
+			t.Errorf("expected empty session id, got %q", result.SessionID)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")

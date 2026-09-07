@@ -275,6 +275,82 @@ func TestGrokSetModelFailureFailsTask(t *testing.T) {
 	}
 }
 
+// fakeGrokACPGhostLoadScript impersonates `grok agent --always-approve stdio`
+// refusing an unknown session id directly at session/load. It answers
+// initialize with a cached_token auth method and authenticate with success,
+// because grok gates every session method behind authentication.
+func fakeGrokACPGhostLoadScript() string {
+	return `#!/bin/sh
+authenticated=
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"authMethods":[{"id":"cached_token","name":"Cached login"}],"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":true}}}}\n' "$id"
+      ;;
+    *'"method":"authenticate"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      authenticated=1
+      ;;
+    *'"method":"session/load"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Session not found"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestGrokBackendSignalsResumeRejectedAtLoad pins the ghost-session loop fix:
+// when session/load itself fails with a session-not-found error, the Result
+// must carry ResumeRejected=true so the daemon's fresh-session retry fires and
+// retires the dead pointer. Before the fix the flag stayed false on this path,
+// and every follow-up re-requested the same dead id forever.
+func TestGrokBackendSignalsResumeRejectedAtLoad(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "grok")
+	writeTestExecutable(t, fakePath, []byte(fakeGrokACPGhostLoadScript()))
+
+	backend, err := New("grok", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new grok backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_stale",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "Session not found") {
+			t.Errorf("expected error to surface the session-not-found message, got %q", result.Error)
+		}
+		if !result.ResumeRejected {
+			t.Fatal("expected ResumeRejected=true so the daemon's fresh-session retry fires")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 func TestGrokUsesSessionLoadForResume(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()

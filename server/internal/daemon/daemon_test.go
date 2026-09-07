@@ -2974,6 +2974,21 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			want:           true,
 		},
 		{
+			// The ghost-session incident: qodercli rejects, at session/resume,
+			// an id from a session that died at set_model before its first
+			// prompt (never persisted by the runtime). The backend fix flags
+			// ResumeRejected on that branch; this pins that the incident shape
+			// actually clears the daemon's fresh-session retry gate.
+			name: "qoder invalid session identifier at resume retries",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          `qoder session/resume failed: session/resume: Invalid session identifier "27d8031c" (code=-32602)`,
+				ResumeRejected: true,
+			},
+			priorSessionID: "27d8031c",
+			want:           true,
+		},
+		{
 			name:           "no resume requested never retries",
 			result:         agent.Result{Status: "failed", Error: "boom", ResumeRejected: true},
 			priorSessionID: "",

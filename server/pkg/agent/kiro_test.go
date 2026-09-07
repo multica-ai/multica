@@ -770,6 +770,76 @@ done
 `
 }
 
+// fakeKiroACPGhostLoadScript impersonates kiro-cli refusing an unknown
+// session id directly at session/load with its observed shape: -32603
+// "Internal error" and "No session found with id ..." in data.
+func fakeKiroACPGhostLoadScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/load"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"No session found with id ses_stale"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKiroBackendSignalsResumeRejectedAtLoad pins the ghost-session loop fix:
+// when session/load itself fails with a session-not-found error, the Result
+// must carry ResumeRejected=true so the daemon's fresh-session retry fires and
+// retires the dead pointer. Before the fix the flag stayed false on this path,
+// and every follow-up re-requested the same dead id forever.
+func TestKiroBackendSignalsResumeRejectedAtLoad(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPGhostLoadScript()))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_stale",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "No session found") {
+			t.Errorf("expected error to surface the session-not-found message, got %q", result.Error)
+		}
+		if !result.ResumeRejected {
+			t.Fatal("expected ResumeRejected=true so the daemon's fresh-session retry fires")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 // TestKiroBackendClearsSessionIDWhenSetModelSessionNotFound pins the
 // set_model sibling of the resumed-session fix: with a model override,
 // session/set_model runs before session/prompt, so a dead resumed

@@ -2960,6 +2960,15 @@ func TestIsACPSessionNotFound(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "qodercli invalid session identifier frame",
+			// qodercli 1.1.25 rejects an id it never persisted directly at
+			// session/resume as invalid_params "Invalid session identifier
+			// <id>" with a structured data object. Verified against the real
+			// CLI (`qodercli --yolo --acp`).
+			err:  &acpRPCError{Method: "session/resume", Code: -32602, Message: `Invalid session identifier "ses_ghost".` + "\n  Searched for sessions in ~/.qoder/projects/-tmp.", Data: `{"code":"INVALID_SESSION_IDENTIFIER","sessionId":"ses_ghost","projectRoot":"/tmp"}`},
+			want: true,
+		},
+		{
 			name: "invalid params without session wording",
 			err:  &acpRPCError{Method: "session/set_model", Code: -32602, Message: "model not available: bogus-model"},
 			want: false,
@@ -2987,6 +2996,77 @@ func TestIsACPSessionNotFound(t *testing.T) {
 				t.Errorf("isACPSessionNotFound(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+// fakeHermesACPRejectedResumeScript impersonates a runtime that refuses the
+// recorded session id directly at session/resume (JSON-RPC -32603 "Session
+// not found") instead of letting the failure surface at set_model/prompt.
+func fakeHermesACPRejectedResumeScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Session not found"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestHermesBackendSignalsResumeRejectedAtResume pins the ghost-session loop
+// fix for the resume-time rejection shape: when session/resume itself fails
+// with a session-not-found error, the Result must carry ResumeRejected=true so
+// the daemon's fresh-session retry fires and retires the dead pointer. Before
+// the fix the flag stayed false on this path, and every follow-up re-requested
+// the same dead id forever.
+func TestHermesBackendSignalsResumeRejectedAtResume(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPRejectedResumeScript()))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_stale",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "Session not found") {
+			t.Errorf("expected error to surface the session-not-found message, got %q", result.Error)
+		}
+		if !result.ResumeRejected {
+			t.Fatal("expected ResumeRejected=true so the daemon's fresh-session retry fires")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
 	}
 }
 

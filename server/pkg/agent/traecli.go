@@ -274,7 +274,15 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			if err != nil {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("traecli session/load failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				if isACPSessionNotFound(err) {
+					// The runtime rejected the recorded session id outright,
+					// before set_model/prompt could surface it. Mirror
+					// zeroclaw/qwenpaw: flag ResumeRejected so the daemon's
+					// fresh-session retry fires and retires the dead pointer
+					// instead of every follow-up re-requesting it forever.
+					resumeRejected = true
+				}
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected}
 				return
 			}
 			var changed bool

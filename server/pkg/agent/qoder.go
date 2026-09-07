@@ -261,7 +261,17 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			if err != nil {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("qoder session/resume failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				if isACPSessionNotFound(err) {
+					// qodercli rejects an id it never persisted (a session
+					// that died before its first prompt, the set_model
+					// failure shape) directly at session/resume, unlike the
+					// sibling runtimes that surface it at set_model/prompt.
+					// Flag it so the daemon's fresh-session retry fires and
+					// the dead pointer is retired instead of every follow-up
+					// re-requesting the same id forever.
+					resumeRejected = true
+				}
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected}
 				return
 			}
 			var changed bool
@@ -321,6 +331,21 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 					)
 					sessionID = ""
 					resumeRejected = true
+				}
+				if opts.ResumeSessionID == "" {
+					// A fresh session that died before its first prompt has
+					// no conversation worth resuming, and qodercli may never
+					// have persisted it (the daemon tears the process down
+					// here and the runtime flushes on first use). Publishing
+					// the id would pin a ghost resume pointer that every
+					// follow-up re-requests and that the runtime rejects at
+					// session/resume. Suppress it; the next turn opens a
+					// clean session/new once the model config is fixed.
+					b.cfg.Logger.Warn("fresh session died at set_model time before any prompt; suppressing session id",
+						"backend", "qoder",
+						"session_id", sessionID,
+					)
+					sessionID = ""
 				}
 				resCh <- Result{
 					Status:         finalStatus,

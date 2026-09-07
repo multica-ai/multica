@@ -515,7 +515,15 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			if err != nil {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes session/resume failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				if isACPSessionNotFound(err) {
+					// The runtime rejected the recorded session id outright,
+					// before set_model/prompt could surface it. Mirror
+					// zeroclaw/qwenpaw: flag ResumeRejected so the daemon's
+					// fresh-session retry fires and retires the dead pointer
+					// instead of every follow-up re-requesting it forever.
+					resumeRejected = true
+				}
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected}
 				return
 			}
 			sessionResult = result
@@ -1380,7 +1388,12 @@ func (e *acpRPCError) Error() string {
 // unknown-session path (src/kimi_cli/acp/server.py), Reasonix says
 // "session/resume: unknown session <id>" under -32602, and ZeroClaw defines
 // its own SESSION_NOT_FOUND = -32000 in the implementation-defined range
-// (zeroclaw-api/src/jsonrpc.rs) — so neither the code nor one runtime's exact
+// (zeroclaw-api/src/jsonrpc.rs). qodercli (1.1.25, verified against the real
+// CLI) rejects an id it never persisted with -32602 "Invalid session
+// identifier <id>" plus data {"code":"INVALID_SESSION_IDENTIFIER"} — the
+// shape a session that died before its first prompt produces, since the
+// daemon kills the process on the set_model failure and the runtime never
+// flushes the transcript. So neither the code nor one runtime's exact
 // wording is discriminating and all of them are matched. The wording check
 // still carries the decision: -32000 is a generic server-error code, and a
 // transient failure reported under it must not read as a lost session.
@@ -1395,7 +1408,8 @@ func isACPSessionNotFound(err error) bool {
 	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
 	return strings.Contains(text, "session not found") ||
 		strings.Contains(text, "no session found") ||
-		strings.Contains(text, "unknown session")
+		strings.Contains(text, "unknown session") ||
+		strings.Contains(text, "invalid session identifier")
 }
 
 // isACPHeldByProcess reports whether a session/load error means the session
