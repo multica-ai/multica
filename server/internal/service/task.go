@@ -7201,7 +7201,7 @@ func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
 // offset away from its real instant and moved it again once a refetch
 // replaced the value — visible as timeline entries jumping position.
 func commentEventFields(c db.Comment) map[string]any {
-	return map[string]any{
+	fields := map[string]any{
 		"id":             util.UUIDToString(c.ID),
 		"issue_id":       util.UUIDToString(c.IssueID),
 		"author_type":    c.AuthorType,
@@ -7212,16 +7212,82 @@ func commentEventFields(c db.Comment) map[string]any {
 		"source_task_id": util.UUIDToPtr(c.SourceTaskID),
 		"created_at":     util.TimestampToString(c.CreatedAt),
 	}
+	if len(c.QuestionPayload) > 0 {
+		// Raw JSON, not a decoded map: the WS envelope re-marshals this map,
+		// and RawMessage keeps the stored bytes byte-for-byte.
+		fields["question_payload"] = json.RawMessage(c.QuestionPayload)
+	}
+	return fields
+}
+
+// agentCommentParams is the input of createAgentCommentRow. It exists so the
+// question path can carry its payload without every other caller growing a
+// positional argument it never sets.
+type agentCommentParams struct {
+	IssueID      pgtype.UUID
+	AgentID      pgtype.UUID
+	Content      string
+	CommentType  string
+	ParentID     pgtype.UUID
+	SourceTaskID pgtype.UUID
+	// QuestionPayload marks an agent question comment (GitHub #8048). Nil for
+	// every ordinary comment.
+	QuestionPayload []byte
+}
+
+// CreateAgentQuestionComment posts the structured question an agent asked
+// through AskUserQuestion as an agent comment on the task's issue, marked
+// with the payload the timeline renders as an interactive card. The comment
+// is threaded under the comment that triggered this run, when there is one,
+// so the answer lands next to the question the same way a reply would. It
+// returns the created comment so the daemon can log its id.
+func (s *TaskService) CreateAgentQuestionComment(ctx context.Context, task db.AgentTaskQueue, payload AgentQuestionPayload) (db.Comment, error) {
+	if !task.IssueID.Valid {
+		return db.Comment{}, fmt.Errorf("task %s is not bound to an issue", util.UUIDToString(task.ID))
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return db.Comment{}, fmt.Errorf("encode question payload: %w", err)
+	}
+	comment, err := s.createAgentCommentRow(ctx, agentCommentParams{
+		IssueID:         task.IssueID,
+		AgentID:         task.AgentID,
+		Content:         payload.Markdown(),
+		CommentType:     "comment",
+		ParentID:        task.TriggerCommentID,
+		SourceTaskID:    task.ID,
+		QuestionPayload: encoded,
+	})
+	if err != nil {
+		return db.Comment{}, err
+	}
+	return comment, nil
 }
 
 func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) {
 	if content == "" {
 		return
 	}
+	_, _ = s.createAgentCommentRow(ctx, agentCommentParams{
+		IssueID:      issueID,
+		AgentID:      agentID,
+		Content:      content,
+		CommentType:  commentType,
+		ParentID:     parentID,
+		SourceTaskID: sourceTaskID,
+	})
+}
+
+// createAgentCommentRow inserts an agent-authored comment, publishes
+// comment:created, and runs the thread side effects. createAgentComment keeps
+// its fire-and-forget contract on top of this; the question path needs the
+// row and the error.
+func (s *TaskService) createAgentCommentRow(ctx context.Context, p agentCommentParams) (db.Comment, error) {
+	issueID, agentID, parentID := p.IssueID, p.AgentID, p.ParentID
 	// Look up issue to get workspace ID for mention expansion and broadcasting.
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
-		return
+		return db.Comment{}, fmt.Errorf("load issue for agent comment: %w", err)
 	}
 	// Resolve the thread root for thread-level side effects without overwriting
 	// parentID. The stored parent_id must remain the exact comment being replied
@@ -7236,18 +7302,19 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		}
 	}
 	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		ID:           dbid.NewV7(),
-		IssueID:      issueID,
-		WorkspaceID:  issue.WorkspaceID,
-		AuthorType:   "agent",
-		AuthorID:     agentID,
-		Content:      content,
-		Type:         commentType,
-		ParentID:     parentID,
-		SourceTaskID: sourceTaskID,
+		ID:              dbid.NewV7(),
+		IssueID:         issueID,
+		WorkspaceID:     issue.WorkspaceID,
+		AuthorType:      "agent",
+		AuthorID:        agentID,
+		Content:         p.Content,
+		Type:            p.CommentType,
+		ParentID:        parentID,
+		SourceTaskID:    p.SourceTaskID,
+		QuestionPayload: p.QuestionPayload,
 	})
 	if err != nil {
-		return
+		return db.Comment{}, fmt.Errorf("create agent comment: %w", err)
 	}
 	comment := created.Comment()
 	s.CancelDeferredEscalationsForIssueAgent(ctx, issueID, agentID)
@@ -7266,6 +7333,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		},
 	})
 	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))
+	return comment, nil
 }
 
 // AutoUnresolveThreadOnReply clears resolved_at on the thread root when a

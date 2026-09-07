@@ -554,6 +554,7 @@ type Comment struct {
 	ViaPluginID       pgtype.UUID        `json:"via_plugin_id"`
 	Revision          int64              `json:"revision"`
 	RecoverySettledAt pgtype.Timestamptz `json:"recovery_settled_at"`
+	QuestionPayload   []byte             `json:"question_payload"`
 }
 
 type CommentReaction struct {

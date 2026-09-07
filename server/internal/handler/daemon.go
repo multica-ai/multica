@@ -3765,6 +3765,62 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// TaskQuestionRequest is the daemon's report of a structured question the
+// agent asked the human through AskUserQuestion (GitHub #8048).
+type TaskQuestionRequest struct {
+	// ToolUseID is the tool call id, for log correlation with the transcript.
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	// Questions is the tool's `questions` array, forwarded verbatim.
+	Questions json.RawMessage `json:"questions"`
+}
+
+// TaskQuestionResponse acknowledges a delivered question with the id of the
+// comment that now carries it.
+type TaskQuestionResponse struct {
+	Status    string `json:"status"`
+	CommentID string `json:"comment_id"`
+}
+
+// ReportTaskQuestion posts an agent's structured question to the task's issue
+// as an interactive comment. The daemon has already told the model to end its
+// turn; the human's reply in the comment's thread triggers the next run,
+// which resumes the session with the answer in view. Only issue-bound tasks
+// have a surface for the card, so chat and autopilot runs are refused —
+// their model gets the daemon's "post it as a comment" fallback instead.
+func (h *Handler) ReportTaskQuestion(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	var req TaskQuestionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
+		return
+	}
+	if !task.IssueID.Valid {
+		writeError(w, http.StatusConflict, "task is not bound to an issue")
+		return
+	}
+
+	payload, err := service.ParseAgentQuestions(req.Questions)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid question payload: "+err.Error())
+		return
+	}
+
+	comment, err := h.TaskService.CreateAgentQuestionComment(r.Context(), task, payload)
+	if err != nil {
+		slog.Error("failed to post agent question", "task_id", taskID, "tool_use_id", req.ToolUseID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to post question")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, TaskQuestionResponse{Status: "ok", CommentID: uuidToString(comment.ID)})
+}
+
 // CompleteTask marks a running task as completed.
 type TaskCompleteRequest struct {
 	PRURL     string `json:"pr_url"`
