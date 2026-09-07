@@ -461,7 +461,6 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 	placeholderCount := 0
 	media := make([]dingtalkMediaResource, 0)
 	appendText := func(value string) {
-		value = dingTalkReadableQuotedText(value)
 		body.WriteString(value)
 		placeholderCount += strings.Count(value, dingtalkImagePlaceholder)
 	}
@@ -475,27 +474,21 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 		media = append(media, dingtalkMediaResourceAt(ref, alt, placeholderCount))
 		placeholderCount++
 	}
-	appendSummary := func(value string) {
-		summary := dingTalkRichTextSummary(value)
-		if summary == "" {
-			return
-		}
-		if body.Len() > 0 && !strings.HasSuffix(body.String(), "\n") {
-			appendText("\n")
-		}
-		appendText(summary)
-	}
 
 	switch msgType {
 	case "text":
-		appendText(replied.Content.Text)
+		appendText(dingTalkReadableQuotedText(replied.Content.Text))
 	case "interactiveCard":
 		// cardParamMap belongs to a template, not a universal body schema.
 		// https://open.dingtalk.com/document/orgapp/create-and-deliver-cards
 		appendText("[quoted content unavailable]")
 	case "picture", "image":
 		appendPicture(replied.Content.DownloadCode, replied.Content.PictureDownloadCode)
-		appendSummary(replied.Content.Text)
+		// The snapshot's text field has no documented caption meaning.
+		// Keep the image while explicitly withholding supplementary text.
+		if replied.Content.Text != "" {
+			appendText("\n[quoted content unavailable]")
+		}
 	case "richText":
 		quotedBody, quotedMedia := renderDingTalkQuotedRichText(replied.Content, placeholderCount)
 		appendText(quotedBody)
@@ -508,14 +501,14 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 		}
 	case "audio":
 		if recognition := strings.TrimSpace(replied.Content.Recognition); recognition != "" {
-			appendText(recognition)
+			appendText(dingTalkReadableQuotedText(recognition))
 		} else {
 			appendText("[Audio message]")
 		}
 	case "video":
 		appendText("[Video message]")
 	default:
-		appendText(replied.Content.Text)
+		appendText("[quoted content unavailable]")
 	}
 
 	quotedBody := strings.TrimSpace(body.String())
@@ -531,18 +524,6 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 		media[i].InlineIndex += prefixMarkers
 	}
 	return block, media
-}
-
-func dingTalkRichTextSummary(text string) string {
-	summary := strings.TrimSpace(text)
-	for summary != "" {
-		stripped := strings.TrimSpace(strings.TrimPrefix(summary, dingtalkImagePlaceholder))
-		if stripped == summary {
-			break
-		}
-		summary = stripped
-	}
-	return summary
 }
 
 // renderDingTalkQuotedRichText reuses only the ordered text/picture schema:
@@ -630,35 +611,19 @@ func normalizeDingTalkRichTextControlLayout(msg *channel.InboundMessage, items [
 	msg.Text = strings.TrimSpace(visible.String())
 }
 
-// dingTalkReadableQuotedText recognizes the opaque reply envelope observed in
-// https://github.com/open-dingtalk/dingtalk-stream-sdk-go/issues/22. Its body is
-// Base64-like text followed by three numeric fields separated by ||. Even the
-// published sample is not valid padded Base64, so decoding is not a reliable
-// detector and would not recover the author's words.
-// Ordinary multiline text, Base64 without the trailer and literal JSON remain
-// untouched. This check applies only to selected snapshots, not current input.
+// dingTalkReadableQuotedText defines a conservative projection policy, not an
+// opaque-envelope decoder. The public sample in
+// https://github.com/open-dingtalk/dingtalk-stream-sdk-go/issues/22 contains ||,
+// but does not establish lengths, alphabets, versions, or trailer field counts.
+// Selected text containing that ambiguous separator is therefore unavailable,
+// including legitimate quoted code/prose containing ||. Current input is never
+// filtered. Apply this only to provider text values, not rendered quote blocks,
+// so a fallback cannot discard generated image markers and their media slots.
 func dingTalkReadableQuotedText(value string) string {
-	parts := strings.Split(strings.TrimSpace(value), "||")
-	if len(parts) != 4 {
-		return value
+	if strings.Contains(value, "||") {
+		return "[quoted content unavailable]"
 	}
-	for _, part := range parts[1:] {
-		if part == "" || strings.IndexFunc(part, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
-			return value
-		}
-	}
-	body := strings.TrimSpace(parts[0])
-	// Bound this heuristic to long encoded bodies, excluding short pipe-delimited prose.
-	if len(body) < 64 {
-		return value
-	}
-	if strings.IndexFunc(body, func(r rune) bool {
-		return !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' ||
-			r == '+' || r == '/' || r == '=' || r == '\r' || r == '\n')
-	}) >= 0 {
-		return value
-	}
-	return "[quoted content unavailable]"
+	return value
 }
 
 // normalizeDingTalkRichTextBotMention removes the bot-addressing envelope from

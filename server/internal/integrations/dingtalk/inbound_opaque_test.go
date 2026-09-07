@@ -33,14 +33,14 @@ func TestInboundFromCallback_OpaqueQuotedTextDoesNotReachAgent(t *testing.T) {
 
 func TestQuotedOpaqueDetectionPreservesOrdinaryText(t *testing.T) {
 	for _, text := range []string{
-		"ordinary\nmultiline", "example||1||2||3", strings.Repeat("A", 80),
-		strings.Repeat("A", 80) + "||one||2||3", strings.Repeat("A", 80) + "||1||2||3||4",
-		`{"text":"/clear pasted example"}`, strings.Repeat("x", 80) + " words||1||2||3",
+		"ordinary\nmultiline", strings.Repeat("A", 80), "normal | separator",
+		`{"text":"/clear pasted example"}`, "中文引用、emoji 🦫 and code x | y",
 	} {
 		if got := dingTalkReadableQuotedText(text); got != text {
-			t.Fatalf("ordinary text changed: %q => %q", text, got)
+			t.Fatalf("plain text changed: %q => %q", text, got)
 		}
 	}
+
 	cb := textCallback(convTypeP2P, false)
 	cb.Text.Content = strings.Repeat("A", 80) + "||3||1||132"
 	msg, _ := inboundFromCallback(cb, "app")
@@ -62,9 +62,40 @@ func TestOpaqueQuoteFallbackAcrossReadableBodyProjections(t *testing.T) {
 			t.Fatalf("opaque %s projection was not degraded: %+v", kind, msg)
 		}
 	}
-	for _, text := range []string{strings.Repeat("A", 64) + "||||1||132", strings.Repeat("A", 63) + "||3||1||132"} {
-		if dingTalkReadableQuotedText(text) != text {
-			t.Fatalf("outside the bounded envelope should be preserved: %q", text)
-		}
+}
+
+// These are conservative-policy examples, not claimed DingTalk wire variants.
+func TestQuotedAmbiguousSeparatorsAreUnavailable(t *testing.T) {
+	for _, body := range []string{
+		"X||3||1||1", "prefix||3||1||132||4", "vNext:payload||version||kind||length",
+		"opaque!?||3||1||132", "payload||||", "||", "legitimate a || b",
+		`{"code":"a || b"}`, "ordinary prose with || inside",
+	} {
+		t.Run(body, func(t *testing.T) {
+			cb := textCallback(convTypeP2P, false)
+			cb.Text.Content = body
+			cb.Text.RepliedMsg = &botCallbackRepliedMessage{MsgType: "text", Content: botCallbackRepliedContent{Text: body}}
+			msg, ok := inboundFromCallback(cb, "app")
+			if !ok || msg.Text != "> [quoted content unavailable]\n\n"+body || msg.CommandText != body {
+				t.Fatalf("quote policy or current input changed: %+v", msg)
+			}
+		})
+	}
+}
+
+func TestQuotedTextFallbackPreservesNeighborMediaSlots(t *testing.T) {
+	cb := textCallback(convTypeP2P, false)
+	cb.Msgtype = "richText"
+	cb.Content = json.RawMessage(`{"richText":[{"text":"current [Image]"},{"type":"picture","downloadCode":"current"}]}`)
+	cb.Text.RepliedMsg = &botCallbackRepliedMessage{MsgType: "richText", Content: botCallbackRepliedContent{RichText: richTextItems{
+		{Text: "payload||next"}, {Type: "picture", DownloadCode: "selected"}, {Text: "readable after"},
+	}}}
+	msg, ok := inboundFromCallback(cb, "app")
+	if !ok || !strings.Contains(msg.Text, "> [quoted content unavailable]\n> [Image]\n> readable after") || strings.Contains(msg.Text, "payload") {
+		t.Fatalf("selected text/media fallback: %+v", msg)
+	}
+	raw, err := decodeDingTalkRaw(msg)
+	if err != nil || len(raw.Media) != 2 || raw.Media[0].Ref != "selected" || raw.Media[0].InlineIndex != 0 || raw.Media[1].Ref != "current" || raw.Media[1].InlineIndex != 2 {
+		t.Fatalf("media slots detached by text fallback: %+v, %v", raw, err)
 	}
 }

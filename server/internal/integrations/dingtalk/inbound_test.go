@@ -388,7 +388,7 @@ func TestInboundFromCallback_QuotedPictureUsesNestedMediaAndOriginalIDFallback(t
 	}
 }
 
-func TestInboundFromCallback_QuotedPictureKeepsTextSummary(t *testing.T) {
+func TestInboundFromCallback_QuotedPictureWithholdsUnverifiedSummary(t *testing.T) {
 	cb := textCallback(convTypeP2P, false)
 	cb.Text.Content = "How many images can you see?"
 	cb.Text.IsReplyMsg = true
@@ -404,9 +404,13 @@ func TestInboundFromCallback_QuotedPictureKeepsTextSummary(t *testing.T) {
 	if !ok || msg.Type != channel.MsgTypeImage {
 		t.Fatalf("quoted picture summary = %+v, ok=%v", msg, ok)
 	}
-	wantQuoted := "> [Image]\n> What do these images suggest together?"
-	if !strings.Contains(msg.Text, wantQuoted) || strings.Count(msg.Text, dingtalkImagePlaceholder) != 1 {
-		t.Fatalf("quoted picture summary body = %q, want substring %q", msg.Text, wantQuoted)
+	wantText := "> **Alice:**\n>\n> [Image]\n>\n> [quoted content unavailable]\n\nHow many images can you see?"
+	if msg.Text != wantText || msg.CommandText != cb.Text.Content {
+		t.Fatalf("quoted picture summary body = %q, command = %q, want %q", msg.Text, msg.CommandText, wantText)
+	}
+	raw, err := decodeDingTalkRaw(msg)
+	if err != nil || len(raw.Media) != 1 || raw.Media[0].Ref != "current-picture" || raw.Media[0].InlineIndex != 0 {
+		t.Fatalf("quoted picture summary media = %+v, err=%v", raw.Media, err)
 	}
 }
 

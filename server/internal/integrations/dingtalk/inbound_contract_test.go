@@ -110,7 +110,8 @@ func TestInboundMalformedOptionalQuoteNeverRejectsCurrentMessage(t *testing.T) {
 	for _, tc := range []struct{ snapshot, body string }{
 		{`42`, "[quoted content unavailable]"},
 		{`[]`, "[quoted content unavailable]"},
-		{`{"msgType":42,"msgId":42,"senderId":{},"senderNick":[],"content":{"text":"readable selected text"}}`, "readable selected text"},
+		{`{"msgType":"text","msgId":42,"senderId":{},"senderNick":[],"content":{"text":"readable selected text"}}`, "readable selected text"},
+		{`{"msgType":42,"content":{"text":"not a verified text kind"}}`, "[quoted content unavailable]"},
 		{`{"msgType":"text","content":42}`, "[quoted content unavailable]"},
 	} {
 		t.Run(tc.snapshot, func(t *testing.T) {
