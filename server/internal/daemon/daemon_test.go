@@ -2131,6 +2131,11 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 // where Pi starts FINE matter as much as the one where it refuses — reading any
 // of them as unresumable would discard healthy history, which is the regression
 // #7760 set out to fix in the first place.
+//
+// The same reasoning is why the two runtimes carry separate expectations. The
+// refusal is Pi's behaviour, not the protocol family's: omp opens the
+// transcript from the explicit --session path and falls back to the launch cwd,
+// so applying Pi's constraint to it would drop sessions it resumes cleanly.
 func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 	t.Parallel()
 
@@ -2141,8 +2146,13 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		// body builds the transcript. liveDir exists; deadDir does not.
-		body          func(liveDir, deadDir, aFile string) string
-		wantReachable bool
+		body func(liveDir, deadDir, aFile string) string
+		// The two runtimes disagree about a missing recorded cwd, so each
+		// states its own expectation. Pi hard-refuses; omp opens the transcript
+		// from the explicit --session path and falls back to the launch cwd, so
+		// dropping its session would be a pure continuity loss.
+		wantPi  bool
+		wantOmp bool
 	}{
 		{
 			// The reported failure: worktree reclaimed, transcript survives.
@@ -2152,14 +2162,16 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				// fixture faithful to what is actually on disk.
 				return header(deadDir) + "\n" + header(deadDir) + "\n"
 			},
-			wantReachable: false,
+			wantPi:  false,
+			wantOmp: true,
 		},
 		{
 			name: "recorded cwd still exists",
 			body: func(liveDir, _, _ string) string {
 				return header(liveDir) + "\n"
 			},
-			wantReachable: true,
+			wantPi:  true,
+			wantOmp: true,
 		},
 		{
 			// No header: Pi falls back to the launch directory and starts.
@@ -2167,7 +2179,8 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 			body: func(_, _, _ string) string {
 				return `{"type":"model_change","id":"a"}` + "\n"
 			},
-			wantReachable: true,
+			wantPi:  true,
+			wantOmp: true,
 		},
 		{
 			// Empty cwd: Pi's own guard short-circuits on falsy and starts.
@@ -2175,7 +2188,8 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 			body: func(_, _, _ string) string {
 				return header("") + "\n"
 			},
-			wantReachable: true,
+			wantPi:  true,
+			wantOmp: true,
 		},
 		{
 			// Pi uses existsSync, which is true for a plain file. Demanding a
@@ -2184,7 +2198,8 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 			body: func(_, _, aFile string) string {
 				return header(aFile) + "\n"
 			},
-			wantReachable: true,
+			wantPi:  true,
+			wantOmp: true,
 		},
 		{
 			// Unparseable leading lines must not hide the header behind them.
@@ -2192,7 +2207,8 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 			body: func(_, deadDir, _ string) string {
 				return "not json\n" + header(deadDir) + "\n"
 			},
-			wantReachable: false,
+			wantPi:  false,
+			wantOmp: true,
 		},
 		{
 			// Past the bounded scan we cannot read the header, and "could not
@@ -2207,10 +2223,15 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				b.WriteString(header(deadDir) + "\n")
 				return b.String()
 			},
-			wantReachable: true,
+			wantPi:  true,
+			wantOmp: true,
 		},
 	} {
 		for _, provider := range []string{"pi", "omp"} {
+			wantReachable := test.wantPi
+			if provider == "omp" {
+				wantReachable = test.wantOmp
+			}
 			t.Run(test.name+"/"+provider, func(t *testing.T) {
 				t.Parallel()
 
@@ -2238,10 +2259,10 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 
 				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, slog.Default())
 
-				if reachable != test.wantReachable {
-					t.Fatalf("reachable = %v, want %v", reachable, test.wantReachable)
+				if reachable != wantReachable {
+					t.Fatalf("reachable = %v, want %v", reachable, wantReachable)
 				}
-				if test.wantReachable {
+				if wantReachable {
 					if task.PriorSessionID != sessionPath {
 						t.Fatalf("PriorSessionID = %q, want %q", task.PriorSessionID, sessionPath)
 					}

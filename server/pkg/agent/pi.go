@@ -520,12 +520,16 @@ func piSessionBusyResult(label, sessionPath string) *Session {
 // and any output (GH #8082).
 //
 // The daemon's resume gate already declines to hand Pi such a session, so in
-// normal operation this never fires. It is the second layer, for the cases the
-// gate cannot predict: the directory disappearing between the gate's check and
-// Pi's, a header the gate's bounded scan did not reach, or a future Pi that
-// refuses on a condition the gate does not model. Without it such a run fails
-// as a generic non-retryable process_failure and the same stale pointer is
-// served again on the next claim — the permanent loop #8082 reported.
+// normal operation this never fires. It is the second layer, and its reach is
+// exactly this one refusal arriving on a run the gate let through: the
+// directory disappearing between the gate's check and Pi's, a header the
+// gate's bounded scan did not reach or could not parse, or a Pi-family runtime
+// the gate does not model as refusing. It is a single phrase match, so it does
+// NOT generalise to some other refusal Pi might grow later.
+//
+// Without it such a run fails as a generic non-retryable process_failure and
+// the same stale pointer is served again on the next claim — the permanent
+// loop #8082 reported.
 const piResumeRefusedMarker = "Stored session working directory does not exist"
 
 // piStderrTailLimit bounds the retained stderr tail. The marker arrives in a

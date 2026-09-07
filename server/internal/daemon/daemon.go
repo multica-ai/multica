@@ -6169,7 +6169,7 @@ func sameExistingDir(a, b string) bool {
 func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv, provider, envWorkDir string, sessionHomeReachable bool, taskLog *slog.Logger) bool {
 	var reachable bool
 	if providerUsesPiSessionFile(provider) {
-		reachable = piSessionResumable(task.PriorSessionID)
+		reachable = piSessionResumable(task.PriorSessionID, providerRefusesMissingSessionCwd(provider))
 	} else {
 		// Compare the directories, not the spelling. Reuse runs in the canonical
 		// path it validated and locked, which need not be character-identical to
@@ -6206,25 +6206,49 @@ func providerUsesPiSessionFile(provider string) bool {
 	return ok && desc.ProtocolFamily == "pi"
 }
 
-// piSessionResumable reports whether the Pi backend can actually START from
-// this session. Two independent things have to hold, and #7760 only checked
-// the first:
+// piSessionResumable reports whether the backend can actually START from this
+// session. The transcript file always has to be there; whether its recorded
+// working directory also has to be there depends on the runtime, which is what
+// refusesMissingCwd carries (providerRefusesMissingSessionCwd).
 //
-//  1. The transcript file exists and holds something (piSessionFilePresent).
-//  2. The working directory recorded in the transcript still exists
-//     (piSessionCwdPresent). Pi re-anchors a resumed run to that directory
-//     rather than to the cwd it was spawned in, and refuses to start at all
-//     when it is gone.
+// Checking only the file is what produced GH #8082: after the prior task's
+// worktree was reclaimed the file survived, the gate reported the session
+// reachable, and Pi exited 1 in under 200ms with no tool call and no output —
+// permanently, because the failed run records the same session id again and the
+// next claim serves the same stale pointer. That is the exact failure shape the
+// gate above exists to prevent; #7760 removed the protection for the Pi family
+// without replacing it with the key Pi actually validates.
+func piSessionResumable(sessionID string, refusesMissingCwd bool) bool {
+	if !piSessionFilePresent(sessionID) {
+		return false
+	}
+	return !refusesMissingCwd || piSessionCwdPresent(sessionID)
+}
+
+// providerRefusesMissingSessionCwd reports whether a runtime refuses to start
+// when the working directory recorded in the transcript no longer exists.
 //
-// Checking only (1) is what produced GH #8082: after the prior task's worktree
-// was reclaimed the file survived, the gate reported the session reachable, and
-// Pi exited 1 in under 200ms with no tool call and no output — permanently,
-// because the failed run records the same session id again and the next claim
-// serves the same stale pointer. That is the exact failure shape the gate above
-// exists to prevent; #7760 removed the protection for the Pi family without
-// replacing it with the key Pi actually validates.
-func piSessionResumable(sessionID string) bool {
-	return piSessionFilePresent(sessionID) && piSessionCwdPresent(sessionID)
+// This is deliberately NOT the same question as providerUsesPiSessionFile.
+// That one asks where the session lives — an independently addressed JSONL path
+// rather than a cwd-keyed store — and it is true for the whole Pi protocol
+// family. This one asks what the runtime does with the cwd it finds inside that
+// file, and the family does not agree:
+//
+//   - pi re-anchors a resumed run to the recorded cwd and hard-refuses when it
+//     is gone (GH #8082).
+//   - omp opens the transcript from an explicit --session path and falls back to
+//     the launch cwd instead; verified on v17.2.12, where the same transcript
+//     whose recorded cwd had been deleted resumed with exit 0 and ran in the
+//     launch directory.
+//
+// So the check must not be applied family-wide: doing that drops omp sessions
+// omp would have resumed cleanly, which is exactly the continuity loss #7760
+// set out to fix. Answering "no" for an unknown Pi-family runtime is the safe
+// default rather than the risky one, because a runtime that does refuse is
+// still caught by the backend's ResumeRejected signal — one wasted run and a
+// fresh session, not the permanent loop this issue reported.
+func providerRefusesMissingSessionCwd(provider string) bool {
+	return provider == "pi"
 }
 
 // piSessionFilePresent proves there is persisted history to resume. It does
