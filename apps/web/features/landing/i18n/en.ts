@@ -294,6 +294,36 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.41",
+        date: "2026-09-07",
+        title: "A reorganized sidebar, faster search in large workspaces, Autopilot manual runs, and leaner CLI output",
+        changes: [],
+        features: [
+          "The sidebar now groups your work and your AI team, with Analytics and Settings pinned at the bottom.",
+          "Pinned items past the first five stay tucked away until you expand them.",
+          "Custom properties come back with their names from the command line, not just ids.",
+          "See how much each agent run used and cost from the command line.",
+          "Pick the Issue fields you want from the command line and get a shorter response.",
+        ],
+        improvements: [
+          "Agent, skill, and runtime detail pages stay aligned on wide screens.",
+          "Issue search is faster in large workspaces, and multi-word searches no longer stall.",
+          "The Inbox list is narrower by default, leaving more room for what you opened.",
+          "Self-hosted servers can set how much memory search is allowed to use.",
+        ],
+        fixes: [
+          "An agent can start an Autopilot run for you when you could start it yourself.",
+          "Every Autopilot change is judged by the permissions of the person behind it.",
+          "Autopilot webhook credentials no longer show up in live updates.",
+          "A Pi task whose working folder is gone starts a fresh session instead of failing over and over.",
+          "A new chat from a channel takes its title from what you just asked for.",
+          "Archiving an agent clears its chats, so Slack no longer shows them as still working.",
+          "Members can create tasks with agents on runtimes they can't see.",
+          "Tab and Enter in a nested list only affect the level you are on.",
+          "Codex explains how to fix the setting behind a failing conversation instead of retrying silently.",
+        ],
+      },
+      {
         version: "0.4.40",
         date: "2026-09-04",
         title: "MCP server renames and connection swaps, steadier task starts during upgrades, cleaner sign-out on expiry, and accurate shared-agent status",
