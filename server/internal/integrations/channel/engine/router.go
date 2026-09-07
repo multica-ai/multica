@@ -391,7 +391,15 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 
 		if startChat {
 			startedTask = db.AgentTaskQueue{}
-			persistMessage := msg.CommandText != "" || hasMedia
+			// Is there a first turn to persist, or is this the bare directive
+			// that only opens the route? CommandText is the sender's own
+			// words, but it is not the whole message: an adapter may put
+			// content in Text the sender did not type here — media
+			// placeholders, and a quoted message they replied to. hasMedia
+			// covers the first; Text covers the second, and by then Text is
+			// "" for a genuinely bare directive because it was rewritten to
+			// the (empty) command body above.
+			persistMessage := msg.CommandText != "" || msg.Text != "" || hasMedia
 			var beforeCommit func(context.Context, pgx.Tx, db.ChatSession) error
 			if persistMessage && !msg.SkipAgentRun {
 				prepared, prepareErr := r.tasks.PrepareChatTaskEnqueue(ctx, inst.AgentID, identity.UserID)
