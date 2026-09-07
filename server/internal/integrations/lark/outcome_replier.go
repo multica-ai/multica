@@ -244,9 +244,9 @@ func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Install
 		OpenID:         res.SenderOpenID,
 		BindURL:        bindURL,
 	}); err != nil {
-		if isBindingPromptUnavailable(err) {
-			if err := r.sendChatNotice(ctx, inst, msg, bindingPromptUnavailableCopy); err != nil {
-				return fmt.Errorf("send binding prompt fallback failed: %w", err)
+		if msg.ChatType == ChatTypeGroup && isBindingPromptUnavailable(err) {
+			if fallbackErr := r.sendChatNotice(ctx, inst, msg, bindingPromptUnavailableCopy); fallbackErr != nil {
+				return fmt.Errorf("send binding prompt fallback failed after private prompt unavailable: %v: %w", err, fallbackErr)
 			}
 			return nil
 		}
@@ -256,14 +256,7 @@ func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Install
 }
 
 func isBindingPromptUnavailable(err error) bool {
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
-		return apiErr.Code == codeNoAvailability
-	}
-	if strings.Contains(strings.ToLower(err.Error()), "no availability") {
-		return true
-	}
-	return false
+	return larkErrorCode(err) == codeNoAvailability
 }
 
 // sendIssueOutcome posts either the created confirmation or active-duplicate
@@ -437,5 +430,5 @@ const (
 	chatStartedCopy              = "✅ 已新建 Multica 对话。你的下一条消息会进入该对话。"
 	issueUsageCopy               = "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）"
 	issueUsageWithMediaCopy      = "请添加标题，并与图片或视频一起重新发送（*图片或视频可以位于命令之前或之后*）：\n\n`/issue <标题>`\n`[描述]`（可选）"
-	bindingPromptUnavailableCopy = "你还未绑定 Multica 账户，绑定卡片未能发送到你的私聊。\n请先与 Bot 建立私信后重试，或联系管理员检查机器人在该用户侧的可见性。"
+	bindingPromptUnavailableCopy = "你还未绑定 Multica 账户，绑定卡片未能发送到你的私聊。\n请先打开机器人对话并发送一条消息，再回到群里重试；仍失败请联系管理员检查应用可用范围。"
 )
