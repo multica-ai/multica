@@ -29,11 +29,11 @@ function isObsoleteCommentRun(task: AgentTask): boolean {
 }
 
 /** Keep each run at its trigger; associate replies by task identity, never arrival order. */
-export function groupCommentRuns(
+export function buildCommentRunView(
   tasks: readonly AgentTask[],
   timeline: readonly TimelineEntry[],
   previous = new Map<string, CommentRun[]>(),
-): Map<string, CommentRun[]> {
+): { timeline: readonly TimelineEntry[]; runs: Map<string, CommentRun[]> } {
   const comments = new Map(timeline.filter((entry) => entry.type === "comment").map((entry) => [entry.id, entry]));
   const replies = new Map<string, TimelineEntry>();
   for (const entry of comments.values()) {
@@ -44,7 +44,7 @@ export function groupCommentRuns(
     }
   }
   const byTask = new Map(tasks.map((task) => [task.id, task]));
-  const grouped = new Map<string, CommentRun[]>();
+  const placements: CommentRun[] = [];
   for (const task of [...tasks].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))) {
     const reply = replies.get(task.id);
     if (isObsoleteCommentRun(task) && !reply) continue;
@@ -66,16 +66,45 @@ export function groupCommentRuns(
         ?? candidates.sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
       source = source.parent_task_id ? byTask.get(source.parent_task_id) : undefined;
     }
-    const location = anchor ?? reply;
-    if (!location) continue;
-    let root = location;
+    placements.push({ task, commentId: reply?.id ?? anchor?.id, anchorCommentId: anchor?.id, hasReply: !!reply });
+  }
+  // Project every task-owned answer first, then use that same tree for run
+  // grouping, replies, resolution, and navigation. Assignment answers become
+  // roots even if the agent originally posted them inside an existing thread.
+  const parents = new Map<string, string | undefined>();
+  for (const run of placements) {
+    if (run.hasReply && run.commentId && run.commentId !== run.anchorCommentId) {
+      parents.set(run.commentId, run.anchorCommentId);
+    }
+  }
+  const cyclic = new Set<string>();
+  for (const id of parents.keys()) {
+    const seen = new Set([id]);
+    let parent = parents.get(id);
+    while (parent) {
+      if (seen.has(parent)) { cyclic.add(id); break; }
+      seen.add(parent);
+      parent = parents.has(parent) ? parents.get(parent) : comments.get(parent)?.parent_id ?? undefined;
+    }
+  }
+  for (const id of cyclic) parents.delete(id);
+  const projected = timeline.map((entry) => {
+    const parent = parents.get(entry.id);
+    return parents.has(entry.id) && (entry.parent_id ?? undefined) !== parent
+      ? { ...entry, parent_id: parent } : entry;
+  });
+  const projectedComments = new Map(projected.filter((entry) => entry.type === "comment").map((entry) => [entry.id, entry]));
+  const grouped = new Map<string, CommentRun[]>();
+  for (const run of placements) {
+    let root = projectedComments.get(run.anchorCommentId ?? run.commentId ?? "");
+    if (!root) continue;
     const ancestors = new Set([root.id]);
-    while (root.parent_id && comments.has(root.parent_id) && !ancestors.has(root.parent_id)) {
-      root = comments.get(root.parent_id)!;
+    while (root.parent_id && projectedComments.has(root.parent_id) && !ancestors.has(root.parent_id)) {
+      root = projectedComments.get(root.parent_id)!;
       ancestors.add(root.id);
     }
     const rows = grouped.get(root.id) ?? [];
-    rows.push({ task, commentId: reply?.id ?? anchor?.id, anchorCommentId: anchor?.id, hasReply: !!reply });
+    rows.push(run);
     grouped.set(root.id, rows);
   }
   // Preserve memoized comment cards when a different thread receives an event.
@@ -86,7 +115,7 @@ export function groupCommentRuns(
       grouped.set(root, prior);
     }
   }
-  return grouped;
+  return { timeline: projected, runs: grouped };
 }
 
 /** Runs without a comment anchor still appear as their own agent activity. */

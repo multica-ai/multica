@@ -1265,14 +1265,15 @@ describe("IssueDetail (shared)", () => {
     expect(mockApiObj.listTaskMessages).toHaveBeenCalledWith(taskId);
   });
 
-  it("shows an assignment run without a trigger comment and moves its metadata to the agent reply", async () => {
+  it.each([null, "comment-1"])("shows an assignment reply once in its run slot when posted under %s", async (parentId) => {
     const task: AgentTask = {
       id: "ba2e8d1c-7f9b-4e2a-9c1d-123456789abc", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
       status: "queued", priority: 0, created_at: "2026-01-16T00:00:00Z",
       started_at: null, dispatched_at: null, completed_at: null, result: null, error: null,
       delivered_comment_ids: [],
     };
-    mockApiObj.listTimeline.mockResolvedValue([]);
+    const existing = { ...mockTimeline[0]!, id: "comment-1" };
+    mockApiObj.listTimeline.mockResolvedValue([existing]);
     mockApiObj.listTasksByIssue.mockResolvedValue([task]);
     mockApiObj.listTaskMessages.mockResolvedValue([
       { task_id: task.id, issue_id: "issue-1", seq: 1, type: "tool_use", tool: "exec_command", input: { command: "pnpm test" } },
@@ -1293,17 +1294,17 @@ describe("IssueDetail (shared)", () => {
     await screen.findByText("pnpm test");
     expect(container.querySelectorAll(`[data-run-id="${task.id}"]`)).toHaveLength(1);
     const reply: TimelineEntry = {
-      ...mockTimeline[1]!, id: "assignment-reply", parent_id: null, source_task_id: task.id,
+      ...mockTimeline[1]!, id: "assignment-reply", parent_id: parentId, source_task_id: task.id,
       content: "Assignment complete.", created_at: "2026-01-16T00:01:00Z",
     };
     const completed: AgentTask = { ...running, status: "completed", completed_at: reply.created_at };
     mockApiObj.listTasksByIssue.mockResolvedValue([completed]);
-    mockApiObj.listTimeline.mockResolvedValue([reply]);
+    mockApiObj.listTimeline.mockResolvedValue([existing, reply]);
     act(() => {
       queryClient.setQueryData(issueKeys.tasks("issue-1"), [completed]);
-      queryClient.setQueryData(issueKeys.timeline("issue-1"), [reply]);
+      queryClient.setQueryData(issueKeys.timeline("issue-1"), [existing, reply]);
     });
-    await screen.findByText(reply.content!);
+    await waitFor(() => expect(screen.getAllByText(reply.content!)).toHaveLength(1));
     await waitFor(() => expect(container.querySelector(`[data-run-comment-id="${task.id}"]`)).toBeNull());
     expect(container.querySelector(`[data-run-slot-id="${task.id}"]`)).toBe(assignmentSlot);
     const replyBlock = container.querySelector("#comment-assignment-reply")!;
@@ -1354,6 +1355,22 @@ describe("IssueDetail (shared)", () => {
     expect(slots[1]!.nextElementSibling?.id).toBe("comment-request-three");
     expect(container.querySelector(`[data-run-slot-id="${tasks[2]!.id}"]`)).toBe(slots[2]);
     expect(within(slots[2] as HTMLElement).getByText("Waiting for an available agent.")).toBeInTheDocument();
+  });
+
+  it("keeps a downstream run in the thread after its triggering agent reply is projected there", async () => {
+    const root = mockTimeline[0]!;
+    const first: AgentTask = { id: "ba2e8d1c-7f9b-4e2a-9c1d-123456789ab0", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+      status: "completed", priority: 0, created_at: root.created_at, started_at: root.created_at, dispatched_at: null,
+      completed_at: "2026-01-16T00:01:00Z", result: null, error: null, trigger_comment_id: root.id };
+    const answer = { ...mockTimeline[1]!, id: "answer-a", parent_id: null, source_task_id: first.id, content: "Agent A response" };
+    const second: AgentTask = { ...first, id: "ba2e8d1c-7f9b-4e2a-9c1d-123456789ab1", agent_id: "agent-2", status: "queued",
+      started_at: null, completed_at: null, trigger_comment_id: answer.id };
+    mockApiObj.listTimeline.mockResolvedValue([root, answer]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([first, second]);
+    const { container } = renderIssueDetail();
+    await screen.findByText(answer.content);
+    await waitFor(() => expect(container.querySelectorAll(`[data-run-id="${second.id}"]`)).toHaveLength(1));
+    expect(container.querySelector(`#comment-${root.id}`)?.querySelector(`[data-run-id="${second.id}"]`)).not.toBeNull();
   });
 
   it.each(["failed", "cancelled"] as const)("keeps a %s run outside the user reply that triggered it", async (status) => {
@@ -1869,6 +1886,20 @@ describe("IssueDetail (shared)", () => {
   });
 
   describe("highlightCommentId scroll-to-comment", () => {
+    it.each(["root", "reply"])("unfolds an assignment run with a resolved %s when a notification targets a hidden reply", async (resolved) => {
+      const run: AgentTask = { id: "ba2e8d1c-7f9b-4e2a-9c1d-123456789abc", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+        status: "completed", priority: 0, created_at: "2026-01-16T00:00:00Z", started_at: null, dispatched_at: null,
+        completed_at: "2026-01-16T00:01:00Z", result: null, error: null, delivered_comment_ids: [] };
+      const root = { ...mockTimeline[1]!, id: "assigned-answer", parent_id: null, source_task_id: run.id,
+        content: "Assignment answer", resolved_at: resolved === "root" ? "2026-01-17T00:00:00Z" : null };
+      const target = { ...mockTimeline[0]!, id: "hidden-target", parent_id: root.id, content: "Hidden notification target" };
+      const resolution = { ...target, id: "resolution", content: "Resolved reply", resolved_at: "2026-01-17T00:00:00Z" };
+      mockApiObj.listTimeline.mockResolvedValue([root, target, ...(resolved === "reply" ? [resolution] : [])]);
+      mockApiObj.listTasksByIssue.mockResolvedValue([run]);
+      renderIssueDetailWithHighlight(target.id);
+      await waitFor(() => expect(document.getElementById(`comment-${target.id}`)).not.toBeNull());
+      await waitFor(() => expect(document.getElementById(`comment-${target.id}`)).toHaveClass(highlightedCommentBackgroundClass));
+    });
     it("scrolls to the highlighted comment after both issue and timeline finish loading", async () => {
       renderIssueDetailWithHighlight("comment-2");
 

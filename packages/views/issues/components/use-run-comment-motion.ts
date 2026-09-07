@@ -62,10 +62,16 @@ export function useRunDisclosureMotion(open: boolean) {
   const contentRef = useRef<HTMLDivElement>(null);
   const chevronRef = useRef<SVGSVGElement>(null);
   const pending = useRef(false);
+  const focusedTrigger = useRef<HTMLElement | null>(null);
   const fromRotation = useRef("0deg");
   useLayoutEffect(() => {
     const requested = pending.current;
     pending.current = false;
+    const previousTrigger = focusedTrigger.current;
+    focusedTrigger.current = null;
+    if (previousTrigger && !previousTrigger.isConnected && document.activeElement === document.body) {
+      chevronRef.current?.closest<HTMLElement>("button, summary")?.focus({ preventScroll: true });
+    }
     if (!requested) return;
     const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     const duration = open ? 180 : 120;
@@ -81,6 +87,7 @@ export function useRunDisclosureMotion(open: boolean) {
     chevronRef,
     onTrigger(event: MouseEvent<HTMLElement>) {
       pending.current = event.detail > 0;
+      focusedTrigger.current = event.detail === 0 && document.activeElement === event.currentTarget ? event.currentTarget : null;
       // Sample before React cancels the previous animation or replaces the
       // trigger, so rapid reversals start at the currently visible angle.
       const rotation = chevronRef.current ? getComputedStyle(chevronRef.current).rotate : undefined;

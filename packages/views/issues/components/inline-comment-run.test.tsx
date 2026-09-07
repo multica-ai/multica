@@ -41,6 +41,20 @@ function setup(initialTask: AgentTask, hasReply = false) {
 }
 
 describe("InlineCommentRun", () => {
+  it.each(["completed", "queued"] as const)("retains keyboard focus when a %s disclosure replaces its trigger", async (status) => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
+    setup(task({ status }));
+    const before = screen.getByRole("button", { name: /View activity/ });
+    before.focus();
+    fireEvent.click(before, { detail: 0 });
+    const expanded = screen.getByRole("button", { name: /View activity/ });
+    expect(expanded).toHaveFocus();
+    expect(expanded).toHaveAttribute("aria-expanded", "true");
+    await screen.findByRole("button", { name: "Open full log" });
+    fireEvent.click(expanded, { detail: 0 });
+    expect(screen.getByRole("button", { name: /View activity/ })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /View activity/ })).toHaveAttribute("aria-expanded", "false");
+  });
   it("shows real activity, expands in place, follows WS data and retains the open transcript at completion", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
     const current = task();

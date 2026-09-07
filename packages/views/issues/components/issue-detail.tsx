@@ -80,7 +80,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { useNewRunIds } from "./use-run-comment-motion";
 import { AgentRunComment, CommentCard } from "./comment-card";
-import { EMPTY_COMMENT_RUNS, groupCommentRuns, standaloneCommentRuns, type CommentRun } from "./comment-runs";
+import { EMPTY_COMMENT_RUNS, buildCommentRunView, standaloneCommentRuns, type CommentRun } from "./comment-runs";
 import { issueTasksOptions } from "@multica/core/issues/queries";
 import { SourceContextBadge } from "./source-context-viewer";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
@@ -1433,9 +1433,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: commentTasks } = useQuery(issueTasksOptions(id));
   const enteringRunIds = useNewRunIds(id, commentTasks);
   const previousCommentRuns = useRef(new Map<string, CommentRun[]>());
-  const commentRuns = useMemo(() => {
-    const next = groupCommentRuns(commentTasks ?? [], timeline, previousCommentRuns.current);
-    previousCommentRuns.current = next;
+  const { runs: commentRuns, timeline: displayTimeline } = useMemo(() => {
+    const next = buildCommentRunView(commentTasks ?? [], timeline, previousCommentRuns.current);
+    previousCommentRuns.current = next.runs;
     return next;
   }, [commentTasks, timeline]);
   const standaloneRuns = useMemo(() => standaloneCommentRuns(commentTasks ?? [], commentRuns), [commentTasks, commentRuns]);
@@ -1450,13 +1450,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       // Fold the thread back on any resolve change: clear the thread ROOT's
       // expand entry (expand state is keyed on root id, but a resolve target
       // can be a reply). Walk parent_id up to the root.
-      const byId = new Map(timeline.map((e) => [e.id, e]));
+      const byId = new Map(displayTimeline.map((e) => [e.id, e]));
       let cur = byId.get(commentId);
       while (cur?.parent_id && byId.get(cur.parent_id)) cur = byId.get(cur.parent_id)!;
       clearResolvedExpand(cur?.id ?? commentId);
       toggleResolveComment(commentId, resolved);
     },
-    [timeline, clearResolvedExpand, toggleResolveComment],
+    [displayTimeline, clearResolvedExpand, toggleResolveComment],
   );
 
   // Memoized timeline grouping. Each render rebuilds the per-parent map from
@@ -1474,16 +1474,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // bucketed under their parent's id and rendered nested inside CommentCard.
     // No orphan rescue needed: the timeline is fetched in full, so every
     // reply's parent is always in the same array.
-    // A task-owned reply occupies its run slot even if the agent posted it
-    // top-level instead of using the trigger's thread as its API parent.
-    const replyParents = new Map([...commentRuns.values()].flatMap((runs) => runs.flatMap((run) =>
-      run.hasReply && run.anchorCommentId && run.commentId && run.commentId !== run.anchorCommentId
-        ? [[run.commentId, run.anchorCommentId] as const] : [],
-    )));
-    const displayTimeline = timeline.map((entry) => {
-      const parentId = replyParents.get(entry.id);
-      return parentId && entry.parent_id !== parentId ? { ...entry, parent_id: parentId } : entry;
-    });
     const topLevel = displayTimeline.filter(
       (e) => e.type === "activity" || !e.parent_id,
     );
@@ -1554,7 +1544,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const groups: RawTimelineGroup[] = [];
     for (const entry of coalesced) {
       if ("task" in entry) {
-        groups.push({ type: "run", run: entry, entry: entry.hasReply ? timeline.find((comment) => comment.id === entry.commentId) : undefined });
+        groups.push({ type: "run", run: entry, entry: entry.hasReply ? displayTimeline.find((comment) => comment.id === entry.commentId) : undefined });
       } else if (entry.type === "activity") {
         const last = groups[groups.length - 1];
         if (last?.type === "activities") {
@@ -1568,7 +1558,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
 
     return { threadReplies, groups };
-  }, [timeline, standaloneRuns, commentRuns]);
+  }, [displayTimeline, standaloneRuns]);
 
   // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
   // changes (timeline events) or expandedResolved flips (user toggles a
@@ -1911,14 +1901,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const rootId = replyToRoot.get(highlightCommentId);
     if (rootId && rootId !== highlightCommentId) {
       // Root resolved → the whole thread is a folded bar.
-      if (items[targetIdx]?.kind === "resolved-bar") {
+      const rootItem = items[targetIdx];
+      if (rootItem?.kind === "resolved-bar" || (rootItem?.kind === "run" && rootItem.entry?.resolved_at && !expandedResolved.has(rootId))) {
         toggleResolvedExpand(rootId, true);
         return;
       }
       // A reply is the resolution → the other replies fold behind the
       // "N comments" bar; expand if the target is one of those folded replies.
-      const rootItem = items[targetIdx];
-      if (rootItem?.kind === "comment" && !expandedResolved.has(rootId)) {
+      if ((rootItem?.kind === "comment" || rootItem?.kind === "run") && rootItem.entry && !expandedResolved.has(rootId)) {
         const resolution = deriveThreadResolution(
           rootItem.entry,
           timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES,

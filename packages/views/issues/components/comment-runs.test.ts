@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
-import { commentRunOutput, groupCommentRuns, standaloneCommentRuns } from "./comment-runs";
+import { commentRunOutput, buildCommentRunView, standaloneCommentRuns } from "./comment-runs";
+
+const groupCommentRuns = (...args: Parameters<typeof buildCommentRunView>) => buildCommentRunView(...args).runs;
 
 function task(id: string, overrides: Partial<AgentTask> = {}): AgentTask {
   return { id, agent_id: "agent", runtime_id: "runtime", issue_id: "issue", status: "running", priority: 0,
@@ -12,6 +14,32 @@ function comment(id: string, overrides: Partial<TimelineEntry> = {}): TimelineEn
 }
 
 describe("groupCommentRuns", () => {
+  it("projects chained answers and assignment subtrees before finding run roots", () => {
+    const first = task("first", { trigger_comment_id: "root" });
+    const second = task("second", { trigger_comment_id: "answer-a" });
+    const assigned = task("assigned");
+    const followup = task("followup", { trigger_comment_id: "nested" });
+    const timeline = [comment("root"),
+      comment("answer-a", { actor_type: "agent", source_task_id: first.id }),
+      comment("answer-b", { actor_type: "agent", source_task_id: second.id }),
+      comment("assigned-answer", { parent_id: "root", actor_type: "agent", source_task_id: assigned.id }),
+      comment("nested", { parent_id: "assigned-answer" })];
+    const view = buildCommentRunView([followup, second, assigned, first], timeline);
+    expect(view.runs.get("root")?.map((run) => run.task.id)).toEqual(["first", "second"]);
+    expect(view.runs.get("assigned-answer")?.map((run) => run.task.id)).toEqual(["assigned", "followup"]);
+    expect(view.timeline.find((entry) => entry.id === "answer-a")?.parent_id).toBe("root");
+    expect(view.timeline.find((entry) => entry.id === "answer-b")?.parent_id).toBe("answer-a");
+    expect(view.timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBeUndefined();
+    expect(timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBe("root");
+  });
+
+  it("does not project reply relationships that would create a comment cycle", () => {
+    const first = task("first", { trigger_comment_id: "b" });
+    const second = task("second", { trigger_comment_id: "a" });
+    const timeline = [comment("a", { actor_type: "agent", source_task_id: first.id }),
+      comment("b", { actor_type: "agent", source_task_id: second.id })];
+    expect(buildCommentRunView([first, second], timeline).timeline).toEqual(timeline);
+  });
   it("replaces invalidated queued runs without adding cancelled comment blocks", () => {
     const old = task("old", { status: "cancelled", trigger_comment_id: "root", cancelled_by_comment_change: true });
     const next = task("new", { status: "queued", trigger_comment_id: "root" });
