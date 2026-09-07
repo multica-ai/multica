@@ -11,6 +11,7 @@ import {
   NavigationProvider,
   type NavigationAdapter,
 } from "../../navigation";
+import { PAGE_GUTTER } from "../../layout/page-header";
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
@@ -276,5 +277,48 @@ describe("AgentOverviewPane Environment tab visibility", () => {
     expect(
       screen.queryByRole("tab", { name: /^Environment$/i }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// MUL-7107: the header, the tab bar and every panel share one leading edge.
+// The regression these guard against is a centred width cap: `mx-auto` plus a
+// `max-w-*` moves an element's edge as the viewport grows, so chrome on a
+// centred rail and a panel on the page gutter agreed at 1440px and drifted
+// hundreds of pixels apart above it. A cap must be anchored, never centred.
+describe("AgentOverviewPane horizontal alignment", () => {
+  const centredCap = (root: HTMLElement) =>
+    Array.from(root.querySelectorAll<HTMLElement>(".mx-auto")).filter((el) =>
+      Array.from(el.classList).some((c) => c.startsWith("max-w-")),
+    );
+
+  it("puts the tab bar on the shared page gutter, not a centred rail", () => {
+    const { container } = renderPane([makeRuntime("claude")]);
+    const tablist = container.querySelector('[role="tablist"]');
+
+    expect(tablist).toHaveClass(PAGE_GUTTER);
+    expect(centredCap(container as HTMLElement)).toEqual([]);
+  });
+
+  it("starts the Overview panel on that same gutter", () => {
+    const { container } = renderPane([makeRuntime("claude")]);
+    const tablist = container.querySelector('[role="tablist"]');
+    const panel = tablist?.nextElementSibling?.firstElementChild;
+
+    expect(panel).toHaveClass(PAGE_GUTTER);
+    expect(panel).not.toHaveClass("mx-auto");
+  });
+
+  it.each([
+    ["Capabilities", openCapabilities],
+    ["Settings", openSettings],
+  ])("starts the %s nav rail on that same gutter", (_name, open) => {
+    const { container } = renderPane([makeRuntime("claude")]);
+    open();
+
+    // The rail is the leftmost thing in these panels, so it — not the content
+    // pane behind it — is what has to line up with the tabs above.
+    const rail = container.querySelector("aside");
+    expect(rail).toHaveClass(PAGE_GUTTER);
+    expect(centredCap(container as HTMLElement)).toEqual([]);
   });
 });
