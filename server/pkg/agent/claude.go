@@ -261,7 +261,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					})
 				}
 			case "control_request":
-				b.handleControlRequest(msg, stdin)
+				b.handleControlRequest(msg, stdin, msgCh)
 			}
 		}
 		scanErr := scanner.Err()
@@ -446,8 +446,31 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool
 	return sawAsyncLaunch
 }
 
-func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }) {
-	// Auto-approve all tool uses in autonomous/daemon mode.
+// claudeAskUserQuestionTool is Claude Code's built-in structured question
+// tool. It is the only built-in tool that reaches the permission host even
+// under bypassPermissions, which is exactly the hook the daemon needs.
+const claudeAskUserQuestionTool = "AskUserQuestion"
+
+// claudeAskUserQuestionDenyMessage is what the model reads back after calling
+// AskUserQuestion under the daemon. A human answers in the issue, not in this
+// process, so the tool call is denied with an instruction to end the turn;
+// the reply comment then triggers the next run, which resumes this session
+// and sees the answer right after the question. Verified against Claude Code
+// 2.1.260: the model posts one waiting sentence and stops, without guessing.
+const claudeAskUserQuestionDenyMessage = "Your question was delivered to the user as an interactive card in the Multica issue. Nobody can answer it inside this run. End this turn now with one short sentence saying you are waiting for the user's answer. Do not guess an answer, do not repeat the question in a comment, and do not continue the task; you will be resumed automatically once the user replies."
+
+// claudeAskUserQuestionUndeliveredMessage replaces the deny message when the
+// question could not be handed to the daemon. Telling the model it was
+// delivered would strand the user: nobody would ever see the question.
+const claudeAskUserQuestionUndeliveredMessage = "Your question could not be delivered to the user through the interactive card. Post the same question as an issue comment with `multica issue comment add`, listing the options, then end this turn and wait for the reply. Do not guess an answer."
+
+// claudeUserQuestionDeliveryTimeout bounds how long handleControlRequest waits
+// for the daemon to accept a question before telling the model to fall back
+// to a comment. Ordinary events use trySend and drop on a full channel; a
+// dropped question is a lost question, so this one blocks — briefly.
+const claudeUserQuestionDeliveryTimeout = 5 * time.Second
+
+func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }, msgCh chan<- Message) {
 	var req claudeControlRequestPayload
 	if err := json.Unmarshal(msg.Request, &req); err != nil {
 		return
@@ -460,11 +483,48 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 	if inputMap == nil {
 		inputMap = map[string]any{}
 	}
-	if forceClaudeToolInputForeground(inputMap) {
-		b.cfg.Logger.Info("claude: forced foreground tool execution",
-			"request_id", msg.RequestID,
-			"tool", req.ToolName,
-		)
+
+	var decision map[string]any
+	if req.ToolName == claudeAskUserQuestionTool {
+		// The question leaves this process as a first-class message; the
+		// daemon posts it to the issue. The model is told to stop rather than
+		// answered, because the answer arrives on the next run (see
+		// MessageUserQuestion).
+		question := Message{
+			Type:   MessageUserQuestion,
+			Tool:   req.ToolName,
+			CallID: req.ToolUseID,
+			Input:  inputMap,
+		}
+		denyMessage := claudeAskUserQuestionDenyMessage
+		if !deliverUserQuestion(msgCh, question, claudeUserQuestionDeliveryTimeout) {
+			b.cfg.Logger.Warn("claude: user question not delivered to daemon; asking the model to fall back to a comment",
+				"request_id", msg.RequestID,
+				"tool_use_id", req.ToolUseID,
+			)
+			denyMessage = claudeAskUserQuestionUndeliveredMessage
+		} else {
+			b.cfg.Logger.Info("claude: user question forwarded to the issue; ending the turn",
+				"request_id", msg.RequestID,
+				"tool_use_id", req.ToolUseID,
+			)
+		}
+		decision = map[string]any{
+			"behavior": "deny",
+			"message":  denyMessage,
+		}
+	} else {
+		// Auto-approve every other tool use in autonomous/daemon mode.
+		if forceClaudeToolInputForeground(inputMap) {
+			b.cfg.Logger.Info("claude: forced foreground tool execution",
+				"request_id", msg.RequestID,
+				"tool", req.ToolName,
+			)
+		}
+		decision = map[string]any{
+			"behavior":     "allow",
+			"updatedInput": inputMap,
+		}
 	}
 
 	response := map[string]any{
@@ -472,10 +532,7 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 		"response": map[string]any{
 			"subtype":    "success",
 			"request_id": msg.RequestID,
-			"response": map[string]any{
-				"behavior":     "allow",
-				"updatedInput": inputMap,
-			},
+			"response":   decision,
 		},
 	}
 
@@ -487,6 +544,23 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 	data = append(data, '\n')
 	if _, err := stdin.Write(data); err != nil {
 		b.cfg.Logger.Warn("claude: failed to write control response", "error", err)
+	}
+}
+
+// deliverUserQuestion hands a MessageUserQuestion to the transcript consumer,
+// waiting up to timeout for room. It reports false when the channel is nil,
+// full for the whole window, or the timer fires first.
+func deliverUserQuestion(msgCh chan<- Message, msg Message, timeout time.Duration) bool {
+	if msgCh == nil {
+		return false
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case msgCh <- msg:
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 
@@ -677,9 +751,10 @@ type claudeContentBlock struct {
 }
 
 type claudeControlRequestPayload struct {
-	Subtype  string          `json:"subtype"`
-	ToolName string          `json:"tool_name,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
+	Subtype   string          `json:"subtype"`
+	ToolName  string          `json:"tool_name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
 }
 
 // ── Shared helpers ──
@@ -702,6 +777,10 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--input-format":    blockedWithValue,  // stream-json protocol
 	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
 	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
+	// The daemon is the permission host for AskUserQuestion; pointing the
+	// prompt tool anywhere else would strand the question in a process that
+	// cannot answer it.
+	"--permission-prompt-tool": blockedWithValue,
 	// `--effort` is owned by the per-agent thinking_level picker so a
 	// user-supplied custom_arg cannot silently outvote it. The daemon
 	// injects --effort only when opts.ThinkingLevel is set; if a user
@@ -718,13 +797,27 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--input-format", "stream-json",
 		"--verbose",
 		"--permission-mode", "bypassPermissions",
+	}
+	if opts.AllowUserQuestions {
+		// Declare this process as the permission host. Without it, print mode
+		// strips AskUserQuestion from the tool set entirely (verified against
+		// Claude Code 2.1.260: the tool is absent from the system/init tools
+		// list whatever the permission mode, and dropping --disallowedTools
+		// alone changes nothing). With it, AskUserQuestion reaches
+		// handleControlRequest as a can_use_tool request even under
+		// bypassPermissions — it is the one built-in tool that always falls
+		// through to the host — where the daemon forwards the question to the
+		// issue and tells the model to end its turn (GitHub #8048). Every
+		// other tool keeps flowing through the same auto-allow branch.
+		args = append(args, "--permission-prompt-tool", "stdio")
+	} else {
 		// AskUserQuestion is Claude Code's built-in interactive question tool.
-		// The daemon runs Claude in non-interactive stream-json mode and has
-		// no UI for the prompt to render in, so a call returns an empty
-		// answer and the agent ends up "inferring" silently — the user
-		// never sees the question (see GitHub #2588). User-facing
-		// clarification belongs in an issue comment instead.
-		"--disallowedTools", "AskUserQuestion",
+		// Runs with no issue to post the question to (chat, autopilot,
+		// quick-create) have no surface for it, so a call would return an
+		// empty answer and the agent would end up "inferring" silently — the
+		// user never sees the question (GitHub #2588). Remove the tool from
+		// the model's context instead.
+		args = append(args, "--disallowedTools", claudeAskUserQuestionTool)
 	}
 	if hasManagedMcpConfig(opts.McpConfig) {
 		// A saved agent-level config is authoritative, including an explicitly

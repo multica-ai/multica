@@ -573,6 +573,22 @@
     "stop_tooltip": "Stop agent",
     "cancel_failed": "Failed to cancel run"
   },
+  "agent_question": {
+    "title": "{{name}} has a question",
+    "title_fallback": "The agent has a question",
+    "pick_single": "Choose one",
+    "pick_multiple": "Choose any that apply",
+    "other_option": "Other",
+    "other_placeholder": "Write your own answer",
+    "submit": "Send answer",
+    "sending": "Sending…",
+    "submit_failed": "Failed to send the answer",
+    "answered": "Answered",
+    "resume_hint": "The agent resumes as soon as you reply.",
+    "waiting_chip": "{{name}} is waiting for your answer",
+    "waiting_chip_fallback": "An agent is waiting for your answer",
+    "option_group_label": "Options for: {{question}}"
+  },
   "execution_log": {
     "section": "Execution log",
     "show_past": "Show past runs ({{count}})",

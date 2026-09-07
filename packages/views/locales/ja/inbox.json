@@ -69,6 +69,7 @@
     "task_failed": "実行失敗",
     "agent_blocked": "エージェントがブロック",
     "agent_completed": "エージェントが完了",
+    "agent_question": "エージェントからの質問",
     "reaction_added": "リアクションあり",
     "quick_create_done": "エージェントで作成",
     "quick_create_failed": "エージェントでの作成に失敗",

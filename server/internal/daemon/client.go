@@ -516,6 +516,22 @@ type TaskMessageData struct {
 	Output  string         `json:"output,omitempty"`
 }
 
+// questionReportRetrySchedule rides out a transport blip while the drain
+// loop is blocked on the report. Kept short: the model has already been told
+// to end its turn, so a long stall here only delays the transcript flush.
+var questionReportRetrySchedule = []time.Duration{2 * time.Second, 4 * time.Second}
+
+// ReportTaskQuestion delivers a structured question the agent asked the human
+// (agent.MessageUserQuestion). The server posts it to the issue as an
+// interactive comment; the answer comes back as a reply that triggers the
+// next run (GitHub #8048).
+func (c *Client) ReportTaskQuestion(ctx context.Context, taskID, toolUseID string, questions any) error {
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/question", taskID), map[string]any{
+		"tool_use_id": toolUseID,
+		"questions":   questions,
+	}, nil, questionReportRetrySchedule)
+}
+
 func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages []TaskMessageData) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/messages", taskID), map[string]any{
 		"messages": messages,

@@ -46,9 +46,14 @@ type CommentResponse struct {
 	// raw prompt body. It is NOT settable through this endpoint — there is no
 	// request field for it — which is exactly why the card keys off this id
 	// rather than a `type` value the client controls.
-	QuickActionID *string              `json:"quick_action_id,omitempty"`
-	Reactions     []ReactionResponse   `json:"reactions"`
-	Attachments   []AttachmentResponse `json:"attachments"`
+	QuickActionID *string `json:"quick_action_id,omitempty"`
+	// QuestionPayload marks an agent question comment (GitHub #8048): the
+	// timeline renders an interactive answer card off it. Server-set only —
+	// the daemon's task question endpoint is the sole writer — so, like
+	// QuickActionID, it cannot be forged through this endpoint.
+	QuestionPayload json.RawMessage      `json:"question_payload,omitempty"`
+	Reactions       []ReactionResponse   `json:"reactions"`
+	Attachments     []AttachmentResponse `json:"attachments"`
 	// Orientation stats — populated only on the roots_only path and omitted in
 	// every other mode, so the default response shape stays byte-identical for
 	// existing callers. ReplyCount is the number of descendants in the thread;
@@ -100,23 +105,24 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		attachments = []AttachmentResponse{}
 	}
 	return CommentResponse{
-		ID:             uuidToString(c.ID),
-		IssueID:        uuidToString(c.IssueID),
-		AuthorType:     c.AuthorType,
-		AuthorID:       uuidToString(c.AuthorID),
-		Content:        c.Content,
-		Type:           c.Type,
-		ParentID:       uuidToPtr(c.ParentID),
-		CreatedAt:      timestampToString(c.CreatedAt),
-		UpdatedAt:      timestampToString(c.UpdatedAt),
-		Revision:       c.Revision,
-		ResolvedAt:     timestampToPtr(c.ResolvedAt),
-		ResolvedByType: textToPtr(c.ResolvedByType),
-		ResolvedByID:   uuidToPtr(c.ResolvedByID),
-		SourceTaskID:   uuidToPtr(c.SourceTaskID),
-		QuickActionID:  uuidToPtr(c.QuickActionID),
-		Reactions:      reactions,
-		Attachments:    attachments,
+		ID:              uuidToString(c.ID),
+		IssueID:         uuidToString(c.IssueID),
+		AuthorType:      c.AuthorType,
+		AuthorID:        uuidToString(c.AuthorID),
+		Content:         c.Content,
+		Type:            c.Type,
+		ParentID:        uuidToPtr(c.ParentID),
+		CreatedAt:       timestampToString(c.CreatedAt),
+		UpdatedAt:       timestampToString(c.UpdatedAt),
+		Revision:        c.Revision,
+		ResolvedAt:      timestampToPtr(c.ResolvedAt),
+		ResolvedByType:  textToPtr(c.ResolvedByType),
+		ResolvedByID:    uuidToPtr(c.ResolvedByID),
+		SourceTaskID:    uuidToPtr(c.SourceTaskID),
+		QuickActionID:   uuidToPtr(c.QuickActionID),
+		QuestionPayload: questionPayloadRaw(c.QuestionPayload),
+		Reactions:       reactions,
+		Attachments:     attachments,
 	}
 }
 
@@ -788,22 +794,23 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 			replies := make([]db.Comment, 0, len(rows))
 			for _, r := range rows {
 				c := db.Comment{
-					ID:             r.ID,
-					IssueID:        r.IssueID,
-					AuthorType:     r.AuthorType,
-					AuthorID:       r.AuthorID,
-					Content:        r.Content,
-					Type:           r.Type,
-					CreatedAt:      r.CreatedAt,
-					UpdatedAt:      r.UpdatedAt,
-					ParentID:       r.ParentID,
-					WorkspaceID:    r.WorkspaceID,
-					ResolvedAt:     r.ResolvedAt,
-					ResolvedByType: r.ResolvedByType,
-					ResolvedByID:   r.ResolvedByID,
-					SourceTaskID:   r.SourceTaskID,
-					QuickActionID:  r.QuickActionID,
-					Revision:       r.Revision,
+					ID:              r.ID,
+					IssueID:         r.IssueID,
+					AuthorType:      r.AuthorType,
+					AuthorID:        r.AuthorID,
+					Content:         r.Content,
+					Type:            r.Type,
+					CreatedAt:       r.CreatedAt,
+					UpdatedAt:       r.UpdatedAt,
+					ParentID:        r.ParentID,
+					WorkspaceID:     r.WorkspaceID,
+					ResolvedAt:      r.ResolvedAt,
+					ResolvedByType:  r.ResolvedByType,
+					ResolvedByID:    r.ResolvedByID,
+					SourceTaskID:    r.SourceTaskID,
+					QuickActionID:   r.QuickActionID,
+					QuestionPayload: r.QuestionPayload,
+					Revision:        r.Revision,
 				}
 				if !r.ParentID.Valid {
 					root := c
@@ -882,22 +889,23 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		replies := make([]db.Comment, 0, len(rows))
 		for _, r := range rows {
 			c := db.Comment{
-				ID:             r.ID,
-				IssueID:        r.IssueID,
-				AuthorType:     r.AuthorType,
-				AuthorID:       r.AuthorID,
-				Content:        r.Content,
-				Type:           r.Type,
-				CreatedAt:      r.CreatedAt,
-				UpdatedAt:      r.UpdatedAt,
-				ParentID:       r.ParentID,
-				WorkspaceID:    r.WorkspaceID,
-				ResolvedAt:     r.ResolvedAt,
-				ResolvedByType: r.ResolvedByType,
-				ResolvedByID:   r.ResolvedByID,
-				SourceTaskID:   r.SourceTaskID,
-				QuickActionID:  r.QuickActionID,
-				Revision:       r.Revision,
+				ID:              r.ID,
+				IssueID:         r.IssueID,
+				AuthorType:      r.AuthorType,
+				AuthorID:        r.AuthorID,
+				Content:         r.Content,
+				Type:            r.Type,
+				CreatedAt:       r.CreatedAt,
+				UpdatedAt:       r.UpdatedAt,
+				ParentID:        r.ParentID,
+				WorkspaceID:     r.WorkspaceID,
+				ResolvedAt:      r.ResolvedAt,
+				ResolvedByType:  r.ResolvedByType,
+				ResolvedByID:    r.ResolvedByID,
+				SourceTaskID:    r.SourceTaskID,
+				QuickActionID:   r.QuickActionID,
+				QuestionPayload: r.QuestionPayload,
+				Revision:        r.Revision,
 			}
 			if !r.ParentID.Valid {
 				root := c
@@ -970,22 +978,23 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				continue
 			}
 			comments = append(comments, db.Comment{
-				ID:             r.ID,
-				IssueID:        r.IssueID,
-				AuthorType:     r.AuthorType,
-				AuthorID:       r.AuthorID,
-				Content:        r.Content,
-				Type:           r.Type,
-				CreatedAt:      r.CreatedAt,
-				UpdatedAt:      r.UpdatedAt,
-				ParentID:       r.ParentID,
-				WorkspaceID:    r.WorkspaceID,
-				ResolvedAt:     r.ResolvedAt,
-				ResolvedByType: r.ResolvedByType,
-				ResolvedByID:   r.ResolvedByID,
-				SourceTaskID:   r.SourceTaskID,
-				QuickActionID:  r.QuickActionID,
-				Revision:       r.Revision,
+				ID:              r.ID,
+				IssueID:         r.IssueID,
+				AuthorType:      r.AuthorType,
+				AuthorID:        r.AuthorID,
+				Content:         r.Content,
+				Type:            r.Type,
+				CreatedAt:       r.CreatedAt,
+				UpdatedAt:       r.UpdatedAt,
+				ParentID:        r.ParentID,
+				WorkspaceID:     r.WorkspaceID,
+				ResolvedAt:      r.ResolvedAt,
+				ResolvedByType:  r.ResolvedByType,
+				ResolvedByID:    r.ResolvedByID,
+				SourceTaskID:    r.SourceTaskID,
+				QuickActionID:   r.QuickActionID,
+				QuestionPayload: r.QuestionPayload,
+				Revision:        r.Revision,
 			})
 		}
 
@@ -1044,7 +1053,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 					ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
 					ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
-					SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
+					SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, QuestionPayload: r.QuestionPayload, Revision: r.Revision,
 				}
 				stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
 			}
@@ -1074,7 +1083,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 				ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
 				ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
-				SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
+				SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, QuestionPayload: r.QuestionPayload, Revision: r.Revision,
 			}
 			stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
 		}
@@ -3840,4 +3849,13 @@ func (h *Handler) UnresolveComment(w http.ResponseWriter, r *http.Request) {
 		h.publish(protocol.EventCommentUnresolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// questionPayloadRaw returns the stored question payload as raw JSON, or nil
+// when the comment is not a question so the field is omitted entirely.
+func questionPayloadRaw(b []byte) json.RawMessage {
+	if len(b) == 0 {
+		return nil
+	}
+	return json.RawMessage(b)
 }

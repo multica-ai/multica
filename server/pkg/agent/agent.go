@@ -34,7 +34,14 @@ type ExecOptions struct {
 	//
 	// A backend must therefore NOT assume this is populated, and adding a new
 	// backend that only reads SystemPrompt will silently receive nothing.
-	SystemPrompt              string
+	SystemPrompt string
+	// AllowUserQuestions lets the agent ask the human structured questions
+	// (Claude Code's AskUserQuestion). The daemon sets it only for issue-bound
+	// runs, because the question is delivered as an issue comment and
+	// answered by a reply there (GitHub #8048); chat, autopilot and
+	// quick-create runs keep the tool disabled, as before, so the model never
+	// hears "delivered" for a question nobody can see.
+	AllowUserQuestions        bool
 	ThreadName                string
 	MaxTurns                  int
 	Timeout                   time.Duration
@@ -159,6 +166,13 @@ const (
 	MessageStatus     MessageType = "status"
 	MessageError      MessageType = "error"
 	MessageLog        MessageType = "log"
+	// MessageUserQuestion is a structured question the agent asked the human
+	// (Claude Code's AskUserQuestion). Input carries the tool's `questions`
+	// payload verbatim and CallID the tool_use id. The backend has already
+	// told the model that nobody can answer inside this run, so the daemon's
+	// only job is to deliver the question to the issue; the answer arrives as
+	// a comment that triggers the next run (GitHub #8048).
+	MessageUserQuestion MessageType = "user-question"
 )
 
 // Message is a unified event emitted by an agent during execution.

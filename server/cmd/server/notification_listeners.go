@@ -81,9 +81,10 @@ var parentBubbleNotifTypes = map[string]bool{
 // unconditionally: they are either addressed at the human directly, or they are
 // exceptions that stall the work until a human looks.
 var delegatedAlwaysNotifTypes = map[string]bool{
-	"mentioned":     true,
-	"task_failed":   true,
-	"agent_blocked": true,
+	"mentioned":      true,
+	"task_failed":    true,
+	"agent_blocked":  true,
+	"agent_question": true,
 }
 
 // delegatedStatusNotify are the statuses whose ARRIVAL is worth an inbox item
@@ -147,6 +148,7 @@ var notifTypeToGroup = map[string]string{
 	"task_failed":        "agent_activity",
 	"agent_blocked":      "agent_activity",
 	"agent_completed":    "agent_activity",
+	"agent_question":     "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -210,8 +212,7 @@ var terminalStatusForTaskFailedDismiss = map[string]bool{
 }
 
 // archiveStaleTaskFailedInbox archives all task_failed inbox rows for the
-// given issue and notifies each affected member recipient via
-// inbox:batch-archived so connected clients self-heal.
+// given issue once it reaches a terminal status.
 func archiveStaleTaskFailedInbox(
 	ctx context.Context,
 	queries *db.Queries,
@@ -219,14 +220,30 @@ func archiveStaleTaskFailedInbox(
 	workspaceID string,
 	issueID string,
 ) {
+	archiveInboxByIssueAndType(ctx, queries, bus, workspaceID, issueID, "task_failed", "issue_status_terminal")
+}
+
+// archiveInboxByIssueAndType archives every open inbox row of one type for
+// the given issue and notifies each affected member recipient via
+// inbox:batch-archived so connected clients self-heal. reason is what the
+// clients see on that event.
+func archiveInboxByIssueAndType(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	workspaceID string,
+	issueID string,
+	notifType string,
+	reason string,
+) {
 	rows, err := queries.ArchiveInboxByIssueAndType(ctx, db.ArchiveInboxByIssueAndTypeParams{
 		WorkspaceID: parseUUID(workspaceID),
 		IssueID:     parseUUID(issueID),
-		Type:        "task_failed",
+		Type:        notifType,
 	})
 	if err != nil {
-		slog.Error("auto-archive task_failed inbox: query failed",
-			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
+		slog.Error("auto-archive inbox: query failed",
+			"type", notifType, "workspace_id", workspaceID, "issue_id", issueID, "error", err)
 		return
 	}
 	if len(rows) == 0 {
@@ -255,13 +272,13 @@ func archiveStaleTaskFailedInbox(
 				"recipient_id": recipientID,
 				"count":        int64(count),
 				"issue_id":     issueID,
-				"reason":       "issue_status_terminal",
+				"reason":       reason,
 			},
 		})
 	}
 
-	slog.Info("auto-archive task_failed inbox: archived stale rows",
-		"workspace_id", workspaceID, "issue_id", issueID,
+	slog.Info("auto-archive inbox: archived rows",
+		"type", notifType, "workspace_id", workspaceID, "issue_id", issueID,
 		"row_count", len(rows), "recipient_count", len(counts))
 }
 
@@ -856,18 +873,25 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		// The comment payload can come as handler.CommentResponse from the
 		// HTTP handler, or as map[string]any from the agent comment path in
 		// task.go. Handle both.
-		var issueID, commentID, commentContent, authorType string
+		var issueID, commentID, commentContent, authorType, parentID string
+		var isQuestion bool
 		switch c := payload["comment"].(type) {
 		case handler.CommentResponse:
 			issueID = c.IssueID
 			commentID = c.ID
 			commentContent = c.Content
 			authorType = c.AuthorType
+			if c.ParentID != nil {
+				parentID = *c.ParentID
+			}
+			isQuestion = len(c.QuestionPayload) > 0
 		case map[string]any:
 			issueID, _ = c["issue_id"].(string)
 			commentID, _ = c["id"].(string)
 			commentContent, _ = c["content"].(string)
 			authorType, _ = c["author_type"].(string)
+			parentID = eventStringField(c["parent_id"])
+			isQuestion = c["question_payload"] != nil
 		default:
 			return
 		}
@@ -894,10 +918,31 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			})
 		}
 
+		// An agent question (AskUserQuestion delivered as a comment, GitHub
+		// #8048) is the one comment that needs a person to act: it gets its
+		// own type and action_required severity so the inbox can foreground
+		// it, and it is never muted under the "comments" group.
+		notifType, severity := "new_comment", "info"
+		if authorType == "agent" && isQuestion {
+			notifType, severity = "agent_question", "action_required"
+		}
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
-			nil, "new_comment", "info",
+			nil, notifType, severity,
 			issueTitle, commentContent,
 			commentDetails)
+
+		// A member replying anywhere in an agent question's thread answers
+		// it, so the question's inbox rows are done. The reply may be nested
+		// under an earlier reply, hence the thread root lookup.
+		if authorType == "member" && parentID != "" {
+			root, err := queries.GetThreadRoot(ctx, db.GetThreadRootParams{
+				CommentID:   parseUUID(parentID),
+				WorkspaceID: parseUUID(e.WorkspaceID),
+			})
+			if err == nil && len(root.QuestionPayload) > 0 {
+				archiveInboxByIssueAndType(ctx, queries, bus, e.WorkspaceID, issueID, "agent_question", "agent_question_answered")
+			}
+		}
 
 		// Notify @mentions in comment content.
 		mentions := parseMentions(commentContent)
@@ -1041,4 +1086,18 @@ func inboxItemToResponse(item db.InboxItem) map[string]any {
 		"actor_id":       util.UUIDToPtr(item.ActorID),
 		"details":        json.RawMessage(item.Details),
 	}
+}
+
+// eventStringField reads a string-valued event payload field that the
+// producer may have set as a string or as a *string (util.UUIDToPtr).
+func eventStringField(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case *string:
+		if t != nil {
+			return *t
+		}
+	}
+	return ""
 }

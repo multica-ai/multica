@@ -8242,6 +8242,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
 		ThreadHandshakeTimeout:     d.cfg.CodexThreadHandshakeTimeout,
 		ResumeSessionID:            task.PriorSessionID,
+		// Structured questions have a surface only on issue-bound runs (GitHub #8048).
+		AllowUserQuestions: task.IssueID != "",
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
 		// resume gates (a dropped resume is surfaced via the prompt instead). If it
 		// survived to here, the backend must disclose the loss when the live
@@ -9092,6 +9094,22 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						Output: output,
 					})
 					mu.Unlock()
+				case agent.MessageUserQuestion:
+					// The backend has already told the model to end its turn;
+					// what remains is getting the question in front of a
+					// human. Reported inline (not via the 500ms batch) so it
+					// is durable before the terminal report can race it: the
+					// completion path synthesizes a fallback comment only
+					// when the agent posted nothing, and this comment is what
+					// it should find. Bounded so a server blip cannot wedge
+					// the drain loop.
+					taskLog.Info("user question observed", "tool_use_id", msg.CallID)
+					questions := msg.Input["questions"]
+					reportCtx, cancelReport := context.WithTimeout(drainCtx, 20*time.Second)
+					if err := d.client.ReportTaskQuestion(reportCtx, taskID, msg.CallID, questions); err != nil {
+						taskLog.Error("failed to report user question; the transcript still carries the tool call", "error", err)
+					}
+					cancelReport()
 				case agent.MessageThinking:
 					if msg.Content != "" {
 						mu.Lock()

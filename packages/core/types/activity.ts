@@ -1,4 +1,4 @@
-import type { CommentAuthorType, Reaction } from "./comment";
+import type { AgentQuestionPayload, CommentAuthorType, Reaction } from "./comment";
 import type { Attachment } from "./attachment";
 
 export interface AssigneeFrequencyEntry {
@@ -27,6 +27,8 @@ export interface TimelineEntry {
   comment_type?: string;
   /** Set only on comments a quick action produced (MUL-5465). Unforgeable. */
   quick_action_id?: string | null;
+  /** Set only on agent question comments (GitHub #8048). Unforgeable. */
+  question_payload?: AgentQuestionPayload | null;
   reactions?: Reaction[];
   attachments?: Attachment[];
   resolved_at?: string | null;

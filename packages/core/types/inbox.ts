@@ -18,6 +18,9 @@ export type InboxItemType =
   | "task_failed"
   | "agent_blocked"
   | "agent_completed"
+  // An agent asked a structured question (AskUserQuestion) and is waiting for
+  // a reply in the issue thread (GitHub #8048). action_required severity.
+  | "agent_question"
   | "reaction_added"
   | "quick_create_done"
   | "quick_create_failed"

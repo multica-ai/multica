@@ -41,7 +41,7 @@ Multica はファイルシステムのサンドボックスを提供しません
 
 ## 境界ではないもの
 
-- **コーディングツール自身のサンドボックスと承認設定。** Multica はエージェントを無人で実行するため、承認要求は自動的に応答されます。デフォルトの経路ではファイルシステムのサンドボックスも無効で、Codex は `sandbox_mode = "danger-full-access"`、Claude Code は `--permission-mode bypassPermissions` で動作します。例外は Windows です。Codex のネイティブサンドボックス（`windows.sandbox = "unelevated"` または `"elevated"`）を明示的に設定した場合、Multica はそのオプトインを尊重し、該当実行では `workspace-write` を維持します。使える場面では有効ですが、1 つのプラットフォームの 1 つのツールに限られる話であり、デーモンユーザーの権限をどこまで絞るべきかという判断は変わりません。
+- **コーディングツール自身のサンドボックスと承認設定。** Multica はエージェントを無人で実行するため、承認要求は自動的に応答されます。唯一の例外は質問です。Claude Code の実行が `AskUserQuestion` を呼び出しても、マシン上では何も応答しません。質問はタスクにカードとして投稿され、実行は終了し、メンバーが返信するとエージェントが再開します。デフォルトの経路ではファイルシステムのサンドボックスも無効で、Codex は `sandbox_mode = "danger-full-access"`、Claude Code は `--permission-mode bypassPermissions` で動作します。例外は Windows です。Codex のネイティブサンドボックス（`windows.sandbox = "unelevated"` または `"elevated"`）を明示的に設定した場合、Multica はそのオプトインを尊重し、該当実行では `workspace-write` を維持します。使える場面では有効ですが、1 つのプラットフォームの 1 つのツールに限られる話であり、デーモンユーザーの権限をどこまで絞るべきかという判断は変わりません。
 - **`HOME` ディレクトリの構成。** 実行はデーモンユーザーの実際の `HOME` と `XDG_*` 変数を引き継ぎます。だからこそ `gh`、`aws`、`kubectl`、`gcloud`、`glab` などのホスト CLI がシェルと同じように実行内で動作します。同時に、そのホーム配下のすべてに到達できるということでもあります。
 
 <Callout>

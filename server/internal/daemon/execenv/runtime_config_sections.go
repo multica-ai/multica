@@ -722,6 +722,20 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- Your turn produced none of the issue's own deliverable — you answered a question or consulted on work owned elsewhere → write nothing, at any point; questions, discussion, and acknowledgements never touch status. This no-write default is what keeps concurrent runs from flapping the board.\n\n")
 }
 
+// writeUserQuestions teaches the one runtime that has a structured question
+// tool how Multica delivers it (GitHub #8048). Claude Code's AskUserQuestion
+// reaches the daemon as a permission request; the daemon posts the question to
+// the issue as an interactive card and denies the call with an instruction to
+// end the turn, and the user's reply triggers the next run. Gated on the
+// provider, which is fixed for the life of a session, so the cached brief
+// stays byte-stable across resumes.
+func writeUserQuestions(b *strings.Builder, provider string) {
+	if provider != "claude" {
+		return
+	}
+	b.WriteString("**Asking the user a question.** When a decision belongs to the issue owner — an ambiguous requirement, a choice between approaches with real trade-offs, something only they can supply — call `AskUserQuestion` once, with 2–4 concrete options per question. Multica delivers it to the issue as an interactive card and ends your turn; do not post the same question as a comment, and do not guess. You are resumed automatically when the user replies, with their answer in the thread. Anything you can reasonably decide yourself, decide — questions are for real forks, not reassurance.\n\n")
+}
+
 // writeSubIssueCreation emits the Sub-issue Creation section.
 //
 // MUL-5442 demotes the full todo/backlog/stage playbook to the multica-platform
@@ -1012,6 +1026,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeWorkflowAutopilot(&b)
 	case kindIssue:
 		writeWorkflowIssue(&b, ctx)
+		writeUserQuestions(&b, provider)
 	}
 
 	if kind.hasIssueContext() && ctx.IssueID != "" {

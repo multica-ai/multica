@@ -39,13 +39,15 @@ type TimelineEntry struct {
 	CommentType *string `json:"comment_type,omitempty"`
 	// Set only on comments produced by a quick action run. Unforgeable: there
 	// is no request field for it on the generic comment endpoint.
-	QuickActionID  *string              `json:"quick_action_id,omitempty"`
-	Reactions      []ReactionResponse   `json:"reactions,omitempty"`
-	Attachments    []AttachmentResponse `json:"attachments,omitempty"`
-	ResolvedAt     *string              `json:"resolved_at,omitempty"`
-	ResolvedByType *string              `json:"resolved_by_type,omitempty"`
-	ResolvedByID   *string              `json:"resolved_by_id,omitempty"`
-	SourceTaskID   *string              `json:"source_task_id,omitempty"`
+	QuickActionID *string `json:"quick_action_id,omitempty"`
+	// QuestionPayload marks an agent question comment; see CommentResponse.
+	QuestionPayload json.RawMessage      `json:"question_payload,omitempty"`
+	Reactions       []ReactionResponse   `json:"reactions,omitempty"`
+	Attachments     []AttachmentResponse `json:"attachments,omitempty"`
+	ResolvedAt      *string              `json:"resolved_at,omitempty"`
+	ResolvedByType  *string              `json:"resolved_by_type,omitempty"`
+	ResolvedByID    *string              `json:"resolved_by_id,omitempty"`
+	SourceTaskID    *string              `json:"source_task_id,omitempty"`
 }
 
 // timelineHardCap bounds the per-issue timeline payload. Sized as a defensive
@@ -288,23 +290,24 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 		updatedAt := timestampToString(c.UpdatedAt)
 		cid := uuidToString(c.ID)
 		out[i] = TimelineEntry{
-			Type:           "comment",
-			ID:             cid,
-			ActorType:      c.AuthorType,
-			ActorID:        uuidToString(c.AuthorID),
-			Content:        &content,
-			CommentType:    &commentType,
-			QuickActionID:  uuidToPtr(c.QuickActionID),
-			ParentID:       uuidToPtr(c.ParentID),
-			CreatedAt:      timestampToString(c.CreatedAt),
-			UpdatedAt:      &updatedAt,
-			Revision:       c.Revision,
-			Reactions:      reactions[cid],
-			Attachments:    attachments[cid],
-			ResolvedAt:     timestampToPtr(c.ResolvedAt),
-			ResolvedByType: textToPtr(c.ResolvedByType),
-			ResolvedByID:   uuidToPtr(c.ResolvedByID),
-			SourceTaskID:   uuidToPtr(c.SourceTaskID),
+			Type:            "comment",
+			ID:              cid,
+			ActorType:       c.AuthorType,
+			ActorID:         uuidToString(c.AuthorID),
+			Content:         &content,
+			CommentType:     &commentType,
+			QuickActionID:   uuidToPtr(c.QuickActionID),
+			QuestionPayload: questionPayloadRaw(c.QuestionPayload),
+			ParentID:        uuidToPtr(c.ParentID),
+			CreatedAt:       timestampToString(c.CreatedAt),
+			UpdatedAt:       &updatedAt,
+			Revision:        c.Revision,
+			Reactions:       reactions[cid],
+			Attachments:     attachments[cid],
+			ResolvedAt:      timestampToPtr(c.ResolvedAt),
+			ResolvedByType:  textToPtr(c.ResolvedByType),
+			ResolvedByID:    uuidToPtr(c.ResolvedByID),
+			SourceTaskID:    uuidToPtr(c.SourceTaskID),
 		}
 	}
 	return out
