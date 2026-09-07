@@ -587,7 +587,7 @@ export function AgentCreatePanel({
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
-  // Field visibility lives in Settings → Issue. Persist the prompt draft
+  // Field visibility lives in Settings → Preferences → Issue creation. Persist the prompt draft
   // before leaving so what the user typed survives the round-trip, then
   // close — the dialog would otherwise linger over the settings page.
   const openFieldSettings = (e: React.MouseEvent) => {
@@ -809,7 +809,7 @@ export function AgentCreatePanel({
               <DropdownMenuItem
                 render={
                   <AppLink
-                    href={`${workspacePaths.settings()}?tab=issue`}
+                    href={`${workspacePaths.settings()}?tab=preferences&section=issue`}
                     onClick={openFieldSettings}
                   />
                 }

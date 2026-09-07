@@ -671,7 +671,7 @@ describe("AgentCreatePanel", () => {
     });
   });
 
-  it("routes Customize fields to Settings → Issue, keeping the typed prompt", async () => {
+  it("routes Customize fields to Settings → Preferences → Issue creation, keeping the typed prompt", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
@@ -685,10 +685,10 @@ describe("AgentCreatePanel", () => {
 
     expect(mockSetAgent).toHaveBeenLastCalledWith({ prompt: "Half-typed request" });
     expect(onClose).toHaveBeenCalled();
-    expect(mockNavigationPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
+    expect(mockNavigationPush).toHaveBeenCalledWith("/ws-test/settings?tab=preferences&section=issue");
   });
 
-  it("respects fields enabled in Settings → Issue by rendering them inline", () => {
+  it("respects fields enabled in Settings → Preferences → Issue creation by rendering them inline", () => {
     mockCreateSettingsStore.quickCreateFields = ["project", "priority", "due_date"];
 
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
