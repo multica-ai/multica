@@ -207,6 +207,7 @@ func daemonCommonCapabilities() []string {
 		protocol.DaemonCapabilityAgentSkillV1,
 		protocol.DaemonCapabilityRemoteMCPV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
+		protocol.DaemonCapabilityRunWorkspaceV1,
 		protocol.DaemonCapabilitySourceContextQuickCreateV1,
 		protocol.DaemonCapabilityRPCV1,
 		protocol.DaemonCapabilityPlatformSkillV1,
@@ -449,6 +450,7 @@ func (c *Client) StartTask(ctx context.Context, taskID string) error {
 func (c *Client) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID, reason string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/wait-local-directory", taskID), map[string]any{
 		"reason": reason,
+		"release_capacity": true,
 	}, nil)
 }
 

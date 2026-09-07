@@ -109,11 +109,12 @@ type repoCheckoutRequest struct {
 }
 
 type activeRepoCheckoutTask struct {
-	WorkspaceID string
-	TaskID      string
-	AgentID     string
-	AgentName   string
-	WorkDir     string
+	RepositoryPolicy map[string]string // nil: legacy workspace policy; non-nil: exact run allowlist
+	WorkspaceID      string
+	TaskID           string
+	AgentID          string
+	AgentName        string
+	WorkDir          string
 }
 
 // registerActiveRepoCheckoutTask binds checkout identity to the active task.
@@ -448,6 +449,15 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		req.AgentName = activeTask.AgentName
 		req.WorkDir = authorizedWorkDir
 
+		if activeTask.RepositoryPolicy != nil {
+			ref, allowed := activeTask.RepositoryPolicy[req.URL]
+			if !allowed || (req.Ref != "" && req.Ref != ref) {
+				http.Error(w, "repository or base commit is outside this run's source allowlist", http.StatusForbidden)
+				return
+			}
+			req.Ref = ref
+			req.CheckoutMode = repoCheckoutModeIsolated
+		}
 		if d.repoCache == nil {
 			http.Error(w, "repo cache not initialized", http.StatusInternalServerError)
 			return

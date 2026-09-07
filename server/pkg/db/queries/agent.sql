@@ -560,7 +560,7 @@ INSERT INTO agent_task_queue (
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
-    channel_context_revision, id
+    channel_context_revision, original_queued_at, id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -580,7 +580,7 @@ SELECT
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, sqlc.narg(fire_at),
-    p.channel_context_revision,
+    p.channel_context_revision, COALESCE(p.original_queued_at, p.created_at),
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p
@@ -799,7 +799,7 @@ WHERE id = (
               )
             )
       )
-    ORDER BY atq.priority DESC, atq.created_at ASC, atq.id ASC
+    ORDER BY CASE WHEN atq.priority >= 4 THEN atq.priority ELSE LEAST(3, atq.priority + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - COALESCE(atq.original_queued_at, atq.created_at))) / 1800))::int) END DESC, COALESCE(atq.original_queued_at, atq.created_at) ASC, atq.id ASC
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
@@ -978,9 +978,10 @@ RETURNING *;
 -- mutation handles the reverse transition once the lock is acquired.
 UPDATE agent_task_queue
 SET status = 'waiting_local_directory',
+    context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('execution_capacity_released', @release_capacity::boolean),
     wait_reason = $2,
     prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
-WHERE id = $1 AND status = 'dispatched'
+WHERE id = $1 AND (status = 'dispatched' OR (status = 'waiting_local_directory' AND @release_capacity::boolean))
 RETURNING *;
 
 -- name: CompleteAgentTask :one
@@ -1718,12 +1719,11 @@ ORDER BY chat_finalize_deferred_at
 LIMIT @max_per_tick::int;
 
 -- name: CountRunningTasks :one
--- waiting_local_directory remains capacity-bearing until resume admission has
--- an atomic reservation/CAS gate. Consequently a waiter-only agent is reported
--- idle by RefreshAgentStatusFromTasks but still cannot claim additional work;
--- removing it here alone could exceed max_concurrent_tasks when it resumes.
+-- Legacy directory waiters retain their reservation. Capability-gated parked
+-- tasks release it; StartTask reacquires under the same profile row lock as claim.
 SELECT count(*) FROM agent_task_queue
-WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory');
+WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
+  AND NOT (status = 'waiting_local_directory' AND COALESCE(context->>'execution_capacity_released', 'false') = 'true');
 
 -- name: GetAgentForClaimUpdate :one
 SELECT * FROM agent
@@ -2189,7 +2189,7 @@ WHERE atq.runtime_id = $1
             )
         )
   )
-ORDER BY atq.priority DESC, atq.created_at ASC;
+ORDER BY CASE WHEN atq.priority >= 4 THEN atq.priority ELSE LEAST(3, atq.priority + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - COALESCE(atq.original_queued_at, atq.created_at))) / 1800))::int) END DESC, COALESCE(atq.original_queued_at, atq.created_at) ASC, atq.id ASC;
 
 -- name: CancelSupersededDeferredRetriesForRuntimes :many
 -- Cancels deferred auto-retry rows that a newer active task has already
@@ -2316,7 +2316,7 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
             )
         )
   )
-ORDER BY atq.priority DESC, atq.created_at ASC;
+ORDER BY CASE WHEN atq.priority >= 4 THEN atq.priority ELSE LEAST(3, atq.priority + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - COALESCE(atq.original_queued_at, atq.created_at))) / 1800))::int) END DESC, COALESCE(atq.original_queued_at, atq.created_at) ASC, atq.id ASC;
 
 -- name: NextDeferredTaskFireAtForRuntimes :one
 -- Returns the next future deferred task for a daemon's authorized runtime set,

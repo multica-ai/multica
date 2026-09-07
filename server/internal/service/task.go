@@ -3994,43 +3994,49 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		}
 	}
 
-	// 6. Claim per distinct agent through the runtime-scoped helper, preserving
+	// 6. Revisit eligible agents until headroom is exhausted, preserving
 	// per-(issue, agent) serialization, capacity caps, and dispatch side effects.
-	triedAgents := make(map[string]struct{}, len(candidates))
-	for i := range candidates {
-		if len(claimed) >= maxTasks {
+	for len(claimed) < maxTasks {
+		before := len(claimed)
+		triedAgents := make(map[string]struct{}, len(candidates))
+		for i := range candidates {
+			if len(claimed) >= maxTasks {
+				break
+			}
+			agentKey := util.UUIDToString(candidates[i].AgentID)
+			if _, tried := triedAgents[agentKey]; tried {
+				continue
+			}
+			triedAgents[agentKey] = struct{}{}
+
+			task, err := s.claimTask(ctx, candidates[i].AgentID, candidates[i].RuntimeID)
+			if err != nil {
+				// Each scoped claim commits in its own transaction, so earlier
+				// iterations (and step-2 reclaims) are already dispatched
+				// server-side. Returning nil here would drop them and force the
+				// daemon to double-claim via HTTP fallback (MUL-4257). Return the
+				// partial batch instead; the failed agent's task stays queued.
+				if len(claimed) > 0 {
+					slog.Error("batch claim: claim task failed after partial success; returning claimed tasks to avoid loss",
+						"error", err, "claimed", len(claimed))
+					return claimed, nil
+				}
+				return nil, fmt.Errorf("claim task: %w", err)
+			}
+			if task == nil {
+				continue
+			}
+			// The SQL claim is scoped to the candidate runtime. Retain this guard as
+			// a defensive contract check so a future query change cannot route work
+			// to a runtime this daemon does not host.
+			if _, ok := runtimeInSet[util.UUIDToString(task.RuntimeID)]; !ok {
+				continue
+			}
+			claimed = append(claimed, *task)
+		}
+		if len(claimed) == before {
 			break
 		}
-		agentKey := util.UUIDToString(candidates[i].AgentID)
-		if _, tried := triedAgents[agentKey]; tried {
-			continue
-		}
-		triedAgents[agentKey] = struct{}{}
-
-		task, err := s.claimTask(ctx, candidates[i].AgentID, candidates[i].RuntimeID)
-		if err != nil {
-			// Each scoped claim commits in its own transaction, so earlier
-			// iterations (and step-2 reclaims) are already dispatched
-			// server-side. Returning nil here would drop them and force the
-			// daemon to double-claim via HTTP fallback (MUL-4257). Return the
-			// partial batch instead; the failed agent's task stays queued.
-			if len(claimed) > 0 {
-				slog.Error("batch claim: claim task failed after partial success; returning claimed tasks to avoid loss",
-					"error", err, "claimed", len(claimed))
-				return claimed, nil
-			}
-			return nil, fmt.Errorf("claim task: %w", err)
-		}
-		if task == nil {
-			continue
-		}
-		// The SQL claim is scoped to the candidate runtime. Retain this guard as
-		// a defensive contract check so a future query change cannot route work
-		// to a runtime this daemon does not host.
-		if _, ok := runtimeInSet[util.UUIDToString(task.RuntimeID)]; !ok {
-			continue
-		}
-		claimed = append(claimed, *task)
 	}
 
 	return claimed, nil
@@ -4118,8 +4124,43 @@ func (s *TaskService) maybeLogClaimSlow(agentID pgtype.UUID, outcome string, sta
 
 // StartTask transitions a dispatched task to running.
 // Issue status is NOT changed here — the agent manages it via the CLI.
+var ErrTaskExecutionCapacity = errors.New("execution_capacity_unavailable")
+
 func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
-	task, err := s.Queries.StartAgentTask(ctx, taskID)
+	var task db.AgentTaskQueue
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		current, err := qtx.GetAgentTask(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		profile, err := qtx.GetAgentForClaimUpdate(ctx, current.AgentID)
+		if err != nil {
+			return err
+		}
+		current, err = qtx.GetAgentTask(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		var state struct {
+			Released bool `json:"execution_capacity_released"`
+		}
+		if current.Status == "waiting_local_directory" && len(current.Context) > 0 {
+			if err := json.Unmarshal(current.Context, &state); err != nil {
+				return err
+			}
+		}
+		if current.Status == "waiting_local_directory" && state.Released {
+			running, err := qtx.CountRunningTasks(ctx, current.AgentID)
+			if err != nil {
+				return err
+			}
+			if running >= int64(profile.MaxConcurrentTasks) {
+				return ErrTaskExecutionCapacity
+			}
+		}
+		task, err = qtx.StartAgentTask(ctx, taskID)
+		return err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("start task: %w", err)
 	}
@@ -4209,12 +4250,13 @@ func (s *TaskService) ExtendTaskPrepareLease(ctx context.Context, taskID, runtim
 // human-readable hint (typically the contested path) that the UI surfaces
 // next to the status. Returns the updated row so the daemon can confirm the
 // transition and so the broadcast carries the up-to-date snapshot.
-func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID pgtype.UUID, reason string) (*db.AgentTaskQueue, error) {
+func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID pgtype.UUID, reason string, releaseCapacity ...bool) (*db.AgentTaskQueue, error) {
 	reason = sanitizeWaitReason(reason)
 	task, err := s.Queries.MarkAgentTaskWaitingLocalDirectory(ctx, db.MarkAgentTaskWaitingLocalDirectoryParams{
 		ID:               taskID,
 		WaitReason:       pgtype.Text{String: reason, Valid: reason != ""},
 		PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
+		ReleaseCapacity:  len(releaseCapacity) > 0 && releaseCapacity[0],
 	})
 	if err != nil {
 		return nil, fmt.Errorf("mark task waiting_local_directory: %w", err)
@@ -4241,6 +4283,9 @@ func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID 
 		extra["wait_reason"] = reason
 	}
 	s.broadcastTaskEvent(ctx, protocol.EventTaskWaitingLocalDirectory, task, extra)
+	if len(releaseCapacity) > 0 && releaseCapacity[0] {
+		s.NotifyTaskFinished(task)
+	}
 	return &task, nil
 }
 

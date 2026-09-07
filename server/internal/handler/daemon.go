@@ -3232,6 +3232,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.ProjectResources,
 		runtime,
 		requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeV1),
+		requestHasClientCapability(r, protocol.DaemonCapabilityRunWorkspaceV1),
 	); reason != "" {
 		slog.Error("task claim: runtime too old for worktree mode; cancelling rather than running in place",
 			"task_id", uuidToString(task.ID),
@@ -3297,11 +3298,8 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 // Only resources bound to the claiming runtime's own daemon are considered: a
 // project may carry one local_directory per machine, and another machine's
 // worktree resource says nothing about this one's ability to run the task.
-func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, hasWorktreeCapability bool) string {
+func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, hasWorktreeCapability bool, runWorkspaceCapability ...bool) string {
 	if !runtime.DaemonID.Valid || runtime.DaemonID.String == "" {
-		return ""
-	}
-	if hasWorktreeCapability {
 		return ""
 	}
 	for _, res := range resources {
@@ -3312,7 +3310,12 @@ func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentR
 		if err := json.Unmarshal(res.ResourceRef, &ref); err != nil {
 			continue
 		}
-		if ref.ExecutionMode != localDirectoryModeWorktree || ref.DaemonID != runtime.DaemonID.String {
+		if ref.DaemonID == runtime.DaemonID.String && ref.ExecutionMode == localDirectoryModeRunOwned {
+			if len(runWorkspaceCapability) == 0 || !runWorkspaceCapability[0] {
+				return "This machine does not support run-owned workspaces; update its Multica runtime before retrying. No shared directory was used."
+			}
+		}
+		if hasWorktreeCapability || ref.ExecutionMode != localDirectoryModeWorktree || ref.DaemonID != runtime.DaemonID.String {
 			continue
 		}
 		return fmt.Sprintf(
@@ -3682,6 +3685,11 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	task, err := h.TaskService.StartTask(r.Context(), parseUUID(taskID))
+	if errors.Is(err, service.ErrTaskExecutionCapacity) {
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusTooManyRequests, "execution_capacity_unavailable")
+		return
+	}
 	if err != nil {
 		slog.Warn("start task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -3695,6 +3703,7 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 // TaskWaitLocalDirectoryRequest is the body the daemon POSTs when it parks
 // a freshly-dispatched task on a busy local_directory path.
 type TaskWaitLocalDirectoryRequest struct {
+	ReleaseCapacity bool `json:"release_capacity"`
 	// Reason is a short hint surfaced by the UI alongside the status —
 	// typically "<path>" or "<path> (holder: <task short id>)". Small
 	// enough to fit on the issue card. Empty is accepted; the column is
@@ -3722,7 +3731,7 @@ func (h *Handler) MarkTaskWaitingLocalDirectory(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	task, err := h.TaskService.MarkTaskWaitingLocalDirectory(r.Context(), parseUUID(taskID), req.Reason)
+	task, err := h.TaskService.MarkTaskWaitingLocalDirectory(r.Context(), parseUUID(taskID), req.Reason, req.ReleaseCapacity && requestHasClientCapability(r, protocol.DaemonCapabilityRunWorkspaceV1))
 	if err != nil {
 		slog.Warn("mark task waiting_local_directory failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())

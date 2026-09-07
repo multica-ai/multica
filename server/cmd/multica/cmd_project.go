@@ -856,6 +856,7 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 		}
 		ref := map[string]any{}
 		if existingRef != nil {
+			for _, key := range []string{"base_commit", "inherit_workspace_repositories"} { if v, ok := existingRef[key]; ok { ref[key] = v } }
 			if p, ok := existingRef["local_path"].(string); ok && strings.TrimSpace(p) != "" {
 				ref["local_path"] = strings.TrimSpace(p)
 			}

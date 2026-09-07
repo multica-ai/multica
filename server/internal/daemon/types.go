@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
@@ -68,6 +69,9 @@ type IssueStatusData struct {
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
+	OriginalQueuedAt     time.Time              `json:"original_queued_at,omitempty"`
+	Priority             int32                  `json:"priority"`
+	CreatedAt            time.Time              `json:"created_at"`
 	ID                   string                 `json:"id"`
 	AgentID              string                 `json:"agent_id"`
 	RuntimeID            string                 `json:"runtime_id"`

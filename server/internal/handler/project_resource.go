@@ -126,6 +126,7 @@ const (
 	// Only valid when the directory is a git working tree — the daemon
 	// verifies that at task time, since the server can't see the filesystem.
 	localDirectoryModeWorktree = "worktree"
+	localDirectoryModeRunOwned = "run_owned"
 )
 
 // localDirectoryRef is the JSONB shape stored for resource_type=local_directory.
@@ -139,10 +140,12 @@ const (
 // keeps the historical one-task-at-a-time behavior, worktree gives each task an
 // isolated git worktree so tasks run concurrently.
 type localDirectoryRef struct {
-	LocalPath     string `json:"local_path"`
-	DaemonID      string `json:"daemon_id"`
-	Label         string `json:"label,omitempty"`
-	ExecutionMode string `json:"execution_mode,omitempty"`
+	LocalPath                    string `json:"local_path"`
+	DaemonID                     string `json:"daemon_id"`
+	Label                        string `json:"label,omitempty"`
+	ExecutionMode                string `json:"execution_mode,omitempty"`
+	BaseCommit                   string `json:"base_commit,omitempty"`
+	InheritWorkspaceRepositories *bool  `json:"inherit_workspace_repositories,omitempty"`
 }
 
 // requireWorktreeCapableDaemon rejects saving a local_directory ref that asks
@@ -165,7 +168,7 @@ func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Re
 		return true
 	}
 	var ref localDirectoryRef
-	if err := json.Unmarshal(normalizedRef, &ref); err != nil || ref.ExecutionMode != localDirectoryModeWorktree {
+	if err := json.Unmarshal(normalizedRef, &ref); err != nil || (ref.ExecutionMode != localDirectoryModeWorktree && ref.ExecutionMode != localDirectoryModeRunOwned) {
 		return true
 	}
 
@@ -181,8 +184,21 @@ func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Re
 	// its runtime row at registration. Version numbers cannot answer this — a
 	// dev-built daemon reports a git-describe string that the version floor
 	// deliberately exempts (MUL-5707).
-	if daemonAdvertisesWorktree(runtimes, ref.DaemonID) {
+	capability := protocol.DaemonCapabilityLocalWorktreeV1
+	if ref.ExecutionMode == localDirectoryModeRunOwned {
+		capability = protocol.DaemonCapabilityRunWorkspaceV1
+	}
+	if daemonAdvertisesCapability(runtimes, ref.DaemonID, capability) {
 		return true
+	}
+	if ref.ExecutionMode == localDirectoryModeRunOwned {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"error":               fmt.Sprintf("local_directory: %q requires a runtime advertising %s before run_owned mode can be saved", ref.LocalPath, capability),
+			"code":                "daemon_capability_unsupported",
+			"required_capability": capability,
+			"daemon_id":           ref.DaemonID,
+		})
+		return false
 	}
 	// Fail closed when no runtime for this daemon advertises it — including a
 	// daemon_id with no registered runtime at all: a worktree resource that can
@@ -212,6 +228,10 @@ func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Re
 // A row missing the capability is never skipped: being the newest is what makes
 // it authoritative, not whether its answer is convenient.
 func daemonAdvertisesWorktree(runtimes []db.AgentRuntime, daemonID string) bool {
+	return daemonAdvertisesCapability(runtimes, daemonID, protocol.DaemonCapabilityLocalWorktreeV1)
+}
+
+func daemonAdvertisesCapability(runtimes []db.AgentRuntime, daemonID, capability string) bool {
 	if strings.TrimSpace(daemonID) == "" {
 		return false
 	}
@@ -228,7 +248,7 @@ func daemonAdvertisesWorktree(runtimes []db.AgentRuntime, daemonID string) bool 
 	if newest == nil {
 		return false
 	}
-	return runtimeHasCapability(newest.Metadata, protocol.DaemonCapabilityLocalWorktreeV1)
+	return runtimeHasCapability(newest.Metadata, capability)
 }
 
 // runtimeSeenAfter orders two rows of the same daemon by last_seen_at. A row
@@ -287,10 +307,25 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 	payload.Label = strings.TrimSpace(payload.Label)
 	payload.ExecutionMode = strings.TrimSpace(payload.ExecutionMode)
 	switch payload.ExecutionMode {
-	case "", localDirectoryModeInPlace, localDirectoryModeWorktree:
+	case "", localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeRunOwned:
 	default:
-		return nil, fmt.Errorf("local_directory: execution_mode must be %q or %q, got %q",
-			localDirectoryModeInPlace, localDirectoryModeWorktree, payload.ExecutionMode)
+		return nil, fmt.Errorf("local_directory: execution_mode must be %q, %q or %q, got %q",
+			localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeRunOwned, payload.ExecutionMode)
+	}
+	if payload.ExecutionMode == localDirectoryModeRunOwned {
+		if payload.InheritWorkspaceRepositories == nil || *payload.InheritWorkspaceRepositories {
+			return nil, errors.New("run_owned requires inherit_workspace_repositories=false")
+		}
+		if payload.BaseCommit != "" {
+			if len(payload.BaseCommit) != 40 {
+				return nil, errors.New("base_commit must be a full immutable commit ID")
+			}
+			for _, c := range payload.BaseCommit {
+				if !strings.ContainsRune("0123456789abcdef", c) {
+					return nil, errors.New("base_commit must be lowercase hexadecimal")
+				}
+			}
+		}
 	}
 	out, err := json.Marshal(payload)
 	if err != nil {
@@ -943,6 +978,18 @@ func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, wor
 		}
 	}
 
+	for _, res := range out.Resources {
+		if res.ResourceType != "local_directory" {
+			continue
+		}
+		var ref localDirectoryRef
+		if err := json.Unmarshal(res.ResourceRef, &ref); err != nil {
+			return claimProjectContext{}, err
+		}
+		if ref.InheritWorkspaceRepositories != nil && !*ref.InheritWorkspaceRepositories {
+			return out, nil
+		}
+	}
 	if len(out.Repos) > 0 {
 		return out, nil
 	}

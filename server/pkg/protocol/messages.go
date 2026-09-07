@@ -20,6 +20,7 @@ const (
 	// unblocked, which let exactly such a daemon through (MUL-5707). A daemon
 	// that implements the mode says so; one that does not, cannot.
 	DaemonCapabilityLocalWorktreeV1 = "local-worktree-v1"
+	DaemonCapabilityRunWorkspaceV1  = "run-workspace-v1"
 	// DaemonCapabilitySourceContextQuickCreateV1 advertises support for the
 	// two-section quick-create prompt that keeps a new instruction separate
 	// from immutable historical source context.

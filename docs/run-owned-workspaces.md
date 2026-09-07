@@ -1,0 +1,17 @@
+# Run-owned workspace candidate
+
+This change adds an opt-in `run_owned` mode for `local_directory` project resources. Existing resources retain their mode. Both the server and daemon must advertise/support `run-workspace-v1`; an older daemon is refused at save and claim time.
+
+The immutable claimed resource contains `local_path`, `daemon_id`, `execution_mode: "run_owned"`, and `inherit_workspace_repositories: false`. An omitted `base_commit` creates an empty scratch room. A full lowercase 40-character `base_commit` creates an independent Git repository from that exact local source commit. It never snapshots tracked edits, untracked files, ignored files, source hooks, or source Git configuration, and never writes the source checkout's refs or worktree registrations. All run IDs, workdirs, branches and provider launch contexts remain distinct. Same-profile same-conversation admission stays serialized.
+
+The existing JSON `--ref` resource command carries this policy; the desktop mode editor has not been expanded for it. Do not use that editor to reconfigure an opted-in resource. Any explicit project GitHub resources must have immutable full commit refs. An explicit empty repository list stays empty, including at the token-bound daemon checkout endpoint; other tasks' repository registrations do not confer access.
+
+Each attempt writes `run-workspace.json` before allocation, including source/base, issue/profile/run, runtime/host, branch, workdir and session ownership. Interrupted or failed allocation retains this receipt and room. Redelivery of the same attempt is refused until reconciliation; a retry is a new attempt. There is no automatic merge, commit, publication or deletion of partial work. Existing result reporting records the actual provider session after execution.
+
+Independent runs bypass the shared-directory mutex. Real in-place writers retain it. Resource waiters order by effective priority, original queue age, then stable task ID. Every 30 minutes adds a priority tier up to high; emergency remains ahead. Original queue age survives automatic retries through migration 451. Native runtime recovery closes orphaned attempts and creates at most one bounded retry.
+
+The batch claimant cycles through eligible profiles until capacity is filled or no profile can progress. New-capability directory waiters return daemon and specialist execution reservations. Wake acquires a daemon slot and the server atomically reserves specialist capacity under the same profile row lock used by claims. Legacy waiters keep their reservations. A capacity refusal remains queued and retries automatically; no provider is launched before the start transaction succeeds.
+
+This is execution-directory and daemon-checkout isolation, not an OS sandbox. It does not remove ambient filesystem, shell, provider or production credential access. External publication/database/port operations still require their existing authorization and effect serialization. No live resource, model, issue, provider session or deployment is changed by installing this source candidate alone.
+
+Before any rollout: independent review, supported UI/controller projection, authenticated candidate Browser verification, scoped native-provider canary, enforceable credential/effect boundaries, and a drained admission migration are required. Do not infer account capacity from synthetic tests. Rollback changes future admissions only and preserves every room already created. Retain the original queue-age column until its retry records no longer need it.
