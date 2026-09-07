@@ -19,6 +19,14 @@ When a question reaches a conclusion, mark the whole discussion as resolved, or 
 
 Replying in a resolved discussion reopens it automatically.
 
+## Agent questions
+
+When an agent running on Claude Code needs a decision only you can make — an ambiguous requirement, a choice between approaches with real trade-offs — it can ask instead of guessing. The question arrives on the issue as a card: each question shows its options, a description for each, and an **Other** field for an answer of your own. Pick the options, send, and the answer is posted as a reply in the question's thread.
+
+Asking ends the agent's run. Your reply triggers the next run, which resumes the same session with the answer in view, so the agent continues from where it stopped. Until someone answers, the issue header shows that the agent is waiting, and subscribers get an **Agent question** item in their [inbox](/inbox) that is retired once a member replies in the thread.
+
+Other runtimes do not have a question tool yet; their agents keep asking in plain comments.
+
 ## @-mentions
 
 Type `@` and pick a target from the list:

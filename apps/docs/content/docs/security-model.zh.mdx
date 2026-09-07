@@ -41,7 +41,7 @@ Multica 不会替你做文件系统沙箱。如果守护进程跑在你的个人
 
 ## 不构成边界的部分
 
-- **编程工具自带的沙箱与审批设置。** Multica 以无人值守方式运行智能体，审批请求会被自动应答。默认路径下文件系统沙箱同样处于关闭状态：Codex 使用 `sandbox_mode = "danger-full-access"`，Claude Code 使用 `--permission-mode bypassPermissions`。例外是 Windows——如果你显式配置了 Codex 原生沙箱（`windows.sandbox = "unelevated"` 或 `"elevated"`），Multica 会尊重这个 opt-in，对这些运行保留 `workspace-write`。适用场景下值得开启，但它只覆盖一个平台上的一个工具，不改变你应当如何收窄守护进程用户的权限。
+- **编程工具自带的沙箱与审批设置。** Multica 以无人值守方式运行智能体，审批请求会被自动应答。唯一的例外是提问：Claude Code 运行调用 `AskUserQuestion` 时，机器上不会有任何自动回答——问题会以卡片形式发布到任务里，本次运行结束，成员回复后智能体再继续。默认路径下文件系统沙箱同样处于关闭状态：Codex 使用 `sandbox_mode = "danger-full-access"`，Claude Code 使用 `--permission-mode bypassPermissions`。例外是 Windows——如果你显式配置了 Codex 原生沙箱（`windows.sandbox = "unelevated"` 或 `"elevated"`），Multica 会尊重这个 opt-in，对这些运行保留 `workspace-write`。适用场景下值得开启，但它只覆盖一个平台上的一个工具，不改变你应当如何收窄守护进程用户的权限。
 - **你的 `HOME` 目录结构。** 运行继承守护进程用户真实的 `HOME` 与 `XDG_*` 变量——正因如此，`gh`、`aws`、`kubectl`、`gcloud`、`glab` 等宿主 CLI 在运行内的行为与在你 shell 里完全一致。这同时也意味着该 home 下的一切都可触达。
 
 <Callout>
