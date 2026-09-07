@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -1335,5 +1337,137 @@ func TestNotification_StatusChange_ReopenSurfacesNewTaskFailed(t *testing.T) {
 	}
 	if archived != 1 {
 		t.Fatalf("expected 1 archived task_failed row preserved from prior cycle, got %d", archived)
+	}
+}
+
+// TestNotification_AgentQuestionCreated verifies that an agent question
+// comment (AskUserQuestion delivered as a comment, GitHub #8048) reaches
+// subscribers as an action_required `agent_question` item rather than a plain
+// new_comment, so the inbox can foreground the one comment that needs a
+// person to act.
+func TestNotification_AgentQuestionCreated(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	subEmail := "notif-sub-agent-question@multica.ai"
+	subID := createTestUser(t, subEmail)
+	t.Cleanup(func() { cleanupTestUser(t, subEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+	addTestSubscriber(t, issueID, "member", subID, "assignee")
+
+	agentID := "00000000-0000-0000-0000-00000000a9e1"
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload: map[string]any{
+			"comment": map[string]any{
+				"id":               "00000000-0000-0000-0000-0000000000c1",
+				"issue_id":         issueID,
+				"author_type":      "agent",
+				"author_id":        agentID,
+				"content":          "**Flag** — Which flag name?",
+				"type":             "comment",
+				"question_payload": json.RawMessage(`{"questions":[{"question":"Which flag name?","options":[{"label":"--dry-run"}]}]}`),
+			},
+			"issue_title":  "agent question issue",
+			"issue_status": "in_progress",
+		},
+	})
+
+	items := inboxItemsForRecipient(t, queries, subID)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 inbox item for the subscriber, got %d", len(items))
+	}
+	if items[0].Type != "agent_question" {
+		t.Fatalf("expected type 'agent_question', got %q", items[0].Type)
+	}
+	if items[0].Severity != "action_required" {
+		t.Fatalf("expected severity 'action_required', got %q", items[0].Severity)
+	}
+}
+
+// TestNotification_AgentQuestionAnsweredArchivesInbox verifies that a member
+// replying in the question's thread retires the question's inbox rows: the
+// answer is what the item asked for, so it must not linger as action_required.
+func TestNotification_AgentQuestionAnsweredArchivesInbox(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+	ctx := context.Background()
+
+	answererEmail := "notif-answerer-agent-question@multica.ai"
+	answererID := createTestUser(t, answererEmail)
+	t.Cleanup(func() { cleanupTestUser(t, answererEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	// The question comment itself, as the daemon endpoint would have stored it.
+	questionID := "00000000-0000-0000-0000-0000000000c2"
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type, question_payload)
+		VALUES ($1, $2, $3, 'agent', $4, 'Which flag name?', 'comment', '{"questions":[{"question":"Which flag name?","options":[{"label":"--dry-run"}]}]}'::jsonb)`,
+		questionID, issueID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("insert question comment: %v", err)
+	}
+	t.Cleanup(func() { _, _ = testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID) })
+
+	// The open inbox row the question produced for the issue creator.
+	if _, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		ID:            dbid.NewV7(),
+		WorkspaceID:   util.MustParseUUID(testWorkspaceID),
+		RecipientType: "member",
+		RecipientID:   util.MustParseUUID(testUserID),
+		Type:          "agent_question",
+		Severity:      "action_required",
+		IssueID:       util.MustParseUUID(issueID),
+		Title:         "agent question issue",
+	}); err != nil {
+		t.Fatalf("create inbox item: %v", err)
+	}
+	if items := inboxItemsForRecipient(t, queries, testUserID); len(items) != 1 {
+		t.Fatalf("precondition: expected 1 open inbox item, got %d", len(items))
+	}
+
+	// A member answers in the thread. Sent as the handler would: a
+	// CommentResponse with parent_id pointing at the question.
+	parent := questionID
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     answererID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-0000000000c3",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   answererID,
+				Content:    "**Flag:** --dry-run",
+				Type:       "comment",
+				ParentID:   &parent,
+			},
+			"issue_title":  "agent question issue",
+			"issue_status": "in_progress",
+		},
+	})
+
+	open := 0
+	for _, item := range inboxItemsForRecipient(t, queries, testUserID) {
+		if item.Type == "agent_question" {
+			open++
+		}
+	}
+	if open != 0 {
+		t.Fatalf("expected the agent_question inbox row to be archived after the answer, %d still open", open)
 	}
 }
