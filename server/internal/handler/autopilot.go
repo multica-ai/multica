@@ -276,6 +276,39 @@ func signingSecretHint(secret string) string {
 	return secret[len(secret)-4:]
 }
 
+// redactWebhookSecrets removes the webhook credential from a trigger response:
+// the bearer token, and the path and URL that embed it. Holding any of the
+// three is equivalent to being able to fire the autopilot from outside the
+// permission system, so they travel together.
+//
+// One definition, shared by the read path's non-writer projection and the
+// broadcast copy (broadcastAutopilotTriggerResponse), so a field added to one
+// cannot be forgotten by the other.
+func redactWebhookSecrets(resp *AutopilotTriggerResponse) {
+	resp.WebhookToken = nil
+	resp.WebhookPath = nil
+	resp.WebhookURL = nil
+}
+
+// broadcastAutopilotTriggerResponse strips the webhook credential from a
+// trigger before it goes onto the WebSocket bus. Mutation handlers call it when
+// fanning out autopilot:updated, following the same rule as
+// broadcastAgentResponse: autopilot events reach the WHOLE workspace room —
+// every member regardless of grant, agent processes on their own task tokens
+// included — so a non-redacted broadcast hands them the token GetAutopilot just
+// refused them, through a push that never passed a write gate (MUL-7108).
+// The caller still receives the live value in the HTTP response; only the
+// broadcast copy is redacted.
+//
+// Nothing downstream loses anything: clients treat these events as "refetch
+// this autopilot" (packages/core/realtime/use-realtime-sync.ts), and a writer
+// re-reads the token from the authenticated detail endpoint.
+func broadcastAutopilotTriggerResponse(resp AutopilotTriggerResponse) AutopilotTriggerResponse {
+	out := resp
+	redactWebhookSecrets(&out)
+	return out
+}
+
 // webhookPathForToken composes the path used by the public ingress route.
 // Kept as a free function (no Handler receiver) so test code that builds
 // expected URLs without instantiating a Handler can call it.
@@ -537,9 +570,7 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 	for i, t := range triggers {
 		tr := h.triggerToResponse(t)
 		if !canWrite {
-			tr.WebhookToken = nil
-			tr.WebhookPath = nil
-			tr.WebhookURL = nil
+			redactWebhookSecrets(&tr)
 		}
 		triggerResp[i] = tr
 	}
@@ -1606,7 +1637,7 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		resp := h.triggerToResponse(trigger)
 		h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 			"autopilot_id": uuidToString(ap.ID),
-			"trigger":      resp,
+			"trigger":      broadcastAutopilotTriggerResponse(resp),
 		})
 		writeJSON(w, http.StatusCreated, resp)
 		return
@@ -1658,7 +1689,7 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	resp := h.triggerToResponse(trigger)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
-		"trigger":      resp,
+		"trigger":      broadcastAutopilotTriggerResponse(resp),
 	})
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -2003,7 +2034,7 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	resp := h.triggerToResponse(trigger)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
-		"trigger":      resp,
+		"trigger":      broadcastAutopilotTriggerResponse(resp),
 	})
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -2137,7 +2168,7 @@ func (h *Handler) RotateAutopilotTriggerWebhookToken(w http.ResponseWriter, r *h
 	resp := h.triggerToResponse(rotated)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", uuidToString(actor.UserID), map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
-		"trigger":      resp,
+		"trigger":      broadcastAutopilotTriggerResponse(resp),
 	})
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -2205,10 +2236,11 @@ func (h *Handler) SetAutopilotTriggerSigningSecret(w http.ResponseWriter, r *htt
 	resp := h.triggerToResponse(updated)
 	// Publish the trigger update so the UI can refresh the has_signing_secret
 	// badge in real time. The event payload only carries the response shape,
-	// which excludes the secret.
+	// which excludes the signing secret and, on the broadcast copy, the webhook
+	// credential as well.
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", uuidToString(actor.UserID), map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
-		"trigger":      resp,
+		"trigger":      broadcastAutopilotTriggerResponse(resp),
 	})
 	writeJSON(w, http.StatusOK, resp)
 }
