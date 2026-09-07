@@ -304,6 +304,41 @@ func TestAuth_StripsClientSuppliedActorSource(t *testing.T) {
 	}
 }
 
+// TestAuth_StripsForgedAgentIdentityHeaders pins the boundary that makes
+// agent identity unforgeable: X-Agent-ID and X-Task-ID are server-set, so any
+// value a client sends must be gone before a handler can read it.
+//
+// Without the strip, resolveActor's "both headers, and the task belongs to the
+// agent" rule proved nothing, because both ids are readable by any workspace
+// member (GET /api/issues/{id}/task-runs returns the pair). A member could
+// replay a live pair on their own JWT and be resolved as that agent — and,
+// since MUL-6951, act with the authority of that run's originator. MUL-3428.
+func TestAuth_StripsForgedAgentIdentityHeaders(t *testing.T) {
+	var gotAgentID, gotTaskID string
+	mw := Auth(nil, nil, nil)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAgentID = r.Header.Get("X-Agent-ID")
+		gotTaskID = r.Header.Get("X-Task-ID")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	token := generateToken(validClaims(), auth.JWTSecret())
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	// A real, observable (agent, task) pair replayed by a member.
+	req.Header.Set("X-Agent-ID", "11111111-1111-1111-1111-111111111111")
+	req.Header.Set("X-Task-ID", "22222222-2222-2222-2222-222222222222")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotAgentID != "" || gotTaskID != "" {
+		t.Fatalf("agent identity headers must be cleared on non-task-token paths, got agent=%q task=%q", gotAgentID, gotTaskID)
+	}
+}
+
 // TestAuth_PATCacheHit pins the optimization: when the PAT cache already
 // holds an entry for this token, the middleware MUST NOT call into queries
 // — it short-circuits before the DB lookup and the last_used_at update.

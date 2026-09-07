@@ -639,6 +639,8 @@ func autopilotWriteRequestError(action string, err error) error {
 		return cli.WithUserMessage("this run has no originating human, so it cannot change an autopilot on anyone's behalf: an autopilot write is authorized as the person who asked for it", err)
 	case "autopilot_forbidden":
 		return cli.WithUserMessage("the person this run acts for cannot manage this autopilot: it requires its creator, a workspace admin, or a granted collaborator", err)
+	case "autopilot_actor_not_member":
+		return cli.WithUserMessage("the person this run acts for is not a member of this workspace, so nothing can be created on their behalf", err)
 	}
 	return fmt.Errorf("%s: %w", action, err)
 }

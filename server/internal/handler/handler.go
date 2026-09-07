@@ -823,21 +823,25 @@ func requestUserID(r *http.Request) string {
 // stripped by the agent process. This is the path MUL-2600 relies on to
 // reject agent-process traffic on owner-only endpoints.
 //
-// Fallback signal (legacy CLI / member-token paths): the request MUST
-// carry both X-Agent-ID and a valid X-Task-ID, and the task must belong
-// to the claimed agent. Otherwise we fall back to "member".
+// Fallback signal: the request MUST carry both X-Agent-ID and a valid
+// X-Task-ID, and the task must belong to the claimed agent. Otherwise we
+// fall back to "member".
 //
-// X-Agent-ID alone is not trusted: any workspace member can guess or observe
-// an agent's UUID, and a member-supplied X-Agent-ID would otherwise let that
-// member impersonate the agent and bypass the private-agent gate (#2359
-// review). The daemon always pairs the two headers, so requiring both has
-// no effect on legitimate agent callers but closes the impersonation path.
+// This fallback is NOT a security boundary and must not be read as one. Both
+// ids are observable by any workspace member (GET /api/issues/{id}/task-runs
+// returns the pair), so requiring both proves nothing on its own — the older
+// comment here claimed it "closes the impersonation path", and it did not.
+// What closes it is the Auth / DaemonAuth middleware stripping both headers
+// from every client, leaving the mat_ branch as the only writer (MUL-3428).
+// The fallback survives that strip only for in-process callers and handler
+// unit tests, which set the headers directly.
 //
 // Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
 	if r.Header.Get("X-Actor-Source") == "task_token" {
-		// Server-set header — auth middleware also forced X-Agent-ID
-		// from the token row. Trust it directly without re-querying.
+		// Server-set header — the auth middleware stripped whatever the
+		// client sent and re-stamped X-Agent-ID from the token row. Trust
+		// it directly without re-querying.
 		return "agent", r.Header.Get("X-Agent-ID")
 	}
 	agentID := r.Header.Get("X-Agent-ID")

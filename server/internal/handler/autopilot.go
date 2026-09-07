@@ -649,6 +649,7 @@ func (h *Handler) memberCanWriteAutopilot(ctx context.Context, ap db.Autopilot, 
 const (
 	autopilotNoOriginatorCode        = "autopilot_no_originator"
 	autopilotForbiddenCode           = "autopilot_forbidden"
+	autopilotActorNotMemberCode      = "autopilot_actor_not_member"
 	autopilotTriggerNoOriginatorCode = "autopilot_trigger_no_originator"
 	autopilotTriggerForbiddenCode    = "autopilot_trigger_forbidden"
 )
@@ -671,10 +672,15 @@ var (
 		forbiddenCode:    autopilotForbiddenCode,
 		forbiddenMsg:     "only the autopilot creator, a workspace admin, or a granted collaborator can manage this autopilot",
 	}
+	// Create has no autopilot to hold a grant on, so its only "forbidden" is
+	// an acting human who is not in this workspace. That is a different fact
+	// from "lacks access to this autopilot" and gets its own code, so the CLI
+	// does not tell someone to ask for a collaborator grant they could not
+	// hold (Elon review).
 	autopilotCreateRefusal = autopilotRefusal{
 		noOriginatorCode: autopilotNoOriginatorCode,
 		noOriginatorMsg:  "no human authorized this autopilot: the calling run records no originator",
-		forbiddenCode:    autopilotForbiddenCode,
+		forbiddenCode:    autopilotActorNotMemberCode,
 		forbiddenMsg:     "the person this run acts for is not a member of this workspace",
 	}
 	autopilotAccessRefusal = autopilotRefusal{

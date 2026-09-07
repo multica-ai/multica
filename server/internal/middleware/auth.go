@@ -60,6 +60,21 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// from a non-task-token path.
 			r.Header.Del("X-Actor-Source")
 
+			// Agent identity is server-set for exactly the same reason,
+			// and the rest of the codebase already assumes it (see
+			// resolveActor, actor_guards.go, CreateIssue). Only the mat_
+			// branch below re-stamps these from the token row.
+			//
+			// Without the strip, resolveActor's pair requirement was not a
+			// boundary: BOTH ids are readable by any workspace member
+			// (GET /api/issues/{id}/task-runs returns agent_id + task_id),
+			// so a member could replay a live pair on their own JWT/PAT and
+			// be resolved as that agent — and, since MUL-6951, act with the
+			// authority of that run's originator. MUL-3428, reported and
+			// fixed in #4313.
+			r.Header.Del("X-Agent-ID")
+			r.Header.Del("X-Task-ID")
+
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
 				slog.Debug("auth: no token found", "path", r.URL.Path)

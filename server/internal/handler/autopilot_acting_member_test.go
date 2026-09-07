@@ -394,6 +394,43 @@ func TestCreateAutopilot_NoOrderingHumanRefused(t *testing.T) {
 	}
 }
 
+// TestCreateAutopilot_OrderingHumanMustBeAWorkspaceMember covers create's own
+// refusal. It is a different fact from the other endpoints' "you hold no grant
+// on this autopilot" — there is no autopilot yet — so it carries its own code:
+// telling someone to ask for a collaborator grant would send them after
+// something that could not help (Elon review).
+func TestCreateAutopilot_OrderingHumanMustBeAWorkspaceMember(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	var agentID string
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
+	// A user of the platform, but not of THIS workspace — the shape an
+	// originator has after leaving it.
+	stranger := dbfx.User(t, "Autopilot Stranger", fmt.Sprintf("autopilot-stranger-%d@multica.test", time.Now().UnixNano()))
+	title := fmt.Sprintf("acting member create stranger %d", time.Now().UnixNano())
+
+	caller := actingCaller{
+		authUserID: testUserID,
+		agentID:    agentID,
+		taskID:     callerTask(t, agentID, stranger),
+	}
+	var body triggerErrorBody
+	testutil.Call(t, testHandler.CreateAutopilot, caller.request("POST", "/api/autopilots?workspace_id="+testWorkspaceID,
+		map[string]any{
+			"title":          title,
+			"assignee_id":    agentID,
+			"execution_mode": "create_issue",
+		})).Want(http.StatusForbidden).JSON(&body)
+	if body.Code != autopilotActorNotMemberCode {
+		t.Errorf("error code = %q, want %q", body.Code, autopilotActorNotMemberCode)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM autopilot WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title); n != 0 {
+		t.Errorf("autopilot rows = %d, want 0", n)
+	}
+}
+
 // TestCreateAutopilotTrigger_StampsTheOrderingHuman pins the durable half of the
 // escalation. A trigger's created_by is the immutable authorization principal
 // every future firing acts as (MUL-6951, "the run acts as this member forever"),
