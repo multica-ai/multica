@@ -96,8 +96,9 @@ func TestShareCRMSessionBinder_StartSessionForwardsRouting(t *testing.T) {
 		Creator:      creator,
 		Sender:       initiator,
 		Message: channel.InboundMessage{
-			MessageID: "m-new",
-			Text:      "hello after /new",
+			MessageID:   "m-new",
+			Text:        "hello after /new",
+			CommandText: "current instruction",
 			Source: channel.Source{
 				ChatID:   "0:fs:session-new:",
 				ChatType: channel.ChatTypeP2P,
@@ -117,8 +118,8 @@ func TestShareCRMSessionBinder_StartSessionForwardsRouting(t *testing.T) {
 	if session.startIn.Initiator != initiator {
 		t.Fatalf("Initiator = %v, want authenticated sender", session.startIn.Initiator)
 	}
-	if session.startIn.Body != "hello after /new" || session.startIn.MessageID != "m-new" {
-		t.Fatalf("first-turn body/id = %q/%q", session.startIn.Body, session.startIn.MessageID)
+	if session.startIn.Body != "hello after /new" || session.startIn.CommandText != "current instruction" || session.startIn.MessageID != "m-new" {
+		t.Fatalf("first-turn body/command/id = %q/%q/%q", session.startIn.Body, session.startIn.CommandText, session.startIn.MessageID)
 	}
 	if !session.startIn.PersistMessage {
 		t.Fatal("PersistMessage dropped; /new <message> would create an empty chat")
