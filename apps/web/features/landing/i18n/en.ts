@@ -296,11 +296,14 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.41",
         date: "2026-09-07",
-        title: "A reorganized sidebar, faster search in large workspaces, Autopilot manual runs, and leaner CLI output",
+        title: "A reorganized sidebar, a regrouped Settings page, faster search in large workspaces, and Autopilot manual runs",
         changes: [],
         features: [
           "The sidebar now groups your work and your AI team, with Analytics and Settings pinned at the bottom.",
           "Pinned items past the first five stay tucked away until you expand them.",
+          "Settings is grouped by purpose: Personal, Workspace, Issue configuration, Connections & extensions, and Desktop app.",
+          "Every integration sits on one page, with its connection status shown up front.",
+          "Issue and chat preferences now live inside Preferences.",
           "Custom properties come back with their names from the command line, not just ids.",
           "See how much each agent run used and cost from the command line.",
           "Pick the Issue fields you want from the command line and get a shorter response.",

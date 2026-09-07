@@ -296,11 +296,14 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.41",
         date: "2026-09-07",
-        title: "全新侧边栏导航、大工作区搜索更快、Autopilot 手动触发、CLI 输出更精简",
+        title: "全新侧边栏导航、分组后的设置页、大工作区搜索更快、Autopilot 手动触发",
         changes: [],
         features: [
           "侧边栏分成「工作」和「AI 团队」两组，Analytics 和 Settings 固定在底部。",
           "置顶项默认只显示五个，其余可以展开查看，也能收起。",
+          "设置页按用途分组：个人、工作区、Issue 配置、连接与扩展、桌面应用。",
+          "所有集成集中在一页，一眼就能看出哪些已经连上。",
+          "创建 Issue 和聊天相关的偏好，现在都在偏好设置里。",
           "命令行里的自定义属性会直接显示名称，不再只有 ID。",
           "命令行可以查看智能体每次运行的用量和花费。",
           "命令行可以只取需要的 Issue 字段，返回内容更短。",
