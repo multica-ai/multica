@@ -33,11 +33,19 @@ export const COMMON_TIMEZONES = [
   "Pacific/Auckland",
 ];
 
+// Older ICU/tzdata releases still return this backward-compatible alias even
+// when the preferred IANA identifier is accepted as input.
+export function preferredTimezoneName(timezone: string): string {
+  return timezone === "Europe/Kiev" ? "Europe/Kyiv" : timezone;
+}
+
 let cachedBrowserTZ: string | null = null;
 export function browserTimezone(): string {
   if (cachedBrowserTZ !== null) return cachedBrowserTZ;
   try {
-    cachedBrowserTZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    cachedBrowserTZ = preferredTimezoneName(
+      Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    );
   } catch {
     cachedBrowserTZ = "UTC";
   }
@@ -71,9 +79,21 @@ function supportedTimezones(): string[] {
 
 export function timezoneOptions(current: string): string[] {
   const browser = browserTimezone();
-  return Array.from(
-    new Set([current, browser, ...COMMON_TIMEZONES, ...supportedTimezones()]),
-  ).filter(Boolean);
+  const candidates = [
+    current,
+    browser,
+    ...COMMON_TIMEZONES.map(preferredTimezoneName),
+    ...supportedTimezones().map(preferredTimezoneName),
+  ];
+  const seenPreferredNames = new Set<string>();
+
+  return candidates.filter((timezone) => {
+    if (!timezone) return false;
+    const preferred = preferredTimezoneName(timezone);
+    if (seenPreferredNames.has(preferred)) return false;
+    seenPreferredNames.add(preferred);
+    return true;
+  });
 }
 
 export function TimezoneSelect({
@@ -91,8 +111,10 @@ export function TimezoneSelect({
 }) {
   const browser = browserTimezone();
   const options = timezoneOptions(value);
-  const render = (tz: string) =>
-    tz === browser ? `${tz}${browserSuffix}` : tz;
+  const render = (tz: string) => {
+    const preferred = preferredTimezoneName(tz);
+    return preferred === browser ? `${preferred}${browserSuffix}` : preferred;
+  };
   const items = options.map((value) => ({ value, label: render(value) }));
 
   return (

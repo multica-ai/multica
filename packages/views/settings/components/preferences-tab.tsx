@@ -20,7 +20,11 @@ import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
 import { api } from "@multica/core/api";
-import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
+import {
+  browserTimezone,
+  preferredTimezoneName,
+  timezoneOptions,
+} from "../../common/timezone-select";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -235,7 +239,7 @@ function TimezoneRow() {
     if (tz === BROWSER_TZ_VALUE) {
       return `${browser}${t(($) => $.preferences.timezone.browser_suffix)}`;
     }
-    return tz;
+    return preferredTimezoneName(tz);
   };
 
   return (
