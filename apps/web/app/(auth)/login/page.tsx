@@ -61,6 +61,9 @@ function LoginPageContent() {
   const qc = useQueryClient();
   const { t } = useT("auth");
   const googleClientId = useConfigStore((state) => state.googleClientId);
+  const oidcAuthorizeUrl = useConfigStore((state) => state.oidcAuthorizeUrl);
+  const oidcScopes = useConfigStore((state) => state.oidcScopes);
+  const oidcDisplayName = useConfigStore((state) => state.oidcDisplayName);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -224,6 +227,11 @@ function LoginPageContent() {
               clientId: googleClientId,
               redirectUri: `${window.location.origin}/auth/callback`,
               state: googleState,
+              // Empty on a Google deployment — the view then falls back to
+              // Google's authorize URL and its branded button.
+              authorizeUrl: oidcAuthorizeUrl || undefined,
+              scopes: oidcScopes || undefined,
+              displayName: oidcDisplayName || undefined,
             }
           : undefined
       }

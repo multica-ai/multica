@@ -25,6 +25,16 @@ type AppConfig struct {
 	// toggle signup or wire Google OAuth.
 	AllowSignup    bool   `json:"allow_signup"`
 	GoogleClientID string `json:"google_client_id,omitempty"`
+	// OIDC endpoint config for the sign-in button. The client id keeps the
+	// historical `google_client_id` name so a client that predates generic
+	// OIDC still renders the button; these three fields describe WHERE to
+	// send the user, and are omitted when the provider is still Google so
+	// the managed-cloud response keeps its previous shape. A client that
+	// does not understand them falls back to the Google authorize URL,
+	// which is exactly the old behaviour.
+	OIDCAuthorizeURL string `json:"oidc_authorize_url,omitempty"`
+	OIDCScopes       string `json:"oidc_scopes,omitempty"`
+	OIDCDisplayName  string `json:"oidc_display_name,omitempty"`
 	// WorkspaceCreationDisabled mirrors the server-side
 	// DISABLE_WORKSPACE_CREATION env var so the UI can hide every
 	// "Create workspace" affordance on self-hosted instances. Omitted
@@ -100,8 +110,16 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		LocalWorktreeSupported:             true,
 		AgentConversationStartersSupported: true,
 		AllowSignup:                        os.Getenv("ALLOW_SIGNUP") != "false",
-		GoogleClientID:                     os.Getenv("GOOGLE_CLIENT_ID"),
+		GoogleClientID:                     oidcProviderFromEnv().ClientID,
 		WorkspaceCreationDisabled:          os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
+	}
+	// Only advertise the endpoint overrides when they actually differ from
+	// the built-in provider, so a Google deployment's /api/config response is
+	// byte-identical to what it was before generic OIDC existed.
+	if provider := oidcProviderFromEnv(); !provider.IsGoogle() {
+		config.OIDCAuthorizeURL = provider.AuthorizeURL
+		config.OIDCScopes = provider.Scopes
+		config.OIDCDisplayName = provider.DisplayName
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()
