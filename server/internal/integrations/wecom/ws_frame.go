@@ -312,6 +312,11 @@ func (mc aibotMsgCallback) ownText() (string, bool) {
 // reading every channel through one prompt meets one vocabulary.
 const quotePrefix = "[Quote]"
 
+// maxQuotedRunes bounds the quoted block. Runes, not bytes: the quoted text is
+// usually Chinese, where a byte bound would cut roughly a third as many
+// characters and could split one in half.
+const maxQuotedRunes = 500
+
 // quotedContext renders the message the sender was replying to, to be shown
 // AHEAD of their own words.
 //
@@ -328,6 +333,13 @@ func (mc aibotMsgCallback) quotedContext() string {
 	rendered := strings.TrimSpace(mc.Quote.render())
 	if rendered == "" {
 		return ""
+	}
+	// A quoted document would otherwise become the body. The sender quoted it
+	// to point at it, not to resend it, and the words that carry their question
+	// are their own — which follow the block and must not be pushed out of the
+	// agent's reach by it.
+	if runes := []rune(rendered); len(runes) > maxQuotedRunes {
+		rendered = strings.TrimRight(string(runes[:maxQuotedRunes]), " \t\n") + "…"
 	}
 	var b strings.Builder
 	for i, line := range strings.Split(rendered, "\n") {
@@ -519,27 +531,41 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 		command = stripLeadingMentions(command, botDisplayName)
 	}
 	media := mc.attachments()
+	// A quote counts as content here for the same reason media does: it is why
+	// the directive-only layouts below are not the empty pending sentinel.
+	// Rendering it happens further down — this only needs to know it exists.
+	quoted := mc.quotedContext()
 	normalizedText, control, controlNormalized := normalizeWeComControlLayout(
-		mc, text, command, chatType, botDisplayName, len(media) > 0,
+		mc, text, command, chatType, botDisplayName, len(media) > 0 || quoted != "",
 	)
 	if controlNormalized {
 		text = normalizedText
-		// A media-bearing bare /clear is a real turn, not the shared pending
-		// sentinel. ForceFresh below carries the already-consumed directive.
-		if control.Kind == engine.ControlCommandFreshSession && control.Body == "" {
-			command = text
-		}
 	}
 
 	// The quoted message goes on last, so everything above — the control-layout
 	// rewrite and the command source it may hand back — still reads the body
 	// the sender actually composed. Only the stored, agent-visible text grows.
-	if quoted := mc.quotedContext(); quoted != "" {
+	if quoted != "" {
 		if text == "" {
 			text = quoted
 		} else {
 			text = quoted + "\n\n" + text
 		}
+	}
+
+	// A bare /clear that still carries content — media, a quote, or both — is a
+	// real turn, not the shared pending sentinel, so it must not reach Router
+	// with the directive still in the command source. ForceFresh below carries
+	// the already-consumed directive; the command source becomes whatever body
+	// is left, which is never a command (a quote opens with "> ", a placeholder
+	// with "["), so nothing downstream re-parses it.
+	//
+	// This runs after the quote is prepended, not before: leaving it above would
+	// hand Router an empty CommandText, which it fills from Text — reaching the
+	// same place by a route that only works while the quote happens not to parse
+	// as a command.
+	if controlNormalized && control.Kind == engine.ControlCommandFreshSession && control.Body == "" {
+		command = text
 	}
 
 	wm := InboundMessage{
@@ -602,16 +628,22 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 // body while retaining media placeholders in their original mixed-message
 // positions. CommandText remains the sender-authored, placeholder-free source
 // so Router alone applies the semantic difference between the directives.
+//
+// hasOtherContent says the message carries something besides the directive —
+// an attachment, a quoted message, or both. A directive with nothing else is
+// the shared pending sentinel and is left intact for Router to recognise; one
+// that arrives alongside content is a real turn, and leaving the directive in
+// the body would persist it as prompt text.
 func normalizeWeComControlLayout(
 	mc aibotMsgCallback,
 	visible string,
 	command string,
 	chatType channel.ChatType,
 	botDisplayName string,
-	hasMedia bool,
+	hasOtherContent bool,
 ) (string, engine.ControlCommand, bool) {
 	control, ok := engine.ParseControlCommand(command)
-	if !ok || (control.Body == "" && !hasMedia) {
+	if !ok || (control.Body == "" && !hasOtherContent) {
 		return visible, engine.ControlCommand{}, false
 	}
 
