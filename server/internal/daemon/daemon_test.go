@@ -2000,7 +2000,7 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, false, slog.Default())
 
 			if reachable != tt.wantReused {
 				t.Fatalf("reachable = %v, want %v", reachable, tt.wantReused)
@@ -2045,7 +2045,7 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionFile, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, providerRefusesMissingSessionCwd(provider, true), slog.Default())
 
 			if !reachable {
 				t.Fatal("Pi-family session file should remain reachable across workdirs")
@@ -2105,7 +2105,7 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionPath, PriorWorkDir: workDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, providerRefusesMissingSessionCwd("pi", true), slog.Default())
 
 			if reachable {
 				t.Fatalf("%s Pi session was treated as reachable", test.name)
@@ -2147,12 +2147,12 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 		name string
 		// body builds the transcript. liveDir exists; deadDir does not.
 		body func(liveDir, deadDir, aFile string) string
-		// The two runtimes disagree about a missing recorded cwd, so each
-		// states its own expectation. Pi hard-refuses; omp opens the transcript
-		// from the explicit --session path and falls back to the launch cwd, so
-		// dropping its session would be a pure continuity loss.
-		wantPi  bool
-		wantOmp bool
+		// Expectations are keyed by what the RUNTIME does with a missing
+		// recorded cwd, not by its name: pi's own binary hard-refuses, while
+		// omp and any custom command speaking the protocol fall back to the
+		// launch cwd, so dropping their session is pure continuity loss.
+		wantRefusing bool
+		wantTolerant bool
 	}{
 		{
 			// The reported failure: worktree reclaimed, transcript survives.
@@ -2162,16 +2162,16 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				// fixture faithful to what is actually on disk.
 				return header(deadDir) + "\n" + header(deadDir) + "\n"
 			},
-			wantPi:  false,
-			wantOmp: true,
+			wantRefusing: false,
+			wantTolerant: true,
 		},
 		{
 			name: "recorded cwd still exists",
 			body: func(liveDir, _, _ string) string {
 				return header(liveDir) + "\n"
 			},
-			wantPi:  true,
-			wantOmp: true,
+			wantRefusing: true,
+			wantTolerant: true,
 		},
 		{
 			// No header: Pi falls back to the launch directory and starts.
@@ -2179,8 +2179,8 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 			body: func(_, _, _ string) string {
 				return `{"type":"model_change","id":"a"}` + "\n"
 			},
-			wantPi:  true,
-			wantOmp: true,
+			wantRefusing: true,
+			wantTolerant: true,
 		},
 		{
 			// Empty cwd: Pi's own guard short-circuits on falsy and starts.
@@ -2188,8 +2188,8 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 			body: func(_, _, _ string) string {
 				return header("") + "\n"
 			},
-			wantPi:  true,
-			wantOmp: true,
+			wantRefusing: true,
+			wantTolerant: true,
 		},
 		{
 			// Pi uses existsSync, which is true for a plain file. Demanding a
@@ -2198,8 +2198,8 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 			body: func(_, _, aFile string) string {
 				return header(aFile) + "\n"
 			},
-			wantPi:  true,
-			wantOmp: true,
+			wantRefusing: true,
+			wantTolerant: true,
 		},
 		{
 			// Unparseable leading lines must not hide the header behind them.
@@ -2207,8 +2207,8 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 			body: func(_, deadDir, _ string) string {
 				return "not json\n" + header(deadDir) + "\n"
 			},
-			wantPi:  false,
-			wantOmp: true,
+			wantRefusing: false,
+			wantTolerant: true,
 		},
 		{
 			// Past the bounded scan we cannot read the header, and "could not
@@ -2223,16 +2223,33 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				b.WriteString(header(deadDir) + "\n")
 				return b.String()
 			},
-			wantPi:  true,
-			wantOmp: true,
+			wantRefusing: true,
+			wantTolerant: true,
 		},
 	} {
-		for _, provider := range []string{"pi", "omp"} {
-			wantReachable := test.wantPi
-			if provider == "omp" {
-				wantReachable = test.wantOmp
+		// refusesMissingCwd is stated as a literal rather than read back from
+		// providerRefusesMissingSessionCwd, so this matrix cannot be satisfied
+		// by the predicate agreeing with itself. The predicate's own answers
+		// are pinned in TestProviderRefusesMissingSessionCwd.
+		for _, runtime := range []struct {
+			name              string
+			provider          string
+			refusesMissingCwd bool
+		}{
+			{name: "pi", provider: "pi", refusesMissingCwd: true},
+			{name: "omp", provider: "omp", refusesMissingCwd: false},
+			// A custom runtime profile registers its protocol family as the
+			// provider, so an arbitrary command configured as `protocol_family:
+			// pi` also arrives here as "pi". It is not the binary whose refusal
+			// was verified, so it must keep its session.
+			{name: "custom-pi-family-profile", provider: "pi", refusesMissingCwd: false},
+		} {
+			wantReachable := test.wantTolerant
+			if runtime.refusesMissingCwd {
+				wantReachable = test.wantRefusing
 			}
-			t.Run(test.name+"/"+provider, func(t *testing.T) {
+			provider := runtime.provider
+			t.Run(test.name+"/"+runtime.name, func(t *testing.T) {
 				t.Parallel()
 
 				base := t.TempDir()
@@ -2257,7 +2274,7 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				task := Task{PriorSessionID: sessionPath, PriorWorkDir: liveDir}
 				taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, slog.Default())
+				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, runtime.refusesMissingCwd, slog.Default())
 
 				if reachable != wantReachable {
 					t.Fatalf("reachable = %v, want %v", reachable, wantReachable)
@@ -2284,6 +2301,45 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestProviderRefusesMissingSessionCwd pins which runtimes are allowed to have
+// their prior session dropped for a missing recorded cwd.
+//
+// The provider name alone cannot answer this. A custom runtime profile keeps
+// its protocol family as the provider, so `protocol_family: pi` with any
+// command arrives as "pi" while being an unrelated implementation — the trap
+// agent.Config.BuiltinRuntime documents. Only the provider's own discovered
+// binary is the CLI whose refusal was verified.
+//
+// Everything else answers false, and that asymmetry is deliberate: a runtime
+// that really does refuse is still recovered by the backend's ResumeRejected
+// signal at the cost of one run, whereas a wrong true silently discards
+// history that was never in danger and has no backstop at all.
+func TestProviderRefusesMissingSessionCwd(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name     string
+		provider string
+		builtin  bool
+		want     bool
+	}{
+		{name: "pi's own binary refuses", provider: "pi", builtin: true, want: true},
+		{name: "custom command speaking pi protocol", provider: "pi", builtin: false, want: false},
+		{name: "omp's own binary tolerates", provider: "omp", builtin: true, want: false},
+		{name: "custom command speaking omp protocol", provider: "omp", builtin: false, want: false},
+		{name: "unrelated provider", provider: "claude", builtin: true, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := providerRefusesMissingSessionCwd(test.provider, test.builtin); got != test.want {
+				t.Fatalf("providerRefusesMissingSessionCwd(%q, builtin=%v) = %v, want %v",
+					test.provider, test.builtin, got, test.want)
+			}
+		})
 	}
 }
 

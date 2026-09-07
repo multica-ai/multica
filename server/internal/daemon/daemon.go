@@ -6166,10 +6166,10 @@ func sameExistingDir(a, b string) bool {
 	return os.SameFile(ai, bi)
 }
 
-func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv, provider, envWorkDir string, sessionHomeReachable bool, taskLog *slog.Logger) bool {
+func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv, provider, envWorkDir string, sessionHomeReachable, refusesMissingSessionCwd bool, taskLog *slog.Logger) bool {
 	var reachable bool
 	if providerUsesPiSessionFile(provider) {
-		reachable = piSessionResumable(task.PriorSessionID, providerRefusesMissingSessionCwd(provider))
+		reachable = piSessionResumable(task.PriorSessionID, refusesMissingSessionCwd)
 	} else {
 		// Compare the directories, not the spelling. Reuse runs in the canonical
 		// path it validated and locked, which need not be character-identical to
@@ -6243,12 +6243,23 @@ func piSessionResumable(sessionID string, refusesMissingCwd bool) bool {
 //
 // So the check must not be applied family-wide: doing that drops omp sessions
 // omp would have resumed cleanly, which is exactly the continuity loss #7760
-// set out to fix. Answering "no" for an unknown Pi-family runtime is the safe
-// default rather than the risky one, because a runtime that does refuse is
-// still caught by the backend's ResumeRejected signal — one wasted run and a
-// fresh session, not the permanent loop this issue reported.
-func providerRefusesMissingSessionCwd(provider string) bool {
-	return provider == "pi"
+// set out to fix.
+//
+// builtinRuntime is why the provider name alone cannot answer this. A custom
+// runtime profile keeps its protocol family as the provider, so
+// `protocol_family: pi` with `command_name: <anything>` also arrives here as
+// "pi" while being an unrelated implementation — the same trap agent.Config's
+// BuiltinRuntime field documents. Only the provider's own discovered binary is
+// the CLI whose refusal was actually verified, so a custom command answers
+// false and keeps its session.
+//
+// False is the safe default in both directions — unknown Pi-family runtime,
+// and custom command — because a runtime that really does refuse is still
+// caught by the backend's ResumeRejected signal: one wasted run and a fresh
+// session, not the permanent loop this issue reported. Guessing the other way
+// has no such backstop; it silently discards history that was never in danger.
+func providerRefusesMissingSessionCwd(provider string, builtinRuntime bool) bool {
+	return builtinRuntime && provider == "pi"
 }
 
 // piSessionFilePresent proves there is persisted history to resume. It does
@@ -7965,7 +7976,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
-	resumeReachable := gateResumeToReachableSession(&task, &taskCtx, provider, env.WorkDir, sessionHomeReachable(provider, env, envReused), taskLog)
+	// usesCustomProfileCommand is the same provenance the backend receives as
+	// agent.Config.BuiltinRuntime: it separates the provider's own discovered
+	// binary from an arbitrary command speaking its protocol. Reused here so
+	// the gate and the backend cannot disagree about which one is running.
+	resumeReachable := gateResumeToReachableSession(
+		&task, &taskCtx, provider, env.WorkDir,
+		sessionHomeReachable(provider, env, envReused),
+		providerRefusesMissingSessionCwd(provider, !usesCustomProfileCommand),
+		taskLog,
+	)
 	// A reused workdir is necessary but not sufficient for a Codex resume: the
 	// prior thread's rollout must actually be present in this task's CODEX_HOME
 	// sessions (MUL-4424 isolates them). Drop the resume before the brief is
