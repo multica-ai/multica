@@ -449,13 +449,12 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"include the PR URL when a PR exists",
 				"Closes MUL-123",
 				"--status backlog",
-				// The only sanctioned pr_url reference is the negative
-				// compatibility warning about pre-existing data — not a write
-				// recommendation (MUL-5442 owner ruling: no curated key
-				// vocabulary). MUL-6966 makes the legacy framing explicit:
-				// the bag is no longer taught, but `issue get` still returns
-				// whatever an older run left in it.
-				"a `pr_url` metadata key left on the issue by an older run",
+				// The link table is the only sanctioned source of PR state,
+				// and the guard against stale data survives MUL-6966 without
+				// naming the key it used to name: `issue get` still returns
+				// whatever an older run left on the issue, but a warning that
+				// spells out a metadata key teaches the key.
+				"stale values left on the issue by an earlier run",
 				// MUL-5442: the brief's Sub-issue Creation section is a
 				// one-line map pointing here. These anchors are the demoted
 				// playbook — if they leave, the brief pointer dangles.
@@ -482,20 +481,19 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Nothing here reserves an issue or serialises anything",
 			},
 			notWant: []string{
-				// MUL-6966 phase 1: the skill must not teach the KV bag at
-				// all. The `pr_url` line above is the one surviving mention
-				// and it is a warning about legacy data, not a write path.
-				"## Metadata: durable custom state",
-				"multica issue metadata set",
-				"multica issue metadata delete",
-				"Never store secrets, tokens, or API keys",
-				"Property vs metadata",
+				// MUL-6966 phase 1: this reference must not teach the KV bag
+				// at all — not as a section, not as a command, and not as a
+				// named key inside a warning. A blanket ban on the vocabulary
+				// is the contract; anything that needs the word back needs
+				// this decision revisited first.
+				"metadata",
+				"Metadata",
+				"pr_url",
 				// A curated key list is the "recommended fields" concept the
 				// owner ruled out on MUL-5442.
 				"High-signal keys",
 				"reuse these names so queries stay consistent",
 				"scratchpad for run state",
-				"(`pr_url`, `waiting_on`",
 				// Per-turn workflow the runtime brief owns; duplicating it here
 				// is how the two drift apart.
 				"Start from the trigger, not from memory",

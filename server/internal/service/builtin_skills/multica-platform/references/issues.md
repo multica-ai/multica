@@ -84,8 +84,8 @@ that explicitly.
 ## Reading a linked PR's real state
 
 When a step depends on PR state, query Multica's link table — do not infer it
-from branch names, GitHub search, memory, or a `pr_url` metadata key left on
-the issue by an older run (which can be stale).
+from branch names, GitHub search, memory, or stale values left on the issue by
+an earlier run.
 
 ```bash
 multica issue pull-requests <issue-id> --output json
