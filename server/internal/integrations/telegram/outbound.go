@@ -161,6 +161,14 @@ func (h *terminalRetryHeap) Pop() any {
 // well inside both without feeling static.
 const editInterval = 2500 * time.Millisecond
 
+// placeholderSettleRetry re-checks a stream whose placeholder sendMessage is
+// still in flight. A check costs one map lookup — the delivery target is
+// resolved once and cached — so the spacing only trades added latency against
+// wasted wakeups: 250ms is shorter than a typical Telegram round trip, so a
+// settled placeholder is picked up within a check or two, and the wait can
+// never outlast the partial's own 10s send context.
+const placeholderSettleRetry = 250 * time.Millisecond
+
 // Idle schedules remain briefly reusable so sequential tasks and cancellation
 // cannot discard a chat's edit cooldown or Telegram retry_after window. The
 // schedule and compressed-fallback maps both have hard capacity limits.
@@ -170,7 +178,6 @@ const (
 	terminalWorkerCount                = 4
 	maxBotFallbacks                    = 1024
 	chatCapacityRetry                  = time.Second
-	placeholderSettleRetry             = 250 * time.Millisecond
 	maxQueuedTerminalReplies           = 64
 	maxQueuedTerminalRepliesPerSession = 8
 	maxQueuedTerminalReplyBytes        = 16 << 20
@@ -300,11 +307,22 @@ func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *str
 		// reply is delivered in chunks by the final EventChatDone send.
 		text = chunkMessage(text, maxMessageUnits)[0]
 	}
-	// Re-read the id under the lock that guards it — the caller's snapshot was
-	// taken before this send was serialized behind schedule.mu — and publish a
-	// first send while it is in flight, so EventChatDone can tell "no
-	// placeholder yet" from "placeholder sent, id still in the air".
+	// o.streams is the single owner registry for a task's reply. The caller
+	// released o.mu before this point and terminal delivery consumes the
+	// stream under that same lock, so a chat:done may have taken ownership in
+	// the meantime — sending on a stream this partial no longer owns is what
+	// puts a second copy of the reply in the chat (GH #8049).
+	//
+	// Still the owner: re-read the id under the lock that guards it (the
+	// caller's snapshot predates this send being serialized behind
+	// schedule.mu) and publish a first send while it is in flight, so terminal
+	// delivery can tell "no placeholder yet" from "placeholder sent, id still
+	// in the air" and wait for the id instead of posting its own copy.
 	o.mu.Lock()
+	if o.streams[target.streamKey] != st {
+		o.mu.Unlock()
+		return
+	}
 	msgID = st.messageID
 	st.sending = msgID == 0
 	o.mu.Unlock()
@@ -578,13 +596,19 @@ type terminalRequestResult struct {
 // fixed worker available for another session.
 func (o *Outbound) sendNextTerminalRequest(ctx context.Context, reply *terminalReply) terminalRequestResult {
 	if !reply.initialized {
-		target, err := o.resolveTarget(ctx, reply.event, false)
-		if err != nil {
-			return terminalRequestResult{done: true, err: err}
+		if reply.target == nil {
+			// Resolved once and cached: the retries below re-enter here, and
+			// every resolve is two queries plus a credential decrypt.
+			target, err := o.resolveTarget(ctx, reply.event, false)
+			if err != nil {
+				return terminalRequestResult{done: true, err: err}
+			}
+			if target == nil {
+				return terminalRequestResult{done: true}
+			}
+			reply.target = target
 		}
-		if target == nil {
-			return terminalRequestResult{done: true}
-		}
+		target := reply.target
 
 		o.mu.Lock()
 		st := o.streams[target.streamKey]
@@ -614,7 +638,6 @@ func (o *Outbound) sendNextTerminalRequest(ctx context.Context, reply *terminalR
 		o.mu.Unlock()
 
 		reply.initialized = true
-		reply.target = target
 		reply.schedule = schedule
 		reply.chunks = chunkMessage(chatDoneContent(reply.event.Payload), maxMessageUnits)
 		if len(reply.chunks) == 0 {
