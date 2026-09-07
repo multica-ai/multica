@@ -50,8 +50,8 @@ export function waveScale(distancePx: number): number {
 }
 
 /**
- * Caps applied by `commentPreview`. The preview card clamps visually
- * (`truncate` / `line-clamp-3`), but agent comments can be tens of KB of
+ * Caps applied by `commentPreview`. Outline labels truncate visually,
+ * but agent comments can be tens of KB of
  * markdown — capping here keeps the flattened strings (and the aria-labels
  * derived from them) small instead of shipping the whole comment into the DOM.
  */
@@ -497,13 +497,13 @@ export function ThreadMinimap({
                       ? t(($) => $.detail.thread_nav_resolved_label, { title })
                       : title}
                     aria-description={participantNames.join(", ") || undefined}
-                    className="flex w-full items-start gap-3 rounded-md px-3 py-2 text-left text-body text-muted-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:font-medium data-active:text-brand"
+                    className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-body text-muted-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:font-medium data-active:text-brand"
                   >
-                    <span className="min-w-0 flex-1 break-words">
-                      {title}
+                    <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                      <span className="truncate">{title}</span>
                       {thread.resolved && (
                         <CheckCircle2
-                          className="ml-1.5 inline-block size-3.5 align-text-bottom text-success"
+                          className="size-3.5 shrink-0 text-success"
                           aria-label={t(($) => $.comment.resolve.thread_resolved_badge)}
                         />
                       )}
