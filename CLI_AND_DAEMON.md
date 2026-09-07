@@ -899,6 +899,17 @@ multica autopilot delete <id>
 multica autopilot trigger <id>            # Fires the autopilot once, returns the run
 ```
 
+The command exits non-zero unless the run actually started (`issue_created` or
+`running`). A `skipped` run — admission refused, runtime offline, quota
+exhausted, a duplicate already in flight — dispatched nothing; its
+`failure_reason` and `reason_code` are printed to stderr, and `--output json`
+still writes the full run to stdout first.
+
+Run as an agent (inside a task, or over A2A), the trigger is authorized as the
+human that run acts for, not as the owner of the machine it executes on. That
+human needs the same write access they would need to trigger it themselves, and
+a run carrying no originator cannot trigger at all.
+
 ### Run History
 
 ```bash

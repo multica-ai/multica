@@ -900,3 +900,37 @@ func TestRelativeTimestampAt(t *testing.T) {
 		})
 	}
 }
+
+// TestAutopilotRunStarted pins the success whitelist for a manual trigger.
+//
+// Before #8078 the CLI printed "Autopilot triggered" and exited 0 for every
+// response the server returned, including a `skipped` run that dispatched
+// nothing — so an operator, and any agent running the command on their behalf,
+// read success and moved on. Success must therefore be an explicit start
+// status, never "anything that is not skipped or failed": the run schema accepts
+// any status string for forward compatibility, so an unknown one has to read as
+// "did not start". Mirrors runNowToastKind on the web client.
+func TestAutopilotRunStarted(t *testing.T) {
+	cases := []struct {
+		status string
+		want   bool
+	}{
+		{"issue_created", true},
+		{"running", true},
+		{"skipped", false},
+		{"failed", false},
+		{"pending", false},
+		{"completed", false},
+		{"", false},
+		// A status this build has never heard of must not be reported as a
+		// successful trigger.
+		{"deferred", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.status, func(t *testing.T) {
+			if got := autopilotRunStarted(tc.status); got != tc.want {
+				t.Errorf("autopilotRunStarted(%q) = %v, want %v", tc.status, got, tc.want)
+			}
+		})
+	}
+}

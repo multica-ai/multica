@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -578,12 +579,43 @@ func runAutopilotTrigger(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("trigger autopilot: %w", err)
 	}
 
+	status := strVal(run, "status")
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
-		return cli.PrintJSON(os.Stdout, run)
+		// Print the run either way: a caller parsing JSON still wants the row,
+		// including its failure_reason, before the non-zero exit below.
+		if err := cli.PrintJSON(os.Stdout, run); err != nil {
+			return err
+		}
+	} else if autopilotRunStarted(status) {
+		fmt.Printf("Autopilot triggered: run %s (status: %s)\n", strVal(run, "id"), status)
 	}
-	fmt.Printf("Autopilot triggered: run %s (status: %s)\n", strVal(run, "id"), strVal(run, "status"))
-	return nil
+	if autopilotRunStarted(status) {
+		return nil
+	}
+	// The server recorded a run but dispatched nothing. Reporting exit 0 with
+	// "Autopilot triggered" is what made #8078 look like a silent no-op for a
+	// day: the operator, and any agent running this on their behalf, read
+	// success and moved on. Surface it as the failure it is.
+	msg := fmt.Sprintf("autopilot did not run (status: %s)", status)
+	if reason := strVal(run, "failure_reason"); reason != "" {
+		msg += ": " + reason
+	}
+	if code := strVal(run, "reason_code"); code != "" {
+		msg += " [" + code + "]"
+	}
+	return errors.New(msg)
+}
+
+// autopilotRunStarted reports whether a manual trigger actually dispatched work.
+//
+// Mirrors the web client's runNowToastKind whitelist (packages/views/autopilots):
+// success is an explicit start status, never "anything that is not skipped or
+// failed". The run schema accepts any status string for forward compatibility, so
+// a future or anomalous-but-parseable status must read as "did not start" rather
+// than be reported as a successful trigger.
+func autopilotRunStarted(status string) bool {
+	return status == "issue_created" || status == "running"
 }
 
 func runAutopilotRuns(cmd *cobra.Command, args []string) error {
