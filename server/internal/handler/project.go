@@ -646,6 +646,12 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to clear project chat context")
 		return
 	}
+	// project_note carries no FK either, so its rows must be swept inside the
+	// same transaction — otherwise deleting a project orphans its notepads.
+	if err := qtx.DeleteProjectNotesByProject(r.Context(), project.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project notes")
+		return
+	}
 	// Project-scoped saved views live on the project page; once the project
 	// is gone they are unreachable, so they go in the same transaction.
 	if err := qtx.DeleteIssueViewsByProjectScope(r.Context(), db.DeleteIssueViewsByProjectScopeParams{

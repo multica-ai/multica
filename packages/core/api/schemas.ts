@@ -52,6 +52,8 @@ import type {
   MemberWithUser,
   IssueProperty,
   ListPropertiesResponse,
+  ListProjectNotesResponse,
+  ProjectNote,
   QuickAction,
   ListQuickActionsResponse,
   IssuePropertiesResponse,
@@ -3337,4 +3339,56 @@ export const EMPTY_JOIN_SHARE_LINK_RESPONSE: {
   },
   workspace_id: "",
   workspace_slug: "",
+};
+
+// Project notes. The list endpoint returns summaries (body replaced by
+// body_size) so a project with dozens of long notepads stays cheap to list;
+// only the detail endpoint carries body_md.
+export const ProjectNoteSummarySchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  // .default(0) so a note from an older backend that omits the field parses to
+  // zero instead of failing the whole object — which would degrade the entire
+  // list to the empty fallback over one missing key.
+  body_size: z.number().default(0),
+  position: z.number().default(0),
+  created_at: z.string(),
+  updated_at: z.string(),
+  created_by: z.string().nullable().default(null),
+}).loose();
+
+export const ListProjectNotesResponseSchema = z.object({
+  notes: z.array(ProjectNoteSummarySchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_PROJECT_NOTES_RESPONSE: ListProjectNotesResponse = {
+  notes: [],
+  total: 0,
+};
+
+export const ProjectNoteSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  body_md: z.string().default(""),
+  position: z.number().default(0),
+  created_at: z.string(),
+  updated_at: z.string(),
+  created_by: z.string().nullable().default(null),
+}).loose();
+
+export const EMPTY_PROJECT_NOTE: ProjectNote = {
+  id: "",
+  project_id: "",
+  workspace_id: "",
+  title: "",
+  body_md: "",
+  position: 0,
+  created_at: "",
+  updated_at: "",
+  created_by: null,
 };

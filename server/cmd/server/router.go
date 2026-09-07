@@ -1978,6 +1978,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					r.Get("/notes", h.ListProjectNotes)
+					r.Post("/notes", h.CreateProjectNote)
+					r.Get("/notes/{noteId}", h.GetProjectNote)
+					r.Patch("/notes/{noteId}", h.UpdateProjectNote)
+					r.Post("/notes/{noteId}/append", h.AppendProjectNote)
+					r.Delete("/notes/{noteId}", h.DeleteProjectNote)
 				})
 			})
 

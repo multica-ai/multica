@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
+  ListProjectNotesResponseSchema,
+  ProjectNoteSchema,
+  ProjectNoteSummarySchema,
+  EMPTY_LIST_PROJECT_NOTES_RESPONSE,
+  EMPTY_PROJECT_NOTE,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
   RedeemWecomBindingTokenResponseSchema,
@@ -1907,6 +1912,100 @@ describe("Telegram installation schemas", () => {
         { endpoint: "POST /api/telegram/binding/redeem" },
       ),
     ).toEqual(EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE);
+  });
+});
+
+// Project notes. The desktop app installed on a machine is older than whatever
+// backend it reaches, so every field here must survive being absent, null, or
+// the wrong type — a note list that throws would white-screen the project page.
+describe("ProjectNoteSummarySchema", () => {
+  const base = {
+    id: "n1",
+    project_id: "p1",
+    workspace_id: "w1",
+    title: "Release journal",
+    body_size: 1234,
+    position: 0,
+    created_at: "2026-08-07T00:00:00Z",
+    updated_at: "2026-08-07T00:00:00Z",
+    created_by: "u1",
+  };
+
+  it("parses a well-formed summary", () => {
+    const parsed = ProjectNoteSummarySchema.parse(base);
+    expect(parsed.body_size).toBe(1234);
+    expect(parsed.created_by).toBe("u1");
+  });
+
+  it("defaults body_size and position when the server omits them", () => {
+    const { body_size, position, ...withoutSizes } = base;
+    const parsed = ProjectNoteSummarySchema.parse(withoutSizes);
+    expect(parsed.body_size).toBe(0);
+    expect(parsed.position).toBe(0);
+  });
+
+  it("accepts a null created_by (agent-authored note)", () => {
+    const parsed = ProjectNoteSummarySchema.parse({ ...base, created_by: null });
+    expect(parsed.created_by).toBeNull();
+  });
+
+  it("defaults created_by when the key is missing entirely", () => {
+    const { created_by, ...withoutCreator } = base;
+    const parsed = ProjectNoteSummarySchema.parse(withoutCreator);
+    expect(parsed.created_by).toBeNull();
+  });
+
+  it("keeps unknown fields rather than rejecting them (forward compat)", () => {
+    const parsed = ProjectNoteSummarySchema.parse({ ...base, pinned: true });
+    expect(parsed.title).toBe("Release journal");
+  });
+});
+
+describe("ListProjectNotesResponseSchema", () => {
+  it("degrades an empty object to an empty list", () => {
+    const parsed = ListProjectNotesResponseSchema.parse({});
+    expect(parsed.notes).toEqual([]);
+    expect(parsed.total).toBe(0);
+  });
+
+  it("rejects a null notes array so parseWithFallback supplies the fallback", () => {
+    expect(() => ListProjectNotesResponseSchema.parse({ notes: null })).toThrow();
+    expect(EMPTY_LIST_PROJECT_NOTES_RESPONSE.notes).toEqual([]);
+  });
+
+  it("rejects a wrong-typed total", () => {
+    expect(() =>
+      ListProjectNotesResponseSchema.parse({ notes: [], total: "seven" }),
+    ).toThrow();
+  });
+});
+
+describe("ProjectNoteSchema", () => {
+  const base = {
+    id: "n1",
+    project_id: "p1",
+    workspace_id: "w1",
+    title: "Findings",
+    body_md: "## Day 1",
+    position: 2,
+    created_at: "2026-08-07T00:00:00Z",
+    updated_at: "2026-08-07T00:00:00Z",
+    created_by: null,
+  };
+
+  it("parses a well-formed note", () => {
+    expect(ProjectNoteSchema.parse(base).body_md).toBe("## Day 1");
+  });
+
+  it("defaults a missing body to an empty string, never undefined", () => {
+    const { body_md, ...withoutBody } = base;
+    const parsed = ProjectNoteSchema.parse(withoutBody);
+    expect(parsed.body_md).toBe("");
+  });
+
+  it("rejects a null body so the editor never renders undefined", () => {
+    expect(() => ProjectNoteSchema.parse({ ...base, body_md: null })).toThrow();
+    expect(EMPTY_PROJECT_NOTE.body_md).toBe("");
   });
 });
 

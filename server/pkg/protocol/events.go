@@ -97,6 +97,9 @@ const (
 	EventProjectResourceCreated = "project_resource:created"
 	EventProjectResourceUpdated = "project_resource:updated"
 	EventProjectResourceDeleted = "project_resource:deleted"
+	EventProjectNoteCreated     = "project_note:created"
+	EventProjectNoteUpdated     = "project_note:updated"
+	EventProjectNoteDeleted     = "project_note:deleted"
 
 	// Label events
 	EventLabelCreated       = "label:created"

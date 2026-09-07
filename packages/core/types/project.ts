@@ -136,3 +136,59 @@ export interface ListProjectResourcesResponse {
   resources: ProjectResource[];
   total: number;
 }
+
+// ProjectNote is a free-form markdown notepad owned by a project. Unlike a
+// ProjectResource — which only points at something living in another system — a
+// note's content is stored by Multica. A project may hold any number of them
+// (a journal, a conclusions page, scratch notes).
+//
+// Notes are deliberately absent from the agent runtime brief; agents discover
+// them through the multica-platform skill and read only what they need.
+export interface ProjectNote {
+  id: string;
+  project_id: string;
+  workspace_id: string;
+  title: string;
+  body_md: string;
+  position: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+}
+
+// ProjectNoteSummary is the list-view shape. The body is replaced by its byte
+// length so listing a project with dozens of long notes stays cheap.
+export interface ProjectNoteSummary {
+  id: string;
+  project_id: string;
+  workspace_id: string;
+  title: string;
+  body_size: number;
+  position: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+}
+
+export interface CreateProjectNoteRequest {
+  title: string;
+  body_md?: string;
+  position?: number;
+}
+
+// Every field is optional; omitted fields keep their current value. Sending
+// body_md replaces the whole body — use appendProjectNote to add to it.
+export interface UpdateProjectNoteRequest {
+  title?: string;
+  body_md?: string;
+  position?: number;
+}
+
+export interface AppendProjectNoteRequest {
+  body_md: string;
+}
+
+export interface ListProjectNotesResponse {
+  notes: ProjectNoteSummary[];
+  total: number;
+}

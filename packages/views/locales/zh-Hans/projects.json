@@ -137,6 +137,28 @@
     "toast_local_mode_update_failed": "无法更新执行方式",
     "mode_badge_in_place": "原地"
   },
+  "notes": {
+    "section_header": "笔记",
+    "empty": "暂无笔记。",
+    "add_button": "新建笔记",
+    "title_placeholder": "笔记标题",
+    "create_submit": "创建",
+    "cancel": "取消",
+    "save": "保存",
+    "body_placeholder": "在此撰写 Markdown...",
+    "remove_tooltip": "删除笔记",
+    "delete_confirm_title": "删除这条笔记？",
+    "delete_confirm_body": "笔记及其内容将被永久删除。",
+    "delete_confirm_action": "删除",
+    "agent_hint": "笔记不会注入智能体上下文，智能体会按需读取。",
+    "toast_created": "笔记已创建",
+    "toast_create_failed": "创建笔记失败",
+    "toast_saved": "笔记已保存",
+    "toast_save_failed": "保存笔记失败",
+    "toast_removed": "笔记已删除",
+    "toast_remove_failed": "删除笔记失败",
+    "title_required": "请填写标题"
+  },
   "delete_dialog": {
     "title": "删除项目",
     "description": "将删除这个项目。任务不会被删除，只会从项目中解除关联。",
