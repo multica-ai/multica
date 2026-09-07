@@ -2147,10 +2147,12 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 		name string
 		// body builds the transcript. liveDir exists; deadDir does not.
 		body func(liveDir, deadDir, aFile string) string
-		// Expectations are keyed by what the RUNTIME does with a missing
-		// recorded cwd, not by its name: pi's own binary hard-refuses, while
-		// omp and any custom command speaking the protocol fall back to the
-		// launch cwd, so dropping their session is pure continuity loss.
+		// Expectations are keyed by whether the RUNTIME is one we may drop a
+		// session for, not by its name. Only pi's own binary is: it hard-
+		// refuses on a missing recorded cwd. omp is verified to fall back to
+		// the launch cwd instead, and a custom command's behaviour is simply
+		// unknown — neither is the CLI the refusal was verified against, so
+		// dropping their session risks pure continuity loss.
 		wantRefusing bool
 		wantTolerant bool
 	}{

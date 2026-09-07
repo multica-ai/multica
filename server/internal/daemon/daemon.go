@@ -6254,10 +6254,14 @@ func piSessionResumable(sessionID string, refusesMissingCwd bool) bool {
 // false and keeps its session.
 //
 // False is the safe default in both directions — unknown Pi-family runtime,
-// and custom command — because a runtime that really does refuse is still
-// caught by the backend's ResumeRejected signal: one wasted run and a fresh
-// session, not the permanent loop this issue reported. Guessing the other way
-// has no such backstop; it silently discards history that was never in danger.
+// and custom command. A runtime that refuses in the words the backend matches
+// (piResumeRefusedMarker) is still recovered by Result.ResumeRejected: one
+// wasted run and a fresh session, not the permanent loop this issue reported.
+// That backstop is a single phrase match and does not generalise to a refusal
+// worded differently — but it does cover the case this default is most likely
+// to be wrong about, a Pi-family runtime behaving like Pi. Guessing the other
+// way has no backstop at all: it silently discards history that was never in
+// danger, with nothing downstream to notice.
 func providerRefusesMissingSessionCwd(provider string, builtinRuntime bool) bool {
 	return builtinRuntime && provider == "pi"
 }
