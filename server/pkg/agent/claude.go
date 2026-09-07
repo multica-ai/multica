@@ -929,6 +929,9 @@ func mergeEnv(base []string, extra map[string]string) []string {
 		env = append(env, entry)
 	}
 	for k, v := range extra {
+		if strings.HasPrefix(strings.ToUpper(k), "MULTICA_CONTROLLER_") {
+			continue
+		}
 		env = append(env, k+"="+v)
 	}
 	return env

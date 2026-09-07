@@ -2107,6 +2107,9 @@ func (d *Daemon) resolveAuth() error {
 		return fmt.Errorf("not authenticated: run %s first", loginHint)
 	}
 	d.client.SetToken(cfg.Token)
+	if err := d.client.SetControllerDaemonToken(strings.TrimSpace(os.Getenv("MULTICA_CONTROLLER_DAEMON_TOKEN"))); err != nil {
+		return err
+	}
 	d.logger.Info("authenticated")
 	d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_len", len(cfg.Token))
 	return nil
@@ -7306,6 +7309,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// which must not extend to arbitrary commands sharing a protocol family.
 	var usesCustomProfileCommand bool
 	if customSpec, isCustom := d.customProfileLaunchForRuntime(task.RuntimeID); isCustom {
+		if task.LaunchAuthority != nil {
+			return TaskResult{}, fmt.Errorf("controlled runs do not permit custom runtime commands")
+		}
 		usesCustomProfileCommand = true
 		entry.Path = customSpec.path
 		resolvedVersion = customSpec.version
@@ -7336,6 +7342,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	stopPrepareLease := d.startTaskPrepareLeaseExtender(prepareCtx, task, taskLog)
 	defer stopPrepareLease()
+
+	if err := validateControllerTask(task, d.cfg.DaemonID); err != nil {
+		return TaskResult{}, err
+	}
 
 	if err := d.ensureTaskSkillBundles(prepareCtx, &task); err != nil {
 		return TaskResult{}, err
@@ -7763,6 +7773,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		if localAssignment.UsesRunWorkspace() {
 			prepParams.RunWorkspace = &execenv.RunWorkspaceParams{
+				Authority:  task.LaunchAuthority,
 				SourcePath: localAssignment.RealPath, BaseCommit: localAssignment.Ref.BaseCommit,
 				HostID: d.cfg.DaemonID, RuntimeID: task.RuntimeID,
 			}

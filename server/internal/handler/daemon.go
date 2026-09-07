@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/runcontrol"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -105,6 +106,18 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(rt.WorkspaceID)) {
 		return db.AgentRuntime{}, false
 	}
+	if h.DB != nil {
+		var controlled bool
+		err := h.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM issue_controller c,jsonb_array_elements(c.config->'targets') t WHERE c.workspace_id=$1 AND t->>'runtime_id'=$2)`, rt.WorkspaceID, uuidToString(rt.ID)).Scan(&controlled)
+		if err != nil {
+			writeError(w, 503, "controller runtime authority unavailable")
+			return db.AgentRuntime{}, false
+		}
+		if controlled && (middleware.DaemonIDFromContext(r.Context()) == "" || middleware.DaemonIDFromContext(r.Context()) != rt.DaemonID.String) {
+			writeError(w, 403, "controlled runtime requires its bound daemon credential")
+			return db.AgentRuntime{}, false
+		}
+	}
 	return rt, true
 }
 
@@ -147,6 +160,9 @@ func (h *Handler) requireDaemonTaskAccessWithWorkspace(w http.ResponseWriter, r 
 	}
 
 	if !h.requireDaemonWorkspaceAccess(w, r, wsID) {
+		return db.AgentTaskQueue{}, "", false
+	}
+	if !h.controllerTaskAccess(w, r, task) {
 		return db.AgentTaskQueue{}, "", false
 	}
 	return task, wsID, true
@@ -2173,6 +2189,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			message: "failed to load task agent",
 		}
 	}
+	var controllerInputs *runcontrol.ProfileSnapshot
+	if authority, authorityErr := h.controllerManifestForTask(r, *task); authorityErr != nil {
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(r.Context(), task, authorityErr.Error(), taskfailure.ReasonInvalidTaskIdentity, "error_controller_authority", http.StatusConflict, authorityErr.Error())
+	} else if authority != nil {
+		inputs, inputErr := service.LoadControllerProfile(r.Context(), h.Queries, agent)
+		if inputErr != nil || inputs.Hash() != authority.ProfileHash {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(r.Context(), task, "Controller execution profile changed", taskfailure.ReasonInvalidTaskIdentity, "error_controller_profile", http.StatusConflict, "controller execution profile changed")
+		}
+		controllerInputs = &inputs
+		agent = inputs.Agent
+		runtime = inputs.Runtime
+	}
 	// The SQL claim narrows candidates and repeats the access predicate before
 	// changing task state, but Agent mutations do not stay locked through HTTP
 	// response assembly. Recheck the freshly loaded Agent here so a rebind or
@@ -2241,7 +2269,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// lands on the agent's next task with nothing to restart. Errors —
 	// including a failed read — leave the agent config untouched: a broken
 	// shared entry must never take away servers the agent runs with today.
-	if bound, err := h.Queries.ListEnabledAgentMcpServers(r.Context(), agent.ID); err != nil {
+	if bound, err := func() ([]db.ListEnabledAgentMcpServersRow, error) {
+		if controllerInputs != nil {
+			return controllerInputs.Bindings, nil
+		}
+		return h.Queries.ListEnabledAgentMcpServers(r.Context(), agent.ID)
+	}(); err != nil {
 		slog.Warn("daemon claim: load agent mcp servers failed; using agent mcp_config",
 			"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
 	} else if len(bound) > 0 {
@@ -2302,7 +2335,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if agent.SystemKey.String == service.MikaSystemKey {
 		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
 	}
-	if useSkillRefs {
+	if controllerInputs != nil {
+		resp.Agent.Skills = controllerSkills(*controllerInputs)
+		agentSkillCount = len(resp.Agent.Skills)
+		builtins := h.TaskService.BuiltinSkills(agent.SystemKey.String, legacySkillRedirects)
+		builtinSkillCount = len(builtins)
+		resp.Agent.Skills = append(resp.Agent.Skills, builtins...)
+	} else if useSkillRefs {
 		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID, agent.SystemKey.String, legacySkillRedirects)
 		if err != nil {
 			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
@@ -3216,6 +3255,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				Description: entry.Description,
 			})
 		}
+	}
+
+	if err := h.applyControllerClaim(r, *task, &resp, controllerInputs); err != nil {
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(r.Context(), task, err.Error(), taskfailure.ReasonInvalidTaskIdentity, "error_controller_authority", http.StatusConflict, err.Error())
 	}
 
 	// Last gate before dispatch: refuse to hand a worktree-mode local_directory

@@ -1232,6 +1232,13 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 }
 
 func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz) (db.AgentTaskQueue, error) {
+	owned, controlErr := s.Queries.ControllerOwnsIssue(ctx, issue.ID)
+	if controlErr != nil {
+		return db.AgentTaskQueue{}, controlErr
+	}
+	if owned {
+		return db.AgentTaskQueue{}, errors.New("issue requires controller launch authority")
+	}
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1395,6 +1402,13 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 }
 
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
+	owned, controlErr := s.Queries.ControllerOwnsIssue(ctx, issue.ID)
+	if controlErr != nil {
+		return db.AgentTaskQueue{}, controlErr
+	}
+	if owned {
+		return db.AgentTaskQueue{}, errors.New("issue requires controller launch authority")
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -4158,6 +4172,9 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 				return ErrTaskExecutionCapacity
 			}
 		}
+		if err := s.checkControllerAdmission(ctx, qtx, current); err != nil {
+			return err
+		}
 		task, err = qtx.StartAgentTask(ctx, taskID)
 		return err
 	})
@@ -4946,6 +4963,15 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		// can never abort this transaction — which also carries the parent's
 		// failed status.
 		createRetry := wantRetry
+		if t.IssueID.Valid {
+			controlled, err := qtx.ControllerOwnsIssue(ctx, t.IssueID)
+			if err != nil {
+				return err
+			}
+			if controlled {
+				createRetry = false
+			}
+		}
 		if createRetry {
 			successor, herr := hasRunnableSuccessor(ctx, qtx, t)
 			if herr != nil {
@@ -5357,6 +5383,15 @@ func hasRunnableSuccessor(ctx context.Context, q *db.Queries, task db.AgentTaskQ
 // Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
 // its own re-run cadence and we don't want to double-fire it.
 func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue) (*db.AgentTaskQueue, error) {
+	if parent.IssueID.Valid {
+		controlled, err := s.Queries.ControllerOwnsIssue(ctx, parent.IssueID)
+		if err != nil {
+			return nil, err
+		}
+		if controlled {
+			return nil, nil
+		}
+	}
 	if parent.Status != "failed" {
 		return nil, nil
 	}
@@ -5947,7 +5982,8 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				// status it inherits, so a custom review gate is excluded for
 				// the same reason In Review is. (MUL-6243)
 				effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
-				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
+				owned, controlErr := s.Queries.ControllerOwnsIssue(ctx, t.IssueID)
+				if controlErr == nil && !owned && effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {
@@ -6517,6 +6553,15 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 // delegated terminal; the production terminal paths deliberately retain their
 // legacy raw-error notice alongside the richer coordinator recovery signal.
 func (s *TaskService) recoverDelegatedTaskFailure(ctx context.Context, failed db.AgentTaskQueue) (handled bool, err error) {
+	if failed.IssueID.Valid {
+		controlled, err := s.Queries.ControllerOwnsIssue(ctx, failed.IssueID)
+		if err != nil {
+			return false, err
+		}
+		if controlled {
+			return true, nil
+		}
+	}
 	target, _, err := s.ensureDelegatedFailureRecoveryComment(ctx, failed.ID)
 	if err != nil || target == nil {
 		return false, err

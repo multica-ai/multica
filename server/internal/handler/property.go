@@ -913,6 +913,9 @@ func (h *Handler) SetIssueProperty(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if h.controllerOwnsProperty(w, r, uuidToString(issue.ID), uuidToString(propertyID)) {
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -1000,6 +1003,9 @@ func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
 
 	issue, ok := h.loadIssueForUser(w, r, issueID)
 	if !ok {
+		return
+	}
+	if h.controllerOwnsProperty(w, r, uuidToString(issue.ID), uuidToString(propertyID)) {
 		return
 	}
 	userID, ok := requireUserID(w, r)

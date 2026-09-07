@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"github.com/multica-ai/multica/server/internal/runcontrol"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -69,6 +70,7 @@ type IssueStatusData struct {
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
+	LaunchAuthority      *runcontrol.Manifest   `json:"launch_authority,omitempty"`
 	OriginalQueuedAt     time.Time              `json:"original_queued_at,omitempty"`
 	Priority             int32                  `json:"priority"`
 	CreatedAt            time.Time              `json:"created_at"`

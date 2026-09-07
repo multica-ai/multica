@@ -92,9 +92,10 @@ func isRuntimeNotFoundError(err error) bool {
 
 // Client handles HTTP communication with the Multica server daemon API.
 type Client struct {
-	baseURL string
-	token   string
-	client  *http.Client
+	controllerDaemonToken string
+	baseURL               string
+	token                 string
+	client                *http.Client
 
 	// bundleClient downloads skill bundles. Unlike client it carries no fixed
 	// Timeout: bundles can be large and slow on jittery links, so the caller
@@ -208,6 +209,7 @@ func daemonCommonCapabilities() []string {
 		protocol.DaemonCapabilityRemoteMCPV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilityRunWorkspaceV1,
+		protocol.DaemonCapabilityControllerV1,
 		protocol.DaemonCapabilitySourceContextQuickCreateV1,
 		protocol.DaemonCapabilityRPCV1,
 		protocol.DaemonCapabilityPlatformSkillV1,
@@ -449,7 +451,7 @@ func (c *Client) StartTask(ctx context.Context, taskID string) error {
 // 400 the daemon swallows and proceeds to wait).
 func (c *Client) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID, reason string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/wait-local-directory", taskID), map[string]any{
-		"reason": reason,
+		"reason":           reason,
 		"release_capacity": true,
 	}, nil)
 }
@@ -708,7 +710,7 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 		return nil, err
 	}
 	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Authorization", "Bearer "+c.requestToken(path))
 	}
 	c.setIdentityHeaders(req)
 	if c.workspaceETag != "" {
@@ -1156,7 +1158,7 @@ func (c *Client) postJSONViaObserved(ctx context.Context, httpClient *http.Clien
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Authorization", "Bearer "+c.requestToken(path))
 	}
 	c.setIdentityHeaders(req)
 
@@ -1179,7 +1181,7 @@ func (c *Client) postJSONViaObserved(ctx context.Context, httpClient *http.Clien
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
-	return c.getJSONWithToken(ctx, path, c.token, respBody)
+	return c.getJSONWithToken(ctx, path, c.requestToken(path), respBody)
 }
 
 // getJSONWithToken performs one GET with an explicit credential. It is used by

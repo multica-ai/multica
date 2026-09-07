@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/runcontrol"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 // snapshot. Empty BaseCommit selects a scratch room. A full commit selects a
 // clean, independent repository; no dirty-tree snapshot or owner ref is written.
 type RunWorkspaceParams struct {
+	Authority  *runcontrol.Manifest
 	SourcePath string
 	BaseCommit string
 	HostID     string
@@ -22,17 +24,18 @@ type RunWorkspaceParams struct {
 }
 
 type RunWorkspaceReceipt struct {
-	RunID        string    `json:"run_id"`
-	IssueID      string    `json:"issue_id"`
-	ProfileID    string    `json:"profile_id"`
-	HostID       string    `json:"host_id"`
-	RuntimeID    string    `json:"runtime_id"`
-	SourcePath   string    `json:"source_path"`
-	BaseCommit   string    `json:"base_commit,omitempty"`
-	WorkDir      string    `json:"work_dir"`
-	Branch       string    `json:"branch,omitempty"`
-	SessionOwner string    `json:"session_owner"`
-	PreparedAt   time.Time `json:"prepared_at"`
+	Authority    *runcontrol.Manifest `json:"launch_authority,omitempty"`
+	RunID        string               `json:"run_id"`
+	IssueID      string               `json:"issue_id"`
+	ProfileID    string               `json:"profile_id"`
+	HostID       string               `json:"host_id"`
+	RuntimeID    string               `json:"runtime_id"`
+	SourcePath   string               `json:"source_path"`
+	BaseCommit   string               `json:"base_commit,omitempty"`
+	WorkDir      string               `json:"work_dir"`
+	Branch       string               `json:"branch,omitempty"`
+	SessionOwner string               `json:"session_owner"`
+	PreparedAt   time.Time            `json:"prepared_at"`
 }
 
 // gitRunWorkspace deliberately ignores user Git hooks, templates and filters.
@@ -87,7 +90,7 @@ func prepareRunWorkspace(params PrepareParams, root, workDir string) error {
 		return fmt.Errorf("run workspace must be empty before allocation")
 	}
 
-	receipt := RunWorkspaceReceipt{RunID: params.TaskID, IssueID: params.Task.IssueID, ProfileID: params.Task.AgentID,
+	receipt := RunWorkspaceReceipt{Authority: p.Authority, RunID: params.TaskID, IssueID: params.Task.IssueID, ProfileID: params.Task.AgentID,
 		HostID: p.HostID, RuntimeID: p.RuntimeID, SourcePath: real, BaseCommit: p.BaseCommit,
 		WorkDir: workDir, SessionOwner: params.TaskID, PreparedAt: time.Now().UTC()}
 	// Write ownership before any Git work. A crashed or partly prepared attempt

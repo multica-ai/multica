@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/runcontrol"
 	"io"
 	"log/slog"
 	"net/http"
@@ -346,6 +347,7 @@ type TaskIssueStatusData struct {
 }
 
 type AgentTaskResponse struct {
+	LaunchAuthority      *runcontrol.Manifest   `json:"launch_authority,omitempty"`
 	OriginalQueuedAt     string                 `json:"original_queued_at,omitempty"`
 	ID                   string                 `json:"id"`
 	AgentID              string                 `json:"agent_id"`
