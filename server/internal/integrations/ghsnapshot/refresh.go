@@ -277,10 +277,13 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		}
 	}
 
-	// Chase decision. Chase only while the snapshot is undecided AND we still
-	// have an open PR row on this head. If nothing applied (head advanced past
-	// this response, or the PR is gone), the webhook that moved the head has
-	// already enqueued the fresh head, so we stop here.
+	// Chase only while the snapshot is undecided AND a write proved that an
+	// open PR row still exists on this head. If the head advanced, its webhook
+	// owns the next refresh; if the row was removed, nothing remains to refresh.
+	// Replica lag can instead make rows empty; that omission is recovered by the
+	// bounded TTL sweep for an open/draft PR or by a later page-view refresh, so
+	// it must not start a chase without having observed current row state. A
+	// logged write failure is likewise left to those later triggers.
 	if anyApplied && anyOpenApplied && !snap.Decided() {
 		m.scheduleChase(addr)
 	} else {
@@ -290,6 +293,11 @@ func (m *Manager) process(ctx context.Context, addr address) {
 	}
 }
 
+// listGitHubPRRowsByAddress is eventual-consistency safe because the returned
+// IDs are only candidates for primary writes. Each write checks the current
+// head SHA on the primary, so replica lag can omit an update but cannot apply a
+// snapshot for an old head. The TTL sweep and page-view trigger recover omitted
+// rows.
 func (m *Manager) listGitHubPRRowsByAddress(ctx context.Context, params db.ListGitHubPRRowsByAddressParams) ([]db.ListGitHubPRRowsByAddressRow, error) {
 	return dbreader.Read(
 		ctx,
