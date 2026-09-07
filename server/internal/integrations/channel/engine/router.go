@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -373,6 +374,11 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	}
 	issueNeedsUsage := parsedCommand != nil && parsedCommand.Title == ""
 	hasMedia := set.Media != nil && set.Media.HasMedia(msg)
+	// Only sender-selected context counts as input for an otherwise bare
+	// control command. Automatic recent history must not create an agent turn.
+	hasSelectedContext := msg.HasSelectedContext && strings.TrimSpace(msg.Text) != ""
+	persistStartedMessage := msg.CommandText != "" || hasSelectedContext || hasMedia
+	bareFresh = bareFresh && !hasSelectedContext && !hasMedia
 	resolveMedia := !issueNeedsUsage && hasMedia
 	localMediaDeadline := time.Now().Add(r.mediaTimeout)
 	if resolveMedia {
@@ -392,9 +398,8 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 
 		if startChat {
 			startedTask = db.AgentTaskQueue{}
-			persistMessage := msg.CommandText != "" || hasMedia
 			var beforeCommit func(context.Context, pgx.Tx, db.ChatSession) error
-			if persistMessage && !msg.SkipAgentRun {
+			if persistStartedMessage && !msg.SkipAgentRun {
 				prepared, prepareErr := r.tasks.PrepareChatTaskEnqueue(ctx, inst.AgentID, identity.UserID)
 				if prepareErr != nil {
 					return Result{}, finalizeRelease, fmt.Errorf("prepare started chat task: %w", prepareErr)
@@ -410,7 +415,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			started, err = set.Session.StartSession(ctx, StartSessionParams{
 				Installation: inst, Creator: sessionCreator, Sender: identity.UserID, Message: msg,
 				ClaimToken: claimToken, MediaPendingSeconds: mediaPendingSeconds,
-				PersistMessage: persistMessage, BeforeCommit: beforeCommit,
+				PersistMessage: persistStartedMessage, BeforeCommit: beforeCommit,
 			})
 			sessionID, appendRes = started.SessionID, started.Append
 		} else {
@@ -448,7 +453,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 				startTaskCommitted = true
 			}
 			r.notifyChatStarted(inst, sessionCreator, msg.Source.ChannelType, started)
-			if msg.CommandText == "" && !hasMedia {
+			if !persistStartedMessage {
 				finalize := finalizeMark
 				if appendRes.DedupMarked {
 					finalize = finalizeNone

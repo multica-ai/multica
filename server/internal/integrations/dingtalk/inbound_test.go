@@ -287,7 +287,7 @@ func TestInboundFromCallback_PartialReplyMetadataRemainsDeterministic(t *testing
 	})
 }
 
-func TestInboundFromCallback_QuotedBotInteractiveCardUsesCardContent(t *testing.T) {
+func TestInboundFromCallback_QuotedBotInteractiveCardIsUnavailable(t *testing.T) {
 	var cb botCallbackData
 	err := json.Unmarshal([]byte(`{
 		"msgId":"current-message",
@@ -317,85 +317,9 @@ func TestInboundFromCallback_QuotedBotInteractiveCardUsesCardContent(t *testing.
 	if !ok {
 		t.Fatal("expected quoted interactive-card message")
 	}
-	want := "> **Multica:**\n>\n> The date is August 27, 2026.\n>\n> The lunar date is the fifteenth day of the seventh month.\n\nPlease verify this information"
+	want := "> **Multica:**\n>\n> [quoted content unavailable]\n\nPlease verify this information"
 	if msg.Text != want || msg.CommandText != "Please verify this information" || msg.Type != channel.MsgTypeText {
 		t.Fatalf("quoted interactive card = %#v, want text %q", msg, want)
-	}
-}
-
-func TestDingTalkCardTextSupportsDirectAndJSONEncodedShapes(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		raw  string
-		want string
-	}{
-		{name: "direct string", raw: `"bot response"`, want: "bot response"},
-		{name: "direct object", raw: `{"title":"ignored","text":"bot response"}`, want: "bot response"},
-		{name: "encoded params", raw: `{"cardData":"{\"cardParamMap\":{\"title\":\"ignored\",\"text\":\"bot response\"}}"}`, want: "bot response"},
-		{
-			name: "rendered node tree",
-			raw: `[
-				{"elementType":"paragraph","children":[
-					{"elementType":"text","value":"{\"content\":[{\"data\":{\"text\":\"previous question\"},\"style\":{},\"type\":\"text\"}]}"},
-					{"elementType":"text","value":"First part "},
-					{"elementType":"text","value":"continues"}
-				]},
-				{"elementType":"paragraph","children":[
-					{"elementType":"text","value":"Second paragraph"}
-				]}
-			]`,
-			want: `{"content":[{"data":{"text":"previous question"},"style":{},"type":"text"}]}` + "First part continues\n\nSecond paragraph",
-		},
-		{
-			name: "rendered structural list",
-			raw: `[
-				{"elementType":"paragraph","children":[
-					{"elementType":"text","value":"Any heading:"}
-				]},
-				{"elementType":"unorderedList","children":[
-					{"elementType":"listItem","children":[{"elementType":"text","value":"Plain text item"}]},
-					{"elementType":"listItem","children":[{"elementType":"text","value":"Another item"}]}
-				]}
-			]`,
-			want: "Any heading:\n\n- Plain text item\n- Another item",
-		},
-		{
-			name: "explicit paragraph boundary",
-			raw: `[{"elementType":"paragraph","children":[
-				{"elementType":"text","value":"Forecast details."},
-				{"elementType":"paragraphSpace"},
-				{"elementType":"text","value":"Remember an umbrella."}
-			]}]`,
-			want: "Forecast details.\n\nRemember an umbrella.",
-		},
-		{
-			name: "link label and destination",
-			raw: `[{"elementType":"unorderedList","children":[
-				{"elementType":"listItem","children":[
-					{"elementType":"link","href":"https://example.com/forecast","children":[
-						{"elementType":"text","value":"Weather forecast"}
-					]}
-				]}
-			]}]`,
-			want: "- [Weather forecast](https://example.com/forecast)",
-		},
-		{
-			name: "nested link value",
-			raw:  `[{"elementType":"link","value":{"text":"Weather service","url":"https://example.com/weather"}}]`,
-			want: "[Weather service](https://example.com/weather)",
-		},
-		{
-			name: "link text with value destination",
-			raw:  `[{"elementType":"link","text":"Forecast center","value":"https://example.com/center"}]`,
-			want: "[Forecast center](https://example.com/center)",
-		},
-		{name: "metadata only", raw: `{"cardTemplateId":"template-id","title":"not body"}`, want: ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := dingTalkCardText(json.RawMessage(tc.raw)); got != tc.want {
-				t.Fatalf("dingTalkCardText() = %q, want %q", got, tc.want)
-			}
-		})
 	}
 }
 
@@ -518,7 +442,7 @@ func TestInboundFromCallback_QuotedRichTextPreservesTextAndImageOrder(t *testing
 	}
 }
 
-func TestInboundFromCallback_QuotedRichTextKeepsTextSummaryOutsideRichTextItems(t *testing.T) {
+func TestInboundFromCallback_QuotedRichTextDoesNotInferSummaryLayout(t *testing.T) {
 	cb := textCallback(convTypeP2P, false)
 	cb.Text.Content = "How many images can you see?"
 	cb.Text.IsReplyMsg = true
@@ -536,7 +460,7 @@ func TestInboundFromCallback_QuotedRichTextKeepsTextSummaryOutsideRichTextItems(
 	if !ok || msg.Type != channel.MsgTypeImage {
 		t.Fatalf("quoted rich-text summary = %+v, ok=%v", msg, ok)
 	}
-	wantQuoted := "> [Image]\n> What do these images suggest together?"
+	wantQuoted := "> [quoted content unavailable]\n>\n> [Image]"
 	if !strings.Contains(msg.Text, wantQuoted) || strings.Count(msg.Text, dingtalkImagePlaceholder) != 1 {
 		t.Fatalf("quoted rich-text summary body = %q, want substring %q", msg.Text, wantQuoted)
 	}
@@ -546,7 +470,7 @@ func TestInboundFromCallback_QuotedRichTextKeepsTextSummaryOutsideRichTextItems(
 	}
 }
 
-func TestInboundFromCallback_QuotedRichTextReadsStructuredTextNodes(t *testing.T) {
+func TestInboundFromCallback_QuotedRichTextDegradesStructuredTextNodes(t *testing.T) {
 	var cb botCallbackData
 	err := json.Unmarshal([]byte(`{
 		"msgId":"current-message",
@@ -582,7 +506,7 @@ func TestInboundFromCallback_QuotedRichTextReadsStructuredTextNodes(t *testing.T
 	if !ok || msg.CommandText != "Current text" || msg.Type != channel.MsgTypeImage {
 		t.Fatalf("structured RichText message = %+v, ok=%v", msg, ok)
 	}
-	want := "> **Alice:**\n>\n> Quoted text\n> [Image]\n\nCurrent text\n[Image]"
+	want := "> **Alice:**\n>\n> [rich-text content unavailable]\n> [Image]\n\nCurrent text\n[Image]"
 	if msg.Text != want {
 		t.Fatalf("structured RichText body = %q, want %q", msg.Text, want)
 	}
@@ -596,7 +520,7 @@ func TestInboundFromCallback_QuotedRichTextReadsStructuredTextNodes(t *testing.T
 	}
 }
 
-func TestInboundFromCallback_QuotedRichTextReadsReplySnapshotNodeNames(t *testing.T) {
+func TestInboundFromCallback_QuotedRichTextDegradesUnknownNodeNames(t *testing.T) {
 	var cb botCallbackData
 	err := json.Unmarshal([]byte(`{
 		"msgId":"current-message",
@@ -633,7 +557,7 @@ func TestInboundFromCallback_QuotedRichTextReadsReplySnapshotNodeNames(t *testin
 	if !ok || msg.CommandText != "Current text" || msg.Type != channel.MsgTypeImage {
 		t.Fatalf("reply snapshot message = %+v, ok=%v", msg, ok)
 	}
-	want := "> **Alice:**\n>\n> Quoted heading\n> [Image]\n> Quoted caption\n\nCurrent text\n[Image]"
+	want := "> **Alice:**\n>\n> [rich-text content unavailable]\n> [Image]\n> [rich-text content unavailable]\n\nCurrent text\n[Image]"
 	if msg.Text != want {
 		t.Fatalf("reply snapshot body = %q, want %q", msg.Text, want)
 	}
@@ -644,44 +568,6 @@ func TestInboundFromCallback_QuotedRichTextReadsReplySnapshotNodeNames(t *testin
 	if raw.Media[0].Ref != "quoted-picture" || raw.Media[0].InlineIndex != 0 ||
 		raw.Media[1].Ref != "current-picture" || raw.Media[1].InlineIndex != 1 {
 		t.Fatalf("reply snapshot media order = %+v", raw.Media)
-	}
-}
-
-func TestBotCallbackRepliedContentReadsRichTextWireShapes(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		raw  string
-		want string
-	}{
-		{
-			name: "object text summary",
-			raw:  `{"text":{"content":"Visible summary"}}`,
-			want: "Visible summary",
-		},
-		{
-			name: "encoded RichText nodes",
-			raw:  `{"richText":"[{\"type\":\"text\",\"content\":{\"value\":\"Visible node\"}}]"}`,
-			want: "Visible node",
-		},
-		{
-			name: "data wrapped RichText node",
-			raw:  `{"richText":[{"type":"text","data":{"text":"Visible data"}}]}`,
-			want: "Visible data",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var content botCallbackRepliedContent
-			if err := json.Unmarshal([]byte(tc.raw), &content); err != nil {
-				t.Fatalf("decode replied content: %v", err)
-			}
-			got := content.Text
-			if got == "" && len(content.RichText) > 0 {
-				got = content.RichText[0].Text
-			}
-			if got != tc.want {
-				t.Fatalf("decoded text = %q, want %q", got, tc.want)
-			}
-		})
 	}
 }
 
@@ -856,7 +742,7 @@ func TestInboundFromCallback_GroupRichTextBotMentionControlWithMedia(t *testing.
 			command: "/clear", content: `{"richText":[
 				{"text":"@YYClaw /clear"},
 				{"type":"picture","downloadCode":"dl-1"}
-			]}`, wantCommandText: "[Image]", wantText: "[Image]", wantFresh: true,
+			]}`, wantCommandText: "/clear", wantText: "[Image]", wantFresh: true,
 		},
 		{
 			command: "/new image after", content: `{"richText":[
@@ -999,7 +885,7 @@ func TestInboundFromCallback_RichTextBareFreshWithMediaPreservesMediaTurn(t *tes
 		{"type":"picture","downloadCode":"dl-1"}
 	]}`)
 	msg, ok := inboundFromCallback(cb, "appkey-A")
-	if !ok || !msg.ForceFresh || msg.CommandText != "[Image]" || msg.Text != "[Image]" {
+	if !ok || !msg.ForceFresh || msg.CommandText != "/clear" || msg.Text != "[Image]" {
 		t.Fatalf("media-bearing bare fresh = %+v, ok=%v", msg, ok)
 	}
 }
@@ -1099,7 +985,11 @@ func TestInboundFromCallback_UnreadableCurrentMediaKeepsQuotedContext(t *testing
 			if !ok || msg.ReplyTo == nil || msg.ReplyTo.MessageID != "quoted-message" {
 				t.Fatalf("unreadable quoted reply = %+v, ok=%v", msg, ok)
 			}
-			if !strings.HasSuffix(msg.Text, "> quoted body\n\n[Image unavailable]") || msg.CommandText != "[Image unavailable]" {
+			fallback := "[Image unavailable]"
+			if tc.kind == "richText" {
+				fallback = "[rich-text content unavailable]"
+			}
+			if !strings.HasSuffix(msg.Text, "> quoted body\n\n"+fallback) || msg.CommandText != fallback {
 				t.Fatalf("unreadable quoted reply text/command = %q / %q", msg.Text, msg.CommandText)
 			}
 			raw, err := decodeDingTalkRaw(msg)

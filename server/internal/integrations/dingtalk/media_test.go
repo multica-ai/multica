@@ -258,8 +258,8 @@ func TestMediaResolver_QuotedAndCurrentIndexesUseCanonicalBody(t *testing.T) {
 			"repliedMsg":{
 				"msgType":"richText", "msgId":"quoted-message", "senderNick":"Alice [Image]",
 				"content":{"richText":[
-					{"msgType":"text","content":"quoted literal [Image]"},
-					{"msgType":"picture","downloadCode":"quoted-picture"}
+					{"text":"quoted literal [Image]"},
+					{"type":"picture","downloadCode":"quoted-picture"}
 				]}
 			}
 		}

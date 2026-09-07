@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf16"
@@ -66,8 +67,9 @@ func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.Inbou
 	}
 	agentText := cleaned
 	quotedHuman := m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && !m.ReplyToMessage.From.IsBot
-	if chatType == channel.ChatTypeGroup && mentioned && quotedHuman {
-		agentText = enrichWithQuotedHumanMessage(cleaned, m.ReplyToMessage)
+	hasSelectedContext := chatType == channel.ChatTypeGroup && mentioned && quotedHuman
+	if hasSelectedContext {
+		agentText = enrichWithQuotedHumanMessage(cleaned, m.Chat.ID, m.ReplyToMessage)
 	}
 
 	senderID := strconv.FormatInt(m.From.ID, 10)
@@ -95,13 +97,14 @@ func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.Inbou
 		EventID: strconv.FormatInt(u.UpdateID, 10),
 		// Telegram message ids are only unique per chat, so the dedup key
 		// (installation, message_id) uses the composite chat:message form.
-		MessageID:      messageKey(m.Chat.ID, m.MessageID),
-		Type:           msgType,
-		Text:           agentText,
-		CommandText:    commandText,
-		ReplyTo:        reply,
-		AddressedToBot: addressed,
-		ForceFresh:     forceFresh,
+		MessageID:          messageKey(m.Chat.ID, m.MessageID),
+		Type:               msgType,
+		Text:               agentText,
+		CommandText:        commandText,
+		HasSelectedContext: hasSelectedContext,
+		ReplyTo:            reply,
+		AddressedToBot:     addressed,
+		ForceFresh:         forceFresh,
 		Source: channel.Source{
 			ChannelType: TypeTelegram,
 			ChatID:      chatID,
@@ -202,7 +205,7 @@ func normalizeText(text, botUsername string) string {
 // explicitly selected by replying and mentioning the bot. Ambient group
 // history never enters the agent context. CommandText remains the sender's own
 // cleaned instruction so commands inside the quoted message stay historical.
-func enrichWithQuotedHumanMessage(instruction string, quoted *Message) string {
+func enrichWithQuotedHumanMessage(instruction string, chatID int64, quoted *Message) string {
 	quotedText := quoted.Text
 	if quotedText == "" {
 		quotedText = quoted.Caption
@@ -216,7 +219,9 @@ func enrichWithQuotedHumanMessage(instruction string, quoted *Message) string {
 			sender = name
 		}
 	}
-	block := channel.FormatQuotedMessage(sender, quotedText)
+	msgType := classifyMessage(quoted)
+	block := fmt.Sprintf("<quoted_message message_id=%q sender=%q type=%q>\n%s\n</quoted_message>",
+		messageKey(chatID, quoted.MessageID), sender, msgType, quotedText)
 	if instruction == "" {
 		return block
 	}

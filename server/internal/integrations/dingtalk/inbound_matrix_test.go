@@ -108,12 +108,12 @@ func dingTalkMatrixHumanQuote(t *testing.T, kind dingTalkMatrixMessageKind) ding
 			mediaRefs: []string{"quoted-picture"},
 		}
 	case matrixRichText:
-		// Reply snapshots use msgType/content, unlike current RichText callbacks,
-		// which use type/text. This is the observed DingTalk wire shape.
+		// Synthetic quote fixture reusing the documented current-message node schema.
+		// The public documentation does not guarantee a reply snapshot schema.
 		wire["content"] = map[string]any{"richText": []any{
-			map[string]any{"msgType": "text", "content": "Quoted rich text before"},
-			map[string]any{"msgType": "picture", "downloadCode": "quoted-rich-picture"},
-			map[string]any{"msgType": "text", "content": "Quoted rich text after"},
+			map[string]any{"text": "Quoted rich text before"},
+			map[string]any{"type": "picture", "downloadCode": "quoted-rich-picture"},
+			map[string]any{"text": "Quoted rich text after"},
 		}}
 		return dingTalkMatrixQuote{
 			wire: wire, messageID: "quoted-human-message", sender: "Alice",
@@ -165,7 +165,7 @@ func dingTalkMatrixBotQuote(t *testing.T, kind dingTalkMatrixMessageKind) dingTa
 		},
 		messageID: "quoted-bot-message",
 		sender:    "Multica",
-		body:      body,
+		body:      "[quoted content unavailable]",
 	}
 }
 

@@ -2,7 +2,6 @@ package dingtalk
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -70,45 +69,41 @@ type botCallbackRepliedMessage struct {
 
 func (m *botCallbackRepliedMessage) UnmarshalJSON(data []byte) error {
 	type wireMessage struct {
-		MsgType    string          `json:"msgType"`
-		MsgId      string          `json:"msgId"`
-		SenderId   string          `json:"senderId"`
-		SenderNick string          `json:"senderNick"`
+		MsgType    json.RawMessage `json:"msgType"`
+		MsgId      json.RawMessage `json:"msgId"`
+		SenderId   json.RawMessage `json:"senderId"`
+		SenderNick json.RawMessage `json:"senderNick"`
 		Content    json.RawMessage `json:"content"`
 	}
+	*m = botCallbackRepliedMessage{}
 	var wire wireMessage
-	if err := json.Unmarshal(data, &wire); err != nil {
-		return err
+	if json.Unmarshal(data, &wire) != nil {
+		// The selected snapshot is optional. An unknown envelope must not
+		// reject the sender's otherwise valid current message.
+		return nil
 	}
-	m.MsgType = wire.MsgType
-	m.MsgId = wire.MsgId
-	m.SenderId = wire.SenderId
-	m.SenderNick = wire.SenderNick
-	m.Content = botCallbackRepliedContent{}
-	// repliedMsg is undocumented and card snapshots may use an unknown content
-	// shape. Keep the callback usable even when it cannot populate the typed
-	// best-effort view.
+	_ = json.Unmarshal(wire.MsgType, &m.MsgType)
+	_ = json.Unmarshal(wire.MsgId, &m.MsgId)
+	_ = json.Unmarshal(wire.SenderId, &m.SenderId)
+	_ = json.Unmarshal(wire.SenderNick, &m.SenderNick)
+	// Each optional field degrades independently. Missing display or routing
+	// metadata must not hide an independently readable selected body.
 	_ = json.Unmarshal(wire.Content, &m.Content)
 	return nil
 }
 
 type botCallbackRepliedContent struct {
-	Text string `json:"text"`
-	// CardContent is not a stable scalar: observed interactiveCard quote
-	// callbacks encode it as either a string or a nested object. Keep the raw
-	// value so one shape mismatch cannot discard the other typed content fields.
-	CardContent         json.RawMessage `json:"cardContent"`
-	RichText            richTextItems   `json:"richText"`
-	DownloadCode        string          `json:"downloadCode"`
-	PictureDownloadCode string          `json:"pictureDownloadCode"`
-	FileName            string          `json:"fileName"`
-	Recognition         string          `json:"recognition"`
+	Text                string        `json:"text"`
+	RichText            richTextItems `json:"richText"`
+	DownloadCode        string        `json:"downloadCode"`
+	PictureDownloadCode string        `json:"pictureDownloadCode"`
+	FileName            string        `json:"fileName"`
+	Recognition         string        `json:"recognition"`
 }
 
 func (content *botCallbackRepliedContent) UnmarshalJSON(data []byte) error {
 	type wireContent struct {
 		Text                json.RawMessage `json:"text"`
-		CardContent         json.RawMessage `json:"cardContent"`
 		RichText            json.RawMessage `json:"richText"`
 		DownloadCode        string          `json:"downloadCode"`
 		PictureDownloadCode string          `json:"pictureDownloadCode"`
@@ -119,10 +114,10 @@ func (content *botCallbackRepliedContent) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
-	content.Text = dingTalkRichTextNodeText(wire.Text)
-	content.CardContent = wire.CardContent
-	// An undocumented richText variant must not hide an independently usable
-	// text summary or download code from the same selected message.
+	content.Text = ""
+	_ = json.Unmarshal(wire.Text, &content.Text)
+	// Decode only the documented ordered-array shape. Unsupported quote
+	// variants remain unavailable; never infer a layout from a sibling summary.
 	content.RichText = nil
 	_ = json.Unmarshal(wire.RichText, &content.RichText)
 	content.DownloadCode = wire.DownloadCode
@@ -142,30 +137,12 @@ type pictureContent struct {
 // richTextContent is the content shape of msgtype=richText: an ORDERED array
 // of heterogeneous items — text runs {"text":…} interleaved with picture items
 // {"type":"picture","downloadCode":…} in send order. Item kinds beyond
-// text/picture are undocumented today and skipped.
+// text/picture are undocumented and receive an unavailable-content marker.
 type richTextContent struct {
 	RichText richTextItems `json:"richText"`
 }
 
 type richTextItems []richTextItem
-
-func (items *richTextItems) UnmarshalJSON(data []byte) error {
-	if len(data) == 0 || string(data) == "null" {
-		*items = nil
-		return nil
-	}
-	var encoded string
-	if json.Unmarshal(data, &encoded) == nil {
-		return json.Unmarshal([]byte(encoded), items)
-	}
-	type plainItems richTextItems
-	var decoded plainItems
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	*items = richTextItems(decoded)
-	return nil
-}
 
 type richTextItem struct {
 	Text                string `json:"text"`
@@ -174,79 +151,37 @@ type richTextItem struct {
 	PictureDownloadCode string `json:"pictureDownloadCode"`
 }
 
+// Only the string text and picture fields documented by DingTalk are read.
+// Unknown nested values are not recursively interpreted as prose or commands.
+// A bad node degrades locally so valid neighboring text and pictures survive.
 func (item *richTextItem) UnmarshalJSON(data []byte) error {
 	type wireItem struct {
 		Text                json.RawMessage `json:"text"`
-		Content             json.RawMessage `json:"content"`
-		Data                json.RawMessage `json:"data"`
 		Type                string          `json:"type"`
-		MsgType             string          `json:"msgType"`
 		DownloadCode        string          `json:"downloadCode"`
 		PictureDownloadCode string          `json:"pictureDownloadCode"`
 	}
+	*item = richTextItem{}
 	var wire wireItem
 	if err := json.Unmarshal(data, &wire); err != nil {
-		return err
+		item.Text = "[rich-text content unavailable]"
+		return nil
+	}
+	if wire.Type != "" && wire.Type != "text" && wire.Type != "picture" {
+		item.Text = "[rich-text content unavailable]"
+		return nil
 	}
 	item.Type = wire.Type
-	if item.Type == "" {
-		item.Type = wire.MsgType
-	}
 	item.DownloadCode = wire.DownloadCode
 	item.PictureDownloadCode = wire.PictureDownloadCode
-	item.Text = dingTalkRichTextNodeText(wire.Text)
-	textBearingNode := item.Type == "" || strings.EqualFold(item.Type, "text")
-	if item.Text == "" && textBearingNode {
-		item.Text = dingTalkRichTextNodeText(wire.Content)
-	}
-	if item.Text == "" && textBearingNode {
-		item.Text = dingTalkRichTextNodeText(wire.Data)
+	if len(wire.Text) > 0 && string(wire.Text) != "null" {
+		if err := json.Unmarshal(wire.Text, &item.Text); err != nil {
+			item.Text = "[rich-text content unavailable]"
+		}
+	} else if item.Type != "picture" && item.DownloadCode == "" && item.PictureDownloadCode == "" {
+		item.Text = "[rich-text content unavailable]"
 	}
 	return nil
-}
-
-// dingTalkRichTextNodeText decodes the text-bearing value of a RichText node.
-// Current-message callbacks commonly use a scalar `text`, while reply
-// snapshots can wrap the same value in a structural `text` or `content`
-// object. Only those explicit text-bearing fields are traversed; unrelated
-// strings in the node cannot leak into the visible message body.
-func dingTalkRichTextNodeText(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
-		return ""
-	}
-	var value any
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
-	decoder.UseNumber()
-	if err := decoder.Decode(&value); err != nil {
-		return ""
-	}
-	return dingTalkRichTextNodeTextValue(value)
-}
-
-func dingTalkRichTextNodeTextValue(value any) string {
-	switch typed := value.(type) {
-	case string:
-		// A scalar text run is user prose, even when it looks like JSON. Only
-		// explicitly structural wire fields (such as richText) decode JSON
-		// strings; interpreting this value could turn a pasted JSON example
-		// into a /new or /clear command.
-		return typed
-	case map[string]any:
-		for _, key := range []string{"text", "content", "value"} {
-			if nested, ok := typed[key]; ok {
-				if text := dingTalkRichTextNodeTextValue(nested); text != "" {
-					return text
-				}
-			}
-		}
-	case []any:
-		var text strings.Builder
-		for _, nested := range typed {
-			text.WriteString(dingTalkRichTextNodeTextValue(nested))
-		}
-		return text.String()
-	}
-	return ""
 }
 
 // refAlt orders a picture item's two download codes into (primary, fallback),
@@ -358,7 +293,7 @@ func inboundFromCallbackWithBotName(data *botCallbackData, appID, botName string
 
 	case "richText":
 		var rc richTextContent
-		if len(data.Content) == 0 || json.Unmarshal(data.Content, &rc) != nil {
+		if len(data.Content) == 0 || json.Unmarshal(data.Content, &rc) != nil || len(rc.RichText) == 0 {
 			// Over-quota / malformed richText: surface it to the engine for
 			// identity-gated feedback rather than a silent adapter drop.
 			return mediaUnreadableMsg(data, msg, rawEvent), true
@@ -373,7 +308,7 @@ func inboundFromCallbackWithBotName(data *botCallbackData, appID, botName string
 			// A single item may in principle carry BOTH a text run and a picture
 			// code; handle each independently (not a switch) so neither is
 			// silently dropped. Text first, then image, matching send order.
-			// Items with neither (undocumented kinds) contribute nothing.
+			// Unsupported nodes carry an explicit placeholder from decoding.
 			if item.Text != "" {
 				text.WriteString(item.Text)
 				commandText.WriteString(item.Text)
@@ -437,7 +372,12 @@ func applyDingTalkReplyContext(data *botCallbackData, msg *channel.InboundMessag
 	// its best-effort platform ID.
 	msg.ReplyTo = &channel.ReplyCtx{MessageID: parentID}
 	if replied == nil {
-		return
+		if !reply.IsReplyMsg {
+			return
+		}
+		// An explicit quote with no snapshot is still selected input; a bare
+		// thread coordinate above does not imply that a quote was selected.
+		replied = &botCallbackRepliedMessage{}
 	}
 
 	// Once Text is enriched, the shared Router can no longer strip a leading
@@ -472,6 +412,7 @@ func applyDingTalkReplyContext(data *botCallbackData, msg *channel.InboundMessag
 	rawEvent.Media = append(rawEvent.Media, currentMedia...)
 
 	msg.Text = block
+	msg.HasSelectedContext = block != ""
 	if visibleInstruction != "" {
 		msg.Text += "\n\n" + visibleInstruction
 	}
@@ -480,11 +421,10 @@ func applyDingTalkReplyContext(data *botCallbackData, msg *channel.InboundMessag
 	}
 }
 
-// dingTalkReplyMetadata normalizes the two callback locations observed for
-// quote metadata. Text callbacks put it under text; rich-text callbacks may
-// instead keep it beside richText under content, notably in direct chats.
-// Prefer text when both are present, and use content only to fill missing
-// fields so one client variant cannot hide the quoted snapshot.
+// dingTalkReplyMetadata reads optional quote metadata under text or content.
+// Neither location is guaranteed by the public receive-message schema. This
+// bounded best-effort projection prefers text and fills missing fields from
+// content; it does not infer the selected body from other callback fields.
 func dingTalkReplyMetadata(data *botCallbackData) botCallbackReplyMetadata {
 	metadata := botCallbackReplyMetadata{
 		IsReplyMsg: data.Text.IsReplyMsg,
@@ -521,6 +461,7 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 	placeholderCount := 0
 	media := make([]dingtalkMediaResource, 0)
 	appendText := func(value string) {
+		value = dingTalkReadableQuotedText(value)
 		body.WriteString(value)
 		placeholderCount += strings.Count(value, dingtalkImagePlaceholder)
 	}
@@ -549,7 +490,9 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 	case "text":
 		appendText(replied.Content.Text)
 	case "interactiveCard":
-		appendText(dingTalkCardText(replied.Content.CardContent))
+		// cardParamMap belongs to a template, not a universal body schema.
+		// https://open.dingtalk.com/document/orgapp/create-and-deliver-cards
+		appendText("[quoted content unavailable]")
 	case "picture", "image":
 		appendPicture(replied.Content.DownloadCode, replied.Content.PictureDownloadCode)
 		appendSummary(replied.Content.Text)
@@ -577,7 +520,7 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 
 	quotedBody := strings.TrimSpace(body.String())
 	if quotedBody == "" {
-		quotedBody = "[empty or unsupported message]"
+		quotedBody = "[quoted content unavailable]"
 	}
 	block := channel.FormatQuotedMessage(sender, quotedBody)
 	// The final Markdown is the media-position authority. Formatting only adds
@@ -602,354 +545,46 @@ func dingTalkRichTextSummary(text string) string {
 	return summary
 }
 
-// renderDingTalkQuotedRichText reconciles the two structural views DingTalk
-// can include in a reply snapshot. richText carries ordered media references
-// but may omit visible text runs; text carries the visual summary and uses
-// [Image] markers but has no download codes. Ordered nodes remain authoritative
-// when they contain prose; otherwise the summary supplies the visible layout,
-// while media references stay bound to markers in their original order.
+// renderDingTalkQuotedRichText reuses only the ordered text/picture schema:
+// https://open.dingtalk.com/document/orgapp/receive-message
+// The public schema does not define repliedMsg or a relationship between a
+// quote's text summary and richText. Never pair summary markers with resources.
 func renderDingTalkQuotedRichText(content botCallbackRepliedContent, placeholderOffset int) (string, []dingtalkMediaResource) {
-	var nodes strings.Builder
-	pictures := make([]dingtalkMediaResource, 0)
-	nodePictureIndexes := make([]int, 0)
-	pictureAvailability := make([]bool, 0)
-	hasNodeProse := false
-	nodeMarkerCount := 0
+	var body strings.Builder
+	var media []dingtalkMediaResource
+	if len(content.RichText) == 0 {
+		return "[quoted content unavailable]", nil
+	}
+	hasText := false
 	for _, item := range content.RichText {
-		if item.Text != "" {
-			nodes.WriteString(item.Text)
-			hasNodeProse = hasNodeProse || dingTalkRichTextComparableText(item.Text) != ""
-			nodeMarkerCount += strings.Count(item.Text, dingtalkImagePlaceholder)
-		}
+		hasText = hasText || strings.TrimSpace(item.Text) != ""
+	}
+	if !hasText && strings.TrimSpace(content.Text) != "" {
+		// A media-only snapshot may have omitted prose. Signal that loss
+		// without guessing where the preview belongs among its pictures.
+		body.WriteString("[quoted content unavailable]\n")
+	}
+	markerCount := placeholderOffset
+	for _, item := range content.RichText {
+		text := dingTalkReadableQuotedText(item.Text)
+		body.WriteString(text)
+		markerCount += strings.Count(text, dingtalkImagePlaceholder)
 		if item.Type != "picture" && item.DownloadCode == "" && item.PictureDownloadCode == "" {
 			continue
 		}
 		ref, alt := refAlt(item.DownloadCode, item.PictureDownloadCode)
-		pictureAvailability = append(pictureAvailability, ref != "")
 		if ref == "" {
-			if nodes.Len() > 0 {
-				nodes.WriteByte('\n')
+			if body.Len() > 0 && !strings.HasSuffix(body.String(), "\n") {
+				body.WriteByte('\n')
 			}
-			nodes.WriteString("[Image unavailable]")
-			continue
-		}
-		appendImagePlaceholder(&nodes)
-		pictures = append(pictures, dingtalkMediaResource{Ref: ref, Alt: alt})
-		nodePictureIndexes = append(nodePictureIndexes, nodeMarkerCount)
-		nodeMarkerCount++
-	}
-
-	nodeLayout := strings.TrimSpace(nodes.String())
-	summaryLayout := strings.TrimSpace(content.Text)
-	// A generated unavailable marker is a degradation signal, not text from
-	// the selected author. A separate readable summary must survive it.
-	if !hasNodeProse && summaryLayout != "" && len(pictureAvailability) > len(pictures) {
-		return renderDingTalkQuotedSummaryMedia(summaryLayout, pictureAvailability, pictures, placeholderOffset)
-	}
-	layout, usesNodePositions := selectDingTalkRichTextLayout(nodeLayout, summaryLayout)
-	if layout == "" {
-		layout = nodeLayout
-		usesNodePositions = true
-	}
-
-	markerCount := strings.Count(layout, dingtalkImagePlaceholder)
-	if markerCount < len(pictures) {
-		var completed strings.Builder
-		completed.WriteString(layout)
-		for range len(pictures) - markerCount {
-			appendImagePlaceholder(&completed)
-		}
-		layout = strings.TrimSpace(completed.String())
-	}
-	for i := range pictures {
-		index := i
-		if usesNodePositions && i < len(nodePictureIndexes) {
-			index = nodePictureIndexes[i]
-		} else if i >= markerCount {
-			index = markerCount + (i - markerCount)
-		}
-		pictures[i].InlineIndex = placeholderOffset + index
-	}
-	return layout, pictures
-}
-
-// renderDingTalkQuotedSummaryMedia pairs summary image markers with the ordered
-// picture slots, including unavailable slots that carry no downloadable ref.
-func renderDingTalkQuotedSummaryMedia(summary string, available []bool, pictures []dingtalkMediaResource, placeholderOffset int) (string, []dingtalkMediaResource) {
-	for missing := len(available) - strings.Count(summary, dingtalkImagePlaceholder); missing > 0; missing-- {
-		summary += "\n" + dingtalkImagePlaceholder
-	}
-	parts := strings.Split(summary, dingtalkImagePlaceholder)
-	var body strings.Builder
-	pictureIndex, markerIndex := 0, 0
-	for i, part := range parts {
-		body.WriteString(part)
-		if i == len(parts)-1 {
-			break
-		}
-		if i < len(available) && !available[i] {
 			body.WriteString("[Image unavailable]")
 			continue
 		}
-		body.WriteString(dingtalkImagePlaceholder)
-		if i < len(available) {
-			pictures[pictureIndex].InlineIndex = placeholderOffset + markerIndex
-			pictureIndex++
-		}
-		markerIndex++
+		appendImagePlaceholder(&body)
+		media = append(media, dingtalkMediaResourceAt(ref, alt, markerCount))
+		markerCount++
 	}
-	return body.String(), pictures
-}
-
-func selectDingTalkRichTextLayout(nodes, summary string) (layout string, usesNodePositions bool) {
-	// Ordered richText nodes are the lossless source when they contain visible
-	// prose. The sibling summary is a fallback for the observed media-only quote
-	// snapshot; it may otherwise be an opaque provider preview, so never mix the
-	// two textual representations or guess which fragments overlap.
-	if dingTalkRichTextComparableText(nodes) != "" {
-		return nodes, true
-	}
-	if summary != "" {
-		return summary, false
-	}
-	return nodes, true
-}
-
-func dingTalkRichTextComparableText(value string) string {
-	withoutImages := strings.ReplaceAll(value, dingtalkImagePlaceholder, " ")
-	return strings.Join(strings.Fields(withoutImages), " ")
-}
-
-// dingTalkCardText extracts only body-like fields from the undocumented
-// interactiveCard quote snapshot. DingTalk may represent a robot Markdown
-// message with title/text inside cardData/cardParamMap and may JSON-encode an
-// intermediate object as a string. Template IDs and unrelated card metadata
-// are deliberately ignored.
-func dingTalkCardText(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
-		return ""
-	}
-	var value any
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
-	decoder.UseNumber()
-	if err := decoder.Decode(&value); err != nil {
-		return ""
-	}
-	return dingTalkCardTextValue(value)
-}
-
-func dingTalkCardTextValue(value any) string {
-	switch typed := value.(type) {
-	case string:
-		text := strings.TrimSpace(typed)
-		if text == "" {
-			return ""
-		}
-		if (strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[")) && json.Valid([]byte(text)) {
-			var nested any
-			decoder := json.NewDecoder(strings.NewReader(text))
-			decoder.UseNumber()
-			if decoder.Decode(&nested) == nil {
-				if extracted := dingTalkCardTextValue(nested); extracted != "" {
-					return extracted
-				}
-			}
-		}
-		return text
-	case map[string]any:
-		if _, isNode := typed["elementType"]; isNode {
-			return dingTalkCardNodeMarkdown(typed).markdown
-		}
-		for _, key := range []string{"text", "content", "markdown"} {
-			if candidate, ok := typed[key]; ok {
-				if extracted := dingTalkCardBodyText(candidate); extracted != "" {
-					return extracted
-				}
-			}
-		}
-		if leaf, ok := typed["value"]; ok {
-			if text, ok := leaf.(string); ok {
-				// Preserve whitespace between adjacent inline runs. The enclosing
-				// node trims only the completed rendered block.
-				return text
-			}
-			if extracted := dingTalkCardTextValue(leaf); extracted != "" {
-				return extracted
-			}
-		}
-		if children, ok := typed["children"]; ok {
-			return dingTalkCardNodeSequence(children, false)
-		}
-		for _, key := range []string{"cardData", "cardParamMap", "data", "params"} {
-			if candidate, ok := typed[key]; ok {
-				if extracted := dingTalkCardTextValue(candidate); extracted != "" {
-					return extracted
-				}
-			}
-		}
-	case []any:
-		return dingTalkCardNodeSequence(typed, true)
-	}
-	return ""
-}
-
-// dingTalkCardBodyText preserves a known body string as user-visible prose.
-// Only structural wrapper fields may contain another encoded card envelope.
-func dingTalkCardBodyText(value any) string {
-	if body, ok := value.(string); ok {
-		return strings.TrimSpace(body)
-	}
-	return dingTalkCardTextValue(value)
-}
-
-type dingTalkCardNodeRender struct {
-	markdown string
-	block    bool
-	breaks   bool
-}
-
-func dingTalkCardNodeMarkdown(node map[string]any) dingTalkCardNodeRender {
-	elementType, _ := node["elementType"].(string)
-	kind := strings.ToLower(strings.NewReplacer("-", "", "_", "", " ", "").Replace(elementType))
-	switch kind {
-	case "paragraphspace", "paragraphbreak", "linebreak", "hardbreak", "newline", "br":
-		return dingTalkCardNodeRender{breaks: true}
-	case "link", "hyperlink", "a":
-		return dingTalkCardLinkMarkdown(node)
-	case "unorderedlist", "bulletlist", "ul":
-		return dingTalkCardListMarkdown(node["children"], false)
-	case "orderedlist", "numberedlist", "ol":
-		return dingTalkCardListMarkdown(node["children"], true)
-	case "listitem", "bulletitem", "li":
-		return dingTalkCardNodeRender{
-			markdown: dingTalkCardNodeSequence(node["children"], false),
-			block:    true,
-		}
-	}
-
-	if children, ok := node["children"]; ok {
-		block := kind == "paragraph" || kind == "heading" || kind == "blockquote" || kind == "quote" || kind == "div"
-		return dingTalkCardNodeRender{
-			markdown: dingTalkCardNodeSequence(children, false),
-			block:    block,
-		}
-	}
-	if leaf, ok := node["value"]; ok {
-		if text, ok := leaf.(string); ok {
-			return dingTalkCardNodeRender{markdown: text}
-		}
-		return dingTalkCardNodeRender{markdown: dingTalkCardTextValue(leaf)}
-	}
-	for _, key := range []string{"text", "content", "markdown"} {
-		if candidate, ok := node[key]; ok {
-			return dingTalkCardNodeRender{markdown: dingTalkCardBodyText(candidate)}
-		}
-	}
-	return dingTalkCardNodeRender{}
-}
-
-func dingTalkCardNodeSequence(value any, siblingBlocks bool) string {
-	nodes, ok := value.([]any)
-	if !ok {
-		return strings.TrimSpace(dingTalkCardTextValue(value))
-	}
-	var rendered strings.Builder
-	pendingBreak := false
-	for _, value := range nodes {
-		var fragment dingTalkCardNodeRender
-		if node, ok := value.(map[string]any); ok {
-			fragment = dingTalkCardNodeMarkdown(node)
-		} else {
-			fragment.markdown = dingTalkCardTextValue(value)
-		}
-		if fragment.breaks {
-			if rendered.Len() > 0 {
-				pendingBreak = true
-			}
-			continue
-		}
-		text := fragment.markdown
-		if strings.TrimSpace(text) == "" {
-			// A separate inline text run can carry the space between words or
-			// links. Empty blocks and whitespace after a break stay invisible.
-			if !siblingBlocks && !fragment.block && !pendingBreak {
-				rendered.WriteString(text)
-			}
-			continue
-		}
-		if rendered.Len() > 0 && (pendingBreak || fragment.block || siblingBlocks) {
-			rendered.WriteString("\n\n")
-		}
-		rendered.WriteString(text)
-		pendingBreak = false
-	}
-	return strings.TrimSpace(rendered.String())
-}
-
-func dingTalkCardListMarkdown(value any, ordered bool) dingTalkCardNodeRender {
-	items, ok := value.([]any)
-	if !ok {
-		return dingTalkCardNodeRender{}
-	}
-	lines := make([]string, 0, len(items))
-	for i, value := range items {
-		item := ""
-		if node, ok := value.(map[string]any); ok {
-			item = dingTalkCardNodeMarkdown(node).markdown
-		} else {
-			item = dingTalkCardTextValue(value)
-		}
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		prefix := "- "
-		if ordered {
-			prefix = fmt.Sprintf("%d. ", i+1)
-		}
-		lines = append(lines, prefix+strings.ReplaceAll(item, "\n", "\n  "))
-	}
-	return dingTalkCardNodeRender{markdown: strings.Join(lines, "\n"), block: true}
-}
-
-func dingTalkCardLinkMarkdown(node map[string]any) dingTalkCardNodeRender {
-	label := dingTalkCardNodeSequence(node["children"], false)
-	if label == "" {
-		label = firstDingTalkCardString(node, "label", "text", "title", "name")
-	}
-	href := firstDingTalkCardString(node, "href", "url", "targetUrl", "targetURL", "link")
-	if nested, ok := node["value"].(map[string]any); ok {
-		if label == "" {
-			label = firstDingTalkCardString(nested, "label", "text", "title", "name")
-		}
-		if href == "" {
-			href = firstDingTalkCardString(nested, "href", "url", "targetUrl", "targetURL", "link")
-		}
-	} else if value, ok := node["value"].(string); ok {
-		if href == "" {
-			href = value
-		} else if label == "" {
-			label = value
-		}
-	}
-	if href == "" {
-		return dingTalkCardNodeRender{markdown: label}
-	}
-	if label == "" {
-		label = href
-	}
-	label = strings.NewReplacer(`\`, `\\`, "[", `\[`, "]", `\]`).Replace(label)
-	href = strings.ReplaceAll(href, ")", `%29`)
-	return dingTalkCardNodeRender{markdown: "[" + label + "](" + href + ")"}
-}
-
-func firstDingTalkCardString(values map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
+	return strings.TrimSpace(body.String()), media
 }
 
 // normalizeDingTalkRichTextControlLayout strips either session-control
@@ -993,11 +628,37 @@ func normalizeDingTalkRichTextControlLayout(msg *channel.InboundMessage, items [
 		}
 	}
 	msg.Text = strings.TrimSpace(visible.String())
-	if control.Kind == engine.ControlCommandFreshSession && control.Body == "" {
-		// A media-bearing `/clear` is a real turn, not the shared bare-command
-		// sentinel. ForceFresh carries the already-consumed directive.
-		msg.CommandText = msg.Text
+}
+
+// dingTalkReadableQuotedText recognizes the opaque reply envelope observed in
+// https://github.com/open-dingtalk/dingtalk-stream-sdk-go/issues/22. Its body is
+// Base64-like text followed by three numeric fields separated by ||. Even the
+// published sample is not valid padded Base64, so decoding is not a reliable
+// detector and would not recover the author's words.
+// Ordinary multiline text, Base64 without the trailer and literal JSON remain
+// untouched. This check applies only to selected snapshots, not current input.
+func dingTalkReadableQuotedText(value string) string {
+	parts := strings.Split(strings.TrimSpace(value), "||")
+	if len(parts) != 4 {
+		return value
 	}
+	for _, part := range parts[1:] {
+		if part == "" || strings.IndexFunc(part, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+			return value
+		}
+	}
+	body := strings.TrimSpace(parts[0])
+	// Bound this heuristic to long encoded bodies, excluding short pipe-delimited prose.
+	if len(body) < 64 {
+		return value
+	}
+	if strings.IndexFunc(body, func(r rune) bool {
+		return !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' ||
+			r == '+' || r == '/' || r == '=' || r == '\r' || r == '\n')
+	}) >= 0 {
+		return value
+	}
+	return "[quoted content unavailable]"
 }
 
 // normalizeDingTalkRichTextBotMention removes the bot-addressing envelope from
@@ -1109,6 +770,10 @@ func withDingTalkRaw(msg channel.InboundMessage, rawEvent dingtalkRawEvent) chan
 func mediaUnreadableMsg(data *botCallbackData, msg channel.InboundMessage, rawEvent dingtalkRawEvent) channel.InboundMessage {
 	msg.Type = channel.MsgTypeImage
 	msg.Text = "[Image unavailable]"
+	if data.Msgtype == "richText" {
+		msg.Type = channel.MsgTypeText
+		msg.Text = "[rich-text content unavailable]"
+	}
 	msg.CommandText = msg.Text
 	applyDingTalkReplyContext(data, &msg, &rawEvent)
 	return withDingTalkRaw(msg, rawEvent)

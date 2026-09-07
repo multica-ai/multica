@@ -2,7 +2,6 @@ package lark
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -110,11 +109,10 @@ func (f *enricherFakeClient) DeleteMessageReaction(context.Context, DeleteReacti
 }
 
 func textMsg(id, sender, text, createTime string) LarkMessage {
-	content, _ := json.Marshal(map[string]string{"text": text})
 	return LarkMessage{
 		MessageID:   id,
 		MessageType: "text",
-		Content:     string(content),
+		Content:     `{"text":"` + text + `"}`,
 		SenderID:    sender,
 		SenderType:  "user",
 		CreateTime:  createTime,
@@ -129,7 +127,7 @@ func enrich(t *testing.T, fake *enricherFakeClient, msg InboundMessage, cfg Inbo
 
 // TestEnrichQuotedReply covers the MUL-2951 quoted-reply example: a text
 // reply to a prior text message gets the parent inlined as a
-// Markdown quote ahead of the user's own prose.
+// <quoted_message> block ahead of the user's own prose.
 func TestEnrichQuotedReply(t *testing.T) {
 	t.Parallel()
 	fake := newEnricherFake()
@@ -140,9 +138,9 @@ func TestEnrichQuotedReply(t *testing.T) {
 
 	out := enrich(t, fake, in, InboundEnricherConfig{})
 
-	want := `> **User 1:**
->
-> 做一个删除 issue 的按钮吧
+	want := `<quoted_message message_id="om_parent" sender="User 1" type="text">
+做一个删除 issue 的按钮吧
+</quoted_message>
 
 去实现`
 	if out.Body != want {
@@ -153,6 +151,10 @@ func TestEnrichQuotedReply(t *testing.T) {
 	}
 }
 
+// TestEnrichMergeForward covers the merge_forward example: the forwarded
+// transcript is fetched via GetMessage(forward_id) — whose items[] are
+// [sentinel, child…] — and inlined as a <forwarded_messages> block with
+// per-speaker labels. The four original lines must all be present.
 func TestEnrichMergeForward(t *testing.T) {
 	t.Parallel()
 	fake := newEnricherFake()
@@ -219,7 +221,7 @@ func TestEnrichFreshSessionPreservesQuotedContext(t *testing.T) {
 	if !out.ForceFreshSession {
 		t.Fatalf("ForceFreshSession should be true for /clear")
 	}
-	if !strings.Contains(out.Body, "> **User 1:**\n>\n> old context") {
+	if !strings.Contains(out.Body, `<quoted_message message_id="om_parent"`) {
 		t.Fatalf("quoted context should be preserved; body=%q", out.Body)
 	}
 	if !strings.HasSuffix(out.Body, "handle this independently") {
@@ -342,10 +344,10 @@ func TestEnrichQuotedMergeForwardNests(t *testing.T) {
 	in := InboundMessage{MessageType: "text", MessageID: "om_child", Body: "see above", ParentID: "om_fwd"}
 	out := enrich(t, fake, in, InboundEnricherConfig{})
 
-	if !strings.HasPrefix(out.Body, "> **User 1:**\n>\n") {
+	if !strings.Contains(out.Body, `<quoted_message message_id="om_fwd" sender="User 1" type="merge_forward">`) {
 		t.Errorf("missing quoted wrapper for merge_forward parent: %q", out.Body)
 	}
-	if !strings.Contains(out.Body, "> <forwarded_messages count=\"2\">") {
+	if !strings.Contains(out.Body, "<forwarded_messages count=\"2\">") {
 		t.Errorf("forwarded block should nest inside quoted: %q", out.Body)
 	}
 	if !strings.Contains(out.Body, "line A") || !strings.Contains(out.Body, "line B") {
@@ -386,7 +388,7 @@ func TestEnrichQuotedFetchFailureDegrades(t *testing.T) {
 	in := InboundMessage{MessageType: "text", MessageID: "om_child", Body: "ping", ParentID: "om_gone"}
 	out := enrich(t, fake, in, InboundEnricherConfig{})
 
-	want := `> [unable to fetch]
+	want := `<quoted_message message_id="om_gone" type="error">[unable to fetch]</quoted_message>
 
 ping`
 	if out.Body != want {
@@ -399,20 +401,8 @@ func TestEnrichQuotedDeletedParentDegrades(t *testing.T) {
 	fake := newEnricherFake()
 	fake.byID["om_del"] = []LarkMessage{{MessageID: "om_del", MessageType: "text", Deleted: true, SenderID: "ou_a", SenderType: "user"}}
 	out := enrich(t, fake, InboundMessage{MessageType: "text", Body: "x", ParentID: "om_del"}, InboundEnricherConfig{})
-	if !strings.Contains(out.Body, "> [unable to fetch]") {
+	if !strings.Contains(out.Body, `type="error"`) {
 		t.Errorf("deleted parent should degrade to error block: %q", out.Body)
-	}
-}
-
-func TestEnrichQuotedEmptyBodyKeepsCurrentInstruction(t *testing.T) {
-	t.Parallel()
-	fake := newEnricherFake()
-	fake.byID["om_empty"] = []LarkMessage{textMsg("om_empty", "ou_a", "", "1000")}
-	out := enrich(t, fake, InboundMessage{
-		MessageType: "text", Body: "explain", CommandBody: "explain", ParentID: "om_empty",
-	}, InboundEnricherConfig{})
-	if out.Body != "> **User 1:**\n>\n> [empty message]\n\nexplain" || out.CommandBody != "explain" {
-		t.Fatalf("empty quoted body/current command = %q / %q", out.Body, out.CommandBody)
 	}
 }
 
@@ -459,7 +449,7 @@ func TestEnrichSkipsWhenClientUnconfigured(t *testing.T) {
 
 // TestEnrichPreservesCommandBodyForIssueParsing is the regression guard
 // for the quote-reply + /issue interaction: enrichment prepends a
-// Markdown quote (so the enriched Body no longer parses as a
+// <quoted_message> block (so the enriched Body no longer parses as a
 // command), but CommandBody is left untouched and still parses, so
 // `/issue` keeps working when typed as a quote-reply.
 func TestEnrichPreservesCommandBodyForIssueParsing(t *testing.T) {
@@ -510,5 +500,45 @@ func TestEnrichResolvesMentionsInChildren(t *testing.T) {
 	out := enrich(t, fake, InboundMessage{MessageType: "merge_forward", MessageID: "om_f"}, InboundEnricherConfig{})
 	if !strings.Contains(out.Body, "@Alice 看一下") {
 		t.Errorf("child mention not resolved: %q", out.Body)
+	}
+}
+
+func TestEnrichSelectedContextSurvivesBareControl(t *testing.T) {
+	for _, command := range []string{"/new", "/clear"} {
+		for _, unavailable := range []bool{false, true} {
+			t.Run(command+map[bool]string{false: "/quote", true: "/unavailable"}[unavailable], func(t *testing.T) {
+				fake := newEnricherFake()
+				fake.byID["parent"] = []LarkMessage{textMsg("parent", "author", "selected text", "1000")}
+				if unavailable {
+					fake.errByID["parent"] = errors.New("unavailable")
+				}
+				out := enrich(t, fake, InboundMessage{MessageType: "text", Body: command, CommandBody: command, ParentID: "parent"}, InboundEnricherConfig{})
+				normalized := channelMessageFromLark(out)
+				if !normalized.HasSelectedContext || normalized.CommandText != command || !strings.Contains(normalized.Text, "<quoted_message ") || strings.Contains(normalized.Text, command) || normalized.ForceFresh != (command == "/clear") {
+					t.Fatalf("selected Lark control = %+v", normalized)
+				}
+			})
+		}
+	}
+	fake := newEnricherFake()
+	fake.byChat["group"] = []LarkMessage{textMsg("recent", "author", "recent only", "1000")}
+	out := enrich(t, fake, InboundMessage{MessageType: "text", ChatType: ChatTypeGroup, ChatID: "group", AddressedToBot: true, Body: "/clear", CommandBody: "/clear"}, InboundEnricherConfig{RecentContextSize: 5})
+	if out.HasSelectedContext {
+		t.Fatal("automatic recent history must not count as sender-selected input")
+	}
+}
+
+func TestEnrichForwardMarksSelectedContext(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		fake := newEnricherFake()
+		fake.byID["forward"] = []LarkMessage{{MessageID: "forward", MessageType: "merge_forward"}, textMsg("child", "sender", "selected forward", "1000")}
+		if failed {
+			fake.errByID["forward"] = errors.New("unavailable")
+		}
+		out := enrich(t, fake, InboundMessage{MessageID: "forward", MessageType: "merge_forward"}, InboundEnricherConfig{})
+		normalized := channelMessageFromLark(out)
+		if !normalized.HasSelectedContext || !strings.Contains(normalized.Text, "<forwarded_messages") {
+			t.Fatalf("forward selection or original format lost: %+v", normalized)
+		}
 	}
 }

@@ -11,8 +11,8 @@ func TestInboundSelectedMessageRegression(t *testing.T) {
 	for _, tt := range []struct{ name, kind, content, want string }{
 		{"text", "text", `{"text":"selected text"}`, "selected text"},
 		{"picture", "picture", `{"downloadCode":"selected-image"}`, "[Image]"},
-		{"rich-text", "richText", `{"richText":[{"text":{"content":"selected rich text"}}]}`, "selected rich text"},
-		{"card", "interactiveCard", `{"cardContent":{"cardData":{"text":"selected bot answer"}}}`, "selected bot answer"},
+		{"rich-text", "richText", `{"richText":[{"text":"selected rich text"}]}`, "selected rich text"},
+		{"card", "interactiveCard", `{"cardContent":{"cardData":{"text":"selected bot answer"}}}`, "[quoted content unavailable]"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			wire := `{"msgId":"current","conversationType":"1","conversationId":"chat","senderStaffId":"sender","msgtype":"text","text":{"content":"explain","isReplyMsg":true,"repliedMsg":{"msgId":"selected","senderNick":"Alice","msgType":"` + tt.kind + `","content":` + tt.content + `}}}`
@@ -34,12 +34,12 @@ func TestInboundStructuredCurrentRichTextRegression(t *testing.T) {
 		t.Fatal(err)
 	}
 	msg, ok := inboundFromCallback(&cb, "app")
-	if !ok || msg.Text != "show details" || msg.CommandText != "show details" {
+	if !ok || msg.Text != "[rich-text content unavailable]" || msg.CommandText != "[rich-text content unavailable]" {
 		t.Fatalf("structured visible text was lost: ok=%v text=%q command=%q", ok, msg.Text, msg.CommandText)
 	}
 }
 
-func TestInboundQuotedCardPreservesLiteralJSONRegression(t *testing.T) {
+func TestInboundQuotedCardDoesNotInterpretNestedValues(t *testing.T) {
 	for _, literal := range []string{`{"content":[{"type":"text"}]}`, `{"text":"literal nested value"}`, `{"content":"/clear historical instruction"}`} {
 		for _, location := range []string{"text", "node-value"} {
 			t.Run(location+"/"+literal, func(t *testing.T) {
@@ -61,7 +61,7 @@ func TestInboundQuotedCardPreservesLiteralJSONRegression(t *testing.T) {
 					t.Fatal(err)
 				}
 				msg, ok := inboundFromCallback(&cb, "app")
-				want := "> **Alice:**\n>\n> " + literal + "\n\nexplain"
+				want := "> **Alice:**\n>\n> [quoted content unavailable]\n\nexplain"
 				if !ok || msg.Text != want || msg.CommandText != "explain" || msg.ForceFresh {
 					t.Fatalf("card literal text lost: got=%q want=%q command=%q fresh=%v", msg.Text, want, msg.CommandText, msg.ForceFresh)
 				}
@@ -70,14 +70,14 @@ func TestInboundQuotedCardPreservesLiteralJSONRegression(t *testing.T) {
 	}
 }
 
-func TestInboundQuotedRichTextUnavailableImageKeepsSummaryRegression(t *testing.T) {
+func TestInboundQuotedRichTextUnavailableImageDoesNotInferSummaryRegression(t *testing.T) {
 	for _, tt := range []struct {
 		name, summary, want string
 		withAvailable       bool
 	}{
-		{name: "unavailable only", summary: "caption", want: "caption\n[Image unavailable]"},
-		{name: "unavailable then available without summary markers", summary: "caption", want: "caption\n[Image unavailable]\n[Image]", withAvailable: true},
-		{name: "unavailable then available with summary markers", summary: "caption\n[Image]\n[Image]", want: "caption\n[Image unavailable]\n[Image]", withAvailable: true},
+		{name: "unavailable only", summary: "caption", want: "[quoted content unavailable]\n[Image unavailable]"},
+		{name: "unavailable then available without summary markers", summary: "caption", want: "[quoted content unavailable]\n[Image unavailable]\n[Image]", withAvailable: true},
+		{name: "unavailable then available with summary markers", summary: "caption\n[Image]\n[Image]", want: "[quoted content unavailable]\n[Image unavailable]\n[Image]", withAvailable: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			nodes := []any{map[string]any{"type": "picture"}}
