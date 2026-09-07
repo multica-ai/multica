@@ -106,6 +106,27 @@ describe("resetAnalytics", () => {
   });
 });
 
+describe("captureSignupSource", () => {
+  it("replaces a malformed existing attribution cookie instead of throwing", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        origin: "https://multica.test",
+        search: "?utm_source=github",
+      },
+    });
+    vi.stubGlobal("document", {
+      cookie: "multica_signup_source=%E0%A4%A",
+      referrer: "",
+    });
+    const { analytics } = await loadModule();
+
+    expect(() => analytics.captureSignupSource()).not.toThrow();
+    expect(document.cookie).toContain(
+      "multica_signup_source=%7B%22utm_source%22%3A%22github%22%7D",
+    );
+  });
+});
+
 describe("captureException", () => {
   it("buffers a pre-init exception and flushes it on init", async () => {
     const { analytics, posthog } = await loadModule();
