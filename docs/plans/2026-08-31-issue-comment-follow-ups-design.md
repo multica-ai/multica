@@ -93,6 +93,20 @@ agent comment in its thread. A newer human reply makes older suggestions stale.
 The activation endpoint verifies freshness again, so stale clients cannot run an
 outdated suggestion.
 
+Activation serializes clicks per anchor using the existing transaction-scoped
+advisory lock, then locks the parent issue before the source comment. This
+matches ordinary comment creation, editing, and issue teardown; holding a
+comment lock before touching its issue would deadlock against those paths.
+Freshness and the stored action are rechecked while these locks are held.
+Dispatch still happens through the normal trigger path after commit; this is
+not a new exactly-once delivery or workflow engine.
+
+The `comment:follow_ups_updated` enrichment event invalidates the matching
+timeline query. It does not patch action IDs into the cache: the event has no
+source revision and can arrive after an edit has cleared the suggestions.
+One refetch per enrichment event is the deliberate tradeoff for reusing the
+authoritative snapshot without adding another cross-client version protocol.
+
 ## Activation Flow
 
 ```text
@@ -140,11 +154,72 @@ unchanged, matching the current platform boundary for Issue Quick Actions.
 
 ## Verification
 
-Backend tests cover eligibility, parsing and sanitization, persistence, stale
-activation, target derivation, permission refusal, mention fanout prevention,
-queued/coalesced/deferred outcomes, and realtime supplementation.
+Automated coverage is split by layer; passing a lower layer is not evidence of
+an end-to-end runtime execution:
 
-Frontend tests cover primary styling, prompt tooltip, pending state, activation,
-stale hiding, and honest outcome feedback. Typecheck, lint, focused suites, Go
-tests, SQL generation checks, and the repository verification pipeline run before
-submission.
+- Service sanitizer tests cover bounded, safe actions and primary selection.
+- Database-backed tests in `issue_comment_follow_up_test.go` cover generation
+  persistence and event publication, disabled/ineligible inputs, provider failure,
+  malformed output, and an edit during generation. The provider is an in-process
+  fake and never contacts an external model.
+- Handler tests cover concurrent clicks plus subsequent retries (one reply and
+  one enqueued task), edit/delete/reply while activation waits for the issue
+  lock, stale/missing/unsafe sources, private-agent refusal, machine-actor
+  middleware refusal, and routing through source agent or squad lineage.
+- The shared comment-mutation lock-order test includes follow-up activation
+  versus issue teardown.
+- UI tests cover action-ID submission, inactive-tail hiding, pending disablement,
+  queued/coalesced/deferred/blocked/unknown feedback, and stale-action errors.
+  Timeline hook tests cover revisionless enrichment refetch and issue scoping.
+
+- The opt-in Playwright test `e2e/issue-comment-follow-ups.spec.ts` exercises a
+  real browser, API, PostgreSQL and WebSocket connection. It authenticates a
+  synthetic member, registers a deterministic worker, completes a source task,
+  observes generated suggestions, hovers the full prompt, clicks an action,
+  verifies its reply and queued task, rejects a repeated activation, and checks
+  the claimed task's completion in both the database and original thread. It
+  also checks that old pills disappear and queue badges settle after completion.
+  The model HTTP provider and daemon claim/start/complete caller are protocol
+  fixtures; this does not execute a user-installed Codex CLI.
+
+Manual acceptance still includes native Desktop, WebSocket reconnection and a
+configured external LLM -> click -> real runtime completion. Mocked
+dispatch-status UI tests do not prove every backend scheduler outcome. Handler
+machine-actor tests exercise the actual guard with server-stamped identity;
+the browser test additionally uses real synthetic-member authentication.
+
+### Running the opt-in browser test
+
+Use a dedicated, disposable PostgreSQL database with all migrations applied,
+a current-source development API, and the Web app pointed at that API and its
+WebSocket endpoint. Do not reuse production databases, SMTP, channel keys or
+user runtimes. The existing E2E login helper requires development email-code
+authentication. Install Chromium with `pnpm exec playwright install chromium`.
+
+For the API, set `MULTICA_LLM_API_KEY=e2e-only`,
+`MULTICA_LLM_DEFAULT_MODEL=e2e-fixture`, `MULTICA_LLM_MAX_RETRIES=0`, and
+`MULTICA_LLM_BASE_URL=http://127.0.0.1:55436/v1`. If the API runs in Docker on
+macOS, use `host.docker.internal` for this provider address. The test starts
+and stops the local provider itself; it must be reachable from the API.
+Set the API's frontend origin/CORS to the isolated Web origin.
+
+From the repository root, substituting only isolated test-service addresses:
+
+```sh
+MULTICA_E2E_FOLLOW_UPS=1 \
+DATABASE_URL='postgres://postgres:local-e2e@127.0.0.1:55433/pr7839_e2e?sslmode=disable' \
+NEXT_PUBLIC_API_URL=http://127.0.0.1:55434 \
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:55435 \
+pnpm exec playwright test e2e/issue-comment-follow-ups.spec.ts \
+  --project=chromium --workers=1 --trace=on
+```
+
+The test removes its issue, tasks, agent and runtime. Dispose of the test
+database afterwards to remove the synthetic member/workspace retained by the
+shared login helper. Traces contain test authentication traffic and should stay
+local; only synthetic-data screenshots are suitable for a public PR.
+
+Record actual commands, tested commit, results and exclusions for each run.
+The PR migration is currently `451_comment_suggested_follow_ups`; verify its
+number against main before rebasing. No migration change is needed for the
+lock-order or cache-invalidation fixes.
