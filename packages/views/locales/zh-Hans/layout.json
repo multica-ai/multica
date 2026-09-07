@@ -29,6 +29,7 @@
   },
   "help": {
     "trigger": "帮助",
+    "download_desktop": "桌面端",
     "docs": "文档",
     "changelog": "更新日志",
     "discord": "Discord",

@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
-import { runtimeModelsKeys } from "@multica/core/runtimes";
-import type { AgentRuntime, RuntimeModel } from "@multica/core/types";
+import type { RuntimeModelsResult } from "@multica/core/types";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import enAgents from "../../../locales/en/agents.json";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
@@ -15,102 +14,124 @@ const TEST_RESOURCES = {
   en: { common: enCommon, agents: enAgents, issues: enIssues },
 };
 
-function makePiRuntime(): AgentRuntime {
-  return {
-    id: "rt-pi",
-    workspace_id: "ws-1",
-    daemon_id: "daemon-1",
-    name: "ys-pi",
-    runtime_mode: "local",
-    provider: "pi",
-    launch_header: "",
-    status: "online",
-    device_info: "macOS",
-    metadata: {},
-    default_model_config: {
-      provider: "deepseek",
-      api: "openai-completions",
-      base_url: "https://api.deepseek.com",
-      model: "deepseek-v4-pro",
+// MUL-6961. The create-agent dropdown and this inspector picker are two
+// separate renderers over one catalog, and the first attempt at unavailable
+// models only taught the dropdown about them — leaving the inspector, which is
+// where an ALREADY configured agent gets edited, still offering a model whose
+// every run 400s. That asymmetry is what this file exists to prevent.
+const CLAUDE_CATALOG: RuntimeModelsResult = {
+  models: [{ id: "claude-fable-5", label: "Fable", provider: "anthropic" }],
+  unavailableModels: [
+    {
+      id: "cc-update-required-1",
+      label: "Fable 5.1 (disabled)",
+      reason: "Update to 2.1.255+ to use Fable 5.1",
     },
-    has_default_model_api_key: true,
-    owner_id: "user-1",
-    visibility: "private",
-    last_seen_at: "2026-08-06T00:00:00Z",
-    created_at: "2026-08-06T00:00:00Z",
-    updated_at: "2026-08-06T00:00:00Z",
-  };
-}
+  ],
+  supported: true,
+};
 
-function renderPicker(models: RuntimeModel[] = []) {
-  const runtime = makePiRuntime();
+let discovery: () => Promise<RuntimeModelsResult> = async () => CLAUDE_CATALOG;
+let discoveryKey = 0;
+const mockRefreshRuntimeModels = vi.hoisted(() => vi.fn());
+
+vi.mock("@multica/core/runtimes", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/runtimes")>(),
+  runtimeModelsOptions: (runtimeId: string | null) => ({
+    enabled: Boolean(runtimeId),
+    queryKey: ["runtime-models", runtimeId, discoveryKey],
+    queryFn: () => discovery(),
+  }),
+  refreshRuntimeModels: (...args: unknown[]) =>
+    mockRefreshRuntimeModels(...args),
+}));
+
+function renderPicker() {
   const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    defaultOptions: { queries: { retry: false } },
   });
-  queryClient.setQueryData(runtimeModelsKeys.forRuntime(runtime.id), {
-    models,
-    supported: true,
-    cached: false,
-  });
-
-  const onChange = vi.fn();
-  render(
+  const onChange = vi.fn(async () => {});
+  const view = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
         <ModelPicker
-          runtime={runtime}
-          runtimeId={runtime.id}
+          runtimeId="rt-claude"
           runtimeOnline
           value=""
-          variant="field"
-          showLabel={false}
           onChange={onChange}
         />
       </QueryClientProvider>
     </I18nProvider>,
   );
-  return { onChange };
+  return { ...view, onChange, queryClient };
 }
 
-describe("ModelPicker runtime default display", () => {
-  it("shows the Pi runtime default as the selected empty model", () => {
-    const { onChange } = renderPicker();
+function openPicker(container: HTMLElement) {
+  const trigger = container.querySelector<HTMLButtonElement>("button");
+  if (!trigger) throw new Error("model picker trigger not rendered");
+  fireEvent.click(trigger);
+}
 
-    expect(
-      screen.getByText("Runtime default: deepseek-v4-pro"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("deepseek · inherited from ys-pi")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button"));
-
-    expect(screen.getByText("Use runtime default")).toBeInTheDocument();
-    expect(screen.getByText("deepseek-v4-pro · deepseek")).toBeInTheDocument();
-    expect(screen.getByText("deepseek-v4-flash")).toBeInTheDocument();
-    expect(screen.queryByText("No models available")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("deepseek-v4-flash"));
-
-    expect(onChange).toHaveBeenCalledWith("deepseek-v4-flash");
+describe("ModelPicker (inspector)", () => {
+  afterEach(() => {
+    cleanup();
+    discovery = async () => CLAUDE_CATALOG;
+    discoveryKey += 1;
+    mockRefreshRuntimeModels.mockReset();
   });
 
-  it("hides Pi no-model discovery noise from the model list", () => {
-    renderPicker([{ id: "No/models", label: "No/models", provider: "No" }]);
+  it("offers the runnable model", async () => {
+    const { container, onChange } = renderPicker();
+    openPicker(container);
 
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(await screen.findByText("Fable"));
+    expect(onChange).toHaveBeenCalledWith("claude-fable-5");
+  });
 
-    expect(screen.getByText("Use runtime default")).toBeInTheDocument();
-    expect(screen.getByText("deepseek-v4-flash")).toBeInTheDocument();
-    expect(screen.queryByText("No/models")).not.toBeInTheDocument();
+  it("shows an unavailable model with its reason and no way to select it", async () => {
+    const { container, onChange } = renderPicker();
+    openPicker(container);
 
-    fireEvent.change(
-      screen.getByRole("textbox", {
-        name: "Search or type a model ID",
-      }),
-      {
-        target: { value: "No/models" },
-      },
+    const row = await screen.findByText("Fable 5.1 (disabled)");
+    expect(
+      screen.getByText("Update to 2.1.255+ to use Fable 5.1"),
+    ).toBeTruthy();
+
+    fireEvent.click(row);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(row.closest("button")).toBeNull();
+  });
+
+  // A backend older than the field sends nothing, and the picker must simply
+  // not render the section rather than break or show an empty heading.
+  it("renders no unavailable section when the backend omits the field", async () => {
+    discovery = async () => ({
+      models: [{ id: "claude-fable-5", label: "Fable", provider: "anthropic" }],
+      supported: true,
+    });
+
+    const { container } = renderPicker();
+    openPicker(container);
+
+    await screen.findByText("Fable");
+    expect(
+      screen.queryByText(enAgents.pickers.model_unavailable_heading),
+    ).toBeNull();
+  });
+
+  it("exposes the live-catalog refresh from the inspector picker", async () => {
+    mockRefreshRuntimeModels.mockResolvedValue(CLAUDE_CATALOG);
+    const { container, queryClient } = renderPicker();
+    openPicker(container);
+    await screen.findByText("Fable");
+    fireEvent.click(
+      screen.getByRole("button", { name: enAgents.pickers.model_refresh }),
     );
 
-    expect(screen.queryByText('Use "No/models"')).not.toBeInTheDocument();
+    expect(mockRefreshRuntimeModels).toHaveBeenCalledWith(
+      queryClient,
+      "rt-claude",
+    );
+    queryClient.clear();
   });
 });

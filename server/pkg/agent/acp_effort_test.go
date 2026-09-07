@@ -382,12 +382,100 @@ func TestACPCatalogProviderGate(t *testing.T) {
 	if IsKnownThinkingValue("reasonix", "not a token") {
 		t.Error("malformed tokens must still be rejected")
 	}
-	if ThinkingControlSupported("hermes") || IsKnownThinkingValue("hermes", "high") {
-		t.Error("hermes must stay closed until its ACP surface applies an effort")
+	// hermes covers jcode (applies an advertised effort) and Hermes Agent
+	// (advertises none). The gate opens at provider granularity; the
+	// per-session catalog decides whether a picker actually appears.
+	if !ThinkingControlSupported("hermes") || !IsKnownThinkingValue("hermes", "high") {
+		t.Error("hermes should advertise reasoning control now that jcode applies it")
 	}
 	// Copilot discovers over ACP but executes through its own CLI, so it must
 	// not be swept in by the generalization.
 	if ThinkingControlSupported("copilot") {
 		t.Error("copilot executes outside ACP; a picker here would do nothing")
+	}
+}
+
+// jcodeEffortSessionResult is jcode's advertised shape (GitHub #6720, verified
+// by the reporter against v0.71.1 and v0.73.0). The option id is
+// `reasoning_effort` — NOT one of the tokens acpEffortOptionIDs matches — so
+// this only parses because the category is `thought_level`.
+const jcodeEffortSessionResult = `{"sessionId":"ses-jcode",` +
+	`"models":{"currentModelId":"gpt-5.6-sol","availableModels":[{"modelId":"gpt-5.6-sol","name":"GPT-5.6 Sol"}]},` +
+	`"configOptions":[` +
+	`{"type":"select","id":"reasoning_effort","name":"Reasoning Effort","category":"thought_level","currentValue":"low","options":[` +
+	`{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}`
+
+// hermesAgentSessionResult is what Hermes Agent actually returns. Captured
+// from `hermes acp` v0.20.0 on 2026-08-11 — the keys are exactly these four,
+// with no configOptions, unchanged from the v0.18.2 finding in MUL-5770.
+const hermesAgentSessionResult = `{"_meta":{},"sessionId":"ses-hermes",` +
+	`"models":{"currentModelId":"hermes-4","availableModels":[{"modelId":"hermes-4","name":"Hermes 4"}]},` +
+	`"modes":{}}`
+
+// TestJcodeEffortOptionMatchesByCategory pins the reason jcode needs no parser
+// change: its option id is unrecognised, and the category carries the match.
+func TestJcodeEffortOptionMatchesByCategory(t *testing.T) {
+	t.Parallel()
+	if acpEffortOptionIDs["reasoning_effort"] {
+		t.Fatal("test premise broken: `reasoning_effort` is now a matched id, " +
+			"so this no longer proves category matching carries jcode")
+	}
+	option, ok := parseACPEffortOption(json.RawMessage(jcodeEffortSessionResult))
+	if !ok {
+		t.Fatal("jcode's effort option was not recognised")
+	}
+	// The id we send back must be jcode's, not the token we matched on.
+	if option.ConfigID != "reasoning_effort" {
+		t.Errorf("ConfigID = %q, want reasoning_effort", option.ConfigID)
+	}
+	if got := strings.Join(option.values(), ","); got != "low,medium,high" {
+		t.Errorf("values = %q", got)
+	}
+}
+
+// TestHermesAgentAdvertisesNoEffortCatalog is the other half of the hermes
+// provider: the same provider type, a binary with no effort surface, and
+// therefore no picker. This is what makes the shared opt-in entry safe.
+func TestHermesAgentAdvertisesNoEffortCatalog(t *testing.T) {
+	t.Parallel()
+	if _, ok := parseACPEffortOption(json.RawMessage(hermesAgentSessionResult)); ok {
+		t.Error("Hermes Agent advertises no configOptions; nothing should parse")
+	}
+	models := []Model{{ID: "hermes-4", Default: true}}
+	annotateACPThinkingForSessionModel(models, json.RawMessage(hermesAgentSessionResult))
+	if models[0].Thinking != nil {
+		t.Errorf("Thinking = %+v, want nil so no picker is offered", models[0].Thinking)
+	}
+}
+
+// TestApplyACPEffortOptionHermesAgentSendsNothing: with no advertised option
+// there is no config id to address, so the helper must not invent a call —
+// the turn runs at the runtime default instead.
+func TestApplyACPEffortOptionHermesAgentSendsNothing(t *testing.T) {
+	t.Parallel()
+	request, calls := recordingACPRequest(`{}`, nil)
+	applyACPEffortOption(context.Background(), request, "hermes", discardLogger(),
+		"ses-hermes", json.RawMessage(hermesAgentSessionResult), "high", true)
+	if len(*calls) != 0 {
+		t.Errorf("sent %+v, want no request against a runtime with no effort option", *calls)
+	}
+}
+
+// TestApplyACPEffortOptionJcodeUsesAdvertisedID: the same provider, the other
+// binary — the level goes out under jcode's own option id.
+func TestApplyACPEffortOptionJcodeUsesAdvertisedID(t *testing.T) {
+	t.Parallel()
+	echo := `{"configOptions":[{"id":"reasoning_effort","currentValue":"high","options":[` +
+		`{"value":"low"},{"value":"medium"},{"value":"high"}]}]}`
+	request, calls := recordingACPRequest(echo, nil)
+
+	applyACPEffortOption(context.Background(), request, "hermes", discardLogger(),
+		"ses-jcode", json.RawMessage(jcodeEffortSessionResult), "high", true)
+
+	if len(*calls) != 1 {
+		t.Fatalf("calls = %+v, want one set_config_option", *calls)
+	}
+	if got := (*calls)[0].params["configId"]; got != "reasoning_effort" {
+		t.Errorf("configId = %v, want reasoning_effort", got)
 	}
 }

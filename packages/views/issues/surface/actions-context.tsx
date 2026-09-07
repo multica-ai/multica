@@ -1,12 +1,12 @@
 "use client";
 
 import { createContext, useContext, type ReactNode } from "react";
-import type { UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import type { IssueCreateDefaults } from "./types";
 
 export type IssueSurfaceMutationOptions = {
   errorMessage?: string;
-  onSuccess?: () => void;
+  onSuccess?: (issue: Issue) => void;
   onError?: (err: unknown) => void;
   onSettled?: () => void;
 };

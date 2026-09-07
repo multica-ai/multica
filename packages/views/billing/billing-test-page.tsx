@@ -51,7 +51,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@multica/ui/components/ui/card";
-import { useT } from "../i18n";
+import { useLocale, useT } from "../i18n";
 import { useNavigation } from "../navigation";
 
 // 1 credit = 1_000_000 micro-credit; cents → dollars factor for the
@@ -116,6 +116,7 @@ function CheckoutSessionStatusBanner({
   onDismiss: () => void;
 }) {
   const { t } = useT("billing");
+  const locale = useLocale();
   const { data, isLoading, isError, error } = useQuery(
     billingCheckoutSessionOptions(sessionId),
   );
@@ -178,13 +179,13 @@ function CheckoutSessionStatusBanner({
             <dd>
               {data.bonus_credits > 0
                 ? t(($) => $.checkout.charged_with_bonus, {
-                    money: formatMoney(data.amount_cents, data.currency),
-                    credits: data.credits.toLocaleString(),
-                    bonus: data.bonus_credits.toLocaleString(),
+                    money: formatMoney(data.amount_cents, data.currency, locale),
+                    credits: data.credits.toLocaleString(locale),
+                    bonus: data.bonus_credits.toLocaleString(locale),
                   })
                 : t(($) => $.checkout.charged_value, {
-                    money: formatMoney(data.amount_cents, data.currency),
-                    credits: data.credits.toLocaleString(),
+                    money: formatMoney(data.amount_cents, data.currency, locale),
+                    credits: data.credits.toLocaleString(locale),
                   })}
             </dd>
           </dl>
@@ -208,6 +209,7 @@ function CheckoutSessionStatusBanner({
 
 function BalanceCard() {
   const { t } = useT("billing");
+  const locale = useLocale();
   const balance = useQuery(billingBalanceOptions());
 
   return (
@@ -232,16 +234,16 @@ function BalanceCard() {
         ) : (
           <div className="space-y-1 text-body">
             <div className="text-display-sm font-semibold tabular-nums">
-              {balance.data?.balance_credit.toLocaleString() ?? 0}
+              {balance.data?.balance_credit.toLocaleString(locale) ?? 0}
               <span className="ml-1 text-body font-normal text-muted-foreground">
                 {t(($) => $.balance.credits_suffix)}
               </span>
             </div>
             <div className="text-caption text-muted-foreground">
               {t(($) => $.balance.meta, {
-                micro: balance.data?.balance_micro.toLocaleString() ?? 0,
+                micro: balance.data?.balance_micro.toLocaleString(locale) ?? 0,
                 owner: balance.data?.owner_id.slice(0, 8) ?? "",
-                updated: formatDate(balance.data?.updated_at, t),
+                updated: formatDate(balance.data?.updated_at, t, locale),
               })}
             </div>
           </div>
@@ -368,19 +370,20 @@ function TierButton({
   onClick: () => void;
 }) {
   const { t } = useT("billing");
+  const locale = useLocale();
   const display = tier.display_name || tier.id;
   const baseLine = t(($) => $.buy.tier_money_to_credits, {
-    money: formatMoney(tier.amount_cents, "usd"),
-    credits: tier.credits.toLocaleString(),
+    money: formatMoney(tier.amount_cents, "usd", locale),
+    credits: tier.credits.toLocaleString(locale),
   });
   const bonusLine = tier.bonus_credits
     ? tier.bonus_expires_in
       ? t(($) => $.buy.tier_bonus_with_expiry, {
-          credits: tier.bonus_credits.toLocaleString(),
+          credits: tier.bonus_credits.toLocaleString(locale),
           expiry: tier.bonus_expires_in,
         })
       : t(($) => $.buy.tier_bonus, {
-          credits: tier.bonus_credits.toLocaleString(),
+          credits: tier.bonus_credits.toLocaleString(locale),
         })
     : "";
   return (
@@ -450,6 +453,7 @@ function TransactionsCard() {
 
 function TransactionRow({ row }: { row: BillingTransaction }) {
   const { t } = useT("billing");
+  const locale = useLocale();
   const credit = row.amount_micro / MICRO_PER_CREDIT;
   return (
     <li className="rounded-md border bg-background p-2.5">
@@ -468,7 +472,7 @@ function TransactionRow({ row }: { row: BillingTransaction }) {
           }`}
         >
           {t(($) => $.transactions.credits_value, {
-            value: `${credit >= 0 ? "+" : ""}${credit.toLocaleString()}`,
+            value: `${credit >= 0 ? "+" : ""}${credit.toLocaleString(locale)}`,
           })}
         </span>
       </div>
@@ -477,8 +481,8 @@ function TransactionRow({ row }: { row: BillingTransaction }) {
       )}
       <div className="mt-1 font-mono text-micro text-muted-foreground">
         {t(($) => $.transactions.row_meta, {
-          date: formatDate(row.created_at, t),
-          balance: (row.balance_after / MICRO_PER_CREDIT).toLocaleString(),
+          date: formatDate(row.created_at, t, locale),
+          balance: (row.balance_after / MICRO_PER_CREDIT).toLocaleString(locale),
           ref: row.reference_id || t(($) => $.transactions.ref_empty),
         })}
       </div>
@@ -529,6 +533,7 @@ function BatchesCard() {
 
 function BatchRow({ row }: { row: BillingBatch }) {
   const { t } = useT("billing");
+  const locale = useLocale();
   const total = row.total_micro / MICRO_PER_CREDIT;
   const remaining = row.remaining_micro / MICRO_PER_CREDIT;
   const consumed = total - remaining;
@@ -543,15 +548,15 @@ function BatchRow({ row }: { row: BillingBatch }) {
         </span>
         <span className="text-body tabular-nums">
           {t(($) => $.batches.remaining_over_total, {
-            remaining: remaining.toLocaleString(),
-            total: total.toLocaleString(),
+            remaining: remaining.toLocaleString(locale),
+            total: total.toLocaleString(locale),
           })}
         </span>
       </div>
       <div className="mt-1 text-caption text-muted-foreground">
-        {t(($) => $.batches.consumed, { value: consumed.toLocaleString() })}
+        {t(($) => $.batches.consumed, { value: consumed.toLocaleString(locale) })}
         {row.expires_at
-          ? t(($) => $.batches.expires_suffix, { value: formatDate(row.expires_at, t) })
+          ? t(($) => $.batches.expires_suffix, { value: formatDate(row.expires_at, t, locale) })
           : t(($) => $.batches.never_expires_suffix)}
       </div>
     </li>
@@ -601,6 +606,7 @@ function TopupsCard() {
 
 function TopupRow({ row }: { row: BillingTopup }) {
   const { t } = useT("billing");
+  const locale = useLocale();
   return (
     <li className="rounded-md border bg-background p-2.5">
       <div className="flex items-center justify-between gap-2">
@@ -621,19 +627,19 @@ function TopupRow({ row }: { row: BillingTopup }) {
         <span className="text-body tabular-nums">
           {row.bonus_credits > 0
             ? t(($) => $.topups.amount_to_credits_with_bonus, {
-                money: formatMoney(row.amount_cents, row.currency),
-                credits: row.credits.toLocaleString(),
-                bonus: row.bonus_credits,
+                money: formatMoney(row.amount_cents, row.currency, locale),
+                credits: row.credits.toLocaleString(locale),
+                bonus: row.bonus_credits.toLocaleString(locale),
               })
             : t(($) => $.topups.amount_to_credits, {
-                money: formatMoney(row.amount_cents, row.currency),
-                credits: row.credits.toLocaleString(),
+                money: formatMoney(row.amount_cents, row.currency, locale),
+                credits: row.credits.toLocaleString(locale),
               })}
         </span>
       </div>
       <div className="mt-1 font-mono text-micro text-muted-foreground">
         {t(($) => $.topups.row_meta, {
-          date: formatDate(row.created_at, t),
+          date: formatDate(row.created_at, t, locale),
           checkout: row.stripe_checkout_id || t(($) => $.topups.stripe_empty),
         })}
       </div>
@@ -701,13 +707,15 @@ function EmptyText({ children }: { children: React.ReactNode }) {
   return <p className="text-caption text-muted-foreground">{children}</p>;
 }
 
-function formatMoney(amountCents: number, currency: string): string {
-  // Intl is fine here — no currency conversion happening, just
-  // canonical display. Defaults to en-US to match the rest of the
-  // dev UI; the produced string is then passed into a t() interpolation
-  // so the surrounding sentence still gets translated.
+function formatMoney(
+  amountCents: number,
+  currency: string,
+  locale: string,
+): string {
+  // Intl is fine here — no currency conversion happening, just canonical
+  // display in the same locale as the surrounding translated sentence.
   try {
-    return new Intl.NumberFormat("en-US", {
+    return new Intl.NumberFormat(locale, {
       style: "currency",
       currency: currency.toUpperCase(),
     }).format(amountCents / CENTS_PER_DOLLAR);
@@ -725,9 +733,10 @@ function formatMoney(amountCents: number, currency: string): string {
 function formatDate(
   value: string | undefined,
   t: ReturnType<typeof useT<"billing">>["t"],
+  locale: string,
 ): string {
   if (!value) return t(($) => $.shared.date_dash);
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString();
+  return d.toLocaleString(locale);
 }

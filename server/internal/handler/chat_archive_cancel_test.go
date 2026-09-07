@@ -339,6 +339,14 @@ func bindChatSessionToChannel(t *testing.T, agentID, sessionID, channelChatID st
 	// channel_* rows have no FK to chat_session, so they outlive the session
 	// helper's cleanup; clear by deterministic key.
 	cleanup := func() {
+		testPool.Exec(context.Background(), `
+			DELETE FROM channel_task_delivery
+			WHERE binding_id IN (
+				SELECT id FROM channel_chat_session_binding WHERE chat_session_id = $1
+			)
+		`, sessionID)
+		testPool.Exec(context.Background(),
+			`DELETE FROM channel_chat_context_generation WHERE chat_session_id = $1`, sessionID)
 		testPool.Exec(context.Background(),
 			`DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, sessionID)
 		testPool.Exec(context.Background(),
@@ -356,9 +364,14 @@ func bindChatSessionToChannel(t *testing.T, agentID, sessionID, channelChatID st
 		t.Fatalf("create installation: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO channel_chat_session_binding
-			(chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
-		VALUES ($1, $2, 'wecom', $3, 'group')
+		WITH binding AS (
+			INSERT INTO channel_chat_session_binding
+				(chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
+			VALUES ($1, $2, 'wecom', $3, 'group')
+			RETURNING chat_session_id, context_revision
+		)
+		INSERT INTO channel_chat_context_generation (chat_session_id, revision)
+		SELECT chat_session_id, context_revision FROM binding
 	`, sessionID, instID, channelChatID); err != nil {
 		t.Fatalf("bind session: %v", err)
 	}

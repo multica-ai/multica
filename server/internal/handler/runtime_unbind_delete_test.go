@@ -8,8 +8,17 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type recordingRuntimeGoneNotifier struct {
+	runtimeIDs []string
+}
+
+func (n *recordingRuntimeGoneNotifier) NotifyRuntimeGone(runtimeID string) {
+	n.runtimeIDs = append(n.runtimeIDs, runtimeID)
+}
 
 // parseExpectedActiveAgentIDs is the cascade endpoint's input validator.
 // Empty list is a valid plan ("no active agents" — cascade just deletes the
@@ -168,6 +177,45 @@ func TestDeleteAgentRuntime_StructuredConflict(t *testing.T) {
 	}
 }
 
+func TestDeleteAgentRuntime_WorkspaceMismatchReturnsStructuredConflict(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createCascadeFixtureRuntime(t, ctx, "Runtime Workspace Mismatch")
+	agentID := createArchivedWorkspaceMismatchedAgent(t, runtimeID, "Runtime Workspace Mismatch Agent")
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.DeleteAgentRuntime(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "runtime_delete_workspace_mismatch" {
+		t.Fatalf("code = %q, want runtime_delete_workspace_mismatch", body.Code)
+	}
+
+	var runtimeRows int
+	var boundRuntime string
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&runtimeRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&boundRuntime); err != nil {
+		t.Fatalf("read mismatched agent binding: %v", err)
+	}
+	if runtimeRows != 1 || boundRuntime != runtimeID {
+		t.Fatalf("workspace mismatch mutated data: runtime rows=%d agent runtime=%q", runtimeRows, boundRuntime)
+	}
+}
+
 func TestRuntimeDeleteLockBlocksConcurrentAgentBinding(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -295,7 +343,10 @@ func TestDeleteAgentRuntime_OrphanedProfileAllowsDirectDelete(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.DeleteAgentRuntime(w, req)
+	notifier := &recordingRuntimeGoneNotifier{}
+	h := *testHandler
+	h.DaemonRuntimeGone = notifier
+	h.DeleteAgentRuntime(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -306,6 +357,9 @@ func TestDeleteAgentRuntime_OrphanedProfileAllowsDirectDelete(t *testing.T) {
 	}
 	if rtRows != 0 {
 		t.Fatalf("expected orphaned custom runtime instance to be deleted, count=%d", rtRows)
+	}
+	if len(notifier.runtimeIDs) != 1 || notifier.runtimeIDs[0] != runtimeID {
+		t.Fatalf("runtime-gone notifications = %v, want [%s]", notifier.runtimeIDs, runtimeID)
 	}
 }
 
@@ -326,7 +380,10 @@ func TestUnbindAgentsAndDeleteRuntime_HappyPath(t *testing.T) {
 	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete",
 		map[string]any{"expected_active_agent_ids": []string{agentID}})
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.UnbindAgentsAndDeleteRuntime(w, req)
+	notifier := &recordingRuntimeGoneNotifier{}
+	h := *testHandler
+	h.DaemonRuntimeGone = notifier
+	h.UnbindAgentsAndDeleteRuntime(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -380,6 +437,9 @@ func TestUnbindAgentsAndDeleteRuntime_HappyPath(t *testing.T) {
 	// archive-and-delete contract.
 	if body.AgentsArchived != 1 {
 		t.Fatalf("agents_archived mirror = %d, want 1", body.AgentsArchived)
+	}
+	if len(notifier.runtimeIDs) != 1 || notifier.runtimeIDs[0] != runtimeID {
+		t.Fatalf("runtime-gone notifications = %v, want [%s]", notifier.runtimeIDs, runtimeID)
 	}
 }
 
@@ -575,4 +635,14 @@ func createCascadeFixtureAgent(t *testing.T, ctx context.Context, runtimeID, nam
 		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 	return agentID
+}
+
+func createArchivedWorkspaceMismatchedAgent(t *testing.T, runtimeID, name string) string {
+	t.Helper()
+	foreignWorkspaceID := dbfx.Workspace(t, name+" Workspace", "runtime-mismatch-"+runtimeID[:8])
+	return dbfx.Agent(t, name, runtimeID, testutil.Cols{
+		"workspace_id": foreignWorkspaceID,
+		"archived_at":  testutil.Raw("now()"),
+		"owner_id":     nil,
+	})
 }

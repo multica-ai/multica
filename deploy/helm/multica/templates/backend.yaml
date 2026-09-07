@@ -80,15 +80,15 @@ spec:
           {{- end }}
           # The entrypoint runs `./migrate up` before serving traffic. On a
           # cold cluster (Postgres still coming up) this can take minutes. The
-          # startupProbe holds off liveness/readiness until /healthz is OK,
-          # giving migrations a ~5 min budget (30 * 10s) so the pod is never
-          # killed mid-migration. Once it passes, the aggressive livenessProbe
-          # below takes over.
+          # startupProbe holds off liveness/readiness until /healthz is OK.
+          # Its 10 minute window exceeds the shared 3 minute database retry
+          # budget and leaves time for migrations before kubelet may restart
+          # the pod.
           startupProbe:
             httpGet:
               path: /healthz
               port: 8080
-            failureThreshold: 30
+            failureThreshold: 60
             periodSeconds: 10
           readinessProbe:
             httpGet:
@@ -98,7 +98,9 @@ spec:
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /healthz
+              # Liveness must not depend on PostgreSQL. A database outage makes
+              # the pod NotReady, but should not restart an otherwise live API.
+              path: /health
               port: 8080
             initialDelaySeconds: 30
             periodSeconds: 30

@@ -71,8 +71,44 @@ func TestS3StorageUploadStreamUsesFixedLengthRequest(t *testing.T) {
 
 func TestS3StorageUploadStreamRejectsUnknownLength(t *testing.T) {
 	store := &S3Storage{}
-	if _, err := store.UploadStream(context.Background(), "uploads/media.bin", strings.NewReader("payload"), 0, "application/octet-stream", "media.bin"); err == nil {
+	if _, err := store.UploadStream(context.Background(), "uploads/media.bin", strings.NewReader("payload"), -1, "application/octet-stream", "media.bin"); err == nil {
 		t.Fatal("UploadStream accepted an unknown content length")
+	}
+}
+
+func TestS3StorageUploadStreamAcceptsKnownEmptyObject(t *testing.T) {
+	observed := make(chan int64, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		if len(body) != 0 {
+			t.Errorf("request body length = %d, want 0", len(body))
+		}
+		observed <- r.ContentLength
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	client := s3.New(s3.Options{
+		Region:       "us-east-1",
+		Credentials:  aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")),
+		BaseEndpoint: aws.String(server.URL),
+		UsePathStyle: true,
+	})
+	store := &S3Storage{
+		client:       client,
+		bucket:       "test-bucket",
+		region:       "us-east-1",
+		endpointURL:  server.URL,
+		usePathStyle: true,
+	}
+	if _, err := store.UploadStream(context.Background(), "uploads/empty.bin", strings.NewReader(""), 0, "application/octet-stream", "empty.bin"); err != nil {
+		t.Fatalf("UploadStream: %v", err)
+	}
+	if got := <-observed; got != 0 {
+		t.Fatalf("Content-Length = %d, want 0", got)
 	}
 }
 

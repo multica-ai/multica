@@ -11,15 +11,19 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 )
 
-func TestMainRouterDoesNotExposePrometheusMetrics(t *testing.T) {
+func TestMainRouterDoesNotExposeDiagnostics(t *testing.T) {
 	router := NewRouter(nil, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil)
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	router.ServeHTTP(rec, req)
+	for _, path := range []string{"/metrics", "/debug/pprof/", "/debug/pprof/heap"} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("main API /metrics status = %d, want %d", rec.Code, http.StatusNotFound)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("main API %s status = %d, want %d", path, rec.Code, http.StatusNotFound)
+			}
+		})
 	}
 }
 

@@ -204,8 +204,8 @@ func TestResolveComment_ScopedToThread(t *testing.T) {
 	}
 	fx := newResolveTestFixture(t)
 
-	resolveCommentHTTP(t, fx.B1)   // thread 1 resolution
-	resolveCommentHTTP(t, fx.A2)   // thread 2 resolution — must NOT touch thread 1
+	resolveCommentHTTP(t, fx.B1) // thread 1 resolution
+	resolveCommentHTTP(t, fx.A2) // thread 2 resolution — must NOT touch thread 1
 	if !commentResolved(t, fx.B1) {
 		t.Fatalf("b1 (thread 1) must stay resolved when a separate thread is resolved")
 	}

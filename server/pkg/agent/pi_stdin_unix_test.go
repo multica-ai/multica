@@ -92,7 +92,7 @@ func TestPiExecuteSendsBuilderPromptOnStdinNotArgv(t *testing.T) {
 		}
 	}
 	joined := strings.Join(argv, " ")
-	for _, want := range []string{"-p", "--mode json", "--session", "--provider cpa", "--model grok-4.5-high"} {
+	for _, want := range []string{"-p", "--mode json", "--session", "--model cpa/grok-4.5-high"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("expected %q in argv, got %v", want, argv)
 		}

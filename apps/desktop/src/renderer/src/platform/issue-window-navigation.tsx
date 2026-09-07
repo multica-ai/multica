@@ -105,6 +105,7 @@ export function IssueWindowNavigationProvider({
       back: () => void navigate(-1),
       pathname: location.pathname,
       searchParams: new URLSearchParams(location.search),
+      hash: location.hash,
       openInNewTab: (path, title) => {
         void window.desktopAPI.openIssueWindow({
           path,
@@ -114,7 +115,13 @@ export function IssueWindowNavigationProvider({
       getShareableUrl: (path) =>
         runtimeConfig.ok ? `${runtimeConfig.config.appUrl}${path}` : path,
     };
-  }, [location.pathname, location.search, navigate, runtimeConfig]);
+  }, [
+    location.pathname,
+    location.search,
+    location.hash,
+    navigate,
+    runtimeConfig,
+  ]);
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;
 }

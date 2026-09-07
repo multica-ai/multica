@@ -14,10 +14,14 @@ import (
 )
 
 type fakeHistoryQueries struct {
-	binding    db.ChannelChatSessionBinding
-	bindingErr error
-	inst       db.ChannelInstallation
-	instErr    error
+	binding       db.ChannelChatSessionBinding
+	bindingErr    error
+	inst          db.ChannelInstallation
+	instErr       error
+	messageIDs    []string
+	messageIDsErr error
+	outbound      []db.ChannelOutboundMessage
+	outboundErr   error
 }
 
 func (f *fakeHistoryQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
@@ -26,6 +30,14 @@ func (f *fakeHistoryQueries) GetChannelChatSessionBindingBySession(context.Conte
 
 func (f *fakeHistoryQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
 	return f.inst, f.instErr
+}
+
+func (f *fakeHistoryQueries) ListChannelOutboundMessageIDsForContext(context.Context, db.ListChannelOutboundMessageIDsForContextParams) ([]string, error) {
+	return f.messageIDs, f.messageIDsErr
+}
+
+func (f *fakeHistoryQueries) ListChannelOutboundMessagesByIDs(context.Context, db.ListChannelOutboundMessagesByIDsParams) ([]db.ChannelOutboundMessage, error) {
+	return f.outbound, f.outboundErr
 }
 
 type fakeHistoryClient struct {
@@ -86,6 +98,7 @@ func groupBinding(threadRoot string) db.ChannelChatSessionBinding {
 
 func dmBinding() db.ChannelChatSessionBinding {
 	return db.ChannelChatSessionBinding{
+		ID:             uid(3),
 		InstallationID: uid(2),
 		ChannelChatID:  "D1",
 		ChatType:       string(channel.ChatTypeP2P),
@@ -146,6 +159,115 @@ func TestChannelOverview(t *testing.T) {
 	}
 	if plain := findByTS(page.Messages, "101.000000"); plain == nil || plain.ThreadID != "" || plain.ReplyCount != 0 {
 		t.Fatalf("plain message should carry no thread metadata: %+v", plain)
+	}
+}
+
+func TestChannelOverviewScopesAndSanitizesFreshGeneration(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("100.000000"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{historyMsgs: []slack.Message{
+		msg("U1", "new reply", "104.000000"),
+		msg("U1", "/clear current question", "103.000000"),
+		msg("U1", "old context", "102.000000"),
+	}}
+	h := newTestHistory(q, fc)
+	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{
+		After: "103.000000", Until: "105.000000",
+	})
+	if err != nil {
+		t.Fatalf("ChannelOverview: %v", err)
+	}
+	if fc.lastHistory.Oldest != "103.000000" || fc.lastHistory.Latest != "105.000000" || !fc.lastHistory.Inclusive {
+		t.Fatalf("Slack bounds = oldest %q latest %q inclusive %t", fc.lastHistory.Oldest, fc.lastHistory.Latest, fc.lastHistory.Inclusive)
+	}
+	if len(page.Messages) != 2 || page.Messages[0].Text != "current question" || page.Messages[1].Text != "new reply" {
+		t.Fatalf("scoped messages = %+v", page.Messages)
+	}
+}
+
+func TestChannelOverviewExcludesLateReplyFromPreviousGeneration(t *testing.T) {
+	q := &fakeHistoryQueries{
+		binding: groupBinding("100.000000"), inst: activeSlackInstall(),
+		messageIDs: []string{"104.000000"},
+	}
+	fc := &fakeHistoryClient{historyMsgs: []slack.Message{
+		msg("UBOT", "current generation answer", "104.000000"),
+		msg("UBOT", "late previous generation answer", "103.500000"),
+		msg("U1", "/clear current question", "103.000000"),
+	}}
+	h := newTestHistory(q, fc)
+	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{
+		After: "103.000000", ContextRevision: 2,
+	})
+	if err != nil {
+		t.Fatalf("ChannelOverview: %v", err)
+	}
+	if len(page.Messages) != 2 || page.Messages[0].Text != "current question" || page.Messages[1].Text != "current generation answer" {
+		t.Fatalf("causally scoped messages = %+v", page.Messages)
+	}
+}
+
+func TestChannelOverviewFailsClosedForUnknownOwnBotReply(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("100.000000"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{historyMsgs: []slack.Message{
+		msg("UBOT", "unattributed answer", "104.000000"),
+		msg("U1", "/clear current question", "103.000000"),
+	}}
+	h := newTestHistory(q, fc)
+	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{
+		After: "103.000000", ContextRevision: 2,
+	})
+	if err != nil {
+		t.Fatalf("ChannelOverview: %v", err)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].Text != "current question" {
+		t.Fatalf("fail-closed messages = %+v", page.Messages)
+	}
+}
+
+func TestChannelOverviewKeepsPagingCursorWhenLateRepliesFillPage(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("100.000000"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{historyMsgs: []slack.Message{
+		msg("UBOT", "late old answer 2", "105.000000"),
+		msg("UBOT", "late old answer 1", "104.000000"),
+	}}
+	h := newTestHistory(q, fc)
+	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{
+		Limit: 2, After: "103.000000", ContextRevision: 2,
+	})
+	if err != nil {
+		t.Fatalf("ChannelOverview: %v", err)
+	}
+	if len(page.Messages) != 0 || page.NextCursor != "104.000000" {
+		t.Fatalf("filtered full page = messages:%+v cursor:%q", page.Messages, page.NextCursor)
+	}
+}
+
+func TestChannelOverviewPendingFreshBoundaryReturnsEmpty(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("100.000000"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{historyMsgs: []slack.Message{msg("U1", "old context", "102.000000")}}
+	h := newTestHistory(q, fc)
+	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{BoundaryPending: true})
+	if err != nil {
+		t.Fatalf("ChannelOverview: %v", err)
+	}
+	if fc.historyCalls != 0 || len(page.Messages) != 0 {
+		t.Fatalf("pending boundary read calls=%d messages=%+v", fc.historyCalls, page.Messages)
+	}
+}
+
+func TestThreadPendingFreshBoundaryReturnsEmptyWithThreadID(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("50.000000"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{repliesMsgs: []slack.Message{msg("U1", "old context", "52.000000")}}
+	h := newTestHistory(q, fc)
+	page, err := h.Thread(context.Background(), uid(9), "", channel.HistoryOptions{BoundaryPending: true})
+	if err != nil {
+		t.Fatalf("Thread: %v", err)
+	}
+	if fc.repliesCalls != 0 || fc.historyCalls != 0 || len(page.Messages) != 0 {
+		t.Fatalf("pending boundary read calls=%d/%d messages=%+v", fc.repliesCalls, fc.historyCalls, page.Messages)
+	}
+	if page.ChannelType != "slack" || page.ThreadID != "50.000000" {
+		t.Fatalf("pending boundary target = %q/%q, want slack/50.000000", page.ChannelType, page.ThreadID)
 	}
 }
 

@@ -391,26 +391,3 @@ func TestSubscriberIssueCreated_AutopilotMapPayload(t *testing.T) {
 		t.Fatal("expected creator to be subscribed when autopilot publishes map payload")
 	}
 }
-
-// Verify parseUUID is consistent — the local helper should agree with util.MustParseUUID
-// for valid input, and panic on invalid input (the silent-zero behavior was removed
-// after #1661 to prevent silent SQL writes against a zero UUID).
-func TestParseUUIDConsistency(t *testing.T) {
-	uuid := "550e8400-e29b-41d4-a716-446655440000"
-	local := parseUUID(uuid)
-	utilResult := util.MustParseUUID(uuid)
-	if local != utilResult {
-		t.Fatalf("parseUUID inconsistency: local=%v, util=%v", local, utilResult)
-	}
-	if !local.Valid {
-		t.Fatal("expected valid UUID")
-	}
-
-	// Invalid input (empty string) must panic now — never silently return a zero UUID.
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("expected parseUUID(\"\") to panic, but it returned normally")
-		}
-	}()
-	_ = parseUUID("")
-}

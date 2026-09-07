@@ -15,10 +15,10 @@
  * What it does catch is a real document-level navigation away from the trusted
  * renderer: `window.location = 'https://evil.example'`, an anchor Chromium
  * resolves to a remote URL in the same window, a dropped file URL. These windows
- * run with `webSecurity: false` and `sandbox: false`, so a foreign document
- * landing in one would inherit privileged context. New windows and external
- * links already route through `setWindowOpenHandler` → `openExternalSafely`;
- * this closes the same-window path.
+ * run with `webSecurity: false` (the process sandbox is enabled), so a
+ * foreign document landing in one would inherit privileged context. New
+ * windows and external links already route through `setWindowOpenHandler` →
+ * `openExternalSafely`; this closes the same-window path.
  */
 
 /** The subset of BrowserWindow this module needs — keeps it unit-testable. */

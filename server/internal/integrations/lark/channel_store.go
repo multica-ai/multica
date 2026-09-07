@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // channelTypeFeishu is the channel_type discriminator for every row this
@@ -293,11 +294,19 @@ func (s *ChannelStore) GetLarkChatSessionBindingBySession(ctx context.Context, c
 	return chatSessionBindingFromRow(row), nil
 }
 
+func (s *ChannelStore) GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error) {
+	return s.Queries.GetChannelTaskDelivery(ctx, taskID)
+}
+
+func (s *ChannelStore) GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
+	return s.Queries.GetChannelChatSessionBindingBySession(ctx, arg)
+}
+
 func (s *ChannelStore) UpdateLarkChatSessionBindingReplyTarget(ctx context.Context, arg UpdateChatSessionBindingReplyTargetParams) error {
 	return s.Queries.UpdateChannelChatSessionBindingReplyTarget(ctx, db.UpdateChannelChatSessionBindingReplyTargetParams{
-		ChatSessionID: arg.ChatSessionID,
-		LastMessageID: arg.LastMessageID,
-		LastThreadID:  arg.LastThreadID,
+		ReplyChatSessionID: arg.ChatSessionID,
+		LastMessageID:      arg.LastMessageID,
+		LastThreadID:       arg.LastThreadID,
 	})
 }
 
@@ -334,6 +343,7 @@ func (s *ChannelStore) ReleaseLarkInboundDedup(ctx context.Context, arg ReleaseI
 
 func (s *ChannelStore) RecordLarkInboundDrop(ctx context.Context, arg RecordInboundDropParams) error {
 	return s.Queries.RecordChannelInboundDrop(ctx, db.RecordChannelInboundDropParams{
+		ID:               dbid.NewV7(),
 		ChannelType:      channelTypeFeishu,
 		EventType:        arg.EventType,
 		DropReason:       arg.DropReason,

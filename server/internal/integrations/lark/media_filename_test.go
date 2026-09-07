@@ -40,6 +40,19 @@ func TestMediaExtensionKnowsPDF(t *testing.T) {
 	}
 }
 
+func TestMediaExtensionKnowsCommonAudioTypes(t *testing.T) {
+	for contentType, want := range map[string]string{
+		"audio/opus": ".opus",
+		"audio/ogg":  ".ogg",
+		"audio/amr":  ".amr",
+		"audio/mpeg": ".mp3",
+	} {
+		if got := mediaExtension(contentType); got != want {
+			t.Errorf("mediaExtension(%q) = %q, want %q", contentType, got, want)
+		}
+	}
+}
+
 // Every resource on one message shares a MessageID, so without the index
 // three photos in one send produce three objects with the same name.
 func TestGeneratedMediaFilenamesAreDistinctWithinAMessage(t *testing.T) {
@@ -62,5 +75,14 @@ func TestProvidedFilenameStillWins(t *testing.T) {
 	res := larkMediaResource{kind: channel.MsgTypeFile, filename: "quarterly.pdf"}
 	if got := mediaFilename(lm, res, DownloadedResourceStream{}, "application/pdf", 2); got != "quarterly.pdf" {
 		t.Errorf("mediaFilename = %q, want the platform's own name", got)
+	}
+}
+
+func TestProvidedAudioFilenameKeepsExistingExtension(t *testing.T) {
+	lm := InboundMessage{MessageID: "om_audio"}
+	res := larkMediaResource{kind: channel.MsgTypeAudio}
+	downloaded := DownloadedResourceStream{Filename: "voice.ogg"}
+	if got := mediaFilename(lm, res, downloaded, "audio/opus", 0); got != "voice.ogg" {
+		t.Errorf("mediaFilename = %q, want the platform's existing extension preserved", got)
 	}
 }

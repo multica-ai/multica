@@ -85,7 +85,7 @@ func TestDiscoverCodebuddyModelsFromACP(t *testing.T) {
 	resetCodebuddyDiscoveryCaches(t)
 	path := writeCodebuddyACPStub(t, codebuddyACPSessionResult)
 
-	catalog, err := discoverCodebuddyModels(context.Background(), path)
+	catalog, err := discoverCodebuddyModels(context.Background(), Command{Path: path})
 	if err != nil {
 		t.Fatalf("discoverCodebuddyModels: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestDiscoverCodebuddyModelsACPEffort(t *testing.T) {
 	resetCodebuddyDiscoveryCaches(t)
 	path := writeCodebuddyACPStub(t, codebuddyACPSessionResult)
 
-	catalog, err := discoverCodebuddyModels(context.Background(), path)
+	catalog, err := discoverCodebuddyModels(context.Background(), Command{Path: path})
 	if err != nil {
 		t.Fatalf("discoverCodebuddyModels: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestDiscoverCodebuddyModelsFallsBackOnACPFailure(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resetCodebuddyDiscoveryCaches(t)
-			catalog, err := discoverCodebuddyModels(context.Background(), tc.path(t))
+			catalog, err := discoverCodebuddyModels(context.Background(), Command{Path: tc.path(t)})
 			if err != nil {
 				t.Fatalf("discoverCodebuddyModels: %v", err)
 			}

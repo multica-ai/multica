@@ -143,9 +143,12 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	grokArgs = append(grokArgs, filterCustomArgs(opts.CustomArgs, grokBlockedArgs, b.cfg.Logger)...)
 	grokArgs = append(grokArgs, "stdio")
 
-	cmd := exec.CommandContext(runCtx, execPath, grokArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, grokArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", grokArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(grokArgs,
+		trustAgentCommandPositional(1, "agent"),
+		trustAgentCommandPositional(len(grokArgs)-1, "stdio"),
+	))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -172,7 +175,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		return nil, fmt.Errorf("grok stderr pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start grok: %w", err)
 	}
@@ -256,6 +259,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			releaseProcessGroup(cmd)
 		}()
 
 		startTime := time.Now()

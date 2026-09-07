@@ -25,7 +25,7 @@ import type { LandingDict } from "../i18n";
 import { StatusIcon, PriorityIcon } from "@multica/views/issues/components";
 import { STATUS_CONFIG } from "@multica/core/issues/config/status";
 import { PRIORITY_CONFIG } from "@multica/core/issues/config/priority";
-import type { IssueStatus, IssuePriority } from "@multica/core/types";
+import type { IssueStatusCategory, IssuePriority } from "@multica/core/types";
 
 /* ------------------------------------------------------------------ */
 /*  Mock ActorAvatar — mirrors the real ActorAvatar styling exactly     */
@@ -137,11 +137,11 @@ const allAssignees: Assignee[] = [
   { type: "agent", id: "tina", name: "Tina-dev" },
 ];
 
-const statusCycle: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done"];
+const statusCycle: IssueStatusCategory[] = ["backlog", "todo", "in_progress", "in_review", "done"];
 const priorityCycle: IssuePriority[] = ["none", "low", "medium", "high", "urgent"];
 
 function TeammatesVisual() {
-  const [status, setStatus] = useState<IssueStatus>("in_progress");
+  const [status, setStatus] = useState<IssueStatusCategory>("in_progress");
   const [priority, setPriority] = useState<IssuePriority>("medium");
   const [assignee, setAssignee] = useState<Assignee>(allAssignees[3]!); // Claude
   const [pickerOpen, setPickerOpen] = useState(true);
@@ -960,7 +960,7 @@ function RuntimesVisual() {
 function buildFeatures(t: LandingDict) {
   const keys = ["teammates", "autonomous", "skills", "runtimes"] as const;
   const visuals = [TeammatesVisual, AutonomousVisual, SkillsVisual, RuntimesVisual];
-  const bgImages = [undefined, "/images/feature-bg-2.jpg", "/images/feature-bg-3.jpg", "/images/feature-bg-4.jpg"];
+  const bgImages = [undefined, "/images/feature-bg-2.webp", "/images/feature-bg-3.webp", "/images/feature-bg-4.webp"];
 
   return keys.map((key, i) => ({
     ...t.features[key],
@@ -1060,7 +1060,7 @@ export function FeaturesSection() {
                   {feature.visual ? (
                     <div className="relative overflow-hidden rounded-sm">
                       <Image
-                        src={feature.bgImage ?? "/images/feature-bg.jpg"}
+                        src={feature.bgImage ?? "/images/feature-bg.webp"}
                         alt=""
                         fill
                         className="object-cover object-center"

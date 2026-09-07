@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"sync"
 	"testing"
 
@@ -16,6 +17,58 @@ type fakeBroadcaster struct {
 	workspaceCalls  []workspaceCall
 	userCalls       []userCall
 	broadcastCalled int
+}
+
+func TestRegisterListeners_ChatSessionCreatedGoesOnlyToCreator(t *testing.T) {
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	registerListeners(bus, fb)
+
+	bus.Publish(events.Event{
+		Type: protocol.EventChatSessionCreated, WorkspaceID: "ws-1",
+		ActorType: "member", ActorID: "creator-1", ChatSessionID: "chat-1",
+		Payload: protocol.ChatSessionCreatedPayload{
+			WorkspaceID: "ws-1", ChatSessionID: "chat-1", CreatorID: "creator-1",
+			Title: "private opening title",
+		},
+	})
+
+	if len(fb.workspaceCalls) != 0 {
+		t.Fatalf("private Chat create reached workspace fanout: %+v", fb.workspaceCalls)
+	}
+	if len(fb.userCalls) != 1 || fb.userCalls[0].userID != "creator-1" {
+		t.Fatalf("creator fanout = %+v, want creator-1 once", fb.userCalls)
+	}
+	var frame struct {
+		Payload protocol.ChatSessionCreatedPayload `json:"payload"`
+	}
+	if err := json.Unmarshal(fb.userCalls[0].msg, &frame); err != nil {
+		t.Fatalf("decode creator frame: %v", err)
+	}
+	if frame.Payload.WorkspaceID != "ws-1" || frame.Payload.ChatSessionID != "chat-1" {
+		t.Fatalf("creator payload = %+v", frame.Payload)
+	}
+}
+
+func TestRegisterListeners_ChatSessionTitleUpdateGoesOnlyToCreator(t *testing.T) {
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	registerListeners(bus, fb)
+
+	bus.Publish(events.Event{
+		Type: protocol.EventChatSessionUpdated, WorkspaceID: "ws-1",
+		ActorType: "member", ActorID: "creator-1", ChatSessionID: "chat-1",
+		Payload: protocol.ChatSessionUpdatedPayload{
+			ChatSessionID: "chat-1", Title: "private derived title",
+		},
+	})
+
+	if len(fb.workspaceCalls) != 0 {
+		t.Fatalf("private Chat title reached workspace fanout: %+v", fb.workspaceCalls)
+	}
+	if len(fb.userCalls) != 1 || fb.userCalls[0].userID != "creator-1" {
+		t.Fatalf("creator fanout = %+v, want creator-1 once", fb.userCalls)
+	}
 }
 
 type scopeCall struct {

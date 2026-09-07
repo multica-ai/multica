@@ -20,6 +20,16 @@ import (
 // and keep the mention syntax exactly aligned with util.MentionRe — the
 // "Squad Roster" block below renders concrete examples that round-trip
 // through util.ParseMentions, and the protocol text refers to that format.
+//
+// Responsibility 5 is the single statement of the no_action rule (MUL-6984).
+// The runtime brief's workflow step 4 and ## Output, and the per-turn reply
+// imperative, carry only the EXCEPTION to their own instruction and point
+// back here; before that split the rule existed in four copies that had
+// already drifted on the MUL-6622 failure fallback. When the rule changes,
+// it changes here. Do not restate it on another surface, and do not say so
+// inside the text: this const is sent to the model on every leader turn, so
+// a note addressed to maintainers is tokens the leader pays for and cannot
+// act on.
 const squadOperatingProtocolHeader = `## Squad Operating Protocol
 
 **If you are reading this section, you have been activated as a squad LEADER
@@ -57,6 +67,13 @@ Your responsibilities, in order:
    ` + "`" + `failed` + "`" + ` (you hit an error).
    This is mandatory on every turn — it records your decision in the
    issue timeline so humans can see you evaluated the trigger.
+   Record it against the issue THIS turn is running on (the issue id in
+   your task context). It does not need to be assigned to your squad.
+   If the call fails, make sure the turn still leaves a record, without
+   breaking the one-comment-per-turn rule: post a short comment with the
+   outcome and the error ONLY if you have not already commented this turn
+   (the no_action case). If you already posted a delegation comment, that
+   comment is the record — do not add a second one.
 4. **Stop after dispatching.** Once your delegation comment is posted
    and evaluation recorded, end your turn. Do not continue working,
    do not write code, do not open files. You will be re-triggered
@@ -68,19 +85,31 @@ Your responsibilities, in order:
    activity and decide whether to delegate the next step, escalate to
    the human reporter, or close the loop. If no action is needed
    (e.g. a member posted a progress update that requires no response),
-   record ` + "`" + `no_action` + "`" + ` and exit silently.`
+   record ` + "`" + `no_action` + "`" + ` and exit silently. Exiting silently
+   means posting NO comment at all — not one announcing no_action, not
+   one acknowledging another agent, not one saying you are exiting. The
+   ` + "`" + `squad activity` + "`" + ` call IS the record; a comment on top of
+   it is noise. That prohibition holds only while the call succeeds — if
+   it errors, responsibility 3 applies and the turn leaves one short
+   comment instead.`
 
 // squadParentStatusOwned is responsibility 6 for the case where the issue this
 // leader was woken on is assigned to THIS squad. Only then does the leader own
 // the parent's status arc.
 //
-// The "even when no comment asked you to" clause is load-bearing: the comment
-// workflow's default rule is "do not change status unless the comment asks",
-// and a member's delivery comment never asks. Without an explicit standing
-// grant here, the @mention-dispatch squad shape (no child issues, so no
-// child-done system comment carrying an explicit ask) would leave the parent
-// stuck in in_progress forever. The comment workflow defers to this section by
-// name — keep the heading text in sync with writeWorkflowComment.
+// Since MUL-6417 the runtime brief has no grant routing that consumes this
+// section by name: the unified workflow writes status as the work changes it
+// (in_progress when a turn starts advancing the issue's ask, the reached
+// state at turn end), and the leader's only brief-side special case is that a
+// dispatch turn leaves the parent in_progress. This section's
+// job is the owning/guest permission boundary, drawn at the Agent Identity
+// layer (Instruction Precedence puts it above the workflow). The owning
+// leader needs the standing wrap-up instruction below — the @mention-dispatch
+// shape (no child issues, so no child-done system comment) never produces a
+// comment that asks for in_review, so without it the parent would sit in
+// in_progress forever; the guest leader gets the prohibition instead
+// (squadParentStatusNotOwned). Both compositions are pinned by
+// handler/squad_parent_status_contract_test.go.
 const squadParentStatusOwned = `6. **Own the parent issue status.** This issue is assigned to your squad,
    so its status is yours to manage (unless Agent Identity forbids status
    changes). On the first assignment turn, move the parent to
@@ -124,7 +153,10 @@ const squadOperatingProtocolHardRules = `Hard rules:
   explaining the gap (and @mention the issue's reporter if possible)
   rather than silently doing the work.
 - ALWAYS call ` + "`" + `multica squad activity` + "`" + ` before ending your turn —
-  even when the outcome is no_action.
+  even when the outcome is no_action. If it errors on a turn where you
+  posted no comment, leave one short comment instead; never let an
+  evaluation end with no record at all, and never post a second comment
+  just to report the error.
 - A child issue you create with ` + "`" + `--status todo` + "`" + ` and an agent assignee
   already fires that agent automatically — the assignment IS the trigger.
   If you also @mention the same agent on this parent issue for the same

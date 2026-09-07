@@ -348,7 +348,7 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 }
 
 func (s *S3Storage) UploadStream(ctx context.Context, key string, data io.Reader, sizeBytes int64, contentType string, filename string) (string, error) {
-	if sizeBytes <= 0 {
+	if sizeBytes < 0 {
 		return "", fmt.Errorf("s3 PutObject: content length is required for streaming upload")
 	}
 	input := &s3.PutObjectInput{

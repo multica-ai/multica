@@ -10,7 +10,8 @@
 --
 -- Nullable and write-once per row: set only when a run abandons a session it
 -- was told to resume. NULL — the overwhelming majority of rows — means nothing
--- was retired. No index: every reader already scopes by (agent_id, issue_id)
--- or chat_session_id, both of which are indexed, and the retired set within a
--- scope is tiny.
+-- was retired. No index was added in this migration: every reader at the time
+-- scoped by (agent_id, issue_id) or chat_session_id, and the retired set within
+-- a scope was tiny. Migrations 349/350 later added terminal-resume and retired-
+-- session indexes after production history made that assumption too costly.
 ALTER TABLE agent_task_queue ADD COLUMN IF NOT EXISTS retired_session_id TEXT;

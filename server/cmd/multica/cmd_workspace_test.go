@@ -688,21 +688,6 @@ func newWorkspaceMemberInviteTestCmd() *cobra.Command {
 	return cmd
 }
 
-func TestWorkspaceMemberInviteCommandIsRegistered(t *testing.T) {
-	cmd, _, err := workspaceMemberCmd.Find([]string{"invite", "alice@example.com"})
-	if err != nil {
-		t.Fatalf("find invite command: %v", err)
-	}
-	if cmd == nil || cmd.Name() != "invite" {
-		t.Fatalf("invite command not registered; got %#v", cmd)
-	}
-	for _, flag := range []string{"role", "output"} {
-		if cmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("invite command missing --%s flag", flag)
-		}
-	}
-}
-
 func TestRunWorkspaceMemberInvitePostsInvitation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")

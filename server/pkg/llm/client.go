@@ -1,8 +1,59 @@
 // Package llm is a thin, reusable wrapper around the official OpenAI Go SDK
 // (github.com/openai/openai-go). It exists so the rest of the server has a
 // single, well-typed entry point for "just call an LLM" needs that do NOT
-// require the full agent runtime — e.g. generating a chat title or drafting a
-// quick-create issue (MUL-4238).
+// require the full agent runtime — currently chat auto-titling and chat
+// follow-up questions (MUL-4238).
+//
+// # Scope: the assist layer, not every model call in the product
+//
+// This package covers the LLM calls the API process makes on its own behalf.
+// Running an agent is a different data path entirely: the daemon executes an
+// AI coding tool as a subprocess under that tool's own credentials, and does
+// not forward this layer's MULTICA_LLM_* settings to it. (It does inject the
+// task-scoped Multica connection variables the agent itself needs — see
+// mergeEnv in pkg/agent, which drops the daemon's inherited MULTICA_* and then
+// appends the values assembled for that task.) Nothing here governs that path,
+// and operator-facing copy about this layer must not imply otherwise — an
+// admin who reads "empty means nothing is sent" as covering the whole product
+// has been misled about where their chat content goes.
+//
+// # The single-entry-point rule
+//
+// Every LLM call the server process makes on its own behalf goes through this
+// package, and nothing outside it imports the OpenAI SDK directly. That is a
+// constraint to keep, not a coincidence: it is what makes "what does this
+// deployment's assist layer send to a third party?" answerable by reading one
+// package instead of auditing the tree. A new feature that wants a model calls
+// this package. Two tests hold the halves of that rule:
+// TestOpenAISDKIsImportedOnlyByThisPackage (nothing else reaches the SDK) and
+// TestDocumentedConsumersAreTheOnlyCallers (nothing else reaches this client).
+//
+// # Consumers, and what they send upstream
+//
+// Keep this list current when a consumer is added, removed, or changes what it
+// sends — it is the source the operator-facing copy is written from
+// (.env.example and apps/docs/content/docs/environment-variables*.mdx), and
+// TestDocumentedConsumersAreTheOnlyCallers fails until a new call site is
+// reflected here.
+//
+//   - Chat auto-titling — server/internal/handler/chat_title.go. Sends the
+//     first user message of a new chat session, verbatim and uncapped.
+//     Attachments are never included.
+//   - Chat follow-up questions, a.k.a. quick actions —
+//     server/internal/service/chat_quick_actions_generate.go.
+//     Sends the tail of the conversation: up to 6 messages, the reply being
+//     answered capped at 3000 runes (2000 head + 1000 tail) and each older
+//     message at 800.
+//
+// Both consumers send private chat content, which is why an unconfigured
+// deployment making zero upstream requests is a contract rather than a side
+// effect: New with no API key and no base URL returns a disabled client whose
+// every call fails with ErrNotConfigured before an HTTP request is ever built,
+// and both consumers check Enabled() before doing any work
+// (TestUnconfiguredClientMakesZeroUpstreamRequests). An operator who must not
+// let THIS layer send chat content leaves MULTICA_LLM_API_KEY and
+// MULTICA_LLM_BASE_URL empty; the product stays whole (client-derived chat
+// titles, no follow-up question buttons).
 //
 // The wrapper is intentionally small:
 //
@@ -23,6 +74,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -63,12 +115,101 @@ type Config struct {
 	// DefaultModel is used when a request omits the model. Maps to
 	// MULTICA_LLM_DEFAULT_MODEL. When empty, FallbackModel is used.
 	DefaultModel string
-	// MaxRetries overrides the SDK default (2). A negative value is treated as
-	// zero (no retries).
-	MaxRetries int
+	// MaxRetries is the transport-level retry budget applied to every request
+	// this client makes. Maps to MULTICA_LLM_MAX_RETRIES. Build one with
+	// Retries; nil means unset, and DefaultMaxRetries applies.
+	//
+	//   - nil            — unset; DefaultMaxRetries applies.
+	//   - Retries(0)     — retries disabled; exactly one upstream request.
+	//   - Retries(N)     — at most N retries, so at most N+1 upstream requests.
+	//
+	// It is a pointer to a validated type rather than a bare int for two
+	// reasons (MUL-6364). A bare int made 0 indistinguishable from the zero
+	// value, so asking for no retries silently produced the SDK default
+	// instead; and it let a negative — which option.WithMaxRetries panics on —
+	// reach this layer, where the only options were to panic or to quietly
+	// substitute some other budget. Retries is the sole constructor and rejects
+	// negatives, so neither state is representable here at all.
+	//
+	// What this budget retries is decided by the SDK: connection-level failures
+	// (no response at all), HTTP 408, 409, 429 and any 5xx, plus any response
+	// carrying `x-should-retry: true`. Every other 4xx — 400, 401, 403, 404 —
+	// is returned to the caller unretried. Backoff starts at 0.5s and doubles
+	// to an 8s cap with up to 25% jitter subtracted, unless the response
+	// carries a Retry-After header, which wins.
+	//
+	// It is NOT the parameter-compatibility retry inside GenerateJSON (which is
+	// independent and bounded separately), and it does not cover a stream that
+	// breaks after ChatStream has already returned. Choose a value against the
+	// caller's own deadline: backoff alone costs ~1.5s at 2 retries and ~21s at
+	// 6, so a budget larger than the caller's timeout only converts a
+	// recoverable failure into a deadline-exceeded one.
+	MaxRetries *RetryOverride
 	// HTTPClient, when set, replaces the SDK's default transport. Primarily a
 	// test seam.
 	HTTPClient option.HTTPClient
+}
+
+// DefaultMaxRetries is the retry budget used when Config.MaxRetries is unset.
+// It mirrors the openai-go default at the version we pin, but New always passes
+// it explicitly so the effective policy is ours to report and can never drift
+// silently with an SDK bump.
+const DefaultMaxRetries = 2
+
+// RetryOverride is a validated retry budget for Config.MaxRetries. Its only
+// field is unexported and Retries is its only constructor, so an invalid budget
+// cannot be represented at this boundary — New therefore has no correction
+// branch to take, and needs none. #7154 asked that invalid values fail
+// validation rather than be silently coerced; making them unbuildable is the
+// strongest available form of that.
+type RetryOverride struct{ n int }
+
+// Retries returns an override of at most n retries per call. It rejects a
+// negative n instead of correcting it: option.WithMaxRetries panics on one, and
+// there is no honest correction to make — "fewer than zero retries" is a
+// mistake, not a request to disable them. Retries(0) is how you disable them.
+func Retries(n int) (*RetryOverride, error) {
+	if n < 0 {
+		return nil, fmt.Errorf("llm: max retries must not be negative, got %d (use 0 to disable retries)", n)
+	}
+	return &RetryOverride{n: n}, nil
+}
+
+// Value reports the configured budget. The zero value of RetryOverride reports
+// 0, which is consistent: an override that was never built through Retries
+// carries no retries either.
+func (r *RetryOverride) Value() int {
+	if r == nil {
+		return 0
+	}
+	return r.n
+}
+
+// Retry policy sources, as reported by RetryBudget.Source.
+const (
+	// RetrySourceDefault means Config.MaxRetries was unset.
+	RetrySourceDefault = "default"
+	// RetrySourceConfig means Config.MaxRetries was set explicitly, including
+	// an explicit 0.
+	RetrySourceConfig = "config"
+)
+
+// RetryBudget describes a Client's effective transport retry policy. It exists
+// so a deployment can report what it will actually do rather than re-derive it
+// from raw configuration — re-deriving is how the unset-versus-zero ambiguity
+// went unnoticed in the first place. Every field is a scalar or a fixed enum,
+// so logging the whole struct can never leak an API key or a gateway URL.
+type RetryBudget struct {
+	// MaxRetries is the ceiling on retries after a failed request, so N means
+	// at most N+1 upstream requests per call. Only retryable failures consume
+	// it; a success or the caller's deadline can end the call sooner.
+	MaxRetries int
+	// Source is RetrySourceDefault or RetrySourceConfig.
+	Source string
+	// RequestTimeout bounds the whole non-streaming call chain, retries and
+	// backoff included, when the caller's context has no earlier deadline of
+	// its own. Every current internal caller sets a tighter one.
+	RequestTimeout time.Duration
 }
 
 // Client is a configured, reusable LLM caller. It is safe for concurrent use;
@@ -77,6 +218,7 @@ type Client struct {
 	sdk          openai.Client
 	defaultModel string
 	enabled      bool
+	retry        RetryBudget
 }
 
 // New builds a Client from cfg. It never returns an error: an unconfigured
@@ -91,13 +233,21 @@ func New(cfg Config) *Client {
 	if base := strings.TrimSpace(cfg.BaseURL); base != "" {
 		opts = append(opts, option.WithBaseURL(base))
 	}
-	if cfg.MaxRetries != 0 {
-		retries := cfg.MaxRetries
-		if retries < 0 {
-			retries = 0
-		}
-		opts = append(opts, option.WithMaxRetries(retries))
+	retry := RetryBudget{
+		MaxRetries:     DefaultMaxRetries,
+		Source:         RetrySourceDefault,
+		RequestTimeout: defaultRequestTimeout,
 	}
+	if cfg.MaxRetries != nil {
+		// No validation and no clamping here on purpose: RetryOverride can only
+		// hold a value Retries already accepted, so there is no invalid budget
+		// left for this layer to silently correct.
+		retry.MaxRetries = cfg.MaxRetries.Value()
+		retry.Source = RetrySourceConfig
+	}
+	// Always set it explicitly, even for the default, so the budget the SDK
+	// enforces and the one RetryBudget reports are the same number.
+	opts = append(opts, option.WithMaxRetries(retry.MaxRetries))
 	if cfg.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
@@ -113,7 +263,17 @@ func New(cfg Config) *Client {
 		// A deployment is "configured" if it gave us either a key or a base
 		// URL. A bare base URL (no key) is valid for keyless local gateways.
 		enabled: strings.TrimSpace(cfg.APIKey) != "" || strings.TrimSpace(cfg.BaseURL) != "",
+		retry:   retry,
 	}
+}
+
+// RetryBudget returns the effective transport retry policy, for startup
+// diagnostics. Safe to log whole: it carries no credentials or URLs.
+func (c *Client) RetryBudget() RetryBudget {
+	if c == nil {
+		return RetryBudget{}
+	}
+	return c.retry
 }
 
 // Enabled reports whether the client was given any credentials or base URL.
@@ -154,6 +314,10 @@ func (c *Client) Chat(ctx context.Context, params openai.ChatCompletionNewParams
 //
 // Unlike Chat, no default timeout is imposed: the stream's lifetime is owned by
 // the caller (typically an HTTP handler bound to the client connection).
+//
+// Config.MaxRetries covers only the POST that opens the stream. Once this
+// returns, a stream that breaks mid-response is the caller's to handle: the SDK
+// cannot replay chunks it has already delivered.
 func (c *Client) ChatStream(ctx context.Context, params openai.ChatCompletionNewParams) (*ssestream.Stream[openai.ChatCompletionChunk], error) {
 	if !c.Enabled() {
 		return nil, ErrNotConfigured
@@ -257,6 +421,13 @@ func (c *Client) GenerateJSON(ctx context.Context, model, systemPrompt, userProm
 	// modern fields. Negotiate only when the upstream explicitly identifies an
 	// unsupported parameter: validation fails before generation, and each field
 	// can be removed or replaced at most once under the shared deadline.
+	//
+	// This loop is a parameter-compatibility negotiation, NOT an error retry,
+	// and it is deliberately independent of Config.MaxRetries: it fires only on
+	// a 400 the SDK never retries, and its bound stays 2 whatever the transport
+	// budget is. The two do compose, though — each attempt below carries its own
+	// transport budget, so one call can cost up to two negotiation requests plus
+	// MaxRetries+1 on the final attempt.
 	var completion *openai.ChatCompletion
 	for compatibilityRetries := 0; ; compatibilityRetries++ {
 		var err error

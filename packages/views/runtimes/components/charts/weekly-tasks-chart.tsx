@@ -12,7 +12,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@multica/ui/components/ui/chart";
-import { useT } from "../../../i18n";
+import { useLocale, useT } from "../../../i18n";
 
 // Weekly counterpart of DailyTasksChart — same completed/cancelled/failed
 // stacked bar, but each bar groups a Mon–Sun calendar week. Partial-week
@@ -39,6 +39,7 @@ export interface WeeklyTasksData {
 export function WeeklyTasksChart({ data }: { data: WeeklyTasksData[] }) {
   const { t } = useT("usage");
   const { t: tRuntimes } = useT("runtimes");
+  const locale = useLocale();
   return (
     <ChartContainer
       config={weeklyTasksChartConfig}
@@ -86,7 +87,7 @@ export function WeeklyTasksChart({ data }: { data: WeeklyTasksData[] }) {
                   <div className="flex items-center justify-between gap-2 font-medium">
                     <span>{tRuntimes(($) => $.charts.tooltip_total)}</span>
                     <span className="font-mono tabular-nums">
-                      {total.toLocaleString()}
+                      {total.toLocaleString(locale)}
                     </span>
                   </div>
                 );

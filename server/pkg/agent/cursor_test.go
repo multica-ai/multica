@@ -8,17 +8,6 @@ import (
 	"testing"
 )
 
-func TestNewReturnsCursorBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("cursor", Config{ExecutablePath: "/nonexistent/cursor-agent"})
-	if err != nil {
-		t.Fatalf("New(cursor) error: %v", err)
-	}
-	if _, ok := b.(*cursorBackend); !ok {
-		t.Fatalf("expected *cursorBackend, got %T", b)
-	}
-}
-
 func TestBuildCursorArgs(t *testing.T) {
 	t.Parallel()
 

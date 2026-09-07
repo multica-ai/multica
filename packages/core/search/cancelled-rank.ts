@@ -20,6 +20,7 @@
  */
 
 import type { SearchIssueResult, SearchProjectResult } from "../types/api";
+import { issueBehavesAs } from "../issues/status-category";
 
 /**
  * Mirrors the server's identifier pattern (parseQueryNumber in
@@ -153,7 +154,9 @@ export function partitionAggregatedSearchResults({
 }): AggregatedSearchPartition {
   const issueParts = partitionStable(
     issues,
-    (issue) => issue.status === "cancelled" && !isIssueDirectHit(issue, query),
+    // By CATEGORY: a custom status in the cancelled category is cancelled
+    // work and has to sink the same way. (MUL-6243)
+    (issue) => issueBehavesAs(issue, "cancelled") && !isIssueDirectHit(issue, query),
   );
   const projectParts = partitionStable(
     projects,

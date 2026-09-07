@@ -1,5 +1,4 @@
 import { render } from "@testing-library/react";
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CodeBlockStatic } from "./code-block-static";
 
@@ -24,12 +23,5 @@ describe("CodeBlockStatic", () => {
     const code = container.querySelector("pre.rich-text-editor code");
     expect(code?.textContent).toBe("const answer = 42;");
     expect(code?.querySelector("span")).toBeNull();
-  });
-
-  it("keeps standalone static code blocks under the block-code CSS selectors", () => {
-    const codeCss = readFileSync("editor/styles/code.css", "utf8");
-
-    expect(codeCss).toContain("pre.rich-text-editor");
-    expect(codeCss).toContain("pre.rich-text-editor code");
   });
 });

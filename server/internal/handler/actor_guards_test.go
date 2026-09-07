@@ -133,7 +133,6 @@ func TestRequireHumanActor_IgnoresUnknownActorSource(t *testing.T) {
 	}
 }
 
-
 // TestRequireHumanActor_AppliedViaChiRouterUse pins the wiring side of
 // the contract: when the guard is attached to a chi route group via
 // r.Use, every endpoint in that group is protected, and a task-token

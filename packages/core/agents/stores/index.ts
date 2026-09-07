@@ -13,7 +13,6 @@ export {
 } from "./view-store";
 export {
   useTranscriptViewStore,
-  type TranscriptDetailDensity,
   type TranscriptFilterKey,
   type TranscriptSortDirection,
 } from "./transcript-view-store";

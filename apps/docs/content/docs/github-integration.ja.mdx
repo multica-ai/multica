@@ -1,11 +1,11 @@
 ---
 title: GitHub 連携
-description: pull request を Multica のイシューに紐づけ、開発の進捗をイシューから確認します。
+description: pull request を Multica のタスクに紐づけ、開発の進捗をタスクから確認します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-GitHub を接続すると、Multica はイシュー番号を使って pull request を自動的に紐づけます。イシューの詳細画面から、PR の状態、変更規模、CI の結果、マージ競合を直接確認できます。
+GitHub を接続すると、Multica はタスク番号を使って pull request を自動的に紐づけます。タスクの詳細画面から、PR の状態、変更規模、CI の結果、マージ競合を直接確認できます。
 
 GitHub 連携が読み取るのは、インストール時に許可されたリポジトリだけです。コード、コメント、status check を書き込むことはありません。
 
@@ -24,7 +24,7 @@ GitHub 連携が読み取るのは、インストール時に許可されたリ�
 接続状態は同じページに表示されます。通常のメンバーは状態を確認できますが、接続、切断、スイッチの変更はできません。
 
 <Callout type="info">
-**GitHub 接続**は、Multica がどのリポジトリから PR イベントを受け取るかを決めます。**コードリポジトリ**設定は、エージェントがタスクを実行するときに選べるリポジトリを決めます。用途が異なるため、それぞれ設定する必要があります。
+**GitHub 接続**は、Multica がどのリポジトリから PR イベントを受け取るかを決めます。**コードリポジトリ**設定は、エージェントが作業を実行するときに選べるリポジトリを決めます。用途が異なるため、それぞれ設定する必要があります。
 </Callout>
 
 ## 機能スイッチ
@@ -34,15 +34,15 @@ GitHub 連携が読み取るのは、インストール時に許可されたリ�
 | スイッチ | 機能 |
 |---|---|
 | GitHub 連携 | メインスイッチ。無効にすると下の 3 項目は機能しなくなりますが、GitHub App の接続は解除されません。 |
-| PR サイドバー | 紐づいた pull request をイシューの詳細画面に表示します。 |
+| PR サイドバー | 紐づいた pull request をタスクの詳細画面に表示します。 |
 | Co-authored-by | エージェントが作成する commit に `Co-authored-by: multica-agent <github@multica.ai>` を追加します。 |
-| PR の自動紐づけ | PR のブランチ名、タイトル、本文からイシュー番号を検出します。 |
+| PR の自動紐づけ | PR のブランチ名、タイトル、本文からタスク番号を検出します。 |
 | **PR カード → CI とマージ可否** | 紐づいた各 PR について、Multica は認証済みの GitHub API スナップショットを取得し、その **CI ステータス**と**マージ可否**をカードにミラーリングします（下記の **PR カードに表示される内容** を参照）。 |
 
 
-## PR をイシューに紐づける
+## PR をタスクに紐づける
 
-最も簡単な方法は、イシュー番号をブランチ名または PR タイトルへ入れることです。イシューが `MUL-123` の場合:
+最も簡単な方法は、タスク番号をブランチ名または PR タイトルへ入れることです。タスクが `MUL-123` の場合:
 
 ```text
 mul-123-fix-login-redirect
@@ -52,9 +52,9 @@ mul-123-fix-login-redirect
 MUL-123 ログイン後のリダイレクトを修正
 ```
 
-Multica は大文字と小文字を区別せず、現在のワークスペースのイシュー接頭辞だけを照合します。1 つの PR を複数のイシューに紐づけることもできます。
+Multica は大文字と小文字を区別せず、現在のワークスペースのタスク接頭辞だけを照合します。1 つの PR を複数のタスクに紐づけることもできます。
 
-イシュー番号を PR 本文だけに書く場合は、GitHub の closing keyword を使ってください。
+タスク番号を PR 本文だけに書く場合は、GitHub の closing keyword を使ってください。
 
 ```text
 Closes MUL-123
@@ -62,11 +62,11 @@ Fixes MUL-123
 Resolves MUL-123
 ```
 
-本文に `Related to MUL-123` のような通常の参照を書いただけでは、そのイシューの作業 PR として表示されません。Commit message と PR コメントも紐づけの対象外です。
+本文に `Related to MUL-123` のような通常の参照を書いただけでは、そのタスクの作業 PR として表示されません。Commit message と PR コメントも紐づけの対象外です。
 
-## イシューから PR を確認する
+## タスクから PR を確認する
 
-紐づけが完了すると、PR がイシュー詳細の **Pull requests** セクションに表示されます。各項目には次の情報が含まれます。
+紐づけが完了すると、PR がタスク詳細の **Pull requests** セクションに表示されます。各項目には次の情報が含まれます。
 
 - リポジトリ、番号、タイトル、作成者
 - `Open`、`Draft`、`Merged`、`Closed` の状態
@@ -80,21 +80,21 @@ CI の状態とマージ可能性は、Multica が GitHub API から取得した
 
 ## PR のマージで Done になる条件
 
-PR がマージされても、必ずしもイシューが完了するわけではありません。Multica がイシューを `Done` に変更するのは、次の条件をすべて満たす場合だけです。
+PR がマージされても、必ずしもタスクが完了するわけではありません。Multica がタスクを `Done` に変更するのは、次の条件をすべて満たす場合だけです。
 
-1. 紐づいたマージ済み PR のうち少なくとも 1 つで、`Closes MUL-123` のように closing keyword の直後にイシュー番号を指定している。`Closes login MUL-123` のように間に別の単語がある形式は無効です。
-2. そのイシューに、`Open` または `Draft` の作業 PR がほかに残っていない。本文中の通常の参照は作業 PR に含みません。
-3. イシューの現在の状態が `done` または `cancelled` ではない。
+1. 紐づいたマージ済み PR のうち少なくとも 1 つで、`Closes MUL-123` のように closing keyword の直後にタスク番号を指定している。`Closes login MUL-123` のように間に別の単語がある形式は無効です。
+2. そのタスクに、`Open` または `Draft` の作業 PR がほかに残っていない。本文中の通常の参照は作業 PR に含みません。
+3. タスクの現在の状態が `done` または `cancelled` ではない。
 
-そのため、ブランチ名やタイトルに `MUL-123` を含めるだけで紐づけは作成されますが、それだけではイシューを完了にしません。PR をマージせずにクローズした場合も、イシューは完了しません。
+そのため、ブランチ名やタイトルに `MUL-123` を含めるだけで紐づけは作成されますが、それだけではタスクを完了にしません。PR をマージせずにクローズした場合も、タスクは完了しません。
 
-状態の変更はシステム操作としてタイムラインに記録され、そのイシューを購読しているメンバーへ通知されます。
+状態の変更はシステム操作としてタイムラインに記録され、そのタスクを購読しているメンバーへ通知されます。
 
 ## 複数のワークスペース
 
-同じ GitHub App installation を複数の Multica ワークスペースへ接続できます。GitHub イベントは各ワークスペースにそれぞれ送られ、各ワークスペースのイシュー接頭辞に従って照合されます。
+同じ GitHub App installation を複数の Multica ワークスペースへ接続できます。GitHub イベントは各ワークスペースにそれぞれ送られ、各ワークスペースのタスク接頭辞に従って照合されます。
 
-たとえば、1 つの PR が `MUL-1` と `ENG-2` の両方を参照している場合、異なる接頭辞を持つ 2 つのワークスペースでそれぞれ紐づけられます。ワークスペース間で相手のイシューが見えることはありません。
+たとえば、1 つの PR が `MUL-1` と `ENG-2` の両方を参照している場合、異なる接頭辞を持つ 2 つのワークスペースでそれぞれ紐づけられます。ワークスペース間で相手のタスクが見えることはありません。
 
 ## 接続を解除する
 
@@ -123,6 +123,7 @@ Repository permissions:
 | 権限 | レベル |
 |---|---|
 | Metadata | Read-only |
+| Contents | Read-only。PR スナップショットのクエリが head commit・マージ可否・CI ロールアップをまとめて読み取るために必要 |
 | Pull requests | Read-only |
 | Checks | Read-only。CI の状態表示に使用 |
 | Commit statuses | Read-only。legacy status 形式の CI 集計に使用 |
@@ -132,7 +133,7 @@ Repository permissions:
 - **Pull request**
 - **Check suite**、**Check run**、**Status**。CI とマージ可能性を更新するために使用します。
 
-Multica で CI を表示しない場合は、Checks と Commit statuses の権限、および関連イベントの購読を省略できます。
+Multica で CI を表示しない場合は、Checks と Commit statuses の権限、および関連イベントの購読を省略できます。ただし Contents は必須です。付与しないとスナップショットのクエリ自体が失敗し、PR カードからマージ状態も消えます。
 
 <Callout type="warning">
 必要なのは **Webhook secret** であり、OAuth Client secret ではありません。GitHub と Multica に入力した Webhook secret が異なる場合、GitHub delivery は `401 invalid signature` を返します。
@@ -157,7 +158,7 @@ GITHUB_APP_ID=<numeric GitHub App ID>
 GITHUB_APP_PRIVATE_KEY=<complete PEM private key, including BEGIN/END lines and newlines>
 ```
 
-秘密鍵は GitHub App の **Private keys → Generate a private key** から生成します。設定しない場合も連携は安全に縮退します。PR のミラー、イシューの自動紐づけ、マージ時の Done への変更は動作しますが、PR カードに CI やマージ状態は表示されません。
+秘密鍵は GitHub App の **Private keys → Generate a private key** から生成します。設定しない場合も連携は安全に縮退します。PR のミラー、タスクの自動紐づけ、マージ時の Done への変更は動作しますが、PR カードに CI やマージ状態は表示されません。
 
 ### 3. データベースを更新して接続する
 
@@ -175,11 +176,11 @@ API サービスを再起動し、**設定 → GitHub** から接続します。
 - **Webhook が 401 を返す**: GitHub App と API が同じ Webhook secret を使っていることを確認し、GitHub の **Recent Deliveries** から再配信します。
 - **PR が紐づかない**: リポジトリが App の許可範囲にあること、PR の自動紐づけが有効であること、番号が現在のワークスペースのものかを確認します。
 - **本文に番号を書いても表示されない**: `Closes MUL-123` を使うか、番号をブランチ名または PR タイトルに入れます。
-- **CI の状態がない**: `GITHUB_APP_ID` と `GITHUB_APP_PRIVATE_KEY` が設定済みで、App に Checks と Commit statuses の read-only 権限があり、関連イベントを購読していることを確認します。インストール済み App に権限を追加した場合は、各 installation の所有者が GitHub 上で承認するまで有効になりません。
-- **PR のマージ後もイシューが完了しない**: PR で closing keyword を使っていることと、`Open` または `Draft` の関連 PR がほかに残っていないことを確認します。
+- **CI の状態がない**: `GITHUB_APP_ID` と `GITHUB_APP_PRIVATE_KEY` が設定済みで、App に Contents、Checks、Commit statuses の read-only 権限があり、関連イベントを購読していることを確認します。Contents が欠けるとスナップショット全体が失敗し、PR カードには CI もマージ状態も表示されません。インストール済み App に権限を追加した場合は、各 installation の所有者が GitHub 上で承認するまで有効になりません。
+- **PR のマージ後もタスクが完了しない**: PR で closing keyword を使っていることと、`Open` または `Draft` の関連 PR がほかに残っていないことを確認します。
 
 ## 次のステップ
 
-- [イシュー](/issues) — 状態遷移と PR マージによる Done への変更
+- [タスク](/issues) — 状態遷移と PR マージによる Done への変更
 - [プロジェクトリソース](/project-resources) — エージェントが実行時に使えるリポジトリ
 - [環境変数](/environment-variables) — セルフホスト GitHub App の全設定

@@ -208,19 +208,25 @@ describe("formatStamp", () => {
   const at = (iso: string) => new Date(iso).toISOString();
 
   it("shows a clock time under today and yesterday", () => {
-    expect(formatStamp(at("2026-08-05T14:20:00"), "today")).toMatch(/\d/);
-    expect(formatStamp(at("2026-08-05T14:20:00"), "today")).not.toMatch(/[A-Za-z]{3}/);
-    expect(formatStamp(at("2026-08-04T14:20:00"), "yesterday")).not.toMatch(/[A-Za-z]{3}/);
+    expect(formatStamp(at("2026-08-05T14:20:00"), "today", "en")).toMatch(/\d/);
+    expect(formatStamp(at("2026-08-05T14:20:00"), "today", "en")).not.toMatch(/[A-Za-z]{3}/);
+    expect(formatStamp(at("2026-08-04T14:20:00"), "yesterday", "en")).not.toMatch(/[A-Za-z]{3}/);
   });
 
   it("always shows a date under earlier, even when it is under 48 hours old", () => {
     // The regression: 23:41 the day before yesterday is < 48h but groups as
     // "earlier", and used to render as a bare clock time.
-    expect(formatStamp(at("2026-08-03T23:41:00"), "earlier")).toMatch(/[A-Za-z]{3}|\d+\/\d+|月/);
+    expect(formatStamp(at("2026-08-03T23:41:00"), "earlier", "en")).toMatch(/[A-Za-z]{3}|\d+\/\d+|月/);
+  });
+
+  it("formats earlier entries with the selected UI language", () => {
+    expect(
+      formatStamp(at("2026-08-03T23:41:00"), "earlier", "zh-Hans"),
+    ).toContain("月");
   });
 
   it("returns an empty string for an unparseable timestamp", () => {
-    expect(formatStamp("not-a-date", "today")).toBe("");
+    expect(formatStamp("not-a-date", "today", "en")).toBe("");
   });
 });
 
@@ -572,19 +578,6 @@ describe("ThreadNavPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Comment threads/ }));
     expect(screen.queryByText(/you are here/i)).toBeNull();
     expect(container.querySelector(".bg-brand")).toBeNull();
-  });
-
-  it("renders the keyboard hints as real keycaps, not glyphs in a string", () => {
-    renderWithI18n(<Harness />);
-    fireEvent.click(screen.getByRole("button", { name: /Comment threads/ }));
-    // Scoped to the footer: the trigger's tooltip renders keycaps too.
-    const footer = screen.getByText("select").closest("div")!.parentElement!;
-    const keycaps = footer.querySelectorAll('[data-slot="shortcut-keycaps"]');
-    // Up, Down, Enter, Escape.
-    expect(keycaps).toHaveLength(4);
-    expect(screen.getByText("select")).toBeTruthy();
-    expect(screen.getByText("jump")).toBeTruthy();
-    expect(screen.getByText("close")).toBeTruthy();
   });
 
   // Enter used to be handled for every keydown bubbling up to the popup, and

@@ -185,19 +185,19 @@ func TestEnrichFreshSessionStripsCommandAndSetsFlag(t *testing.T) {
 	fake := newEnricherFake()
 	in := InboundMessage{
 		MessageType: "text",
-		Body:        "/new rebuild the plan",
-		CommandBody: "/new rebuild the plan",
+		Body:        "/clear rebuild the plan",
+		CommandBody: "/clear rebuild the plan",
 	}
 
 	out := enrich(t, fake, in, InboundEnricherConfig{})
 
 	if !out.ForceFreshSession {
-		t.Fatalf("ForceFreshSession should be true for /new")
+		t.Fatalf("ForceFreshSession should be true for /clear")
 	}
 	if out.Body != "rebuild the plan" {
 		t.Fatalf("Body should have directive stripped; got %q", out.Body)
 	}
-	if out.CommandBody != "/new rebuild the plan" {
+	if out.CommandBody != "/clear rebuild the plan" {
 		t.Fatalf("CommandBody should remain the original command source; got %q", out.CommandBody)
 	}
 }
@@ -211,15 +211,15 @@ func TestEnrichFreshSessionPreservesQuotedContext(t *testing.T) {
 	in := InboundMessage{
 		MessageType: "text",
 		MessageID:   "om_child",
-		Body:        "/new handle this independently",
-		CommandBody: "/new handle this independently",
+		Body:        "/clear handle this independently",
+		CommandBody: "/clear handle this independently",
 		ParentID:    "om_parent",
 	}
 
 	out := enrich(t, fake, in, InboundEnricherConfig{})
 
 	if !out.ForceFreshSession {
-		t.Fatalf("ForceFreshSession should be true for /new")
+		t.Fatalf("ForceFreshSession should be true for /clear")
 	}
 	if !strings.Contains(out.Body, `<quoted_message message_id="om_parent"`) {
 		t.Fatalf("quoted context should be preserved; body=%q", out.Body)
@@ -227,8 +227,62 @@ func TestEnrichFreshSessionPreservesQuotedContext(t *testing.T) {
 	if !strings.HasSuffix(out.Body, "handle this independently") {
 		t.Fatalf("directive should be stripped from user prose; body=%q", out.Body)
 	}
-	if strings.Contains(out.Body, "/new") {
+	if strings.Contains(out.Body, "/clear") {
 		t.Fatalf("stored/enriched body should not include the directive; body=%q", out.Body)
+	}
+}
+
+func TestEnrichNewChatExcludesAutomaticRecentContext(t *testing.T) {
+	t.Parallel()
+
+	fake := newEnricherFake()
+	fake.byChat["oc_group"] = []LarkMessage{textMsg("om_old", "ou_old", "previous chat context", "1")}
+	in := InboundMessage{
+		Body:           "/new start clean",
+		CommandBody:    "/new start clean",
+		ChatID:         "oc_group",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+	}
+
+	out := enrich(t, fake, in, InboundEnricherConfig{RecentContextSize: 10})
+
+	if out.Body != "start clean" {
+		t.Fatalf("Body = %q, want only the new Chat message", out.Body)
+	}
+	if len(fake.listCalls) != 0 {
+		t.Fatalf("recent-context list calls = %d, want 0", len(fake.listCalls))
+	}
+}
+
+func TestEnrichNewChatPreservesExplicitQuotedContext(t *testing.T) {
+	t.Parallel()
+
+	fake := newEnricherFake()
+	fake.byID["om_parent"] = []LarkMessage{textMsg("om_parent", "ou_parent", "explicit context", "1")}
+	in := InboundMessage{
+		Body:           "/new answer this",
+		CommandBody:    "/new answer this",
+		ChatID:         "oc_group",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ParentID:       "om_parent",
+	}
+
+	out := enrich(t, fake, in, InboundEnricherConfig{RecentContextSize: 10})
+
+	if !strings.Contains(out.Body, "explicit context") || !strings.Contains(out.Body, "answer this") {
+		t.Fatalf("Body = %q, want quoted context and command body", out.Body)
+	}
+	if strings.Contains(out.Body, "<recent_context") {
+		t.Fatalf("Body = %q, must not contain automatic recent context", out.Body)
+	}
+	if len(fake.listCalls) != 0 {
+		t.Fatalf("recent-context list calls = %d, want 0", len(fake.listCalls))
 	}
 }
 

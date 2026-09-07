@@ -1,5 +1,6 @@
 "use client";
 
+import { issueStatusCategory } from "@multica/core/issues";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
@@ -365,7 +366,11 @@ function PinRow({
     const label = issue.title;
     const iconNode = (
       /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
-      <StatusIcon status={issue.status} className="!size-3.5 shrink-0" />
+      <StatusIcon
+        status={issue.status}
+        category={issueStatusCategory(issue) ?? undefined}
+        className="!size-3.5 shrink-0"
+      />
     );
     return (
       <SortablePinItem

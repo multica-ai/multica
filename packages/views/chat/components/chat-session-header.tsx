@@ -28,6 +28,7 @@ import {
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession } from "@multica/core/types";
+import { isImeComposing } from "@multica/core/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
@@ -63,6 +64,11 @@ export function ChatSessionHeader({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [draft, setDraft] = useState(session.title ?? "");
   const inputRef = useRef<HTMLInputElement>(null);
+  const isComposingRef = useRef(false);
+  // A browser can blur the input before it emits compositionend. Remember
+  // that intent so the final composed value is committed, not the draft.
+  const commitAfterCompositionRef = useRef(false);
+  const blurCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const title = session.title?.trim() || t(($) => $.window.untitled);
 
@@ -73,14 +79,35 @@ export function ChatSessionHeader({
     }
   }, [editing]);
 
+  useEffect(
+    () => () => {
+      if (blurCommitTimeoutRef.current !== null) {
+        clearTimeout(blurCommitTimeoutRef.current);
+      }
+    },
+    [],
+  );
+
+  const clearPendingBlurCommit = () => {
+    if (blurCommitTimeoutRef.current === null) return;
+    clearTimeout(blurCommitTimeoutRef.current);
+    blurCommitTimeoutRef.current = null;
+  };
+
   const startRename = () => {
+    clearPendingBlurCommit();
+    isComposingRef.current = false;
+    commitAfterCompositionRef.current = false;
     setDraft(session.title ?? "");
     setEditing(true);
   };
 
-  const commitRename = () => {
+  const commitRename = (raw = draft) => {
+    clearPendingBlurCommit();
+    isComposingRef.current = false;
+    commitAfterCompositionRef.current = false;
     setEditing(false);
-    const trimmed = draft.trim();
+    const trimmed = raw.trim();
     if (!trimmed || trimmed === session.title) return;
     updateSession.mutate({ sessionId: session.id, title: trimmed });
   };
@@ -113,13 +140,50 @@ export function ChatSessionHeader({
             maxLength={200}
             aria-label={t(($) => $.header.rename)}
             onChange={(e) => setDraft(e.target.value)}
-            onBlur={commitRename}
+            onCompositionStart={() => {
+              isComposingRef.current = true;
+            }}
+            onCompositionEnd={(e) => {
+              isComposingRef.current = false;
+              if (!commitAfterCompositionRef.current) return;
+              commitRename(e.currentTarget.value);
+            }}
+            onBlur={(e) => {
+              if (isComposingRef.current) {
+                commitAfterCompositionRef.current = true;
+                const input = e.currentTarget;
+                // Let a compositionend queued by the same focus change win.
+                // If it never arrives, commit on the next task instead of
+                // leaving an unfocused editor open indefinitely.
+                clearPendingBlurCommit();
+                blurCommitTimeoutRef.current = setTimeout(() => {
+                  if (!commitAfterCompositionRef.current) return;
+                  // Without compositionend, the current DOM value is not
+                  // known to be final. Close without persisting a partial
+                  // composition instead of recreating the original bug.
+                  if (isComposingRef.current) {
+                    clearPendingBlurCommit();
+                    isComposingRef.current = false;
+                    commitAfterCompositionRef.current = false;
+                    setEditing(false);
+                    return;
+                  }
+                  commitRename(input.value);
+                }, 0);
+                return;
+              }
+              commitRename(e.currentTarget.value);
+            }}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
               if (e.key === "Enter") {
                 e.preventDefault();
                 commitRename();
               } else if (e.key === "Escape") {
                 e.preventDefault();
+                clearPendingBlurCommit();
+                isComposingRef.current = false;
+                commitAfterCompositionRef.current = false;
                 setEditing(false);
               }
             }}

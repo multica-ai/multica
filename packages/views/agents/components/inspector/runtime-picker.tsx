@@ -9,6 +9,7 @@ import {
   Lock,
   Monitor,
 } from "lucide-react";
+import { isRuntimeUsableForUser } from "@multica/core/runtimes";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
@@ -69,11 +70,11 @@ export function RuntimePicker({
 
   const selected = runtimes.find((r) => r.id === value) ?? null;
 
-  const isDisabled = (r: AgentRuntime): boolean => {
-    if (!currentUserId) return false;
-    if (r.owner_id === currentUserId) return false;
-    return r.visibility !== "public";
-  };
+  // Same predicate the create / duplicate / builder surfaces use, so a
+  // runtime this picker locks is exactly the one the API and CLI refuse
+  // (MUL-6126) — no workspace-role exception on either side.
+  const isDisabled = (r: AgentRuntime): boolean =>
+    !isRuntimeUsableForUser(r, currentUserId);
 
   // Machine grouping over the unfiltered list — resolves the selected
   // runtime's machine for the trigger label regardless of the Mine/All

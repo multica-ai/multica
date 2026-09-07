@@ -7,12 +7,30 @@ import { NavigationProvider } from "../../navigation";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enInbox from "../../locales/en/inbox.json";
 
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  // The catalog is server state; these suites render leaves without a
+  // QueryClientProvider, so it is stubbed like the other data hooks. Built-in
+  // keys are their own category, which is what this fixture asserts on.
+  useIssueStatuses: () => ({
+    statuses: [],
+    activeStatuses: [],
+    categoryOf: (key: string) => key,
+    labelOf: (key: string) => key,
+    entryOf: () => undefined,
+    inCategory: () => [],
+    isLoaded: true,
+  }),
+}));
+
 vi.mock("../../issues/components", () => ({ StatusIcon: () => null }));
 vi.mock("../../issues/components/issue-agent-activity-indicator", () => ({
   IssueAgentActivityIndicator: () => null,
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
-vi.mock("./inbox-detail-label", () => ({ InboxDetailLabel: () => null }));
+vi.mock("./inbox-detail-label", () => ({
+  InboxDetailLabel: () => null,
+  useTypeLabels: () => ({}),
+}));
 
 // Import after mocks.
 import { InboxContextMenuProvider } from "./inbox-context-menu";
@@ -49,6 +67,7 @@ const navigationAdapter = {
   back: vi.fn(),
   pathname: "/",
   searchParams: new URLSearchParams(),
+  hash: "",
   getShareableUrl: (p: string) => p,
   openInNewTab: vi.fn(),
 };

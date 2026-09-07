@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/slack-go/slack"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -18,7 +19,7 @@ type fakeReplySender struct {
 	calls int
 }
 
-func (f *fakeReplySender) Send(_ context.Context, out channel.OutboundMessage) (channel.SendResult, error) {
+func (f *fakeReplySender) SendWithMetadata(_ context.Context, out channel.OutboundMessage, _ slack.SlackMetadata) (channel.SendResult, error) {
 	f.calls++
 	cp := out
 	f.sent = &cp

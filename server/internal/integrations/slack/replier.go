@@ -34,6 +34,7 @@ const (
 	agentOfflineText  = "⚠️ The agent is offline right now. Your message was received and will be handled once it's back online."
 	agentArchivedText = "⚠️ This agent has been archived and can't respond. Please contact your workspace admin."
 	freshPendingText  = "✅ Fresh start ready. Your next chat message will run without previous context."
+	chatStartedText   = "✅ Started a new Multica chat. Your next message will enter it."
 	issueUsageText    = "Please include an issue title. Use:\n\n`/issue <title>`\n`[description]` (optional)"
 )
 
@@ -41,6 +42,10 @@ const (
 // *BindingTokenService satisfies it.
 type bindingMinter interface {
 	Mint(ctx context.Context, workspaceID, installationID pgtype.UUID, slackUserID string) (BindingToken, error)
+}
+
+type controlAckLedger interface {
+	RecordChannelOutboundMessage(ctx context.Context, arg db.RecordChannelOutboundMessageParams) error
 }
 
 // OutboundReplier implements engine.OutboundReplier for Slack.
@@ -51,6 +56,7 @@ type OutboundReplier struct {
 	appURL      string
 	bindingPath string
 	logger      *slog.Logger
+	ledger      controlAckLedger
 }
 
 // OutboundReplierConfig configures the replier. Binding + AppURL are required
@@ -69,6 +75,7 @@ type OutboundReplierConfig struct {
 	AppURL      string
 	BindingPath string // default "/slack/bind"
 	Logger      *slog.Logger
+	Queries     *db.Queries
 }
 
 var _ engine.OutboundReplier = (*OutboundReplier)(nil)
@@ -93,6 +100,7 @@ func NewOutboundReplier(cfg OutboundReplierConfig) *OutboundReplier {
 		appURL:      strings.TrimRight(cfg.AppURL, "/"),
 		bindingPath: bindingPath,
 		logger:      logger,
+		ledger:      cfg.Queries,
 	}
 	r.newSender = func(c credentials) replySender {
 		return newSlackSender(c, slack.New(c.BotToken), logger)
@@ -110,22 +118,26 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeAgentOffline:
-		if err := r.post(ctx, inst, msg, agentOfflineText); err != nil {
+		if err := r.postResult(ctx, inst, msg, res, agentOfflineText); err != nil {
 			r.logger.WarnContext(ctx, "slack replier: offline notice failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeAgentArchived:
-		if err := r.post(ctx, inst, msg, agentArchivedText); err != nil {
+		if err := r.postResult(ctx, inst, msg, res, agentArchivedText); err != nil {
 			r.logger.WarnContext(ctx, "slack replier: archived notice failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeFreshPending:
-		if err := r.post(ctx, inst, msg, freshPendingText); err != nil {
+		if err := r.postResult(ctx, inst, msg, res, freshPendingText); err != nil {
 			r.logger.WarnContext(ctx, "slack replier: fresh-start confirmation failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
+	case engine.OutcomeChatStarted:
+		if err := r.postResult(ctx, inst, msg, res, chatStartedText); err != nil {
+			r.logger.WarnContext(ctx, "slack replier: new-chat confirmation failed", "installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	case engine.OutcomeIssueUsage:
-		if err := r.post(ctx, inst, msg, issueUsageText); err != nil {
+		if err := r.postResult(ctx, inst, msg, res, issueUsageText); err != nil {
 			r.logger.WarnContext(ctx, "slack replier: issue usage reply failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
@@ -137,12 +149,50 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			if res.IssueDuplicate {
 				text = issueDuplicateText(res)
 			}
-			if err := r.post(ctx, inst, msg, text); err != nil {
+			if err := r.postResult(ctx, inst, msg, res, text); err != nil {
 				r.logger.WarnContext(ctx, "slack replier: issue outcome reply failed",
 					"installation_id", util.UUIDToString(inst.ID), "error", err)
 			}
 		}
 	}
+}
+
+func (r *OutboundReplier) postResult(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, res engine.Result, text string) error {
+	row, ok := inst.Platform.(db.ChannelInstallation)
+	if !ok {
+		return errors.New("installation platform row unavailable")
+	}
+	creds, err := decodeCredentials(row.Config, r.decrypt)
+	if err != nil {
+		return fmt.Errorf("decode credentials: %w", err)
+	}
+	kind := "control_ack"
+	if res.Outcome == engine.OutcomeIngested && res.IssueID.Valid {
+		kind = "issue_ack"
+	}
+	sent, err := r.newSender(creds).SendWithMetadata(ctx, channel.OutboundMessage{
+		ChatID: msg.Source.ChatID, Text: text, ThreadID: msg.Source.ThreadID,
+	}, outboundMetadata(res.ChannelBindingID, res.ChannelRouteRevision, kind))
+	if err != nil {
+		return fmt.Errorf("post slack reply: %w", err)
+	}
+	if r.ledger == nil || !res.ChannelBindingID.Valid {
+		return nil
+	}
+	ids := sent.MessageIDs
+	if len(ids) == 0 && sent.MessageID != "" {
+		ids = []string{sent.MessageID}
+	}
+	for _, id := range ids {
+		if err := r.ledger.RecordChannelOutboundMessage(ctx, db.RecordChannelOutboundMessageParams{
+			OutboundInstallationID: inst.ID, OutboundChannelType: string(TypeSlack),
+			OutboundMessageID: id, OutboundBindingID: res.ChannelBindingID,
+			OutboundRouteRevision: res.ChannelRouteRevision, OutboundKind: kind,
+		}); err != nil {
+			return fmt.Errorf("record slack control acknowledgement: %w", err)
+		}
+	}
+	return nil
 }
 
 func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, res engine.Result) error {
@@ -169,28 +219,7 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	// not mangled into italics.
 	text := "👋 To start chatting with me, link your Slack account to Multica: <" +
 		bindURL + "|link your account>\n(This link expires in 15 minutes.)"
-	return r.post(ctx, inst, msg, text)
-}
-
-// post resolves the installation's bot token from the carried platform row and
-// sends text back into the originating channel / thread.
-func (r *OutboundReplier) post(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, text string) error {
-	row, ok := inst.Platform.(db.ChannelInstallation)
-	if !ok {
-		return errors.New("installation platform row unavailable")
-	}
-	creds, err := decodeCredentials(row.Config, r.decrypt)
-	if err != nil {
-		return fmt.Errorf("decode credentials: %w", err)
-	}
-	if _, err := r.newSender(creds).Send(ctx, channel.OutboundMessage{
-		ChatID:   msg.Source.ChatID,
-		Text:     text,
-		ThreadID: msg.Source.ThreadID,
-	}); err != nil {
-		return fmt.Errorf("post slack reply: %w", err)
-	}
-	return nil
+	return r.postResult(ctx, inst, msg, res, text)
 }
 
 func issueCreatedText(res engine.Result) string {

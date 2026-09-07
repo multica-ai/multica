@@ -108,6 +108,7 @@ const LAYOUT_LABEL_KEY = {
 const GROUPING_LABEL_KEY = {
   status: "group_status",
   assignee: "group_assignee",
+  project: "group_project",
 } as const;
 
 const SWIMLANE_LABEL_KEY = {

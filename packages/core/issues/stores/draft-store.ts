@@ -97,6 +97,10 @@ const emptyAgent = (): IssueCreateAgent => ({
 
 interface IssueDraftStore {
   draft: IssueCreateDraft;
+  /** In-memory only. While present, writes target an isolated source-context
+   *  create session and persistence continues to serialize this ordinary
+   *  backup, so a reload cannot leak the source draft into normal create. */
+  isolatedDraftBackup?: IssueCreateDraft;
   // Last assignee picked at submit time. Persisted across drafts so the
   // create-issue modal can prefill the picker with the user's most recent
   // choice instead of always opening with no assignee.
@@ -107,6 +111,8 @@ interface IssueDraftStore {
   setAgent: (patch: Partial<IssueCreateAgent>) => void;
   setActiveMode: (mode: CreateMode) => void;
   clearDraft: () => void;
+  beginIsolatedDraft: () => void;
+  endIsolatedDraft: () => void;
   setLastAssignee: (type?: IssueAssigneeType, id?: string) => void;
   hasDraft: () => boolean;
 }
@@ -199,6 +205,27 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
             activeMode: s.draft.activeMode,
           },
         })),
+      beginIsolatedDraft: () =>
+        set((s) => {
+          if (s.isolatedDraftBackup) return s;
+          return {
+            isolatedDraftBackup: s.draft,
+            draft: {
+              shared: emptyShared(),
+              manual: {
+                ...emptyManual(),
+                assigneeType: s.lastAssigneeType,
+                assigneeId: s.lastAssigneeId,
+              },
+              agent: emptyAgent(),
+              activeMode: "agent",
+            },
+          };
+        }),
+      endIsolatedDraft: () =>
+        set((s) => s.isolatedDraftBackup
+          ? { draft: s.isolatedDraftBackup, isolatedDraftBackup: undefined }
+          : s),
       setLastAssignee: (type, id) =>
         set({ lastAssigneeType: type, lastAssigneeId: id }),
       hasDraft: () => {
@@ -217,6 +244,14 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
     {
       name: "multica_issue_draft",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
+      // An isolated source-context draft must never reach localStorage. Persist
+      // the ordinary backup throughout that session; a crash/reload therefore
+      // restores the user's normal create draft, not source-specific input.
+      partialize: (state) => ({
+        draft: state.isolatedDraftBackup ?? state.draft,
+        lastAssigneeType: state.lastAssigneeType,
+        lastAssigneeId: state.lastAssigneeId,
+      }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<IssueDraftStore> & {
           draft?: unknown;
@@ -245,5 +280,6 @@ registerDraftCleanup({
       draft: migrateDraft(undefined),
       lastAssigneeType: undefined,
       lastAssigneeId: undefined,
+      isolatedDraftBackup: undefined,
     }),
 });

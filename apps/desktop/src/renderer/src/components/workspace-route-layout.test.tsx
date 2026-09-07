@@ -1,5 +1,6 @@
+import { useEffect } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 // vi.hoisted shared state for all the stores / hooks the layout consumes.
@@ -8,11 +9,15 @@ const state = vi.hoisted(() => ({
   isAuthLoading: false,
   overlay: null as { type: string } | null,
   workspace: null as { id: string; slug: string } | null,
+  workspaceError: false,
   listFetched: true,
   wsList: [] as { id: string; slug: string }[],
   workspaceSeen: true,
   modalRenders: 0,
   modalAriaLabel: "source-backfill-modal-marker",
+  currentSlug: null as string | null,
+  pendingDeletes: new Set<string>(),
+  childQuerySlugs: [] as (string | null)[],
 }));
 
 vi.mock("@multica/core/auth", () => {
@@ -24,8 +29,24 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
+// A real-enough stand-in for the platform singleton: the layout both writes
+// and reads it (the clear paths check `getCurrentSlug()` before wiping), so a
+// bare vi.fn() would make every guard trivially true.
+// The slug-equality early return mirrors the real singleton
+// (packages/core/platform/workspace-storage.ts). It is load-bearing for the
+// tab-swap case below: the incoming layout of a same-workspace swap writes the
+// slug that is already there, so its write is a no-op and cannot be what stops
+// the outgoing cleanup from clearing it.
 vi.mock("@multica/core/platform", () => ({
-  setCurrentWorkspace: vi.fn(),
+  setCurrentWorkspace: vi.fn((slug: string | null) => {
+    if (state.currentSlug === slug) return;
+    state.currentSlug = slug;
+  }),
+  getCurrentSlug: () => state.currentSlug,
+}));
+
+vi.mock("@multica/core/workspace/pending-delete", () => ({
+  isWorkspaceDeletePending: (id: string) => state.pendingDeletes.has(id),
 }));
 
 vi.mock("@multica/core/workspace", async () => {
@@ -36,7 +57,10 @@ vi.mock("@multica/core/workspace", async () => {
     ...actual,
     workspaceBySlugOptions: () => ({
       queryKey: ["workspace-by-slug"],
-      queryFn: async () => state.workspace,
+      queryFn: async () => {
+        if (state.workspaceError) throw new Error("temporary failure");
+        return state.workspace;
+      },
     }),
     workspaceListOptions: () => ({
       queryKey: ["workspace-list"],
@@ -107,7 +131,7 @@ function renderLayout() {
   // synchronously — the real hook reads from cache.
   qc.setQueryData(["workspace-by-slug"], state.workspace);
   qc.setQueryData(["workspace-list"], state.wsList);
-  return render(
+  const result = render(
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={["/acme/issues"]}>
         <Routes>
@@ -118,6 +142,7 @@ function renderLayout() {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...result, queryClient: qc };
 }
 
 beforeEach(() => {
@@ -125,10 +150,14 @@ beforeEach(() => {
   state.isAuthLoading = false;
   state.overlay = null;
   state.workspace = { id: "ws-1", slug: "acme" };
+  state.workspaceError = false;
   state.listFetched = true;
   state.wsList = [{ id: "ws-1", slug: "acme" }];
   state.workspaceSeen = true;
   state.modalRenders = 0;
+  state.currentSlug = null;
+  state.pendingDeletes = new Set<string>();
+  state.childQuerySlugs = [];
 });
 
 describe("WorkspaceRouteLayout", () => {
@@ -143,5 +172,169 @@ describe("WorkspaceRouteLayout", () => {
     const { queryByTestId } = renderLayout();
     expect(queryByTestId(state.modalAriaLabel)).toBeNull();
     expect(state.modalRenders).toBe(0);
+  });
+
+  it("keeps workspace content mounted when a background refetch fails", async () => {
+    const { queryByTestId, queryClient } = renderLayout();
+    expect(queryByTestId("outlet")).not.toBeNull();
+
+    state.workspaceError = true;
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ["workspace-by-slug"] });
+    });
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(["workspace-by-slug"])?.status).toBe(
+        "error",
+      );
+    });
+    expect(queryClient.getQueryData(["workspace-by-slug"])).toEqual({
+      id: "ws-1",
+      slug: "acme",
+    });
+    expect(queryByTestId("outlet")).not.toBeNull();
+  });
+});
+
+/**
+ * MUL-6231 / #7021. This layout is the only owner of the platform workspace
+ * singleton, and it used to only ever SET it. Deleting the active workspace
+ * therefore left the singleton pointing at a workspace that no longer existed,
+ * which is what kept the desktop shell mounting workspace-scoped chrome over
+ * nothing until a `useWorkspaceId()` throw blanked the whole renderer.
+ */
+describe("WorkspaceRouteLayout workspace singleton lifecycle", () => {
+  it("adopts the workspace while it resolves", () => {
+    renderLayout();
+    expect(state.currentSlug).toBe("acme");
+  });
+
+  it("releases the singleton once the workspace stops resolving", () => {
+    state.currentSlug = "acme";
+    state.workspace = null;
+    state.wsList = [];
+
+    renderLayout();
+
+    expect(state.currentSlug).toBeNull();
+  });
+
+  it("does not re-adopt a workspace whose delete this client started", () => {
+    // The exact post-delete window: useDeleteWorkspace has cleared the
+    // singleton and navigated, but its list invalidation is still in flight so
+    // the deleted workspace is very much still in the cache. Re-adopting here
+    // would stamp the dead slug back over the delete flow's own cleanup.
+    state.currentSlug = null;
+    state.pendingDeletes = new Set(["ws-1"]);
+
+    renderLayout();
+
+    expect(state.currentSlug).toBeNull();
+  });
+
+  it("releases the singleton on unmount", () => {
+    const { unmount } = renderLayout();
+    expect(state.currentSlug).toBe("acme");
+
+    unmount();
+
+    expect(state.currentSlug).toBeNull();
+  });
+
+  it("leaves the singleton alone when it already points at another workspace", () => {
+    // Workspace switch: React renders the incoming layout (which adopts the
+    // new slug) before running the outgoing layout's cleanup. An unguarded
+    // clear would wipe the workspace context that just arrived.
+    const { unmount } = renderLayout();
+    state.currentSlug = "other";
+
+    unmount();
+
+    expect(state.currentSlug).toBe("other");
+  });
+});
+
+/**
+ * MUL-6303 / #7086. Desktop mounts exactly one tab at a time and keys the host
+ * on the active tab id (tab-content.tsx), so opening or switching a tab
+ * unmounts the whole router subtree and builds a new one beside it. React
+ * renders the incoming tree first and only then runs the outgoing tree's
+ * effect cleanups — so the release path above has to survive a successor that
+ * has already taken over.
+ *
+ * The guard it shipped with (slug equality) could not see that successor when
+ * both tabs belonged to the SAME workspace: the "+" button opens
+ * /<slug>/issues in the active workspace, so the incoming layout carried the
+ * same slug, its write deduped to a no-op, and the outgoing cleanup cleared
+ * the singleton out from under it. Every request the new tab fired then went
+ * out without X-Workspace-Slug and came back 400, and the shell dropped its
+ * sidebar — until the app was relaunched.
+ */
+describe("WorkspaceRouteLayout across a tab swap", () => {
+  // Records the singleton as a child sees it. Real workspace-scoped queries
+  // fire from effects exactly like this one, which is why the ordering matters:
+  // an outgoing cleanup that clears the singleton still lands BEFORE the
+  // incoming tab's first request goes out.
+  function ChildQuery() {
+    useEffect(() => {
+      state.childQuerySlugs.push(state.currentSlug);
+    }, []);
+    return <div data-testid="outlet" />;
+  }
+
+  // Mirrors ActiveTabHost: one tab mounted at a time, keyed by tab id.
+  function TabHost({ slug }: { slug: string }) {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    qc.setQueryData(["workspace-by-slug"], state.workspace);
+    qc.setQueryData(["workspace-list"], state.wsList);
+    return (
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={[`/${slug}/issues`]}>
+          <Routes>
+            <Route path=":workspaceSlug/*" element={<WorkspaceRouteLayout />}>
+              <Route path="*" element={<ChildQuery />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("keeps the workspace when the incoming tab is in the SAME workspace", () => {
+    const { rerender } = render(<TabHost key="tab-1" slug="acme" />);
+    expect(state.currentSlug).toBe("acme");
+
+    rerender(<TabHost key="tab-2" slug="acme" />);
+
+    expect(state.currentSlug).toBe("acme");
+    // Both tabs' first requests carried a workspace. The second entry is the
+    // one that used to be null, which is what produced the 400s.
+    expect(state.childQuerySlugs).toEqual(["acme", "acme"]);
+  });
+
+  it("adopts the incoming workspace when the tab is in a DIFFERENT workspace", () => {
+    state.wsList = [
+      { id: "ws-1", slug: "acme" },
+      { id: "ws-2", slug: "globex" },
+    ];
+    const { rerender } = render(<TabHost key="tab-1" slug="acme" />);
+    expect(state.currentSlug).toBe("acme");
+
+    state.workspace = { id: "ws-2", slug: "globex" };
+    rerender(<TabHost key="tab-2" slug="globex" />);
+
+    expect(state.currentSlug).toBe("globex");
+    expect(state.childQuerySlugs).toEqual(["acme", "globex"]);
+  });
+
+  it("still releases the workspace when the last tab goes away", () => {
+    const { unmount } = render(<TabHost key="tab-1" slug="acme" />);
+    expect(state.currentSlug).toBe("acme");
+
+    unmount();
+
+    expect(state.currentSlug).toBeNull();
   });
 });

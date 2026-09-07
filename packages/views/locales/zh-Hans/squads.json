@@ -19,6 +19,10 @@
     "details_section": "详情",
     "archive_button": "归档"
   },
+  "member_type": {
+    "agent": "智能体",
+    "member": "成员"
+  },
   "archive_dialog": {
     "title": "归档这个小队？",
     "description": "“{{name}}” 将被归档，该小队当前承接的任务会转交给小队负责人。此操作无法撤销，如需恢复路由请新建小队。",
@@ -28,7 +32,13 @@
     "success": "已归档小队"
   },
   "name_editor": {
-    "cancel": "取消"
+    "title": "重命名小队",
+    "placeholder": "小队名称",
+    "required": "名称不能为空",
+    "cancel": "取消",
+    "save": "保存",
+    "saved": "已保存",
+    "save_failed": "保存失败"
   },
   "add_member_dialog": {
     "title": "添加成员",
@@ -36,13 +46,24 @@
     "label_member": "成员",
     "label_role": "角色",
     "label_optional": "（可选）",
-    "placeholder_role_inline": "添加角色…",
-    "cancel": "取消"
+    "cancel": "取消",
+    "select_target": "选择成员或智能体",
+    "search_placeholder": "搜索成员或智能体...",
+    "members_section": "成员",
+    "agents_section": "智能体",
+    "role_placeholder": "例如：审查者、前端负责人",
+    "add": "添加"
+  },
+  "role_editor": {
+    "empty": "添加角色…",
+    "placeholder": "角色（例如：审查者）"
   },
   "description_dialog": {
     "title": "编辑描述",
     "placeholder_empty": "添加描述",
-    "cancel": "取消"
+    "cancel": "取消",
+    "responsibility_placeholder": "这个小队负责什么？",
+    "save": "保存"
   },
   "discard_changes_dialog": {
     "title": "放弃未保存的修改？",
@@ -68,6 +89,29 @@
     "active_issue_more": "还有 {{count}} 个",
     "last_active_label": "最近活动 {{time}}"
   },
+  "detail_tabs": {
+    "members": "成员",
+    "instructions": "指引"
+  },
+  "details": {
+    "leader": "队长",
+    "members": "成员",
+    "created_by": "创建者",
+    "created": "创建时间",
+    "updated": "更新时间"
+  },
+  "toasts": {
+    "member_added": "已添加成员",
+    "member_add_failed": "添加成员失败",
+    "member_removed": "已移除成员",
+    "member_remove_failed": "移除成员失败",
+    "role_updated": "角色已更新",
+    "role_update_failed": "更新角色失败",
+    "leader_updated": "队长已更新",
+    "leader_update_failed": "更新队长失败",
+    "archive_failed": "归档小队失败",
+    "instructions_saved": "指引已保存"
+  },
   "profile_card": {
     "unavailable": "小队不可用",
     "detail_link": "详情 →",
@@ -77,9 +121,10 @@
     "more_members_other": "还有 {{count}} 人"
   },
   "instructions_tab": {
-    "description": "小队指引会在 Leader 智能体处理分配给该小队的任务时注入到它的 prompt 中。可用来给 Leader 提供贯穿全队的指导、协作规范，或每次 task 都应遵循的上下文。",
+    "description": "小队指引会在队长智能体处理分配给该小队的任务时注入到它的 prompt 中。可用来给队长提供贯穿全队的指导、协作规范，或每次运行都应遵循的上下文。",
     "unsaved_changes": "有未保存的修改",
-    "save_button": "保存"
+    "save_button": "保存",
+    "placeholder": "例如：始终先编写失败测试。提交应保持小而独立。"
   },
   "scope": {
     "mine": "我的",

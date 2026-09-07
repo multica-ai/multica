@@ -24,7 +24,7 @@ A workspace owner or admin can complete the connection:
 The connection status shows on the same page. Regular members can view the status but can't connect, disconnect, or change the switches.
 
 <Callout type="info">
-The **GitHub connection** decides which repositories Multica receives PR events from; the **code repositories** setting decides which repositories agents can pick when running tasks. They serve different purposes and are configured separately.
+The **GitHub connection** decides which repositories Multica receives PR events from; the **code repositories** setting decides which repositories agents can pick when starting runs. They serve different purposes and are configured separately.
 </Callout>
 
 ## Feature switches
@@ -124,6 +124,7 @@ Repository permissions:
 | Permission | Level |
 |---|---|
 | Metadata | Read-only |
+| Contents | Read-only; required by the PR snapshot query, which reads the head commit together with mergeability and the CI rollup |
 | Pull requests | Read-only |
 | Checks | Read-only; used to show CI status |
 | Commit statuses | Read-only; used to aggregate legacy-status CI |
@@ -133,7 +134,7 @@ Subscribe to these events:
 - **Pull request**;
 - **Check suite**, **Check run**, and **Status**, which trigger CI and mergeability refreshes.
 
-If you don't need CI shown in Multica, you can skip the Checks and Commit statuses permissions and their events.
+If you don't need CI shown in Multica, you can skip the Checks and Commit statuses permissions and their events. Contents is still required — without it the snapshot query fails outright and the PR card also loses merge state.
 
 <Callout type="warning">
 This is the **Webhook secret**, not the OAuth Client secret. If the two sides have different webhook secrets, GitHub deliveries return `401 invalid signature`.
@@ -176,7 +177,7 @@ Restart the API server, then complete the connection in **Settings → GitHub**.
 - **Webhook returns 401**: confirm the GitHub App and the API use the same webhook secret, then redeliver from GitHub's **Recent Deliveries**.
 - **PR not linked**: check that the repository is in the App's authorized scope, auto-linking is on, and the identifier belongs to the current workspace.
 - **Identifier in the body but not shown**: switch to `Closes MUL-123`, or put the identifier in the branch name or PR title.
-- **No CI status**: confirm `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are configured, and that the App has read-only Checks and Commit statuses permissions with the matching events subscribed. After adding permissions to an installed App, each installation's owner must also approve them on GitHub before they take effect.
+- **No CI status**: confirm `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are configured, and that the App has read-only Contents, Checks, and Commit statuses permissions with the matching events subscribed. Without Contents the whole snapshot fails, so the PR card shows neither CI nor merge state. After adding permissions to an installed App, each installation's owner must also approve them on GitHub before they take effect.
 - **Issue not completed after the PR merged**: confirm the PR used a close intent, and check whether other linked PRs are still Open or Draft.
 
 ## Next steps

@@ -17,6 +17,22 @@ import { isReservedSlug } from "@multica/core/paths";
 // router to `activeSession.url` with a navigation token. Nothing in this
 // file touches react-router.
 
+/**
+ * One captured scroll position.
+ *
+ * `contentKey` is an optional fingerprint of the rendered content, used by
+ * out-of-DOM scroll sources (the sandboxed HTML-attachment iframe — see
+ * multica-ai#6405) to invalidate restoration when the content changed
+ * (re-upload to the same attachment id). Plain `[data-tab-scroll-root]`
+ * containers leave it undefined; identity comparison (undefined ===
+ * undefined) means their behavior is unchanged.
+ */
+export interface ScrollMementoEntry {
+  top: number;
+  height: number;
+  contentKey?: string;
+}
+
 export interface TabMemento {
   /**
    * Scroll offsets keyed `${routePathname}::${containerKey}` where the
@@ -27,7 +43,7 @@ export interface TabMemento {
    * tab). `height` is the container's scrollHeight at capture time, kept
    * for diagnostics and future pre-sizing heuristics.
    */
-  scroll: Record<string, { top: number; height: number }>;
+  scroll: Record<string, ScrollMementoEntry>;
   /**
    * Generic restorable view-state entries, keyed like `scroll`
    * (`${routePathname}::${entryKey}`). The memento's second kind of cargo:
@@ -196,12 +212,15 @@ interface TabStore {
    * deactivate / before in-tab navigation). REPLACE semantics per route: all
    * of the route's previous entries are dropped and the given ones written —
    * so a container scrolled back to 0 (captured as "no entry") clears its
-   * stale offset instead of resurrecting it on the next visit.
+   * stale offset instead of resurrecting it on the next visit. External
+   * sources (iframe documents) always write an entry, including top:0, so a
+   * contentKey change can replace a stale positive offset rather than leave
+   * it behind.
    */
   commitScrollMemento: (
     tabId: string,
     routeKey: string,
-    entries: Record<string, { top: number; height: number }>,
+    entries: Record<string, ScrollMementoEntry>,
   ) => void;
   /**
    * Write (string) or clear (undefined) one generic view-state entry for one
@@ -773,7 +792,12 @@ export const useTabStore = create<TabStore>()(
           nextKeys.every((k) => {
             const prev = current.memento.scroll[k];
             const next = nextScroll[k];
-            return prev !== undefined && prev.top === next.top && prev.height === next.height;
+            return (
+              prev !== undefined &&
+              prev.top === next.top &&
+              prev.height === next.height &&
+              prev.contentKey === next.contentKey
+            );
           });
         if (unchanged) return;
 

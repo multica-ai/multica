@@ -18,18 +18,18 @@ import (
 // token kind the caller used:
 //
 //   - JWT cookie / mul_ PAT  → X-User-ID = the human's user id.
-//                              X-Actor-Source is left empty.
+//     X-Actor-Source is left empty.
 //   - mat_ task token        → X-User-ID = the OWNING human's user id,
-//                              plus X-Agent-ID, X-Task-ID, and the
-//                              authoritative server-set header
-//                              `X-Actor-Source: task_token`.
+//     plus X-Agent-ID, X-Task-ID, and the
+//     authoritative server-set header
+//     `X-Actor-Source: task_token`.
 //   - mcn_ cloud-node PAT    → X-User-ID = the OWNING human's user id,
-//                              plus `X-Actor-Source: cloud_pat`.
-//                              The token authenticates a cloud-runtime
-//                              EC2 node operating on the owner's
-//                              behalf — same conceptual category as
-//                              mat_ (machine running owner-scoped
-//                              code) for authorization purposes.
+//     plus `X-Actor-Source: cloud_pat`.
+//     The token authenticates a cloud-runtime
+//     EC2 node operating on the owner's
+//     behalf — same conceptual category as
+//     mat_ (machine running owner-scoped
+//     code) for authorization purposes.
 //
 // The mat_ and mcn_ designs (MUL-2600 and the cloud-node PAT story
 // respectively) were both deliberately built this way: every request
@@ -95,14 +95,26 @@ import (
 // human-equivalent or machine-equivalent.
 func RequireHumanActor(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// X-Actor-Source is server-set only. The auth middleware
-		// strips any client-supplied value before stamping its own,
-		// so a non-empty value here is authoritative.
-		switch r.Header.Get("X-Actor-Source") {
-		case "task_token", "cloud_pat":
+		if isMachineCredentialActor(r) {
 			writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isMachineCredentialActor centralizes the authoritative actor-source check so
+// sensitive handlers can keep a fail-closed backstop in addition to their
+// router middleware. Unknown actor sources intentionally remain human-equivalent
+// until their authentication branch is explicitly classified here.
+func isMachineCredentialActor(r *http.Request) bool {
+	// X-Actor-Source is server-set only. The auth middleware strips any
+	// client-supplied value before stamping its own, so a recognized value here
+	// is authoritative.
+	switch r.Header.Get("X-Actor-Source") {
+	case "task_token", "cloud_pat":
+		return true
+	default:
+		return false
+	}
 }

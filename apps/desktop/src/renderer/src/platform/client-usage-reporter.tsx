@@ -83,7 +83,8 @@ export function DesktopClientUsageReporter({ apiUrl }: { apiUrl: string }) {
         status.state === "running" ||
         status.state === "stopped" ||
         status.state === "auth_expired" ||
-        status.state === "cli_not_found"
+        status.state === "cli_not_found" ||
+        status.state === "recovery_paused"
       ) {
         const signal = `${status.state}:${[...(status.agents ?? [])].sort().join(",")}`;
         if (lastStatusSignal.current === signal) return;

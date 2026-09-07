@@ -17,6 +17,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { commonIssueFields } from "@multica/core/issues/batch";
+import { issueBehavesAs } from "@multica/core/issues";
 import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
@@ -131,7 +132,9 @@ export function BatchActionToolbar({
       // start" box — apply directly, matching handleBatchStatus's backlog short-
       // circuit. A mixed selection still routes through the modal: the non-backlog
       // issues will trigger and need confirmation.
-      const allBacklog = selectedIssues.every((i) => i.status === "backlog");
+      // Category, not key: a custom status in the backlog category is a parking
+      // lot too, and assigning into it never starts a run. (MUL-6243)
+      const allBacklog = selectedIssues.every((i) => issueBehavesAs(i, "backlog"));
       if (!allBacklog) {
         openModal("issue-run-confirm", {
           issueIds: ids,

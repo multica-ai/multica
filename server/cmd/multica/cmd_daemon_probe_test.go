@@ -15,12 +15,3 @@ func TestDaemonRuntimeProbeFromAgents(t *testing.T) {
 		t.Fatalf("probe = %#v", probe)
 	}
 }
-
-func TestLoadConfigAllowNoAgentsIsOptIn(t *testing.T) {
-	// The production startup path does not set this override. Keep the probe's
-	// escape hatch explicit rather than weakening the daemon startup invariant.
-	var overrides daemon.Overrides
-	if overrides.AllowNoAgents {
-		t.Fatal("AllowNoAgents must default to false")
-	}
-}

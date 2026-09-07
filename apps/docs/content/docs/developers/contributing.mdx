@@ -11,7 +11,7 @@ Multica is a Go backend and pnpm monorepo. The simplest way to start locally is 
 
 - Node.js 22
 - pnpm 10.28.2
-- Go 1.26.1
+- Go 1.26.6
 - Docker Engine or Docker Desktop
 - Git and Make
 
@@ -70,12 +70,26 @@ Different worktrees share the PostgreSQL container, not the database. Do not sta
 ### Full workflow
 
 ```bash
-make dev              # Prepare and start the current checkout
-make start            # Start API and Web with the existing environment
-make stop             # Stop processes for the current checkout
+make up               # Start this checkout's environment (C=api,web,daemon,desktop)
+make status           # Show what is running and prove it is this environment
+make list             # List every environment on this machine
+make down             # Stop the processes, keep the database
+make destroy          # Stop, then drop the database and free the slot
+make gc               # Collect expired or directory-less environments
+make dev              # Prepare and start the current checkout in the foreground
 make check            # Run the complete local verification workflow
 make build            # Build the server, CLI, and migrate binaries
 ```
+
+`make up` treats an environment as a named object: it allocates the API, Web and Desktop renderer ports,
+database name and CLI profile under a lock and records them in `~/.multica/dev/`,
+so two checkouts cannot land on the same slot without one of them being told.
+It verifies the database through `DATABASE_URL` and the backend through
+`GET /health`, which reports `pid`, `commit` and `started_at` — a 200 alone
+would also come from a leftover process on the same port. `make destroy`
+removes the database, CLI profile, daemon workspaces, Desktop userData and
+registry entry; a failed deletion keeps the registry entry for retry. Temporary
+environments are collected best-effort on the next `make up` after their TTL.
 
 ### Frontend
 

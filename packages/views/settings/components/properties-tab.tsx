@@ -76,7 +76,7 @@ import {
   PropertyIconGlyph,
   PropertyIconPicker,
 } from "../../common/property-icon";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 
 const MAX_ACTIVE_PROPERTIES = 20;
@@ -109,6 +109,7 @@ function typeHasOptions(type: string): boolean {
 
 export function PropertiesTab() {
   const { t } = useT("settings");
+  const locale = useLocale();
   const wsId = useWorkspaceId();
   const user = useAuthStore((s) => s.user);
 
@@ -255,7 +256,7 @@ export function PropertiesTab() {
                     {t(($) => $.properties.usage_count, { count: property.usage_count ?? 0 })}
                   </span>
                   <span className="text-caption text-muted-foreground">
-                    {new Date(property.updated_at).toLocaleDateString()}
+                    {new Date(property.updated_at).toLocaleDateString(locale)}
                   </span>
                   {canManage ? (
                     <DropdownMenu>
@@ -346,6 +347,10 @@ export function PropertyTypeLabel({ type }: { type: string }) {
       return <>{t(($) => $.properties.types.checkbox)}</>;
     case "url":
       return <>{t(($) => $.properties.types.url)}</>;
+    case "actor":
+      return <>{t(($) => $.properties.types.actor)}</>;
+    case "multi_actor":
+      return <>{t(($) => $.properties.types.multi_actor)}</>;
     default:
       // Forward compat: newer servers may ship types this build doesn't know.
       return <>{type}</>;

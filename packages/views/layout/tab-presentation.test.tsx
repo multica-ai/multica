@@ -109,7 +109,9 @@ describe("useTabPresentation — live from cache", () => {
 
   it("issue: live status glyph + identifier:title", () => {
     expect(presentationOf("/acme/issues/i1")).toEqual({
-      visual: { kind: "issue-status", status: "in_progress" },
+      // `category` travels with the visual so the tab strip never resolves a
+      // custom status key itself. (MUL-6243)
+      visual: { kind: "issue-status", status: "in_progress", category: "in_progress" },
       title: "MUL-1: Fix login",
     });
   });

@@ -5,7 +5,7 @@ description: 为项目关联 GitHub 仓库或本地目录，让后续执行获�
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-[项目](/projects)资源告诉智能体这组工作会用到哪些代码，以及在哪里执行。资源会持续关联在项目上，不必在每条 issue 中重复粘贴仓库地址或本地路径。
+[项目](/projects)资源告诉智能体这组工作会用到哪些代码，以及在哪里执行。资源会持续关联在项目上，不必在每条任务中重复粘贴仓库地址或本地路径。
 
 目前支持两种资源：
 
@@ -16,7 +16,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 资源进入执行的方式
 
-当智能体处理项目内的 issue 时，Multica 会把项目名称、项目描述和资源列表加入执行上下文，并在工作目录中写入 `.multica/project/resources.json`。
+当智能体处理项目内的任务时，Multica 会把项目名称、项目描述和资源列表加入执行上下文，并在工作目录中写入 `.multica/project/resources.json`。
 
 工作区关联的仓库列表始终包含在执行上下文中。项目关联的仓库在此基础上指明这组工作使用的代码和默认 ref。
 
@@ -37,31 +37,65 @@ import { Callout } from "fumadocs-ui/components/callout";
 添加本地目录的界面只在 Desktop 中提供，因为浏览器不能选择电脑上的文件夹。
 
 <Callout type="warning">
-**这是逃生舱，不是更方便的默认项。** `local_directory` 是给那些"不得不这么开发"的人准备的 —— 典型是一个 checkout 就几十 GB 的游戏项目，不可能每来一条任务就重新 clone 一份。
+**这是逃生舱，不是更方便的默认项。** `local_directory` 是给那些"不得不这么开发"的人准备的 —— 典型是一个 checkout 就几十 GB 的游戏项目，不可能每来一次运行就重新 clone 一份。
 
-如果你的目录只是一个能正常 clone 的普通 git 仓库，**请用 `github_repo`**：它默认走 worktree 模式，同一个仓库上的任务可以无限并发。选 `local_directory` 意味着这个目录上的任务从此**只能一条一条串行跑**。先看上面的两种资源对照再决定。
+如果你的目录只是一个能正常 clone 的普通 git 仓库，**请用 `github_repo`**：它默认走 worktree 模式，同一个仓库上的运行可以无限并发。`local_directory` **默认同一时间只进行一次运行**；如果这个目录本身是 git 仓库，可以主动开启 worktree 模式把并发拿回来（见“运行如何共享这个目录”）。先看上面的两种资源对照再决定。
 </Callout>
 
 
 1. 确认 Desktop 的本地守护进程在线。
-2. 打开项目的 **资源**。
+2. 打开项目的 **资源**，或者创建项目对话框里的 **本地目录** 标签页 —— 项目还没建出来时也能做同样的选择。
 3. 选择"添加本地目录"，再选择要使用的文件夹。
+4. 选择运行如何使用它 —— **原地** 还是 **并行**，两者的区别见"运行如何共享这个目录"。如果这个文件夹是 git 仓库、并且那台机器上的运行时能做隔离，Desktop 会预选 **并行**，否则预选 **原地**。当场可以改，之后也可以在 **资源** 里点目录旁边的铅笔图标改。
+
+预选只作用于你此刻正在关联的目录。之前关联好的目录仍然保持保存时的模式 —— 已有的配置不会在你不知情的情况下被切换。
 
 目录必须是绝对路径，已经存在，并且当前守护进程可以读取和写入。以下路径会被拒绝：系统根目录和盘符根（`/`、`C:\`）、用户主目录本身及各主目录的上级（如 `/Users`、`/home`、`/root`），以及 `/etc`、`/var`、`/tmp`、`/usr`、`/opt` 等系统目录。如果所选路径是符号链接，会先解析为真实路径再按同样的规则校验一次，串行锁也按真实路径生效。
 
 每个项目在同一台守护进程上最多关联一个本地目录。团队中的不同电脑可以分别为同一个项目关联各自的目录。
 
 <Callout type="warning">
-本地目录不是隔离环境。智能体会直接看到并修改当前分支和未提交的文件；Multica 不会自动切换分支、stash、commit、push 或创建 PR。
+在默认的 `in_place` 模式下，本地目录不是隔离环境：智能体会直接看到并修改当前分支和未提交的文件，Multica 也不会自动切换分支、stash、commit、push 或创建 PR。worktree 模式会改变这一点 —— 见下面的“运行如何共享这个目录”。
 </Callout>
 
-## 本地目录串行执行
+<span id="task-如何共享这个目录" />
+<span id="任务如何共享这个目录" />
 
-两条执行任务使用同一个真实目录时，后到的任务进入 `waiting_local_directory`，等前一条释放目录后继续。两个路径经不同符号链接指向同一目录时，同样串行。
+## 运行如何共享这个目录
 
-等待不会修改目录。等待中的任务可以取消，否则会一直等到目录可用。
+本地目录有两种执行模式，按资源逐个设置。在资源面板里可以直接切换，CLI 用 `--execution-mode`。Desktop 里这两种模式显示为 **原地** 和 **并行**；API、CLI 和本页其余部分都使用标识符。
 
-需要同时处理多项改动时，使用 GitHub 仓库资源，让运行时为不同工作准备各自的工作目录。
+### `in_place`（默认）—— “原地”
+
+智能体直接在你的目录里工作，同一时间只进行一次运行。两次运行使用同一个真实目录时，后到的运行进入 `waiting_local_directory`，等前一次释放目录后继续。两个路径经不同符号链接指向同一目录时，同样串行。
+
+等待不会修改目录。等待中的运行可以取消，否则会一直等到目录可用。
+
+### `worktree` —— “并行”
+
+每次运行拿到你仓库的一个独立 [git worktree](https://git-scm.com/docs/git-worktree)，建在运行时自己的工作区目录里。**同一目录上的运行并发执行，谁都不用排队**，并且都不会写你的工作副本。
+
+要求这个目录是一个至少有一次提交的 git 仓库。如果不是，运行会明确报错，而不是悄悄退回串行。那台机器上的运行时也必须实现了该模式。运行时在连接时会声明这项能力，Multica 判断的是这个声明而不是版本号 —— 一个开发构建完全可能带着看起来足够新的版本号，却根本没有对应的实现。这个声明会被检查两次：只要那台机器的运行时没有声明该能力，保存资源就会被拒绝，并提示去升级那台机器上的 App；每次运行在被真正领取时还会再按领取它的运行时检查一次 —— 所以资源保存之后才降级的机器，其运行会被带原因取消，而不是悄悄原地跑掉。选择 `worktree` 就是在要求隔离，把它换成“直接改你的工作副本”永远不是兜底方案。
+
+智能体看到什么、你拿回什么：
+
+- **智能体从你眼前的状态开始，而不是从 `HEAD` 开始。** 你未提交的改动和未跟踪的文件会被回放进 worktree，所以它不会去 review 一份你已经不用的代码。你自己的工作副本、暂存区和 stash 列表都不会被动到。如果这个状态无法忠实还原 —— 包括未跟踪内容超出回放上限（2000 个文件 / 200 MiB）—— 运行会直接失败，而不是从一棵你认不出来的树开始。通常的解决办法是把还没被忽略的构建产物加进 gitignore 或清理掉。
+- **结果是你仓库里的一个分支**，按任务而不是按每次执行来分：`agent/<agent>/<issue>`（chat 则是 `agent/<agent>/chat-<session>`）。本次运行的**详情**面板里会显示分支名（可直接复制），也可以用 `git branch` 找到它。用 `git log` / `git diff` review，然后自己决定 merge 还是 cherry-pick。Multica 不会替你合并。中途失败的运行同样会报告它的分支，因为它已经把智能体做出来的部分提交进去了。
+- **后续对话接着上一轮继续。** 同一个任务的下一条评论会重新 check out 这个分支，智能体站在自己刚交付的成果上继续做，而不是从 `HEAD` 重新开始、把上一轮的改动落在另一个分支上。只有你在上一轮之后改动的部分会被重放上去 —— 其余部分分支里已经有了。把分支 merge 掉之后，下一轮又会从你的 `HEAD` 重新开始。同一个任务上有两次执行重叠时，后一个会从前一个的成果分叉到 `agent/<agent>/<issue>-<task>`，因为 git 规定一个分支只能有一棵 worktree。
+- **你的改动和智能体的成果冲突时，由智能体来解决。** 如果你重写了智能体也重写过的那几行，git 无法判断谁对，这一轮就会在一棵带冲突的 worktree 上启动，并被要求先把 merge 做完（在那棵 worktree 里 `git status` 会列出未合并的文件）。只要还有文件没合完，这一轮就什么都不交付：运行失败、worktree 保留，下一轮会再次把同样的改动送上来，所以你的修改不会被悄悄丢掉。
+- **只有 Multica 自己的分支才会被续接。** 是否续接由归属记录决定，而不是看名字：记录里既写了属于哪个会话，也写了这条分支当时停在哪个 commit。你自己建的、恰好叫 `agent/<agent>/<issue>` 的分支永远不会被 check out、被追加提交，也不会被当成上一轮的成果读取；已经不包含记录中那个 commit 的分支同样如此 —— 所以你把 Multica 的分支删掉再自己建一条同名的，或者把它 force-move 到别的历史上，都是安全的，运行会改用 `agent/<agent>/<issue>-<id>`。在已交付的分支上继续提交则是正常用法，续接照常，你的提交下一轮就在那里。每条分支还会以一个属于自己的 baseline commit 开头，标记第一轮开始时的目录状态 —— 后续正是靠这个 commit 来辨认这条分支，同时 `git diff <baseline>..<branch>` 恰好就是智能体做的改动。如果某一轮没能记录它的分支 —— 中途失败、记录写不进去，或者把 worktree reset 到了「把你的改动带进分支的那个 commit」之前 —— 这一轮会报失败并保留 worktree，后续几轮会另起一条分支，而不是去续接一条无法证明归属的分支。
+- **不会静默丢东西。** 智能体留下的未提交改动，会在 worktree 被移除前提交到那个分支上，**运行中途失败时同样如此**。极少数情况下连这次提交都做不了 —— 例如仓库开了 `commit.gpgSign` 而运行时拿不到签名密钥 —— worktree 会被刻意保留而不是删除，运行标记为失败，并且在你仓库里执行 `git worktree list` 就能看到存放这些改动的目录。
+- **没有产生改动的运行不留下任何东西。** 它的分支会被删除，而不是作为一个空条目留在 `git branch` 里；但如果这是承载了之前几轮成果的任务分支，它一定会保留。
+
+由于 worktree 位于运行时的工作区目录内，它会按正常的清理周期回收。留在你仓库里的有两样东西：分支，以及每条分支对应的一个隐藏 ref（在 `refs/multica/local-state/` 下），记录这条分支归谁所有、以及上次续接时你目录里的内容。隐藏 ref 不会出现在 `git branch` 里，可以用 `git for-each-ref refs/multica` 查看。Multica 删除分支时会一并删掉它；你自己删掉的分支所对应的 ref，会在下一次该仓库上有运行开始时被清理 —— 也可以用 `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d` 一次性清掉。
+
+<Callout type="warn">
+**自托管运维注意：** 该模式的隔离由服务端强制（保存资源时检查一次，运行时每次领取执行时再检查一次），所以无论何时降级运行时都会被拦住。唯一拦不住的组合是：把服务端回滚到本功能之前的版本，同时还连着没有实现该模式的运行时 —— 旧服务端没有这道门禁，而这样的运行时会忽略 `execution_mode`、直接在原目录里执行。只要还存在 `worktree` 资源，就不要把服务端回滚到本版本之前，除非那些机器上的运行时全部升级到位。
+</Callout>
+
+<Callout type="info">
+worktree 模式面向 git 仓库。普通的非 git 目录仍然串行执行 —— 这正是 `in_place` 的用途。
+</Callout>
 
 ## 执行期间写入的内容
 
@@ -74,30 +108,41 @@ Multica 清理执行环境时不会删除关联的本地目录。智能体对该
 ```bash
 # 创建项目时关联仓库
 multica project create \
-  --title "Agent UX" \
-  --repo https://github.com/multica-ai/multica
+ --title "Agent UX" \
+ --repo https://github.com/multica-ai/multica
 
 # 查看和添加资源
 multica project resource list <project-id>
 multica project resource add <project-id> \
-  --type github_repo \
-  --url https://github.com/multica-ai/multica \
-  --ref main
+ --type github_repo \
+ --url https://github.com/multica-ai/multica \
+ --ref main
 
 # 关联指定守护进程上的本地目录
 multica project resource add <project-id> \
-  --type local_directory \
-  --local-path /absolute/path/to/repo \
-  --daemon-id <daemon-id>
+ --type local_directory \
+ --local-path /absolute/path/to/repo \
+ --daemon-id <daemon-id>
+
+# 关联一个本地 git 仓库，并让每次运行在各自的 worktree 中并发执行
+multica project resource add <project-id> \
+ --type local_directory \
+ --local-path /absolute/path/to/repo \
+ --daemon-id <daemon-id> \
+ --execution-mode worktree
+
+# 为已有的本地目录切换模式
+multica project resource update <project-id> <resource-id> --execution-mode worktree
+multica project resource update <project-id> <resource-id> --execution-mode in_place
 
 # 移除资源
 multica project resource remove <project-id> <resource-id>
 ```
 
-资源变更会影响之后创建的执行任务，不会改写已经结束的执行记录。
+资源变更会影响之后创建的运行，不会改写已经结束的执行记录。
 
 ## 接下来
 
 - [项目](/projects) — 了解项目上下文、进度和负责人。
-- [守护进程与运行时](/daemon-runtimes) — 了解任务由哪台电脑领取。
-- [执行任务](/tasks) — 查看 `waiting_local_directory` 等执行状态。
+- [守护进程与运行时](/daemon-runtimes) — 了解运行由哪台电脑领取。
+- [运行](/tasks) — 查看 `waiting_local_directory` 等执行状态。

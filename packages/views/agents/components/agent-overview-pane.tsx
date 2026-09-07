@@ -15,6 +15,7 @@ import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
 import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { wecomInstallationsOptions } from "@multica/core/wecom";
+import { telegramInstallationsOptions } from "@multica/core/telegram";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +27,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { cn } from "@multica/ui/lib/utils";
+import { PAGE_GUTTER } from "../../layout/page-header";
 import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
@@ -176,12 +178,17 @@ export function AgentOverviewPane({
     ...wecomInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: telegramListing } = useQuery({
+    ...telegramInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
 
   const integrationsConfigured =
     larkListing?.configured === true ||
     slackListing?.configured === true ||
     dingtalkListing?.configured === true ||
-    wecomListing?.configured === true;
+    wecomListing?.configured === true ||
+    telegramListing?.configured === true;
 
   const visibleCapabilityTabs = useMemo(() => {
     const showMcp = runtime
@@ -316,11 +323,11 @@ export function AgentOverviewPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div
-        className="shrink-0 overflow-x-auto border-b px-4 sm:px-6"
+        className={cn("shrink-0 overflow-x-auto border-b", PAGE_GUTTER)}
         role="tablist"
         aria-label={t(($) => $.tabs.page_navigation_aria)}
       >
-        <div className="mx-auto flex max-w-[1440px] items-center gap-6">
+        <div className="flex items-center gap-6">
           {TOP_TABS.map((tab) => (
             <button
               key={tab.id}
@@ -341,7 +348,16 @@ export function AgentOverviewPane({
         </div>
       </div>
 
-      {/* Overview/Work scroll as one page. Sidebar views split scrolling on
+      {/* One leading edge for the whole page: the header, the tab bar and
+          every panel start at PAGE_GUTTER (MUL-7107). The chrome used to sit
+          on a centred `max-w-[1440px]` rail while the panels did not, so above
+          ~1730px the tabs walked right and left the content behind them.
+
+          A panel caps its width by anchoring, never by centring — a centred cap
+          drifts away from that edge as the window grows. Lists stay full-bleed
+          (an issue table wants the width); reading and form content takes a cap.
+
+          Overview/Work scroll as one page. Sidebar views split scrolling on
           md+ (nav rail pinned, content pane scrolls) like settings-page.tsx;
           below md the rail is a horizontal strip and the page scrolls whole. */}
       <div
@@ -351,7 +367,12 @@ export function AgentOverviewPane({
         )}
       >
         {effectiveView === "overview" && (
-          <div className="mx-auto max-w-[1440px] p-4 sm:p-6">
+          <div
+            className={cn(
+              "w-full max-w-[1440px] py-4 sm:py-6",
+              PAGE_GUTTER,
+            )}
+          >
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
               <ActivityTab agent={agent} showPerformance={false} />
               <AgentOverviewSummary
@@ -373,7 +394,12 @@ export function AgentOverviewPane({
           <div className="flex min-h-full flex-col md:h-full md:flex-row">
             {/* Content-surface color, no shell tint — same rule as the settings
                 nav: in-card panels must not break the desktop tab merge (MUL-4439). */}
-            <aside className="shrink-0 overflow-x-auto border-b border-surface-border p-2 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:p-4">
+            <aside
+              className={cn(
+                "shrink-0 overflow-x-auto border-b border-surface-border py-2 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:py-4",
+                PAGE_GUTTER,
+              )}
+            >
               <div
                 className="flex w-max min-w-full items-center gap-1 md:w-full md:flex-col md:items-stretch"
                 role="tablist"
@@ -404,7 +430,7 @@ export function AgentOverviewPane({
             </aside>
 
             <section className="min-w-0 flex-1 md:overflow-y-auto">
-              <div className="mx-auto w-full max-w-3xl p-4 sm:p-6 md:p-8">
+              <div className="w-full max-w-3xl p-4 sm:p-6 md:p-8">
                 <header>
                   <h2 className="text-title-sm font-medium text-balance">
                     {t(($) => $.tabs[activeSecondaryTab.labelKey])}
@@ -415,9 +441,7 @@ export function AgentOverviewPane({
                   {effectiveView === "instructions" && (
                     <InstructionsTab
                       agent={agent}
-                      onSave={(instructions) =>
-                        onUpdate(agent.id, { instructions })
-                      }
+                      onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
                     />
                   )}
@@ -425,6 +449,7 @@ export function AgentOverviewPane({
                     <SkillsTab
                       agent={agent}
                       runtime={runtime}
+                      currentUserId={currentUserId}
                       canEdit={canEdit}
                     />
                   )}
@@ -432,6 +457,8 @@ export function AgentOverviewPane({
                     <McpConfigTab
                       agent={agent}
                       runtime={runtime}
+                      currentUserId={currentUserId}
+                      canEdit={canEdit}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
                     />

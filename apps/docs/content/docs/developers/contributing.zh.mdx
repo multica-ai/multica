@@ -11,7 +11,7 @@ Multica 是 Go backend 与 pnpm monorepo。最简单的本地启动方式是 `ma
 
 - Node.js 22；
 - pnpm 10.28.2；
-- Go 1.26.1；
+- Go 1.26.6；
 - Docker Engine 或 Docker Desktop；
 - Git 和 Make。
 
@@ -70,11 +70,11 @@ make stop-worktree
 ### 整体流程
 
 ```bash
-make dev              # 准备并启动当前 checkout
-make start            # 使用已有环境启动 API 与 Web
-make stop             # 停止当前 checkout 的进程
-make check            # 完整本地验证流程
-make build            # 构建 server、CLI 和 migrate 二进制
+make dev # 准备并启动当前 checkout
+make start # 使用已有环境启动 API 与 Web
+make stop # 停止当前 checkout 的进程
+make check # 完整本地验证流程
+make build # 构建 server、CLI 和 migrate 二进制
 ```
 
 ### 前端
@@ -187,7 +187,7 @@ make start
 ## 提交前检查
 
 - 阅读根目录 `CLAUDE.md` 和相关子目录说明；
-- 只修改当前任务需要的范围；
+- 只修改当前 task 需要的范围；
 - 代码注释使用英文；
 - 不提交 `.env`、令牌、构建产物或本机路径；
 - 使用 `feat(scope)`、`fix(scope)`、`docs` 等 conventional commit；

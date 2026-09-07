@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // freshDaemon builds a Daemon with every map field the production New() seeds
@@ -45,7 +47,7 @@ func stubAgentVersion(t *testing.T) func() {
 	t.Helper()
 	origDetect := detectAgentVersion
 	origCheck := checkAgentMinVersion
-	detectAgentVersion = func(_ context.Context, _ string) (string, error) {
+	detectAgentVersion = func(_ context.Context, _ agent.Command) (string, error) {
 		return "9.9.9", nil
 	}
 	checkAgentMinVersion = func(_, _ string) error { return nil }

@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { Archive, ChevronRight, Inbox } from "lucide-react";
 import { isEditableShortcutTarget } from "@multica/core/shortcuts";
@@ -47,6 +54,8 @@ export function InboxList({
   onSelect,
   onAction,
   onOpenArchived,
+  emptyLabel,
+  emptyAction,
 }: {
   items: InboxItem[];
   view: InboxView;
@@ -57,6 +66,8 @@ export function InboxList({
   onSelect: (item: InboxItem) => void;
   onAction: (id: string) => void;
   onOpenArchived: () => void;
+  emptyLabel?: string;
+  emptyAction?: ReactNode;
 }) {
   const { t } = useT("inbox");
   // Virtuoso's `customScrollParent` wants the actual HTMLElement, not a ref.
@@ -176,10 +187,12 @@ export function InboxList({
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <Inbox className="mb-3 h-8 w-8 text-faint-foreground" />
           <p className="text-body">
-            {isArchivedView
-              ? t(($) => $.list.archived_empty)
-              : t(($) => $.list.empty)}
+            {emptyLabel ??
+              (isArchivedView
+                ? t(($) => $.list.archived_empty)
+                : t(($) => $.list.empty))}
           </p>
+          {emptyAction && <div className="mt-3">{emptyAction}</div>}
         </div>
         {/* Still offer the archive when the main list is empty — that is
             exactly when a user goes looking for what they filed away. */}

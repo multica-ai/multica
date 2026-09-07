@@ -32,6 +32,7 @@ type dingtalkChannel struct {
 	appKey    string
 	appSecret string // decrypted — opens the Stream connection + mints tokens
 	client    *Client
+	botNames  *BotNameResolver
 	handler   channel.InboundHandler
 	logger    *slog.Logger
 	// dispatch runs inbound jobs off the socket read loop on per-conversation
@@ -39,11 +40,23 @@ type dingtalkChannel struct {
 	// it survives redials, and in-flight jobs deliberately outlive the socket.
 	dispatch *dispatcher
 	slot     *dispatchSlot
+	// releaseDispatchSlot removes the closed slot from the factory registry
+	// after a lifecycle stop. It is compare-by-slot, so an overlapping rebuild
+	// can replace the registry entry without an older generation deleting it.
+	releaseDispatchSlot func()
 	// stopDispatch is set by Connect only when its run context was already
 	// cancelled when the transport returned (revoke, lease loss, rotation, or
 	// process shutdown). A normal gateway redial leaves it false so the queue
 	// survives and preserves per-conversation ordering across the reconnect.
 	stopDispatch atomic.Bool
+}
+
+// inboundJob is the adapter-private payload accepted by the asynchronous
+// dispatcher. Keeping the original callback until the worker runs lets Bot
+// identity resolution happen before normalization without blocking the Stream
+// read loop or leaking DingTalk-specific fields into channel.InboundMessage.
+type inboundJob struct {
+	callback botCallbackData
 }
 
 func (c *dingtalkChannel) Type() channel.Type { return TypeDingTalk }
@@ -71,11 +84,22 @@ func (c *dingtalkChannel) Disconnect(ctx context.Context) error {
 	// the slot, so the factory will create a fresh queue instead of adopting it.
 	c.dispatch.startClose()
 	c.slot.mu.Unlock()
-	defer c.slot.current.CompareAndSwap(c, nil)
 	if !c.dispatch.waitClosed(ctx) {
+		go func() {
+			<-c.dispatch.done
+			c.releaseClosedDispatchSlot()
+		}()
 		return fmt.Errorf("dingtalk: dispatcher drain: %w", ctx.Err())
 	}
+	c.releaseClosedDispatchSlot()
 	return nil
+}
+
+func (c *dingtalkChannel) releaseClosedDispatchSlot() {
+	c.slot.current.CompareAndSwap(c, nil)
+	if c.releaseDispatchSlot != nil {
+		c.releaseDispatchSlot()
+	}
 }
 
 // Send posts a group reply into out.ChatID with this installation's robot. It
@@ -125,8 +149,7 @@ func (c *dingtalkChannel) Connect(ctx context.Context) (err error) {
 // returns nil: DingTalk never redelivers robot messages and the engine's
 // (installation, msgId) dedup guards any duplicate anyway.
 func (c *dingtalkChannel) onMessage(ctx context.Context, data *botCallbackData) error {
-	msg, ok := inboundFromCallback(data, c.appID)
-	if !ok {
+	if data == nil || data.SenderStaffId == "" {
 		// The message never reaches the engine (no sender staff id — a system
 		// or bot-authored event), so no channel_inbound_audit row is written
 		// for it. Log the drop so the report is diagnosable instead of
@@ -139,13 +162,47 @@ func (c *dingtalkChannel) onMessage(ctx context.Context, data *botCallbackData) 
 		}
 		return nil
 	}
-	c.dispatch.enqueue(msg.Source.ChatID, msg)
+	job := inboundJob{callback: cloneBotCallbackData(data)}
+	c.dispatch.enqueue(data.ConversationId, job)
 	return nil
 }
 
-// runInbound is the dispatcher's job body: hand the message to the engine and
-// surface pipeline errors the way the old inline path did.
-func (c *dingtalkChannel) runInbound(ctx context.Context, msg channel.InboundMessage) {
+func cloneBotCallbackData(data *botCallbackData) botCallbackData {
+	cloned := *data
+	cloned.AtUsers = append([]botCallbackAtUser(nil), data.AtUsers...)
+	cloned.Content = append(json.RawMessage(nil), data.Content...)
+	return cloned
+}
+
+// runInbound is the dispatcher's job body. Resolve the current Bot's readable
+// identity before flattening the callback, then hand the normalized message to
+// the shared engine and surface pipeline errors the way the old inline path did.
+func (c *dingtalkChannel) runInbound(ctx context.Context, job inboundJob) {
+	data := &job.callback
+	botName := ""
+	if data.ConversationType == convTypeGroup && data.IsInAtList && c.botNames != nil {
+		resolved, err := c.botNames.resolveCredentials(ctx, credentials{
+			AppKey: c.appKey, AppSecret: c.appSecret, RobotCode: c.robotCode,
+		}, data.ConversationId)
+		if err != nil {
+			if errors.Is(err, errMissingChatManagePermission) {
+				c.logger.DebugContext(ctx, "dingtalk: Bot name unavailable without qyapi_chat_manage",
+					"app_id", c.appID, "conversation_id", data.ConversationId)
+			} else {
+				c.logger.WarnContext(ctx, "dingtalk: could not resolve Bot name before normalization",
+					"error", err, "app_id", c.appID, "conversation_id", data.ConversationId)
+			}
+		} else {
+			botName = resolved
+		}
+	}
+	msg, ok := inboundFromCallbackWithBotName(data, c.appID, botName)
+	if !ok {
+		c.logger.InfoContext(ctx, "dingtalk: dropped unsupported inbound message",
+			"app_id", c.appID, "msg_type", data.Msgtype, "msg_id", data.MsgId,
+			"has_sender", data.SenderStaffId != "")
+		return
+	}
 	if err := c.handler(ctx, msg); err != nil {
 		c.logger.WarnContext(ctx, "dingtalk: inbound handler error", "error", err, "app_id", c.appID)
 		c.notifyIssueDispatchError(msg)
@@ -180,11 +237,14 @@ func (c *dingtalkChannel) notifyIssueDispatchError(msg channel.InboundMessage) {
 // ChannelDeps are the shared dependencies the DingTalk Factory closes over. The
 // engine inbound handler is supplied per-build via channel.Config.Handler; the
 // Decrypter turns the installation's stored ciphertext AppSecret into plaintext;
-// the Client owns the outbound token cache + transport.
+// the Client owns the outbound token cache + transport; BotNames is shared with
+// group-presence discovery so ingest normalization and metadata observe one
+// authoritative identity cache.
 type ChannelDeps struct {
-	Decrypt Decrypter
-	Client  *Client
-	Logger  *slog.Logger
+	Decrypt  Decrypter
+	Client   *Client
+	BotNames *BotNameResolver
+	Logger   *slog.Logger
 }
 
 // dispatchSlot keeps one conversation dispatcher alive across the channel
@@ -196,6 +256,62 @@ type dispatchSlot struct {
 	queue   *dispatcher
 }
 
+type dispatchSlotRegistry struct {
+	mu      sync.Mutex
+	byAppID map[string]*dispatchSlot
+}
+
+func newDispatchSlotRegistry() *dispatchSlotRegistry {
+	return &dispatchSlotRegistry{byAppID: make(map[string]*dispatchSlot)}
+}
+
+func (r *dispatchSlotRegistry) assign(ch *dingtalkChannel, logger *slog.Logger) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	slot := r.byAppID[ch.appID]
+	if slot != nil {
+		slot.mu.Lock()
+	}
+	if slot == nil || slot.queue.isClosed() {
+		if slot != nil {
+			slot.mu.Unlock()
+		}
+		slot = &dispatchSlot{}
+		slot.mu.Lock()
+		slot.queue = newDispatcher(func(ctx context.Context, job inboundJob) {
+			if current := slot.current.Load(); current != nil {
+				current.runInbound(ctx, job)
+			}
+		}, logger)
+		r.byAppID[ch.appID] = slot
+	}
+	slot.current.Store(ch)
+	ch.dispatch = slot.queue
+	ch.slot = slot
+	ch.releaseDispatchSlot = func() { r.release(ch.appID, slot) }
+	slot.mu.Unlock()
+}
+
+func (r *dispatchSlotRegistry) release(appID string, slot *dispatchSlot) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.byAppID[appID] != slot {
+		return
+	}
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+	if slot.current.Load() == nil && slot.queue.isClosed() {
+		delete(r.byAppID, appID)
+	}
+}
+
+func (r *dispatchSlotRegistry) size() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.byAppID)
+}
+
 // RegisterDingTalk registers the per-installation DingTalk Factory so the
 // engine.Supervisor builds + supervises one dingtalkChannel per active
 // installation.
@@ -204,6 +320,10 @@ func RegisterDingTalk(reg *channel.Registry, deps ChannelDeps) {
 }
 
 func newDingTalkFactory(deps ChannelDeps) channel.Factory {
+	return newDingTalkFactoryWithRegistry(deps, newDispatchSlotRegistry())
+}
+
+func newDingTalkFactoryWithRegistry(deps ChannelDeps, slots *dispatchSlotRegistry) channel.Factory {
 	logger := deps.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -212,8 +332,6 @@ func newDingTalkFactory(deps ChannelDeps) channel.Factory {
 	if dtClient == nil {
 		dtClient = NewClient(nil, "")
 	}
-	var dispatchMu sync.Mutex
-	dispatchByAppID := make(map[string]*dispatchSlot)
 	return func(cfg channel.Config) (channel.Channel, error) {
 		var ic installConfig
 		if err := json.Unmarshal(cfg.Raw, &ic); err != nil {
@@ -232,6 +350,7 @@ func newDingTalkFactory(deps ChannelDeps) channel.Factory {
 			appKey:    ic.AppID,
 			appSecret: appSecret,
 			client:    dtClient,
+			botNames:  deps.BotNames,
 			handler:   cfg.Handler,
 			logger:    logger,
 		}
@@ -239,29 +358,7 @@ func newDingTalkFactory(deps ChannelDeps) channel.Factory {
 		// Supervisor.Build runs once per reconnect. Reusing the queue by the
 		// installation's unique AppKey prevents an old in-flight turn and the
 		// next turn received after reconnect from running concurrently.
-		dispatchMu.Lock()
-		slot := dispatchByAppID[ch.appID]
-		if slot != nil {
-			slot.mu.Lock()
-		}
-		if slot == nil || slot.queue.isClosed() {
-			if slot != nil {
-				slot.mu.Unlock()
-			}
-			slot = &dispatchSlot{}
-			slot.mu.Lock()
-			slot.queue = newDispatcher(func(ctx context.Context, msg channel.InboundMessage) {
-				if current := slot.current.Load(); current != nil {
-					current.runInbound(ctx, msg)
-				}
-			}, logger)
-			dispatchByAppID[ch.appID] = slot
-		}
-		slot.current.Store(ch)
-		ch.dispatch = slot.queue
-		ch.slot = slot
-		slot.mu.Unlock()
-		dispatchMu.Unlock()
+		slots.assign(ch, logger)
 		return ch, nil
 	}
 }

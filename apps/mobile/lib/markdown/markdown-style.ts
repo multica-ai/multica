@@ -10,12 +10,12 @@
  * `useColorScheme` everything else in the app uses, and rebuilds the
  * style object whenever the theme flips.
  *
- * Sizing follows the mobile typography scale documented in
- * `apps/mobile/docs/markdown-renderer-research.md` → "Mobile typography
- * scale" (calibrated against Apple HIG; one tier below shadcn web defaults
- * because markdown headings inside an issue card are structural, not
- * screen titles). HIG values are encoded in `MD_FONT` / `MD_LINE` /
- * `MD_GAP` constants — these are NOT RNR tokens to replace; they are
+ * Sizing sits one tier below shadcn web defaults because markdown headings
+ * inside an issue card are structural, not screen titles. The scale is
+ * calibrated against Apple HIG Dynamic Type (Body 17pt, Title 3 20pt,
+ * Title 2 22pt, Title 1 28pt) and cross-checked against GitHub Mobile and
+ * Linear iOS. Those values are encoded in the `MD_FONT` / `MD_LINE` /
+ * `MD_GAP` constants below — these are NOT RNR tokens to replace; they are
  * mobile-specific design constants validated by the 2026-05-09 inline-
  * code incident.
  */
@@ -25,7 +25,7 @@ import { useColorScheme } from "@/lib/use-color-scheme";
 
 /**
  * Typography scale — Apple HIG-calibrated, one tier below shadcn web.
- * See `docs/markdown-renderer-research.md` "Mobile typography scale".
+ * h1 maps to HIG Title 3 (20), h2 one step down (18), h3 body+2 (16).
  */
 const MD_FONT = {
   body: 14,
@@ -63,9 +63,8 @@ const MD_LINE = {
   // chip artifact is library-specific, not RN-platform-wide. Discord /
   // Slack / Telegram / Mattermost mobile all use background + mono with
   // no visible top-heavy issue, confirming this is enriched's bug, not
-  // an RN+iOS structural limitation. See:
-  //   - docs/markdown-rendering-adr.md "Known limitations"
-  //   - docs/markdown-renderer-research.md decision log 2026-05-19
+  // an RN+iOS structural limitation. See
+  // docs/markdown-rendering-adr.md "Known limitations".
   body: 24,
   // Heading lineHeights match each heading's fontSize × ~1.3. We MUST
   // pass these explicitly: enriched-markdown's heading defaults are

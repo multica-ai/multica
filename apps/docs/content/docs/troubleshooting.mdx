@@ -56,18 +56,18 @@ multica config show
 
 ## Issue does not start executing
 
-Open the issue's **execution log** and check the task's current status and what it is waiting for.
+Open the issue's **execution log** and check the run's current status and what it is waiting for.
 
 ### `queued` status
 
-`queued` means the task is still waiting for a runtime to claim it. Check in order:
+`queued` means the run is still waiting for a runtime to claim it. Check in order:
 
 1. Is the runtime the agent is bound to online?
 2. Did the runtime detect the AI coding tool the agent is configured with?
 3. Does the agent still have concurrency headroom?
 4. Does the daemon still have global execution capacity?
 
-An agent runs at most 6 tasks concurrently by default; a single daemon runs at most 20. At the limit, new tasks stay in the queue until a running one finishes. Tasks also keep queueing while the runtime is offline; they only fail after going unclaimed for more than 2 hours.
+An agent executes at most 6 runs concurrently by default; a single daemon executes at most 20. At the limit, new runs stay in the queue until an active one finishes. Runs also keep queueing while the runtime is offline; they only fail once that runtime has stopped heartbeating for longer than the reconnect grace and the run has itself waited that long, so a long queue behind a busy runtime is never expired for waiting, and assigning work to a machine that is already offline still leaves a full grace to bring it back.
 
 ```bash
 multica daemon status --output json
@@ -79,9 +79,11 @@ If the runtime list is missing an expected tool, first confirm the tool runs and
 
 ### `waiting_local_directory` status
 
-This means another in-flight task is using the same local directory. Multica waits for the directory lock to be released so two agents never modify the same files at once.
+This means another in-flight run is using the same local directory. Multica waits for the directory lock to be released so two agents never modify the same files at once.
 
-Usually you just wait for the earlier task to finish. If it is stuck, stop it from its execution log, or pick a different local directory for the current agent. This directory mutex lives in the daemon's memory — no lock file is written to disk. If you suspect stale lock state, `multica daemon restart` releases it; there is nothing to delete manually.
+This wait only exists in the directory's `in_place` ("Direct") mode. If the directory is a git repository, switching the resource to `worktree` ("Parallel") removes the queue altogether: each run gets its own worktree and hands its work back as a branch, so nothing waits on anything. See [Project resources](/project-resources#how-runs-share-the-directory).
+
+Otherwise you just wait for the earlier run to finish. If it is stuck, stop it from its execution log, or pick a different local directory for the current agent. This directory mutex lives in the daemon's memory — no lock file is written to disk. If you suspect stale lock state, `multica daemon restart` releases it; there is nothing to delete manually.
 
 ## AI coding tool fails to start
 
@@ -93,11 +95,11 @@ An online daemon does not mean the tool itself works. Open the run's detailed re
 - Whether the local working directory exists and is writable.
 - Whether the agent's custom arguments or environment variables are valid.
 
-Run the same tool directly in a terminal on the executing computer first. If the tool cannot start on its own, fix its sign-in or configuration, then retry the task from the execution log.
+Run the same tool directly in a terminal on the executing computer first. If the tool cannot start on its own, fix its sign-in or configuration, then retry the run from the execution log.
 
 ## Realtime updates stop working
 
-If tasks still execute but comments and status changes no longer appear live, the WebSocket is usually not connected.
+If runs still execute but comments and status changes no longer appear live, the WebSocket is usually not connected.
 
 Check the `/ws` connection under **Network → WS** in the browser's developer tools. For self-hosted deployments, focus on:
 
@@ -106,6 +108,10 @@ Check the `/ws` connection under **Network → WS** in the browser's developer t
 - Whether the reverse proxy forwards the WebSocket Upgrade request.
 - Whether the browser sign-in has expired.
 
+A plain `curl` against `/ws` returning HTTP 400 is expected: the endpoint requires workspace-scoped query parameters and rejects a bare handshake before any WebSocket upgrade happens. A 400/401 recorded in the backend logs therefore proves only that ordinary HTTP routing reaches the backend — it does not prove the proxy preserves the WebSocket `Upgrade` headers. To verify the actual connection, open the browser DevTools → Network → WS tab (or use a WebSocket-aware client) and look for a `101` handshake.
+
+Self-host note: daemons dial `/api/daemon/ws` for their long connection (not `/ws`) — route it to the backend the same way. If the WebSocket handshake fails there, the daemon silently falls back to polling; repeated `status=400` lines on that path in the backend log are the symptom.
+
 Containers read `.env` only at creation time; recreate them after changes:
 
 ```bash
@@ -113,6 +119,16 @@ docker compose -f docker-compose.selfhost.yml up -d
 ```
 
 For a complete reverse-proxy example, see the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access).
+
+## `multica setup` reports the server is not reachable
+
+The CLI reachability probe GETs `<server-url>/health` and needs a 200. The backend serves this path. Current web releases forward `/health` to the backend, but older ones do not — a reverse proxy that forwards everything to such an older frontend returns 404, and the CLI concludes the server is down while the stack is healthy.
+
+Routing `/health` to the backend (port 8080) explicitly in your proxy works across all releases — both Caddy examples in the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access) do this. Confirm with:
+
+```bash
+curl -fsS <server-url>/health
+```
 
 ## Verification code and invitation emails not delivered
 
@@ -146,7 +162,7 @@ With Docker Compose, the default `backend_uploads` volume stores local attachmen
 
 ## Usage shows zero
 
-The Usage page reads hourly rollups, not each task's raw usage. Check the raw data and the rollup table first:
+The Usage page reads hourly rollups, not each run's raw usage. Check the raw data and the rollup table first:
 
 ```sql
 SELECT count(*) FROM task_usage;
@@ -203,6 +219,8 @@ If it is another Multica checkout, run `make stop` in that directory first. Othe
 | Docker backend | `docker compose -f docker-compose.selfhost.yml logs -f backend` |
 | Browser | Console and Network in the developer tools |
 
+Which of those files is the live one depends on the profile the daemon was started with, and a stale log from an earlier daemon still reads perfectly — the easiest way to debug the wrong file. Don't open one by guess: `multica daemon logs` prints the absolute path it resolved before streaming it. Add `--profile <name>` to read a named profile's log.
+
 To observe the daemon's startup directly, run it in the foreground instead:
 
 ```bash
@@ -215,5 +233,5 @@ If you still cannot pin it down, search existing issues or file a new one on [Gi
 ## Next steps
 
 - [Daemon and runtimes](/daemon-runtimes) — how runtimes register and report online status.
-- [Tasks](/tasks) — status, timeout, and failure reference.
+- [Runs](/tasks) — status, timeout, and failure reference.
 - [Environment variables](/environment-variables) — the full self-hosting configuration reference.

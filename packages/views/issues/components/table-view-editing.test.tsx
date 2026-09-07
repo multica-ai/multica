@@ -21,6 +21,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
+import { useModalStore } from "@multica/core/modals";
 import type { ApiClient } from "@multica/core/api/client";
 import { issueKeys } from "@multica/core/issues/queries";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
@@ -66,6 +67,13 @@ vi.mock("@tanstack/react-virtual", () => ({
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Someone" }),
   buildActorNameResolver: () => () => "Someone",
+}));
+
+// The assignee cell's avatar only renders for a row that HAS an assignee (the
+// run-confirm case below) and pulls in presence, images and the rest of the
+// workspace-hooks surface. None of that is under test here.
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));
 
 const mockAuthUser = { id: "user-1", email: "t@t.co", name: "Tester" };
@@ -226,6 +234,47 @@ function Harness({
 }
 
 describe("TableView cell editors under data refresh", () => {
+  // The table's inline pickers are single-issue writes like the issue detail's,
+  // so they route on the same run-confirm gate: promoting an agent-owned issue
+  // out of backlog starts a run and must confirm first (MUL-6463). The gate's
+  // own matrix lives in ../actions/run-confirm-gate.test.ts; this only proves
+  // the table asks it instead of writing straight through.
+  it("confirms a status change that would start an agent run instead of applying it", async () => {
+    const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
+    serverIssues = [
+      {
+        ...makeIssue("c", "Parked task", "backlog"),
+        assignee_type: "agent",
+        assignee_id: "agent-1",
+      },
+    ];
+    useModalStore.getState().close();
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness
+          childProgressMap={new Map<string, ChildProgress>()}
+          surfaceKey={`test-surface-${Math.floor(Math.random() * 1e9)}`}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("MUL-c");
+    const row = screen.getByText("MUL-c").closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: /Backlog/ }));
+    await user.click(screen.getByRole("button", { name: /^Todo$/ }));
+
+    const { modal, data } = useModalStore.getState();
+    expect(modal).toBe("issue-run-confirm");
+    expect(data).toMatchObject({
+      mode: "promote",
+      status: "todo",
+      assigneeType: "agent",
+      assigneeId: "agent-1",
+    });
+    useModalStore.getState().close();
+  });
+
   let queryClient: QueryClient;
 
   beforeEach(() => {
@@ -247,6 +296,7 @@ describe("TableView cell editors under data refresh", () => {
       listAgents: async () => [],
       listSquads: async () => [],
       getAssigneeFrequency: async () => [],
+      listIssueStatuses: async () => ({ statuses: [] }),
       listIssueTableRows: async () => ({
         query_fingerprint: "test",
         group_key: null,

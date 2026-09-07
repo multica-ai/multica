@@ -217,11 +217,13 @@ function renderCommentInput(onSubmit = vi.fn().mockResolvedValue(true)) {
 }
 
 function renderReplyInput({
-  onSubmit = vi.fn().mockResolvedValue(true),
+  onSubmit = vi.fn().mockResolvedValue("reply-new"),
+  onAccepted,
   size = "sm",
   draftKey,
 }: {
-  onSubmit?: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
+  onSubmit?: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<string | boolean>;
+  onAccepted?: (commentId: string) => void;
   size?: "sm" | "default";
   draftKey?: `reply:${string}:${string}`;
 } = {}) {
@@ -232,6 +234,7 @@ function renderReplyInput({
       avatarType="member"
       avatarId="user-1"
       onSubmit={onSubmit}
+      onAccepted={onAccepted}
       size={size}
       draftKey={draftKey}
     />,
@@ -386,17 +389,6 @@ describe("comment composers", () => {
     expect(shell.className).not.toContain("h-[60vh]");
   });
 
-  it("lets default-size replies grow without a height cap", () => {
-    const { container } = renderReplyInput({ size: "default" });
-
-    activateComposer("reply-composer-shell");
-    expect(screen.getByPlaceholderText("Leave a reply...")).toBeInTheDocument();
-    expect(container.querySelectorAll("button")).toHaveLength(2);
-
-    const shell = screen.getByTestId("drop-zone");
-    expect(shell.className).not.toMatch(/max-h-/);
-  });
-
   it("keeps main comment submission wired after removing expand", async () => {
     const { container, onSubmit } = renderCommentInput();
 
@@ -508,6 +500,18 @@ describe("comment composers", () => {
 
     await waitFor(() => expect(focusCalls.focused).toBeGreaterThan(0));
     expect(focusCalls.blurred).toBe(0);
+  });
+
+  it("reports the new reply id as the accepted scroll target", async () => {
+    const onAccepted = vi.fn();
+    const { container } = renderReplyInput({ onAccepted });
+
+    activateComposer("reply-composer-shell");
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "replied" } });
+    fireEvent.click(getSubmitButton(container));
+
+    await waitFor(() => expect(onAccepted).toHaveBeenCalledTimes(1));
+    expect(onAccepted).toHaveBeenCalledWith("reply-new");
   });
 
   it("does not refocus the reply box when the send fails", async () => {

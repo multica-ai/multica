@@ -11,11 +11,11 @@
  * mount.
  */
 import { useQuery } from "@tanstack/react-query";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { agentListOptions } from "@/data/queries/agents";
 import { memberListOptions } from "@/data/queries/members";
-import { canAssignAgent } from "./can-assign-agent";
 
 export type WorkspaceAgentAvailability = "loading" | "none" | "available";
 
@@ -32,10 +32,12 @@ export function useWorkspaceAgentAvailability(): WorkspaceAgentAvailability {
 
   if (!agentsFetched || !membersFetched) return "loading";
 
-  const memberRole = members?.find((m) => m.user_id === userId)?.role;
+  const role = members?.find((m) => m.user_id === userId)?.role ?? null;
 
   const hasVisibleAgent = (agents ?? []).some(
-    (a) => !a.archived_at && canAssignAgent(a, userId, memberRole),
+    (a) =>
+      !a.archived_at &&
+      canAssignAgentToIssue(a, { userId: userId ?? null, role }).allowed,
   );
 
   return hasVisibleAgent ? "available" : "none";

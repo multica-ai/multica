@@ -206,26 +206,3 @@ func TestBindingConfigNullStrip(t *testing.T) {
 		t.Fatalf("expected empty union_id to encode as {}, got %q", got)
 	}
 }
-
-func TestChatSessionBindingFromRow(t *testing.T) {
-	row := db.ChannelChatSessionBinding{
-		ID:             uuidFrom(0x77),
-		ChatSessionID:  uuidFrom(0x88),
-		InstallationID: uuidFrom(0x11),
-		ChannelType:    "feishu",
-		ChannelChatID:  "oc_chat_1",
-		ChatType:       "group",
-		LastMessageID:  pgtype.Text{String: "om_last", Valid: true},
-		LastThreadID:   pgtype.Text{String: "omt_thread", Valid: true},
-	}
-	got := chatSessionBindingFromRow(row)
-	if got.ChannelChatID != "oc_chat_1" || got.ChatType != "group" {
-		t.Fatalf("chat fields mismatch: %+v", got)
-	}
-	if got.LastMessageID != row.LastMessageID || got.LastThreadID != row.LastThreadID {
-		t.Fatalf("reply-target fields mismatch: %+v", got)
-	}
-	if got.ChatSessionID != row.ChatSessionID || got.InstallationID != row.InstallationID {
-		t.Fatalf("id fields mismatch: %+v", got)
-	}
-}

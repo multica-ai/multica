@@ -43,6 +43,7 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { useT } from "../../i18n";
+import { PAGE_TOOLBAR } from "../../layout/page-header";
 
 // Composite "type:id" value for polymorphic actor filter dimensions, so the
 // string[] filter store can hold agent/squad/member references alike.
@@ -191,7 +192,7 @@ export function AutopilotListToolbar({
   );
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
+    <div className={PAGE_TOOLBAR}>
       {/* Left: scope buttons + result count. Scope is the promoted status
           dimension (it does NOT appear in the filter dropdown). No search
           box: scope buttons already partition the (small) set, so search

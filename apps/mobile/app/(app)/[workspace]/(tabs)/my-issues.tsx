@@ -5,10 +5,14 @@
  * (`involves_user_id`, MUL-2397) surfaces both the user's owned agents and
  * squads they're involved in (member / leader / has an owned agent inside).
  *
- * Issues are grouped by status using SectionList in `BOARD_STATUSES` order;
- * empty status sections are filtered out so the screen doesn't fill with
- * "(0)" headers. Section grouping uses `BOARD_STATUSES` (cancelled excluded)
- * to match web — same source `packages/views/my-issues/components/my-issues-page.tsx:117-125`.
+ * Issues are grouped by status CATEGORY using SectionList in
+ * `BOARD_CATEGORIES` order; empty sections are filtered out so the screen
+ * doesn't fill with "(0)" headers. Grouping is by category, not by status key,
+ * because a workspace's custom statuses live inside their category's section
+ * rather than adding one of their own — bucketing by key is what made
+ * custom-status issues disappear from this list (MUL-6457). `cancelled` stays
+ * excluded, so a custom status in that category is hidden here exactly like the
+ * built-in Cancelled is: a custom status inherits its category's behavior.
  *
  * Status + Priority filters mirror web's MyIssuesHeader filter sub-menus.
  * Filter state lives in `useMyIssuesViewStore` and is cleared on workspace
@@ -20,7 +24,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
+import type {
+  IssuePriority,
+  IssueStatus,
+  IssueStatusCategory,
+} from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/ui/header";
@@ -37,11 +45,9 @@ import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useMyIssuesViewStore } from "@/data/stores/my-issues-view-store";
 import { useClearFiltersOnWorkspaceChange } from "@/lib/use-clear-filters-on-workspace-change";
-import {
-  BOARD_STATUSES,
-  PRIORITY_LABEL,
-  STATUS_LABEL,
-} from "@/lib/issue-status";
+import { PRIORITY_LABEL, STATUS_LABEL } from "@/lib/issue-status";
+import { useIssueStatuses } from "@/lib/use-issue-statuses";
+import { groupIssuesByCategory } from "@/lib/group-issues-by-category";
 import { filterIssues } from "@/lib/filter-issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
@@ -57,8 +63,6 @@ const SCOPES: { value: MyIssuesScope; label: string }[] = [
   { value: "created", label: "Created" },
   { value: "agents", label: "Agents" },
 ];
-
-type IssueSection = { status: IssueStatus; data: Issue[] };
 
 export default function MyIssues() {
   const isFocused = useIsFocused();
@@ -94,6 +98,11 @@ export default function MyIssues() {
     enabled: !!wsId && !!userId,
   });
 
+  // Only the active-filter chips need the catalog: sections group on the
+  // category the server already resolved onto each issue, so the list never
+  // waits for this. (MUL-6243)
+  const catalog = useIssueStatuses();
+
   // Apply client-side status + priority filter. Mirrors the predicate at
   // packages/views/issues/utils/filter.ts:30-34 via filterIssues().
   const filtered = useMemo(
@@ -101,24 +110,7 @@ export default function MyIssues() {
     [data, statusFilters, priorityFilters],
   );
 
-  // When statusFilters is non-empty, intersect visible status order with it
-  // so hidden statuses don't render an empty section header. Uses
-  // BOARD_STATUSES (cancelled excluded) to match web.
-  const sections = useMemo<IssueSection[]>(() => {
-    if (filtered.length === 0) return [];
-    const byStatus = new Map<IssueStatus, Issue[]>();
-    for (const issue of filtered) {
-      const list = byStatus.get(issue.status);
-      if (list) list.push(issue);
-      else byStatus.set(issue.status, [issue]);
-    }
-    const visibleStatuses = statusFilters.length > 0
-      ? BOARD_STATUSES.filter((s) => statusFilters.includes(s))
-      : BOARD_STATUSES;
-    return visibleStatuses
-      .map((status) => ({ status, data: byStatus.get(status) ?? [] }))
-      .filter((s) => s.data.length > 0);
-  }, [filtered, statusFilters]);
+  const sections = useMemo(() => groupIssuesByCategory(filtered), [filtered]);
 
   const hasActiveFilters =
     statusFilters.length > 0 || priorityFilters.length > 0;
@@ -140,6 +132,7 @@ export default function MyIssues() {
         <ActiveFilterChips
           statusFilters={statusFilters}
           priorityFilters={priorityFilters}
+          statusLabelOf={catalog.labelOf}
           onClearStatus={(s) =>
             useMyIssuesViewStore.getState().toggleStatusFilter(s)
           }
@@ -178,7 +171,7 @@ export default function MyIssues() {
           )}
           renderSectionHeader={({ section }) => (
             <SectionHeader
-              status={section.status}
+              category={section.category}
               count={section.data.length}
             />
           )}
@@ -297,18 +290,21 @@ function ScopeToolbar<S extends string>({
 function ActiveFilterChips({
   statusFilters,
   priorityFilters,
+  statusLabelOf,
   onClearStatus,
   onClearPriority,
 }: {
   statusFilters: IssueStatus[];
   priorityFilters: IssuePriority[];
+  /** Resolves a status KEY — which can be a custom one — to its label. */
+  statusLabelOf: (statusKey: string) => string;
   onClearStatus: (s: IssueStatus) => void;
   onClearPriority: (p: IssuePriority) => void;
 }) {
   return (
     <View className="flex-row flex-wrap gap-1.5 px-4 pb-2">
       {statusFilters.map((s) => (
-        <Chip key={`s-${s}`} label={STATUS_LABEL[s]} onClear={() => onClearStatus(s)} />
+        <Chip key={`s-${s}`} label={statusLabelOf(s)} onClear={() => onClearStatus(s)} />
       ))}
       {priorityFilters.map((p) => (
         <Chip key={`p-${p}`} label={PRIORITY_LABEL[p]} onClear={() => onClearPriority(p)} />
@@ -334,18 +330,22 @@ function Chip({ label, onClear }: { label: string; onClear: () => void }) {
   );
 }
 
+// The header names the CATEGORY, not any one status inside it, so it keeps
+// mobile's own copy and its category glyph even when the section holds custom
+// statuses.
 function SectionHeader({
-  status,
+  category,
   count,
 }: {
-  status: IssueStatus;
+  category: IssueStatusCategory;
   count: number;
 }) {
   return (
     <View className="flex-row items-center gap-2 px-4 py-2 bg-background">
-      <StatusIcon status={status} size={14} />
+      {/* A category IS a built-in status key, so it resolves to its own glyph. */}
+      <StatusIcon status={category} size={14} />
       <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-        {STATUS_LABEL[status]}
+        {STATUS_LABEL[category]}
       </Text>
       <Text className="text-xs text-muted-foreground/60">{count}</Text>
     </View>

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -226,15 +227,23 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	if err := ensurePiSessionFile(sessionPath); err != nil {
 		return nil, fmt.Errorf("%s session file: %w", label, err)
 	}
+	sessionLock, locked, err := tryLockPiSessionFile(sessionPath)
+	if err != nil {
+		return nil, fmt.Errorf("%s session lock: %w", label, err)
+	}
+	if !locked {
+		if opts.ResumeSessionID != "" {
+			return piSessionBusyResult(label, sessionPath), nil
+		}
+		return nil, fmt.Errorf("%s session file %q is already in use", label, sessionPath)
+	}
 
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildPiArgs(sessionPath, opts, b.cfg.Logger)
-	argv0, cmdArgs := choosePiInvocation(execName, lookedUp, args, b.cfg.Logger)
-
-	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
+	cmd, _, _ := b.cfg.commandAt(execName).execVia(runCtx, choosePiInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -243,6 +252,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		releasePiSessionFileLock(sessionLock)
 		cancel()
 		return nil, fmt.Errorf("%s stdout pipe: %w", label, err)
 	}
@@ -253,15 +263,21 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	// Pi has been observed to wait indefinitely when stdin never reaches EOF.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		releasePiSessionFileLock(sessionLock)
 		cancel()
 		return nil, fmt.Errorf("%s stdin pipe: %w", label, err)
 	}
 	var closeStdinOnce sync.Once
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "["+label+":stderr] ")
+	// Watch stderr as well as log it. When Pi refuses a resume it exits before
+	// emitting a single JSON event, so stderr is the only place the reason
+	// exists and Result.ResumeRejected has nothing else to be built from.
+	stderrWatch := newPiStderrWatcher(newLogWriter(b.cfg.Logger, "["+label+":stderr] "))
+	cmd.Stderr = stderrWatch
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
+		releasePiSessionFileLock(sessionLock)
 		cancel()
 		return nil, fmt.Errorf("start %s: %w", label, err)
 	}
@@ -291,6 +307,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	}()
 
 	go func() {
+		defer func() { releasePiSessionFileLock(sessionLock) }()
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
@@ -299,6 +316,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		var output strings.Builder
 		finalStatus := "completed"
 		var finalError string
+		var lastTurnError string
 		usage := make(map[string]TokenUsage)
 
 		// Pi message_update events can be large (they embed the full message
@@ -323,6 +341,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			case "turn_start":
 				output.Reset()
 				textBuffer.Reset()
+				lastTurnError = ""
 
 			case "message_update":
 				if evt.AssistantMessageEvent == nil {
@@ -360,7 +379,11 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				})
 
 			case "turn_end":
-				if msg := decodePiMessage(evt.Message); msg != nil && msg.Usage != nil {
+				msg := decodePiMessage(evt.Message)
+				if msg == nil {
+					continue
+				}
+				if msg.Usage != nil {
 					model := msg.Model
 					if model == "" {
 						model = opts.Model
@@ -374,6 +397,16 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					u.CacheReadTokens += msg.Usage.CacheRead
 					u.CacheWriteTokens += msg.Usage.CacheWrite
 					usage[model] = u
+				}
+				// A turn Pi ends on an error is only terminal when nothing
+				// follows it. Pi emits the same stopReason before an automatic
+				// retry, and turn_start clears this, so a later successful turn
+				// leaves nothing behind.
+				if msg.StopReason == "error" {
+					lastTurnError = msg.ErrorMessage
+					if lastTurnError == "" {
+						lastTurnError = label + " ended the turn with an error"
+					}
 				}
 
 			case "error":
@@ -401,6 +434,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		}
 
 		waitErr := cmd.Wait()
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
 		// Wait closes the process pipes, so a prompt write still blocked when the
@@ -415,14 +449,39 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			finalError = "execution cancelled"
 		} else if waitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("%s exited with error: %v", label, waitErr)
+			// Prefer the turn's provider message over the process exit code.
+			// Pi (and pi-print-clean-exit) exits 1 after stopReason=error, so
+			// Wait() wins this branch and used to drop lastTurnError. The
+			// classifier then saw only "exit status 1" and filed the run as
+			// non-retryable process_failure — even when the turn was a
+			// transient LiteLLM/OpenAI "Connection error." / "Request timed
+			// out." Keep the exit status as a suffix so a genuine crash is
+			// still visible (same shape as the OpenCode empty-step+exit
+			// composite).
+			if lastTurnError != "" {
+				finalError = fmt.Sprintf("%s; %s exited with error: %v", lastTurnError, label, waitErr)
+			} else {
+				finalError = fmt.Sprintf("%s exited with error: %v", label, waitErr)
+			}
 		} else if writeErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("%s prompt write failed: %v", label, writeErr)
+		} else if lastTurnError != "" && finalStatus == "completed" {
+			// Pi exits 0 after a turn it could not complete and did not retry,
+			// and emits neither an `error` event nor `auto_retry_end`. Without
+			// this the run reports success with no output.
+			finalStatus = "failed"
+			finalError = lastTurnError
 		}
 
 		b.cfg.Logger.Info(label+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
+		// Publish the terminal result only after the transcript is available to
+		// a follow-up run. The result channel is buffered, so relying on a defer
+		// would let the receiver race ahead and spuriously treat the session as
+		// still busy after Pi had already exited.
+		releasePiSessionFileLock(sessionLock)
+		sessionLock = nil
 		resCh <- Result{
 			Status:     finalStatus,
 			Output:     output.String(),
@@ -430,10 +489,86 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			DurationMs: duration.Milliseconds(),
 			SessionID:  sessionPath,
 			Usage:      usage,
+			// Only a run that asked to resume can have had a resume refused.
+			// On a cold run the phrase cannot appear anyway, but stating the
+			// precondition keeps this honest against Result.ResumeRejected's
+			// contract rather than relying on Pi never saying it.
+			ResumeRejected: opts.ResumeSessionID != "" && stderrWatch.resumeRefused(),
 		}
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func piSessionBusyResult(label, sessionPath string) *Session {
+	msgCh := make(chan Message)
+	close(msgCh)
+	resCh := make(chan Result, 1)
+	resCh <- Result{
+		Status:                  "failed",
+		Error:                   fmt.Sprintf("%s session file %q is already in use by another execution", label, sessionPath),
+		ResumeRejectedTransient: true,
+	}
+	close(resCh)
+	return &Session{Messages: msgCh, Result: resCh}
+}
+
+// piResumeRefusedMarker is Pi's message when a resumed transcript names a
+// working directory that no longer exists. Pi re-anchors a resumed run to the
+// cwd recorded in the session header; when that directory is gone it prints
+// this to stderr and exits 1 immediately, before any JSON event, any tool call
+// and any output (GH #8082).
+//
+// The daemon's resume gate already declines to hand Pi such a session, so in
+// normal operation this never fires. It is the second layer, and its reach is
+// exactly this one refusal arriving on a run the gate let through: the
+// directory disappearing between the gate's check and Pi's, a header the
+// gate's bounded scan did not reach or could not parse, or a Pi-family runtime
+// the gate does not model as refusing. It is a single phrase match, so it does
+// NOT generalise to some other refusal Pi might grow later.
+//
+// Without it such a run fails as a generic non-retryable process_failure and
+// the same stale pointer is served again on the next claim — the permanent
+// loop #8082 reported.
+const piResumeRefusedMarker = "Stored session working directory does not exist"
+
+// piStderrTailLimit bounds the retained stderr tail. The marker arrives in a
+// single write at startup, so this only has to be large enough that a partial
+// flush cannot split it apart.
+const piStderrTailLimit = 8 << 10
+
+// piStderrWatcher tees Pi's stderr to the debug log while retaining a bounded
+// tail to test for a resume refusal. Writes arrive from the child process
+// goroutine and resumeRefused is read from the result goroutine after Wait, so
+// the buffer is mutex-guarded rather than relying on that ordering.
+type piStderrWatcher struct {
+	log io.Writer
+
+	mu   sync.Mutex
+	tail []byte
+}
+
+func newPiStderrWatcher(log io.Writer) *piStderrWatcher {
+	return &piStderrWatcher{log: log}
+}
+
+func (w *piStderrWatcher) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	w.tail = append(w.tail, p...)
+	if len(w.tail) > piStderrTailLimit {
+		w.tail = w.tail[len(w.tail)-piStderrTailLimit:]
+	}
+	w.mu.Unlock()
+	// Never fail the child's stderr write on a logging problem: a short write
+	// here makes Pi's own writer error out mid-run.
+	_, _ = w.log.Write(p)
+	return len(p), nil
+}
+
+func (w *piStderrWatcher) resumeRefused() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return bytes.Contains(w.tail, []byte(piResumeRefusedMarker))
 }
 
 // ── Pi event types ──
@@ -472,6 +607,12 @@ type piMessage struct {
 	Role  string   `json:"role,omitempty"`
 	Model string   `json:"model,omitempty"`
 	Usage *piUsage `json:"usage,omitempty"`
+
+	// turn_end carries the terminal state of the turn. Pi sets StopReason to
+	// "error" for a provider call it could not complete, whether or not it
+	// goes on to retry, and puts the provider's message in ErrorMessage.
+	StopReason   string `json:"stopReason,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
 type piUsage struct {
@@ -594,8 +735,7 @@ var piCustomArgModes = map[string]blockedArgMode{
 //	-p                          non-interactive mode (prompt arrives on stdin)
 //	--mode json                 emit one JSON event per line on stdout
 //	--session <path>            session log file (created upfront, reused on resume)
-//	--provider <name>           provider, when Model is "provider/id"
-//	--model <id>                model identifier
+//	--model <selector>          model selector, passed through verbatim
 //	--thinking <level>          per-agent reasoning level override
 //
 // The prompt is deliberately absent from argv. Pi reads a non-TTY stdin in
@@ -609,14 +749,18 @@ func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []st
 	if sessionPath != "" {
 		args = append(args, "--session", sessionPath)
 	}
-	if opts.Model != "" {
-		provider, model := splitPiModel(opts.Model)
-		if provider != "" {
-			args = append(args, "--provider", provider)
-		}
-		if model != "" {
-			args = append(args, "--model", model)
-		}
+	// The selector goes to --model whole, and --provider is never synthesized.
+	// Pi's own resolver already accepts every shape we hold: a canonical
+	// `provider/id`, a bare id, and — crucially — an id that itself contains a
+	// slash, which is the normal case for gateway-style providers whose model
+	// ids look like `claude/claude-opus-5`. Splitting on the first slash to
+	// fill --provider turns that id into a provider name Pi has never heard of,
+	// and an unknown --provider is a hard error ("Unknown provider ...") rather
+	// than something Pi can recover from — whereas --model alone falls back to
+	// matching the full string as a raw model id. Passing less is strictly more
+	// capable here (GH #7300).
+	if model := strings.TrimSpace(opts.Model); model != "" {
+		args = append(args, "--model", model)
 	}
 	if opts.ThinkingLevel != "" {
 		args = append(args, "--thinking", opts.ThinkingLevel)
@@ -691,16 +835,6 @@ func filterPiCustomArgs(args []string, logger *slog.Logger) []string {
 		}
 	}
 	return filtered
-}
-
-// splitPiModel parses a "provider/model" string into its parts. Plain
-// "model" strings pass through as (provider="", model="model").
-func splitPiModel(s string) (provider, model string) {
-	s = strings.TrimSpace(s)
-	if i := strings.Index(s, "/"); i >= 0 {
-		return strings.TrimSpace(s[:i]), strings.TrimSpace(s[i+1:])
-	}
-	return "", s
 }
 
 // ── Session path ──

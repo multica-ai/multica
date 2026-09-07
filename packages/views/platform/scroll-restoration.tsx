@@ -1,6 +1,11 @@
 "use client";
 
-import { createContext, useCallback, useContext, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  type ReactNode,
+} from "react";
 
 /**
  * Pull-based scroll restoration channel (MUL-4741 state-restoration
@@ -22,12 +27,49 @@ import { createContext, useCallback, useContext, type ReactNode } from "react";
  * capture side scans for; the platform scopes them per route + tab. On web
  * (no provider) every lookup returns undefined and views behave as before.
  */
+
+/**
+ * One captured scroll entry. `contentKey` is an optional fingerprint of the
+ * rendered content (multica-ai#6405): views that render untrusted HTML inside
+ * a sandboxed iframe cannot be scrolled externally and register an external
+ * capture source instead; they tag the entry with a hash of the rendered HTML
+ * so a re-upload to the same attachment id refuses to restore a stale offset.
+ * Plain containers leave it undefined and get identity comparison (undefined
+ * === undefined), so they are unaffected.
+ */
+export interface ScrollRestorationEntry {
+  top: number;
+  height: number;
+  contentKey?: string;
+}
+
+/**
+ * A scroll source that lives outside the outer DOM — e.g. the document inside
+ * a sandboxed iframe, which the platform cannot query for `scrollTop` due to
+ * the opaque-origin boundary. The owning view reports latest values into a
+ * ref and registers a source whose `capture()` reads it synchronously during
+ * the pre-unmount store tick.
+ */
+export interface ExternalScrollSource {
+  capture(): ScrollRestorationEntry | undefined;
+}
+
 export interface ScrollRestorationAdapter {
   /**
-   * The saved offset for a container key on the current route, or undefined
+   * The saved entry for a container key on the current route, or undefined
    * when there is nothing to restore.
    */
-  get(containerKey: string): { top: number; height: number } | undefined;
+  get(containerKey: string): ScrollRestorationEntry | undefined;
+  /**
+   * Register/unregister a scroll source that is not a `[data-tab-scroll-root]`
+   * element (currently: a sandboxed iframe's internal document). Desktop
+   * implements this; web does not and the method stays absent — views detect
+   * that and no-op without importing any app code.
+   */
+  registerExternalSource?(
+    containerKey: string,
+    source: ExternalScrollSource | null,
+  ): void;
   /**
    * Generic restorable view-state entries — the memento's second kind of
    * cargo, for state that must survive the view's unmount but is not a
@@ -63,13 +105,33 @@ export function ScrollRestorationProvider({
 }
 
 /**
+ * The active adapter, or null on web (no provider). Prefer the narrower hooks
+ * below; reach for this when a view needs to call `registerExternalSource` or
+ * inspect whether restoration is active at all.
+ */
+export function useScrollRestorationAdapter(): ScrollRestorationAdapter | null {
+  return useContext(ScrollRestorationContext);
+}
+
+/**
+ * The full saved entry for a container key on the current route, including
+ * `contentKey` — use this when a view must decide whether a saved offset is
+ * still applicable to the currently rendered content (multica-ai#6405).
+ */
+export function useRestoredScrollEntry(
+  containerKey: string,
+): ScrollRestorationEntry | undefined {
+  const adapter = useContext(ScrollRestorationContext);
+  return adapter?.get(containerKey);
+}
+
+/**
  * The saved scroll offset for a container key on the current route, or
  * undefined. Read it once at mount (e.g. into a Virtuoso `initialScrollTop`)
  * — it reflects the state captured when this route was last left.
  */
 export function useRestoredScrollOffset(containerKey: string): number | undefined {
-  const adapter = useContext(ScrollRestorationContext);
-  return adapter?.get(containerKey)?.top;
+  return useRestoredScrollEntry(containerKey)?.top;
 }
 
 /**

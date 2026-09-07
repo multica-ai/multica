@@ -27,6 +27,7 @@ type InboxItemResponse struct {
 	Archived      bool            `json:"archived"`
 	CreatedAt     string          `json:"created_at"`
 	IssueStatus   *string         `json:"issue_status"`
+	IssuePriority *string         `json:"issue_priority"`
 	ActorType     *string         `json:"actor_type"`
 	ActorID       *string         `json:"actor_id"`
 	Details       json.RawMessage `json:"details"`
@@ -67,6 +68,7 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		Archived:      r.Archived,
 		CreatedAt:     timestampToString(r.CreatedAt),
 		IssueStatus:   textToPtr(r.IssueStatus),
+		IssuePriority: textToPtr(r.IssuePriority),
 		ActorType:     textToPtr(r.ActorType),
 		ActorID:       uuidToPtr(r.ActorID),
 		Details:       json.RawMessage(r.Details),
@@ -74,7 +76,7 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 }
 
 // ListArchivedInboxItemsRow carries the same columns as ListInboxItemsRow (both
-// queries select `inbox_item.*` plus the joined issue status), so the archived
+// queries select `inbox_item.*` plus the joined issue projections), so the archived
 // row converts to the active one and reuses its mapper. If either query's
 // column list drifts, this conversion stops compiling — which is the point.
 func archivedInboxRowToResponse(r db.ListArchivedInboxItemsRow) InboxItemResponse {
@@ -89,6 +91,8 @@ func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemRespons
 	if err == nil {
 		s := issue.Status
 		resp.IssueStatus = &s
+		p := issue.Priority
+		resp.IssuePriority = &p
 	}
 	return resp
 }
@@ -128,8 +132,9 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 // unbounded archive never rides along with the main list.
 //
 // The query drops any issue that also has an active row, keeping this list and
-// the main inbox mutually exclusive per issue group, and caps the response at
-// 200 rows — see the query comment for both.
+// the main inbox mutually exclusive per issue group. It selects at most 200
+// groups and returns only each group's newest row plus its optional comment
+// anchor — see the query comment for both the bound and the grouping contract.
 func (h *Handler) ListArchivedInbox(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -445,9 +450,15 @@ func (h *Handler) ArchiveCompletedInbox(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	terminalStatusKeys, err := h.terminalIssueStatusKeys(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
+		return
+	}
 	count, err := h.Queries.ArchiveCompletedInbox(r.Context(), db.ArchiveCompletedInboxParams{
-		WorkspaceID: wsUUID,
-		RecipientID: parseUUID(userID),
+		WorkspaceID:        wsUUID,
+		RecipientID:        parseUUID(userID),
+		TerminalStatusKeys: terminalStatusKeys,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive completed inbox")

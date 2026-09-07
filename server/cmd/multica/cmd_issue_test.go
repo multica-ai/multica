@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/handler"
 )
 
 // stderrCapture redirects os.Stderr through a pipe so a test can assert on
@@ -906,6 +907,33 @@ func TestResolveIssueRef(t *testing.T) {
 		}
 	})
 
+	t.Run("full UUID resolves locally with zero HTTP requests", func(t *testing.T) {
+		// A full UUID is self-identifying — the resolver used to GET
+		// /api/issues/<uuid> just to learn the id it already had, and
+		// agents pay that per `multica issue …` call during run
+		// bootstrap (GH #7017). Any HTTP call here means the local
+		// resolve regressed.
+		var hits []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits = append(hits, r.Method+" "+r.URL.Path)
+			http.NotFound(w, r)
+		}))
+		defer srv.Close()
+
+		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+		got, err := resolveIssueRef(context.Background(), client, "1881A167-4BB6-4602-944B-F40CE4192FE6")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Canonical lowercase, whatever case the user pasted.
+		if got.ID != "1881a167-4bb6-4602-944b-f40ce4192fe6" || got.Display != got.ID {
+			t.Fatalf("got %#v", got)
+		}
+		if len(hits) != 0 {
+			t.Fatalf("full UUID must not perform any HTTP call; got %#v", hits)
+		}
+	})
+
 	t.Run("short UUID prefix is rejected without any HTTP call", func(t *testing.T) {
 		// Until commit 9a3a99c this called fetchIssueCandidates and paged
 		// /api/issues client-side, which timed out on large workspaces
@@ -998,31 +1026,6 @@ func TestResolveIssueRef(t *testing.T) {
 		}
 	})
 
-	t.Run("full UUID still resolves via single GET", func(t *testing.T) {
-		// Sanity check: the canonical reference forms must still work.
-		var hits []string
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			hits = append(hits, r.Method+" "+r.URL.Path)
-			if r.URL.Path == "/api/issues/"+issue["id"].(string) {
-				json.NewEncoder(w).Encode(issue)
-				return
-			}
-			http.NotFound(w, r)
-		}))
-		defer srv.Close()
-
-		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
-		got, err := resolveIssueRef(context.Background(), client, issue["id"].(string))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got.ID != issue["id"] || got.Display != "MUL-1852" {
-			t.Fatalf("got %#v", got)
-		}
-		if len(hits) != 1 {
-			t.Fatalf("full UUID must resolve via a single request; got %#v", hits)
-		}
-	})
 }
 
 func TestFetchAutopilotCandidatesPaginates(t *testing.T) {
@@ -1166,11 +1169,14 @@ func TestRunIssueRunMessagesResolvesShortTaskPrefix(t *testing.T) {
 
 func TestResolveAssignee(t *testing.T) {
 	membersResp := []map[string]any{
-		{"user_id": "user-1111", "name": "Alice Smith"},
-		{"user_id": "user-2222", "name": "Bob Jones"},
+		{"user_id": "user-1111", "name": "Alice Smith", "email": "alice@example.com"},
+		{"user_id": "user-2222", "name": "Bob Jones", "email": "bob@example.com"},
 	}
 	agentsResp := []map[string]any{
 		{"id": "agent-3333", "name": "CodeBot"},
+		// Deliberate collision: this agent's NAME contains Alice's email, so
+		// the substring path would match it. Email must still win outright.
+		{"id": "agent-5555", "name": "Mailer for alice@example.com"},
 	}
 	squadsResp := []map[string]any{
 		{"id": "squad-4444", "name": "Super Human"},
@@ -1210,6 +1216,58 @@ func TestResolveAssignee(t *testing.T) {
 		}
 		if aType != "member" || aID != "user-2222" {
 			t.Errorf("got (%q, %q), want (member, user-2222)", aType, aID)
+		}
+	})
+
+	// MUL-6286: the CLI documents member email as a way to address an actor
+	// property value ("--value alice@example.com"), so email has to resolve.
+	t.Run("match member by email", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "alice@example.com", memberOnlyKinds)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "member" || aID != "user-1111" {
+			t.Errorf("got (%q, %q), want (member, user-1111)", aType, aID)
+		}
+	})
+
+	t.Run("match member by email case-insensitively", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "BOB@EXAMPLE.COM", issueAssigneeKinds)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "member" || aID != "user-2222" {
+			t.Errorf("got (%q, %q), want (member, user-2222)", aType, aID)
+		}
+	})
+
+	// An email beats a substring collision on someone else's name, because it
+	// is ranked with id matches rather than with name matches. agentsResp
+	// carries an agent whose name embeds this exact email, so without the
+	// ranking this resolves to that agent (or errors as ambiguous).
+	t.Run("email outranks a name substring match", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "alice@example.com", issueAssigneeKinds)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "member" || aID != "user-1111" {
+			t.Errorf("got (%q, %q), want (member, user-1111)", aType, aID)
+		}
+	})
+
+	t.Run("resolveActorPropertyRef renders a prefixed reference", func(t *testing.T) {
+		ref, err := resolveActorPropertyRef(ctx, client, "alice@example.com")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ref != "member:user-1111" {
+			t.Errorf("got %q, want member:user-1111", ref)
+		}
+	})
+
+	t.Run("resolveActorPropertyRef rejects a non-member kind", func(t *testing.T) {
+		if _, err := resolveActorPropertyRef(ctx, client, "codebot"); err == nil {
+			t.Error("expected an agent name to be unresolvable for an actor property")
 		}
 	})
 
@@ -2685,38 +2743,49 @@ func TestRunIssueCommentList_DoesNotPrintShowingPreamble(t *testing.T) {
 	}
 }
 
-func TestValidIssueStatuses(t *testing.T) {
-	expected := map[string]bool{
-		"backlog":     true,
-		"todo":        true,
-		"in_progress": true,
-		"in_review":   true,
-		"done":        true,
-		"blocked":     true,
-		"cancelled":   true,
-	}
-	for _, s := range validIssueStatuses {
-		if !expected[s] {
-			t.Errorf("unexpected status in validIssueStatuses: %q", s)
-		}
-	}
-	if len(validIssueStatuses) != len(expected) {
-		t.Errorf("validIssueStatuses has %d entries, expected %d", len(validIssueStatuses), len(expected))
-	}
-}
-
+// TestValidateIssueStatus pins the post-MUL-6243 contract: the CLI validates
+// the SHAPE of a status key, not its membership. A workspace can define custom
+// statuses, so only the server knows the valid set; rejecting an unknown key
+// locally would make every custom status unreachable from the CLI.
 func TestValidateIssueStatus(t *testing.T) {
 	for _, s := range validIssueStatuses {
 		if err := validateIssueStatus(s); err != nil {
-			t.Errorf("status %q should be valid, got: %v", s, err)
+			t.Errorf("built-in status %q should be valid, got: %v", s, err)
 		}
 	}
-	err := validateIssueStatus("active")
+
+	// Well-formed keys pass locally even though they are not built-ins — they
+	// may name a custom status. The server returns a 400 listing the
+	// workspace's real statuses when they do not.
+	for _, s := range []string{"human_review", "gate_approved", "rework", "active", "s1"} {
+		if err := validateIssueStatus(s); err != nil {
+			t.Errorf("well-formed custom status key %q should pass CLI validation, got: %v", s, err)
+		}
+	}
+
+	// Malformed keys are still caught locally, offline and instantly.
+	for _, s := range []string{
+		"",                      // empty
+		"   ",                   // whitespace only
+		"In Review",             // spaces
+		"in-review",             // hyphen is not in the key charset
+		"_leading",              // must start with a letter or digit
+		"Ünicode",               // non-ASCII
+		strings.Repeat("a", 33), // over the 32-character limit
+	} {
+		if err := validateIssueStatus(s); err == nil {
+			t.Errorf("malformed status key %q should be rejected", s)
+		}
+	}
+
+	// The error still names the built-ins, so a user who typo'd one is pointed
+	// back at the common set.
+	err := validateIssueStatus("In Review")
 	if err == nil {
-		t.Fatal("status \"active\" should be rejected")
+		t.Fatal("expected an error for a malformed key")
 	}
 	if !strings.Contains(err.Error(), "backlog") {
-		t.Errorf("error should list valid statuses, got: %v", err)
+		t.Errorf("error should list the built-in statuses, got: %v", err)
 	}
 }
 
@@ -2748,16 +2817,20 @@ func TestValidateIssuePriority(t *testing.T) {
 	}
 }
 
+// The status must be MALFORMED, not merely unknown: since MUL-6243 a workspace
+// can define custom statuses, so an unknown-but-well-formed key is the server's
+// call, not the CLI's. What still has to hold is that a malformed one never
+// costs a network round trip.
 func TestRunIssueCreateRejectsInvalidStatusBeforeRequest(t *testing.T) {
 	cmd := newIssueCreateTestCmd()
 	_ = cmd.Flags().Set("title", "Invalid status")
-	_ = cmd.Flags().Set("status", "active")
+	_ = cmd.Flags().Set("status", "not a status")
 	err := runIssueCreate(cmd, nil)
 	if err == nil {
-		t.Fatal("runIssueCreate should reject invalid status")
+		t.Fatal("runIssueCreate should reject a malformed status")
 	}
-	if !strings.Contains(err.Error(), "valid values") {
-		t.Fatalf("expected valid values error, got: %v", err)
+	if !strings.Contains(err.Error(), "valid values") && !strings.Contains(err.Error(), "status key") {
+		t.Fatalf("expected a local validation error, got: %v", err)
 	}
 }
 
@@ -2778,13 +2851,13 @@ func TestRunIssueUpdateRejectsInvalidStatusBeforeRequest(t *testing.T) {
 	cmd := &cobra.Command{Use: "update"}
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("priority", "", "")
-	_ = cmd.Flags().Set("status", "active")
+	_ = cmd.Flags().Set("status", "not a status")
 	err := runIssueUpdate(cmd, []string{"MUL-1"})
 	if err == nil {
-		t.Fatal("runIssueUpdate should reject invalid status")
+		t.Fatal("runIssueUpdate should reject a malformed status")
 	}
-	if !strings.Contains(err.Error(), "valid values") {
-		t.Fatalf("expected valid values error, got: %v", err)
+	if !strings.Contains(err.Error(), "valid values") && !strings.Contains(err.Error(), "status key") {
+		t.Fatalf("expected a local validation error, got: %v", err)
 	}
 }
 
@@ -2817,8 +2890,27 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("start-date", "", "")
 	cmd.Flags().String("due-date", "", "")
 	cmd.Flags().String("parent", "", "")
+	cmd.Flags().Int("stage", 0, "")
 	cmd.Flags().Float64("position", 0, "")
+	cmd.Flags().Bool("no-start", false, "")
 	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func newIssueAssignTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "assign"}
+	cmd.Flags().String("to", "", "")
+	cmd.Flags().String("to-id", "", "")
+	cmd.Flags().Bool("unassign", false, "")
+	cmd.Flags().Bool("no-start", false, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func newIssueStatusTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "status"}
+	cmd.Flags().Bool("no-start", false, "")
+	cmd.Flags().String("output", "table", "")
 	return cmd
 }
 
@@ -2832,10 +2924,12 @@ func newIssueListTestCmd() *cobra.Command {
 	cmd.Flags().String("assignee-id", "", "")
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().StringSlice("metadata", nil, "")
+	cmd.Flags().StringArray("property", nil, "")
 	cmd.Flags().Int("limit", 50, "")
 	cmd.Flags().Int("offset", 0, "")
 	cmd.Flags().String("sort", "", "")
 	cmd.Flags().String("direction", "", "")
+	cmd.Flags().String("fields", "", "")
 	return cmd
 }
 
@@ -2877,6 +2971,118 @@ func TestRunIssueUpdateSendsPosition(t *testing.T) {
 	}
 	if got := body["position"]; got != float64(7.5) {
 		t.Fatalf("position = %#v, want 7.5 in request body", got)
+	}
+}
+
+func TestRunIssueUpdateNoStartSendsSuppressRun(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "in_progress"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("status", "in_progress")
+	_ = cmd.Flags().Set("no-start", "true")
+	if err := runIssueUpdate(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	if got := body["suppress_run"]; got != true {
+		t.Fatalf("suppress_run = %#v, want true", got)
+	}
+}
+
+func TestRunIssueStatusNoStartSendsSuppressRun(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "backlog"})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "in_progress"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueStatusTestCmd()
+	_ = cmd.Flags().Set("no-start", "true")
+	if err := runIssueStatus(cmd, []string{"MUL-1", "in_progress"}); err != nil {
+		t.Fatalf("runIssueStatus: %v", err)
+	}
+	if got := body["status"]; got != "in_progress" {
+		t.Fatalf("status = %#v, want in_progress", got)
+	}
+	if got := body["suppress_run"]; got != true {
+		t.Fatalf("suppress_run = %#v, want true", got)
+	}
+}
+
+func TestRunIssueAssignNoStartSendsSuppressRun(t *testing.T) {
+	const agentID = "5fb87ac7-23b5-4a7a-81fa-ed295a54545d"
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agents":
+			json.NewEncoder(w).Encode([]map[string]any{{"id": agentID, "name": "CodeBot"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/squads":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueAssignTestCmd()
+	_ = cmd.Flags().Set("to-id", agentID)
+	_ = cmd.Flags().Set("no-start", "true")
+	if err := runIssueAssign(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueAssign: %v", err)
+	}
+	if got := body["suppress_run"]; got != true {
+		t.Fatalf("suppress_run = %#v, want true", got)
+	}
+}
+
+func TestRunIssueAssignRejectsNoStartWithUnassign(t *testing.T) {
+	cmd := newIssueAssignTestCmd()
+	_ = cmd.Flags().Set("unassign", "true")
+	_ = cmd.Flags().Set("no-start", "true")
+	err := runIssueAssign(cmd, []string{"MUL-1"})
+	if err == nil || !strings.Contains(err.Error(), "--no-start") {
+		t.Fatalf("expected --no-start validation error, got %v", err)
 	}
 }
 
@@ -3060,6 +3266,254 @@ func TestRunIssueListRejectsDirectionWithoutDirectionalSort(t *testing.T) {
 				t.Fatalf("error = %q, want it to list the valid directional sort columns", err)
 			}
 		})
+	}
+}
+
+// sampleIssueResponse returns a handler.IssueResponse populated the way the
+// /api/issues list endpoint actually populates one (ListIssues in
+// server/internal/handler/issue.go) — every field a real "issue list
+// --output json" row carries. Reactions, Attachments, and SourceContext are
+// left zero-valued on purpose: they are `omitempty` and ListIssues never
+// sets them (detail-only), so a real list payload never carries those keys.
+// This is the single source of truth for both fullTestIssue (the --fields
+// filtering fixture) and the drift guard below, so the two can't diverge
+// from each other the way the whitelist once diverged from the real API.
+func sampleIssueResponse() handler.IssueResponse {
+	desc := "a very long description"
+	assigneeType := "member"
+	assigneeID := "user-1"
+	parentID := "parent-1"
+	projectID := "proj-1"
+	stage := int32(1)
+	startDate := "2024-01-01"
+	dueDate := "2024-01-02"
+	lastActivity := "2024-01-01T00:00:00Z"
+	labels := []handler.LabelResponse{}
+
+	return handler.IssueResponse{
+		ID:             "iss-1",
+		WorkspaceID:    "ws-1",
+		Number:         42,
+		Identifier:     "MUL-42",
+		Title:          "Test issue",
+		Description:    &desc,
+		Status:         "in_progress",
+		StatusCategory: "active",
+		StatusName:     "In Progress",
+		Priority:       "high",
+		AssigneeType:   &assigneeType,
+		AssigneeID:     &assigneeID,
+		CreatorType:    "member",
+		CreatorID:      "user-2",
+		ParentIssueID:  &parentID,
+		ProjectID:      &projectID,
+		Position:       1,
+		Stage:          &stage,
+		StartDate:      &startDate,
+		DueDate:        &dueDate,
+		CreatedAt:      "2024-01-01T00:00:00Z",
+		UpdatedAt:      "2024-01-01T00:00:00Z",
+		Revision:       1,
+		LastActivityAt: &lastActivity,
+		Metadata:       map[string]any{},
+		Properties:     map[string]any{},
+		Labels:         &labels,
+	}
+}
+
+// fullTestIssue returns a JSON-decoded issue map carrying every field a real
+// "issue list --output json" row exposes (see sampleIssueResponse), so
+// --fields tests can assert on a realistic full payload rather than a
+// hand-picked subset.
+func fullTestIssue(t *testing.T) map[string]any {
+	t.Helper()
+	return issueResponseJSONMap(t, sampleIssueResponse())
+}
+
+func keysOf(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func issueResponseJSONMap(t *testing.T, resp handler.IssueResponse) map[string]any {
+	t.Helper()
+	b, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal handler.IssueResponse: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal handler.IssueResponse: %v", err)
+	}
+	return m
+}
+
+// TestValidIssueFieldsMatchListEndpointShape guards validIssueFields (the
+// --fields whitelist) against drifting from what /api/issues actually
+// returns for `issue list`. It caught a real bug: the whitelist was modeled
+// on publicapi/v1.Issue, which the list endpoint never serializes — the real
+// response is handler.IssueResponse, which also emits status_name and
+// labels that the whitelist rejected as invalid field names.
+func TestValidIssueFieldsMatchListEndpointShape(t *testing.T) {
+	realKeys := keysOf(fullTestIssue(t))
+
+	valid := make(map[string]bool, len(validIssueFields))
+	for _, f := range validIssueFields {
+		valid[f] = true
+	}
+	real := make(map[string]bool, len(realKeys))
+	for _, k := range realKeys {
+		real[k] = true
+	}
+
+	for _, k := range realKeys {
+		if !valid[k] {
+			t.Errorf("validIssueFields is missing %q, which a real issue list JSON response emits", k)
+		}
+	}
+	for _, f := range validIssueFields {
+		if !real[f] {
+			t.Errorf("validIssueFields has %q, which a real issue list JSON response never emits", f)
+		}
+	}
+}
+
+// TestRunIssueListFieldsFiltersJSONOutput guards that --fields whitelists
+// exactly the requested top-level keys on each returned issue, so an agent
+// asking for id/title/status/priority never pays for the description field
+// that makes up most of a typical issue payload.
+func TestRunIssueListFieldsFiltersJSONOutput(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name   string
+		fields string
+		want   []string
+	}{
+		{"id, title, status, priority", "id,title,status,priority", []string{"id", "title", "status", "priority"}},
+		{"assignee pair", "assignee_type,assignee_id", []string{"assignee_type", "assignee_id"}},
+		{"single field", "identifier", []string{"identifier"}},
+		{"description explicitly requested", "id,description", []string{"id", "description"}},
+		{"whitespace around names", " id , title ", []string{"id", "title"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set("output", "json")
+			_ = cmd.Flags().Set("fields", tc.fields)
+
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+
+			var resp struct {
+				Issues []map[string]any `json:"issues"`
+			}
+			if err := json.Unmarshal([]byte(out), &resp); err != nil {
+				t.Fatalf("unmarshal output: %v\noutput: %s", err, out)
+			}
+			if len(resp.Issues) != 1 {
+				t.Fatalf("issues = %d, want 1", len(resp.Issues))
+			}
+			got := resp.Issues[0]
+			if len(got) != len(tc.want) {
+				t.Fatalf("issue keys = %v, want exactly %v", keysOf(got), tc.want)
+			}
+			for _, f := range tc.want {
+				if _, ok := got[f]; !ok {
+					t.Fatalf("issue missing field %q; got keys %v", f, keysOf(got))
+				}
+			}
+		})
+	}
+}
+
+// TestRunIssueListDefaultKeepsFullIssueUnchanged guards backward
+// compatibility: omitting --fields must return the full issue object,
+// description included, exactly as before this flag existed.
+func TestRunIssueListDefaultKeepsFullIssueUnchanged(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+
+	out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+	var resp struct {
+		Issues []map[string]any `json:"issues"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	got := resp.Issues[0]
+	if len(got) != len(issue) {
+		t.Fatalf("issue keys = %v, want all %d original fields", keysOf(got), len(issue))
+	}
+	if _, ok := got["description"]; !ok {
+		t.Fatalf("expected description to remain in default (no --fields) output, got %v", got)
+	}
+}
+
+// TestRunIssueListRejectsInvalidFields guards that a typo'd or non-existent
+// field name fails fast with the valid list, instead of silently returning
+// an issue object missing the field the caller expected.
+func TestRunIssueListRejectsInvalidFields(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	_ = cmd.Flags().Set("fields", "id,bogus_field")
+	err := runIssueList(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueList: expected error for invalid --fields")
+	}
+	if !strings.Contains(err.Error(), `invalid --fields value "bogus_field"`) {
+		t.Fatalf("error = %q, want it to mention the invalid field name", err)
+	}
+}
+
+// TestRunIssueListIgnoresFieldsWithTableOutput guards that --output table
+// (the default) is completely unaffected by --fields, matching how
+// issue comment list's --compact/--summary are JSON-only no-ops for table.
+func TestRunIssueListIgnoresFieldsWithTableOutput(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("fields", "id") // table output; --fields must not error or change behavior
+	if err := runIssueList(cmd, nil); err != nil {
+		t.Fatalf("runIssueList: %v", err)
 	}
 }
 
@@ -3281,6 +3735,37 @@ func TestRunIssueReorderRejectsCrossColumnTarget(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "in_progress") || !strings.Contains(err.Error(), "todo") {
 		t.Fatalf("error = %q, want it to name both columns", err)
+	}
+}
+
+func TestReorderTargetNotInColumnErrorUsesFetchedIssueKey(t *testing.T) {
+	otherID := "33333333-3333-3333-3333-333333333333"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/issues/"+otherID {
+			http.NotFound(w, r)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         otherID,
+			"identifier": "MUL-3",
+			"status":     "in_progress",
+		})
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	err := reorderTargetNotInColumnError(
+		context.Background(),
+		client,
+		resolvedID{ID: otherID, Display: otherID},
+		"MUL-9",
+		"todo",
+	)
+	if msg := err.Error(); !strings.Contains(msg, "issue MUL-3") || !strings.Contains(msg, "MUL-9") {
+		t.Fatalf("error = %q, want fetched issue keys for both issues", msg)
+	}
+	if strings.Contains(err.Error(), otherID) {
+		t.Fatalf("error = %q, should not expose the UUID after fetching the issue key", err)
 	}
 }
 
@@ -3513,47 +3998,6 @@ func TestRunIssueUpdateOmitsPositionWhenUnset(t *testing.T) {
 	}
 }
 
-// TestIssueCommentListHelpCarriesReadContract pins the read-surface contract
-// that MUL-5442 moved out of the runtime brief into this command's --help: the
-// --recent saturation semantics (MUL-5372), the bounded two-step alternative,
-// and the pagination cursor labels. The brief now only points here — if these
-// leave the help, the pointer dangles and the over-read trap returns
-// undocumented.
-//
-// The assertions run against the RENDERED FlagUsages output, not raw
-// Flag.Usage: pflag's UnquoteUsage hijacks the first backtick pair in a usage
-// string as the flag's value placeholder (see
-// TestLoginTokenHelpOutputRendersCleanly for the original regression), so only
-// the rendered output proves what an agent actually reads.
-func TestIssueCommentListHelpCarriesReadContract(t *testing.T) {
-	help := issueCommentListCmd.Flags().FlagUsages()
-
-	for _, want := range []string{
-		// --before must keep its string placeholder — a backticked phrase in
-		// the usage text would replace it (the UnquoteUsage hijack).
-		"--before string",
-		// The saturation contract relocated from the brief (MUL-5372).
-		"caps THREADS, not comments",
-		"no per-thread cap",
-		"fewer than N root threads",
-		// The bounded alternative, as two sequential reads — the flags are
-		// mutually exclusive, so the help must never suggest composing them.
-		"scan with --roots-only --summary",
-		"then open selected threads with --thread <id> --tail N",
-		// Pagination cursor labels, exactly as the CLI prints them on stderr.
-		"Next thread cursor",
-		"Next reply cursor",
-		// The --compact contract (#5999 follow-up): what goes and what is
-		// untouchable.
-		"drop response fields that carry no information",
-		"Content and identity fields pass through untouched",
-	} {
-		if !strings.Contains(help, want) {
-			t.Errorf("comment list rendered help missing %q, got:\n%s", want, help)
-		}
-	}
-}
-
 // TestCompactCommentsDropsReaderNoise pins the --compact contract (#5999
 // follow-up, MUL-5442): reader-noise fields go — the echoed issue_id,
 // source_task_id, updated_at when identical to created_at, null values,
@@ -3697,5 +4141,266 @@ func TestRunIssueCommentListCompactWiring(t *testing.T) {
 		if _, ok := compacted[0][k]; !ok {
 			t.Errorf("--compact dropped %q — zero-value scalars must survive", k)
 		}
+	}
+}
+
+// TestIsTerminalChildIssue pins the stage-progress terminal test used by
+// `multica issue children --output json`. Since MUL-6243 a workspace can define
+// custom statuses, so counting only the literal done/cancelled would report
+// wrong progress to an agent reading the stage summary.
+func TestIsTerminalChildIssue(t *testing.T) {
+	cases := []struct {
+		name  string
+		issue map[string]any
+		want  bool
+	}{
+		{
+			name:  "built-in done",
+			issue: map[string]any{"status": "done", "status_category": "done"},
+			want:  true,
+		},
+		{
+			name:  "built-in cancelled",
+			issue: map[string]any{"status": "cancelled", "status_category": "cancelled"},
+			want:  true,
+		},
+		{
+			name:  "built-in in_progress",
+			issue: map[string]any{"status": "in_progress", "status_category": "in_progress"},
+			want:  false,
+		},
+		{
+			// The case the literal comparison got wrong.
+			name:  "custom status in the done category",
+			issue: map[string]any{"status": "gate_approved", "status_category": "done"},
+			want:  true,
+		},
+		{
+			name:  "custom status in the in_review category is not terminal",
+			issue: map[string]any{"status": "human_review", "status_category": "in_review"},
+			want:  false,
+		},
+		{
+			// Older backend: no status_category at all. Falling back to the raw
+			// status keeps the built-ins correct rather than reporting zero.
+			name:  "no category from an older backend falls back to status",
+			issue: map[string]any{"status": "done"},
+			want:  true,
+		},
+		{
+			name:  "unknown custom status with no category is not counted",
+			issue: map[string]any{"status": "gate_approved"},
+			want:  false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTerminalChildIssue(tc.issue); got != tc.want {
+				t.Errorf("isTerminalChildIssue(%v) = %v, want %v", tc.issue, got, tc.want)
+			}
+		})
+	}
+}
+
+// `issue runs` answers three different questions off one endpoint, and the only
+// thing telling them apart is the query string the CLI builds (#7768). These
+// tests pin that translation: a plain read must stay a plain read — the
+// short-task-ID resolver and the execution log both depend on the unfiltered
+// history — while --active and --siblings must actually reach the server.
+
+// newIssueRunsTestCmd mirrors the real flag set registered on issueRunsCmd.
+func newIssueRunsTestCmd(t *testing.T, output string) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{Use: "runs"}
+	cmd.Flags().String("output", output, "")
+	cmd.Flags().Bool("full-id", false, "")
+	cmd.Flags().Bool("active", false, "")
+	cmd.Flags().Bool("siblings", false, "")
+	return cmd
+}
+
+func TestRunIssueRunsScopeFlagsBuildQuery(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		want  url.Values
+	}{
+		// No flags means no params: the resolver and the sidebar read the same
+		// full history they always have.
+		{"default reads full history", nil, url.Values{}},
+		{"active narrows to in-flight", []string{"active"}, url.Values{"active": {"true"}}},
+		// --siblings implies active. The CLI sends both so the request says what
+		// it means without the reader having to know the server's default.
+		{"siblings widens to the family", []string{"siblings"},
+			url.Values{"scope": {"family"}, "active": {"true"}}},
+		{"siblings wins over a redundant active", []string{"siblings", "active"},
+			url.Values{"scope": {"family"}, "active": {"true"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/issues/" + issueID + "/task-runs":
+					gotQuery = r.URL.Query()
+					_ = json.NewEncoder(w).Encode([]map[string]any{})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueRunsTestCmd(t, "json")
+			for _, flag := range tc.flags {
+				if err := cmd.Flags().Set(flag, "true"); err != nil {
+					t.Fatalf("set --%s: %v", flag, err)
+				}
+			}
+			if _, err := captureStdout(t, func() error { return runIssueRuns(cmd, []string{issueID}) }); err != nil {
+				t.Fatalf("issue runs: %v", err)
+			}
+
+			if len(gotQuery) != len(tc.want) {
+				t.Fatalf("query = %v, want %v", gotQuery, tc.want)
+			}
+			for key, want := range tc.want {
+				if got := gotQuery.Get(key); got != want[0] {
+					t.Fatalf("query %s = %q, want %q (full query %v)", key, got, want[0], gotQuery)
+				}
+			}
+		})
+	}
+}
+
+// The two modes return different payloads, so they render through different
+// column sets. The family row names its issue — without that the table is a
+// list of task ids the reader cannot attribute, which is the whole question
+// --siblings answers — and it drops COMPLETED / ERROR, which are empty on
+// every row of a read that only returns work still in flight.
+func TestRunIssueRunsSiblingsTableRendersFamilyColumns(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/" + issueID + "/task-runs":
+			if r.URL.Query().Get("scope") == "family" {
+				_ = json.NewEncoder(w).Encode([]map[string]any{{
+					"task_id":          "abcd1234-0000-0000-0000-000000000000",
+					"issue_id":         "5678abcd-0000-0000-0000-000000000000",
+					"issue_identifier": "MUL-7001",
+					"issue_title":      "sibling work",
+					"agent_id":         "agent-1",
+					"status":           "running",
+					"created_at":       "2026-09-02T07:00:00Z",
+					"started_at":       "2026-09-02T07:00:01Z",
+				}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"id": "abcd1234-0000-0000-0000-000000000000", "agent_id": "agent-1",
+				"status": "completed", "error": "boom",
+			}})
+		default:
+			// Actor lookups for the AGENT column are best-effort; 404 is fine.
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueRunsTestCmd(t, "table")
+	if err := cmd.Flags().Set("siblings", "true"); err != nil {
+		t.Fatalf("set --siblings: %v", err)
+	}
+	out, err := captureStdout(t, func() error { return runIssueRuns(cmd, []string{issueID}) })
+	if err != nil {
+		t.Fatalf("issue runs: %v", err)
+	}
+	// The task id has to survive the new payload's task_id key — reading `id`
+	// here would render a column of blanks and lose the run-messages target.
+	for _, want := range []string{"RUN", "ISSUE", "MUL-7001", "abcd1234"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("family table missing %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"COMPLETED", "ERROR"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("family table carries %q, which is empty on every in-flight row:\n%s", unwanted, out)
+		}
+	}
+
+	// The execution log keeps its own columns: same command, different question.
+	plain := newIssueRunsTestCmd(t, "table")
+	out, err = captureStdout(t, func() error { return runIssueRuns(plain, []string{issueID}) })
+	if err != nil {
+		t.Fatalf("issue runs: %v", err)
+	}
+	if strings.Contains(out, "ISSUE") {
+		t.Fatalf("single-issue table should not carry an issue column:\n%s", out)
+	}
+	if !strings.Contains(out, "ERROR") || !strings.Contains(out, "boom") {
+		t.Fatalf("execution log lost its error column:\n%s", out)
+	}
+}
+
+// A capped family read and a complete one are identical in the body. If the CLI
+// swallows the server's truncation header, an agent reads "no run on that
+// sibling" off a list that was simply cut off — the one wrong conclusion this
+// command exists to prevent.
+func TestRunIssueRunsWarnsOnTruncatedFamilyRead(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+
+	for _, tc := range []struct {
+		name      string
+		truncated bool
+	}{
+		{"truncated read warns", true},
+		{"complete read stays quiet", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/issues/" + issueID + "/task-runs":
+					if tc.truncated {
+						w.Header().Set(headerActiveRunsTruncated, "true")
+					}
+					_ = json.NewEncoder(w).Encode([]map[string]any{{
+						"id": "abcd1234-0000-0000-0000-000000000000", "status": "running",
+					}})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueRunsTestCmd(t, "json")
+			if err := cmd.Flags().Set("siblings", "true"); err != nil {
+				t.Fatalf("set --siblings: %v", err)
+			}
+
+			capture := captureStderr(t)
+			_, err := captureStdout(t, func() error { return runIssueRuns(cmd, []string{issueID}) })
+			stderr := capture.read()
+			if err != nil {
+				t.Fatalf("issue runs: %v", err)
+			}
+
+			warned := strings.Contains(stderr, "truncated")
+			if warned != tc.truncated {
+				t.Fatalf("warned = %v, want %v; stderr was %q", warned, tc.truncated, stderr)
+			}
+		})
 	}
 }

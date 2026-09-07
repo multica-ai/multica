@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -543,30 +544,18 @@ func runtimeLocalSkillRequestTerminal(status RuntimeLocalSkillRequestStatus) boo
 		status == RuntimeLocalSkillTimeout || status == RuntimeLocalSkillConflict
 }
 
-// requireRuntimeCapabilityReadAccess resolves the runtime and asserts the
-// caller is a member of its workspace. This is the read-level gate for
-// capability discovery (local skills + the redacted MCP inventory): the
-// payload is deliberately non-secret so any member viewing an agent can see
-// what it inherits from its runtime, regardless of who owns that runtime.
-// Flows that copy skill files off the owner's machine must use the stricter
-// requireRuntimeLocalSkillAccess instead.
-func (h *Handler) requireRuntimeCapabilityReadAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (runtimeIDAndWorkspace, db.Member, bool) {
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+// requireRuntimeCapabilityReadAccess applies the runtime read gate to
+// capability discovery (local skills + the redacted MCP inventory). Private
+// machines remain owner-only even for admins; public runtimes are readable by
+// workspace members. Flows that copy skill files off the owner's machine add
+// the stricter owner-only check in requireRuntimeLocalSkillAccess.
+func (h *Handler) requireRuntimeCapabilityReadAccess(w http.ResponseWriter, r *http.Request, source, runtimeID string) (runtimeIDAndWorkspace, db.Member, bool) {
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, source, runtimeID)
 	if !ok {
-		return runtimeIDAndWorkspace{}, db.Member{}, false
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
 		return runtimeIDAndWorkspace{}, db.Member{}, false
 	}
 
 	wsID := uuidToString(rt.WorkspaceID)
-	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
-	if !ok {
-		return runtimeIDAndWorkspace{}, db.Member{}, false
-	}
 
 	return runtimeIDAndWorkspace{
 		runtimeID:   uuidToString(rt.ID),
@@ -580,8 +569,8 @@ func (h *Handler) requireRuntimeCapabilityReadAccess(w http.ResponseWriter, r *h
 // requireRuntimeLocalSkillAccess additionally requires the caller to own the
 // runtime. Import reads full skill file contents from the owner's machine, so
 // it stays owner-only even for workspace owners/admins.
-func (h *Handler) requireRuntimeLocalSkillAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (runtimeIDAndWorkspace, bool) {
-	rt, member, ok := h.requireRuntimeCapabilityReadAccess(w, r, runtimeID)
+func (h *Handler) requireRuntimeLocalSkillAccess(w http.ResponseWriter, r *http.Request, source, runtimeID string) (runtimeIDAndWorkspace, bool) {
+	rt, member, ok := h.requireRuntimeCapabilityReadAccess(w, r, source, runtimeID)
 	if !ok {
 		return runtimeIDAndWorkspace{}, false
 	}
@@ -604,7 +593,7 @@ type runtimeIDAndWorkspace struct {
 
 func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, _, ok := h.requireRuntimeCapabilityReadAccess(w, r, runtimeID)
+	rt, _, ok := h.requireRuntimeCapabilityReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
 	if !ok {
 		return
 	}
@@ -618,12 +607,13 @@ func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to enqueue local skills request: "+err.Error())
 		return
 	}
+	h.requestDaemonPendingWork(rt.runtimeID, protocol.PendingWorkKindLocalSkills)
 	writeJSON(w, http.StatusOK, req)
 }
 
 func (h *Handler) GetLocalSkillListRequest(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, _, ok := h.requireRuntimeCapabilityReadAccess(w, r, runtimeID)
+	rt, _, ok := h.requireRuntimeCapabilityReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeLocalSkillPoll, runtimeID)
 	if !ok {
 		return
 	}
@@ -644,7 +634,7 @@ func (h *Handler) GetLocalSkillListRequest(w http.ResponseWriter, r *http.Reques
 
 func (h *Handler) InitiateImportLocalSkill(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, runtimeID)
+	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
 	if !ok {
 		return
 	}
@@ -702,12 +692,13 @@ func (h *Handler) InitiateImportLocalSkill(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to enqueue local skill import: "+err.Error())
 		return
 	}
+	h.requestDaemonPendingWork(rt.runtimeID, protocol.PendingWorkKindLocalSkillImport)
 	writeJSON(w, http.StatusOK, importReq)
 }
 
 func (h *Handler) GetLocalSkillImportRequest(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, runtimeID)
+	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeLocalSkillImportPoll, runtimeID)
 	if !ok {
 		return
 	}

@@ -180,7 +180,8 @@ export function DesktopNavigationProvider({
     const { pathname, suffix } = splitTabUrl(url);
     const hashIdx = suffix.indexOf("#");
     const search = hashIdx === -1 ? suffix : suffix.slice(0, hashIdx);
-    return { pathname, search };
+    const hash = hashIdx === -1 ? "" : suffix.slice(hashIdx);
+    return { pathname, search, hash };
   }, [activeUrl]);
 
   const adapter: NavigationAdapter = useMemo(
@@ -218,6 +219,9 @@ export function DesktopNavigationProvider({
       },
       pathname: location.pathname,
       searchParams: new URLSearchParams(location.search),
+      // The tab's URL is the only place the fragment survives on desktop: the
+      // renderer's own `window.location` is the packaged file:// page.
+      hash: location.hash,
       openInNewTab: (
         path: string,
         title?: string,

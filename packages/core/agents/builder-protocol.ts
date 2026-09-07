@@ -1,4 +1,9 @@
 import type { RuntimeDevice, RuntimeModel } from "../types";
+import {
+  AGENT_CONVERSATION_STARTER_LABEL_MAX_LENGTH,
+  AGENT_CONVERSATION_STARTER_MAX_LENGTH,
+  AGENT_CONVERSATION_STARTERS_MAX,
+} from "./constants";
 import type { AgentDraft } from "./draft";
 
 /**
@@ -22,6 +27,7 @@ export interface BuilderDraftPayload {
   name?: unknown;
   description?: unknown;
   instructions?: unknown;
+  conversation_starters?: unknown;
   model?: unknown;
   skill_ids?: unknown;
   permission_scope?: unknown;
@@ -130,6 +136,7 @@ export function encodeBuilderInput(
           name: draft.name,
           description: draft.description,
           instructions: draft.instructions,
+          conversation_starters: draft.conversationStarters,
           model: draft.model,
           skill_ids: [...draft.skillIds],
           permission_scope: draft.permissionScope,
@@ -244,6 +251,28 @@ export function mergeBuilderDraft(
       ? payload.model
       : current.model;
 
+  const conversationStarters = Array.isArray(payload.conversation_starters)
+    ? payload.conversation_starters
+        .slice(0, AGENT_CONVERSATION_STARTERS_MAX)
+        .filter(
+          (item): item is { label: string; prompt: string } =>
+            !!item &&
+            typeof item === "object" &&
+            typeof (item as { label?: unknown }).label === "string" &&
+            typeof (item as { prompt?: unknown }).prompt === "string" &&
+            (item as { label: string }).label.trim().length > 0 &&
+            (item as { prompt: string }).prompt.trim().length > 0,
+        )
+        .map((item) => ({
+          label: [...item.label.trim()]
+            .slice(0, AGENT_CONVERSATION_STARTER_LABEL_MAX_LENGTH)
+            .join(""),
+          prompt: [...item.prompt.trim()]
+            .slice(0, AGENT_CONVERSATION_STARTER_MAX_LENGTH)
+            .join(""),
+        }))
+    : current.conversationStarters;
+
   return {
     ...current,
     name: typeof payload.name === "string" ? payload.name : current.name,
@@ -255,6 +284,7 @@ export function mergeBuilderDraft(
       typeof payload.instructions === "string"
         ? payload.instructions
         : current.instructions,
+    conversationStarters,
     model,
     // The builder can move the model, which invalidates whatever thinking /
     // speed the user picked for the previous one. It never sets these two

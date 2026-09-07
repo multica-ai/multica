@@ -155,9 +155,9 @@ export function StepWorkspace({
   // What the workspace will actually be created with. Clearing the prefix
   // input reverts to the slug-derived default rather than blocking the CTA —
   // the placeholder shows that default, so an empty field is never a
-  // surprise. Empty only while the slug is (a CJK-only name derives none),
-  // which is also exactly when `canCreate` is false, so submit always carries
-  // a real prefix.
+  // surprise. Empty only while the slug is (a name that romanizes to nothing
+  // derives none), which is also exactly when `canCreate` is false, so submit
+  // always carries a real prefix.
   const derivedPrefix = issuePrefix(slug);
   const effectivePrefix = prefix || derivedPrefix;
 
@@ -172,7 +172,9 @@ export function StepWorkspace({
   const handleNameChange = (value: string) => {
     setName(value);
     if (!slugTouched.current) {
-      applySlug(nameToWorkspaceSlug(value));
+      // Locale decides whether Han characters are read as Chinese; see
+      // nameToWorkspaceSlug.
+      applySlug(nameToWorkspaceSlug(value, locale));
     }
   };
 
@@ -342,12 +344,13 @@ export function StepWorkspace({
       {/* Editable, pre-filled from the slug. Narrow input — the value is
           capped at 10 chars, so a full-width field would read as a mistake.
 
-          Nothing is invented while the slug is empty: a CJK-only name derives
-          no slug (see nameToWorkspaceSlug), and the placeholder used to fill
-          that gap with "WS" — telling the user they were getting the exact
-          prefix this whole change exists to eliminate. Empty field plus a
-          hint is the honest state; the user is picking a URL next anyway,
-          and the prefix appears the moment they do. */}
+          Nothing is invented while the slug is empty: a name that romanizes
+          to nothing — kana, Hangul, emoji — derives no slug (see
+          nameToWorkspaceSlug), and the placeholder used to fill that gap with
+          "WS", telling the user they were getting the exact prefix this whole
+          change exists to eliminate. Empty field plus a hint is the honest
+          state; the user is picking a URL next anyway, and the prefix appears
+          the moment they do. */}
       <Field>
         <FieldLabel htmlFor="ws-issue-prefix">
           {t(($) => $.step_workspace.issue_prefix_label)}

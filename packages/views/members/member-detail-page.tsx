@@ -119,7 +119,7 @@ function RoleBadge({ role }: { role: MemberRole }) {
 function MemberDetailSkeleton() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="px-5">
+      <PageHeader>
         <Skeleton className="h-5 w-52" />
       </PageHeader>
       <div className="flex shrink-0 items-center gap-3 border-b px-6 py-4">

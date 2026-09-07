@@ -1,10 +1,123 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import en from "../locales/en/agents.json";
 import zhHans from "../locales/zh-Hans/agents.json";
 import ja from "../locales/ja/agents.json";
 import ko from "../locales/ko/agents.json";
+import { FAILURE_REASON_I18N_KEYS } from "./components/tabs/task-failure";
+import { taskStatusConfig } from "./config";
+import { availabilityConfig, workloadConfig } from "./presence";
 
 const LOCALES = { en, "zh-Hans": zhHans, ja, ko } as const;
+
+describe("task failure reason i18n parity across all 4 locales", () => {
+  const expectedKeys = Object.values(FAILURE_REASON_I18N_KEYS).toSorted();
+
+  it("covers every mapped reason with the exact same key set", () => {
+    for (const [name, locale] of Object.entries(LOCALES)) {
+      expect(
+        Object.keys(locale.task_failure.reasons).toSorted(),
+        `${name}: task_failure.reasons keys drifted`,
+      ).toEqual(expectedKeys);
+    }
+  });
+
+  it("keeps every failure label and the system-cancel fallback non-empty", () => {
+    for (const [name, locale] of Object.entries(LOCALES)) {
+      expect(
+        locale.task_failure.cancelled_by_system.length,
+        `${name}: task_failure.cancelled_by_system is empty`,
+      ).toBeGreaterThan(0);
+      for (const [key, label] of Object.entries(locale.task_failure.reasons)) {
+        expect(typeof label, `${name}: ${key} is not a string`).toBe("string");
+        expect(label.length, `${name}: ${key} is empty`).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
+/**
+ * #7411: hardcoded English label tables living inside the translated package.
+ * The visual configs must stay visual — the moment one of them carries a
+ * human-readable string again, that string is untranslatable by construction
+ * and no parity test over the JSON bundles can see it. So assert the absence
+ * of the field itself, at the only place that can still notice.
+ */
+describe("visual config tables carry no human-readable labels", () => {
+  const tables: Record<string, Record<string, object>> = {
+    taskStatusConfig,
+    availabilityConfig,
+    workloadConfig,
+  };
+
+  it("exposes no `label` field on any visual entry", () => {
+    for (const [tableName, table] of Object.entries(tables)) {
+      for (const [key, visual] of Object.entries(table)) {
+        expect(
+          Object.keys(visual),
+          `${tableName}.${key} must not carry a label — use the agents locale bundle`,
+        ).not.toContain("label");
+      }
+    }
+  });
+
+  it("keeps every availability and workload value translated in all 4 locales", () => {
+    for (const [name, locale] of Object.entries(LOCALES)) {
+      for (const key of Object.keys(availabilityConfig)) {
+        const value = (locale.availability as Record<string, string>)[key];
+        expect(value, `${name}: availability.${key} missing`).toBeDefined();
+        expect(value!.length, `${name}: availability.${key} empty`).toBeGreaterThan(0);
+      }
+      for (const key of Object.keys(workloadConfig)) {
+        const value = (locale.workload as Record<string, string>)[key];
+        expect(value, `${name}: workload.${key} missing`).toBeDefined();
+        expect(value!.length, `${name}: workload.${key} empty`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("interpolates the presence status aria-label in all 4 locales", () => {
+    for (const [name, locale] of Object.entries(LOCALES)) {
+      const phrase = locale.presence_status_aria;
+      expect(typeof phrase, `${name}: presence_status_aria missing`).toBe("string");
+      expect(
+        phrase.includes("{{status}}"),
+        `${name}: presence_status_aria lost {{status}}`,
+      ).toBe(true);
+      // The prefix is part of the accessible name, so it must be translated
+      // too — an English "Status:" in front of a localized word is the same
+      // bug in a smaller box.
+      if (name !== "en") {
+        expect(
+          phrase.toLowerCase().includes("status:"),
+          `${name}: presence_status_aria still carries the English prefix`,
+        ).toBe(false);
+      }
+    }
+  });
+});
+
+/**
+ * The transcript's Run details separates two audiences: `details_reason` heads
+ * the localized `failure_reason` label, `details_diagnostics` heads the raw
+ * English text the server persisted. Both headings must exist everywhere, and
+ * they must not collapse into the same word — that would undo the distinction
+ * the UI is making (#7411).
+ */
+describe("failure reason vs raw diagnostics headings", () => {
+  it("ships both headings, distinct, in all 4 locales", () => {
+    for (const [name, locale] of Object.entries(LOCALES)) {
+      const reason = locale.transcript.details_reason;
+      const diagnostics = locale.transcript.details_diagnostics;
+      expect(typeof reason, `${name}: details_reason missing`).toBe("string");
+      expect(typeof diagnostics, `${name}: details_diagnostics missing`).toBe("string");
+      expect(diagnostics.length, `${name}: details_diagnostics empty`).toBeGreaterThan(0);
+      expect(diagnostics, `${name}: diagnostics heading duplicates the reason heading`).not.toBe(
+        reason,
+      );
+    }
+  });
+});
 
 /**
  * Verify new access-scope / bulk-access keys are present in every locale

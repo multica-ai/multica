@@ -1,6 +1,7 @@
 export {
   ApiClient,
   ApiError,
+  clientErrorMessage,
   dispatchReasonCode,
   errorCode,
   PreviewTooLargeError,

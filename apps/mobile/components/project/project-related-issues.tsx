@@ -11,20 +11,22 @@
  *     small-screen pattern for the same data.
  *   - This is a UI divergence, NOT semantic divergence (per
  *     mobile/CLAUDE.md "Behavioral parity"): same issues, same status
- *     enum, same 6 BOARD_STATUSES grouping as web — only the layout
+ *     categories, same 6 visible groups as web — only the layout
  *     differs. UI may diverge when semantics agree.
  *
- * Status grouping uses full `BOARD_STATUSES` (six visible groups, cancelled
- * excluded) to match web `packages/views/projects/components/project-detail.tsx`.
- * The earlier mobile-only "Open / Done" two-bucket layout was a parity
- * violation: same status enum value would appear in different visible
+ * Groups are status CATEGORIES (`BOARD_CATEGORIES`, cancelled excluded) to
+ * match web `packages/views/projects/components/project-detail.tsx`, NOT status
+ * keys: a workspace's custom statuses live inside their category's group rather
+ * than adding one of their own, and grouping by key dropped them from the list
+ * entirely (MUL-6457). The earlier mobile-only "Open / Done" two-bucket layout
+ * was a parity violation: the same status would appear in different visible
  * groups on mobile vs web. Cancelled is omitted on both clients.
  */
 import { useMemo } from "react";
 import { View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import type { Issue, IssueStatus } from "@multica/core/types";
+import type { Issue, IssueStatusCategory } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { StatusIcon } from "@/components/ui/status-icon";
@@ -32,7 +34,11 @@ import { IssueRow } from "@/components/issue/issue-row";
 import { IssuesLoading } from "@/components/issue/issues-loading";
 import { projectIssuesOptions } from "@/data/queries/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
-import { BOARD_STATUSES, STATUS_LABEL } from "@/lib/issue-status";
+import {
+  BOARD_CATEGORIES,
+  STATUS_LABEL,
+  issueColumnCategory,
+} from "@/lib/issue-status";
 
 interface Props {
   projectId: string;
@@ -45,12 +51,12 @@ export function ProjectRelatedIssues({ projectId }: Props) {
     projectIssuesOptions(wsId, projectId),
   );
 
-  const byStatus = useMemo(() => {
-    const m = new Map<IssueStatus, Issue[]>();
-    for (const status of BOARD_STATUSES) m.set(status, []);
+  const byCategory = useMemo(() => {
+    const m = new Map<IssueStatusCategory, Issue[]>();
+    for (const category of BOARD_CATEGORIES) m.set(category, []);
     for (const issue of data ?? []) {
-      const list = m.get(issue.status);
-      if (list) list.push(issue);
+      // Issues in the cancelled category have no group here, same as before.
+      m.get(issueColumnCategory(issue))?.push(issue);
     }
     return m;
   }, [data]);
@@ -85,12 +91,12 @@ export function ProjectRelatedIssues({ projectId }: Props) {
 
   return (
     <View>
-      {BOARD_STATUSES.map((status) => {
-        const issues = byStatus.get(status) ?? [];
+      {BOARD_CATEGORIES.map((category) => {
+        const issues = byCategory.get(category) ?? [];
         if (issues.length === 0) return null;
         return (
-          <View key={status}>
-            <SectionHeader status={status} count={issues.length} />
+          <View key={category}>
+            <SectionHeader category={category} count={issues.length} />
             {issues.map((issue) => (
               <IssueRow
                 key={issue.id}
@@ -106,17 +112,18 @@ export function ProjectRelatedIssues({ projectId }: Props) {
 }
 
 function SectionHeader({
-  status,
+  category,
   count,
 }: {
-  status: IssueStatus;
+  category: IssueStatusCategory;
   count: number;
 }) {
   return (
     <View className="flex-row items-center gap-2 px-4 py-2 bg-background">
-      <StatusIcon status={status} size={14} />
+      {/* A category IS a built-in status key, so it resolves to its own glyph. */}
+      <StatusIcon status={category} size={14} />
       <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-        {STATUS_LABEL[status]}
+        {STATUS_LABEL[category]}
       </Text>
       <Text className="text-xs text-muted-foreground/60">{count}</Text>
     </View>

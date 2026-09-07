@@ -165,7 +165,7 @@ type InboundMessage struct {
 	AddressedToBot bool
 
 	// ForceFresh asks the core to start a fresh agent session for this message
-	// instead of resuming the prior one. Router recognizes the shared /new text
+	// instead of resuming the prior one. Router recognizes the shared /clear text
 	// command; adapters may also set this flag for a native platform affordance.
 	ForceFresh bool
 
@@ -209,4 +209,8 @@ type OutboundMessage struct {
 type SendResult struct {
 	// MessageID is the platform's identifier for the delivered message.
 	MessageID string
+	// MessageIDs contains every delivered platform message identifier when one
+	// logical reply is split into multiple messages. Adapters that never chunk
+	// may leave it empty and return only MessageID for compatibility.
+	MessageIDs []string
 }

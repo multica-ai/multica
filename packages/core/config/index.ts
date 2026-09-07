@@ -25,6 +25,17 @@ interface ConfigState {
   // self-hosted operators can confirm what's deployed. Empty for dev builds
   // or servers older than this feature.
   serverVersion: string;
+  // Whether the connected server validates local_directory execution_mode.
+  // Defaults to false, and stays false for any server that does not declare it:
+  // the dangerous ones accept worktree mode, drop the field, and run the task
+  // in the user's working copy anyway (#7113). Servers that validate but
+  // predate this signal are caught by the same net — indistinguishable from
+  // here, and only one of the two answers is safe to guess.
+  localWorktreeSupported: boolean;
+  // Whether this server persists conversation_starters on agent create/update.
+  // Older handlers accepted the unknown field and returned success while
+  // dropping it, so absent must fail closed.
+  agentConversationStartersSupported: boolean;
   setCdnConfig: (config: { cdnDomain: string; cdnSigned?: boolean }) => void;
   setAuthConfig: (config: {
     allowSignup: boolean;
@@ -38,6 +49,8 @@ interface ConfigState {
   }) => void;
   setFeatureFlags: (flags?: Record<string, boolean>) => void;
   setServerVersion: (version?: string) => void;
+  setLocalWorktreeSupported: (supported?: boolean) => void;
+  setAgentConversationStartersSupported: (supported?: boolean) => void;
 }
 
 export const configStore = createStore<ConfigState>((set) => ({
@@ -51,6 +64,8 @@ export const configStore = createStore<ConfigState>((set) => ({
   vcsIntegrationAvailable: false,
   featureFlags: {},
   serverVersion: "",
+  localWorktreeSupported: false,
+  agentConversationStartersSupported: false,
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
   setAuthConfig: ({
     allowSignup,
@@ -62,6 +77,10 @@ export const configStore = createStore<ConfigState>((set) => ({
     set({ daemonServerUrl, daemonAppUrl }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),
   setServerVersion: (version = "") => set({ serverVersion: version }),
+  setLocalWorktreeSupported: (supported = false) =>
+    set({ localWorktreeSupported: supported === true }),
+  setAgentConversationStartersSupported: (supported = false) =>
+    set({ agentConversationStartersSupported: supported === true }),
 }));
 
 export function useConfigStore(): ConfigState;

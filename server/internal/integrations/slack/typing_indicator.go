@@ -230,15 +230,10 @@ func (m *TypingIndicatorManager) apiForInstallation(ctx context.Context, id pgty
 // just deleted, and an event with no workspace is dropped before it reaches the
 // bus. It now takes the workspace from its caller.
 //
-// Two holes are left, and neither is a missing subscription.
+// Archiving an agent also publishes task:cancelled for its chat tasks after
+// commit, so these reactions are cleared through the same subscription.
 //
-// Archiving an agent cancels its tasks without broadcasting per row, on the
-// grounds that the agent:archived event already invalidates every client's task
-// list (handler/agent.go, ArchiveAgent). No client-side list refresh takes a
-// reaction off a Slack message, so archiving an agent mid-run leaves the 👀 in
-// place.
-//
-// And an ending that arrives while the reaction is still being added clears
+// An ending during Add can still clear
 // nothing: Add records its state only after the Slack call returns, so Clear
 // finds an empty map, and the reaction lands after it with nothing left to take
 // it off. The Router adds on a detached goroutine, so a cancelled or very fast

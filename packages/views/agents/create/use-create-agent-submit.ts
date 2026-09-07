@@ -8,7 +8,10 @@ import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { Agent } from "@multica/core/types";
-import { workspaceKeys } from "@multica/core/workspace/queries";
+import {
+  cacheAgentResponse,
+  workspaceKeys,
+} from "@multica/core/workspace/queries";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
@@ -101,7 +104,11 @@ export function useCreateAgentSubmit(options: {
       }
 
       await onCreated?.(agent);
-      await qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      cacheAgentResponse(qc, wsId, agent);
+      // The create response is authoritative enough to open immediately.
+      // Reconcile other list projections in the background instead of making
+      // navigation wait on a second network request.
+      void qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
       toast.success(
         t(($) => $.creation_studio.created, {
           name: agent.name || draft.name.trim(),

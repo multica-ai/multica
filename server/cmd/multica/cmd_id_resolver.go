@@ -16,7 +16,9 @@ const minShortIDPrefixLen = 4
 const resolverListPageLimit = 50
 
 type resolvedID struct {
-	ID      string
+	ID string
+	// Display is a best-effort label for human-facing messages. It may equal
+	// ID when resolution does not fetch display metadata from the server.
 	Display string
 }
 
@@ -151,7 +153,16 @@ func resolveIssueRef(ctx context.Context, client *cli.APIClient, input string) (
 		return fetchIssueRef(ctx, client, trimmed)
 	}
 	if uuidRegexp.MatchString(trimmed) {
-		return fetchIssueRef(ctx, client, trimmed)
+		// A full UUID is self-identifying: the resolver GET added a round
+		// trip and no information, and agents pay it several times per run
+		// during bootstrap (GH #7017). Lowercased to the canonical form the
+		// server emits. Messages without an issue response may show this UUID
+		// rather than the issue key, and failures now come from the command's
+		// next issue-aware endpoint. Every write path re-validates server-side
+		// (e.g. parent_issue_id on create), so nothing is stored on the strength
+		// of the ref alone.
+		id := strings.ToLower(trimmed)
+		return resolvedID{ID: id, Display: id}, nil
 	}
 
 	// Detect the common "I copied a truncated UUID" case and give a

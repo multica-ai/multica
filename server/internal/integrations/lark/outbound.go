@@ -144,6 +144,7 @@ func (defaultRenderer) Render(in RenderInput) (CardRender, error) {
 type PatcherQueries interface {
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
+	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error)
@@ -263,14 +264,12 @@ func (p *Patcher) SetTypingIndicatorManager(m *TypingIndicatorManager) {
 //     BroadcastCancelledTasks resolved each task's workspace through its
 //     chat_session, the same row its transaction had just deleted, and an
 //     event with no workspace is dropped before it reaches the bus. It now
-//     takes the workspace from its caller. Two holes are left, neither of
-//     them a missing subscription: archiving an agent stays silent by
-//     choice — agent:archived invalidates every client's task list
-//     instead — and no list refresh removes a Lark reaction; and an
-//     ending that arrives while the reaction is still being added clears
+//     takes the workspace from its caller. Archiving an agent also publishes
+//     task:cancelled for chat tasks after commit, clearing their reactions
+//     through this subscription. An ending during Add can still clear
 //     nothing, because Add records its state only after the Lark call
 //     returns, so the badge lands after the clear with nothing left to
-//     take it off. That second one predates task:cancelled — chat-done
+//     take it off. This race predates task:cancelled — chat-done
 //     and task-failed race the add the same way — and closing it needs a
 //     per-session generation the add can check when its call returns.
 //
@@ -339,13 +338,21 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		return nil
 	}
 
-	binding, err := p.queries.GetLarkChatSessionBindingBySession(ctx, chatSessionID)
+	delivery, err := p.queries.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Web-only chat session — not a Lark target.
+			// Direct Multica task or violated snapshot invariant — fail closed.
 			return nil
 		}
-		return fmt.Errorf("lookup chat session binding: %w", err)
+		return fmt.Errorf("lookup lark task delivery: %w", err)
+	}
+	if delivery.ChannelType != channelTypeFeishu {
+		return nil
+	}
+	binding := ChatSessionBinding{
+		ID: delivery.BindingID, InstallationID: delivery.InstallationID,
+		ChannelChatID: delivery.ChannelChatID, ChatType: delivery.ChatType, Config: delivery.Config,
+		LastMessageID: delivery.ChannelMessageID, LastThreadID: delivery.ChannelThreadID,
 	}
 
 	// Only bound sessions reach here, so classify the task origin before

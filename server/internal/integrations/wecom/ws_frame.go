@@ -427,7 +427,7 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 	// its "/issue …" on the first line the parser reads.
 	//
 	// In a group the @-mention IS how you reach the bot, so it arrives glued to
-	// whatever was typed after it — "@Andrew /new" is a person asking for a
+	// whatever was typed after it — "@Andrew /clear" is a person asking for a
 	// fresh session, not prose that happens to contain a word — and the
 	// addressing comes off the front.
 	//
@@ -443,6 +443,18 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 	if chatType == channel.ChatTypeGroup {
 		command = stripLeadingMentions(command, botDisplayName)
 	}
+	media := mc.attachments()
+	normalizedText, control, controlNormalized := normalizeWeComControlLayout(
+		mc, text, command, chatType, botDisplayName, len(media) > 0,
+	)
+	if controlNormalized {
+		text = normalizedText
+		// A media-bearing bare /clear is a real turn, not the shared pending
+		// sentinel. ForceFresh below carries the already-consumed directive.
+		if control.Kind == engine.ControlCommandFreshSession && control.Body == "" {
+			command = text
+		}
+	}
 
 	wm := InboundMessage{
 		BotID:        botID,
@@ -453,7 +465,7 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 		SenderUserID: senderID,
 		Content:      text,
 		ReqID:        reqID,
-		Media:        mc.attachments(),
+		Media:        media,
 	}
 	raw, _ := json.Marshal(wm)
 
@@ -472,6 +484,7 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 		// (feishu_channel.go:139) and Slack from its cleaned text
 		// (slack/inbound.go:131); WeCom was the one adapter leaving it empty.
 		CommandText: command,
+		ForceFresh:  controlNormalized && control.Kind == engine.ControlCommandFreshSession,
 		// A pure /issue command in WeCom should NOT trigger the
 		// agent — the engine already creates the issue and the
 		// OutboundReplier already sends "✅ 已创建 #N". Letting the agent
@@ -499,6 +512,68 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 	}
 }
 
+// normalizeWeComControlLayout removes /clear or /new from the agent-readable
+// body while retaining media placeholders in their original mixed-message
+// positions. CommandText remains the sender-authored, placeholder-free source
+// so Router alone applies the semantic difference between the directives.
+func normalizeWeComControlLayout(
+	mc aibotMsgCallback,
+	visible string,
+	command string,
+	chatType channel.ChatType,
+	botDisplayName string,
+	hasMedia bool,
+) (string, engine.ControlCommand, bool) {
+	control, ok := engine.ParseControlCommand(command)
+	if !ok || (control.Body == "" && !hasMedia) {
+		return visible, engine.ControlCommand{}, false
+	}
+
+	normalizeWords := func(words string) string {
+		if chatType == channel.ChatTypeGroup {
+			return stripLeadingMentions(words, botDisplayName)
+		}
+		return strings.TrimSpace(words)
+	}
+
+	switch strings.ToLower(mc.MsgType) {
+	case "text":
+		itemControl, itemOK := engine.ParseControlCommand(normalizeWords(mc.Text.Content))
+		if !itemOK || itemControl.Kind != control.Kind {
+			return visible, engine.ControlCommand{}, false
+		}
+		return itemControl.Body, control, true
+	case "voice":
+		itemControl, itemOK := engine.ParseControlCommand(normalizeWords(mc.Voice.Content))
+		if !itemOK || itemControl.Kind != control.Kind {
+			return visible, engine.ControlCommand{}, false
+		}
+		return itemControl.Body, control, true
+	case "mixed":
+		var runs []string
+		consumed := false
+		for _, item := range mc.Mixed.MsgItem {
+			rendered := item.render()
+			if !consumed {
+				if words := item.words(); words != "" {
+					itemControl, itemOK := engine.ParseControlCommand(normalizeWords(words))
+					if itemOK && itemControl.Kind == control.Kind {
+						rendered = itemControl.Body
+						consumed = true
+					}
+				}
+			}
+			if rendered != "" {
+				runs = append(runs, rendered)
+			}
+		}
+		if consumed {
+			return strings.Join(runs, "\n"), control, true
+		}
+	}
+	return visible, engine.ControlCommand{}, false
+}
+
 // stripLeadingMentions removes the @-mentions a message opens with, which in a
 // group chat is how the sender addresses the bot. WeCom puts them in the text
 // and sends no mention list alongside it, so there is nothing to match against
@@ -512,8 +587,10 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 // somebody — "@Andrew ask @李雷 about yesterday" is one instruction naming one
 // colleague — and stripping that would quietly rewrite what they said.
 //
-// This feeds command classification only. The stored message keeps the text
-// exactly as it arrived, so the transcript still shows who was addressed.
+// This primarily feeds command classification. For a recognized /clear or /new,
+// normalizeWeComControlLayout also applies the same addressing cleanup while
+// rebuilding the agent-visible mixed-media body, so neither the bot mention nor
+// the consumed directive is persisted as prompt text.
 //
 // Slack does the same thing with a regex over its mention token
 // (slack/inbound.go cleanText); Feishu is handed an already-clean command body
@@ -526,7 +603,7 @@ func stripLeadingMentions(s, botName string) string {
 		}
 		// Our own name first, matched whole. A display name may contain
 		// spaces — "Multica Bot" is the obvious one — and cutting at the
-		// first space would leave "Bot /new 重新分析", which is not a command,
+		// first space would leave "Bot /clear 重新分析", which is not a command,
 		// so every slash command in that group would still be dropped.
 		//
 		// The name is not guessed. It comes from the installation config, set

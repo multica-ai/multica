@@ -88,7 +88,13 @@ func TestPublishAttachmentsChangedAlsoBroadcastsUpdatedDescription(t *testing.T)
 	bus := events.New()
 	svc := &IssueService{Bus: bus, Queries: q}
 	var updated events.Event
+	var ordered []events.Event
 	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) { updated = e })
+	bus.SubscribeAll(func(e events.Event) {
+		if e.Type == protocol.EventIssueUpdated || e.Type == protocol.EventIssueAttachmentsChanged {
+			ordered = append(ordered, e)
+		}
+	})
 
 	svc.PublishAttachmentsChanged(ctx, issue, actorID)
 
@@ -112,6 +118,13 @@ func TestPublishAttachmentsChangedAlsoBroadcastsUpdatedDescription(t *testing.T)
 			t.Fatalf("%s = %#v, want false", key, payload[key])
 		}
 	}
+	if len(ordered) != 2 || ordered[0].Type != protocol.EventIssueUpdated || ordered[1].Type != protocol.EventIssueAttachmentsChanged {
+		t.Fatalf("event order = %#v, want issue:updated then issue_attachments:changed", ordered)
+	}
+	attachmentPayload, ok := ordered[1].Payload.(map[string]any)
+	if !ok || attachmentPayload["issue_revision"] != issue.Revision {
+		t.Fatalf("attachment event payload = %#v, want revision %d", ordered[1].Payload, issue.Revision)
+	}
 }
 
 func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t *testing.T) {
@@ -124,6 +137,7 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 	agentUUID := util.MustParseUUID(agentID)
 
 	bus := events.New()
+	wakeup := &stubWakeup{}
 	createdOverlay := json.RawMessage(`{"mcpServers":{"creator":{"url":"https://creator.example"}}}`)
 	taskService := &TaskService{
 		Queries:      q,
@@ -131,6 +145,7 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 		Bus:          bus,
 		Composio:     &stubOverlayBuilder{resp: createdOverlay},
 		FeatureFlags: composioMCPAppsTestFlags(true),
+		Wakeup:       wakeup,
 	}
 	var competingTaskID pgtype.UUID
 	var competingErr error
@@ -235,6 +250,9 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 	if !result.AssignedTaskID.Valid {
 		t.Fatal("media-gated issue did not return its deferred task")
 	}
+	if len(wakeup.calls) != 1 || wakeup.calls[0].taskID != "" {
+		t.Fatalf("post-commit schedule wakeups = %+v, want one wakeup without a ready task id", wakeup.calls)
+	}
 	if !isDuplicatePendingTaskErr(competingErr) {
 		t.Fatalf("post-commit competing queued insert error = %v, want duplicate pending task", competingErr)
 	}
@@ -242,20 +260,23 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 		t.Fatalf("post-commit competing task unexpectedly won: %s", util.UUIDToString(competingTaskID))
 	}
 
-	var taskID, triggerCommentID pgtype.UUID
+	var taskID, triggerCommentID, runtimeID pgtype.UUID
 	var taskCount int
 	if err := pool.QueryRow(ctx, `
-		SELECT id, trigger_comment_id, count(*) OVER ()
+		SELECT id, trigger_comment_id, runtime_id, count(*) OVER ()
 		FROM agent_task_queue
 		WHERE issue_id = $1 AND agent_id = $2
 		  AND status IN ('queued', 'dispatched', 'deferred')
 		ORDER BY created_at
 		LIMIT 1`, result.Issue.ID, agentUUID).
-		Scan(&taskID, &triggerCommentID, &taskCount); err != nil {
+		Scan(&taskID, &triggerCommentID, &runtimeID, &taskCount); err != nil {
 		t.Fatalf("load final pending task: %v", err)
 	}
 	if taskCount != 1 || taskID != result.AssignedTaskID || triggerCommentID != mergedCommentID {
 		t.Fatalf("pending task = count %d id %v trigger %v, want one task %v with trigger %v", taskCount, taskID, triggerCommentID, result.AssignedTaskID, mergedCommentID)
+	}
+	if wakeup.calls[0].runtimeID != util.UUIDToString(runtimeID) {
+		t.Fatalf("schedule wakeup runtime = %q, want %q", wakeup.calls[0].runtimeID, util.UUIDToString(runtimeID))
 	}
 }
 

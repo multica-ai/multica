@@ -173,6 +173,16 @@ func TestCreateMikaAgent_SessionIsPerMemberAndStable(t *testing.T) {
 	if firstResp.OnboardingSession == nil {
 		t.Fatal("first call returned no onboarding session")
 	}
+	var explicitlyCreated bool
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT explicitly_created_at IS NOT NULL FROM chat_session WHERE id = $1`,
+		firstResp.OnboardingSession.ID,
+	).Scan(&explicitlyCreated); err != nil {
+		t.Fatalf("load Mika session origin: %v", err)
+	}
+	if !explicitlyCreated {
+		t.Fatal("Mika onboarding session must be marked as an explicit first-party Chat")
+	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE creator_id = $1`, testUserID)
 	})

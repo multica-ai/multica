@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // ErrLeaseLost is returned by heartbeat / terminal-update primitives
@@ -72,13 +73,15 @@ func tryClaim(
 			status, attempt, max_attempts,
 			runner_id, lease_token,
 			heartbeat_at, stale_after,
-			started_at, updated_at
+			started_at, updated_at,
+			id
 		) VALUES (
 			$1, $2, $3, $4,
 			'RUNNING', 1, $5,
 			$6, gen_random_uuid(),
 			$7::timestamptz, $7::timestamptz + make_interval(secs => $8),
-			$7::timestamptz, $7::timestamptz
+			$7::timestamptz, $7::timestamptz,
+			COALESCE($9::uuid, gen_random_uuid())
 		)
 		ON CONFLICT ON CONSTRAINT uq_sys_cron_execution DO NOTHING
 		RETURNING id, lease_token, attempt
@@ -94,6 +97,10 @@ func tryClaim(
 		job.MaxAttempts,
 		runnerID,
 		dbTime, staleSecs,
+		// Execution rows are append-only and high-churn, so the id is a v7 for
+		// primary-key locality. lease_token stays gen_random_uuid(): it is a
+		// claim token, and it must not carry a guessable timestamp.
+		dbid.NewV7(),
 	).Scan(&c.ID, &c.LeaseToken, &c.Attempt)
 	if err == nil {
 		c.Won = true

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -15,13 +16,15 @@ import (
 
 // modelListFixture stands up a Daemon whose model-list report is captured and
 // whose agent.ListModels call is stubbed, so a test can assert exactly which
-// executable path model discovery enumerated without shelling out to a CLI.
+// command model discovery enumerated — path and launch prefix both — without
+// shelling out to a CLI.
 type modelListFixture struct {
 	daemon *Daemon
 
 	mu             sync.Mutex
 	listedProvider string
 	listedPath     string
+	listedPrefix   []string
 	listCalls      int
 	report         map[string]any
 }
@@ -48,13 +51,18 @@ func newModelListFixture(t *testing.T) *modelListFixture {
 	fx.daemon = d
 
 	orig := listModels
-	listModels = func(_ context.Context, provider, execPath string) (agent.Catalog, error) {
+	listModels = func(_ context.Context, provider string, runtimeCmd agent.Command) (agent.Catalog, error) {
 		fx.mu.Lock()
 		fx.listedProvider = provider
-		fx.listedPath = execPath
+		fx.listedPath = runtimeCmd.Path
+		fx.listedPrefix = append([]string(nil), runtimeCmd.Prefix...)
 		fx.listCalls++
 		fx.mu.Unlock()
-		return agent.Catalog{Models: []agent.Model{{ID: "m-1", Label: "M 1"}}}, nil
+		return agent.Catalog{Models: []agent.Model{{
+			ID:                                  "m-1",
+			Label:                               "M 1",
+			SupportsExplicitStandardServiceTier: true,
+		}}}, nil
 	}
 	t.Cleanup(func() { listModels = orig })
 
@@ -170,6 +178,30 @@ func TestHandleModelList_BuiltinRuntimeUnaffected(t *testing.T) {
 	}
 }
 
+func TestHandleModelListReportsExplicitStandardCapability(t *testing.T) {
+	fx := newModelListFixture(t)
+	d := fx.daemon
+
+	builtinPath := fakeExecutable(t, "codex")
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: builtinPath}}
+	d.runtimeIndex["rt-builtin"] = Runtime{ID: "rt-builtin", Provider: "codex"}
+
+	d.handleModelList(context.Background(), d.runtimeIndex["rt-builtin"], "req-1")
+
+	_, _, _, report := fx.snapshot()
+	models, ok := report["models"].([]any)
+	if !ok || len(models) != 1 {
+		t.Fatalf("report models = %T %v, want one model", report["models"], report["models"])
+	}
+	model, ok := models[0].(map[string]any)
+	if !ok {
+		t.Fatalf("reported model = %T %v, want object", models[0], models[0])
+	}
+	if got := model["supports_explicit_standard_service_tier"]; got != true {
+		t.Fatalf("reported capability = %v, want true (model: %v)", got, model)
+	}
+}
+
 // TestHandleModelList_NoProfileAndNoBuiltinStillFails pins that the failure
 // message survives for the case it was actually written for: a built-in runtime
 // whose provider has no agent entry on this host.
@@ -217,5 +249,62 @@ func TestHandleModelList_UnresolvedProfileFallsBackToBuiltin(t *testing.T) {
 	}
 	if got := report["status"]; got != "completed" {
 		t.Fatalf("report status = %v, want completed (report: %v)", got, report)
+	}
+}
+
+// TestHandleModelList_CustomProfileCarriesFixedArgs is the discovery half of
+// GH #7046. #6488 aligned model discovery to the profile's own binary but
+// carried only the path, so a wrapper whose CLI is reachable only through a
+// subcommand was enumerated as `ccms models` — the wrapper's own catalog, or
+// more often an error — instead of `ccms start q36 models`. The launch prefix
+// has to travel with the path.
+func TestHandleModelList_CustomProfileCarriesFixedArgs(t *testing.T) {
+	fx := newModelListFixture(t)
+	d := fx.daemon
+
+	d.cfg.Agents = map[string]AgentEntry{}
+	d.runtimeIndex["rt-custom"] = Runtime{ID: "rt-custom", Provider: "claude", ProfileID: "prof-1"}
+	d.profileLaunchSpecs["prof-1"] = profileLaunchSpec{
+		path:      "/usr/local/bin/ccms",
+		fixedArgs: []string{"start", "q36"},
+	}
+
+	d.handleModelList(context.Background(), d.runtimeIndex["rt-custom"], "req-1")
+
+	fx.mu.Lock()
+	path, prefix := fx.listedPath, append([]string(nil), fx.listedPrefix...)
+	fx.mu.Unlock()
+
+	if path != "/usr/local/bin/ccms" {
+		t.Fatalf("discovery path = %q, want the profile's command path", path)
+	}
+	if strings.Join(prefix, "\x00") != "start\x00q36" {
+		t.Fatalf("discovery launch prefix = %v, want the profile's fixed_args [start q36]", prefix)
+	}
+}
+
+// TestHandleModelList_FixedArgsFilteredBeforeDiscovery: the prefix a probe runs
+// with is the same one a task launches with, protocol-critical flags dropped.
+// If the two disagreed, the picker would enumerate a CLI configured
+// differently from the one that runs.
+func TestHandleModelList_FixedArgsFilteredBeforeDiscovery(t *testing.T) {
+	fx := newModelListFixture(t)
+	d := fx.daemon
+
+	d.cfg.Agents = map[string]AgentEntry{}
+	d.runtimeIndex["rt-custom"] = Runtime{ID: "rt-custom", Provider: "claude", ProfileID: "prof-1"}
+	d.profileLaunchSpecs["prof-1"] = profileLaunchSpec{
+		path:      "/usr/local/bin/ccms",
+		fixedArgs: []string{"start", "q36", "--output-format", "text"},
+	}
+
+	d.handleModelList(context.Background(), d.runtimeIndex["rt-custom"], "req-1")
+
+	fx.mu.Lock()
+	prefix := append([]string(nil), fx.listedPrefix...)
+	fx.mu.Unlock()
+
+	if strings.Join(prefix, "\x00") != "start\x00q36" {
+		t.Fatalf("discovery prefix = %v, want the protocol flag filtered out", prefix)
 	}
 }

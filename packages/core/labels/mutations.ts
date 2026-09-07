@@ -204,8 +204,7 @@ export function useAttachLabel(issueId: string) {
       // when the backend gave us one — otherwise the optimistic patch from
       // onMutate stands until onSettled's invalidation refetches.
       if (data && Array.isArray(data.labels)) {
-        qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), data);
-        onIssueLabelsChanged(qc, wsId, issueId, data.labels);
+        onIssueLabelsChanged(qc, wsId, issueId, data.labels, data.issue_revision);
       }
     },
     onSettled: () => {
@@ -260,6 +259,11 @@ export function useDetachLabel(issueId: string) {
       if (ctx?.prev) {
         qc.setQueryData(labelKeys.byIssue(wsId, issueId), ctx.prev);
         patchIssueLabels(qc, wsId, issueId, ctx.prev.labels);
+      }
+    },
+    onSuccess: (data: IssueLabelsResponse) => {
+      if (data && Array.isArray(data.labels)) {
+        onIssueLabelsChanged(qc, wsId, issueId, data.labels, data.issue_revision);
       }
     },
     onSettled: () => {

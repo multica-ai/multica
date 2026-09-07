@@ -9,6 +9,7 @@ import {
   HoverCardContent,
 } from "@multica/ui/components/ui/hover-card";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AgentProfileCard } from "../agents/components/agent-profile-card";
@@ -16,6 +17,7 @@ import { AgentLivePeekCard } from "../agents/components/agent-live-peek-card";
 import { MemberProfileCard } from "../members/member-profile-card";
 import { SquadProfileCard } from "../squads/components/squad-profile-card";
 import { availabilityConfig } from "../agents/presence";
+import { useT } from "../i18n";
 import {
   resolveClickIntent,
   useIntentNavigate,
@@ -39,6 +41,15 @@ export type AgentHoverCardVariant = "profile" | "live";
 interface ActorAvatarProps {
   actorType: string;
   actorId: string;
+  /** Timeline-provided identity for actors no longer in the live directory. */
+  name?: string;
+  avatarUrl?: string | null;
+  /**
+   * Disable profile interactions after the live directory confirms that this
+   * actor no longer has a profile. Timeline surfaces opt in because their
+   * hydrated identity remains displayable after an actor leaves.
+   */
+  profileRequiresDirectoryEntry?: boolean;
   size?: AvatarSize;
   className?: string;
   /**
@@ -76,6 +87,9 @@ const PROFILE_LINK_CONTROL_SELECTOR =
 export function ActorAvatar({
   actorType,
   actorId,
+  name,
+  avatarUrl,
+  profileRequiresDirectoryEntry = false,
   size,
   className,
   enableHoverCard,
@@ -83,13 +97,25 @@ export function ActorAvatar({
   hoverCardVariant = "profile",
   profileLink,
 }: ActorAvatarProps) {
-  const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
+  const {
+    getActorName,
+    getActorInitials,
+    getActorAvatarUrl,
+    hasActor,
+  } = useActorName();
   const paths = useWorkspacePaths();
+  const resolvedName = name ?? getActorName(actorType, actorId);
+  const resolvedAvatarUrl =
+    avatarUrl === undefined
+      ? getActorAvatarUrl(actorType, actorId)
+      : avatarUrl?.startsWith("/")
+        ? resolvePublicFileUrl(avatarUrl)
+        : avatarUrl;
   const avatar = (
     <ActorAvatarBase
-      name={getActorName(actorType, actorId)}
-      initials={getActorInitials(actorType, actorId)}
-      avatarUrl={getActorAvatarUrl(actorType, actorId)}
+      name={resolvedName}
+      initials={getActorInitials(actorType, actorId, resolvedName)}
+      avatarUrl={resolvedAvatarUrl}
       isAgent={actorType === "agent"}
       isSystem={actorType === "system"}
       isSquad={actorType === "squad"}
@@ -111,9 +137,14 @@ export function ActorAvatar({
   ) : (
     avatar
   );
+  const profileAvailable =
+    !profileRequiresDirectoryEntry || hasActor(actorType, actorId) !== false;
   const shouldLinkToProfile =
-    profileLink ??
-    (actorType === "member" || actorType === "agent" || actorType === "squad");
+    profileAvailable &&
+    (profileLink ??
+      (actorType === "member" ||
+        actorType === "agent" ||
+        actorType === "squad"));
   const profileHref = shouldLinkToProfile
     ? actorType === "member"
       ? paths.memberDetail(actorId)
@@ -129,7 +160,7 @@ export function ActorAvatar({
     dotted
   );
 
-  if (!enableHoverCard) {
+  if (!enableHoverCard || !profileAvailable) {
     return content;
   }
   if (actorType === "agent") {
@@ -150,12 +181,9 @@ export function ActorAvatar({
 
 /**
  * Not an `<a>` on purpose: the avatar is often composed inside menu items,
- * options and buttons, where it must yield the click to the surrounding
- * control untouched (no preventDefault — a real anchor would need one to
- * suppress its own navigation, and a pre-prevented click can change how the
- * host control behaves). The cost is no native context menu; modifier and
- * middle clicks are implemented here instead, with the same intent semantics
- * as AppLink.
+ * options and buttons, where it yields the click to the surrounding control.
+ * The cost is no native context menu, so modifier and middle clicks are
+ * implemented here with the same intent semantics as AppLink.
  */
 function ActorAvatarProfileLink({
   href,
@@ -220,15 +248,22 @@ function ActorAvatarProfileLink({
 export function AgentStatusDot({ agentId, size }: { agentId: string; size?: AvatarSize }) {
   const ws = useCurrentWorkspace();
   const detail = useAgentPresenceDetail(ws?.id, agentId);
+  const { t } = useT("agents");
   if (detail === "loading") return null;
 
-  const { dotClass, label } = availabilityConfig[detail.availability];
+  const { dotClass } = availabilityConfig[detail.availability];
   const px = size ? AVATAR_SIZE_PX[size] : 24;
   const dotSize = px >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
 
   return (
     <span
-      aria-label={`Status: ${label}`}
+      // The dot is the only presence signal on this avatar, so the aria-label
+      // is the whole accessible payload — it has to be translated, prefix
+      // included. It used to read `Status: ${availabilityConfig[...].label}`,
+      // which was English in every locale (#7411).
+      aria-label={t(($) => $.presence_status_aria, {
+        status: t(($) => $.availability[detail.availability]),
+      })}
       className={`absolute bottom-0 right-0 rounded-full ring-1 ring-background ${dotClass} ${dotSize}`}
     />
   );

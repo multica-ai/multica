@@ -84,6 +84,12 @@ func TestChannelCommandVisibility_SessionProjectionUsesPublicMessages(t *testing
 	mixedSessionID := createHandlerTestChatSession(t, agentID)
 	newerPublicSessionID := createHandlerTestChatSession(t, agentID)
 	base := time.Date(2026, 8, 7, 2, 0, 0, 0, time.UTC)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE chat_session SET explicitly_created_at = NULL
+		WHERE id = ANY($1::uuid[])
+	`, []string{commandOnlySessionID, mixedSessionID, newerPublicSessionID}); err != nil {
+		t.Fatalf("set session origin fixtures: %v", err)
+	}
 
 	insertChatVisibilityMessage(t, commandOnlySessionID, "/issue hidden only", "channel_command", true, base.Add(3*time.Second))
 	insertChatVisibilityMessage(t, mixedSessionID, "mixed public", "message", true, base)
@@ -142,6 +148,11 @@ func TestChannelCommandVisibility_CommandOnlySessionRejectsChatInteractionsButAl
 	agentID := createHandlerTestAgent(t, "ChannelCommandDirectAccessAgent", []byte("[]"))
 	commandOnlySessionID := createHandlerTestChatSession(t, agentID)
 	webEmptySessionID := createHandlerTestChatSession(t, agentID)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE chat_session SET explicitly_created_at = NULL WHERE id = $1
+	`, commandOnlySessionID); err != nil {
+		t.Fatalf("set session origin fixtures: %v", err)
+	}
 	insertChatVisibilityMessage(t, commandOnlySessionID, "/issue hidden", "channel_command", true, time.Now())
 
 	get := func(sessionID string) *httptest.ResponseRecorder {

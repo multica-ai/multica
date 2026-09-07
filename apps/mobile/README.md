@@ -23,6 +23,13 @@ export EXPO_BUNDLE_IDENTIFIER_PROD=com.yourname.multica
 pnpm ios:mobile:device:prod:release
 ```
 
+**If your Apple ID belongs to more than one Apple Developer team** — a personal team plus an employer's, say — the build signs with the first identity it finds, which may not be the team you meant, and it keeps reusing that choice on every later build. Pin the right one (find the id in the Apple Developer Portal under Membership):
+
+```bash
+export EXPO_APPLE_TEAM_ID=ABCDE12345
+pnpm ios:mobile:device:prod:release
+```
+
 **7-day signing limit**: a free Apple ID signs builds for 7 days. After that, plug back into the Mac and re-run the command to re-sign. An Apple Developer Program account ($99/yr) extends this to 1 year.
 
 Everything below is for app developers — you can ignore the rest if you only wanted a personal install.
@@ -57,6 +64,8 @@ cp apps/mobile/.env.example apps/mobile/.env.development.local
 ```
 
 If your Apple ID isn't on the Multica Apple Developer team yet, also uncomment and set `EXPO_BUNDLE_IDENTIFIER_DEV` to a reverse-domain you own (e.g. `com.yourname.multica.dev`). This **only** overrides the dev variant — staging / production bundle ids are intentionally not overridable so variants can coexist.
+
+If your Apple ID belongs to more than one Apple Developer team, also set `EXPO_APPLE_TEAM_ID` to the team that should sign your builds. Unlike the bundle id overrides it applies to every variant, and it is re-applied on each run — so it also fixes a checkout that has already latched onto the wrong team.
 
 ## Build it onto your iPhone
 

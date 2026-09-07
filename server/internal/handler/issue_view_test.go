@@ -1,14 +1,13 @@
 package handler
 
 import (
-	"strings"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
-
 )
 
 func createIssueViewForTest(t *testing.T, body map[string]any) (IssueViewResponse, int, string) {

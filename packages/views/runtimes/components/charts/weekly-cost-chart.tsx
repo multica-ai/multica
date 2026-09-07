@@ -15,13 +15,14 @@ import {
 import type { WeeklyCostStackData } from "../../utils";
 import { useT } from "../../../i18n";
 
-// Same three-segment stack as DailyCostChart — keeping series, colours, and
+// Same four-segment stack as DailyCostChart — keeping series, colours, and
 // ordering identical so the user reads "Weekly" as a coarser cut of the same
 // chart, not a different chart. Partial-week bars render at half-opacity so
 // "this week is in progress" is visually obvious without a separate legend.
 export const weeklyCostStackConfig = {
   input: { label: "Input", color: "var(--chart-1)" },
   output: { label: "Output", color: "var(--chart-2)" },
+  cacheRead: { label: "Cache read", color: "var(--chart-4)" },
   cacheWrite: { label: "Cache write", color: "var(--chart-3)" },
 } satisfies ChartConfig;
 
@@ -88,6 +89,11 @@ export function WeeklyCostChart({ data }: { data: WeeklyCostStackData[] }) {
           ))}
         </Bar>
         <Bar dataKey="output" stackId="cost" fill="var(--color-output)">
+          {data.map((d) => (
+            <Cell key={d.weekStart} fillOpacity={d.partial ? 0.5 : 1} />
+          ))}
+        </Bar>
+        <Bar dataKey="cacheRead" stackId="cost" fill="var(--color-cacheRead)">
           {data.map((d) => (
             <Cell key={d.weekStart} fillOpacity={d.partial ? 0.5 : 1} />
           ))}

@@ -200,7 +200,7 @@ func TestManagedArtifact_NonTerminalAutopilotAndQuickCreate(t *testing.T) {
 		name string
 		meta *execenv.GCMeta
 	}{
-		{"autopilot_run", &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"}},
+		{"autopilot-run", &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"}},
 		{"quick_create", &execenv.GCMeta{Kind: execenv.GCKindQuickCreate, TaskID: taskID, WorkspaceID: "ws"}},
 	}
 	for _, tc := range cases {

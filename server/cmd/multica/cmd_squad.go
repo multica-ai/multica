@@ -450,7 +450,13 @@ Outcome must be one of:
   failed     — leader encountered an error
 
 This command is intended to be called by squad leader agents after each
-trigger to record their decision in the issue timeline.`,
+trigger to record their decision in the issue timeline.
+
+Pass the issue the current turn is running on. That issue does not need to
+be assigned to your squad — authorization comes from the leader task itself,
+so @squad mentions on an individually owned issue and leader tasks bound to a
+child issue both record fine. A leader woken by a stage barrier runs on the
+parent issue, so record against the parent.`,
 	Args: exactArgs(2),
 	RunE: runSquadActivity,
 }

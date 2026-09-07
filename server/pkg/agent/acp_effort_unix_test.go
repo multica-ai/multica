@@ -78,7 +78,7 @@ func TestValidateThinkingLevelReasonix(t *testing.T) {
 		{model: "", level: "high", want: true},
 		{model: "no-such-model", level: "high", want: false},
 	} {
-		got, err := ValidateThinkingLevel(context.Background(), "reasonix", fakePath, tc.model, tc.level)
+		got, err := ValidateThinkingLevel(context.Background(), "reasonix", Command{Path: fakePath}, tc.model, tc.level)
 		if err != nil {
 			t.Fatalf("ValidateThinkingLevel(%q, %q): %v", tc.model, tc.level, err)
 		}
@@ -114,7 +114,7 @@ func TestReasonixPerModelEffortIsNotSharedAcrossModels(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "reasonix")
 	writeTestExecutable(t, fakePath, []byte(reasonixStubFor(reasonixThreeModelSessionResult)))
 
-	models, err := discoverReasonixModels(context.Background(), fakePath)
+	models, err := discoverReasonixModels(context.Background(), Command{Path: fakePath})
 	if err != nil {
 		t.Fatalf("discoverReasonixModels: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestReasonixPerModelEffortIsNotSharedAcrossModels(t *testing.T) {
 		{model: "deepseek-v4-pro", level: "high", want: false},
 		{model: "glm-4-air", level: "high", want: false},
 	} {
-		got, err := ValidateThinkingLevel(context.Background(), "reasonix", fakePath, tc.model, tc.level)
+		got, err := ValidateThinkingLevel(context.Background(), "reasonix", Command{Path: fakePath}, tc.model, tc.level)
 		if err != nil {
 			t.Fatalf("ValidateThinkingLevel(%q, %q): %v", tc.model, tc.level, err)
 		}
@@ -171,7 +171,7 @@ func TestDiscoverReasonixModelsAnnotatesEffort(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "reasonix")
 	writeTestExecutable(t, fakePath, []byte(reasonixStubFor(reasonixEffortSessionResult)))
 
-	models, err := discoverReasonixModels(context.Background(), fakePath)
+	models, err := discoverReasonixModels(context.Background(), Command{Path: fakePath})
 	if err != nil {
 		t.Fatalf("discoverReasonixModels: %v", err)
 	}

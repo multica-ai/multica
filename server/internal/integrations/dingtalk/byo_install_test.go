@@ -279,6 +279,7 @@ func TestRegisterBYO_SameAgentReconnect_UpdatesRowInPlace(t *testing.T) {
 		ID:          mustUUID(t, "44444444-4444-4444-4444-444444444444"),
 		WorkspaceID: mustUUID(t, "11111111-1111-1111-1111-111111111111"),
 		AgentID:     mustUUID(t, "22222222-2222-2222-2222-222222222222"),
+		Config:      []byte(`{"group_titles":{"cid-platform":"Platform"},"group_bot_names":{"cid-platform":"Release Bot"}}`),
 	}
 	q := &fakeInstallQueries{existing: existing, existingAppID: "ding-app-key-xyz"}
 	svc := newTestInstallService(t, q)
@@ -296,6 +297,15 @@ func TestRegisterBYO_SameAgentReconnect_UpdatesRowInPlace(t *testing.T) {
 	}
 	if q.replaceCalled {
 		t.Fatal("same-AppKey reconnect retired the installation identity")
+	}
+	var reconnectConfig map[string]json.RawMessage
+	if err := json.Unmarshal(q.upsertParams.Config, &reconnectConfig); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"group_titles", "group_bot_names"} {
+		if _, ok := reconnectConfig[key]; ok {
+			t.Fatalf("credential config retained presence key %q: %s", key, q.upsertParams.Config)
+		}
 	}
 }
 

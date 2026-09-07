@@ -13,6 +13,19 @@ import (
 	"github.com/openai/openai-go/v3/shared"
 )
 
+// retries builds a Config.MaxRetries value, failing loudly on a budget Retries
+// rejects. Tests that assert an exact upstream request count pass retries(0) to
+// take SDK retries out of the picture; before MUL-6364 that required the
+// negative -1, because a plain 0 was indistinguishable from unset and quietly
+// restored the default budget.
+func retries(n int) *RetryOverride {
+	override, err := Retries(n)
+	if err != nil {
+		panic(err)
+	}
+	return override
+}
+
 // stubUpstream returns an httptest server that mimics the OpenAI
 // chat-completions endpoint. handler receives the decoded request body.
 func stubUpstream(t *testing.T, handler func(w http.ResponseWriter, body map[string]any)) *httptest.Server {
@@ -178,7 +191,7 @@ func TestGenerateJSONFallsBackToLegacyMaxTokens(t *testing.T) {
 		_, _ = io.WriteString(w, `{"id":"cmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"{\"actions\":[]}"},"finish_reason":"stop"}]}`)
 	})
 
-	c := New(Config{APIKey: "k", BaseURL: srv.URL, MaxRetries: -1})
+	c := New(Config{APIKey: "k", BaseURL: srv.URL, MaxRetries: retries(0)})
 	if _, err := c.GenerateJSON(context.Background(), "legacy-model", "Return JSON.", "Generate actions.", 0.3, 800); err != nil {
 		t.Fatalf("GenerateJSON failed: %v", err)
 	}
@@ -215,7 +228,7 @@ func TestGenerateJSONFallsBackFromUnsupportedReasoningEffort(t *testing.T) {
 		_, _ = io.WriteString(w, `{"id":"cmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"{\"actions\":[]}"},"finish_reason":"stop"}]}`)
 	})
 
-	c := New(Config{APIKey: "k", BaseURL: srv.URL, MaxRetries: -1})
+	c := New(Config{APIKey: "k", BaseURL: srv.URL, MaxRetries: retries(0)})
 	if _, err := c.GenerateJSON(context.Background(), "gpt-5.6-luna", "Return JSON.", "Generate actions.", 0.3, 800); err != nil {
 		t.Fatalf("GenerateJSON failed: %v", err)
 	}
@@ -250,7 +263,7 @@ func TestGenerateJSONNegotiatesBothLegacyParameters(t *testing.T) {
 		}
 	})
 
-	c := New(Config{APIKey: "k", BaseURL: srv.URL, MaxRetries: -1})
+	c := New(Config{APIKey: "k", BaseURL: srv.URL, MaxRetries: retries(0)})
 	if _, err := c.GenerateJSON(context.Background(), "gpt-5.6-luna", "Return JSON.", "Generate actions.", 0.3, 800); err != nil {
 		t.Fatalf("GenerateJSON failed: %v", err)
 	}
@@ -278,7 +291,7 @@ func TestGenerateJSONDoesNotRetryInvalidTokenLimit(t *testing.T) {
 		_, _ = io.WriteString(w, `{"error":{"message":"Invalid max_completion_tokens value","type":"invalid_request_error","param":"max_completion_tokens","code":"invalid_value"}}`)
 	})
 
-	c := New(Config{APIKey: "k", BaseURL: srv.URL, MaxRetries: -1})
+	c := New(Config{APIKey: "k", BaseURL: srv.URL, MaxRetries: retries(0)})
 	if _, err := c.GenerateJSON(context.Background(), "gpt-5.6-luna", "Return JSON.", "Generate actions.", 0.3, 800); err == nil {
 		t.Fatal("expected invalid token limit error")
 	}

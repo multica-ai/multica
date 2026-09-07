@@ -12,10 +12,28 @@ import (
 )
 
 const addReaction = `-- name: AddReaction :one
-INSERT INTO comment_reaction (comment_id, workspace_id, actor_type, actor_id, emoji)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (comment_id, actor_type, actor_id, emoji) DO UPDATE SET created_at = comment_reaction.created_at
-RETURNING id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at
+WITH inserted AS (
+    INSERT INTO comment_reaction (comment_id, workspace_id, actor_type, actor_id, emoji)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (comment_id, actor_type, actor_id, emoji) DO NOTHING
+    RETURNING id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at
+), bumped AS (
+    UPDATE comment
+    SET revision = revision + 1
+    WHERE id IN (SELECT comment_id FROM inserted)
+    RETURNING revision
+)
+SELECT reaction.id, reaction.comment_id, reaction.workspace_id, reaction.actor_type, reaction.actor_id, reaction.emoji, reaction.created_at, COALESCE((SELECT revision FROM bumped), 0)::bigint AS comment_revision
+FROM inserted reaction
+UNION ALL
+SELECT reaction.id, reaction.comment_id, reaction.workspace_id, reaction.actor_type, reaction.actor_id, reaction.emoji, reaction.created_at, 0::bigint AS comment_revision
+FROM comment_reaction reaction
+WHERE reaction.comment_id = $1
+  AND reaction.actor_type = $3
+  AND reaction.actor_id = $4
+  AND reaction.emoji = $5
+  AND NOT EXISTS (SELECT 1 FROM inserted)
+LIMIT 1
 `
 
 type AddReactionParams struct {
@@ -26,7 +44,18 @@ type AddReactionParams struct {
 	Emoji       string      `json:"emoji"`
 }
 
-func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) (CommentReaction, error) {
+type AddReactionRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	CommentID       pgtype.UUID        `json:"comment_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ActorType       string             `json:"actor_type"`
+	ActorID         pgtype.UUID        `json:"actor_id"`
+	Emoji           string             `json:"emoji"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	CommentRevision int64              `json:"comment_revision"`
+}
+
+func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) (AddReactionRow, error) {
 	row := q.db.QueryRow(ctx, addReaction,
 		arg.CommentID,
 		arg.WorkspaceID,
@@ -34,7 +63,7 @@ func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) (Comme
 		arg.ActorID,
 		arg.Emoji,
 	)
-	var i CommentReaction
+	var i AddReactionRow
 	err := row.Scan(
 		&i.ID,
 		&i.CommentID,
@@ -43,6 +72,7 @@ func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) (Comme
 		&i.ActorID,
 		&i.Emoji,
 		&i.CreatedAt,
+		&i.CommentRevision,
 	)
 	return i, err
 }
@@ -81,9 +111,19 @@ func (q *Queries) ListReactionsByCommentIDs(ctx context.Context, dollar_1 []pgty
 	return items, nil
 }
 
-const removeReaction = `-- name: RemoveReaction :exec
-DELETE FROM comment_reaction
-WHERE comment_id = $1 AND actor_type = $2 AND actor_id = $3 AND emoji = $4
+const removeReaction = `-- name: RemoveReaction :one
+WITH deleted AS (
+    DELETE FROM comment_reaction
+    WHERE comment_id = $1 AND actor_type = $2 AND actor_id = $3 AND emoji = $4
+    RETURNING comment_id
+), bumped AS (
+    UPDATE comment
+    SET revision = revision + 1
+    WHERE id IN (SELECT comment_id FROM deleted)
+    RETURNING revision
+)
+SELECT EXISTS(SELECT 1 FROM deleted) AS changed,
+       COALESCE((SELECT revision FROM bumped), 0)::bigint AS comment_revision
 `
 
 type RemoveReactionParams struct {
@@ -93,12 +133,19 @@ type RemoveReactionParams struct {
 	Emoji     string      `json:"emoji"`
 }
 
-func (q *Queries) RemoveReaction(ctx context.Context, arg RemoveReactionParams) error {
-	_, err := q.db.Exec(ctx, removeReaction,
+type RemoveReactionRow struct {
+	Changed         bool  `json:"changed"`
+	CommentRevision int64 `json:"comment_revision"`
+}
+
+func (q *Queries) RemoveReaction(ctx context.Context, arg RemoveReactionParams) (RemoveReactionRow, error) {
+	row := q.db.QueryRow(ctx, removeReaction,
 		arg.CommentID,
 		arg.ActorType,
 		arg.ActorID,
 		arg.Emoji,
 	)
-	return err
+	var i RemoveReactionRow
+	err := row.Scan(&i.Changed, &i.CommentRevision)
+	return i, err
 }

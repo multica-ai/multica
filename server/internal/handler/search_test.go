@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuildSearchQuery_SingleTerm(t *testing.T) {
-	query, args := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false)
+	query, args := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, []string{"done", "cancelled"})
 
 	// Pattern should be lowercased in Go.
 	if args[0] != "hello" {
@@ -36,13 +36,57 @@ func TestBuildSearchQuery_SingleTerm(t *testing.T) {
 	}
 
 	// Should exclude closed issues by default.
-	if !strings.Contains(query, "NOT IN ('done', 'cancelled')") {
-		t.Error("query should exclude done/cancelled when includeClosed=false")
+	if !strings.Contains(query, "NOT (i.status = ANY(") {
+		t.Error("query should exclude the expanded terminal status keys when includeClosed=false")
+	}
+	if strings.Contains(query, "issue_effective_status") {
+		t.Error("query should not resolve status categories once per issue row")
+	}
+}
+
+func TestBuildSearchQuery_OmitsUnusedExactTotal(t *testing.T) {
+	query, _ := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, []string{"done", "cancelled"})
+
+	if strings.Contains(query, "COUNT(*) OVER()") || strings.Contains(query, "total_count") {
+		t.Fatalf("search query should not calculate an unused exact total:\n%s", query)
+	}
+}
+
+func TestBuildProjectSearchQuery_OmitsUnusedExactTotal(t *testing.T) {
+	query, _ := buildProjectSearchQuery("Hello", []string{"Hello"}, false)
+
+	if strings.Contains(query, "COUNT(*) OVER()") || strings.Contains(query, "total_count") {
+		t.Fatalf("project search query should not calculate an unused exact total:\n%s", query)
+	}
+}
+
+func TestBuildSearchQuery_CustomTerminalStatuses(t *testing.T) {
+	terminalStatusKeys := []string{"done", "cancelled", "verified"}
+	query, args := buildSearchQuery(
+		"Hello",
+		[]string{"Hello"},
+		0,
+		false,
+		false,
+		terminalStatusKeys,
+	)
+
+	if !strings.Contains(query, "NOT (i.status = ANY($5::text[]))") {
+		t.Fatalf("query does not filter through the expanded terminal keys:\n%s", query)
+	}
+	got, ok := args[4].([]string)
+	if !ok || len(got) != len(terminalStatusKeys) {
+		t.Fatalf("terminal status argument = %#v, want %#v", args[4], terminalStatusKeys)
+	}
+	for i := range terminalStatusKeys {
+		if got[i] != terminalStatusKeys[i] {
+			t.Fatalf("terminal status argument = %#v, want %#v", got, terminalStatusKeys)
+		}
 	}
 }
 
 func TestBuildSearchQuery_MultiTerm(t *testing.T) {
-	query, args := buildSearchQuery("Foo Bar", []string{"Foo", "Bar"}, 0, false, false)
+	query, args := buildSearchQuery("Foo Bar", []string{"Foo", "Bar"}, 0, false, false, []string{"done", "cancelled"})
 
 	// Both phrase and terms should be lowercased.
 	if args[0] != "foo bar" {
@@ -63,7 +107,7 @@ func TestBuildSearchQuery_MultiTerm(t *testing.T) {
 }
 
 func TestBuildSearchQuery_WithNumber(t *testing.T) {
-	query, args := buildSearchQuery("MUL-42", []string{"MUL-42"}, 42, true, false)
+	query, args := buildSearchQuery("MUL-42", []string{"MUL-42"}, 42, true, false, []string{"done", "cancelled"})
 
 	_ = args
 	// Number match should be in WHERE.
@@ -77,15 +121,15 @@ func TestBuildSearchQuery_WithNumber(t *testing.T) {
 }
 
 func TestBuildSearchQuery_IncludeClosed(t *testing.T) {
-	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true)
+	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true, nil)
 
-	if strings.Contains(query, "NOT IN ('done', 'cancelled')") {
+	if strings.Contains(query, "i.status = ANY(") {
 		t.Error("query should not exclude done/cancelled when includeClosed=true")
 	}
 }
 
 func TestBuildSearchQuery_SpecialChars(t *testing.T) {
-	query, args := buildSearchQuery("100%", []string{"100%"}, 0, false, false)
+	query, args := buildSearchQuery("100%", []string{"100%"}, 0, false, false, []string{"done", "cancelled"})
 
 	_ = query
 	// % should be escaped in the phrase arg.
@@ -204,7 +248,7 @@ func TestExtractSnippet_CJKContent(t *testing.T) {
 // --- Ranking regression tests ---
 
 func TestBuildSearchQuery_CommentRankTiers(t *testing.T) {
-	query, _ := buildSearchQuery("test phrase", []string{"test", "phrase"}, 0, false, false)
+	query, _ := buildSearchQuery("test phrase", []string{"test", "phrase"}, 0, false, false, []string{"done", "cancelled"})
 
 	// Comment phrase match should be tier 7
 	if !strings.Contains(query, "THEN 7") {
@@ -221,7 +265,7 @@ func TestBuildSearchQuery_CommentRankTiers(t *testing.T) {
 }
 
 func TestBuildSearchQuery_DescriptionRankTiers(t *testing.T) {
-	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false)
+	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"})
 
 	// Description phrase match should be tier 5
 	if !strings.Contains(query, "THEN 5") {
@@ -234,7 +278,7 @@ func TestBuildSearchQuery_DescriptionRankTiers(t *testing.T) {
 }
 
 func TestBuildSearchQuery_SingleTermNoAllTermTiers(t *testing.T) {
-	query, _ := buildSearchQuery("html", []string{"html"}, 0, false, false)
+	query, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, []string{"done", "cancelled"})
 
 	// Extract the rank CASE expression (ends with "ELSE 9 END") to avoid
 	// false matches against statusRank which also contains THEN 4/6.
@@ -257,41 +301,64 @@ func TestBuildSearchQuery_SingleTermNoAllTermTiers(t *testing.T) {
 }
 
 // TestBuildSearchQuery_CommentSubqueryWorkspaceScope regressions the
-// MUL-4059 fix: every EXISTS / correlated subquery over `comment` MUST
-// filter by c.workspace_id = $wsParam. Without this, Postgres rewrites
-// the correlated subquery into a hashed subplan that materializes every
-// comment in the entire table matching the LIKE — on prd this was
-// 536k rows / 32.3 s for '%search%'. With the filter the hashed set
-// collapses to this workspace's comments and the plan uses the
-// idx_comment_workspace supporting btree.
+// MUL-4059 fix: the single comment scan and the final point hydration MUST
+// both filter by c.workspace_id = $wsParam. Without this, Postgres can read
+// matching comments from every workspace — on prd this was 536k rows / 32.3 s
+// for '%search%'.
 //
 // $4 is buildSearchQuery's canonical workspace_id placeholder (the
 // caller writes wsUUID into args[3] before executing).
 func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
-	singleQuery, _ := buildSearchQuery("html", []string{"html"}, 0, false, false)
+	singleQuery, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, []string{"done", "cancelled"})
 
-	// Every occurrence of `FROM comment c` must be followed by the
-	// c.workspace_id = $4 constraint. Counting is safer than a single
-	// substring check because the WHERE, rank CASE, matched_comment_content
-	// subqueries all touch `comment` and must each carry the filter.
+	// Candidate-first search aggregates comments in one workspace-first pass;
+	// it must not grow a second scan for eligibility, ranking, or snippets.
 	fromCount := strings.Count(singleQuery, "FROM comment c")
 	scopedCount := strings.Count(singleQuery, "c.workspace_id = $4")
-	if fromCount == 0 {
-		t.Fatalf("single-term query has no comment subquery — did buildSearchQuery drop it?")
+	if fromCount != 1 {
+		t.Fatalf("single-term query has %d comment scans, want exactly one:\n%s", fromCount, singleQuery)
 	}
-	if scopedCount < fromCount {
-		t.Errorf("single-term query has %d comment subqueries but only %d workspace_id filters — %d unscoped subquery(ies) will trigger the MUL-4059 global-hash plan",
-			fromCount, scopedCount, fromCount-scopedCount)
+	if scopedCount < 2 {
+		t.Errorf("single-term query has %d workspace_id filters, want one on aggregation and one on hydration:\n%s", scopedCount, singleQuery)
+	}
+	if !strings.Contains(singleQuery, "comment_matches AS MATERIALIZED") {
+		t.Errorf("comment aggregation is not materialized:\n%s", singleQuery)
+	}
+	if strings.Contains(singleQuery, "EXISTS (SELECT 1 FROM comment") {
+		t.Errorf("candidate-first query regressed to correlated comment EXISTS checks:\n%s", singleQuery)
 	}
 
-	// Multi-term uses one extra comment subquery in the WHERE and one in
-	// the rank CASE for the all-terms match — same invariant applies.
-	multiQuery, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false)
+	// Adding terms adds boolean aggregates, not extra comment relation scans.
+	multiQuery, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"})
 	fromCountMulti := strings.Count(multiQuery, "FROM comment c")
-	scopedCountMulti := strings.Count(multiQuery, "c.workspace_id = $4")
-	if scopedCountMulti < fromCountMulti {
-		t.Errorf("multi-term query has %d comment subqueries but only %d workspace_id filters",
-			fromCountMulti, scopedCountMulti)
+	if fromCountMulti != 1 {
+		t.Errorf("multi-term query has %d comment scans, want exactly one:\n%s", fromCountMulti, multiQuery)
+	}
+	if !strings.Contains(multiQuery, "BOOL_OR((LOWER(c.content) LIKE") || !strings.Contains(multiQuery, "AS comment_all_terms") {
+		t.Errorf("multi-term query does not retain the same-comment all-terms flag:\n%s", multiQuery)
+	}
+	if !strings.Contains(multiQuery, "ARRAY_AGG(c.id ORDER BY c.created_at DESC, c.id DESC)") {
+		t.Errorf("snippet selection has no deterministic comment-ID tie-breaker:\n%s", multiQuery)
+	}
+}
+
+func TestBuildSearchQuery_HydratesOnlyTheSelectedPage(t *testing.T) {
+	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"})
+
+	if strings.Contains(query, "issue_matches AS MATERIALIZED") {
+		t.Fatalf("issue flag CTE must remain inlineable; forced materialization spills in production:\n%s", query)
+	}
+	if !strings.Contains(query, "issue_matches AS (") || !strings.Contains(query, "page_candidates AS MATERIALIZED") {
+		t.Fatalf("query does not retain narrow issue flags and materialize the selected page:\n%s", query)
+	}
+	limitAt := strings.Index(query, "LIMIT ")
+	issueHydrationAt := strings.Index(query, "JOIN issue i ON i.id = pc.issue_id")
+	commentHydrationAt := strings.Index(query, "LEFT JOIN comment c ON c.id = pc.snippet_comment_id")
+	if limitAt == -1 || issueHydrationAt < limitAt || commentHydrationAt < limitAt {
+		t.Fatalf("full issue/comment hydration must happen after LIMIT/OFFSET:\n%s", query)
+	}
+	if lastTextMatch := strings.LastIndex(query, "LOWER(c.content) LIKE"); lastTextMatch > limitAt {
+		t.Errorf("comment hydration repeats a text search after LIMIT/OFFSET:\n%s", query)
 	}
 }
 
@@ -314,28 +381,25 @@ func orderByClause(t *testing.T, query string) string {
 // already landed in the same tier, so an exactly-titled cancelled issue
 // (tier 1) would still beat an in_progress title-contains match (tier 3).
 func TestBuildSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) {
-	orderBy := orderByClause(t, buildSearchQueryForTest(t, "login bug", []string{"login", "bug"}, 0, false, true))
-
-	cancelledAt := strings.Index(orderBy, "i.status = 'cancelled' AND NOT")
-	if cancelledAt == -1 {
-		t.Fatalf("ORDER BY has no cancelled demotion:\n%s", orderBy)
+	query := buildSearchQueryForTest(t, "login bug", []string{"login", "bug"}, 0, false, true)
+	if !strings.Contains(query, "CASE WHEN im.status = 'cancelled' AND NOT (im.title_exact) THEN 1 ELSE 0 END AS cancelled_rank") {
+		t.Fatalf("ranked candidates have no cancelled demotion:\n%s", query)
 	}
 
-	// "ELSE 9 END" terminates the relevance CASE (rankExpr).
-	relevanceEndsAt := strings.Index(orderBy, "ELSE 9 END")
-	if relevanceEndsAt == -1 {
-		t.Fatalf("ORDER BY has no relevance rank CASE:\n%s", orderBy)
-	}
-	if cancelledAt > relevanceEndsAt {
-		t.Errorf("cancelled demotion sorts after the relevance tiers, so a well-matching cancelled issue still outranks live work:\n%s", orderBy)
+	orderBy := orderByClause(t, query)
+	if !strings.HasPrefix(orderBy, "pc.cancelled_rank, pc.relevance_rank, pc.status_rank") {
+		t.Errorf("cancelled demotion does not sort before relevance and status:\n%s", orderBy)
 	}
 
 	// The demotion must not replace the existing status ordering.
-	if !strings.Contains(orderBy, "WHEN 'in_progress' THEN 0") {
-		t.Errorf("statusRank was dropped from ORDER BY:\n%s", orderBy)
+	if !strings.Contains(query, "WHEN 'in_progress' THEN 0") {
+		t.Errorf("statusRank was dropped from ranked candidates:\n%s", query)
 	}
-	if !strings.Contains(orderBy, "i.updated_at DESC") {
+	if !strings.Contains(orderBy, "pc.updated_at DESC") {
 		t.Errorf("recency tie-breaker was dropped from ORDER BY:\n%s", orderBy)
+	}
+	if !strings.Contains(orderBy, "pc.issue_id ASC") {
+		t.Errorf("stable issue ID tie-breaker was dropped from ORDER BY:\n%s", orderBy)
 	}
 }
 
@@ -343,28 +407,28 @@ func TestBuildSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) {
 // the searcher already knows which issue they want, so demoting it would just
 // hide the row they asked for.
 func TestBuildSearchQuery_CancelledDirectHitExempt(t *testing.T) {
-	// $1 is the exact (non-wildcard) phrase param.
-	textOnly := orderByClause(t, buildSearchQueryForTest(t, "ship it", []string{"ship", "it"}, 0, false, true))
-	if !strings.Contains(textOnly, "i.status = 'cancelled' AND NOT (LOWER(i.title) = $1)") {
+	textOnly := buildSearchQueryForTest(t, "ship it", []string{"ship", "it"}, 0, false, true)
+	if !strings.Contains(textOnly, "im.status = 'cancelled' AND NOT (im.title_exact)") {
 		t.Errorf("exact-title hit is not exempt from the cancelled demotion:\n%s", textOnly)
 	}
-	if strings.Contains(textOnly, "i.number = ") {
+	if strings.Contains(textOnly, "number_exact") {
 		t.Errorf("non-numeric query should not reference i.number in the demotion:\n%s", textOnly)
 	}
 
-	withNumber := orderByClause(t, buildSearchQueryForTest(t, "MUL-42", []string{"MUL-42"}, 42, true, true))
-	if !strings.Contains(withNumber, "LOWER(i.title) = $1 OR i.number = ") {
+	withNumber := buildSearchQueryForTest(t, "MUL-42", []string{"MUL-42"}, 42, true, true)
+	if !strings.Contains(withNumber, "NOT (im.title_exact OR im.number_exact)") {
 		t.Errorf("identifier lookup is not exempt from the cancelled demotion, so MUL-42 sinks below every fuzzy match:\n%s", withNumber)
 	}
 }
 
 // 'done' is finished work worth referencing; only 'cancelled' is thrown away.
 func TestBuildSearchQuery_DoneNotDemotedAheadOfRelevance(t *testing.T) {
-	orderBy := orderByClause(t, buildSearchQueryForTest(t, "login", []string{"login"}, 0, false, true))
-
-	relevanceEndsAt := strings.Index(orderBy, "ELSE 9 END")
-	if doneAt := strings.Index(orderBy, "i.status = 'done'"); doneAt != -1 && doneAt < relevanceEndsAt {
-		t.Errorf("done issues were demoted ahead of relevance; only cancelled should be:\n%s", orderBy)
+	query := buildSearchQueryForTest(t, "login", []string{"login"}, 0, false, true)
+	if strings.Contains(query, "CASE WHEN im.status = 'done'") {
+		t.Errorf("done issues were demoted ahead of relevance; only cancelled should be:\n%s", query)
+	}
+	if !strings.Contains(query, "WHEN 'done' THEN 5") {
+		t.Errorf("done status tie-breaker was dropped:\n%s", query)
 	}
 }
 
@@ -398,6 +462,6 @@ func TestBuildProjectSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) 
 // keeps each test's literals independent.
 func buildSearchQueryForTest(t *testing.T, phrase string, terms []string, num int, hasNum bool, includeClosed bool) string {
 	t.Helper()
-	query, _ := buildSearchQuery(phrase, append([]string(nil), terms...), num, hasNum, includeClosed)
+	query, _ := buildSearchQuery(phrase, append([]string(nil), terms...), num, hasNum, includeClosed, []string{"done", "cancelled"})
 	return query
 }

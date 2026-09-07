@@ -13,6 +13,9 @@ export interface TimelineEntry {
   actor_type: string;
   actor_id: string;
   created_at: string;
+  /** Display identity hydrated from the actor's global user row when available. */
+  actor_name?: string;
+  actor_avatar_url?: string;
   // Activity fields
   action?: string;
   details?: Record<string, unknown>;
@@ -20,6 +23,7 @@ export interface TimelineEntry {
   content?: string;
   parent_id?: string | null;
   updated_at?: string;
+  revision?: number;
   comment_type?: string;
   /** Set only on comments a quick action produced (MUL-5465). Unforgeable. */
   quick_action_id?: string | null;

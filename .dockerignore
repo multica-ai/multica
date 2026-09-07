@@ -32,7 +32,15 @@ e2e/test-results
 coverage
 
 # Docs
-docs/
+/docs/
+*.md
 
-# Desktop app (not needed for web self-hosting)
-apps/desktop
+# Only the web workspace is used by Dockerfile.web. Default-exclude future
+# app workspaces so they do not silently enter the build context.
+/apps/*
+!/apps/web/
+
+# Repository-only tooling
+/.github/
+/deploy/
+/scripts/

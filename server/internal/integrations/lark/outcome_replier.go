@@ -52,7 +52,7 @@ type noopReplier struct {
 
 func (n *noopReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
-	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived, OutcomeFreshPending, OutcomeIssueUsage:
+	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived, OutcomeFreshPending, OutcomeChatStarted, OutcomeIssueUsage:
 		n.log.Warn("lark outcome replier: outbound reply skipped (replier not wired)",
 			"outcome", string(res.Outcome),
 			"installation_id", uuidString(inst.ID),
@@ -186,6 +186,10 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 				"chat_id", string(msg.ChatID),
 				"err", err.Error(),
 			)
+		}
+	case OutcomeChatStarted:
+		if err := r.sendChatNotice(ctx, inst, msg, chatStartedCopy); err != nil {
+			r.log.Warn("lark outcome replier: new-chat confirmation failed", "installation_id", uuidString(inst.ID), "chat_id", string(msg.ChatID), "err", err.Error())
 		}
 	case OutcomeIssueUsage:
 		copy := issueUsageCopy
@@ -409,7 +413,8 @@ func renderNoticeCard(header, body string) (string, error) {
 const (
 	agentOfflineCopy        = "Agent 当前离线，消息已记录。下次 daemon 上线后会自动继续处理。"
 	agentArchivedCopy       = "这个 Agent 已被归档，无法继续处理消息。请联系工作区管理员恢复或重新绑定。"
-	freshPendingCopy        = "✅ 已准备开始新对话。你的下一条聊天消息将不带之前的上下文运行。"
+	freshPendingCopy        = "✅ 已准备从空上下文运行。你的下一条聊天消息仍会进入当前对话，但不会带上之前的上下文。"
+	chatStartedCopy         = "✅ 已新建 Multica 对话。你的下一条消息会进入该对话。"
 	issueUsageCopy          = "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）"
 	issueUsageWithMediaCopy = "请添加标题，并与图片或视频一起重新发送（*图片或视频可以位于命令之前或之后*）：\n\n`/issue <标题>`\n`[描述]`（可选）"
 )

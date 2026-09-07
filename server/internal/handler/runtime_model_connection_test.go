@@ -37,7 +37,7 @@ func TestRuntimeModelConnectionLifecycle(t *testing.T) {
 	); err != nil {
 		t.Fatalf("make fixture a Pi runtime: %v", err)
 	}
-	if err := cache.Put(ctx, runtimeID, []ModelEntry{{ID: "No/models", Label: "No/models"}}, true); err != nil {
+	if err := cache.Put(ctx, runtimeID, []ModelEntry{{ID: "No/models", Label: "No/models"}}, nil, true); err != nil {
 		t.Fatalf("seed stale model cache: %v", err)
 	}
 
@@ -164,7 +164,7 @@ func TestRuntimeModelConnectionLifecycle(t *testing.T) {
 		t.Fatalf("plain member PUT: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 
-	if err := cache.Put(ctx, runtimeID, []ModelEntry{{ID: "deepseek/old", Label: "deepseek/old"}}, true); err != nil {
+	if err := cache.Put(ctx, runtimeID, []ModelEntry{{ID: "deepseek/old", Label: "deepseek/old"}}, nil, true); err != nil {
 		t.Fatalf("reseed stale model cache: %v", err)
 	}
 	w = httptest.NewRecorder()

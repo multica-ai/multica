@@ -414,6 +414,42 @@ func TestUploadFileWithURL(t *testing.T) {
 	})
 }
 
+func TestUploadPrivatePlugin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces/ws-1/plugins/private/install" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-token" || r.Header.Get("X-Workspace-ID") != "ws-1" {
+			t.Fatalf("missing authenticated workspace headers: %#v", r.Header)
+		}
+		file, header, err := r.FormFile("artifact")
+		if err != nil {
+			t.Fatalf("artifact form file: %v", err)
+		}
+		defer file.Close()
+		contents, err := io.ReadAll(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header.Filename != "private.zip" || string(contents) != "zip-bytes" {
+			t.Fatalf("unexpected artifact filename=%q content=%q", header.Filename, contents)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"id": "installation-1"})
+	}))
+	defer server.Close()
+
+	client := NewAPIClient(server.URL, "ws-1", "test-token")
+	var response map[string]string
+	err := client.UploadPrivatePlugin(context.Background(), "/api/workspaces/ws-1/plugins/private/install", []byte("zip-bytes"), "private.zip", &response)
+	if err != nil {
+		t.Fatalf("UploadPrivatePlugin: %v", err)
+	}
+	if response["id"] != "installation-1" {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+}
+
 func TestNormalizeGOOS(t *testing.T) {
 	cases := map[string]string{
 		"darwin":  "macos",
@@ -522,6 +558,70 @@ func TestSetHeaders_AdvertisesStableAttachmentURLs(t *testing.T) {
 		}
 		if got != wantCapability {
 			t.Errorf("X-Client-Capabilities = %q, want %q", got, wantCapability)
+		}
+	})
+}
+
+// TestHTTPErrorTaskScopedFollowsTheRequestNotTheClient wires the credential
+// claim to what actually went out on the wire.
+//
+// Reading the client's Token field instead is wrong in a way a hand-built
+// HTTPError cannot show: DownloadFile deliberately sends no Authorization
+// header for an absolute signed URL, so a 401 from object storage would be
+// reported to an agent as "your task token was rejected, stop" purely because
+// the client happened to hold one.
+func TestHTTPErrorTaskScopedFollowsTheRequestNotTheClient(t *testing.T) {
+	var sawAuth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = append(sawAuth, r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"unauthorized"}`)
+	}))
+	defer srv.Close()
+
+	taskClient := NewAPIClient(srv.URL, "ws-1", TaskTokenPrefix+"0123456789abcdef")
+
+	t.Run("api call sends the task token", func(t *testing.T) {
+		err := taskClient.GetJSON(context.Background(), "/api/me", &struct{}{})
+		var httpErr *HTTPError
+		if !errors.As(err, &httpErr) {
+			t.Fatalf("err = %v, want an *HTTPError", err)
+		}
+		if !httpErr.TaskScoped {
+			t.Error("a 401 on a request that carried the task token must be marked task-scoped")
+		}
+		if got := FormatError(err, false); !strings.Contains(got, "task token") {
+			t.Errorf("message did not use the task-token copy: %q", got)
+		}
+	})
+
+	t.Run("signed absolute URL sends no credential at all", func(t *testing.T) {
+		before := len(sawAuth)
+		_, err := taskClient.DownloadFile(context.Background(), srv.URL+"/signed-object?sig=abc")
+		var httpErr *HTTPError
+		if !errors.As(err, &httpErr) {
+			t.Fatalf("err = %v, want an *HTTPError", err)
+		}
+		if auth := sawAuth[before]; auth != "" {
+			t.Fatalf("DownloadFile sent %q on an absolute URL; the test no longer covers the unauthenticated path", auth)
+		}
+		if httpErr.TaskScoped {
+			t.Error("a 401 from an unauthenticated signed URL must not be reported as a rejected task token")
+		}
+		if got := FormatError(err, false); strings.Contains(got, "task token") {
+			t.Errorf("storage 401 got the task-token copy: %q", got)
+		}
+	})
+
+	t.Run("member token is never task-scoped", func(t *testing.T) {
+		memberClient := NewAPIClient(srv.URL, "ws-1", "mul_0123456789abcdef")
+		err := memberClient.GetJSON(context.Background(), "/api/me", &struct{}{})
+		var httpErr *HTTPError
+		if !errors.As(err, &httpErr) {
+			t.Fatalf("err = %v, want an *HTTPError", err)
+		}
+		if httpErr.TaskScoped {
+			t.Error("a member credential must not be reported as a task token")
 		}
 	})
 }

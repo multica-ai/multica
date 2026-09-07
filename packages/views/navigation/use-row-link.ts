@@ -15,7 +15,9 @@ import { useNavigation } from "./context";
  * The whole row navigates on click — the row is the click target, so the
  * name cell stays plain text (no nested `<a>`, which would be a redundant
  * second entry point). Interactive cells (checkbox, kebab, inline editors)
- * call `stopPropagation` so clicking them never reaches these handlers.
+ * must stop propagation so interacting with them never reaches these
+ * handlers — spread `rowLinkInteractiveProps` on them rather than wiring
+ * `onClick` alone, because the row handles `auxclick` too.
  *
  * Mirrors AppLink's modifier semantics via `resolveClickIntent`: a plain left
  * click pushes; cmd/ctrl (or a middle click) opens a background tab on
@@ -32,6 +34,21 @@ import { useNavigation } from "./context";
  * Callers add `cursor-pointer` to the row's own className (kept out of the
  * returned props so it can't clash with the row's existing className).
  */
+/**
+ * Props for interactive elements nested inside a `useRowLink` row.
+ *
+ * Stops BOTH `click` and `auxclick` from bubbling to the row. Stopping only
+ * `click` is a trap: a middle click bubbles as `auxclick`, the row handler
+ * calls `preventDefault()`, and for a nested `<a>` that cancels the anchor's
+ * native middle-click open — so the row opens in a background tab instead of
+ * the link's own destination. Native behaviour on the element itself is
+ * untouched (no `preventDefault` here), so anchors keep their default open.
+ */
+export const rowLinkInteractiveProps = {
+  onClick: (e: React.MouseEvent) => e.stopPropagation(),
+  onAuxClick: (e: React.MouseEvent) => e.stopPropagation(),
+};
+
 export function useRowLink() {
   const { push, openInNewTab, prefetch, getShareableUrl } = useNavigation();
 

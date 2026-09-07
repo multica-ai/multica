@@ -163,6 +163,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
 // For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .opencode/skills/)
+// For CodeArts: writes {workDir}/AGENTS.md  (skills discovered natively from .codeartsdoer/skills/)
 // For DevEco Code: writes {workDir}/AGENTS.md  (skills discovered natively from .deveco/skills/)
 // For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from {workDir}/skills/ via per-task openclaw-config.json that pins agents.defaults.workspace)
 // For Hermes:   writes {workDir}/AGENTS.md  (skills discovered natively from a per-task HERMES_HOME/skills seeded by the daemon; see hermes_home.go)
@@ -171,6 +172,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Cursor:   writes {workDir}/AGENTS.md  (skills discovered natively from .cursor/skills/)
 // For Kimi:        writes {workDir}/AGENTS.md  (Kimi Code CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
 // For Reasonix:    writes {workDir}/AGENTS.md  (Reasonix reads AGENTS.md and .reasonix/skills/ natively)
+// For DSH:         writes {workDir}/AGENTS.md  (DSH reads AGENTS.md and .dsh/skills/ natively)
 // For Kiro:        writes {workDir}/AGENTS.md  (Kiro CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
 // For Qoder/Qoder CN: writes {workDir}/AGENTS.md  (skills discovered from .qoder/skills/; user-level roots are unaffected)
 // For Antigravity: writes {workDir}/AGENTS.md  (agy CLI reads AGENTS.md natively; skills discovered natively from .agents/skills/ — see https://antigravity.google/docs/gcli-migration)
@@ -213,7 +215,7 @@ func runtimeConfigPath(workDir, provider string) string {
 		return filepath.Join(workDir, "CODEBUDDY.md")
 	case "qwen":
 		return filepath.Join(workDir, "QWEN.md")
-	case "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwenpaw":
+	case "codex", "copilot", "opencode", "codearts", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwenpaw", "mcode", "dim", "zeroclaw":
 		return filepath.Join(workDir, "AGENTS.md")
 	default:
 		return ""

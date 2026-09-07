@@ -165,7 +165,7 @@ func TestDaemonAuth_InvalidMDT_NilQueries(t *testing.T) {
 }
 
 // TestDaemonAuth_MCN_NoVerifierConfigured pins the fail-closed
-// behaviour when MULTICA_CLOUD_FLEET_URL is empty: an mcn_ token MUST
+// behaviour when MULTICA_CLOUD_URL is empty: an mcn_ token MUST
 // be rejected at the prefix branch with 401, not silently fall
 // through to the mul_/JWT paths (an mcn_ string would never match a
 // valid PAT or JWT, but failing closed makes the contract explicit).

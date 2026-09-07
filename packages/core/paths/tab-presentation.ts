@@ -16,7 +16,8 @@
  * loaded yet renders a stable type icon and a type label, never a wrong or
  * empty identity, and never borrows the Issues icon.
  */
-import type { IssueStatus } from "../types";
+import type { IssueStatus, IssueStatusCategory } from "../types";
+import { issueStatusCategory } from "../issues/status-category";
 import {
   WORKSPACE_PAGES,
   type NavLabelKey,
@@ -28,8 +29,10 @@ import type { TabActorType, TabSubject } from "./tab-subject";
 export type TabVisual =
   /** A static Lucide icon (page icon or resourceless type icon). */
   | { kind: "icon"; icon: RouteIconName }
-  /** An issue's live status glyph. `null` while the issue is loading. */
-  | { kind: "issue-status"; status: IssueStatus | null }
+  /** An issue's live status glyph. `null` while the issue is loading.
+   *  `category` is what selects the glyph — carried here so the tab strip
+   *  never has to resolve a custom status key on its own. (MUL-6243) */
+  | { kind: "issue-status"; status: IssueStatus | null; category?: IssueStatusCategory }
   /** A project's own icon. `null` falls back to the default project glyph. */
   | { kind: "project-icon"; icon: string | null }
   /** An actor's avatar, resolved by the view layer from `actorType`+`id`. */
@@ -154,7 +157,11 @@ export function resolveTabPresentation(
     }
     case "issue":
       return {
-        visual: { kind: "issue-status", status: data.issue?.status ?? null },
+        visual: {
+          kind: "issue-status",
+          status: data.issue?.status ?? null,
+          ...(data.issue ? { category: issueStatusCategory(data.issue) ?? undefined } : {}),
+        },
         title: data.issue
           ? { kind: "text", text: `${data.issue.identifier}: ${data.issue.title}` }
           : { kind: "tab", tabKey: "issue" },

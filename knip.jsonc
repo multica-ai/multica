@@ -1,0 +1,79 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+
+  // Guards the invariant in CLAUDE.md "Package Boundaries": every workspace
+  // declares the external packages it actually imports, and nothing else.
+  // `.npmrc` sets `shamefully-hoist=true`, so an undeclared import still
+  // resolves at runtime and an obsolete declaration still installs — neither
+  // failure is visible without a tool that reads the import graph.
+  //
+  // Scoped to `files`, `dependencies`, and `unlisted` on purpose. `exports` is
+  // the noisy one here: packages/ui and packages/views are consumed through
+  // per-file `exports` maps, so a named export used by exactly one app still
+  // reads as "unused" from inside its own workspace.
+  "include": ["files", "dependencies", "unlisted"],
+
+  // Go, and a workspace with its own Expo toolchain, lint pipeline, and React
+  // version (see apps/mobile/CLAUDE.md). Neither is covered by this config.
+  "ignoreWorkspaces": ["apps/mobile"],
+
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.mjs"],
+      "project": ["scripts/*.mjs"]
+    },
+
+    "apps/web": {
+      "entry": ["eslint.config.mjs"],
+      // Referenced only by the `@type {import('postcss-load-config').Config}`
+      // JSDoc annotation in postcss.config.mjs. Declaring it would add a
+      // runtime dependency to satisfy a type comment.
+      "ignoreDependencies": ["postcss-load-config"]
+    },
+
+    "apps/desktop": {
+      // window-state.node-test.mjs is run by hand (`node --test`, see its
+      // header) rather than by a package script, so nothing imports it.
+      "entry": ["eslint.config.mjs", "src/main/*.node-test.mjs"],
+      // Consumed by `extends` in tsconfig.node.json / tsconfig.web.json.
+      // knip follows `extends` from the default tsconfig.json only.
+      "ignoreDependencies": ["@multica/tsconfig"]
+    },
+
+    "apps/docs": {},
+
+    // The three shared packages export raw .ts/.tsx compiled by their
+    // consumers (CLAUDE.md "Project Shape"), so `entry` names only the config
+    // files knip would otherwise miss and the apps supply the real entry
+    // points — a file is live when an app reaches it.
+    //
+    // That holds for views and core, whose `exports` name specific files
+    // (44 of views' 45). It does NOT hold for the four wildcard exports in
+    // packages/ui: knip expands each into a glob over its whole directory and
+    // registers every match as an entry point, so nothing under
+    // components/ui, components/common, markdown, or hooks can ever be
+    // reported unused here. `entry: []`, negated `entry` patterns, and
+    // `--production` were all tried — manifest entries come from a separate
+    // code path that none of them subtract from.
+    //
+    // scripts/check-ui-wildcard-exports.mjs covers exactly those four
+    // directories and runs as its own blocking CI step. Narrow a wildcard
+    // export and knip picks that directory back up; the script reads the same
+    // manifest, so the two stay in step without overlapping.
+    "packages/ui": {
+      "entry": ["eslint.config.mjs"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/views": {
+      "entry": ["eslint.config.mjs"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/core": {
+      "entry": ["eslint.config.mjs"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+
+    "packages/eslint-config": {},
+    "packages/tsconfig": {}
+  }
+}

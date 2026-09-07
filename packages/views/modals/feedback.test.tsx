@@ -4,7 +4,12 @@ import { forwardRef, useImperativeHandle, useRef } from "react";
 
 let storedDraftMessage = "saved draft";
 let liveEditorMarkdown = "";
-const feedbackMocks = vi.hoisted(() => ({ mutateAsync: vi.fn() }));
+const feedbackMocks = vi.hoisted(() => ({
+  getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
+  mutateAsync: vi.fn(),
+  // The fragment the adapter reports for the page the modal is opened from.
+  hash: { current: "" },
+}));
 // Deferred controlling the mock editor's in-flight upload: `reset` arms a new
 // pending upload, `resolve` lands it so a test can watch the gate re-open.
 const pendingUpload = vi.hoisted(() => {
@@ -52,6 +57,17 @@ vi.mock("../i18n", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "ws1" }) }));
+// Only the adapter is stubbed: `currentPath()` stays real, because how it
+// composes pathname + search + fragment is exactly what these tests check.
+vi.mock("../navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../navigation")>()),
+  useOptionalNavigation: () => ({
+    pathname: "/test-workspace/projects/project-1",
+    searchParams: new URLSearchParams("view=board"),
+    hash: feedbackMocks.hash.current,
+    getShareableUrl: feedbackMocks.getShareableUrl,
+  }),
+}));
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: vi.fn() }),
 }));
@@ -131,6 +147,8 @@ describe("FeedbackModal", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     feedbackMocks.mutateAsync.mockReset().mockResolvedValue(undefined);
+    feedbackMocks.getShareableUrl.mockClear();
+    feedbackMocks.hash.current = "";
   });
 
   afterEach(() => {
@@ -166,6 +184,49 @@ describe("FeedbackModal", () => {
     await waitFor(() => {
       expect(feedbackMocks.mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({ message: "fresh feedback" }),
+      );
+    });
+  });
+
+  it("submits the platform shareable URL instead of the renderer URL", async () => {
+    storedDraftMessage = "";
+    render(<FeedbackModal onClose={vi.fn()} />);
+
+    const editor = screen.getByLabelText("feedback editor");
+    fireEvent.change(editor, { target: { value: "Desktop feedback" } });
+    fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
+
+    await waitFor(() => {
+      expect(feedbackMocks.getShareableUrl).toHaveBeenCalledWith(
+        "/test-workspace/projects/project-1?view=board",
+      );
+      expect(feedbackMocks.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://app.example/test-workspace/projects/project-1?view=board",
+        }),
+      );
+    });
+  });
+
+  // MUL-6784: rebuilding the URL from pathname + search alone downgraded a
+  // `#comment-…` deep link to the whole issue, so a report sent from one
+  // comment no longer said which one. Desktop cannot fall back to
+  // `window.location` for the fragment — its renderer is a MemoryRouter over a
+  // file:// page — so the adapter has to carry it.
+  it("keeps the comment fragment of the page the report was sent from", async () => {
+    storedDraftMessage = "";
+    feedbackMocks.hash.current = "#comment-c1";
+    render(<FeedbackModal onClose={vi.fn()} />);
+
+    const editor = screen.getByLabelText("feedback editor");
+    fireEvent.change(editor, { target: { value: "Broken on this comment" } });
+    fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
+
+    await waitFor(() => {
+      expect(feedbackMocks.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://app.example/test-workspace/projects/project-1?view=board#comment-c1",
+        }),
       );
     });
   });

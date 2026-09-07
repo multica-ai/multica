@@ -15,6 +15,7 @@
     "placeholder_archived": "This session is archived",
     "placeholder_archived_agent": "This agent has been archived",
     "placeholder_runtime_required": "Bind a runtime to continue",
+    "placeholder_access_revoked": "You no longer have permission to run this agent",
     "placeholder_named": "Message {{name}}…",
     "placeholder_default": "Start a message…",
     "send_tooltip": "Send",
@@ -38,6 +39,7 @@
     "clear": "Clear all",
     "steer": "Steer",
     "steer_unavailable": "Steer is available after the current reply starts",
+    "steer_no_permission": "You no longer have permission to run this agent",
     "steer_unavailable_toast": "Steer is unavailable. Refreshing the queue.",
     "edit": "Edit queued message",
     "remove": "Remove queued message",
@@ -59,12 +61,14 @@
       "runtime_recovery": "The agent restarted before it could finish. Please try again.",
       "manual": "This reply was cancelled.",
       "skill_bundle_unavailable": "The agent's skills couldn't be downloaded, so it never got started. This is usually a connection problem — please try again.",
+      "runtime_cli_timeout": "The local OpenClaw CLI didn't answer in time, so this run never started. It's a local startup timeout, not a network problem — retrying won't help until the CLI gets faster or the timeout is raised (MULTICA_OPENCLAW_CLI_TIMEOUT).",
+      "environment_prepare_failed": "The machine running the agent couldn't set this run up, so it never started. The error below says what failed there — often disk space, a permission, a folder still in use, or a local config that couldn't be read. It isn't the agent or the model provider.",
       "provider_network": "The connection to the model provider dropped before the reply finished. Check your network and try again.",
       "provider_auth_or_access": "The agent's model account isn't signed in any more. Sign in again, then retry.",
       "provider_quota_limit": "The agent's model account has run out of credit. Top it up or switch accounts, then retry.",
       "provider_capacity_or_rate_limit": "The model provider is busy or rate-limiting this account. Please try again in a moment.",
       "context_overflow": "This conversation got too long for the model. Start a new session, or break your request into smaller steps.",
-      "runtime_missing_executable": "The agent's CLI couldn't be found on this machine. Check that it's installed and on PATH, then retry.",
+      "runtime_missing_executable": "The agent's CLI couldn't be run on this machine. Check that it's installed correctly and on PATH, then retry.",
       "runtime_version_unsupported": "The agent's CLI is too old for this runtime. Upgrade it, then retry.",
       "fallback": "Something went wrong and the agent couldn't finish replying. Please try again."
     },
@@ -79,6 +83,7 @@
     "copy_failed_toast": "Copy failed",
     "loading_older": "Loading older messages…",
     "quick_actions_heading": "Follow-up questions",
+    "quick_actions_aria": "Suggested follow-ups",
     "quick_actions_regenerate": "Regenerate suggestions",
     "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again."
   },
@@ -101,8 +106,8 @@
     },
     "stop_dialog": {
       "title": "Stop this run?",
-      "description_with_title": "This will cancel the current agent task in \"{{title}}\". Partial output will stay in the chat.",
-      "description_default": "This will cancel the current agent task. Partial output will stay in the chat.",
+      "description_with_title": "This will cancel the current agent run in \"{{title}}\". Partial output will stay in the chat.",
+      "description_default": "This will cancel the current agent run. Partial output will stay in the chat.",
       "cancel": "Keep running",
       "confirm": "Stop run",
       "confirming": "Stopping..."
@@ -147,10 +152,21 @@
     "returning_subtitle": "Try asking",
     "chat_with_named": "Chat with {{name}}"
   },
-  "starter_prompts": {
-    "list_open": "List my open tasks by priority",
-    "summarize_today": "Summarize what I did today",
-    "plan_next": "Plan what to work on next"
+  "conversation_starters": {
+    "aria_label": "Conversation starters",
+    "capabilities": {
+      "label": "What can you help with?",
+      "prompt": "What are you best at helping with? Give me a concise overview."
+    },
+    "first_task": {
+      "label": "Suggest a first issue",
+      "prompt": "Suggest three useful issues I could assign to you."
+    },
+    "recommend": {
+      "label": "Recommend an action",
+      "prompt": "Review what you know about my workspace and recommend a useful first action."
+    },
+    "customize": "Customize starters"
   },
   "onboarding_cards": {
     "aria_label": "Ways to start",
@@ -174,6 +190,7 @@
   },
   "no_agent_banner": "You need an agent to start chatting.",
   "archived_agent_banner": "{{name}} has been archived — this conversation is read-only.",
+  "agent_access_revoked_banner": "You no longer have permission to run {{name}} — this conversation is read-only.",
   "runtime_required_banner": {
     "fallback_name": "The agent",
     "message": "{{name}} needs a runtime before it can reply.",
@@ -191,6 +208,7 @@
       "retrying": "Retrying",
       "queued": "Queued",
       "waiting_local_directory": "Waiting for local directory",
+      "waiting_local_directory_reason": "Waiting for {{reason}}",
       "starting_up": "Starting up",
       "thinking": "Thinking",
       "typing": "Typing"

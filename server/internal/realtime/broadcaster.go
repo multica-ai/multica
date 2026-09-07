@@ -11,6 +11,22 @@ const (
 	// ScopeDaemonRuntime routes daemon wakeup frames through the Redis relay.
 	// It is consumed by the daemon WebSocket hub, not by browser clients.
 	ScopeDaemonRuntime = "daemon_runtime"
+
+	// ScopeWecomOutbound routes a WeCom reply to the replica holding that
+	// installation's aibot WebSocket.
+	//
+	// WeCom is the one channel whose outbound has no REST path: a reply can
+	// only leave the process that holds the socket, and the WS lease makes
+	// that exactly one process. But chat:done is published on the in-process
+	// events.Bus by whichever replica served the daemon's completion callback,
+	// which is a load-balancer decision. Off-lease, the reply used to be
+	// dropped (GH #7215, #6890, and the single-replica exception in
+	// SELF_HOSTING.md).
+	//
+	// The scope id is the installation id, so this is the same shape as
+	// ScopeDaemonRuntime: the thing that must act lives on one specific
+	// replica, and the relay is how the others reach it.
+	ScopeWecomOutbound = "wecom_outbound"
 )
 
 // Broadcaster is the abstraction every realtime event producer should depend
@@ -44,6 +60,13 @@ type Broadcaster interface {
 // DaemonRuntimeDeliverer consumes daemon-runtime scoped relay frames.
 type DaemonRuntimeDeliverer interface {
 	DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
+}
+
+// WecomOutboundDeliverer consumes wecom-outbound scoped relay frames. Every
+// replica receives every frame; the implementation delivers only when it holds
+// that installation's socket and ignores the rest, so exactly one acts.
+type WecomOutboundDeliverer interface {
+	DeliverWecomOutbound(scopeID string, frame []byte, eventID string)
 }
 
 // Compile-time assertion that *Hub continues to satisfy Broadcaster.

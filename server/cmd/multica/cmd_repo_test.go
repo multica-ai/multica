@@ -200,6 +200,9 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode checkout body: %v", err)
 		}
+		if got := r.Header.Get("Authorization"); got != "Bearer mat_repo_checkout_test" {
+			t.Fatalf("Authorization = %q, want task-scoped bearer", got)
+		}
 		json.NewEncoder(w).Encode(map[string]string{
 			"path":        "/work/repo",
 			"branch_name": "agent/test/task",
@@ -211,6 +214,7 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
 	t.Setenv("MULTICA_AGENT_NAME", "Test Agent")
 	t.Setenv("MULTICA_TASK_ID", "task-1")
+	t.Setenv("MULTICA_TOKEN", "mat_repo_checkout_test")
 	t.Setenv("MULTICA_REPO_CHECKOUT_MODE", "isolated")
 
 	previousRef := repoCheckoutRef
@@ -228,6 +232,16 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 	}
 	if got := body["retry_busy"]; got != true {
 		t.Fatalf("retry_busy = %v, want true", got)
+	}
+}
+
+func TestRunRepoCheckoutRequiresTaskCredential(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_PORT", "12345")
+	t.Setenv("MULTICA_TOKEN", "")
+
+	err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"})
+	if err == nil || !strings.Contains(err.Error(), "MULTICA_TOKEN not set") {
+		t.Fatalf("runRepoCheckout error = %v, want missing task credential", err)
 	}
 }
 
@@ -252,6 +266,7 @@ func TestRunRepoCheckoutRetriesServiceUnavailable(t *testing.T) {
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
 	t.Setenv("MULTICA_AGENT_NAME", "Test Agent")
 	t.Setenv("MULTICA_TASK_ID", "task-1")
+	t.Setenv("MULTICA_TOKEN", "mat_repo_checkout_test")
 
 	if err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"}); err != nil {
 		t.Fatalf("runRepoCheckout: %v", err)
@@ -270,6 +285,7 @@ func TestRunRepoCheckoutDoesNotRetryUnmarkedServiceUnavailable(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("MULTICA_DAEMON_PORT", strings.TrimPrefix(srv.URL, "http://127.0.0.1:"))
+	t.Setenv("MULTICA_TOKEN", "mat_repo_checkout_test")
 	if err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"}); err == nil {
 		t.Fatal("runRepoCheckout unexpectedly succeeded")
 	}
