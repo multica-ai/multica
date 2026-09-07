@@ -437,7 +437,7 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/autopilots", body, &result); err != nil {
-		return fmt.Errorf("create autopilot: %w", err)
+		return autopilotWriteRequestError("create autopilot", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -528,7 +528,7 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if err := client.PatchJSON(ctx, "/api/autopilots/"+autopilotRef.ID, body, &result); err != nil {
-		return fmt.Errorf("update autopilot: %w", err)
+		return autopilotWriteRequestError("update autopilot", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -554,7 +554,7 @@ func runAutopilotDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := client.DeleteJSON(ctx, "/api/autopilots/"+autopilotRef.ID); err != nil {
-		return fmt.Errorf("delete autopilot: %w", err)
+		return autopilotWriteRequestError("delete autopilot", err)
 	}
 	fmt.Printf("Autopilot %s deleted.\n", autopilotRef.Display)
 	return nil
@@ -625,6 +625,22 @@ func autopilotTriggerRequestError(err error) error {
 		return cli.WithUserMessage("the person this run acts for cannot trigger this autopilot: triggering requires its creator, a workspace admin, or a granted collaborator", err)
 	}
 	return fmt.Errorf("trigger autopilot: %w", err)
+}
+
+// autopilotWriteRequestError turns a refused autopilot write into what the user
+// should read, for the same reason autopilotTriggerRequestError exists: an
+// autopilot write is authorized as the human who asked for it, so when YOU are
+// the one running this, "no access" is about them and not about you — and
+// FormatError's generic 403 copy cannot say which (MUL-7108). The branch is on
+// the server's stable code, never on the English sentence.
+func autopilotWriteRequestError(action string, err error) error {
+	switch cli.ServerErrorCode(err) {
+	case "autopilot_no_originator":
+		return cli.WithUserMessage("this run has no originating human, so it cannot change an autopilot on anyone's behalf: an autopilot write is authorized as the person who asked for it", err)
+	case "autopilot_forbidden":
+		return cli.WithUserMessage("the person this run acts for cannot manage this autopilot: it requires its creator, a workspace admin, or a granted collaborator", err)
+	}
+	return fmt.Errorf("%s: %w", action, err)
 }
 
 // autopilotRunStarted reports whether a manual trigger actually dispatched work.
@@ -802,7 +818,7 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/autopilots/"+autopilotRef.ID+"/triggers", body, &result); err != nil {
-		return fmt.Errorf("create trigger: %w", err)
+		return autopilotWriteRequestError("create trigger", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -867,7 +883,7 @@ func runAutopilotTriggerRotateURL(cmd *cobra.Command, args []string) error {
 	var result map[string]any
 	path := "/api/autopilots/" + autopilotRef.ID + "/triggers/" + triggerRef.ID + "/rotate-webhook-token"
 	if err := client.PostJSON(ctx, path, nil, &result); err != nil {
-		return fmt.Errorf("rotate webhook url: %w", err)
+		return autopilotWriteRequestError("rotate webhook url", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -921,7 +937,7 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 	var result map[string]any
 	path := "/api/autopilots/" + autopilotRef.ID + "/triggers/" + triggerRef.ID
 	if err := client.PatchJSON(ctx, path, body, &result); err != nil {
-		return fmt.Errorf("update trigger: %w", err)
+		return autopilotWriteRequestError("update trigger", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -952,7 +968,7 @@ func runAutopilotTriggerDelete(cmd *cobra.Command, args []string) error {
 
 	path := "/api/autopilots/" + autopilotRef.ID + "/triggers/" + triggerRef.ID
 	if err := client.DeleteJSON(ctx, path); err != nil {
-		return fmt.Errorf("delete trigger: %w", err)
+		return autopilotWriteRequestError("delete trigger", err)
 	}
 	fmt.Printf("Trigger %s deleted.\n", triggerRef.ID)
 	return nil

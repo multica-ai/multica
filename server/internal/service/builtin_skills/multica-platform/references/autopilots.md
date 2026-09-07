@@ -81,13 +81,21 @@ keeps write/execute but cannot re-grant or revoke peers. `get` stamps two
 per-caller booleans — `can_write` and the narrower `can_manage_access` — read
 those rather than inferring from role.
 
-When YOU run `trigger`, the run is authorized as the human who asked you to —
-your run's originator — not as the owner of the machine you execute on, whose
-grants are not consulted. So the person who gave you the instruction needs that
-write access, and you cannot trigger an autopilot they could not trigger
-themselves. A run that carries no originator at all cannot trigger anything: the
-server answers `403` naming the missing originator rather than skipping quietly,
-and the CLI prints that reason instead of a generic permission error.
+When YOU do any of this — `trigger`, `create`, `update`, `delete`, the
+`trigger-*` commands, or a webhook-secret or collaborator change over the API —
+the request is authorized as the human who asked you to (your run's originator),
+not as the owner of the machine you execute on, whose grants are not consulted.
+So the person who gave you the instruction needs that write access, and you
+cannot change or trigger an autopilot they could not themselves. The same human
+is stamped into what you write: an autopilot you create is theirs, and a trigger
+you add fires as them for as long as it exists.
+
+A run that carries no originator cannot write here at all: the server
+answers `403` naming the missing originator rather than failing quietly, and the
+CLI prints that reason instead of a generic permission error. Reads are
+unaffected — except that `get` redacts the webhook token unless the human you
+act for may write, since holding that token is equivalent to being able to
+trigger.
 
 ## Side effects
 
