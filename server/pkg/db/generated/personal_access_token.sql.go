@@ -111,6 +111,30 @@ func (q *Queries) GetPersonalAccessTokenByHash(ctx context.Context, tokenHash st
 	return i, err
 }
 
+const getPersonalAccessTokenWorkspaceMemberForCreate = `-- name: GetPersonalAccessTokenWorkspaceMemberForCreate :one
+SELECT id, workspace_id, user_id, role, created_at FROM member
+WHERE user_id = $1 AND workspace_id = $2
+FOR KEY SHARE
+`
+
+type GetPersonalAccessTokenWorkspaceMemberForCreateParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetPersonalAccessTokenWorkspaceMemberForCreate(ctx context.Context, arg GetPersonalAccessTokenWorkspaceMemberForCreateParams) (Member, error) {
+	row := q.db.QueryRow(ctx, getPersonalAccessTokenWorkspaceMemberForCreate, arg.UserID, arg.WorkspaceID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listPersonalAccessTokensByUser = `-- name: ListPersonalAccessTokensByUser :many
 SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, workspace_id FROM personal_access_token
 WHERE user_id = $1
@@ -147,6 +171,21 @@ func (q *Queries) ListPersonalAccessTokensByUser(ctx context.Context, userID pgt
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockWorkspaceForPersonalAccessTokenCreate = `-- name: LockWorkspaceForPersonalAccessTokenCreate :one
+SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE
+`
+
+// Application-layer replacement for a personal_access_token.workspace_id FK.
+// The workspace deletion transaction takes FOR UPDATE on this row before its
+// cleanup graph runs, so this lock makes validation plus insert atomic against
+// teardown without introducing a database relationship or cascade.
+func (q *Queries) LockWorkspaceForPersonalAccessTokenCreate(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockWorkspaceForPersonalAccessTokenCreate, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const revokePersonalAccessToken = `-- name: RevokePersonalAccessToken :one

@@ -17,6 +17,26 @@ import (
 
 func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 
+// applyPATWorkspaceScope pins a workspace-scoped PAT to its tenant before the
+// workspace middleware resolves request context. It returns false when an
+// explicit selector attempts to cross the token boundary.
+func applyPATWorkspaceScope(r *http.Request, workspaceID pgtype.UUID) bool {
+	if !workspaceID.Valid {
+		return true
+	}
+
+	requested := r.Header.Get("X-Workspace-ID")
+	if requested == "" {
+		requested = r.URL.Query().Get("workspace_id")
+	}
+	boundWorkspaceID := uuidToString(workspaceID)
+	if requested != "" && requested != boundWorkspaceID {
+		return false
+	}
+	r.Header.Set("X-Workspace-ID", boundWorkspaceID)
+	return true
+}
+
 func rejectTemporarilyDisabledUser(w http.ResponseWriter, r *http.Request, userID, email, authPath string) bool {
 	if !auth.IsTemporarilyDisabledUser(userID, email) {
 		return false
@@ -203,19 +223,9 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				}
 
 				userID := uuidToString(pat.UserID)
-				// Workspace-scoped PATs are never valid outside their bound tenant.
-				// The workspace middleware runs later, so enforce the binding here
-				// against the request's explicit workspace selector as well.
-				if pat.WorkspaceID.Valid {
-					requested := r.Header.Get("X-Workspace-ID")
-					if requested == "" {
-						requested = r.URL.Query().Get("workspace_id")
-					}
-					if requested != "" && requested != uuidToString(pat.WorkspaceID) {
-						http.Error(w, `{"error":"token is not valid for this workspace"}`, http.StatusForbidden)
-						return
-					}
-					r.Header.Set("X-Workspace-ID", uuidToString(pat.WorkspaceID))
+				if !applyPATWorkspaceScope(r, pat.WorkspaceID) {
+					http.Error(w, `{"error":"token is not valid for this workspace"}`, http.StatusForbidden)
+					return
 				}
 				if rejectTemporarilyDisabledUser(w, r, userID, "", "pat") {
 					return

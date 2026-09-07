@@ -215,14 +215,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				}
 
 				userID := uuidToString(pat.UserID)
-				if pat.WorkspaceID.Valid {
-					requested := r.Header.Get("X-Workspace-ID")
-					if requested == "" { requested = r.URL.Query().Get("workspace_id") }
-					if requested != "" && requested != uuidToString(pat.WorkspaceID) {
-						writeError(w, http.StatusForbidden, "token is not valid for this workspace")
-						return
-					}
-					r.Header.Set("X-Workspace-ID", uuidToString(pat.WorkspaceID))
+				if !applyPATWorkspaceScope(r, pat.WorkspaceID) {
+					writeError(w, http.StatusForbidden, "token is not valid for this workspace")
+					return
 				}
 				if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
 					return

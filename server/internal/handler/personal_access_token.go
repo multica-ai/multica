@@ -28,12 +28,12 @@ const PATRenewThreshold = 7 * 24 * time.Hour
 const PATRenewExtension = 90 * 24 * time.Hour
 
 type PersonalAccessTokenResponse struct {
-	ID         string  `json:"id"`
-	Name       string  `json:"name"`
-	Prefix     string  `json:"token_prefix"`
-	ExpiresAt  *string `json:"expires_at"`
-	LastUsedAt *string `json:"last_used_at"`
-	CreatedAt  string  `json:"created_at"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Prefix      string  `json:"token_prefix"`
+	ExpiresAt   *string `json:"expires_at"`
+	LastUsedAt  *string `json:"last_used_at"`
+	CreatedAt   string  `json:"created_at"`
 	WorkspaceID *string `json:"workspace_id,omitempty"`
 }
 
@@ -43,20 +43,26 @@ type CreatePATResponse struct {
 }
 
 func patToResponse(pat db.PersonalAccessToken) PersonalAccessTokenResponse {
+	var workspaceID *string
+	if pat.WorkspaceID.Valid {
+		value := uuidToString(pat.WorkspaceID)
+		workspaceID = &value
+	}
+
 	return PersonalAccessTokenResponse{
-		ID:         uuidToString(pat.ID),
-		Name:       pat.Name,
-		Prefix:     pat.TokenPrefix,
-		ExpiresAt:  timestampToPtr(pat.ExpiresAt),
-		LastUsedAt: timestampToPtr(pat.LastUsedAt),
-		CreatedAt:  timestampToString(pat.CreatedAt),
-		WorkspaceID: func() *string { if !pat.WorkspaceID.Valid { return nil }; v := uuidToString(pat.WorkspaceID); return &v }(),
+		ID:          uuidToString(pat.ID),
+		Name:        pat.Name,
+		Prefix:      pat.TokenPrefix,
+		ExpiresAt:   timestampToPtr(pat.ExpiresAt),
+		LastUsedAt:  timestampToPtr(pat.LastUsedAt),
+		CreatedAt:   timestampToString(pat.CreatedAt),
+		WorkspaceID: workspaceID,
 	}
 }
 
 type CreatePATRequest struct {
-	Name          string `json:"name"`
-	ExpiresInDays *int   `json:"expires_in_days"`
+	Name          string  `json:"name"`
+	ExpiresInDays *int    `json:"expires_in_days"`
 	WorkspaceID   *string `json:"workspace_id,omitempty"`
 }
 
@@ -74,6 +80,15 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
+	}
+
+	var workspaceID pgtype.UUID
+	if req.WorkspaceID != nil && *req.WorkspaceID != "" {
+		var valid bool
+		workspaceID, valid = parseUUIDOrBadRequest(w, *req.WorkspaceID, "workspace id")
+		if !valid {
+			return
+		}
 	}
 
 	rawToken, err := auth.GeneratePATToken()
@@ -95,9 +110,44 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 		prefix = prefix[:12]
 	}
 
-	pat, err := h.Queries.CreatePersonalAccessToken(r.Context(), db.CreatePersonalAccessTokenParams{
+	queries := h.Queries
+	var tx pgx.Tx
+	if workspaceID.Valid {
+		tx, err = h.TxStarter.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create token")
+			return
+		}
+		defer tx.Rollback(r.Context())
+
+		queries = h.Queries.WithTx(tx)
+		// Fence workspace teardown before checking membership. DeleteWorkspace
+		// holds FOR UPDATE on the same row, so a scoped token cannot be inserted
+		// after its workspace has been deleted.
+		if _, err := queries.LockWorkspaceForPersonalAccessTokenCreate(r.Context(), workspaceID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "workspace not found")
+			} else {
+				writeError(w, http.StatusInternalServerError, "failed to validate workspace")
+			}
+			return
+		}
+		if _, err := queries.GetPersonalAccessTokenWorkspaceMemberForCreate(r.Context(), db.GetPersonalAccessTokenWorkspaceMemberForCreateParams{
+			UserID:      parseUUID(userID),
+			WorkspaceID: workspaceID,
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "workspace not found")
+			} else {
+				writeError(w, http.StatusInternalServerError, "failed to validate workspace")
+			}
+			return
+		}
+	}
+
+	pat, err := queries.CreatePersonalAccessToken(r.Context(), db.CreatePersonalAccessTokenParams{
 		UserID:      parseUUID(userID),
-		WorkspaceID: func() pgtype.UUID { if req.WorkspaceID == nil || *req.WorkspaceID == "" { return pgtype.UUID{} }; return parseUUID(*req.WorkspaceID) }(),
+		WorkspaceID: workspaceID,
 		Name:        req.Name,
 		TokenHash:   auth.HashToken(rawToken),
 		TokenPrefix: prefix,
@@ -106,6 +156,12 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create token")
 		return
+	}
+	if tx != nil {
+		if err := tx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create token")
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, CreatePATResponse{
