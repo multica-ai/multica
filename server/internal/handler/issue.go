@@ -2959,13 +2959,13 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		// so resolveOriginatorForIssueTask can inherit its originator — the
 		// same trick CreateComment uses with comment.source_task_id (MUL-4015).
 		//
-		// The task id is taken from the SERVER-trusted X-Task-ID: resolveActor
-		// only returns creatorType=="agent" when either X-Actor-Source=task_token
-		// (the auth middleware bound X-Agent-ID/X-Task-ID from the mat_ token and
-		// stripped any client value) or the X-Agent-ID/X-Task-ID pair was
-		// validated against the DB. A member-forged X-Task-ID never reaches here
-		// because it would have resolved to creatorType=="member". We still
-		// re-check the task belongs to the acting agent before trusting it.
+		// The task id is taken from the SERVER-trusted X-Task-ID: the auth
+		// middleware deletes whatever the client sent and re-stamps
+		// X-Agent-ID / X-Task-ID only from a validated mat_ token (MUL-3428), so
+		// a member-forged pair never reaches here — it is gone before
+		// resolveActor runs, and the request resolves to creatorType=="member".
+		// We still re-check the task belongs to the acting agent before trusting
+		// it.
 		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
 			if taskUUID, perr := util.ParseUUID(taskIDHeader); perr == nil {
 				if task, terr := h.Queries.GetAgentTask(r.Context(), taskUUID); terr == nil && uuidToString(task.AgentID) == actualCreatorID {

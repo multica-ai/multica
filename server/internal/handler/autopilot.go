@@ -676,7 +676,7 @@ var (
 	// an acting human who is not in this workspace. That is a different fact
 	// from "lacks access to this autopilot" and gets its own code, so the CLI
 	// does not tell someone to ask for a collaborator grant they could not
-	// hold (Elon review).
+	// hold (MUL-7108).
 	autopilotCreateRefusal = autopilotRefusal{
 		noOriginatorCode: autopilotNoOriginatorCode,
 		noOriginatorMsg:  "no human authorized this autopilot: the calling run records no originator",

@@ -398,7 +398,7 @@ func TestCreateAutopilot_NoOrderingHumanRefused(t *testing.T) {
 // refusal. It is a different fact from the other endpoints' "you hold no grant
 // on this autopilot" — there is no autopilot yet — so it carries its own code:
 // telling someone to ask for a collaborator grant would send them after
-// something that could not help (Elon review).
+// something that could not help (MUL-7108).
 func TestCreateAutopilot_OrderingHumanMustBeAWorkspaceMember(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

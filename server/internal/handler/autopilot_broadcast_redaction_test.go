@@ -17,9 +17,10 @@ import (
 // member exactly what the read path had just refused them, through a push no
 // write gate ever sees.
 //
-// Found by Niko reviewing #8107; the leak predates it. The fix follows the rule
-// broadcastAgentResponse already established for agents: the HTTP caller keeps
-// the live value, the broadcast copy carries none.
+// The leak predates MUL-7108 but is the same authorization bypass, so it is
+// closed with it. The fix follows the rule broadcastAgentResponse already
+// established for agents: the HTTP caller keeps the live value, the broadcast
+// copy carries none.
 func TestAutopilotTriggerBroadcastsCarryNoWebhookCredential(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

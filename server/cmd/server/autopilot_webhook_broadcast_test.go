@@ -19,8 +19,8 @@ import (
 // webhook token by GetAutopilot must not receive it from the fanout either.
 //
 // Holding that token fires the autopilot through the public ingress route, so a
-// leak here is a permission bypass that no write gate can see. Found by Niko
-// reviewing #8107 (this repro is theirs); the leak predates that PR.
+// leak here is a permission bypass that no write gate can see. The leak predates
+// MUL-7108 and is closed with it, since it is the same bypass.
 func TestAutopilotWebhookTokenIsNotBroadcastToTheWorkspace(t *testing.T) {
 	fx := testutil.New(testPool, testWorkspaceID, testUserID)
 
