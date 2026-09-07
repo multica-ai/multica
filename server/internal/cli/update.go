@@ -10,9 +10,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +33,10 @@ import (
 const ChecksumManifestName = "checksums.txt"
 
 const DefaultUpdateDownloadTimeout = 120 * time.Second
+
+const githubAPIVersion = "2022-11-28"
+const githubJSONAccept = "application/vnd.github+json"
+const githubBinaryAccept = "application/octet-stream"
 
 // GitHubRelease is the subset of the GitHub releases API response we need.
 type GitHubRelease struct {
@@ -124,6 +130,7 @@ func parseReleaseVersion(v string) ([3]int, bool) {
 
 type GitHubReleaseAsset struct {
 	Name               string `json:"name"`
+	APIURL             string `json:"url"`
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
@@ -224,13 +231,82 @@ func verifyAssetSHA256(data []byte, expectedHex, assetName string) error {
 	return nil
 }
 
-func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/tags/"+tag, nil)
+func githubAPIToken() string {
+	if token := strings.TrimSpace(os.Getenv("GH_TOKEN")); token != "" {
+		return token
+	}
+	return strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+}
+
+func isTrustedGitHubAuthURL(target *url.URL) bool {
+	if target == nil || target.Scheme != "https" || target.User != nil {
+		return false
+	}
+	if port := target.Port(); port != "" && port != "443" {
+		return false
+	}
+	return target.Hostname() == "api.github.com" || target.Hostname() == "github.com"
+}
+
+func releaseAssetAPIURL(asset *GitHubReleaseAsset) (string, error) {
+	if asset == nil || strings.TrimSpace(asset.APIURL) == "" {
+		return "", errors.New("release asset is missing its API URL")
+	}
+	target, err := url.Parse(asset.APIURL)
+	if err != nil || !isTrustedGitHubAuthURL(target) || target.Hostname() != "api.github.com" {
+		return "", fmt.Errorf("release asset %q has an untrusted API URL", asset.Name)
+	}
+	return target.String(), nil
+}
+
+func newGitHubGETRequest(rawURL, accept string) (*http.Request, error) {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	if req.URL.Hostname() == "api.github.com" {
+		req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
+	}
+
+	// Never attach credentials to redirects, mirrors, or lookalike hosts.
+	if isTrustedGitHubAuthURL(req.URL) {
+		if token := githubAPIToken(); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
+	return req, nil
+}
+
+func githubHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			req.Header.Del("Authorization")
+			if isTrustedGitHubAuthURL(req.URL) {
+				if token := githubAPIToken(); token != "" {
+					req.Header.Set("Authorization", "Bearer "+token)
+				}
+			}
+			if req.URL.Hostname() != "api.github.com" {
+				req.Header.Del("X-GitHub-Api-Version")
+			}
+			return nil
+		},
+	}
+}
+
+func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
+	client := githubHTTPClient(10 * time.Second)
+	req, err := newGitHubGETRequest("https://api.github.com/repos/multica-ai/multica/releases/tags/"+tag, githubJSONAccept)
+	if err != nil {
+		return nil, err
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -251,12 +327,11 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 
 // FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
 func FetchLatestRelease() (*GitHubRelease, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/latest", nil)
+	client := githubHTTPClient(10 * time.Second)
+	req, err := newGitHubGETRequest("https://api.github.com/repos/multica-ai/multica/releases/latest", githubJSONAccept)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -349,8 +424,12 @@ func updateDownloadTimeoutOrDefault(timeout time.Duration) time.Duration {
 // archive (single-digit MB). The checksum verification path requires buffered
 // bytes so streaming would just push the buffer into the caller anyway.
 func fetchURLBytes(url string, timeout time.Duration) ([]byte, error) {
-	client := &http.Client{Timeout: updateDownloadTimeoutOrDefault(timeout)}
-	resp, err := client.Get(url)
+	client := githubHTTPClient(updateDownloadTimeoutOrDefault(timeout))
+	req, err := newGitHubGETRequest(url, githubBinaryAccept)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -392,14 +471,21 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	if err != nil {
 		return "", err
 	}
-	downloadURL := asset.BrowserDownloadURL
+	downloadURL, err := releaseAssetAPIURL(asset)
+	if err != nil {
+		return "", err
+	}
+	manifestURL, err := releaseAssetAPIURL(manifestAsset)
+	if err != nil {
+		return "", err
+	}
 	assetName := asset.Name
 
 	// Pull the checksum manifest first so a release that is half-published
 	// (archives uploaded but checksums.txt not yet) fails before we eat the
 	// archive's bandwidth.
 	timeout := updateDownloadTimeoutOrDefault(downloadTimeout)
-	manifestData, err := fetchURLBytes(manifestAsset.BrowserDownloadURL, timeout)
+	manifestData, err := fetchURLBytes(manifestURL, timeout)
 	if err != nil {
 		return "", fmt.Errorf("download checksum manifest: %w", err)
 	}

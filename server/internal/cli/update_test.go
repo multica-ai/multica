@@ -3,10 +3,193 @@ package cli
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestNewGitHubGETRequestAuthentication(t *testing.T) {
+	t.Run("omits authorization without a token", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "")
+		t.Setenv("GITHUB_TOKEN", "")
+
+		req, err := newGitHubGETRequest("https://api.github.com/repos/multica-ai/multica/releases/latest", githubJSONAccept)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := req.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization = %q, want empty", got)
+		}
+	})
+
+	t.Run("prefers GH_TOKEN and trims whitespace", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "  gh-token  ")
+		t.Setenv("GITHUB_TOKEN", "github-token")
+
+		req, err := newGitHubGETRequest("https://api.github.com/repos/multica-ai/multica/releases/latest", githubJSONAccept)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := req.Header.Get("Authorization"); got != "Bearer gh-token" {
+			t.Fatalf("Authorization = %q, want GH_TOKEN bearer", got)
+		}
+		if strings.Contains(req.URL.String(), "gh-token") {
+			t.Fatal("token leaked into request URL")
+		}
+	})
+
+	t.Run("falls back to GITHUB_TOKEN", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "")
+		t.Setenv("GITHUB_TOKEN", "github-token")
+
+		req, err := newGitHubGETRequest("https://api.github.com/repos/multica-ai/multica/releases/latest", githubJSONAccept)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := req.Header.Get("Authorization"); got != "Bearer github-token" {
+			t.Fatalf("Authorization = %q, want GITHUB_TOKEN bearer", got)
+		}
+	})
+
+	t.Run("never authenticates outside the exact GitHub API origin", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "secret-token")
+		t.Setenv("GITHUB_TOKEN", "")
+
+		for _, rawURL := range []string{
+			"http://api.github.com/repos/multica-ai/multica/releases/latest",
+			"https://api.github.com.evil.example/releases/latest",
+			"https://user@api.github.com/repos/multica-ai/multica/releases/latest",
+			"https://api.github.com:444/repos/multica-ai/multica/releases/latest",
+		} {
+			req, err := newGitHubGETRequest(rawURL, githubJSONAccept)
+			if err != nil {
+				t.Fatalf("newGitHubGETRequest(%q): %v", rawURL, err)
+			}
+			if got := req.Header.Get("Authorization"); got != "" {
+				t.Fatalf("Authorization for %q = %q, want empty", rawURL, got)
+			}
+		}
+	})
+
+	t.Run("authenticates exact GitHub hosts on default HTTPS port", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "secret-token")
+		t.Setenv("GITHUB_TOKEN", "")
+
+		for _, rawURL := range []string{
+			"https://api.github.com/repos/multica-ai/multica/releases/latest",
+			"https://api.github.com:443/repos/multica-ai/multica/releases/latest",
+			"https://github.com/multica-ai/multica/releases/download/v1.2.3/archive.tar.gz",
+		} {
+			req, err := newGitHubGETRequest(rawURL, githubBinaryAccept)
+			if err != nil {
+				t.Fatalf("newGitHubGETRequest(%q): %v", rawURL, err)
+			}
+			if got := req.Header.Get("Authorization"); got != "Bearer secret-token" {
+				t.Fatalf("Authorization for %q = %q", rawURL, got)
+			}
+		}
+	})
+
+	t.Run("sets stable GitHub API headers", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "")
+		t.Setenv("GITHUB_TOKEN", "")
+
+		req, err := newGitHubGETRequest("https://api.github.com/repos/multica-ai/multica/releases/latest", githubJSONAccept)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := req.Header.Get("Accept"); got != "application/vnd.github+json" {
+			t.Fatalf("Accept = %q", got)
+		}
+		if got := req.Header.Get("X-GitHub-Api-Version"); got != githubAPIVersion {
+			t.Fatalf("X-GitHub-Api-Version = %q", got)
+		}
+	})
+}
+
+func TestReleaseAssetAPIURL(t *testing.T) {
+	t.Run("accepts exact GitHub API asset URL", func(t *testing.T) {
+		asset := &GitHubReleaseAsset{
+			Name:   "archive.tar.gz",
+			APIURL: "https://api.github.com/repos/multica-ai/multica/releases/assets/123",
+		}
+		got, err := releaseAssetAPIURL(asset)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != asset.APIURL {
+			t.Fatalf("URL = %q, want %q", got, asset.APIURL)
+		}
+	})
+
+	t.Run("rejects missing or untrusted asset URL", func(t *testing.T) {
+		for _, asset := range []*GitHubReleaseAsset{
+			nil,
+			{Name: "missing.tar.gz"},
+			{Name: "browser.tar.gz", APIURL: "https://github.com/multica-ai/multica/releases/download/v1.2.3/browser.tar.gz"},
+			{Name: "http.tar.gz", APIURL: "http://api.github.com/repos/multica-ai/multica/releases/assets/123"},
+			{Name: "evil.tar.gz", APIURL: "https://api.github.com.evil.example/releases/assets/123"},
+		} {
+			if _, err := releaseAssetAPIURL(asset); err == nil {
+				t.Fatalf("expected error for asset %+v", asset)
+			}
+		}
+	})
+}
+
+func TestGitHubHTTPClientRedirectAuthentication(t *testing.T) {
+	t.Setenv("GH_TOKEN", "secret-token")
+	t.Setenv("GITHUB_TOKEN", "")
+	client := githubHTTPClient(time.Second)
+
+	initial, err := newGitHubGETRequest("https://github.com/multica-ai/multica/releases/download/v1.2.3/archive.tar.gz", githubBinaryAccept)
+	if err != nil {
+		t.Fatalf("unexpected initial request error: %v", err)
+	}
+
+	t.Run("retains auth only for trusted redirect", func(t *testing.T) {
+		redirect, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/latest", nil)
+		if err != nil {
+			t.Fatalf("unexpected redirect request error: %v", err)
+		}
+		redirect.Header.Set("Authorization", initial.Header.Get("Authorization"))
+		if err := client.CheckRedirect(redirect, []*http.Request{initial}); err != nil {
+			t.Fatalf("unexpected redirect error: %v", err)
+		}
+		if got := redirect.Header.Get("Authorization"); got != "Bearer secret-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+	})
+
+	t.Run("strips auth from CDN redirect", func(t *testing.T) {
+		redirect, err := http.NewRequest(http.MethodGet, "https://objects.githubusercontent.com/private-release", nil)
+		if err != nil {
+			t.Fatalf("unexpected redirect request error: %v", err)
+		}
+		redirect.Header.Set("Authorization", initial.Header.Get("Authorization"))
+		if err := client.CheckRedirect(redirect, []*http.Request{initial}); err != nil {
+			t.Fatalf("unexpected redirect error: %v", err)
+		}
+		if got := redirect.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization = %q, want empty", got)
+		}
+	})
+
+	t.Run("stops after ten redirects", func(t *testing.T) {
+		redirect, err := http.NewRequest(http.MethodGet, "https://github.com/final", nil)
+		if err != nil {
+			t.Fatalf("unexpected redirect request error: %v", err)
+		}
+		via := make([]*http.Request, 10)
+		for i := range via {
+			via[i] = initial
+		}
+		if err := client.CheckRedirect(redirect, via); err == nil {
+			t.Fatal("expected redirect limit error")
+		}
+	})
+}
 
 func TestReleaseAssetCandidates(t *testing.T) {
 	tests := []struct {
