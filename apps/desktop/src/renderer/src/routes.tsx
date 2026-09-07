@@ -34,6 +34,7 @@ import { useT } from "@multica/views/i18n";
 import { Download, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
+import { desktopTitle, type DesktopTitleKey } from "./desktop-title";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { DesktopRouteErrorPage } from "./components/route-error-page";
 
@@ -49,7 +50,7 @@ function DesktopSettingsRoute() {
       extraAccountTabs={[
         {
           value: "daemon",
-          label: "Daemon",
+          label: t(($) => $.desktop.tabs.daemon),
           icon: Server,
           content: <DaemonSettingsTab />,
         },
@@ -65,21 +66,22 @@ function DesktopSettingsRoute() {
 }
 
 /**
- * Sets document.title from the deepest matched route's handle.title.
+ * Sets document.title from the deepest matched route's translated title key.
  * The tab system observes document.title via MutationObserver.
  * Pages with dynamic titles (e.g. issue detail) override by setting
  * document.title directly via useDocumentTitle().
  */
 function TitleSync() {
+  const { t } = useT("layout");
   const matches = useMatches();
-  const title = [...matches]
+  const titleKey = [...matches]
     .reverse()
-    .find((m) => (m.handle as { title?: string })?.title)
-    ?.handle as { title?: string } | undefined;
+    .find((m) => (m.handle as { titleKey?: DesktopTitleKey })?.titleKey)
+    ?.handle as { titleKey?: DesktopTitleKey } | undefined;
 
   useEffect(() => {
-    if (title?.title) document.title = title.title;
-  }, [title?.title]);
+    if (titleKey?.titleKey) document.title = desktopTitle(titleKey.titleKey, t);
+  }, [t, titleKey?.titleKey]);
 
   return null;
 }
@@ -130,112 +132,132 @@ export const appRoutes: RouteObject[] = [
           {
             path: "issues",
             element: <IssuesPage />,
-            handle: { title: "Issues" },
+            handle: { titleKey: "issues" },
           },
           {
             path: "issues/:id",
             element: <IssueDetailPage />,
-            handle: { title: "Issue" },
+            handle: { titleKey: "issue" },
           },
           {
             path: "projects",
             element: <ProjectsPage />,
-            handle: { title: "Projects" },
+            handle: { titleKey: "projects" },
           },
           {
             path: "projects/:id",
             element: <ProjectDetailPage />,
-            handle: { title: "Project" },
+            handle: { titleKey: "project" },
           },
           {
             path: "autopilots",
             element: <AutopilotsPage />,
-            handle: { title: "Autopilot" },
+            handle: { titleKey: "autopilot" },
           },
           {
             path: "autopilots/:id",
             element: <AutopilotDetailPage />,
-            handle: { title: "Autopilot" },
+            handle: { titleKey: "autopilot" },
           },
           {
             path: "my-issues",
             element: <MyIssuesPage />,
-            handle: { title: "My Issues" },
+            handle: { titleKey: "my_issues" },
           },
           {
             path: "runtimes",
             element: <DesktopRuntimesPage />,
-            handle: { title: "Runtimes" },
+            handle: { titleKey: "runtimes" },
           },
           {
             path: "runtimes/:id",
             element: <RuntimeDetailPage />,
-            handle: { title: "Machine" },
+            handle: { titleKey: "machine" },
           },
           {
             path: "runtimes/:id/runtime/:runtimeId",
             element: <RuntimeSettingsPage />,
-            handle: { title: "Runtime" },
+            handle: { titleKey: "runtime" },
           },
-          { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
+          {
+            path: "skills",
+            element: <SkillsPage />,
+            handle: { titleKey: "skills" },
+          },
           {
             path: "skills/:id",
             element: <SkillDetailPage />,
-            handle: { title: "Skill" },
+            handle: { titleKey: "skill" },
           },
-          { path: "agents", element: <DesktopAgentsPage />, handle: { title: "Agents" } },
+          {
+            path: "agents",
+            element: <DesktopAgentsPage />,
+            handle: { titleKey: "agents" },
+          },
           {
             path: "agents/new",
             element: <ChooseCreateMethodPage />,
-            handle: { title: "Create Agent" },
+            handle: { titleKey: "create_agent" },
           },
           {
             path: "agents/new/manual",
             element: <ManualCreateAgentPage />,
-            handle: { title: "Create Agent" },
+            handle: { titleKey: "create_agent" },
           },
           {
             path: "agents/new/ai",
             element: <AiCreateAgentPage />,
-            handle: { title: "Create Agent" },
+            handle: { titleKey: "create_agent" },
           },
           {
             path: "agents/new/ai/:sessionId",
             element: <AiBuilderSessionPage />,
-            handle: { title: "Create Agent" },
+            handle: { titleKey: "create_agent" },
           },
           {
             path: "agents/:id",
             element: <AgentDetailPage />,
-            handle: { title: "Agent" },
+            handle: { titleKey: "agent" },
           },
           {
             path: "members/:id",
             element: <MemberDetailPage />,
-            handle: { title: "Member" },
+            handle: { titleKey: "member" },
           },
-          { path: "squads", element: <SquadsPage />, handle: { title: "Squads" } },
+          {
+            path: "squads",
+            element: <SquadsPage />,
+            handle: { titleKey: "squads" },
+          },
           {
             path: "squads/:id",
             element: <SquadDetailPageView />,
-            handle: { title: "Squad" },
+            handle: { titleKey: "squad" },
           },
-          { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
-          { path: "chat", element: <ChatPage />, handle: { title: "Chat" } },
+          {
+            path: "inbox",
+            element: <InboxPage />,
+            handle: { titleKey: "inbox" },
+          },
+          {
+            path: "chat",
+            element: <ChatPage />,
+            handle: { titleKey: "chat" },
+          },
           {
             path: "attachments/:id/preview",
             element: <AttachmentPreviewRoute />,
-            handle: { title: "Attachment" },
+            handle: { titleKey: "attachment" },
           },
           {
             path: "usage",
             element: <DashboardPage />,
-            handle: { title: "Usage" },
+            handle: { titleKey: "usage" },
           },
           {
             path: "settings",
             element: <DesktopSettingsRoute />,
-            handle: { title: "Settings" },
+            handle: { titleKey: "settings" },
           },
         ],
       },

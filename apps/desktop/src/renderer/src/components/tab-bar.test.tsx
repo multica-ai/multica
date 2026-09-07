@@ -1,13 +1,16 @@
 import { afterAll, describe, expect, it, vi, beforeEach } from "vitest";
 import {
-  render,
+  render as testingLibraryRender,
   renderHook,
   fireEvent,
   waitFor,
   within,
 } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { SIDEBAR_WRAPPER_FILL_CLASS } from "@multica/ui/components/ui/sidebar";
+import { I18nProvider } from "@multica/core/i18n/react";
+import { RESOURCES } from "@multica/views/locales";
 
 type MockTab = {
   id: string;
@@ -93,6 +96,23 @@ vi.mock("@multica/views/layout", () => ({
 }));
 
 import { TabBar } from "./tab-bar";
+
+function render(ui: ReactElement) {
+  const result = testingLibraryRender(
+    <I18nProvider locale="en" resources={RESOURCES}>
+      {ui}
+    </I18nProvider>,
+  );
+  return {
+    ...result,
+    rerender: (nextUi: ReactElement) =>
+      result.rerender(
+        <I18nProvider locale="en" resources={RESOURCES}>
+          {nextUi}
+        </I18nProvider>,
+      ),
+  };
+}
 
 function reset() {
   state.activeWorkspaceSlug = "acme";

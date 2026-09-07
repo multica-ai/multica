@@ -1,5 +1,20 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  fireEvent,
+  render as testingLibraryRender,
+  screen,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
+import { I18nProvider } from "@multica/core/i18n/react";
+import { RESOURCES } from "@multica/views/locales";
+
+function render(ui: ReactElement) {
+  return testingLibraryRender(
+    <I18nProvider locale="en" resources={RESOURCES}>
+      {ui}
+    </I18nProvider>,
+  );
+}
 
 const state = vi.hoisted(() => ({
   workspaces: [] as { id: string; slug: string }[],

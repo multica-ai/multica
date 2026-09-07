@@ -1142,6 +1142,7 @@
   },
   "desktop": {
     "tabs": {
+      "daemon": "守护进程",
       "updates": "更新"
     },
     "updates": {

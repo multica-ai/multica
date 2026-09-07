@@ -42,6 +42,7 @@ import {
   useTabPresentation,
   ResourceLeadingVisual,
 } from "@multica/views/layout";
+import { useT } from "@multica/views/i18n";
 import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 const TAB_SCROLL_FADE_SIZE = 24;
@@ -203,6 +204,7 @@ function SortableTabItem({
    */
   showSeparator: boolean;
 }) {
+  const { t } = useT("layout");
   const setActiveTab = useTabStore((s) => s.setActiveTab);
   const closeTab = useTabStore((s) => s.closeTab);
   const closeOtherTabs = useTabStore((s) => s.closeOtherTabs);
@@ -301,10 +303,14 @@ function SortableTabItem({
         e.preventDefault();
         handleClose(e);
       }}
-      aria-label={tab.pinned ? `${title} (pinned)` : title}
+      aria-label={
+        tab.pinned ? `${title} (${t(($) => $.desktop.pinned)})` : title
+      }
       data-tab-active={isActive ? "true" : undefined}
       data-tab-entering={isEntering ? "true" : undefined}
-      title={tab.pinned ? `${title} (pinned)` : undefined}
+      title={
+        tab.pinned ? `${title} (${t(($) => $.desktop.pinned)})` : undefined
+      }
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       className={cn(
         "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 text-caption transition-colors",
@@ -329,8 +335,16 @@ function SortableTabItem({
         onClick={handleTogglePin}
         onPointerDown={stopDragOnAction}
         role="button"
-        aria-label={tab.pinned ? "Unpin tab" : "Pin tab"}
-        title={tab.pinned ? "Unpin tab" : "Pin tab"}
+        aria-label={
+          tab.pinned
+            ? t(($) => $.desktop.unpin_tab)
+            : t(($) => $.desktop.pin_tab)
+        }
+        title={
+          tab.pinned
+            ? t(($) => $.desktop.unpin_tab)
+            : t(($) => $.desktop.pin_tab)
+        }
         className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
       >
         {tab.pinned ? <PinOff className="size-2.5" /> : <Pin className="size-2.5" />}
@@ -340,7 +354,7 @@ function SortableTabItem({
           onClick={handleClose}
           onPointerDown={stopDragOnAction}
           role="button"
-          aria-label="Close tab"
+          aria-label={t(($) => $.desktop.close_tab)}
           className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
         >
           <X className="size-2.5" />
@@ -411,7 +425,7 @@ function SortableTabItem({
               <>
                 <ContextMenuItem onClick={handleOpenAsWindow}>
                   <AppWindow />
-                  Open as new window
+                  {t(($) => $.desktop.open_new_window)}
                 </ContextMenuItem>
                 <ContextMenuSeparator />
               </>
@@ -420,12 +434,12 @@ function SortableTabItem({
               {tab.pinned ? (
                 <>
                   <PinOff />
-                  Unpin tab
+                  {t(($) => $.desktop.unpin_tab)}
                 </>
               ) : (
                 <>
                   <Pin />
-                  Pin tab
+                  {t(($) => $.desktop.pin_tab)}
                 </>
               )}
             </ContextMenuItem>
@@ -436,7 +450,7 @@ function SortableTabItem({
               onClick={() => closeTab(tab.id)}
             >
               <X />
-              Close tab
+              {t(($) => $.desktop.close_tab)}
             </ContextMenuItem>
             <ContextMenuItem
               variant="destructive"
@@ -444,7 +458,7 @@ function SortableTabItem({
               onClick={() => closeOtherTabs(tab.id)}
             >
               <ListX />
-              Close other tabs
+              {t(($) => $.desktop.close_other_tabs)}
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
@@ -527,6 +541,7 @@ function NewTabEdgeFeedback({
 }
 
 function NewTabButton() {
+  const { t } = useT("layout");
   const addTab = useTabStore((s) => s.addTab);
   const setActiveTab = useTabStore((s) => s.setActiveTab);
 
@@ -536,7 +551,7 @@ function NewTabButton() {
     const activeSlug = useTabStore.getState().activeWorkspaceSlug;
     if (!activeSlug) return;
     const path = paths.workspace(activeSlug).issues();
-    const tabId = addTab(path, "Issues");
+    const tabId = addTab(path, t(($) => $.nav.issues));
     if (tabId) setActiveTab(tabId);
   };
 
@@ -544,8 +559,8 @@ function NewTabButton() {
     <button
       type="button"
       onClick={handleClick}
-      aria-label="New tab"
-      title="New tab"
+      aria-label={t(($) => $.desktop.new_tab)}
+      title={t(($) => $.desktop.new_tab)}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       className="mb-1 flex size-7 shrink-0 items-center justify-center self-end rounded-md text-faint-foreground transition-colors hover:bg-muted/50 hover:text-muted-foreground"
     >
