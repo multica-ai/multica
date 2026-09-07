@@ -907,8 +907,10 @@ still writes the full run to stdout first.
 
 Run as an agent (inside a task, or over A2A), the trigger is authorized as the
 human that run acts for, not as the owner of the machine it executes on. That
-human needs the same write access they would need to trigger it themselves, and
-a run carrying no originator cannot trigger at all.
+human needs exactly the write access they would need to trigger it themselves —
+and it is the only access checked: the machine's owner needs no grant on the
+autopilot, only workspace membership. A run carrying no originator cannot
+trigger at all, and says so rather than failing generically.
 
 ### Run History
 

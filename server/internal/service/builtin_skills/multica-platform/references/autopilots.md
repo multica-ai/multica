@@ -82,11 +82,12 @@ per-caller booleans — `can_write` and the narrower `can_manage_access` — rea
 those rather than inferring from role.
 
 When YOU run `trigger`, the run is authorized as the human who asked you to —
-your run's originator — not as the owner of the machine you execute on. So the
-person who gave you the instruction needs that same write access, and you cannot
-trigger an autopilot they could not trigger themselves. A run that carries no
-originator at all cannot trigger anything: the server answers `403` naming the
-missing originator rather than skipping quietly.
+your run's originator — not as the owner of the machine you execute on, whose
+grants are not consulted. So the person who gave you the instruction needs that
+write access, and you cannot trigger an autopilot they could not trigger
+themselves. A run that carries no originator at all cannot trigger anything: the
+server answers `403` naming the missing originator rather than skipping quietly,
+and the CLI prints that reason instead of a generic permission error.
 
 ## Side effects
 

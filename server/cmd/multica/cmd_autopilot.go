@@ -576,7 +576,7 @@ func runAutopilotTrigger(cmd *cobra.Command, args []string) error {
 
 	var run map[string]any
 	if err := client.PostJSON(ctx, "/api/autopilots/"+autopilotRef.ID+"/trigger", nil, &run); err != nil {
-		return fmt.Errorf("trigger autopilot: %w", err)
+		return autopilotTriggerRequestError(err)
 	}
 
 	status := strVal(run, "status")
@@ -605,6 +605,26 @@ func runAutopilotTrigger(cmd *cobra.Command, args []string) error {
 		msg += " [" + code + "]"
 	}
 	return errors.New(msg)
+}
+
+// autopilotTriggerRequestError turns a failed trigger request into what the
+// user should read.
+//
+// FormatError deliberately collapses every 403 into generic "no access" copy so
+// a refusal cannot confirm that a resource exists. For a manual trigger that
+// hides the one refusal a workspace can actually act on — the calling run having
+// no originating human — which is exactly the silence #8078 was about. These two
+// refusals opt out by carrying a stable server code; the branch is on that code,
+// never on the English sentence, which changes with copy edits and disappears
+// under translation.
+func autopilotTriggerRequestError(err error) error {
+	switch cli.ServerErrorCode(err) {
+	case "autopilot_trigger_no_originator":
+		return cli.WithUserMessage("this run has no originating human, so it cannot trigger an autopilot on anyone's behalf: a manual trigger is authorized as the person who asked for it", err)
+	case "autopilot_trigger_forbidden":
+		return cli.WithUserMessage("the person this run acts for cannot trigger this autopilot: triggering requires its creator, a workspace admin, or a granted collaborator", err)
+	}
+	return fmt.Errorf("trigger autopilot: %w", err)
 }
 
 // autopilotRunStarted reports whether a manual trigger actually dispatched work.

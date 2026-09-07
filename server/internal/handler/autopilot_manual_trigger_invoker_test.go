@@ -73,12 +73,29 @@ func callerTask(t *testing.T, agentID, originatorUserID string) string {
 // middleware as a task-token actor.
 func triggerAsAgent(t *testing.T, autopilotID, agentID, taskID string) *testutil.Response {
 	t.Helper()
-	r := newRequestAs(testUserID, "POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, nil)
+	return triggerAsAgentAuthedAs(t, testUserID, autopilotID, agentID, taskID)
+}
+
+// triggerAsAgentAuthedAs is triggerAsAgent with the authenticated (runtime
+// owner) identity spelled out, for the cases where it must differ from the
+// originator.
+func triggerAsAgentAuthedAs(t *testing.T, runtimeOwnerID, autopilotID, agentID, taskID string) *testutil.Response {
+	t.Helper()
+	r := newRequestAs(runtimeOwnerID, "POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, nil)
 	r.Header.Set("X-Actor-Source", "task_token")
 	r.Header.Set("X-Agent-ID", agentID)
 	r.Header.Set("X-Task-ID", taskID)
 	r = withURLParam(r, "id", autopilotID)
 	return testutil.Call(t, testHandler.TriggerAutopilot, r)
+}
+
+// plainMember returns a workspace member holding no autopilot grants at all —
+// not a creator, not an admin, not a collaborator.
+func plainMember(t *testing.T, label string) string {
+	t.Helper()
+	userID := dbfx.User(t, label, fmt.Sprintf("%s-%d@multica.test", label, time.Now().UnixNano()))
+	dbfx.Member(t, testWorkspaceID, userID, "member")
+	return userID
 }
 
 // TestTriggerAutopilot_AgentActsForItsOriginator is the acceptance test for the
@@ -113,13 +130,67 @@ func TestTriggerAutopilot_AgentWithNoOriginatorRefused(t *testing.T) {
 	autopilotID, agentID := triggerInvokerFixture(t, "no originator")
 	taskID := callerTask(t, agentID, "")
 
-	triggerAsAgent(t, autopilotID, agentID, taskID).Want(http.StatusForbidden)
+	var body triggerErrorBody
+	triggerAsAgent(t, autopilotID, agentID, taskID).Want(http.StatusForbidden).JSON(&body)
+	// The CLI keys its actionable output on this code, because FormatError
+	// collapses every other 403 into generic "no access" copy that would hide the
+	// one fact making this failure fixable.
+	if body.Code != autopilotTriggerNoOriginatorCode {
+		t.Errorf("error code = %q, want %q — the CLI cannot surface the cause without it", body.Code, autopilotTriggerNoOriginatorCode)
+	}
 
 	// Refused before dispatch, so no run row: a skipped run would report this as
 	// an admission outcome on the autopilot's own failure-rate history, which the
 	// auto-pause monitor reads.
 	if runs := dbfx.Count(t, `SELECT count(*) FROM autopilot_run WHERE autopilot_id = $1`, autopilotID); runs != 0 {
 		t.Errorf("autopilot_run rows = %d, want 0 for a pre-dispatch refusal", runs)
+	}
+}
+
+// TestTriggerAutopilot_RuntimeOwnerNeedsNoGrant is the cross-identity case: the
+// ordering human may trigger this autopilot, the machine the agent happens to
+// run on belongs to someone who may not, and the trigger goes through.
+//
+// This is the scenario the first cut of the fix still refused. It kept
+// requireAutopilotWrite in front of the originator check, so BOTH humans had to
+// hold the grant and a member could not delegate a "Run now" they were perfectly
+// entitled to press themselves. Authorization here is the ordering human's alone;
+// workspace tenancy for the authenticated caller stays with the router's
+// RequireWorkspaceMember middleware.
+func TestTriggerAutopilot_RuntimeOwnerNeedsNoGrant(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	var agentID string
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
+
+	// The ordering human owns the autopilot outright: they created it.
+	orderingHuman := plainMember(t, "ordering-human")
+	title := fmt.Sprintf("manual trigger cross identity %d", time.Now().UnixNano())
+	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":         testWorkspaceID,
+		"title":                title,
+		"assignee_id":          agentID,
+		"assignee_type":        "agent",
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+		"status":               "active",
+		"created_by_type":      "member",
+		"created_by_id":        orderingHuman,
+	})
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id IN (SELECT id FROM issue WHERE workspace_id = $1 AND title = $2)`, testWorkspaceID, title)
+	dbfx.Cleanup(t, `DELETE FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
+	dbfx.Cleanup(t, `DELETE FROM autopilot_run WHERE autopilot_id = $1`, autopilotID)
+
+	// The machine's owner is a plain member with no grant on this autopilot.
+	runtimeOwner := plainMember(t, "runtime-owner")
+	taskID := callerTask(t, agentID, orderingHuman)
+
+	var run AutopilotRunResponse
+	triggerAsAgentAuthedAs(t, runtimeOwner, autopilotID, agentID, taskID).Want(http.StatusOK).JSON(&run)
+	if run.Status != "issue_created" {
+		t.Fatalf("run status = %q (reason_code %v, failure_reason %v), want issue_created — the ordering human created this autopilot; the runtime owner's lack of a grant must not block them",
+			run.Status, derefStr(run.ReasonCode), derefStr(run.FailureReason))
 	}
 }
 
@@ -140,7 +211,11 @@ func TestTriggerAutopilot_AgentCannotExceedItsOriginator(t *testing.T) {
 	dbfx.Member(t, testWorkspaceID, outsiderID, "member")
 
 	taskID := callerTask(t, agentID, outsiderID)
-	triggerAsAgent(t, autopilotID, agentID, taskID).Want(http.StatusForbidden)
+	var body triggerErrorBody
+	triggerAsAgent(t, autopilotID, agentID, taskID).Want(http.StatusForbidden).JSON(&body)
+	if body.Code != autopilotTriggerForbiddenCode {
+		t.Errorf("error code = %q, want %q", body.Code, autopilotTriggerForbiddenCode)
+	}
 
 	if runs := dbfx.Count(t, `SELECT count(*) FROM autopilot_run WHERE autopilot_id = $1`, autopilotID); runs != 0 {
 		t.Errorf("autopilot_run rows = %d, want 0 for a pre-dispatch refusal", runs)
@@ -164,6 +239,12 @@ func TestTriggerAutopilot_MemberPathUnchanged(t *testing.T) {
 	if run.Status != "issue_created" {
 		t.Fatalf("run status = %q (reason_code %v), want issue_created", run.Status, derefStr(run.ReasonCode))
 	}
+}
+
+// triggerErrorBody is the refusal envelope writeErrorCode produces.
+type triggerErrorBody struct {
+	Error string `json:"error"`
+	Code  string `json:"code"`
 }
 
 func derefStr(s *string) string {
