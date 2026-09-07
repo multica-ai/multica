@@ -210,7 +210,7 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 			continue
 		}
 		taskDir := filepath.Join(wsDir, entry.Name())
-		if d.isActiveEnvRoot(taskDir) {
+		if d.isActiveEnvRoot(taskDir) || hasRunWorkspaceReceipt(taskDir) {
 			stats.skipped++
 			continue
 		}
@@ -320,6 +320,10 @@ func (d *Daemon) gcWorkspaceIssues(ctx context.Context, workspaceID string, cand
 // atomically reserves the env root because a task can start while the server
 // reconciliation request is in flight.
 func (d *Daemon) applyGCAction(taskDir string, action gcAction, stats *gcStats) int {
+	if hasRunWorkspaceReceipt(taskDir) {
+		stats.skipped++
+		return 0
+	}
 	if action != gcActionSkip {
 		if _, err := d.gcTaskDirOwner(taskDir); err != nil {
 			d.logger.Warn("gc: refusing to mutate unowned task directory", "dir", taskDir, "error", err)
@@ -332,6 +336,10 @@ func (d *Daemon) applyGCAction(taskDir string, action gcAction, stats *gcStats) 
 			return 0
 		}
 		defer release()
+		if hasRunWorkspaceReceipt(taskDir) {
+			stats.skipped++
+			return 0
+		}
 		// Re-read provenance after taking the exclusion lock so a concurrent
 		// reset cannot change ownership between validation and mutation.
 		if _, err := d.gcTaskDirOwner(taskDir); err != nil {
@@ -402,6 +410,9 @@ const (
 // Dispatches on meta.Kind so chat / autopilot / quick-create tasks each
 // follow the parent record that actually governs their lifecycle.
 func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcAction {
+	if hasRunWorkspaceReceipt(taskDir) {
+		return gcActionSkip
+	}
 	// A task currently running on this env root must never be reclaimed —
 	// not even on the done/cancelled or orphan-404 paths. A re-dispatched or
 	// still-running task can reuse the prior workdir of an already-done issue
@@ -878,6 +889,9 @@ func (d *Daemon) cleanTaskDir(taskDir string) (bytes int64, removed bool) {
 	// hand RemoveAll a path last proven ours tens of seconds earlier. This is
 	// the defense-in-depth check, so it sits immediately before the removal.
 	bytes = dirSize(taskDir)
+	if hasRunWorkspaceReceipt(taskDir) {
+		return 0, false
+	}
 	owner, ownerErr := d.gcTaskDirOwner(taskDir)
 	if ownerErr != nil {
 		d.logger.Warn("gc: refusing to remove unowned task directory", "dir", taskDir, "error", ownerErr)
@@ -893,6 +907,14 @@ func (d *Daemon) cleanTaskDir(taskDir string) (bytes int64, removed bool) {
 		d.logger.Warn("gc: remove stable task root record failed", "dir", taskDir, "error", err)
 	}
 	return bytes, true
+}
+
+// A run-owned room is a retained deliverable, including interrupted allocation
+// before completion metadata exists. Corrupt or unreadable receipts also need
+// explicit reconciliation; automatic GC must not infer permission to delete.
+func hasRunWorkspaceReceipt(taskDir string) bool {
+	_, err := os.Lstat(filepath.Join(taskDir, "run-workspace.json"))
+	return !os.IsNotExist(err)
 }
 
 // linkedDirModes are the mode bits that mark a directory entry as a link to

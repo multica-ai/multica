@@ -268,6 +268,17 @@ func resolveRealPath(absPath string) (string, error) {
 // Each failure returns a typed error message so the daemon can forward it
 // onto the task's fail comment verbatim.
 func validateLocalPath(absPath string) error {
+	if err := validateLocalSourcePath(absPath); err != nil {
+		return err
+	}
+	if err := checkDirReadWrite(absPath); err != nil {
+		return fmt.Errorf("local_directory: %w", err)
+	}
+	return nil
+}
+
+// Run-owned allocation reads the source without writing even a probe into it.
+func validateLocalSourcePath(absPath string) error {
 	if absPath == "" {
 		return errors.New("local_directory: local_path is empty")
 	}
@@ -313,8 +324,8 @@ func validateLocalPath(absPath string) error {
 		}
 		return fmt.Errorf("local_directory: %s (canonical path %q)", reason, absPath)
 	}
-	if err := checkDirReadWrite(absPath); err != nil {
-		return fmt.Errorf("local_directory: %w", err)
+	if _, err := os.ReadDir(absPath); err != nil {
+		return fmt.Errorf("local_directory: read %q: %w", absPath, err)
 	}
 	return nil
 }

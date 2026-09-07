@@ -8,6 +8,27 @@ import (
 	"time"
 )
 
+func TestTaskReservationLaunchUsesReacquiredSlot(t *testing.T) {
+	slots := make(chan int, 2)
+	a := &taskExecutionReservation{slots: slots, slot: 0, held: true}
+	aCtx := context.WithValue(context.Background(), taskReservationKey{}, a)
+	a.release()
+	b := &taskExecutionReservation{slots: slots}
+	if err := b.acquire(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer b.release()
+	slots <- 1 // another running task finishes after B took A's old slot
+	if err := a.acquire(aCtx); err != nil {
+		t.Fatal(err)
+	}
+	defer a.release()
+	env := taskMulticaEnvironment(Task{}, "", "", "", "", "", 0, currentTaskExecutionSlot(aCtx, 0), "")
+	if env["MULTICA_TASK_SLOT"] != "1" || b.slot != 0 {
+		t.Fatalf("woken task exported stale slot: env=%v other=%d", env, b.slot)
+	}
+}
+
 func TestTaskReservationAtomicWake(t *testing.T) {
 	slots := newTaskSlotSemaphore(2)
 	var active, peak atomic.Int32

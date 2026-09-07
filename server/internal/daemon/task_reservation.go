@@ -69,6 +69,17 @@ func reacquireTaskExecutionSlot(ctx context.Context) error {
 	return ctx.Err()
 }
 
+// Read after admission: a parked task may return its original token and wake
+// into another one. Slot-derived ports must follow the token it actually owns.
+func currentTaskExecutionSlot(ctx context.Context, fallback int) int {
+	if r, ok := ctx.Value(taskReservationKey{}).(*taskExecutionReservation); ok {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.slot
+	}
+	return fallback
+}
+
 func (d *Daemon) startTaskWithAdmission(ctx context.Context, taskID string) error {
 	for {
 		if err := reacquireTaskExecutionSlot(ctx); err != nil {
