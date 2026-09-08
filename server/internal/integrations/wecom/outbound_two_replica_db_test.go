@@ -345,8 +345,16 @@ type sharedDedupe struct {
 	// a DEL the server executed whose response was lost. The outcome the
 	// caller sees is the same error as above; what the store holds is not.
 	releaseErrAfterDelete bool
-	// settleFails makes Settle report failure and leave the key as it is.
+	// settleFails makes every Settle report failure without executing: a
+	// store that is simply not answering.
 	settleFails bool
+	// settleErrBeforeWrite makes the first N Settle calls report failure
+	// without executing — a request that never reached the server.
+	settleErrBeforeWrite int
+	// settleErrAfterWrite makes the first N Settle calls execute the write
+	// AND report failure: the SET the server ran and whose response was lost.
+	// The caller sees the same error as above; what the store holds is not.
+	settleErrAfterWrite int
 }
 
 func newSharedDedupe() *sharedDedupe { return &sharedDedupe{values: map[string]string{}} }
@@ -413,6 +421,20 @@ func (d *sharedDedupe) Settle(_ context.Context, key, token string) (bool, error
 	defer d.mu.Unlock()
 	if d.settleFails {
 		return false, errors.New("dedupe: SET failed")
+	}
+	if d.settleErrBeforeWrite > 0 {
+		d.settleErrBeforeWrite--
+		return false, errors.New("dedupe: SET never reached the server")
+	}
+	afterWrite := d.settleErrAfterWrite > 0
+	if afterWrite {
+		d.settleErrAfterWrite--
+	}
+	if afterWrite {
+		if d.values[key] == token {
+			d.values[key] = claimSettledValue
+		}
+		return false, errors.New("dedupe: SET response lost")
 	}
 	switch d.values[key] {
 	case token:
@@ -1082,5 +1104,83 @@ func TestTwoReplicas_AStrandedClaimIsResolvedOnceByThePublisher(t *testing.T) {
 	}
 	if v := dedupe.valueOf(dedupeKey(relayEventID(chatDoneFor(turn), mustParseTaskUUID(t, turn.taskID)))); v != claimLostValue {
 		t.Fatalf("claim value = %q, want %q: Resolve fences a stranded claim so a late holder records nothing", v, claimLostValue)
+	}
+}
+
+// The symmetric case to a release whose response was lost, one step later: the
+// holder DELIVERED, its Settle wrote the settled state, and only the response
+// went missing. Nothing else will ever speak for this reply — a settled
+// delivery is finished, so there is no later offer to resolve it — which is
+// why the settle is retried rather than abandoned. The retry finds the state
+// already settled and the holder records, once.
+//
+// REVERSE VERIFICATION: make settleClaim return false on the first error
+// (drop the retry loop) and this fails with no record at all: the holder stays
+// quiet and the publisher's Resolve reads claimSettled and stays quiet too.
+func TestTwoReplicas_ASettleThatLandedButErroredEndsWithExactlyOneRecord(t *testing.T) {
+	pool := twoReplicaDB(t)
+	turn := seedBoundTurn(t, pool)
+	relay, dedupe := &fanoutRelay{}, newSharedDedupe()
+	dedupe.settleErrAfterWrite = 1
+	cfg := RelayConfig{Shards: 1, LeaseSettle: 120 * time.Millisecond, RetryBackoff: 20 * time.Millisecond, DeliveryBudget: 20 * time.Millisecond}
+
+	holder := newRelayReplicaWith(t, pool, turn.instID, true, relay, dedupe, cfg)
+	publisher := newRelayReplicaWith(t, pool, turn.instID, false, relay, dedupe, cfg)
+
+	publisher.bus.Publish(chatDoneFor(turn))
+
+	waitLong(t, "the holder to record the delivery after retrying the settle", func() bool {
+		return holder.mx.get("outbound_delivered") == 1
+	})
+	time.Sleep(publisher.router.outcomeGrace() + 200*time.Millisecond)
+
+	if got := holder.mx.get("outbound_delivered"); got != 1 {
+		t.Fatalf("outbound_delivered = %d, want 1", got)
+	}
+	dropped := holder.mx.get("outbound_dropped") + publisher.mx.get("outbound_dropped")
+	if dropped != 0 {
+		t.Fatalf("outbound_dropped = %d across holder and publisher, want 0: the reply was delivered", dropped)
+	}
+	if got := len(sentTexts(t, holder.conn)); got != 1 {
+		t.Fatalf("%d messages reached the chat, want 1", got)
+	}
+	if v := dedupe.valueOf(dedupeKey(relayEventID(chatDoneFor(turn), mustParseTaskUUID(t, turn.taskID)))); v != claimSettledValue {
+		t.Fatalf("claim value = %q, want %q", v, claimSettledValue)
+	}
+}
+
+// A settle nobody can complete — the store answers nothing, attempt after
+// attempt — leaves the claim held under the holder's token. The holder records
+// nothing, because it cannot know whether its settle landed; the publisher's
+// Resolve finds a held claim at the end of the grace and ends the reply there.
+// One record, and the honest one to make with a store that is down.
+//
+// REVERSE VERIFICATION: record inside settleClaim when the attempts run out
+// and this fails with two records, one from each side.
+func TestTwoReplicas_ASettleNobodyCanCompleteIsEndedOnceByThePublisher(t *testing.T) {
+	pool := twoReplicaDB(t)
+	turn := seedBoundTurn(t, pool)
+	relay, dedupe := &fanoutRelay{}, newSharedDedupe()
+	dedupe.settleFails = true
+	cfg := RelayConfig{Shards: 1, LeaseSettle: 120 * time.Millisecond, RetryBackoff: 20 * time.Millisecond, DeliveryBudget: 20 * time.Millisecond}
+
+	holder := newRelayReplicaWith(t, pool, turn.instID, true, relay, dedupe, cfg)
+	publisher := newRelayReplicaWith(t, pool, turn.instID, false, relay, dedupe, cfg)
+
+	publisher.bus.Publish(chatDoneFor(turn))
+
+	waitLong(t, "the publisher to end the unsettled reply", func() bool {
+		return publisher.mx.get("outbound_dropped") == 1
+	})
+	time.Sleep(300 * time.Millisecond)
+
+	if got := publisher.mx.get("outbound_dropped"); got != 1 {
+		t.Fatalf("publisher outbound_dropped = %d, want 1", got)
+	}
+	if got := holder.mx.get("outbound_delivered") + holder.mx.get("outbound_dropped"); got != 0 {
+		t.Fatalf("the holder recorded %d outcome(s) for a claim it could not settle, want 0", got)
+	}
+	if got := len(sentTexts(t, holder.conn)); got != 1 {
+		t.Fatalf("%d messages reached the chat, want 1: the delivery itself is unaffected", got)
 	}
 }

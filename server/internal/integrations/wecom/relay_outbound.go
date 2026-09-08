@@ -871,27 +871,8 @@ func (r *RelayOutbound) perform(ctx context.Context, item queued) bool {
 		// at the end of its grace — it has a record, so this one must not
 		// be made. That is the whole reason record is a closure rather than
 		// a counter moved inside deliverRelayed.
-		if r.dedupe != nil {
-			settled, err := r.dedupe.Settle(ctx, key, token)
-			switch {
-			case err != nil:
-				// Unknown whether the settle landed. Recording here could
-				// double a drop the publisher's Resolve is about to make;
-				// recording nothing could leave the reply with no record at
-				// all if the settle did land. Of the two, the one that can
-				// be seen is the one taken: nothing is counted, and the log
-				// says why, on the same terms the publisher uses when its
-				// own read fails (settle).
-				r.logger.WarnContext(ctx, "wecom relay: delivered, but the claim could not be settled; outcome unrecorded",
-					"error", err, "kind", item.frame.Kind,
-					"installation_id", item.frame.InstallationID, "task_id", item.frame.TaskID)
-				return true
-			case !settled:
-				r.logger.WarnContext(ctx, "wecom relay: delivered after the publisher resolved the reply as lost; not counted again",
-					"kind", item.frame.Kind,
-					"installation_id", item.frame.InstallationID, "task_id", item.frame.TaskID)
-				return true
-			}
+		if r.dedupe != nil && !r.settleClaim(ctx, key, token, item.frame) {
+			return true
 		}
 		if res.record != nil {
 			res.record()
@@ -930,6 +911,72 @@ func (r *RelayOutbound) perform(ctx context.Context, item queued) bool {
 	return false
 }
 
+// claimSettleAttempts is how many times the holder asks the store to settle
+// its claim before giving up. An error from Settle means UNKNOWN, exactly as
+// it does for Release — and unlike Release there is no later offer to resolve
+// it, because a settled delivery is finished. So the retry is what resolves
+// it, and the operation is built to be retried: redisSettleSource is
+// idempotent and token-fenced, so a retry after a settle that DID land
+// matches the settled value and reports success, while one after a settle
+// that never landed finds either the token (settles it now) or the
+// publisher's fence (refused, and the holder correctly records nothing).
+const claimSettleAttempts = 3
+
+// settleRetryBackoff paces those attempts. The claim layer's own knob rather
+// than a new one: it is the same "how long before asking the store again"
+// question the re-offer chain asks.
+func (r *RelayOutbound) settleRetryBackoff() time.Duration {
+	if r.cfg.RetryBackoff > 0 {
+		return r.cfg.RetryBackoff
+	}
+	return defaultRelayRetryBackoff
+}
+
+// settleClaim marks a delivered frame's claim as settled and reports whether
+// its holder may record the outcome.
+//
+// False has two meanings, and both are "somebody else has this covered":
+// the publisher already resolved the reply as lost — its record stands, and a
+// second one here would double it — or every attempt came back unknown, in
+// which case the claim is still held by this token and the publisher's own
+// Resolve is what will end it, once. Neither may be counted here.
+func (r *RelayOutbound) settleClaim(ctx context.Context, key, token string, f relayFrame) bool {
+	var lastErr error
+	for attempt := 0; attempt < claimSettleAttempts; attempt++ {
+		if attempt > 0 {
+			timer := time.NewTimer(r.settleRetryBackoff())
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				// Shutdown does not excuse the settle: the frame is already
+				// in the user's chat, and the store call itself runs on a
+				// context of its own (dedupe_redis.go). Skip the pause, not
+				// the attempt.
+				timer.Stop()
+			}
+		}
+		settled, err := r.dedupe.Settle(ctx, key, token)
+		switch {
+		case err != nil:
+			lastErr = err
+		case settled:
+			return true
+		default:
+			r.logger.WarnContext(ctx, "wecom relay: delivered after the publisher resolved the reply as lost; not counted again",
+				"kind", f.Kind, "installation_id", f.InstallationID, "task_id", f.TaskID)
+			return false
+		}
+	}
+	// Still unknown after every attempt. The claim, if the settles never
+	// landed, is held by this token — which is the one state the publisher's
+	// Resolve turns into a record of its own. Counting here as well would be
+	// the double record this whole path exists to prevent.
+	r.logger.WarnContext(ctx, "wecom relay: delivered, but the claim could not be settled; the publisher's watch will end it",
+		"error", lastErr, "attempts", claimSettleAttempts, "kind", f.Kind,
+		"installation_id", f.InstallationID, "task_id", f.TaskID)
+	return false
+}
+
 // tokenFor is the owner token one claim is held under: this process, and the
 // delivery. Stable across re-offers on this process, unique across replicas.
 func (r *RelayOutbound) tokenFor(eventID string) string { return r.owner + "/" + eventID }
@@ -961,10 +1008,23 @@ func (r *RelayOutbound) outcomeGrace() time.Duration {
 	if r.dedupe != nil {
 		budget = r.dedupe.ClaimBudget()
 	}
-	total := budget * time.Duration(len(r.retryPlan)+1)
+	// TWO round trips per offer, not one. Every offer makes its own Claim,
+	// and every offer ends in a second call on the same budget: a Release
+	// when it is owed another offer, a Settle when it is finished. Counting
+	// only the Claim leaves half the store time out of the arithmetic, and
+	// the absent state is deliberately NOT fenced by Resolve — a premature
+	// expiry there would be recorded as a loss while a later offer could
+	// still claim, deliver and settle, which is the contradiction this whole
+	// path exists to remove. (Fencing absent would trade that miscount for a
+	// claim no offer can take, i.e. a reply the user never gets: worse.)
+	offers := len(r.retryPlan) + 1
+	total := budget * time.Duration(2*offers)
 	for _, d := range r.retryPlan {
 		total += d
 	}
+	// The settle retry on the finished offer: its extra attempts and the
+	// pauses between them (settleClaim).
+	total += time.Duration(claimSettleAttempts-1) * (budget + r.settleRetryBackoff())
 	// Plus the last offer's own delivery: a claim taken on the final attempt
 	// is still being written and acked when the chain's timing says the chain
 	// is over, and a Resolve that lands inside that ack wait fences a reply

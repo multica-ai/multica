@@ -91,6 +91,13 @@ return 0
 `
 	// Resolve reads the state and, for a key still held by a token, fences
 	// it as lost in the same operation. Return codes are claimState values.
+	//
+	// A value that is not token-shaped is a claim from before this scheme —
+	// the plain "1" of the SET NX that used to be the whole claim. Its holder
+	// recorded its own outcome inline, so it is reported as settled and left
+	// alone: fencing it would record a second outcome for a reply that was
+	// already counted. Every token carries the "/" tokenFor puts there, so
+	// the two are told apart without a version flag or a key migration.
 	redisResolveSource = `
 local v = redis.call('GET', KEYS[1])
 if (not v) then
@@ -101,6 +108,9 @@ if v == ARGV[1] then
 end
 if v == ARGV[2] then
   return 3
+end
+if not string.find(v, '/', 1, true) then
+  return 2
 end
 redis.call('SET', KEYS[1], ARGV[2], 'KEEPTTL')
 return 1

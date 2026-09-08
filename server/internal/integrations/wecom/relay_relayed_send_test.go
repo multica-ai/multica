@@ -336,3 +336,35 @@ func TestRelayedReply_AReleaseThatLandedButErroredIsTakenFreshByTheNextOffer(t *
 		t.Fatalf("%d offers, want 2", got)
 	}
 }
+
+// A settle whose request never reached the store is retried, and the retry
+// settles it. The holder records once — no reliance on the publisher, which
+// would have counted this delivered reply as a drop.
+//
+// REVERSE VERIFICATION: drop the retry loop from settleClaim and this fails
+// with outbound_delivered = 0.
+func TestRelayedReply_ASettleThatNeverExecutedIsRetried(t *testing.T) {
+	t.Parallel()
+	dedupe := newSharedDedupe()
+	dedupe.settleErrBeforeWrite = 1
+	rig := newRelaySendRigWithDedupe(t, nil, dedupe)
+
+	rig.route(t, "the agent reply")
+	waitFor(t, "the delivery to be recorded after the settle retry", func() bool {
+		return rig.mx.get("outbound_delivered") == 1
+	})
+	time.Sleep(rig.router.outcomeGrace())
+
+	if got := rig.mx.get("outbound_delivered"); got != 1 {
+		t.Fatalf("outbound_delivered = %d, want 1", got)
+	}
+	if got := rig.mx.get("outbound_dropped"); got != 0 {
+		t.Fatalf("outbound_dropped = %d, want 0", got)
+	}
+	if got := rig.conn.writeAttempts(); got != 1 {
+		t.Fatalf("%d offers, want 1: a settle retry is not a re-delivery", got)
+	}
+	if v := dedupe.valueOf(dedupeKey(rig.lastEventID())); v != claimSettledValue {
+		t.Fatalf("claim value = %q, want %q", v, claimSettledValue)
+	}
+}

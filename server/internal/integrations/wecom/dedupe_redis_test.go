@@ -73,6 +73,20 @@ func TestRedisDedupe_TokenFencedOperations(t *testing.T) {
 	if st, err := d.Resolve(ctx, key+":absent"); err != nil || st != claimAbsent {
 		t.Fatalf("Resolve on no key = %v, %v; want claimAbsent", st, err)
 	}
+	// A claim written before this scheme — the plain "1" of the old SET NX —
+	// belongs to a holder that recorded its own outcome inline. Reported as
+	// settled and left alone, so a rolling upgrade cannot turn a reply that
+	// was already counted into a second, contradictory record.
+	const legacy = key + ":legacy"
+	if err := rdb.Set(ctx, legacy, "1", ttl).Err(); err != nil {
+		t.Fatalf("seed a legacy claim: %v", err)
+	}
+	if st, err := d.Resolve(ctx, legacy); err != nil || st != claimSettled {
+		t.Fatalf("Resolve on a legacy claim = %v, %v; want claimSettled", st, err)
+	}
+	if v := rdb.Get(ctx, legacy).Val(); v != "1" {
+		t.Fatalf("Resolve rewrote a legacy claim to %q; it belongs to a holder this process cannot speak for", v)
+	}
 	// TTL survives settle and resolve (KEEPTTL), so the key still expires.
 	if pttl := rdb.PTTL(ctx, key).Val(); pttl <= 0 || pttl > ttl {
 		t.Fatalf("settled key TTL = %v, want within %v", pttl, ttl)
