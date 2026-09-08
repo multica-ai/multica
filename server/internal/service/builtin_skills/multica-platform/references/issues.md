@@ -122,6 +122,30 @@ not observe a routable issue key in the PR title/body/branch — or the only mat
 was a bare body mention, which links as `reference_only` and is hidden from this
 list (see the reference-only rule above).
 
+### Linking a PR without a routable key
+
+`multica issue pull-requests link` and `unlink` are the manual counterpart to
+webhook auto-link discovery, for GitHub pull requests that never got a
+routable key in their title, body, or branch — for example a PR opened in a
+repo where the Multica issue key must stay internal-only and cannot appear on
+any public GitHub surface.
+
+```bash
+multica issue pull-requests link <issue-id> <pr-url> [--close-on-merge]
+multica issue pull-requests unlink <issue-id> <pr-url>
+```
+
+`<pr-url>` is the GitHub PR's `html_url`
+(`https://github.com/<owner>/<repo>/pull/<number>`). `link` fetches the PR from
+GitHub to confirm it exists and that a GitHub installation connected to this
+workspace can see it, then writes the same link row webhook discovery would
+have written — the PR appears in `multica issue pull-requests` and the issue's
+UI exactly as an auto-discovered link would. Without `--close-on-merge` the
+link behaves like a bare title/branch reference (links, does not close on
+merge); with it, the link behaves like a `Closes MUL-123` keyword (the issue
+can auto-advance to `done` when the PR merges). Relinking the same issue/PR
+pair updates `--close-on-merge` rather than creating a duplicate link.
+
 ## Custom properties: typed workflow state
 
 Workspaces may define custom issue properties (Severity, Environment, QA
