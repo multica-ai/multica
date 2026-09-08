@@ -964,13 +964,14 @@ var cursorBlockedArgs = map[string]blockedArgMode{
 	"-p":              blockedStandalone, // non-interactive print mode
 	"--output-format": blockedWithValue,  // stream-json protocol
 	"--yolo":          blockedStandalone, // auto-approval for autonomous operation
+	"--trust":         blockedStandalone, // headless runs cannot answer a trust prompt
 }
 
 // buildCursorArgs assembles the argv for a one-shot cursor-agent invocation.
 //
 // Usage: cursor-agent -p --output-format stream-json
 //
-//	--workspace <cwd> --yolo [--model <m>] [--resume <id>]
+//	--workspace <cwd> --yolo --trust [--model <m>] [--resume <id>]
 //
 // The prompt is deliberately NOT part of argv. cursor-agent's -p is a boolean
 // print-mode switch and the prompt is a positional argument; when no positional
@@ -991,6 +992,13 @@ func buildCursorArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"-p",
 		"--output-format", "stream-json",
 		"--yolo",
+		// A workspace cursor-agent has not seen before raises an interactive
+		// trust prompt. The daemon runs it without a TTY, so the prompt has no
+		// answer and the run hangs until its deadline instead of failing —
+		// --yolo governs command approval and does not cover it. Trust is
+		// implied here anyway: the workdir is one the daemon prepared for this
+		// task.
+		"--trust",
 	}
 	if opts.Cwd != "" {
 		args = append(args, "--workspace", opts.Cwd)
