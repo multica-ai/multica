@@ -31,6 +31,22 @@ func TestTaskCommentChangeCancellation(t *testing.T) {
 	}
 }
 
+func TestComputeTaskKindPreservesLinkedQuickCreateOrigin(t *testing.T) {
+	issueID := parseUUID("11111111-1111-1111-1111-111111111111")
+	if got := computeTaskKind(db.AgentTaskQueue{
+		IssueID: issueID,
+		Context: []byte(`{"type":"quick_create","prompt":"Create an issue"}`),
+	}); got != "quick_create" {
+		t.Fatalf("linked quick-create kind = %q, want quick_create", got)
+	}
+	if got := computeTaskKind(db.AgentTaskQueue{
+		IssueID: issueID,
+		Context: []byte(`{"head_sha":"abc123"}`),
+	}); got != "direct" {
+		t.Fatalf("ordinary linked task kind = %q, want direct", got)
+	}
+}
+
 // TestTaskAttributionBase covers the pure row→attribution mapping (MUL-4302 §9):
 // source label + precise flag, initiator/originator raw refs, evidence, lineage —
 // no DB, no name hydration.

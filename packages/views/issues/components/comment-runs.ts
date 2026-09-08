@@ -39,6 +39,10 @@ export function buildCommentRunView(
   timeline: readonly TimelineEntry[],
   previous = new Map<string, CommentRun[]>(),
 ): { timeline: readonly TimelineEntry[]; runs: Map<string, CommentRun[]>; standaloneRuns: CommentRun[] } {
+  // Quick create owns the issue's creation, not a turn inside the issue. The
+  // backend links that task to the issue after success so it remains available
+  // in Execution history, but it must not become an unanchored Activity block.
+  const inlineTasks = tasks.filter((task) => task.kind !== "quick_create");
   const comments = new Map(timeline.filter((entry) => entry.type === "comment").map((entry) => [entry.id, entry]));
   const threadRoot = (id: string): string | undefined => {
     const seen = new Set<string>();
@@ -58,10 +62,10 @@ export function buildCommentRunView(
       replies.set(entry.source_task_id, entry);
     }
   }
-  const byTask = new Map(tasks.map((task) => [task.id, task]));
+  const byTask = new Map(inlineTasks.map((task) => [task.id, task]));
   const priorAnchors = new Map([...previous.values()].flatMap((runs) => runs.map((run) => [run.task.id, run.anchorCommentId] as const)));
   const placements: CommentRun[] = [];
-  for (const task of [...tasks].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))) {
+  for (const task of [...inlineTasks].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))) {
     const reply = replies.get(task.id);
     if (isObsoleteCommentRun(task) && !reply) continue;
     let anchorId: string | undefined;

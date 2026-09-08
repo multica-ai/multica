@@ -200,6 +200,13 @@ describe("standaloneCommentRuns", () => {
       .toEqual([{ task: run, hasReply: false }]);
   });
 
+  it("omits the issue-producing quick-create run from Activity", () => {
+    const quickCreate = task("quick-create", { kind: "quick_create", status: "completed" });
+    const assignment = task("assignment", { kind: "direct", status: "completed" });
+    expect(buildCommentRunView([quickCreate, assignment], []).standaloneRuns)
+      .toEqual([{ task: assignment, hasReply: false }]);
+  });
+
   it("keeps assignment slots after replies arrive and excludes comment-triggered slots", () => {
     const assigned = task("assignment");
     const triggered = task("comment-run", { trigger_comment_id: "trigger" });
