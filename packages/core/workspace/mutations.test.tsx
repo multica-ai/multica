@@ -13,6 +13,10 @@ import {
   useCreateWorkspace,
   useDeleteWorkspace,
   useUpdateWorkspaceMcpServer,
+  useDeleteWorkspaceMcpServer,
+  useAddAgentMcpServer,
+  useSetAgentMcpServerEnabled,
+  useRemoveAgentMcpServer,
 } from "./mutations";
 import { agentMcpServersOptions, workspaceKeys } from "./queries";
 import {
@@ -284,14 +288,16 @@ describe("useUpdateWorkspaceMcpServer", () => {
       .mockImplementation(async () => [{ ...current, enabled: true }]);
     setApiInstance({ updateWorkspaceMcpServer, listAgentMcpServers } as unknown as ApiClient);
 
-    const activeKey = agentMcpServersOptions("agent-1").queryKey;
-    const inactiveKey = agentMcpServersOptions("agent-2").queryKey;
+    const activeKey = agentMcpServersOptions("ws-1", "agent-1").queryKey;
+    const inactiveKey = agentMcpServersOptions("ws-1", "agent-2").queryKey;
+    const otherWorkspaceKey = agentMcpServersOptions("ws-2", "agent-3").queryKey;
     qc.setQueryData(workspaceKeys.mcpServers("ws-1"), [original]);
     qc.setQueryData(activeKey, [{ ...original, enabled: true }]);
     qc.setQueryData(inactiveKey, [{ ...original, enabled: false }]);
+    qc.setQueryData(otherWorkspaceKey, []);
 
     const { result } = renderHook(() => ({
-      assignment: useQuery(agentMcpServersOptions("agent-1")),
+      assignment: useQuery(agentMcpServersOptions("ws-1", "agent-1")),
       updateServer: useUpdateWorkspaceMcpServer("ws-1"),
     }), { wrapper: createWrapper(qc) });
 
@@ -307,6 +313,7 @@ describe("useUpdateWorkspaceMcpServer", () => {
     expect(updateWorkspaceMcpServer).toHaveBeenCalledWith("ws-1", "server-1", update);
     expect(qc.getQueryState(workspaceKeys.mcpServers("ws-1"))?.isInvalidated).toBe(true);
     expect(qc.getQueryState(inactiveKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(otherWorkspaceKey)?.isInvalidated).toBe(false);
     await waitFor(() => {
       expect(result.current.assignment.data).toEqual([{ ...original, ...expected, enabled: true }]);
     });
@@ -331,11 +338,11 @@ describe("useUpdateWorkspaceMcpServer", () => {
     setApiInstance({ updateWorkspaceMcpServer, listAgentMcpServers } as unknown as ApiClient);
 
     qc.setQueryData(workspaceKeys.mcpServers("ws-1"), [original]);
-    qc.setQueryData(agentMcpServersOptions("agent-1").queryKey, [
+    qc.setQueryData(agentMcpServersOptions("ws-1", "agent-1").queryKey, [
       { ...original, enabled: true },
     ]);
     const { result } = renderHook(() => ({
-      assignment: useQuery(agentMcpServersOptions("agent-1")),
+      assignment: useQuery(agentMcpServersOptions("ws-1", "agent-1")),
       updateServer: useUpdateWorkspaceMcpServer("ws-1"),
     }), { wrapper: createWrapper(qc) });
 
@@ -353,5 +360,87 @@ describe("useUpdateWorkspaceMcpServer", () => {
       expect(result.current.updateServer.error).toBe(responseLost);
     });
     expect(listAgentMcpServers).toHaveBeenCalledWith("agent-1");
+  });
+});
+
+describe("MCP mutation cache scope", () => {
+  it.each(["add", "toggle", "remove", "failed remove"])(
+    "refreshes only the target assignment after %s",
+    async (operation) => {
+      const qc = new QueryClient({
+        defaultOptions: { queries: { staleTime: Infinity } },
+      });
+      const write = vi.fn().mockResolvedValue([]);
+      const failure = new Error("response lost");
+      if (operation === "failed remove") write.mockRejectedValue(failure);
+      setApiInstance({
+        addAgentMcpServer: write,
+        setAgentMcpServerEnabled: write,
+        removeAgentMcpServer: write,
+      } as unknown as ApiClient);
+      const target = agentMcpServersOptions("ws-1", "agent-1").queryKey;
+      const sibling = agentMcpServersOptions("ws-1", "agent-2").queryKey;
+      const other = agentMcpServersOptions("ws-2", "agent-3").queryKey;
+      for (const key of [target, sibling, other]) qc.setQueryData(key, []);
+      const { result, unmount } = renderHook(
+        () => ({
+          add: useAddAgentMcpServer("ws-1", "agent-1"),
+          toggle: useSetAgentMcpServerEnabled("ws-1", "agent-1"),
+          remove: useRemoveAgentMcpServer("ws-1", "agent-1"),
+        }),
+        { wrapper: createWrapper(qc) },
+      );
+      await act(async () => {
+        if (operation === "add")
+          await result.current.add.mutateAsync("server-1");
+        else if (operation === "toggle")
+          await result.current.toggle.mutateAsync({
+            serverId: "server-1",
+            enabled: false,
+          });
+        else if (operation === "failed remove")
+          await expect(
+            result.current.remove.mutateAsync("server-1"),
+          ).rejects.toBe(failure);
+        else await result.current.remove.mutateAsync("server-1");
+      });
+      expect(write).toHaveBeenCalledWith(
+        ...(operation === "toggle"
+          ? ["agent-1", "server-1", false]
+          : ["agent-1", "server-1"]),
+      );
+      expect(qc.getQueryState(target)?.isInvalidated).toBe(true);
+      expect(qc.getQueryState(sibling)?.isInvalidated).toBe(false);
+      expect(qc.getQueryState(other)?.isInvalidated).toBe(false);
+      unmount();
+      qc.clear();
+    },
+  );
+
+  it("invalidates the library and its assignments after deleting a server", async () => {
+    const qc = new QueryClient();
+    const remove = vi.fn().mockResolvedValue(undefined);
+    setApiInstance({
+      deleteWorkspaceMcpServer: remove,
+    } as unknown as ApiClient);
+    const keys = [
+      workspaceKeys.mcpServers("ws-1"),
+      agentMcpServersOptions("ws-1", "agent-1").queryKey,
+    ];
+    const other = agentMcpServersOptions("ws-2", "agent-2").queryKey;
+    for (const key of [...keys, other]) qc.setQueryData(key, []);
+    const { result, unmount } = renderHook(
+      () => useDeleteWorkspaceMcpServer("ws-1"),
+      { wrapper: createWrapper(qc) },
+    );
+    await act(async () => {
+      await result.current.mutateAsync("server-1");
+    });
+    expect(remove).toHaveBeenCalledWith("ws-1", "server-1");
+    for (const key of keys)
+      expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(other)?.isInvalidated).toBe(false);
+    unmount();
+    qc.clear();
   });
 });

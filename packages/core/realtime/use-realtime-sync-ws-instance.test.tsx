@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { WSClient } from "../api/ws-client";
@@ -11,7 +11,7 @@ import { issueKeys } from "../issues/queries";
 import { chatKeys } from "../chat/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import { workspaceWorkingAgentsKeys } from "../agents/queries";
-import { workspaceKeys } from "../workspace/queries";
+import { agentMcpServersOptions, workspaceKeys } from "../workspace/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
 import {
   markWorkspaceDeletePending,
@@ -88,6 +88,39 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
+  it.each(["reconnect", "replacement"])(
+    "invalidates cached MCP configuration on socket %s",
+    async (recovery) => {
+      const libraryKey = workspaceKeys.mcpServers("ws-1");
+      const assignmentKey = agentMcpServersOptions("ws-1", "agent-1").queryKey;
+      const otherLibraryKey = workspaceKeys.mcpServers("ws-2");
+      qc.setQueryData(libraryKey, []);
+      qc.setQueryData(assignmentKey, []);
+      qc.setQueryData(otherLibraryKey, []);
+      const ws = createMockWs();
+      const { rerender } = renderHook(
+        ({ socket }) => useRealtimeSync(socket, stores),
+        {
+          initialProps: { socket: ws as WSClient | null },
+          wrapper: createWrapper(qc),
+        },
+      );
+
+      await act(async () => {
+        if (recovery === "reconnect") {
+          await vi.mocked(ws.onReconnect).mock.calls[0]![0]();
+        } else {
+          rerender({ socket: null });
+        }
+      });
+      if (recovery === "replacement") rerender({ socket: createMockWs() });
+
+      expect(qc.getQueryState(libraryKey)?.isInvalidated).toBe(true);
+      expect(qc.getQueryState(assignmentKey)?.isInvalidated).toBe(true);
+      expect(qc.getQueryState(otherLibraryKey)?.isInvalidated).toBe(false);
+    },
+  );
+
   it("does not invalidate when ws goes from instance to null", () => {
     const ws1 = createMockWs();
     const { rerender } = renderHook(
@@ -117,11 +150,11 @@ describe("useRealtimeSync — ws instance change", () => {
     rerender({ ws: ws2 });
 
     // Should have called invalidateQueries for all workspace-scoped keys
-    // (16 workspace-scoped [incl. property definitions] + 6 per-issue
+    // (17 workspace-scoped [incl. property definitions] + 6 per-issue
     // prefixes + the workspace working-agents projection + 5 per-chat
     // prefixes + 1 workspaceKeys.list() + 1 cross-workspace inbox unread
-    // summary = 31 calls)
-    expect(invalidateSpy).toHaveBeenCalledTimes(31);
+    // summary = 32 calls)
+    expect(invalidateSpy).toHaveBeenCalledTimes(32);
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {

@@ -28,10 +28,10 @@ const workspaceMcp = vi.hoisted(() => ({
 // Stubbing the query options keeps this a pure render test — the real ones
 // would hit fetch.
 vi.mock("@multica/core/workspace/queries", () => ({
-  agentMcpServersOptions: (agentId: string) => ({
-    queryKey: ["agents", agentId, "mcp-servers"],
+  agentMcpServersOptions: (wsId: string, agentId: string) => ({
+    queryKey: ["workspaces", wsId, "agents", "mcp-servers", agentId],
     queryFn: () => Promise.resolve(workspaceMcp.assigned),
-    enabled: agentId !== "",
+    enabled: wsId !== "" && agentId !== "",
   }),
   workspaceMcpServersOptions: (wsId: string) => ({
     queryKey: ["workspaces", wsId, "mcp-servers"],

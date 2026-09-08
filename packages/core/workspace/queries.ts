@@ -21,6 +21,11 @@ export const workspaceKeys = {
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
+  // Nested under agents so agent events and reconnects also refresh assignments.
+  agentMcpServersAll: (wsId: string) =>
+    ["workspaces", wsId, "agents", "mcp-servers"] as const,
+  agentMcpServers: (wsId: string, agentId: string) =>
+    ["workspaces", wsId, "agents", "mcp-servers", agentId] as const,
 };
 
 export function workspaceListOptions() {
@@ -205,10 +210,10 @@ export function workspaceMcpServersOptions(wsId: string) {
 }
 
 /** The workspace MCP servers assigned to one agent, with their toggles. */
-export function agentMcpServersOptions(agentId: string) {
+export function agentMcpServersOptions(wsId: string, agentId: string) {
   return queryOptions({
-    queryKey: ["agents", agentId, "mcp-servers"] as const,
+    queryKey: workspaceKeys.agentMcpServers(wsId, agentId),
     queryFn: () => api.listAgentMcpServers(agentId),
-    enabled: agentId !== "",
+    enabled: wsId !== "" && agentId !== "",
   });
 }

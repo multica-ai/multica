@@ -94,13 +94,12 @@ export function McpConfigTab({
   // from (GH #6062). A library entry does nothing until it is added here, and
   // each assignment carries its own toggle. The API returns names and
   // transports only — never the stored credentials.
-  const assignedQuery = useQuery(agentMcpServersOptions(agent.id));
-  const libraryQuery = useQuery(
-    workspaceMcpServersOptions(agent.workspace_id ?? ""),
-  );
-  const addServer = useAddAgentMcpServer(agent.id);
-  const setServerEnabled = useSetAgentMcpServerEnabled(agent.id);
-  const removeServer = useRemoveAgentMcpServer(agent.id);
+  const wsId = agent.workspace_id ?? "";
+  const assignedQuery = useQuery(agentMcpServersOptions(wsId, agent.id));
+  const libraryQuery = useQuery(workspaceMcpServersOptions(wsId));
+  const addServer = useAddAgentMcpServer(wsId, agent.id);
+  const setServerEnabled = useSetAgentMcpServerEnabled(wsId, agent.id);
+  const removeServer = useRemoveAgentMcpServer(wsId, agent.id);
   const redacted = agent.mcp_config_redacted === true;
   const managedServers = useMemo(
     () => listManagedMcpServers(agent.mcp_config),
