@@ -371,6 +371,18 @@ describe("workspace-switcher dropdown per-workspace dot", () => {
   });
 });
 
+describe("navigation typography", () => {
+  it("does not downsize Analytics and Settings below the other nav items", () => {
+    const { container } = render(<AppSidebar />);
+
+    for (const href of ["/acme/usage", "/acme/settings"]) {
+      expect(container.querySelector(`button[data-href="${href}"]`)).not.toHaveClass(
+        "text-caption",
+      );
+    }
+  });
+});
+
 describe("personal nav — Chat", () => {
   beforeEach(() => {
     chatSessions.current = [];
