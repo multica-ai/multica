@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import type { ChatMessage } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
-import { splitTimeline, extractCopyText } from "./copy-text";
+import { splitTimeline, extractCopyText, timelineFinalMatchesContent } from "./copy-text";
 
 const text = (seq: number, content: string): ChatTimelineItem => ({
   seq,
@@ -131,5 +131,66 @@ describe("extractCopyText", () => {
         text(3, "para 2"),
       ]),
     ).toBe("para 1\n\npara 2");
+  });
+});
+
+describe("timelineFinalMatchesContent", () => {
+  it("matches when final text equals content", () => {
+    expect(timelineFinalMatchesContent([text(1, "final answer")], "final answer")).toBe(true);
+  });
+
+  it("matches when final is several segments that concatenate to content", () => {
+    expect(
+      timelineFinalMatchesContent(
+        [text(1, "para 1"), text(2, "para 2")],
+        "para 1para 2",
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores whitespace-only differences (trailing newlines, CRLF, runs)", () => {
+    expect(
+      timelineFinalMatchesContent([text(1, "final answer \n\n")], "final answer"),
+    ).toBe(true);
+    expect(
+      timelineFinalMatchesContent([text(1, "line one\r\nline two")], "line one\nline two"),
+    ).toBe(true);
+    expect(
+      timelineFinalMatchesContent([text(1, "a  b")], "a b"),
+    ).toBe(true);
+  });
+
+  it("matches when both sides are empty", () => {
+    expect(timelineFinalMatchesContent([], "")).toBe(true);
+    expect(timelineFinalMatchesContent([], null)).toBe(true);
+    expect(timelineFinalMatchesContent([text(1, "   \n")], undefined)).toBe(true);
+  });
+
+  it("does not match when final is a strict prefix of content (truncated tail)", () => {
+    expect(
+      timelineFinalMatchesContent([text(1, "Summary: the")], "Summary: the answer is ready"),
+    ).toBe(false);
+  });
+
+  it("does not match when final and content are entirely different", () => {
+    expect(
+      timelineFinalMatchesContent(
+        [text(1, "Synthetic narration frame left over from a mid-run checkpoint.")],
+        "Summary: the answer is ready",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not match when final is empty but content is not", () => {
+    expect(timelineFinalMatchesContent([], "final answer")).toBe(false);
+    expect(
+      timelineFinalMatchesContent([text(1, "   ")], "final answer"),
+    ).toBe(false);
+  });
+
+  it("does not match when content only extends final by whitespace", () => {
+    // Whitespace normalization means trailing whitespace in content cannot
+    // manufacture a mismatch for an otherwise-complete final.
+    expect(timelineFinalMatchesContent([text(1, "final answer")], "final answer\n")).toBe(true);
   });
 });
