@@ -683,6 +683,48 @@ func TestLarkOutcomeReplierIssueDuplicateSendsConflict(t *testing.T) {
 	}
 }
 
+// TestLarkOutcomeReplierIssueLinkOmittedOnDegradedWorkspaceRead pins the only
+// production path that leaves the slug empty: the workspace lookup behind
+// /issue failed, which zeroes the issue prefix and the slug together. The reply
+// must still confirm the issue with the degraded "#42" label, and must send no
+// link at all — neither the workspace-less path nor a URL built from "#42"
+// routes anywhere.
+func TestLarkOutcomeReplierIssueLinkOmittedOnDegradedWorkspaceRead(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{configured: true}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  &BindingTokenService{},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		AppURL:      "https://multica.test",
+		Logger:      log,
+	})
+
+	inst := Installation{AppID: "cli_x"}
+	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
+	rep.Reply(context.Background(), inst, InboundMessage{ChatID: "oc_chat_42"}, DispatchResult{
+		Outcome:     OutcomeIngested,
+		IssueID:     mustUUID("22222222-2222-2222-2222-222222222222"),
+		IssueNumber: 42,
+		IssueTitle:  "fix login bug",
+	})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.textOut) != 1 {
+		t.Fatalf("expected one reply, got %d", len(stub.textOut))
+	}
+	text := stub.textOut[0].Text
+	if !strings.Contains(text, "Created #42") {
+		t.Fatalf("degraded reply should still confirm with the #42 label; got %q", text)
+	}
+	if strings.Contains(text, "https://multica.test") {
+		t.Fatalf("degraded reply must omit the link entirely; got %q", text)
+	}
+}
+
 // TestLarkOutcomeReplierOutcomeIngestedSilentWithoutIssue pins the
 // silent-by-default behaviour for plain chat messages. The "Created"
 // text is gated on IssueID.Valid; a chat that didn't include /issue

@@ -320,7 +320,9 @@ func issueCreatedText(res DispatchResult, appURL string) string {
 	} else {
 		line = fmt.Sprintf("Created %s — %s", identifier, title)
 	}
-	if link := channel.IssueWebLink(appURL, res.IssueWorkspaceSlug, identifier); link != "" {
+	// Link off IssueIdentifier, not the local display value: the "#42" fallback
+	// above is a degraded label, never a routable identifier.
+	if link := channel.IssueWebLink(appURL, res.IssueWorkspaceSlug, res.IssueIdentifier); link != "" {
 		return line + "\n" + link
 	}
 	return line
@@ -338,7 +340,9 @@ func issueDuplicateText(res DispatchResult, appURL string) string {
 	} else {
 		line = fmt.Sprintf("Not created — active issue %s already exists: %s", identifier, title)
 	}
-	if link := channel.IssueWebLink(appURL, res.IssueWorkspaceSlug, identifier); link != "" {
+	// Link off IssueIdentifier, not the local display value: the "#42" fallback
+	// above is a degraded label, never a routable identifier.
+	if link := channel.IssueWebLink(appURL, res.IssueWorkspaceSlug, res.IssueIdentifier); link != "" {
 		return line + "\n" + link
 	}
 	return line
