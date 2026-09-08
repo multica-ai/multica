@@ -1,4 +1,25 @@
 {
+  "inline_run": {
+    "label": "{{name}} の実行",
+    "stop": "停止",
+    "stopping": "停止中...",
+    "queued": "利用可能なエージェントを待っています。",
+    "starting": "エージェントのセッションを準備しています。",
+    "waiting_directory": "別の実行が作業ディレクトリを解放するのを待っています。",
+    "thinking": "思考中",
+    "waiting_response": "エージェントの応答を待っています。",
+    "view_activity": "実行過程を表示",
+    "steps_other": "{{count}} ステップ",
+    "loading": "実行過程を読み込み中...",
+    "load_failed": "実行過程を読み込めませんでした。",
+    "try_again": "再試行",
+    "empty": "実行記録はまだありません。",
+    "show_earlier": "前の {{count}} ステップを表示",
+    "full_log": "完全なログを開く",
+    "message": "エージェントのメッセージ",
+    "error": "エラー",
+    "waiting_result": "ツールの結果を待っています..."
+  },
   "status_catalog_error": {
     "title": "ステータス一覧を読み込めませんでした",
     "hint": "これがないとステータスの絞り込みを適用できないため、タスクは表示されません。",
@@ -402,24 +423,6 @@
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "thread_nav_label": "スレッドへ移動",
     "thread_nav_resolved_label": "{{title}}（解決済み）",
-    "thread_nav": {
-      "button_label_other": "スレッド（{{count}}）",
-      "search_placeholder": "スレッド・作成者を検索",
-      "match_count_other": "{{count}} 件ヒット",
-      "filter_all": "すべて",
-      "filter_unresolved": "未解決",
-      "filter_resolved": "解決済み",
-      "filter_mine": "@自分",
-      "group": {
-        "today": "今日",
-        "yesterday": "昨日",
-        "earlier": "それ以前"
-      },
-      "empty": "一致するスレッドはありません",
-      "hint_select": "選択",
-      "hint_jump": "移動",
-      "hint_close": "閉じる"
-    },
     "sidebar_tooltip": "右サイドバーの開閉",
     "find": {
       "placeholder": "タスク内を検索...",
@@ -469,6 +472,9 @@
     "show_more_activities_other": "アクティビティをさらに {{count}} 件表示"
   },
   "comment": {
+    "add_reaction": "リアクションを追加",
+    "collapse_thread": "スレッドを折りたたむ",
+    "expand_thread": "スレッドを展開",
     "delete_title": "コメントを削除",
     "delete_desc": "このコメントは完全に削除されます。この操作は元に戻せません。",
     "delete_desc_with_replies": "このコメントとすべての返信が完全に削除されます。この操作は元に戻せません。",

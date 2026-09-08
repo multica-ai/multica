@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 type DaemonWorkspaceResponse struct {
@@ -18,11 +21,21 @@ type DaemonWorkspaceResponse struct {
 // ListDaemonWorkspaces returns the minimal workspace membership projection
 // needed by local daemons. User-scoped PAT/JWT callers receive every workspace
 // they belong to; workspace-scoped daemon tokens receive only their bound
-// workspace.
+// workspace. This reconciliation read is eventual-consistency safe: daemons
+// repeat it on hints and timers, and downstream daemon APIs authorize their own
+// requests instead of treating this response as an admission decision.
 func (h *Handler) ListDaemonWorkspaces(w http.ResponseWriter, r *http.Request) {
 	var resp []DaemonWorkspaceResponse
 	if userID := requestUserID(r); userID != "" {
-		rows, err := h.Queries.ListDaemonWorkspaces(r.Context(), parseUUID(userID))
+		rows, err := dbreader.Read(
+			r.Context(),
+			h.ReadSelector,
+			dbreader.BusinessDaemonWorkspaces,
+			dbreader.EventualConsistency,
+			func(ctx context.Context, q *db.Queries) ([]db.ListDaemonWorkspacesRow, error) {
+				return q.ListDaemonWorkspaces(ctx, parseUUID(userID))
+			},
+		)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list daemon workspaces")
 			return
@@ -37,7 +50,15 @@ func (h *Handler) ListDaemonWorkspaces(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "daemon workspace identity required")
 			return
 		}
-		row, err := h.Queries.GetDaemonWorkspace(r.Context(), parseUUID(workspaceID))
+		row, err := dbreader.Read(
+			r.Context(),
+			h.ReadSelector,
+			dbreader.BusinessDaemonWorkspaces,
+			dbreader.EventualConsistency,
+			func(ctx context.Context, q *db.Queries) (db.GetDaemonWorkspaceRow, error) {
+				return q.GetDaemonWorkspace(ctx, parseUUID(workspaceID))
+			},
+		)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "workspace not found")
 			return

@@ -550,6 +550,35 @@ func extractServerMessage(body string) string {
 	return code
 }
 
+// ServerErrorCode returns the stable `code` a server error body carries, or ""
+// when err is not an HTTP failure or the body has no code.
+//
+// It exists so a command can recognize ONE specific refusal and print guidance
+// for it without matching on the English sentence, which changes with copy edits
+// and disappears under translation. Statuses whose generic copy is deliberately
+// vague — 403 above all, where naming the cause could confirm a resource exists —
+// keep that copy for every code a command has not explicitly opted into.
+func ServerErrorCode(err error) string {
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		return ""
+	}
+	body := strings.TrimSpace(httpErr.Body)
+	if body == "" || body[0] != '{' {
+		return ""
+	}
+	var parsed struct {
+		Code string `json:"code"`
+	}
+	if jsonErr := json.Unmarshal([]byte(body), &parsed); jsonErr != nil {
+		return ""
+	}
+	if !looksLikeMachineCode(parsed.Code) {
+		return ""
+	}
+	return parsed.Code
+}
+
 // looksLikeMachineCode reports whether s is a bare identifier such as
 // "cursor_query_mismatch" rather than a sentence meant for a person. The test
 // is deliberately narrow — lowercase word characters only — so that ordinary

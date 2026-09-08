@@ -469,8 +469,8 @@ func TestCodexRawTurnStarted(t *testing.T) {
 	if c.notificationProtocol != "raw" {
 		t.Fatalf("expected protocol=raw, got %q", c.notificationProtocol)
 	}
-	if c.turnID != "turn-1" {
-		t.Fatalf("expected turnID=turn-1, got %q", c.turnID)
+	if turnID := c.activeTurnID(); turnID != "turn-1" {
+		t.Fatalf("expected turnID=turn-1, got %q", turnID)
 	}
 }
 
@@ -1057,6 +1057,14 @@ func TestParseCodexSessionFileSinceResumeEdgeCases(t *testing.T) {
 			want: TokenUsage{InputTokens: 100, CacheReadTokens: 700},
 		},
 		{
+			name: "cache write remains separate from plain input",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":300,"cache_write_input_tokens":100}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1250,"cached_input_tokens":380,"cache_write_input_tokens":110}}}}`,
+			},
+			want: TokenUsage{InputTokens: 160, CacheReadTokens: 80, CacheWriteTokens: 10},
+		},
+		{
 			name: "counter reset accumulates every segment",
 			lines: []string{
 				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":50}}}}`,
@@ -1566,8 +1574,8 @@ func TestCodexTurnNotificationGateIgnoresSubagentTurnStarted(t *testing.T) {
 	if gate.turnID != "turn-main" {
 		t.Fatalf("subagent turn/started replaced gate turnID: got %q", gate.turnID)
 	}
-	if c.turnID != "turn-main" {
-		t.Fatalf("subagent turn/started replaced client turnID: got %q", c.turnID)
+	if turnID := c.activeTurnID(); turnID != "turn-main" {
+		t.Fatalf("subagent turn/started replaced client turnID: got %q", turnID)
 	}
 	if gotText != "Main answer" {
 		t.Fatalf("main turn text was lost after subagent start: got %q", gotText)
@@ -3679,6 +3687,370 @@ func TestCodexExecuteSurfacesUnsupportedServerRequestOnInterruptedTurn(t *testin
 	if !strings.Contains(result.Error, "unsupported codex app-server request: item/tool/call") {
 		t.Fatalf("expected unsupported request error, got %q", result.Error)
 	}
+}
+
+func TestCodexExecuteCancellationInterruptsTurnAndPreservesUsage(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	tempDir := t.TempDir()
+	startedPath := filepath.Join(tempDir, "turn-started")
+	interruptPath := filepath.Join(tempDir, "interrupt-request")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-cancel-usage"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-cancel-usage","turn":{"id":"turn-cancel-usage"}}}'`+"\n"+
+		`echo started > `+startedPath+"\n"+
+		`read line`+"\n"+
+		`printf '%s\n' "$line" > `+interruptPath+"\n"+
+		`echo '{"jsonrpc":"2.0","id":4,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"thr-cancel-usage","turnId":"turn-cancel-usage","tokenUsage":{"total":{"inputTokens":100,"cachedInputTokens":30,"outputTokens":10,"reasoningOutputTokens":0,"totalTokens":110},"last":{"inputTokens":100,"cachedInputTokens":30,"outputTokens":10,"reasoningOutputTokens":0,"totalTokens":110},"modelContextWindow":200000}}}'`+"\n"+
+		// Real Codex v2 turn/completed has no usage field; accounting arrives in
+		// the separate thread/tokenUsage/updated notification above.
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-cancel-usage","turn":{"id":"turn-cancel-usage","status":"interrupted"}}}'`+"\n")
+
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{
+		Model:                     "gpt-test",
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(startedPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timeout waiting for fake Codex turn to start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "aborted" {
+			t.Fatalf("status = %q, want aborted (error=%q)", result.Status, result.Error)
+		}
+		usage, ok := result.Usage["gpt-test"]
+		if !ok {
+			t.Fatalf("cancelled turn usage missing: %+v", result.Usage)
+		}
+		if usage.InputTokens != 70 || usage.CacheReadTokens != 30 || usage.OutputTokens != 10 {
+			t.Fatalf("cancelled turn usage = %+v, want input=70 cache_read=30 output=10", usage)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for cancelled Codex result")
+	}
+
+	rawInterrupt, err := os.ReadFile(interruptPath)
+	if err != nil {
+		t.Fatalf("read interrupt request: %v", err)
+	}
+	var interruptRequest map[string]any
+	if err := json.Unmarshal(rawInterrupt, &interruptRequest); err != nil {
+		t.Fatalf("parse interrupt request: %v: %q", err, rawInterrupt)
+	}
+	if interruptRequest["method"] != "turn/interrupt" {
+		t.Fatalf("method = %v, want turn/interrupt", interruptRequest["method"])
+	}
+	params, _ := interruptRequest["params"].(map[string]any)
+	if params["threadId"] != "thr-cancel-usage" || params["turnId"] != "turn-cancel-usage" {
+		t.Fatalf("interrupt params = %+v", params)
+	}
+}
+
+func TestCodexThreadTokenUsageUpdatedDropsResumeReplay(t *testing.T) {
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thread-resumed"
+	gate := &codexTurnNotificationGate{}
+	gate.arm()
+
+	// Codex deliberately emits the restored historical usage after the
+	// thread/resume response. The gate is armed by then, but no current turn ID
+	// exists yet, so this prior-turn snapshot must not be charged.
+	replay := codexThreadTokenUsageParams(
+		"thread-resumed", "turn-previous",
+		map[string]any{"inputTokens": float64(10_000), "outputTokens": float64(500)},
+		map[string]any{"inputTokens": float64(400), "outputTokens": float64(20)},
+	)
+	if !gate.accept("thread/tokenUsage/updated", replay) {
+		t.Fatal("armed notification gate should expose the resume replay to usage attribution")
+	}
+	c.handleRawNotification("thread/tokenUsage/updated", replay)
+	c.handleRawNotification("turn/started", map[string]any{
+		"threadId": "thread-resumed",
+		"turn":     map[string]any{"id": "turn-current"},
+	})
+	c.handleRawNotification("thread/tokenUsage/updated", codexThreadTokenUsageParams(
+		"thread-resumed", "turn-current",
+		map[string]any{"inputTokens": float64(10_100), "cachedInputTokens": float64(30), "outputTokens": float64(510)},
+		map[string]any{"inputTokens": float64(100), "cachedInputTokens": float64(30), "outputTokens": float64(10)},
+	))
+
+	c.usageMu.Lock()
+	got := c.usage
+	c.usageMu.Unlock()
+	want := (TokenUsage{InputTokens: 70, OutputTokens: 10, CacheReadTokens: 30})
+	if got != want {
+		t.Fatalf("usage after resume replay = %+v, want current turn only %+v", got, want)
+	}
+}
+
+func TestCodexThreadTokenUsageUpdatedDeduplicatesSnapshot(t *testing.T) {
+	c := &codexClient{}
+	c.setActiveTurnID("turn-current")
+	params := codexThreadTokenUsageParams(
+		"thread-1", "turn-current",
+		map[string]any{"inputTokens": float64(10_100), "cachedInputTokens": float64(30), "outputTokens": float64(510)},
+		map[string]any{"inputTokens": float64(100), "cachedInputTokens": float64(30), "outputTokens": float64(10)},
+	)
+	c.updateThreadTokenUsage(params)
+	c.updateThreadTokenUsage(params)
+
+	c.usageMu.Lock()
+	got := c.usage
+	c.usageMu.Unlock()
+	want := (TokenUsage{InputTokens: 70, OutputTokens: 10, CacheReadTokens: 30})
+	if got != want {
+		t.Fatalf("usage after duplicate snapshot = %+v, want %+v", got, want)
+	}
+}
+
+func TestCodexThreadTokenUsageUpdatedAccumulatesCurrentTurnResponses(t *testing.T) {
+	c := &codexClient{}
+	c.setActiveTurnID("turn-current")
+	c.updateThreadTokenUsage(codexThreadTokenUsageParams(
+		"thread-1", "turn-current",
+		// The cumulative total includes resumed history and is deliberately much
+		// larger than the first response being charged to this task.
+		map[string]any{
+			"inputTokens": float64(10_000), "cachedInputTokens": float64(2_000),
+			"outputTokens": float64(100), "reasoningOutputTokens": float64(10),
+			"cacheWriteInputTokens": float64(20),
+		},
+		map[string]any{
+			"inputTokens": float64(100), "cachedInputTokens": float64(30),
+			"outputTokens": float64(10), "reasoningOutputTokens": float64(2),
+			"cacheWriteInputTokens": float64(4),
+		},
+	))
+	c.updateThreadTokenUsage(codexThreadTokenUsageParams(
+		"thread-1", "turn-current",
+		map[string]any{
+			"inputTokens": float64(10_150), "cachedInputTokens": float64(2_050),
+			"outputTokens": float64(120), "reasoningOutputTokens": float64(13),
+			"cacheWriteInputTokens": float64(26),
+		},
+		map[string]any{
+			"inputTokens": float64(150), "cachedInputTokens": float64(50),
+			"outputTokens": float64(20), "reasoningOutputTokens": float64(3),
+			"cacheWriteInputTokens": float64(6),
+		},
+	))
+
+	c.usageMu.Lock()
+	got := c.usage
+	c.usageMu.Unlock()
+	want := (TokenUsage{InputTokens: 160, OutputTokens: 35, CacheReadTokens: 80, CacheWriteTokens: 10})
+	if got != want {
+		t.Fatalf("multi-response usage = %+v, want %+v", got, want)
+	}
+}
+
+func codexThreadTokenUsageParams(threadID, turnID string, total, last map[string]any) map[string]any {
+	return map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"tokenUsage": map[string]any{
+			"total": total,
+			"last":  last,
+		},
+	}
+}
+
+func TestCodexCancellationDuringInitializeStopsProcessImmediately(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only; Windows ownership is covered in proc_windows_test.go")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(3 * time.Second))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	marker := filepath.Join(t.TempDir(), "initialize-read")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo ready > `+marker+"\n"+
+		`sleep 30`+"\n")
+
+	result, elapsed := cancelFakeCodexAfterMarker(t, fakePath, marker, ExecOptions{})
+	if result.Status != "failed" || !strings.Contains(result.Error, "initialize failed") {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("initialize cancellation took %s; process cleanup should be immediate", elapsed)
+	}
+}
+
+func TestCodexCancellationBeforeTurnStartedStopsProcessImmediately(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only; Windows ownership is covered in proc_windows_test.go")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(3 * time.Second))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	marker := filepath.Join(t.TempDir(), "turn-start-read")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-race"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo ready > `+marker+"\n"+
+		`sleep 30`+"\n")
+
+	result, elapsed := cancelFakeCodexAfterMarker(t, fakePath, marker, ExecOptions{})
+	if result.Status != "aborted" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("pre-turn/started cancellation took %s; process cleanup should be immediate", elapsed)
+	}
+}
+
+func TestCodexNonResponsiveInterruptStopsProcessAtConfiguredDeadline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only; Windows ownership is covered in proc_windows_test.go")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(3 * time.Second))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	tempDir := t.TempDir()
+	marker := filepath.Join(tempDir, "turn-started")
+	interrupt := filepath.Join(tempDir, "interrupt-read")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-stuck"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-stuck","turn":{"id":"turn-stuck"}}}'`+"\n"+
+		`echo ready > `+marker+"\n"+
+		`read line`+"\n"+
+		`echo interrupt > `+interrupt+"\n"+
+		`sleep 30`+"\n")
+
+	result, elapsed := cancelFakeCodexAfterMarker(t, fakePath, marker, ExecOptions{TurnInterruptTimeout: 150 * time.Millisecond})
+	if result.Status != "aborted" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if _, err := os.Stat(interrupt); err != nil {
+		t.Fatalf("turn/interrupt was not sent: %v", err)
+	}
+	if elapsed < 100*time.Millisecond || elapsed > time.Second {
+		t.Fatalf("interrupt cleanup took %s; want configured wait followed by immediate process stop", elapsed)
+	}
+}
+
+func TestCodexInterruptCompletesNearConfiguredDeadline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	marker := filepath.Join(t.TempDir(), "turn-started")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-near-deadline"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-near-deadline","turn":{"id":"turn-near-deadline"}}}'`+"\n"+
+		`echo ready > `+marker+"\n"+
+		`read line`+"\n"+
+		`sleep 0.12`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":4,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"thr-near-deadline","turnId":"turn-near-deadline","tokenUsage":{"total":{"inputTokens":12,"cachedInputTokens":2,"outputTokens":3,"reasoningOutputTokens":0,"totalTokens":15},"last":{"inputTokens":12,"cachedInputTokens":2,"outputTokens":3,"reasoningOutputTokens":0,"totalTokens":15},"modelContextWindow":200000}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-near-deadline","turn":{"id":"turn-near-deadline","status":"interrupted"}}}'`+"\n")
+
+	result, elapsed := cancelFakeCodexAfterMarker(t, fakePath, marker, ExecOptions{
+		Model:                "gpt-test",
+		TurnInterruptTimeout: 250 * time.Millisecond,
+	})
+	if result.Status != "aborted" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if elapsed < 100*time.Millisecond || elapsed >= 250*time.Millisecond {
+		t.Fatalf("interrupt completed in %s, want a near-deadline success below 250ms", elapsed)
+	}
+	if got := result.Usage["gpt-test"]; got.InputTokens != 10 || got.CacheReadTokens != 2 || got.OutputTokens != 3 {
+		t.Fatalf("near-deadline usage = %+v", got)
+	}
+}
+
+func cancelFakeCodexAfterMarker(t *testing.T, fakePath, marker string, opts ExecOptions) (Result, time.Duration) {
+	t.Helper()
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	session, err := backend.Execute(ctx, "prompt", opts)
+	if err != nil {
+		cancel()
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	waitForCodexMarker(t, marker, 5*time.Second)
+	started := time.Now()
+	cancel()
+	select {
+	case result := <-session.Result:
+		return result, time.Since(started)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for cancelled Codex result")
+		return Result{}, 0
+	}
+}
+
+func waitForCodexMarker(t *testing.T, path string, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", path)
 }
 
 func TestCodexExecuteTimeoutWinsOverProcessExitDuringActiveTurn(t *testing.T) {

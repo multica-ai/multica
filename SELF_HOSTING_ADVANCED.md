@@ -210,6 +210,7 @@ These are configured on each user's machine, not on the server:
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | WebSocket URL for daemon → server connection |
 | `MULTICA_APP_URL` | `http://localhost:3000` | Frontend URL for CLI login flow |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Catch-up poll for tasks; WebSocket wake signals normally deliver work sooner |
+| `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | Upper bound for healthy WebSocket claim safety polls, configured independently of `MULTICA_DAEMON_POLL_INTERVAL`; downward jitter keeps normal polls at `2m30s`–`2m45s`, while old servers and uncertain claims retain the ordinary poll interval |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
 
 Agent-specific overrides:

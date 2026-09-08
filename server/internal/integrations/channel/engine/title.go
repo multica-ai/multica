@@ -13,6 +13,22 @@ func DeriveChatTitle(body string) string {
 	return chattitle.Derive(body)
 }
 
+// chatTitleSource prefers the user's own typed text over the contextual body.
+// CommandText excludes quoted/recent context but deliberately retains /clear
+// for command classification. Only an already-consumed fresh directive is
+// removed here; a /new body beginning with /clear remains ordinary text.
+func chatTitleSource(body, commandText string, consumedFresh bool) string {
+	if strings.TrimSpace(commandText) != "" {
+		if consumedFresh {
+			if current, ok := ParseFreshSessionCommand(commandText); ok {
+				return current
+			}
+		}
+		return commandText
+	}
+	return body
+}
+
 func deriveFirstMessageTitle(body string, hasMedia bool) string {
 	if hasMedia {
 		body = withoutMediaPlaceholderLines(body)

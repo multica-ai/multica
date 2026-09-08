@@ -641,6 +641,14 @@ func (h *Handler) getAgentRuntime(ctx context.Context, source string, id pgtype.
 	return h.runtimeLookup(source).Get(ctx, id)
 }
 
+// getAgentRuntimes is the batch sibling of getAgentRuntime: one query for many
+// ids, attributed to source the same way (MUL-6788). It returns the rows keyed
+// by canonical UUID string and surfaces the read error so batch callers fail
+// closed instead of treating a failed read as "no rows exist".
+func (h *Handler) getAgentRuntimes(ctx context.Context, source string, ids []pgtype.UUID) (map[string]db.AgentRuntime, error) {
+	return h.runtimeLookup(source).GetMany(ctx, ids)
+}
+
 // runtimeLookup is the same reader, unexecuted, for handlers that hand it to a
 // shared readiness helper instead of reading the row themselves.
 func (h *Handler) runtimeLookup(source string) service.RuntimeLookup {

@@ -437,6 +437,108 @@ func main() {
 	}
 }
 
+func TestCodexWindowsCancelledTurnKillsOwnedDescendantsWhenInterruptStalls(t *testing.T) {
+	tempDir := t.TempDir()
+	sourcePath := filepath.Join(tempDir, "fake_codex_cancel.go")
+	exePath := filepath.Join(tempDir, "fake_codex_cancel.exe")
+	pidPath := filepath.Join(tempDir, "descendant.pid")
+	startedPath := filepath.Join(tempDir, "turn-started")
+	const source = `package main
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"os/exec"
+	"time"
+)
+func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--version" { fmt.Println("codex-cli windows-test"); return }
+	if len(os.Args) > 1 && os.Args[1] == "descendant" { time.Sleep(30*time.Second); return }
+	s := bufio.NewScanner(os.Stdin)
+	if !s.Scan() { return }
+	fmt.Println("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}")
+	if !s.Scan() { return }
+	if !s.Scan() { return }
+	fmt.Println("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"thread\":{\"id\":\"thr-windows-cancel\"}}}")
+	if !s.Scan() { return }
+	fmt.Println("{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}")
+	fmt.Println("{\"jsonrpc\":\"2.0\",\"method\":\"turn/started\",\"params\":{\"threadId\":\"thr-windows-cancel\",\"turn\":{\"id\":\"turn-windows-cancel\"}}}")
+	child := exec.Command(os.Args[0], "descendant")
+	child.Stdout = os.Stdout
+	child.Stderr = os.Stderr
+	if err := child.Start(); err != nil { panic(err) }
+	_ = os.WriteFile(os.Getenv("DESCENDANT_PID_FILE"), []byte(fmt.Sprint(child.Process.Pid)), 0600)
+	_ = os.WriteFile(os.Getenv("TURN_STARTED_FILE"), []byte("ready"), 0600)
+	if !s.Scan() { return }
+	time.Sleep(time.Hour)
+}`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	build := exec.Command("go", "build", "-o", exePath, sourcePath)
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build Windows fake app-server: %v: %s", err, output)
+	}
+
+	codexGracefulShutdownTimeoutNanos.Store(int64(2 * time.Second))
+	codexProcessWaitDelayNanos.Store(int64(200 * time.Millisecond))
+	t.Cleanup(func() {
+		codexGracefulShutdownTimeoutNanos.Store(0)
+		codexProcessWaitDelayNanos.Store(0)
+	})
+
+	backend, err := New("codex", Config{
+		ExecutablePath: exePath,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Env: map[string]string{
+			"DESCENDANT_PID_FILE": pidPath,
+			"TURN_STARTED_FILE":   startedPath,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{
+		Timeout:              5 * time.Second,
+		HandshakeTimeout:     time.Second,
+		TurnInterruptTimeout: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	waitForWindowsPath(t, startedPath, 10*time.Second)
+	descendantPid := waitForDescendantPid(t, pidPath)
+	started := time.Now()
+	cancel()
+	result := <-session.Result
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("cancel cleanup exceeded bound: %s", elapsed)
+	}
+	if result.Status != "aborted" {
+		t.Fatalf("expected aborted, got %+v", result)
+	}
+	if processStillRunning(descendantPid) {
+		t.Fatalf("descendant %d survived stalled interrupt cleanup", descendantPid)
+	}
+}
+
+func waitForWindowsPath(t *testing.T, path string, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", path)
+}
+
 func phaseCount(entries []map[string]any, phase string) int {
 	count := 0
 	for _, entry := range entries {

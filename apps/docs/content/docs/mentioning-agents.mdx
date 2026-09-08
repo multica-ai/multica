@@ -43,7 +43,7 @@ A plain comment (containing no @ at all) is routed by discussion context:
 
 When a comment explicitly @-mentions other targets (including members), the assignee fallback no longer applies.
 
-When a reply triggers an agent other than the assignee, Multica schedules a delayed fallback run for the assignee: if the target agent replies within about 5 minutes, the fallback is cancelled automatically; otherwise the assignee starts a run too.
+Replies stay with the target agent even while its runtime is offline or busy. Multica does not automatically start the issue assignee after a timeout. To involve another agent, explicitly @-mention it.
 
 ## Coalescing consecutive comments
 

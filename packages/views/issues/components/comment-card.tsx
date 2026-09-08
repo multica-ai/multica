@@ -1,10 +1,10 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -25,6 +25,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
+import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-picker";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -44,6 +45,12 @@ import { useT } from "../../i18n";
 import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
+import { InlineCommentRun, useInlineCommentRunState, type InlineCommentRunState } from "./inline-comment-run";
+import { EMPTY_COMMENT_RUNS, showCommentRunInHeader, type CommentRun } from "./comment-runs";
+import { useRunCommentMotion } from "./use-run-comment-motion";
+
+const commentActionClassName =
+  "text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50";
 
 const highlightedCommentBackgroundClass =
   "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
@@ -89,6 +96,9 @@ function StickyHeaderShell({
 
 interface CommentCardProps {
   issueId: string;
+  runs?: CommentRun[];
+  runViewState?: InlineCommentRunState;
+  enteringRunIds?: ReadonlySet<string>;
   entry: TimelineEntry;
   /**
    * Flat list of every nested reply under this thread root, in render order.
@@ -586,6 +596,8 @@ function CommentRevisionConflict({
 // ---------------------------------------------------------------------------
 
 function CommentRow({
+  runHeader,
+  runMetadata,
   issueId,
   entry,
   currentUserId,
@@ -598,6 +610,8 @@ function CommentRow({
   onCreateSubIssue,
   onResolveToggle,
 }: {
+  runHeader?: ReactNode;
+  runMetadata?: ReactNode;
   issueId: string;
   entry: TimelineEntry;
   currentUserId?: string;
@@ -627,7 +641,7 @@ function CommentRow({
   const reactions = entry.reactions ?? [];
 
   return (
-    <div className="py-1.5">
+    <div data-comment-block className="pb-3">
       {/* Header pins to the timeline's scroll parent within this reply's own
           row box, so a LONG reply keeps its
           author + actions visible while you scroll its body, then releases once
@@ -635,7 +649,7 @@ function CommentRow({
           highlight state while it occludes the body scrolling underneath. */}
       <StickyHeaderShell
         highlighted={isHighlighted}
-        className="flex items-center gap-2.5 px-4 max-md:px-3 pt-1 pb-1.5"
+        className="flex items-center gap-2.5 px-4 max-md:px-3 pt-3 pb-2"
       >
         <ActorAvatar
           actorType={entry.actor_type}
@@ -663,20 +677,28 @@ function CommentRow({
           </TooltipContent>
         </Tooltip>
 
+        {runHeader}
+
         {isResolution && (
           <span className="text-caption font-medium text-success">
             {t(($) => $.comment.resolve.resolution_badge)}
           </span>
         )}
 
-        <div className="ml-auto flex items-center gap-0.5">
+        <div data-comment-actions className="ml-auto flex shrink-0 items-center gap-0.5">
+          {!edit.editing && <QuickEmojiPicker
+            onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
+            ariaLabel={t(($) => $.comment.add_reaction)}
+            align="end"
+            className={buttonVariants({ variant: "ghost", size: "icon-sm", className: commentActionClassName })}
+          />}
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="text-muted-foreground"
+                  className={commentActionClassName}
                   aria-label={t(($) => $.comment.more_actions)}
                 >
                   <MoreHorizontal className="h-4 w-4" aria-hidden />
@@ -822,7 +844,7 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 pt-1 text-body leading-relaxed text-foreground">
+          <div data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
@@ -833,15 +855,49 @@ function CommentRow({
               className="mt-2 pl-12 pr-4 max-md:pl-3 max-md:pr-3"
             />
           )}
-          <ReactionBar
-            reactions={reactions}
-            currentUserId={currentUserId}
-            onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
-            getActorName={getActorName}
-            className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3"
-          />
         </>
       )}
+      <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">{runMetadata}</div>
+      {!edit.editing && <ReactionBar
+        reactions={reactions}
+        showPicker={false}
+        currentUserId={currentUserId}
+        onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
+        getActorName={getActorName}
+        className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3"
+      />}
+    </div>
+  );
+}
+
+/** A run without a persisted reply still belongs to the agent, never its trigger author. */
+export function AgentRunComment({ run, standalone = false, commentProps, entering = false }: {
+  run: CommentRun;
+  standalone?: boolean;
+  entering?: boolean;
+  commentProps?: CommentCardProps;
+}) {
+  const viewState = useInlineCommentRunState();
+  const reply = commentProps?.entry;
+  const motionRef = useRunCommentMotion(entering, reply?.id, run.task.status);
+  return (
+    <div ref={motionRef} data-run-slot-id={run.task.id}
+      data-run-comment-id={!reply ? run.task.id : undefined}
+      id={!standalone && reply ? `comment-${reply.id}` : undefined}
+      className={cn(standalone ? !reply && "rounded-xl border bg-card" : "border-t border-border/50", !reply && "py-1.5", reply && commentProps?.highlightedCommentId === reply.id && highlightedCommentBackgroundClass)}>
+      {commentProps ? standalone ? (
+        <CommentCard {...commentProps} runs={commentProps.runs ?? [run]} runViewState={viewState} />
+      ) : (
+        <CommentRow {...commentProps}
+          isHighlighted={commentProps.highlightedCommentId === reply?.id}
+          isResolution={!!reply?.resolved_at}
+          runHeader={showCommentRunInHeader(run)
+            ? <InlineCommentRun run={run} viewState={viewState} presentation="header" /> : undefined}
+          runMetadata={!showCommentRunInHeader(run)
+            ? <InlineCommentRun run={run} viewState={viewState} /> : undefined} />
+      ) : <div className="px-4 max-md:px-3">
+        <InlineCommentRun run={run} viewState={viewState} showIdentity />
+      </div>}
     </div>
   );
 }
@@ -859,6 +915,9 @@ function CommentRow({
 
 function CommentCardImpl({
   issueId,
+  runs = EMPTY_COMMENT_RUNS,
+  runViewState,
+  enteringRunIds,
   entry,
   replies,
   currentUserId,
@@ -895,6 +954,22 @@ function CommentCardImpl({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const allNestedReplies = replies;
+  const slottedReplyIds = new Set(runs.filter((run) => run.hasReply && run.anchorCommentId && run.commentId !== entry.id)
+    .map((run) => run.commentId));
+  const renderRuns = (commentId: string, presentation: "inline" | "header" = "inline") => runs.filter((run) => run.commentId === commentId && run.hasReply
+    && showCommentRunInHeader(run) === (presentation === "header")
+    && (!run.anchorCommentId || run.anchorCommentId === commentId || replyFolded))
+    .map((run) => <InlineCommentRun key={run.task.id} run={run} presentation={presentation} viewState={run.commentId === entry.id ? runViewState : undefined} />);
+
+  const renderAnchoredRuns = (commentId: string) => runs.filter((run) => run.anchorCommentId === commentId
+    && !(replyFolded && run.hasReply))
+    .map((run) => {
+      const reply = run.hasReply ? allNestedReplies.find((entry) => entry.id === run.commentId) : undefined;
+      return <Fragment key={run.task.id}><AgentRunComment run={run} entering={enteringRunIds?.has(run.task.id)} commentProps={reply ? {
+        issueId, entry: reply, replies: [], currentUserId, canModerate, onReply, onEdit, onDelete,
+        onToggleReaction, onCreateSubIssue, onResolveToggle, highlightedCommentId, enteringRunIds,
+      } : undefined} />{reply && reply.id !== commentId && renderAnchoredRuns(reply.id)}</Fragment>;
+    });
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
@@ -952,23 +1027,14 @@ function CommentCardImpl({
             That is what keeps exactly one header pinned at a time: without this
             wrapper the header's containing block is the whole thread and it
             stays stuck behind every reply. */}
-        <div className={cn("transition-colors duration-700", isHighlighted && highlightedCommentBackgroundClass)}>
-          {/* Header — always visible, acts as toggle */}
+        <div data-comment-block className={cn("transition-colors duration-700", isHighlighted && highlightedCommentBackgroundClass)}>
+          {/* Keep the author aligned with replies; thread controls sit on the right. */}
           <StickyHeaderShell
             sticky={stickyHeader}
             highlighted={isHighlighted}
-            className="px-4 max-md:px-3 py-3"
+            className={cn("px-4 max-md:px-3", open ? "pt-3 pb-2" : "py-3")}
           >
             <div className="flex items-center gap-2.5">
-              <button
-                type="button"
-                aria-expanded={open}
-                aria-controls={`comment-body-${entry.id}`}
-                onClick={handleToggle}
-                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-              >
-                <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
-              </button>
               <ActorAvatar
                 actorType={entry.actor_type}
                 actorId={entry.actor_id}
@@ -995,6 +1061,8 @@ function CommentCardImpl({
                 </TooltipContent>
               </Tooltip>
 
+              {renderRuns(entry.id, "header")}
+
               {!open && contentPreview && (
                 <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">
                   {contentPreview}
@@ -1006,15 +1074,34 @@ function CommentCardImpl({
                 </span>
               )}
 
-              {open && (
-                <div className="ml-auto flex items-center gap-0.5">
+              <div data-comment-actions className="ml-auto flex shrink-0 items-center gap-0.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={open ? t(($) => $.comment.collapse_thread) : t(($) => $.comment.expand_thread)}
+                  title={open ? t(($) => $.comment.collapse_thread) : t(($) => $.comment.expand_thread)}
+                  aria-expanded={open}
+                  aria-controls={open ? `comment-body-${entry.id}` : undefined}
+                  onClick={handleToggle}
+                  className={commentActionClassName}
+                >
+                  <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
+                </Button>
+                {open && <>
+                  {!edit.editing && <QuickEmojiPicker
+                    onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
+                    ariaLabel={t(($) => $.comment.add_reaction)}
+                    align="end"
+                    className={buttonVariants({ variant: "ghost", size: "icon-sm", className: commentActionClassName })}
+                  />}
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          className="text-muted-foreground"
+                          className={commentActionClassName}
                           aria-label={t(($) => $.comment.more_actions)}
                         >
                           <MoreHorizontal className="h-4 w-4" aria-hidden />
@@ -1080,8 +1167,8 @@ function CommentCardImpl({
                     onConfirm={() => onDelete(entry.id)}
                     hasReplies
                   />
-                </div>
-              )}
+                </>}
+              </div>
             </div>
           </StickyHeaderShell>
 
@@ -1089,11 +1176,11 @@ function CommentCardImpl({
             probes computed styles to detect animations, forcing a style
             recalculation across long issue-detail documents. */}
         {open && (
-          <div id={`comment-body-${entry.id}`} className="px-4 max-md:px-3 pt-1 pb-3">
+          <div id={`comment-body-${entry.id}`} className="px-4 max-md:px-3 pb-3">
             {edit.editing ? (
               <div
                 {...edit.dropZoneProps}
-                className="relative pl-10 max-md:pl-0"
+                className="relative pl-8 max-md:pl-0"
                 onKeyDown={(e) => { if (e.key === "Escape") edit.cancelEdit(); }}
               >
                 <div className="text-body leading-relaxed">
@@ -1170,26 +1257,28 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
-                <div className="pl-10 max-md:pl-0 text-body leading-relaxed text-foreground">
+                <div data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
-                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10 max-md:pl-0" />
+                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
                 {retryableAgentFailureComment(entry) && (
                   <TaskCommentRetryButton
                     issueId={issueId}
                     taskId={entry.source_task_id}
-                    className="mt-2 pl-10 max-md:pl-0"
+                    className="mt-2 pl-8 max-md:pl-0"
                   />
                 )}
-                <ReactionBar
-                  reactions={reactions}
-                  currentUserId={currentUserId}
-                  onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
-                  getActorName={getActorName}
-                  className="mt-1.5 pl-10 max-md:pl-0"
-                />
               </>
             )}
+            <div className="pl-8 max-md:pl-0">{renderRuns(entry.id)}</div>
+            {!edit.editing && <ReactionBar
+              reactions={reactions}
+              showPicker={false}
+              currentUserId={currentUserId}
+              onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
+              getActorName={getActorName}
+              className="mt-1.5 pl-8 max-md:pl-0"
+            />}
           </div>
         )}
         </div>
@@ -1199,6 +1288,7 @@ function CommentCardImpl({
             to mirror the body Panel's collapse visibility. */}
         {open && (
           <>
+          {renderAnchoredRuns(entry.id)}
           {replyFolded ? (
             <>
               {/* reply-mode folded: other replies behind a bar, resolution pinned below */}
@@ -1211,27 +1301,32 @@ function CommentCardImpl({
                 </div>
               )}
               {resolutionReply && (
-                <div
-                  id={`comment-${resolutionReply.id}`}
-                  className={cn(
-                    "border-t border-border/50 transition-colors duration-700",
-                    highlightedCommentId === resolutionReply.id && highlightedCommentBackgroundClass,
-                  )}
-                >
-                  <CommentRow
-                    issueId={issueId}
-                    entry={resolutionReply}
-                    currentUserId={currentUserId}
-                    canModerate={canModerate}
-                    isResolution
-                    isHighlighted={highlightedCommentId === resolutionReply.id}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onToggleReaction={onToggleReaction}
-                    onCreateSubIssue={onCreateSubIssue}
-                    onResolveToggle={onResolveToggle}
-                  />
-                </div>
+                <>
+                  <div
+                    id={`comment-${resolutionReply.id}`}
+                    className={cn(
+                      "border-t border-border/50 transition-colors duration-700",
+                      highlightedCommentId === resolutionReply.id && highlightedCommentBackgroundClass,
+                    )}
+                  >
+                    <CommentRow
+                      issueId={issueId}
+                      entry={resolutionReply}
+                      runHeader={renderRuns(resolutionReply.id, "header")}
+                      runMetadata={renderRuns(resolutionReply.id)}
+                      currentUserId={currentUserId}
+                      canModerate={canModerate}
+                      isResolution
+                      isHighlighted={highlightedCommentId === resolutionReply.id}
+                      onEdit={onEdit}
+                      onDelete={onDelete}
+                      onToggleReaction={onToggleReaction}
+                      onCreateSubIssue={onCreateSubIssue}
+                      onResolveToggle={onResolveToggle}
+                    />
+                  </div>
+                  {renderAnchoredRuns(resolutionReply.id)}
+                </>
               )}
             </>
           ) : (
@@ -1249,29 +1344,33 @@ function CommentCardImpl({
                 </button>
               )}
               {/* Replies — chronological; the resolution keeps its place with a badge */}
-              {allNestedReplies.map((reply) => (
-                <div
-                  key={reply.id}
-                  id={`comment-${reply.id}`}
-                  className={cn(
-                    "border-t border-border/50 transition-colors duration-700",
-                    highlightedCommentId === reply.id && highlightedCommentBackgroundClass,
-                  )}
-                >
-                  <CommentRow
-                    issueId={issueId}
-                    entry={reply}
-                    currentUserId={currentUserId}
-                    canModerate={canModerate}
-                    isResolution={reply.id === replyResolutionId}
-                    isHighlighted={highlightedCommentId === reply.id}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onToggleReaction={onToggleReaction}
-                    onCreateSubIssue={onCreateSubIssue}
-                    onResolveToggle={onResolveToggle}
-                  />
-                </div>
+              {allNestedReplies.filter((reply) => !slottedReplyIds.has(reply.id)).map((reply) => (
+                <Fragment key={reply.id}>
+                  <div
+                    id={`comment-${reply.id}`}
+                    className={cn(
+                      "border-t border-border/50 transition-colors duration-700",
+                      highlightedCommentId === reply.id && highlightedCommentBackgroundClass,
+                    )}
+                  >
+                    <CommentRow
+                      issueId={issueId}
+                      entry={reply}
+                      runHeader={renderRuns(reply.id, "header")}
+                      runMetadata={renderRuns(reply.id)}
+                      currentUserId={currentUserId}
+                      canModerate={canModerate}
+                      isResolution={reply.id === replyResolutionId}
+                      isHighlighted={highlightedCommentId === reply.id}
+                      onEdit={onEdit}
+                      onDelete={onDelete}
+                      onToggleReaction={onToggleReaction}
+                      onCreateSubIssue={onCreateSubIssue}
+                      onResolveToggle={onResolveToggle}
+                    />
+                  </div>
+                  {renderAnchoredRuns(reply.id)}
+                </Fragment>
               ))}
 
               {/* Reply input */}

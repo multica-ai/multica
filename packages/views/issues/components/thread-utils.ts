@@ -31,6 +31,21 @@ export function collectThreadReplies(
   return sortTimelineEntriesAsc(out);
 }
 
+/** Unique member and agent authors, root first, followed by all nested replies. */
+export function collectThreadParticipants(
+  root: TimelineEntry,
+  replies: readonly TimelineEntry[],
+): TimelineEntry[] {
+  const seen = new Set<string>();
+  return [root, ...replies].filter((entry) => {
+    if (entry.actor_type !== "member" && entry.actor_type !== "agent") return false;
+    const key = `${entry.actor_type}:${entry.actor_id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
  * A thread's resolution, derived purely from `resolved_at`. Two user actions
  * write the same field:

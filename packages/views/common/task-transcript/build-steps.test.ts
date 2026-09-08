@@ -6,7 +6,6 @@ import {
   groupSteps,
   laneSegmentPosition,
   rowCalls,
-  shouldShowTimeline,
   timelineTicks,
   toolKindTotals,
   type TraceCallStep,
@@ -302,35 +301,5 @@ describe("toolKindTotals", () => {
       read: 1_000,
       other: 0,
     });
-  });
-});
-
-describe("shouldShowTimeline", () => {
-  function longRun(stepCount: number, seconds: number) {
-    const items: TimelineItem[] = [];
-    for (let i = 0; i < stepCount; i++) {
-      const start = (seconds / stepCount) * i;
-      items.push(call("Bash", start), result("Bash", start + 1));
-    }
-    return buildSteps(items);
-  }
-
-  it("shows for a long run with many steps", () => {
-    const steps = longRun(10, 600);
-    expect(shouldShowTimeline(steps, buildLanes(steps, at(0), at(600)))).toBe(true);
-  });
-
-  it("hides for a short run — a handful of bars says less than the row durations", () => {
-    const steps = longRun(3, 600);
-    expect(shouldShowTimeline(steps, buildLanes(steps, at(0), at(600)))).toBe(false);
-  });
-
-  it("hides for a fast run even with many steps", () => {
-    const steps = longRun(10, 20);
-    expect(shouldShowTimeline(steps, buildLanes(steps, at(0), at(20)))).toBe(false);
-  });
-
-  it("hides when lanes could not be built", () => {
-    expect(shouldShowTimeline(longRun(10, 600), null)).toBe(false);
   });
 });

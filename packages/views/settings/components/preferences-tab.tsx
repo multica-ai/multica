@@ -21,6 +21,16 @@ import { useAuthStore } from "@multica/core/auth";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
 import { api } from "@multica/core/api";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@multica/ui/components/ui/tabs";
+import { useNavigation } from "../../navigation";
+import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
+import { IssueTab } from "./issue-tab";
+import { ChatTab } from "./chat-tab";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -30,6 +40,57 @@ import {
 } from "./settings-layout";
 
 export function PreferencesTab() {
+  const { t } = useT("settings");
+  const navigation = useNavigation();
+  const requested = resolveSettingsLocation(navigation.searchParams).section;
+  const section =
+    requested === "issue" || requested === "chat" ? requested : "general";
+  return (
+    <SettingsTab
+      title={t(($) => $.page.tabs.preferences)}
+      description={t(($) => $.preferences.description)}
+    >
+      <Tabs
+        value={section}
+        onValueChange={(next) =>
+          navigation.replace(
+            settingsHref(
+              navigation.pathname,
+              navigation.searchParams,
+              "preferences",
+              { section: String(next) },
+            ),
+          )
+        }
+      >
+        <TabsList
+          variant="line"
+          className="mb-6 max-w-full justify-start"
+          aria-label={t(($) => $.page.tabs.preferences)}
+        >
+          <TabsTrigger value="general">
+            {t(($) => $.preferences.general_title)}
+          </TabsTrigger>
+          <TabsTrigger value="issue">
+            {t(($) => $.preferences.issue_title)}
+          </TabsTrigger>
+          <TabsTrigger value="chat">{t(($) => $.page.tabs.chat)}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="general">
+          <GeneralPreferences />
+        </TabsContent>
+        <TabsContent value="issue">
+          <IssueTab />
+        </TabsContent>
+        <TabsContent value="chat">
+          <ChatTab />
+        </TabsContent>
+      </Tabs>
+    </SettingsTab>
+  );
+}
+
+function GeneralPreferences() {
   const { theme, setTheme } = useTheme();
   const { t, i18n } = useT("settings");
   const localeAdapter = useLocaleAdapter();
@@ -85,15 +146,18 @@ export function PreferencesTab() {
       setTimeout(() => window.location.reload(), 2500);
       return;
     }
-    toast.success(t(($) => $.auto_save.toast_saved), {
-      id: "settings-auto-save",
-    });
+    toast.success(
+      t(($) => $.auto_save.toast_saved),
+      {
+        id: "settings-auto-save",
+      },
+    );
     // Keep the confirmation visible before the locale reload replaces the UI.
     setTimeout(() => window.location.reload(), 900);
   };
 
   return (
-    <SettingsTab title={t(($) => $.page.tabs.preferences)}>
+    <>
       <SettingsSection title={t(($) => $.preferences.general_title)}>
         <SettingsCard>
           <SettingsRow
@@ -106,9 +170,12 @@ export function PreferencesTab() {
               onValueChange={(next) => {
                 if (!next || next === theme) return;
                 setTheme(next as (typeof themeOptions)[number]["value"]);
-                toast.success(t(($) => $.auto_save.toast_saved), {
-                  id: "settings-auto-save",
-                });
+                toast.success(
+                  t(($) => $.auto_save.toast_saved),
+                  {
+                    id: "settings-auto-save",
+                  },
+                );
               }}
             >
               <SelectTrigger
@@ -147,7 +214,11 @@ export function PreferencesTab() {
                 aria-label={t(($) => $.preferences.language.title)}
               >
                 <SelectValue>
-                  {languageOptions.find((option) => option.value === currentLocale)?.label}
+                  {
+                    languageOptions.find(
+                      (option) => option.value === currentLocale,
+                    )?.label
+                  }
                 </SelectValue>
               </SelectTrigger>
               <SelectContent align="end">
@@ -161,11 +232,18 @@ export function PreferencesTab() {
           </SettingsRow>
 
           <TimezoneRow />
-
+        </SettingsCard>
+      </SettingsSection>
+      <SettingsSection
+        title={t(($) => $.preferences.comments_title)}
+        description={t(($) => $.preferences.device_hint)}
+        className="mt-8"
+      >
+        <SettingsCard>
           <StickyCommentBarRow />
         </SettingsCard>
       </SettingsSection>
-    </SettingsTab>
+    </>
   );
 }
 
@@ -183,9 +261,12 @@ function StickyCommentBarRow() {
         checked={sticky}
         onCheckedChange={() => {
           toggleSticky();
-          toast.success(t(($) => $.auto_save.toast_saved), {
-            id: "settings-auto-save",
-          });
+          toast.success(
+            t(($) => $.auto_save.toast_saved),
+            {
+              id: "settings-auto-save",
+            },
+          );
         }}
         aria-label={t(($) => $.preferences.sticky_comment_bar.title)}
       />
@@ -219,9 +300,12 @@ function TimezoneRow() {
     try {
       const updated = await api.updateMe({ timezone: payload });
       setUser(updated);
-      toast.success(t(($) => $.auto_save.toast_saved), {
-        id: "settings-auto-save",
-      });
+      toast.success(
+        t(($) => $.auto_save.toast_saved),
+        {
+          id: "settings-auto-save",
+        },
+      );
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
@@ -265,11 +349,18 @@ function TimezoneRow() {
           <SelectValue>{formatTZLabel(value)}</SelectValue>
         </SelectTrigger>
         <SelectContent align="end" className="max-h-72">
-          <SelectItem value={BROWSER_TZ_VALUE} className="font-mono text-caption">
+          <SelectItem
+            value={BROWSER_TZ_VALUE}
+            className="font-mono text-caption"
+          >
             {formatTZLabel(BROWSER_TZ_VALUE)}
           </SelectItem>
           {options.map((timezone) => (
-            <SelectItem key={timezone} value={timezone} className="font-mono text-caption">
+            <SelectItem
+              key={timezone}
+              value={timezone}
+              className="font-mono text-caption"
+            >
               {formatTZLabel(timezone)}
             </SelectItem>
           ))}

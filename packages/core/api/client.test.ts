@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createAuthStore } from "../auth";
 import { configStore } from "../config";
+import type { StorageAdapter, User } from "../types";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
 import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
@@ -1070,6 +1072,42 @@ describe("ApiClient", () => {
     expect(tasks[1]?.usage).toBeUndefined();
     expect(tasks[2]?.usage?.[0]?.input_tokens).toBe(31_000);
     expect(tasks[2]?.usage?.[0]?.output_tokens).toBe(0);
+  });
+
+  it("keeps agent detail task history on the lightweight endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          { id: "task-1", status: "completed", created_at: "2026-08-27T03:00:00Z" },
+          { id: "task-2", status: "completed", created_at: "2026-08-27T02:00:00Z" },
+        ]),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listAgentTasks("agent-1");
+
+    expect(tasks.map((task) => task.id)).toEqual(["task-1", "task-2"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/agents/agent-1/tasks",
+    );
+  });
+
+  it("falls back to an empty agent task history for a malformed response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ tasks: "not-an-array" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listAgentTasks("agent-1")).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
@@ -2625,5 +2663,61 @@ describe("clientErrorMessage", () => {
   it("withholds a transport failure, whose message says nothing actionable", () => {
     expect(clientErrorMessage(new TypeError("Failed to fetch"))).toBeUndefined();
     expect(clientErrorMessage(undefined)).toBeUndefined();
+  });
+});
+
+// The wiring this exercises is the one CoreProvider installs: the client's
+// 401 hook drives the auth store's session teardown. Before MUL-7028 the hook
+// only dropped the stored token, so the shell stayed mounted with a live
+// `user` and every following request came back "missing authorization" with
+// no way for the user to get to the login page.
+describe("ApiClient session expiry", () => {
+  function makeStorage(
+    initial: Record<string, string> = {},
+  ): StorageAdapter {
+    const values = { ...initial };
+    return {
+      getItem: (key) => values[key] ?? null,
+      setItem: (key, value) => {
+        values[key] = value;
+      },
+      removeItem: (key) => {
+        delete values[key];
+      },
+    };
+  }
+
+  it("ends the session when the server rejects the credential mid-flight", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "missing authorization" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const storage = makeStorage({ multica_token: "live-token" });
+    // The client is constructed before the store it notifies, exactly as
+    // CoreProvider's initCore does; the hook only ever runs from a request.
+    const session: { store?: ReturnType<typeof createAuthStore> } = {};
+    const client = new ApiClient("https://api.example.test", {
+      onUnauthorized: () => session.store?.getState().sessionExpired(),
+    });
+    const store = createAuthStore({ api: client, storage });
+    session.store = store;
+    store.setState({
+      user: { id: "u1", email: "a@example.com" } as User,
+      isLoading: false,
+      status: "authenticated",
+    });
+    client.setToken("live-token");
+
+    await expect(client.listProjects()).rejects.toBeInstanceOf(ApiError);
+
+    expect(store.getState().user).toBeNull();
+    expect(store.getState().status).toBe("unauthenticated");
+    expect(store.getState().expired).toBe(true);
+    expect(storage.getItem("multica_token")).toBeNull();
   });
 });

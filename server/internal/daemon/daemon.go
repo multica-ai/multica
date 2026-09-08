@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1981,6 +1982,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"workspaces_root", d.cfg.WorkspacesRoot,
 		"health_port", d.cfg.HealthPort,
 		"poll_interval", d.cfg.PollInterval,
+		"ws_claim_poll_interval", d.cfg.WSClaimPollInterval,
 		"heartbeat_interval", d.cfg.HeartbeatInterval,
 		"agent_timeout", d.cfg.AgentTimeout,
 		"idle_watchdog", d.cfg.AgentIdleWatchdog,
@@ -5100,7 +5102,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			continue
 		}
 
-		tasks, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
+		claimResult, err := d.claimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
 		if err != nil {
 			d.exitClaim()
 			releaseSlots(slots)
@@ -5112,6 +5114,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			}
 			continue
 		}
+		tasks := claimResult.Tasks
 
 		// Dispatch each claimed task into a slot. activeTasks is incremented for
 		// every dispatched task BEFORE exitClaim so the auto-update barrier never
@@ -5159,14 +5162,54 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 		}
 
 		// If we filled every slot, more work may be queued — loop immediately.
-		// Otherwise wait for the next wakeup / poll interval.
+		// Otherwise wait for the next wakeup / poll interval. A connection that
+		// negotiated WS RPC receives task-available pushes, so this poll is only
+		// a missed-event safety net and can run less often. Claim errors retain
+		// the configured fallback cadence above.
 		if dispatched > 0 && dispatched == len(slots) {
 			continue
 		}
-		if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+		if err := sleepWithContextOrWakeup(pollerCtx, d.taskClaimPollInterval(claimResult), wakeup); err != nil {
 			return
 		}
 	}
+}
+
+// taskClaimPollInterval returns the next missed-event safety poll. The longer
+// cadence is only safe when this exact claim response came from a server that
+// opted into scheduling hints; a missing hint covers old servers and uncertain
+// WS claims, both of which retain the normal fallback cadence. Downward-only
+// jitter keeps the default below the server's 3-minute empty-claim cache TTL
+// while preventing an idle fleet from polling in lockstep.
+func (d *Daemon) taskClaimPollInterval(result claimTasksResult) time.Duration {
+	if !d.wsRPC.supportsRPCV1() || !result.ClaimedOverWS || !result.ClaimPollHintSupported {
+		if d.cfg.PollInterval > 0 {
+			return d.cfg.PollInterval
+		}
+		return DefaultPollInterval
+	}
+	upperBound := d.cfg.WSClaimPollInterval
+	if upperBound <= 0 {
+		upperBound = DefaultWSClaimPollInterval
+	}
+	interval := downwardJitterDuration(upperBound)
+	if result.NextDeferredTaskAfterMillis > 0 {
+		untilDeferred := time.Duration(result.NextDeferredTaskAfterMillis) * time.Millisecond
+		if untilDeferred < interval {
+			interval = untilDeferred
+		}
+	}
+	return interval
+}
+
+func downwardJitterDuration(interval time.Duration) time.Duration {
+	minReduction := interval / 12
+	maxReduction := interval / 6
+	if minReduction <= 0 || maxReduction <= minReduction {
+		return interval
+	}
+	reduction := minReduction + time.Duration(rand.Int63n(int64(maxReduction-minReduction)+1))
+	return interval - reduction
 }
 
 func signalPollerWakeup(wakeup chan<- struct{}) {
@@ -6130,10 +6173,10 @@ func sameExistingDir(a, b string) bool {
 	return os.SameFile(ai, bi)
 }
 
-func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv, provider, envWorkDir string, sessionHomeReachable bool, taskLog *slog.Logger) bool {
+func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv, provider, envWorkDir string, sessionHomeReachable, refusesMissingSessionCwd bool, taskLog *slog.Logger) bool {
 	var reachable bool
 	if providerUsesPiSessionFile(provider) {
-		reachable = piSessionFilePresent(task.PriorSessionID)
+		reachable = piSessionResumable(task.PriorSessionID, refusesMissingSessionCwd)
 	} else {
 		// Compare the directories, not the spelling. Reuse runs in the canonical
 		// path it validated and locked, which need not be character-identical to
@@ -6170,6 +6213,66 @@ func providerUsesPiSessionFile(provider string) bool {
 	return ok && desc.ProtocolFamily == "pi"
 }
 
+// piSessionResumable reports whether the backend can actually START from this
+// session. The transcript file always has to be there; whether its recorded
+// working directory also has to be there depends on the runtime, which is what
+// refusesMissingCwd carries (providerRefusesMissingSessionCwd).
+//
+// Checking only the file is what produced GH #8082: after the prior task's
+// worktree was reclaimed the file survived, the gate reported the session
+// reachable, and Pi exited 1 in under 200ms with no tool call and no output —
+// permanently, because the failed run records the same session id again and the
+// next claim serves the same stale pointer. That is the exact failure shape the
+// gate above exists to prevent; #7760 removed the protection for the Pi family
+// without replacing it with the key Pi actually validates.
+func piSessionResumable(sessionID string, refusesMissingCwd bool) bool {
+	if !piSessionFilePresent(sessionID) {
+		return false
+	}
+	return !refusesMissingCwd || piSessionCwdPresent(sessionID)
+}
+
+// providerRefusesMissingSessionCwd reports whether a runtime refuses to start
+// when the working directory recorded in the transcript no longer exists.
+//
+// This is deliberately NOT the same question as providerUsesPiSessionFile.
+// That one asks where the session lives — an independently addressed JSONL path
+// rather than a cwd-keyed store — and it is true for the whole Pi protocol
+// family. This one asks what the runtime does with the cwd it finds inside that
+// file, and the family does not agree:
+//
+//   - pi re-anchors a resumed run to the recorded cwd and hard-refuses when it
+//     is gone (GH #8082).
+//   - omp opens the transcript from an explicit --session path and falls back to
+//     the launch cwd instead; verified on v17.2.12, where the same transcript
+//     whose recorded cwd had been deleted resumed with exit 0 and ran in the
+//     launch directory.
+//
+// So the check must not be applied family-wide: doing that drops omp sessions
+// omp would have resumed cleanly, which is exactly the continuity loss #7760
+// set out to fix.
+//
+// builtinRuntime is why the provider name alone cannot answer this. A custom
+// runtime profile keeps its protocol family as the provider, so
+// `protocol_family: pi` with `command_name: <anything>` also arrives here as
+// "pi" while being an unrelated implementation — the same trap agent.Config's
+// BuiltinRuntime field documents. Only the provider's own discovered binary is
+// the CLI whose refusal was actually verified, so a custom command answers
+// false and keeps its session.
+//
+// False is the safe default in both directions — unknown Pi-family runtime,
+// and custom command. A runtime that refuses in the words the backend matches
+// (piResumeRefusedMarker) is still recovered by Result.ResumeRejected: one
+// wasted run and a fresh session, not the permanent loop this issue reported.
+// That backstop is a single phrase match and does not generalise to a refusal
+// worded differently — but it does cover the case this default is most likely
+// to be wrong about, a Pi-family runtime behaving like Pi. Guessing the other
+// way has no backstop at all: it silently discards history that was never in
+// danger, with nothing downstream to notice.
+func providerRefusesMissingSessionCwd(provider string, builtinRuntime bool) bool {
+	return builtinRuntime && provider == "pi"
+}
+
 // piSessionFilePresent proves there is persisted history to resume. It does
 // not claim the transcript is idle: the Pi backend takes an exclusive lock for
 // the complete child-process lifetime and reports a busy resume as rejected so
@@ -6180,6 +6283,76 @@ func piSessionFilePresent(sessionID string) bool {
 	}
 	info, err := os.Stat(sessionID)
 	return err == nil && info.Mode().IsRegular() && info.Size() > 0
+}
+
+// piSessionCwdPresent mirrors Pi's own startup check, deliberately condition
+// for condition, so the two cannot disagree about what "resumable" means a
+// second time. Pi refuses to start if and only if the transcript carries a
+// session header whose `cwd` is non-empty and does not exist on disk; with no
+// header, or an empty cwd, it falls back to the launch directory and starts
+// normally. Anything this predicate cannot read is therefore NOT evidence of a
+// refusal, and returns true: a false negative here silently discards healthy
+// conversation history, which is the regression #7760 set out to fix.
+//
+// Existence is the whole test — not "is a directory". Pi uses existsSync, which
+// is true for a plain file too, so demanding a directory would drop sessions Pi
+// would have accepted and re-open the same divergence from the other side.
+//
+// Note this says nothing about WHICH directory the resumed run will use. Pi
+// adopts the recorded cwd, so a session whose recorded cwd still exists but is
+// not this task's workdir resumes into the older directory. That is a separate
+// defect with a separate fix; this predicate deliberately keeps the existing
+// behaviour there rather than widening a crash fix into a semantic change.
+func piSessionCwdPresent(sessionID string) bool {
+	cwd, ok := piSessionRecordedCwd(sessionID)
+	if !ok || cwd == "" {
+		return true
+	}
+	_, err := os.Stat(cwd)
+	return err == nil
+}
+
+// piSessionHeaderScanLines bounds how far into a transcript we look for the
+// session header. Pi writes it as the first line at session creation, so the
+// answer is always line 1 in practice; the bound only stops a pathological or
+// hand-edited file from turning a cheap predicate into a full read of a
+// multi-megabyte transcript.
+const piSessionHeaderScanLines = 64
+
+// piSessionMaxHeaderLine caps a single scanned line. A transcript's later lines
+// carry whole assistant turns and can be far larger than bufio's 64KB default;
+// without this the scan would stop early with an error on a perfectly healthy
+// file.
+const piSessionMaxHeaderLine = 1 << 20
+
+// piSessionRecordedCwd returns the cwd recorded in the transcript's session
+// header. The bool reports whether a header was found at all — callers must
+// distinguish "no header" (Pi starts fine) from "header with an empty cwd"
+// (also fine), and neither from a real recorded directory.
+func piSessionRecordedCwd(path string) (string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), piSessionMaxHeaderLine)
+	for i := 0; i < piSessionHeaderScanLines && scanner.Scan(); i++ {
+		var entry struct {
+			Type string `json:"type"`
+			Cwd  string `json:"cwd"`
+		}
+		// A malformed line is skipped rather than failing the scan: Pi itself
+		// tolerates unparseable entries when loading a transcript.
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+			continue
+		}
+		if entry.Type == "session" {
+			return entry.Cwd, true
+		}
+	}
+	return "", false
 }
 
 // sessionHomeReachable reports whether a session recorded by a prior task on
@@ -7814,7 +7987,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
-	resumeReachable := gateResumeToReachableSession(&task, &taskCtx, provider, env.WorkDir, sessionHomeReachable(provider, env, envReused), taskLog)
+	// usesCustomProfileCommand is the same provenance the backend receives as
+	// agent.Config.BuiltinRuntime: it separates the provider's own discovered
+	// binary from an arbitrary command speaking its protocol. Reused here so
+	// the gate and the backend cannot disagree about which one is running.
+	resumeReachable := gateResumeToReachableSession(
+		&task, &taskCtx, provider, env.WorkDir,
+		sessionHomeReachable(provider, env, envReused),
+		providerRefusesMissingSessionCwd(provider, !usesCustomProfileCommand),
+		taskLog,
+	)
 	// A reused workdir is necessary but not sufficient for a Codex resume: the
 	// prior thread's rollout must actually be present in this task's CODEX_HOME
 	// sessions (MUL-4424 isolates them). Drop the resume before the brief is
@@ -8065,6 +8247,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
 		IdleWatchdogTimeout:        idleWatchdogTimeout,
 		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
+		TurnInterruptTimeout:       d.cfg.CodexTurnInterruptTimeout,
 		ThreadHandshakeTimeout:     d.cfg.CodexThreadHandshakeTimeout,
 		ResumeSessionID:            task.PriorSessionID,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
@@ -8454,13 +8637,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// fact.
 			failureReason = taskfailure.Classify(errMsg).String()
 		}
-		// After the classifiers above have read errMsg. The hint is fixed
+		// After the classifiers above have read errMsg. Each hint is fixed
 		// prose chosen to match none of the resume guards (see its const), so
 		// ordering is not what makes it safe — but it keeps the machine
 		// decisions reading exactly what the runtime reported, and leaves the
-		// annotation on the outside where a future edit is visibly a change to
-		// human-facing text rather than to classifier input.
+		// annotations on the outside where a future edit is visibly a change
+		// to human-facing text rather than to classifier input. They are
+		// mutually exclusive by provider, so they cannot stack.
 		errMsg = annotateHermesProviderUnconfigured(errMsg, provider, env.HermesHome != "")
+		errMsg = annotateCodexRetiredCompaction(errMsg, provider)
 		return TaskResult{
 			Status:        "blocked",
 			Comment:       errMsg,
@@ -8738,8 +8923,36 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	}
 	var idleWatchdogThreshold atomic.Int64
 	idleWatchdogThreshold.Store(int64(idleWindow))
+	watchdogToolCount := inFlightTools.Load
+	if session.ToolActivity != nil {
+		watchdogToolCount = func() int32 {
+			count, at := session.ToolActivity()
+			for {
+				previous := lastActivityAt.Load()
+				if at.UnixNano() <= previous || lastActivityAt.CompareAndSwap(previous, at.UnixNano()) {
+					break
+				}
+			}
+			return count
+		}
+	}
+	// A backend that can prove its outcome is already decided outranks every
+	// liveness policy below: a run whose terminal result has been read is not a
+	// hang, no matter how long its cleanup then takes.
+	// Nil is meaningful and kept distinguishable: a backend that offers no
+	// terminal boundary is one whose result cannot outrank a force stop, so it
+	// must not be given a hand-off window it can never use. Every such backend
+	// keeps the previous behaviour, including a wedged one, which is force
+	// stopped and classified without waiting for anything.
+	handsOverTerminal := session.TerminalObserved != nil
+	terminalObserved := session.TerminalObserved
+	if terminalObserved == nil {
+		terminalObserved = func() bool { return false }
+	}
+	watchdogCtx, stopWatchdog := context.WithCancel(agentCtx)
+	defer stopWatchdog()
 	if idleWindow > 0 {
-		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog)
+		go d.runIdleWatchdog(watchdogCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
 	}
 
 	// drainFinished closes after the drain goroutine has flushed the last
@@ -8977,8 +9190,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	select {
 	case result := <-session.Result:
+		stopWatchdog()
 		waitForDrain()
-		if idleWatchdogFired.Load() {
+		// terminalObserved outranks a watchdog that fired anyway: if the backend
+		// had already read its authoritative result, this is the real outcome and
+		// re-tagging it would report a completed run as a hang.
+		if idleWatchdogFired.Load() && !terminalObserved() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
 			// Re-tag it as "idle_watchdog" so runTask routes the
@@ -9001,6 +9218,51 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		// classifiers so a watchdog-induced stop isn't misreported as
 		// "task cancelled by server".
 		if idleWatchdogFired.Load() {
+			// For a backend that publishes a terminal boundary, enter the
+			// hand-off without asking terminalObserved first. Reading a flag and
+			// then acting on it is exactly the window this branch kept losing:
+			// the backend can publish between the read and the classifier below.
+			// Waiting for the result instead makes its delivery the
+			// linearization point, and the backend contract — publish the
+			// observation before sending Result — is what makes the check after
+			// delivery reliable rather than lucky.
+			//
+			// Such a backend always closes Result, so a wedged one still ends
+			// this wait promptly through the closed channel rather than the
+			// budget.
+			if handsOverTerminal {
+				taskLog.Info("idle watchdog fired; waiting for the backend to hand over its result",
+					"budget", terminalResultHandoffBudget.String())
+				select {
+				case result, ok := <-session.Result:
+					if ok && terminalObserved() {
+						// The backend had already read its authoritative
+						// result, so this is the real outcome, not a hang.
+						return result, toolCount.Load(), nil
+					}
+					if ok {
+						// The backend's wait goroutine (e.g. claude.go)
+						// translates the SIGKILL we delivered via agentCancel
+						// into Status="aborted". Re-tag it as "idle_watchdog"
+						// so runTask routes the disposition through a dedicated
+						// failure_reason, not the generic "agent_error" bucket
+						// the aborted path falls into.
+						result.Status = "idle_watchdog"
+						if result.Error == "" {
+							result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
+						}
+						return result, toolCount.Load(), nil
+					}
+					// Closed with no value: the backend gave up without an
+					// outcome, so the liveness verdict is the only one left.
+				case <-time.After(terminalResultHandoffBudget):
+					// A backend that neither delivers nor closes is itself the
+					// hang. Linearizing here keeps the branch bounded whatever
+					// a backend does.
+					taskLog.Warn("backend did not hand over a result within the budget; classifying by liveness",
+						"budget", terminalResultHandoffBudget.String())
+				}
+			}
 			return agent.Result{
 				Status: "idle_watchdog",
 				Error:  idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load())),
@@ -9023,6 +9285,25 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		}, toolCount.Load(), nil
 	}
 }
+
+// terminalResultHandoffBudget is how long executeAndDrain waits, after force-
+// stopping a run, for the backend to hand over whatever result it has. It only
+// decides how long we believe a backend before falling back to the liveness
+// verdict; the backend caps its own finalization, so in practice the wait ends
+// far sooner.
+//
+// The value is derived from the slowest finalization this daemon drives today,
+// Cursor's, rather than picked: a concurrent background-cleanup pass we may have
+// to wait behind (cursorCloseBudget, 10s), the closing pass itself (another
+// 10s), one already-started process termination per pass overshooting its
+// budget by that termination's own bound (~1s each), and the process WaitDelay
+// after cancellation (0.5s) — about 22.5s. 30s leaves margin without letting a
+// wedged backend hold a runtime slot indefinitely.
+//
+// Deliberately not a term: the background reaper's tick. Closing its stop
+// channel wakes it immediately rather than at the next tick, so it adds
+// nothing to this ceiling.
+const terminalResultHandoffBudget = 30 * time.Second
 
 // idleWatchdogReason formats the human-facing explanation surfaced on
 // idle_watchdog dispositions. Centralised so the result-arrival branch and the
@@ -9076,8 +9357,12 @@ func idleWatchdogTickInterval(window time.Duration) time.Duration {
 //
 // Polling rate comes from idleWatchdogTickInterval, so a run is force-stopped
 // somewhere between its budget and budget + tick, never earlier.
-func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger) {
-	ticker := time.NewTicker(idleWatchdogTickInterval(window))
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, taskLog *slog.Logger) {
+	tickWindow := window
+	if toolWindow > 0 && toolWindow < tickWindow {
+		tickWindow = toolWindow
+	}
+	ticker := time.NewTicker(idleWatchdogTickInterval(tickWindow))
 	defer ticker.Stop()
 	for {
 		select {
@@ -9089,7 +9374,7 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 			// tool_use and tool_result), so it gets the larger toolWindow;
 			// toolWindow <= 0 disables the in-flight bound entirely.
 			threshold := window
-			toolInFlight := inFlightTools.Load() > 0
+			toolInFlight := inFlightTools() > 0
 			if toolInFlight {
 				if toolWindow <= 0 {
 					continue
@@ -9106,6 +9391,41 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 			// killing a backend that is still producing output.
 			if len(messages) > 0 {
 				continue
+			}
+			// Cursor can stop its owned background tools without aborting the
+			// agent. The same watchdog owns both the budget and this recovery,
+			// so no competing timer can cancel Cursor while it reports a result.
+			if agentCtx.Err() != nil {
+				return
+			}
+			if terminalObserved != nil && terminalObserved() {
+				return
+			}
+			if toolInFlight && interruptBackground != nil && interruptBackground() {
+				lastActivityAt.Store(time.Now().UnixNano())
+				taskLog.Info("tool watchdog stopped background tools; waiting for agent result")
+				continue
+			}
+			// A natural tool completion may race the callback or the tick.
+			if agentCtx.Err() != nil {
+				return
+			}
+			// Refresh native tool activity BEFORE reading its timestamp. The
+			// callback may publish newer activity without changing the count.
+			currentToolInFlight := inFlightTools() > 0
+			currentActivity := lastActivityAt.Load()
+			if currentActivity != last.UnixNano() ||
+				currentToolInFlight != toolInFlight || len(messages) > 0 {
+				continue
+			}
+			if agentCtx.Err() != nil {
+				return
+			}
+			// Last gate before force-stopping. The terminal result can land while
+			// this tick is deciding — including while it is blocked inside the
+			// interrupt callback above — and a decided outcome is never a hang.
+			if terminalObserved != nil && terminalObserved() {
+				return
 			}
 			// No "task" field here: taskLog already carries the full id.
 			taskLog.Warn("idle watchdog firing: no agent activity, force-stopping run",
@@ -9571,6 +9891,68 @@ func annotateHermesProviderUnconfigured(errMsg, provider string, overlayActive b
 		return errMsg
 	}
 	return errMsg + hermesProviderUnconfiguredHint
+}
+
+// codexRetiredCompactionHint is appended verbatim to a Codex compaction
+// failure against the retired route. Like hermesProviderUnconfiguredHint
+// above it is a CONSTANT, for the same correctness reason — see
+// annotateCodexRetiredCompaction — and is worded to stay clear of every
+// phrase the resume guards and taskfailure.Classify match, since it is
+// persisted in agent_task_queue.error and re-scanned there indefinitely.
+// TestCodexCompactionAnnotationCannotChangeMachineDecisions pins that.
+//
+// It names every place the setting can be off, because being a constant means
+// it cannot know which one applied. The shared config is the common case and
+// the only one the upstream reports mention, but the launch arguments reach
+// the same state: nothing strips `--disable remote_compaction_v2` or
+// `-c features.remote_compaction_v2=false` out of an agent's custom args, a
+// daemon's extra args, or a custom runtime profile's launch prefix — only
+// fast_mode gets that treatment, and only when a service tier is selected.
+// Naming just the file would send anyone in that case to edit a line that is
+// not there, which is the failure mode this hint exists to prevent.
+//
+// For the same reason the closing line excludes only the generated per-task
+// copy, rather than claiming nothing on the Multica side needs changing. Once
+// the hint sends people to look at custom_args, a daemon's extra args, or a
+// profile's fixed args, "nothing to change here" contradicts the instruction
+// directly above it and strands exactly the users the argument half was added
+// for. The per-task copy is the one target that is genuinely wrong to edit: it
+// is rebuilt from the shared config every run, so an edit there is discarded.
+const codexRetiredCompactionHint = " [multica] codex could not compact this conversation: it called a " +
+	"compaction endpoint OpenAI has retired. That route is selected by turning `remote_compaction_v2` " +
+	"off, so look in both places it can be off: `[features]` in the codex config this agent uses " +
+	"(~/.codex/config.toml by default), and the codex launch arguments on the agent, the daemon, or a " +
+	"custom runtime profile (`--disable remote_compaction_v2`, `-c features.remote_compaction_v2=false`). " +
+	"Remove it wherever it appears — or set it to true — and run this task again; both sources are re-read " +
+	"on the next run. The one place not to edit is the per-task codex config this run used: it is " +
+	"regenerated from your shared one every run, so a change there is lost. A thread stuck this way " +
+	"continues where it left off once compaction works."
+
+// annotateCodexRetiredCompaction explains a retired-route compaction failure
+// that Codex itself cannot explain.
+//
+// Codex reports the failing URL and status and stops there. The setting that
+// chose that URL — `remote_compaction_v2` — appears nowhere in the text, so the
+// error names no file, no key and no remedy; the reporter in GH #8000 had to
+// open an issue to learn the fix was deleting one line. Nor does the failure
+// resolve on its own: the conversation stays above the auto-compact threshold,
+// so every following turn retries the same retired call.
+//
+// Text only. This changes no reason, status, or control flow — in particular
+// it does NOT retire the session. That is a deliberate choice, not an
+// omission: unlike the resume-unsafe failures classified above, this thread is
+// recoverable, and it recovers by itself once the setting is right. Dropping
+// the session pointer would discard the conversation the fix brings back.
+//
+// Scoped to the codex provider, which is exactly the set of runs that can
+// produce this text (only "codex" resolves to codexBackend), so the check
+// costs nothing and keeps a lookalike string from another runtime out.
+func annotateCodexRetiredCompaction(errMsg, provider string) string {
+	if strings.ToLower(strings.TrimSpace(provider)) != "codex" ||
+		!agent.CodexRetiredCompactionError(errMsg) {
+		return errMsg
+	}
+	return errMsg + codexRetiredCompactionHint
 }
 
 func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayHome string, logger *slog.Logger) {

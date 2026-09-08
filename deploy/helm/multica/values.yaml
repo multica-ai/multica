@@ -117,6 +117,10 @@ backend:
     # Native connect_timeout / PGCONNECT_TIMEOUT / service settings take
     # precedence so existing deployments keep their pgx connection behavior.
     databaseConnectTimeout: 5s
+    # PostgreSQL work_mem ceiling in MB for search transactions. Set 1-64 to
+    # lower it for memory-constrained databases, or 0 to keep the database
+    # default. Invalid values fall back to 64 in the API process.
+    databaseSearchWorkMemMB: 64
     appEnv: production
     appUrl: http://multica.dev.lan
     frontendOrigin: http://multica.dev.lan

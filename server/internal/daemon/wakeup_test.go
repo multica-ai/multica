@@ -63,6 +63,68 @@ func TestTaskWakeupURL(t *testing.T) {
 	}
 }
 
+func TestRunTaskWakeupConnectionSignalsDisconnect(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	connected := make(chan struct{})
+	capabilities := make(chan string, 1)
+	closeConnection := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capabilities <- r.Header.Get("X-Client-Capabilities")
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		close(connected)
+		<-closeConnection
+		conn.Close()
+	}))
+	defer srv.Close()
+	defer func() {
+		select {
+		case <-closeConnection:
+		default:
+			close(closeConnection)
+		}
+	}()
+
+	d := New(Config{
+		ServerBaseURL:     srv.URL,
+		HeartbeatInterval: time.Hour,
+	}, slog.Default())
+	taskWakeups := make(chan taskWakeup, 2)
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := d.runTaskWakeupConnection(context.Background(), []string{"runtime-1"}, taskWakeups, make(chan struct{}))
+		errCh <- err
+	}()
+
+	select {
+	case <-connected:
+	case <-time.After(time.Second):
+		t.Fatal("websocket did not connect")
+	}
+	if got := <-capabilities; !strings.Contains(got, protocol.DaemonCapabilityClaimPollHintsV1) {
+		t.Fatalf("WS capabilities = %q, missing %q", got, protocol.DaemonCapabilityClaimPollHintsV1)
+	}
+	select {
+	case <-taskWakeups: // initial catch-up claim
+	case <-time.After(time.Second):
+		t.Fatal("connection did not signal initial wakeup")
+	}
+
+	close(closeConnection)
+	select {
+	case <-errCh:
+	case <-time.After(time.Second):
+		t.Fatal("connection did not stop after peer disconnect")
+	}
+	select {
+	case <-taskWakeups:
+	case <-time.After(time.Second):
+		t.Fatal("disconnect did not wake the claim poller")
+	}
+}
+
 // TestWSHeartbeatFreshnessSuppressesHTTP pins the WS-vs-HTTP coordination:
 // once a runtime acked over WS within the freshness window the HTTP
 // heartbeat loop must skip it to avoid duplicate DB writes.

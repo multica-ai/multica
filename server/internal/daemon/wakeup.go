@@ -115,8 +115,8 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	if d.client.os != "" {
 		headers.Set("X-Client-OS", d.client.os)
 	}
-	// Advertise the same capabilities as the HTTP path so a claim built over
-	// this WS connection gets identical capability gating (MUL-4257).
+	// WS claims use the common capabilities plus scheduling hints that only the
+	// healthy-connection poller can consume.
 	headers.Set("X-Client-Capabilities", daemonClientCapabilities())
 
 	// A hand-built websocket.Dialer has Proxy == nil, which gorilla reads as
@@ -232,6 +232,10 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 		// frame will be dropped), and flip the send-closed flag under sendMu so
 		// any in-flight guarded send finishes before we close writes.
 		d.wsRPC.attach(nil)
+		// A healthy WS connection lets the claim poller use a longer fallback
+		// interval. Wake it as soon as the connection drops so it immediately
+		// observes the detach and resumes the configured HTTP cadence.
+		signalTaskWakeup(taskWakeups, "")
 		sendMu.Lock()
 		sendClosed = true
 		sendMu.Unlock()

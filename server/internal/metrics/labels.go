@@ -44,6 +44,7 @@ var businessMetricLabels = map[string][]string{
 	"multica_agent_task_terminal_total":                {labelSource, labelRuntimeMode, labelTerminalStatus},
 	"multica_agent_task_failed_total":                  {labelSource, labelRuntimeMode, labelFailureReason},
 	"multica_agent_task_queue_wait_seconds":            {labelSource, labelRuntimeMode},
+	"multica_agent_task_claimable_wait_seconds":        {labelSource, labelRuntimeMode},
 	"multica_agent_task_run_seconds":                   {labelSource, labelRuntimeMode, labelTerminalStatus},
 	"multica_agent_task_total_seconds":                 {labelSource, labelRuntimeMode, labelTerminalStatus},
 	"multica_agent_task_in_progress":                   {labelSource, labelRuntimeMode},

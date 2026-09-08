@@ -285,7 +285,7 @@ func TestOperatorClassAvailabilityFailsClosed(t *testing.T) {
 		{"wrong owning extension", extensionOperatorClass{"gin", "gin_trgm_ops", "pg_bigm"}, false},
 		{"wrong access method", extensionOperatorClass{"btree", "gin_trgm_ops", "pg_trgm"}, false},
 		{"unknown opclass", extensionOperatorClass{"gin", "gin_nonexistent_ops", "pg_trgm"}, false},
-		{"migration 446 gate", issuePropertiesBigramOperatorClass, pgBigmUsable},
+		{"pg_bigm migration gate", pgBigmOperatorClass, pgBigmUsable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			apply, reason, err := whenOperatorClassAvailable(tc.opclass)(ctx, conn)
@@ -299,6 +299,17 @@ func TestOperatorClassAvailabilityFailsClosed(t *testing.T) {
 				t.Fatal("a skipped migration must report why")
 			}
 		})
+	}
+
+	apply, reason, err := whenOperatorClassUnavailable(pgBigmOperatorClass)(ctx, conn)
+	if err != nil {
+		t.Fatalf("evaluate unavailable condition: %v", err)
+	}
+	if apply != !pgBigmUsable {
+		t.Fatalf("unavailable apply=%v (%s), want %v", apply, reason, !pgBigmUsable)
+	}
+	if !apply && reason == "" {
+		t.Fatal("an unavailable-condition skip must report why")
 	}
 }
 

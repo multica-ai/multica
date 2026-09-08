@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -137,6 +138,7 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 	agentUUID := util.MustParseUUID(agentID)
 
 	bus := events.New()
+	wakeup := &stubWakeup{}
 	createdOverlay := json.RawMessage(`{"mcpServers":{"creator":{"url":"https://creator.example"}}}`)
 	taskService := &TaskService{
 		Queries:      q,
@@ -144,6 +146,7 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 		Bus:          bus,
 		Composio:     &stubOverlayBuilder{resp: createdOverlay},
 		FeatureFlags: composioMCPAppsTestFlags(true),
+		Wakeup:       wakeup,
 	}
 	var competingTaskID pgtype.UUID
 	var competingErr error
@@ -224,8 +227,8 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 			NewOriginatorSource:     pgtype.Text{String: "direct_human", Valid: true},
 			NewTriggerEvidenceKind:  pgtype.Text{String: "comment", Valid: true},
 			NewTriggerEvidenceRefID: mergedCommentID,
-		}); err != nil {
-			callbackErr = fmt.Errorf("merge immediate comment into deferred task: %w", err)
+		}); !errors.Is(err, pgx.ErrNoRows) {
+			callbackErr = fmt.Errorf("new comment thread must not merge into the assignment: %v", err)
 		}
 	})
 
@@ -248,6 +251,9 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 	if !result.AssignedTaskID.Valid {
 		t.Fatal("media-gated issue did not return its deferred task")
 	}
+	if len(wakeup.calls) != 1 || wakeup.calls[0].taskID != "" {
+		t.Fatalf("post-commit schedule wakeups = %+v, want one wakeup without a ready task id", wakeup.calls)
+	}
 	if !isDuplicatePendingTaskErr(competingErr) {
 		t.Fatalf("post-commit competing queued insert error = %v, want duplicate pending task", competingErr)
 	}
@@ -255,20 +261,23 @@ func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t 
 		t.Fatalf("post-commit competing task unexpectedly won: %s", util.UUIDToString(competingTaskID))
 	}
 
-	var taskID, triggerCommentID pgtype.UUID
+	var taskID, triggerCommentID, runtimeID pgtype.UUID
 	var taskCount int
 	if err := pool.QueryRow(ctx, `
-		SELECT id, trigger_comment_id, count(*) OVER ()
+		SELECT id, trigger_comment_id, runtime_id, count(*) OVER ()
 		FROM agent_task_queue
 		WHERE issue_id = $1 AND agent_id = $2
 		  AND status IN ('queued', 'dispatched', 'deferred')
 		ORDER BY created_at
 		LIMIT 1`, result.Issue.ID, agentUUID).
-		Scan(&taskID, &triggerCommentID, &taskCount); err != nil {
+		Scan(&taskID, &triggerCommentID, &runtimeID, &taskCount); err != nil {
 		t.Fatalf("load final pending task: %v", err)
 	}
-	if taskCount != 1 || taskID != result.AssignedTaskID || triggerCommentID != mergedCommentID {
-		t.Fatalf("pending task = count %d id %v trigger %v, want one task %v with trigger %v", taskCount, taskID, triggerCommentID, result.AssignedTaskID, mergedCommentID)
+	if taskCount != 1 || taskID != result.AssignedTaskID || triggerCommentID.Valid {
+		t.Fatalf("pending task = count %d id %v trigger %v, want one assignment task %v without a comment trigger", taskCount, taskID, triggerCommentID, result.AssignedTaskID)
+	}
+	if wakeup.calls[0].runtimeID != util.UUIDToString(runtimeID) {
+		t.Fatalf("schedule wakeup runtime = %q, want %q", wakeup.calls[0].runtimeID, util.UUIDToString(runtimeID))
 	}
 }
 
@@ -299,6 +308,9 @@ func TestHydrateDeferredChannelIssueTaskOverlayDoesNotOverwriteMergedCommentPlan
 		VALUES ($1, $2, 'member', $3, 'New effective trigger')
 		RETURNING id`, task.IssueID, workspaceID, userID).Scan(&commentID); err != nil {
 		t.Fatalf("seed merged comment: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET trigger_comment_id=$2 WHERE id=$1`, task.ID, commentID); err != nil {
+		t.Fatal(err)
 	}
 	mergedOverlay := json.RawMessage(`{"mcpServers":{"merged":{"url":"https://merged.example"}}}`)
 	if _, err := q.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{

@@ -64,11 +64,11 @@ import (
 //
 //   - resolveActor's primary job is "agent vs member" classification
 //     for ownership / authorship attribution (issue creator, comment
-//     author, etc.). It also has a fallback path that trusts
-//     X-Agent-ID + X-Task-ID for legacy CLI flows; that fallback is
-//     valid for resolving authorship but is irrelevant here. Billing
-//     authorization needs the strict "machine credential → forbidden"
-//     gate, nothing else.
+//     author, etc.). It also has a fallback path that reads
+//     X-Agent-ID + X-Task-ID directly; since MUL-3428 both middlewares
+//     strip those headers, so that path is unreachable from the network
+//     and irrelevant here either way. Billing authorization needs the
+//     strict "machine credential → forbidden" gate, nothing else.
 //   - resolveActor takes a workspaceID parameter; billing routes have
 //     no workspace context, so threading one through just to call it
 //     would be misleading.

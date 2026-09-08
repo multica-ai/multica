@@ -1289,16 +1289,18 @@ func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg List
 const listReconcilableCommentsForIssueSince = `-- name: ListReconcilableCommentsForIssueSince :many
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at FROM comment
 WHERE issue_id = $1
+  AND (id = ANY($2::uuid[])
+       OR comment_thread_root_id(id) = $3::uuid)
   AND (
       (
           author_type IN ('member', 'agent')
-          AND (created_at > $2 OR id = ANY($3::uuid[]))
+          AND (created_at > $4 OR id = ANY($2::uuid[]))
       )
       OR (
           author_type = 'system'
           AND type = 'progress_update'
           AND source_task_id IS NOT NULL
-          AND id = ANY($3::uuid[])
+          AND id = ANY($2::uuid[])
       )
   )
 ORDER BY created_at ASC, id ASC
@@ -1306,8 +1308,9 @@ ORDER BY created_at ASC, id ASC
 
 type ListReconcilableCommentsForIssueSinceParams struct {
 	IssueID           pgtype.UUID        `json:"issue_id"`
-	Since             pgtype.Timestamptz `json:"since"`
 	PlannedCommentIds []pgtype.UUID      `json:"planned_comment_ids"`
+	CommentThreadID   pgtype.UUID        `json:"comment_thread_id"`
+	Since             pgtype.Timestamptz `json:"since"`
 }
 
 // MUL-4195 / MUL-4304 completion reconciliation: every MEMBER- or AGENT-authored
@@ -1343,7 +1346,12 @@ type ListReconcilableCommentsForIssueSinceParams struct {
 // replaying in order lets later comments coalesce onto the follow-up created by
 // the first.
 func (q *Queries) ListReconcilableCommentsForIssueSince(ctx context.Context, arg ListReconcilableCommentsForIssueSinceParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listReconcilableCommentsForIssueSince, arg.IssueID, arg.Since, arg.PlannedCommentIds)
+	rows, err := q.db.Query(ctx, listReconcilableCommentsForIssueSince,
+		arg.IssueID,
+		arg.PlannedCommentIds,
+		arg.CommentThreadID,
+		arg.Since,
+	)
 	if err != nil {
 		return nil, err
 	}

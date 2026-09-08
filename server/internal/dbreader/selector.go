@@ -28,8 +28,10 @@ type Business struct {
 }
 
 var (
-	BusinessDashboard = Business{label: "dashboard"}
-	businessUnknown   = Business{label: "unknown"}
+	BusinessDashboard        = Business{label: "dashboard"}
+	BusinessDaemonWorkspaces = Business{label: "daemon_workspaces"}
+	BusinessGitHubPRRefresh  = Business{label: "github_pr_refresh"}
+	businessUnknown          = Business{label: "unknown"}
 )
 
 type Consistency string

@@ -322,23 +322,18 @@ func TestPromoteDueDeferred_CancelsSupersededRetry(t *testing.T) {
 	}
 }
 
-// TestPromoteDueDeferred_LeavesNonRetryDeferredRowsAlone bounds the cancellation
-// above. Assignee-fallback escalations are deferred rows that are SUPPOSED to
-// coexist with an active primary task — they own their own fire_at lifecycle and
-// exist precisely to fire when the primary goes quiet. Cancelling those would
-// silently disable escalation, so the sweep is scoped to auto-retry clones.
-//
-// The index fence still applies to them: they stay deferred while the slot is
-// occupied rather than colliding on promotion.
+// TestPromoteDueDeferred_LeavesNonRetryDeferredRowsAlone keeps the superseded
+// retry sweep scoped to auto-retry clones. Other scheduled tasks still wait for
+// their queue slot without being cancelled.
 func TestPromoteDueDeferred_LeavesNonRetryDeferredRowsAlone(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
 
-	runtimeID := dbfx.Runtime(t, "promote-escalation-runtime")
-	agentID := dbfx.Agent(t, "promote-escalation-agent", runtimeID)
-	issueID := dbfx.Issue(t, "escalation survives an active primary", testutil.Cols{
+	runtimeID := dbfx.Runtime(t, "promote-scheduled-runtime")
+	agentID := dbfx.Agent(t, "promote-scheduled-agent", runtimeID)
+	issueID := dbfx.Issue(t, "scheduled task waits for its queue slot", testutil.Cols{
 		"assignee_type": "agent",
 		"assignee_id":   agentID,
 	})
@@ -349,19 +344,18 @@ func TestPromoteDueDeferred_LeavesNonRetryDeferredRowsAlone(t *testing.T) {
 	primaryID := dbfx.Task(t, agentID, testutil.Cols{
 		"issue_id": issueID, "runtime_id": runtimeID, "status": "queued",
 	})
-	escalationID := dbfx.Task(t, agentID, testutil.Cols{
-		"issue_id":               issueID,
-		"runtime_id":             runtimeID,
-		"status":                 "deferred",
-		"fire_at":                testutil.Raw("now() - interval '1 minute'"),
-		"escalation_for_task_id": primaryID,
+	scheduledID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id":   issueID,
+		"runtime_id": runtimeID,
+		"status":     "deferred",
+		"fire_at":    testutil.Raw("now() - interval '1 minute'"),
 	})
 
 	if err := testHandler.TaskService.PromoteDueDeferredTasksForRuntime(ctx, parseUUID(runtimeID)); err != nil {
 		t.Fatalf("promotion: %v", err)
 	}
-	if got := taskStatusByID(t, escalationID); got != "deferred" {
-		t.Fatalf("an escalation must be neither cancelled nor promoted into an occupied slot, got %q", got)
+	if got := taskStatusByID(t, scheduledID); got != "deferred" {
+		t.Fatalf("a scheduled task must be neither cancelled nor promoted into an occupied slot, got %q", got)
 	}
 	if got := taskStatusByID(t, primaryID); got != "queued" {
 		t.Fatalf("primary must be untouched, got %q", got)

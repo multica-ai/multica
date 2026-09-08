@@ -7,7 +7,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import { deriveAgentAvailability } from "@multica/core/agents";
+import { deriveAgentPresenceDetail } from "@multica/core/agents/derive-presence";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { workloadConfig } from "../presence";
 import { useT } from "../../i18n";
@@ -73,7 +73,10 @@ function AgentActivityTaskRow({
 
   const agent = agentById.get(task.agent_id);
   const runtime = runtimeFrom(agent?.runtime_id, runtimeById);
-  const availability = deriveAgentAvailability(runtime, now);
+  const availability = agent
+    ? deriveAgentPresenceDetail({ agent, runtime, tasks: [], now })
+        .availability
+    : "offline";
   const isRunning = task.status === "running";
   // queued/dispatched both read as "queued" in the user-facing copy —
   // `dispatched` is the daemon-acked sub-state of queued and not
