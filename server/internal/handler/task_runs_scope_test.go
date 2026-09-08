@@ -206,6 +206,34 @@ func TestCancelCommentAssigneeFallbacksMigration(t *testing.T) {
 	}
 	want := map[string]string{}
 	want[idleFallbackID] = "cancelled"
+	retryIssueID := dbfx.Issue(t, "unused fallback retry lineage")
+	retryPrimaryID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retryIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "completed",
+	})
+	startedFallbackID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retryIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "failed",
+		"started_at": testutil.Raw("now() - interval '2 minutes'"), "completed_at": testutil.Raw("now() - interval '1 minute'"),
+		"escalation_for_task_id": retryPrimaryID,
+	})
+	startedRetryID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retryIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "failed",
+		"started_at": testutil.Raw("now() - interval '1 minute'"), "completed_at": testutil.Raw("now()"),
+		"parent_task_id": startedFallbackID, "retry_of_task_id": startedFallbackID,
+	})
+	pendingRetryID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retryIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "deferred",
+		"fire_at": testutil.Raw("now() + interval '1 minute'"),
+		"parent_task_id": startedRetryID, "retry_of_task_id": startedRetryID,
+	})
+	manualRerunID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retryIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "queued",
+		"rerun_of_task_id": startedFallbackID,
+	})
+	want[retryPrimaryID] = "completed"
+	want[startedFallbackID] = "failed"
+	want[startedRetryID] = "failed"
+	want[pendingRetryID] = "cancelled"
+	want[manualRerunID] = "queued"
 	for _, tc := range []struct {
 		status   string
 		fallback bool
@@ -246,6 +274,20 @@ func TestCancelCommentAssigneeFallbacksMigration(t *testing.T) {
 		for id, status := range want {
 			if got := taskStatusByID(t, id); got != status {
 				t.Errorf("task %s status = %s, want %s", id, got, status)
+			}
+		}
+		var retryFallbackID *string
+		if err := testPool.QueryRow(context.Background(),
+			`SELECT escalation_for_task_id FROM agent_task_queue WHERE id = $1`, pendingRetryID,
+		).Scan(&retryFallbackID); err != nil {
+			t.Fatal(err)
+		}
+		if retryFallbackID == nil || *retryFallbackID != retryPrimaryID {
+			t.Errorf("pending fallback retry escalation_for_task_id = %v, want %s", retryFallbackID, retryPrimaryID)
+		}
+		for _, id := range taskIDs(runsRequest(t, retryIssueID, "")) {
+			if id == pendingRetryID {
+				t.Errorf("cancelled fallback retry %s must be hidden from issue history", id)
 			}
 		}
 		for id, wantStatus := range map[string]string{agentID: "working", idleAgentID: "idle"} {

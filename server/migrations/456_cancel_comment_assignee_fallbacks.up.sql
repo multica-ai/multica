@@ -1,15 +1,47 @@
 -- Comment replies no longer escalate to the issue assignee. Retire old
--- fallback tasks that have not started; preserve running tasks and history.
+-- fallback tasks and their automatic retries that have not started; preserve
+-- running tasks, completed history, and user-requested reruns.
 -- Stop old API instances before running this one-time cleanup: they can still
 -- enqueue new fallback rows after it finishes. The Helm Recreate deployment
 -- and migrate-before-server entrypoint provide this ordering.
-WITH cancelled AS (
-    UPDATE agent_task_queue
-    SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-    WHERE escalation_for_task_id IS NOT NULL
-      AND started_at IS NULL
-      AND status IN ('deferred', 'queued', 'dispatched', 'waiting_local_directory')
-    RETURNING id, agent_id
+WITH RECURSIVE fallback_lineage AS (
+    SELECT task.id AS task_id,
+        task.escalation_for_task_id,
+        ARRAY[task.id] AS path
+    FROM agent_task_queue task
+    WHERE task.escalation_for_task_id IS NOT NULL
+      -- CreateDeferredAgentTask never set retry_of_task_id. Excluding retry
+      -- descendants backfilled by an earlier idempotent run keeps one root per
+      -- lineage instead of rediscovering every suffix as a separate tree.
+      AND task.retry_of_task_id IS NULL
+
+    UNION ALL
+
+    -- CreateRetryTask stores both links to the same immediate parent but does
+    -- not copy escalation_for_task_id. Following the indexed parent_task_id
+    -- finds descendants without scanning the whole queue; retry_of_task_id
+    -- keeps user-requested reruns outside this cleanup.
+    SELECT retry.id,
+        lineage.escalation_for_task_id,
+        lineage.path || retry.id
+    FROM fallback_lineage lineage
+    JOIN agent_task_queue retry
+      ON retry.parent_task_id = lineage.task_id
+     AND retry.retry_of_task_id = lineage.task_id
+    -- Stored retry links should be acyclic, but corrupt historical data must
+    -- not make a startup migration recurse forever.
+    WHERE NOT retry.id = ANY(lineage.path)
+), cancelled AS (
+    UPDATE agent_task_queue task
+    SET status = 'cancelled',
+        completed_at = now(),
+        prepare_lease_expires_at = NULL,
+        escalation_for_task_id = fallback_lineage.escalation_for_task_id
+    FROM fallback_lineage
+    WHERE task.id = fallback_lineage.task_id
+      AND task.started_at IS NULL
+      AND task.status IN ('deferred', 'queued', 'dispatched', 'waiting_local_directory')
+    RETURNING task.id, task.agent_id
 ), desired AS (
     SELECT DISTINCT cancelled.agent_id,
         CASE WHEN EXISTS (
