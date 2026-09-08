@@ -1096,6 +1096,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				sharecrmMedia = sharecrm.NewMediaResolver(store, engine.NewDBMediaIntentLedger(queries), slog.Default())
 			}
 			channelRouter.Register(sharecrm.TypeShareCRM, sharecrm.NewShareCRMResolverSet(queries, pool, replier, ack, sharecrmMedia))
+			h.RegisterChannelExternalSessionIDResolver(string(sharecrm.TypeShareCRM), sharecrm.ExternalSessionIDFromBindingConfig)
 			sharecrm.NewOutbound(queries, box.Open, sharecrmClient, slog.Default()).Register(bus)
 			sharecrm.RegisterShareCRM(channelRegistry, sharecrm.ChannelDeps{
 				Decrypt: box.Open,

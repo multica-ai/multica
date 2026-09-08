@@ -17,6 +17,7 @@ func TestInboundFromEvent_Direct(t *testing.T) {
 		Message:   &botTextMessage{Type: "text", Content: "hello"},
 		EA:        "fs",
 		BotFullID: "B.fs.bot_demo",
+		SessionID: "gateway-session-1",
 	}
 	msg, ok := inboundFromEvent(data, "app-1", "B.fs.bot_demo")
 	if !ok {
@@ -46,6 +47,9 @@ func TestInboundFromEvent_Direct(t *testing.T) {
 	}
 	if raw.AppID != "app-1" {
 		t.Fatalf("raw app_id = %q", raw.AppID)
+	}
+	if raw.SessionID != "gateway-session-1" {
+		t.Fatalf("raw session_id = %q, want gateway-session-1", raw.SessionID)
 	}
 }
 

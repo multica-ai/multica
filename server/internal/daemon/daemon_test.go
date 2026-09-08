@@ -543,9 +543,10 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 		workspacesRoot = "/daemon/multica_workspaces_staging"
 	)
 	task := Task{
-		ID:          "task-test",
-		AgentID:     "agent-test",
-		WorkspaceID: "workspace-test",
+		ID:                "task-test",
+		AgentID:           "agent-test",
+		WorkspaceID:       "workspace-test",
+		ExternalSessionID: " external-session-1 ",
 	}
 	env := taskMulticaEnvironment(task, "agent-name", fakeToken, taskRoot, workspacesRoot, "https://task.example", 19514, 3, "/task/tmp")
 
@@ -563,6 +564,7 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 		"TMPDIR":                       "/task/tmp",
 		"TMP":                          "/task/tmp",
 		"TEMP":                         "/task/tmp",
+		"MULTICA_EXTERNAL_SESSION_ID":  "external-session-1",
 	}
 	if !maps.Equal(env, want) {
 		t.Fatalf("taskMulticaEnvironment() = %#v, want %#v", env, want)
@@ -584,7 +586,13 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 	}
 }
 
-// When `brew --prefix` is unavailable but the executable path is under a
+func TestTaskMulticaEnvironmentOmitsEmptyExternalSessionID(t *testing.T) {
+	env := taskMulticaEnvironment(Task{}, "agent", "token", "/config", "/workspaces", "https://server", 1234, 1, "/tmp")
+	if _, ok := env["MULTICA_EXTERNAL_SESSION_ID"]; ok {
+		t.Fatal("task environment should omit an empty external session id")
+	}
+}
+
 // known Cellar root, triggerRestart must recover the prefix from the
 // known-prefix list and target <prefix>/bin/multica.
 func TestTriggerRestart_BrewPrefixUnavailable_FallsBackToKnownPrefix(t *testing.T) {
