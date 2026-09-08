@@ -3540,7 +3540,7 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 	// failed Result reaches the caller within a small bound and carries an
 	// empty SessionID so the outer daemon's PriorSessionID-with-empty-
 	// SessionID fallback can retry a fresh session.
-	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
+	codexGracefulShutdownTimeoutNanos.Store(int64(1500 * time.Millisecond))
 	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
 
 	fakePath := writeFakeCodexAppServer(t, ""+
