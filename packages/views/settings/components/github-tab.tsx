@@ -190,7 +190,7 @@ export function GitHubTab() {
                   ) : canManage ? (
                     <p className="text-caption text-muted-foreground">
                       {t(($) => $.github.connection_description_prefix)}{" "}
-                      <code className="rounded bg-muted px-1 py-0.5 text-micro">
+                      <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                         {t(($) => $.github.connection_identifier_example)}
                       </code>{" "}
                       {t(($) => $.github.connection_description_suffix)}{" "}
@@ -239,9 +239,9 @@ export function GitHubTab() {
             {canManage && !configured && (
               <p className="text-caption text-muted-foreground">
                 {t(($) => $.github.not_configured)}{" "}
-                <code className="rounded bg-muted px-1 py-0.5 text-micro">GITHUB_APP_SLUG</code>{" "}
+                <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">GITHUB_APP_SLUG</code>{" "}
                 {t(($) => $.github.not_configured_and)}{" "}
-                <code className="rounded bg-muted px-1 py-0.5 text-micro">GITHUB_WEBHOOK_SECRET</code>.
+                <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">GITHUB_WEBHOOK_SECRET</code>.
               </p>
             )}
 
@@ -279,7 +279,7 @@ export function GitHubTab() {
               description={
                 <p className="text-body text-muted-foreground">
                   {t(($) => $.github.feature_co_author_description_prefix)}{" "}
-                  <code className="rounded bg-muted px-1 py-0.5 text-caption">
+                  <code className="rounded-xs bg-muted px-1 py-0.5 text-caption">
                     {"Co-authored-by: multica-agent <github@multica.ai>"}
                   </code>{" "}
                   {t(($) => $.github.feature_co_author_description_suffix)}

@@ -16,6 +16,7 @@ import { AutosizeTextArea } from "@/components/ui/autosize-textarea";
 import { MIN_BODY_INPUT_HEIGHT_PX } from "@/components/ui/input-tokens";
 import { cn } from "@/lib/utils";
 import type { UseMentionInputReturn } from "@/lib/use-mention-input";
+import { continuousCorners } from "@/lib/radius";
 
 export function DescriptionField({
   description,
@@ -35,6 +36,7 @@ export function DescriptionField({
           ? "border-primary/30 bg-secondary"
           : "border-transparent bg-secondary/40",
       )}
+      style={continuousCorners}
     >
       <AutosizeTextArea
         value={description.text}

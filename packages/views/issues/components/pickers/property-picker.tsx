@@ -33,7 +33,7 @@ const isEmptyItem = (el: HTMLButtonElement | undefined) =>
  * first interaction is pixel-identical.
  */
 export const PICKER_TRIGGER_CLASS =
-  "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
+  "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
 
 // ---------------------------------------------------------------------------
 // PropertyPicker — generic Popover shell with optional search

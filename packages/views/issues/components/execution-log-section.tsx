@@ -177,7 +177,7 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
               <button
                 type="button"
                 onClick={() => setShowPast(!showPast)}
-                className="flex w-full items-center gap-1 rounded px-1 py-1 text-caption text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+                className="flex w-full items-center gap-1 rounded-xs px-1 py-1 text-caption text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
               >
                 <ChevronRight
                   className={`!size-3 shrink-0 stroke-[2.5] transition-transform ${
@@ -394,7 +394,7 @@ export function ActiveTaskRow({
                 aria-label={t(($) => $.execution_log.cancel_task_aria)}
               />
             }
-            className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center justify-center rounded-xs p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {cancelling ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -527,7 +527,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
                   aria-label={t(($) => $.execution_log.retry_task_aria)}
                 />
               }
-              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center justify-center rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
               {retrying ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -561,7 +561,7 @@ function RowShell({
   return (
     <div
       title={title || undefined}
-      className="group/execution-log-row flex items-center gap-2 overflow-hidden rounded px-1 py-1.5 transition-colors hover:bg-accent/40"
+      className="group/execution-log-row flex items-center gap-2 overflow-hidden rounded-xs px-1 py-1.5 transition-colors hover:bg-accent/40"
     >
       {task.agent_id ? (
         <ActorAvatar

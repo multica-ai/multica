@@ -164,7 +164,7 @@ function ToolCallRow({ item }: { item: TaskMessagePayload }) {
         </View>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <View className="ml-4 mt-1 rounded bg-muted/40 px-2 py-1.5">
+        <View className="ml-4 mt-1 rounded-xs bg-muted/40 px-2 py-1.5">
           <Text className="text-xs text-muted-foreground">
             {JSON.stringify(item.input, null, 2)}
           </Text>
@@ -199,7 +199,7 @@ function ToolResultRow({ item }: { item: TaskMessagePayload }) {
         </View>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <View className="ml-4 mt-1 rounded bg-muted/40 px-2 py-1.5">
+        <View className="ml-4 mt-1 rounded-xs bg-muted/40 px-2 py-1.5">
           <Text className="text-xs text-muted-foreground">
             {output.length > 4000
               ? `${output.slice(0, 4000)}\n…(truncated)`

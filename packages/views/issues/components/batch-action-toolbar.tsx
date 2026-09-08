@@ -215,7 +215,7 @@ export function BatchActionToolbar({
           <button
             type="button"
             onClick={clear}
-            className="rounded p-0.5 hover:bg-accent transition-colors"
+            className="rounded-xs p-0.5 hover:bg-accent transition-colors"
           >
             <X className="size-3.5 text-muted-foreground" />
           </button>

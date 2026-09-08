@@ -141,7 +141,7 @@ function MiniCard({
   return (
     <div
       className={cn(
-        "flex flex-col gap-1 rounded-[4px] border border-border bg-card px-1.5 py-1",
+        "flex flex-col gap-1 rounded-xs border border-border bg-card px-1.5 py-1",
         className,
       )}
     >

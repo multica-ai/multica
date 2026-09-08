@@ -53,6 +53,7 @@ import type {
   TaskMessagePayload,
 } from "@multica/core/types";
 import type { AgentAvailability } from "@multica/core/agents";
+import { continuousCorners } from "@/lib/radius";
 import { taskMessagesOptions } from "@/data/queries/chat";
 import { Text } from "@/components/ui/text";
 import { Markdown } from "@/lib/markdown";
@@ -307,6 +308,7 @@ function MessageRow({
               ? "bg-muted border-primary/30"
               : "bg-muted border-transparent",
         )}
+        style={continuousCorners}
       >
         <Markdown
           content={message.content}
@@ -549,6 +551,7 @@ function FailureBubble({
             ? "border-primary/30"
             : "border-destructive/30",
         )}
+        style={continuousCorners}
       >
         <Text className="text-xs font-semibold text-destructive">
           {reasonLabel}
@@ -572,7 +575,7 @@ function FailureBubble({
               </View>
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <View className="mt-1 rounded bg-muted/40 px-2 py-1.5">
+              <View className="mt-1 rounded-xs bg-muted/40 px-2 py-1.5">
                 <Text
                   className="text-xs text-muted-foreground"
                   selectable={isSelecting}

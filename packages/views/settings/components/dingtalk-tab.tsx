@@ -189,7 +189,7 @@ export function DingTalkConnectionLabel({
                     <span className="leading-relaxed">
                       {permissionTooltipPrefix}{" "}
                       <code
-                        className="rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-foreground ring-1 ring-border"
+                        className="rounded-xs bg-muted px-1.5 py-0.5 font-mono text-micro text-foreground ring-1 ring-border"
                         translate="no"
                       >
                         {dingTalkChatManagePermission}
@@ -587,7 +587,7 @@ export function DingTalkTab() {
             <p className="text-body font-medium">{t(($) => $.dingtalk.not_enabled_title)}</p>
             <p className="text-caption text-muted-foreground">
               {t(($) => $.dingtalk.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-micro">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_DINGTALK_SECRET_KEY
               </code>{" "}
               {t(($) => $.dingtalk.not_enabled_description_suffix)}{" "}
@@ -739,7 +739,7 @@ function InstallationRow({
             <h3 className="truncate text-title-sm font-medium text-pretty">
               {agentName}
               {!isActive && (
-                <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+                <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                   {t(($) => $.dingtalk.revoked_badge)}
                 </span>
               )}

@@ -106,7 +106,7 @@ export function TelegramTab() {
             <p className="text-body font-medium">{t(($) => $.telegram.not_enabled_title)}</p>
             <p className="text-caption text-muted-foreground">
               {t(($) => $.telegram.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-micro">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_TELEGRAM_SECRET_KEY
               </code>{" "}
               {t(($) => $.telegram.not_enabled_description_suffix)}{" "}
@@ -209,7 +209,7 @@ function InstallationRow({
               </span>
             ) : null}
             {!isActive && (
-              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.telegram.revoked_badge)}
               </span>
             )}

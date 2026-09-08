@@ -53,7 +53,7 @@ export function LandingHero() {
               </Link>
               <Link
                 href="/contact-sales"
-                className="group inline-flex items-center justify-center gap-1.5 rounded-[12px] px-3 py-3 text-body font-semibold text-white/80 transition-colors hover:text-white"
+                className="group inline-flex items-center justify-center gap-1.5 rounded-(--landing-radius-action) px-3 py-3 text-body font-semibold text-white/80 transition-colors hover:text-white"
               >
                 {t.hero.talkToSales}
                 <ArrowRight

@@ -52,6 +52,7 @@ import { useFailedCommentsStore } from "@/data/stores/failed-comments-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { continuousCorners } from "@/lib/radius";
 import { ReactionBar } from "./reaction-bar";
 import { useCommentLongPress } from "./comment-context-menu";
 import { useCommentSelectStore } from "@/data/comment-select-store";
@@ -137,7 +138,7 @@ export function CommentCard({
 
   return (
     <View className="px-4">
-      <View className="rounded-2xl">
+      <View className="rounded-2xl" style={continuousCorners}>
         {/* Bubble uses `surface-1` (L 98%) — extremely subtle elevation
          *  above the page, visible mostly through the rounded edge rather
          *  than the fill (iOS settings cell feel; see Refactoring UI #4
@@ -158,6 +159,7 @@ export function CommentCard({
             isHighlighted && "border-primary/30",
             isSelectingHere && "bg-primary/5 border-primary/30",
           )}
+          style={continuousCorners}
         >
           {resolved ? (
             <ResolvedIndicator
@@ -246,6 +248,7 @@ function ResolvedThreadBar({
       <Pressable
         onPress={onExpand}
         className="flex-row items-center gap-2.5 px-4 py-3 rounded-2xl bg-surface-1 active:opacity-70"
+        style={continuousCorners}
         accessibilityRole="button"
         accessibilityLabel={`Resolved thread by ${authorsLabel}, ${total} ${total === 1 ? "message" : "messages"}. Tap to expand.`}
       >
@@ -341,7 +344,7 @@ function RootHighlightOverlay({ active }: { active: boolean }) {
     <Animated.View
       pointerEvents="none"
       className="absolute inset-0 rounded-2xl border-2 border-brand/50 bg-brand/5"
-      style={style}
+      style={[continuousCorners, style]}
     />
   );
 }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { AVATAR_SIZE_PX, type AvatarSize } from "@multica/ui/lib/avatar-size";
+import { cn } from "@multica/ui/lib/utils";
 import {
   HoverCard,
   HoverCardTrigger,
@@ -155,7 +156,12 @@ export function ActorAvatar({
           : null
     : null;
   const content = profileHref ? (
-    <ActorAvatarProfileLink href={profileHref}>{dotted}</ActorAvatarProfileLink>
+    <ActorAvatarProfileLink
+      href={profileHref}
+      shape={actorType === "squad" ? "entity" : "circle"}
+    >
+      {dotted}
+    </ActorAvatarProfileLink>
   ) : (
     dotted
   );
@@ -187,9 +193,11 @@ export function ActorAvatar({
  */
 function ActorAvatarProfileLink({
   href,
+  shape,
   children,
 }: {
   href: string;
+  shape: "circle" | "entity";
   children: React.ReactNode;
 }) {
   // Web note: the trigger is a `<span role="link">`, not an anchor, so there
@@ -218,7 +226,10 @@ function ActorAvatarProfileLink({
     <span
       role="link"
       tabIndex={-1}
-      className="inline-flex cursor-pointer rounded-full"
+      className={cn(
+        "inline-flex cursor-pointer",
+        shape === "entity" ? "rounded-entity" : "rounded-full",
+      )}
       onClick={navigate}
       onAuxClick={(event) => {
         if (event.defaultPrevented || event.button !== 1) return;

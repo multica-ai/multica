@@ -154,7 +154,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           <TaskStatusIcon status={task.status} />{status}
         </span>
         <button type="button"
-          className={cn("flex min-w-0 items-center gap-1.5 rounded py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          className={cn("flex min-w-0 items-center gap-1.5 rounded-xs py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             showProgress ? "flex-1 text-body" : "order-last ml-auto shrink-0",
             showIdentity && !showProgress && "@max-[32rem]/run:min-w-7 @max-[32rem]/run:justify-center")}
           aria-label={stepLabel ? `${activityLabel} · ${stepLabel}` : activityLabel}
@@ -188,7 +188,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {rows.length > visibleCount && <button type="button" className="py-1 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
           {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={active} formatText={formatText} />)}
-          <button type="button" className="flex items-center gap-1.5 rounded py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          <button type="button" className="flex items-center gap-1.5 rounded-xs py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={openFullLog}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
         </div>}
       </div>
@@ -216,7 +216,7 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
     : row.kind === "thinking" ? t(($) => $.inline_run.thinking)
     : t(($) => $.inline_run.error);
   return <details className="min-w-0 text-caption" onToggle={onToggle}>
-    <summary onClick={disclosure.onTrigger} className="flex cursor-pointer list-none items-center gap-2 rounded py-1.5 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+    <summary onClick={disclosure.onTrigger} className="flex cursor-pointer list-none items-center gap-2 rounded-xs py-1.5 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
       {pending ? <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-info motion-reduce:animate-none" />
         : <Icon aria-hidden className={cn("size-3.5 shrink-0", error ? "text-destructive" : "text-muted-foreground")} />}
       <span className={cn("min-w-0 flex-1 truncate", error && "text-destructive")} title={summary}>{summary}</span>

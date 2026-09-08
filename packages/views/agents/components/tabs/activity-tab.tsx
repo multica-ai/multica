@@ -429,7 +429,7 @@ function RecentWorkSection({
             <button
               type="button"
               onClick={onShowMore}
-              className="mt-2 self-start rounded text-caption text-muted-foreground transition-colors hover:text-foreground"
+              className="mt-2 self-start rounded-xs text-caption text-muted-foreground transition-colors hover:text-foreground"
             >
               {t(($) => $.tab_body.activity.show_more)}
             </button>
@@ -719,7 +719,7 @@ function TaskRow({
             <TooltipTrigger
               render={<AppLink href={paths.issueDetail(task.issue_id)} />}
               aria-label={t(($) => $.tab_body.activity.open_issue_aria)}
-              className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+              className="flex items-center justify-center rounded-xs p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
             >
               <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
             </TooltipTrigger>
@@ -745,7 +745,7 @@ function TaskRow({
                   aria-label={t(($) => $.tab_body.activity.cancel_task_aria)}
                 />
               }
-              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center justify-center rounded-xs p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
             >
               <X className="h-3.5 w-3.5" aria-hidden="true" />
             </TooltipTrigger>

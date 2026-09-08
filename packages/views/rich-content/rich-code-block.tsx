@@ -144,7 +144,7 @@ export function CodeBlockShell({
         <button
           type="button"
           onClick={handleCopy}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           title={copyLabel}
           aria-label={copyLabel}
         >

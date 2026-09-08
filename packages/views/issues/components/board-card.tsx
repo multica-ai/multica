@@ -114,7 +114,7 @@ export const BoardCardContent = memo(function BoardCardContent({
             <button
               type="button"
               aria-label={priorityLabel}
-              className="inline-flex size-5 shrink-0 items-center justify-center rounded hover:bg-muted/60"
+              className="inline-flex size-5 shrink-0 items-center justify-center rounded-xs hover:bg-muted/60"
             >
               <PriorityIcon priority={issue.priority} />
             </button>

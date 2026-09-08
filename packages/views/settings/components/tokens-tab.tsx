@@ -183,7 +183,7 @@ export function TokensTab() {
                     <Skeleton className="h-4 w-32" />
                     <Skeleton className="h-3 w-48" />
                   </div>
-                  <Skeleton className="h-8 w-8 rounded" />
+                  <Skeleton className="h-8 w-8 rounded-xs" />
                 </CardContent>
               </Card>
             ))}

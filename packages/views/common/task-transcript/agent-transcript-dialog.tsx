@@ -244,7 +244,7 @@ function RunDetailRow({
         type="button"
         onClick={onCopy}
         title={copyTitle}
-        className="group -mx-1 grid w-[calc(100%+0.5rem)] grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 rounded px-1 py-0.5 text-left transition-colors hover:bg-accent/60"
+        className="group -mx-1 grid w-[calc(100%+0.5rem)] grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 rounded-xs px-1 py-0.5 text-left transition-colors hover:bg-accent/60"
       >
         <span className="text-muted-foreground">{label}</span>
         <span className="flex min-w-0 items-start gap-1.5">
@@ -1596,7 +1596,7 @@ function GroupRow({
               type="button"
               onClick={() => onSelect(step.seq)}
               className={cn(
-                "flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-micro transition-colors",
+                "flex w-full items-baseline gap-2 rounded-xs px-2 py-1 text-left text-micro transition-colors",
                 selectedSeq === step.seq ? "bg-brand/10" : "hover:bg-accent/40",
               )}
             >

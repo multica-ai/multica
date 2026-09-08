@@ -239,7 +239,7 @@ export function RuntimeDetailPage({
                     {healthLabel(machine.health)}
                   </span>
                   {machine.isCurrent && (
-                    <span className="rounded bg-foreground px-1.5 py-0.5 text-micro font-medium text-background">
+                    <span className="rounded-xs bg-foreground px-1.5 py-0.5 text-micro font-medium text-background">
                       {t(($) => $.machine.this_machine)}
                     </span>
                   )}

@@ -412,7 +412,7 @@ function PinSkeleton() {
     <SidebarMenuItem>
       <div className="flex h-7 w-full items-center gap-2 px-2">
         <div className="size-3.5 shrink-0 rounded-sm bg-sidebar-accent/40" />
-        <div className="h-3 w-24 rounded bg-sidebar-accent/40" />
+        <div className="h-3 w-24 rounded-xs bg-sidebar-accent/40" />
       </div>
     </SidebarMenuItem>
   );
@@ -700,7 +700,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <span className="flex-1 truncate text-body">{inv.workspace_name ?? t(($) => $.sidebar.invitation_workspace_fallback)}</span>
                             <button
                               type="button"
-                              className="text-caption px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                              className="text-caption px-2 py-0.5 rounded-xs bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                               disabled={acceptInvitationMut.isPending}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -711,7 +711,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             </button>
                             <button
                               type="button"
-                              className="text-caption px-2 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+                              className="text-caption px-2 py-0.5 rounded-xs bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
                               disabled={declineInvitationMut.isPending}
                               onClick={(e) => {
                                 e.stopPropagation();
