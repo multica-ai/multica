@@ -17,8 +17,10 @@ instead of deployment configuration.
 The client reads:
 
 - `schema_version`: only version 1 is accepted.
-- `policy_revision`: the policy protocol generation, currently fixed at `1` by
-  Cloud and not deployment configuration.
+- `policy_revision`: the effective-instruction generation, currently fixed at
+  `2` by Cloud and not deployment configuration. Cloud advances it when the
+  meaning or set of actionable instructions changes, including additive
+  instructions; `schema_version` changes only for incompatible wire parsing.
 - `subscription_version`: the workspace's monotonic subscription revision. A
   response that moves this revision backwards cannot replace a cached policy
   while it is still usable for fresh or stale decisions. After the bounded
@@ -32,6 +34,16 @@ The client reads:
 - `gates`: effective `off` or `enforce` instructions and parameters. Cloud does
   not expose an `observe` rollout mode; `observe` exists only as Multica's local
   downgrade of an expired cached `enforce` instruction.
+- `gates.*.notifications`: an optional, additive delivery policy. The autopilot
+  quota consumer recognizes `first_rejection_per_period` and delivers one
+  workspace notice for the first rejected execution in the Cloud-defined quota
+  period. A malformed notification policy is ignored without invalidating an
+  otherwise valid enforcement gate.
+
+Deploy Cloud policy revision 2 before the Multica consumer. The consumer treats
+a missing notification policy as notices-disabled while continuing to enforce
+the quota. The reverse order is safe because older consumers ignore the
+additive notification fields.
 
 Responses tolerate unknown JSON fields for additive compatibility. Unknown
 schema/action, malformed fields, missing gates, HTTP failures, and timeouts fail
@@ -76,6 +88,20 @@ The client itself has no background goroutine and introduces no startup
 dependency; the autopilot consumer owns its policy-neutral accounting and
 recovery lifecycle separately. Cloud remains the only place that determines
 the effective policy from subscription facts and authoritative limits.
+
+For an enforcing autopilot policy, the first rejected run in a period that
+finds at least one workspace owner or admin is delivered once to all such
+managers. With no manager the marker stays unset so a later rejection can retry;
+after a successful delivery, later rejections create no more Inbox items.
+
+Quota admission and blocked-count transactions commit before a separate Inbox
+transaction begins. Inbox inserts and notification-state parsing are therefore
+best-effort presentation side effects: failures are logged and the unmarked
+first rejection is retried later, but they cannot roll back a run, replace a
+quota error with a 500, or erase the blocked count. Issue-less Inbox items are
+published only after their own transaction commits. Stored English title/body
+remain complete fallback copy for clients and delivery channels without
+structured localization; in-app quota views localize from `details`.
 
 Future consumers should depend on the small `Provider` interface. Tests can use
 `server/internal/entitlement/entitlementtest.Stub` without Cloud.

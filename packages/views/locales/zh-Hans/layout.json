@@ -52,8 +52,10 @@
     "new_issue": "新建任务",
     "new_issue_shortcut": "C",
     "pinned_label": "固定",
-    "workspace_group": "工作区",
-    "configure_group": "配置",
+    "work_group": "工作",
+    "ai_team_group": "AI 团队",
+    "show_more_pins": "再显示 {{count}} 项...",
+    "show_fewer_pins": "收起",
     "unread_overflow": "99+",
     "discord_card": {
       "title": "加入 Discord",

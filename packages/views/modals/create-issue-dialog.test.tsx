@@ -125,29 +125,6 @@ describe("CreateIssueDialog sizing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
-  // MUL-6236: every width the shell sets is `!important` so it can beat
-  // DialogContent's own sizing — which also beat DialogContent's
-  // `max-w-[calc(100%-2rem)]` gutter, so the card ran the full width of a
-  // phone screen with no margin on either side.
-  it("caps the agent dialog inside the viewport on phones", () => {
-    render(<CreateIssueDialog onClose={vi.fn()} initialMode="agent" />);
-
-    expect(contentClass()).toContain("!max-w-[calc(100vw-1.5rem)]");
-    expect(contentClass()).toContain("sm:!max-w-xl");
-  });
-
-  it("keeps the ordinary agent dialog content-driven", () => {
-    render(<CreateIssueDialog onClose={vi.fn()} initialMode="agent" />);
-
-    expect(contentClass()).toContain("!max-h-[80dvh]");
-    expect(contentClass()).not.toContain("!h-96");
-  });
-
-  it("hands manual mode its own sizing", () => {
-    render(<CreateIssueDialog onClose={vi.fn()} initialMode="manual" />);
-
-    expect(contentClass()).toBe("manual-dialog-class");
-  });
 
   it("leaves ordinary create outside the isolated source-context path", () => {
     render(

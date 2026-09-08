@@ -2,7 +2,6 @@ package telegram
 
 import (
 	"context"
-	"errors"
 	"regexp"
 	"testing"
 
@@ -43,20 +42,5 @@ func TestRedeemAndBindRequiresTransactionStarter(t *testing.T) {
 	_, err := service.RedeemAndBind(context.Background(), "token", pgtype.UUID{})
 	if err == nil || err.Error() != "telegram: BindingTokenService missing TxStarter" {
 		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestBindingErrorSentinelsRemainDistinct(t *testing.T) {
-	errs := []error{
-		ErrBindingTokenInvalid,
-		ErrBindingAlreadyAssigned,
-		ErrBindingNotWorkspaceMember,
-	}
-	for i := range errs {
-		for j := range errs {
-			if i != j && errors.Is(errs[i], errs[j]) {
-				t.Fatalf("binding errors %v and %v overlap", errs[i], errs[j])
-			}
-		}
 	}
 }

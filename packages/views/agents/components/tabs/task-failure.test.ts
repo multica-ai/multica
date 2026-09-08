@@ -109,7 +109,7 @@ describe("failureReasonLabel", () => {
 
   it("covers platform reasons added after the original hardcoded map", () => {
     expect(failureReasonLabel("invalid_task_identity", enT)).toBe(
-      "Task identity mismatch",
+      "Run identity mismatch",
     );
   });
 

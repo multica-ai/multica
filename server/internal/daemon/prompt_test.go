@@ -35,16 +35,6 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		// context section is conditional and must not be an apology log
 		"include ONLY when the input cited external resources",
 		"never use it as an apology log",
-		// output/reporting must be workspace-prefix agnostic. Workspaces can
-		// use custom issue prefixes, so a successful issue creation should
-		// not look failed merely because the identifier does not match one
-		// fixed prefix.
-		"multica issue create --output json",
-		"JSON response",
-		"identifier",
-		"Do not scrape human output",
-		"do not assume any workspace issue prefix",
-		"Created <identifier-or-id>: <title>",
 		// hard rules
 		"never invent requirements",
 		"never reduce multi-sentence input",
@@ -63,6 +53,25 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 
 	if strings.Contains(out, "do NOT pass `--attachment`") {
 		t.Errorf("buildQuickCreatePrompt carries the unconditional --attachment ban that conflicts with the quick-create ## Output delivery channel (MUL-5696)\n--- output ---\n%s", out)
+	}
+
+	// How to run the create, what to print, and how to pass a long
+	// description are RULES: true for every quick-create run, and required
+	// even on a turn whose user message never arrived. They are stated once
+	// in the brief (execenv.TestQuickCreateBriefOwnsRunAndOutputRules and
+	// TestSlimQuickCreateAvailableCommands pin them there). This function
+	// renders the modal's field VALUES; restating the rules alongside them
+	// put two hand-maintained copies in one context window (MUL-6984).
+	for _, moved := range []string{
+		"Output format:",
+		"Run exactly one `multica issue create --output json` invocation",
+		"Created <identifier-or-id>: <title>",
+		"Passing the description:",
+		"never `/tmp` or any machine-shared path",
+	} {
+		if strings.Contains(out, moved) {
+			t.Errorf("buildQuickCreatePrompt restates brief-owned rule %q\n--- output ---\n%s", moved, out)
+		}
 	}
 }
 
@@ -282,84 +291,59 @@ func TestBuildQuickCreatePromptParentPinning(t *testing.T) {
 	}
 }
 
-// TestBuildPromptSquadLeaderNoActionFailureFallback locks the escape hatch added
-// in MUL-6622 / GH #7487. The comment prohibition is conditional on the
-// `squad activity` call succeeding — the server only rejects a leader comment
-// once the no_action activity exists — so a failed call must not end the turn in
-// silence. The fallback is capped at ONE comment so it cannot collide with the
-// one-comment-per-turn rule.
-func TestBuildPromptSquadLeaderNoActionFailureFallback(t *testing.T) {
-	out := BuildPrompt(Task{
-		IssueID:               "issue-123",
-		TriggerCommentID:      "comment-456",
-		TriggerCommentContent: "LGTM",
-		TriggerAuthorType:     "member",
-		TriggerAuthorName:     "Bohan",
-		IsLeaderTask:          true,
-		LeaderRoleResolved:    true,
-		Agent: &AgentData{
-			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
-		},
-	}, "claude")
+// TestBuildPromptSquadLeaderReplyCarveOutIgnoresTriggerAuthor is the MUL-2168
+// regression, retargeted at the surface that still branches on leadership.
+//
+// The bug was a leader posting "LGTM is a pure acknowledgment — no reply
+// needed. Exiting silently." — noise it produced because the per-turn
+// no_action rule only fired for AGENT-triggered comments, so a member's
+// comment bypassed it. That per-turn copy is gone (MUL-6984): the rule itself
+// now lives once, in the Squad Operating Protocol the server appends to
+// Instructions, and handler.TestSquadOperatingProtocolOwnsNoActionRule pins
+// its wording. What the per-turn message still owns is the reply imperative,
+// which must carry the carve-out so it cannot contradict the protocol — and,
+// as here, it must do so whoever wrote the triggering comment.
+func TestBuildPromptSquadLeaderReplyCarveOutIgnoresTriggerAuthor(t *testing.T) {
+	t.Parallel()
 
-	for _, want := range []string{
-		"conditional on that call SUCCEEDING",
-		"post exactly ONE short comment",
-		"does not license a second one",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("squad leader no_action rule must contain %q, got:\n%s", want, out)
+	for _, authorType := range []string{"member", "agent"} {
+		out := BuildPrompt(Task{
+			IssueID:               "issue-123",
+			TriggerCommentID:      "comment-456",
+			TriggerCommentContent: "LGTM",
+			TriggerAuthorType:     authorType,
+			TriggerAuthorName:     "Bohan",
+			IsLeaderTask:          true,
+			LeaderRoleResolved:    true,
+			Agent: &AgentData{
+				Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
+			},
+		}, "claude")
+
+		if !strings.Contains(out, "Unless your outcome is `no_action`, post your reply as a comment") {
+			t.Errorf("%s-triggered leader prompt lost the no_action carve-out\n---\n%s", authorType, out)
+		}
+		// The rule is stated by the protocol in Instructions, never restated
+		// here — a second hand-maintained copy in the same context window is
+		// what drifted before.
+		if strings.Contains(out, "Squad leader no_action rule") {
+			t.Errorf("%s-triggered leader prompt restates the no_action rule\n---\n%s", authorType, out)
 		}
 	}
-}
 
-// TestBuildPromptSquadLeaderNoActionForMemberTrigger verifies that the
-// squad leader no_action prohibition is injected in the per-turn prompt
-// regardless of whether the triggering comment was posted by an agent or
-// a member. This was the root cause of the "LGTM is a pure acknowledgment
-// — no reply needed. Exiting silently." noise comment: the prohibition
-// only fired for agent-triggered comments, so member-triggered ones
-// (like "LGTM") bypassed it.
-func TestBuildPromptSquadLeaderNoActionForMemberTrigger(t *testing.T) {
-	task := Task{
+	// A non-leader gets the unconditional imperative: the carve-out is a
+	// leader-only exception, and offering it to an ordinary agent would licence
+	// a silent exit no `squad activity` call ever records.
+	nonLeader := BuildPrompt(Task{
 		IssueID:               "issue-123",
 		TriggerCommentID:      "comment-456",
 		TriggerCommentContent: "LGTM",
-		TriggerAuthorType:     "member",
-		TriggerAuthorName:     "Bohan",
-		IsLeaderTask:          true,
-		LeaderRoleResolved:    true,
-		Agent: &AgentData{
-			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
-		},
-	}
-	out := BuildPrompt(task, "claude")
-	if !strings.Contains(out, "Squad leader no_action rule") {
-		t.Errorf("buildCommentPrompt must inject squad leader no_action rule for member-triggered comments, got:\n%s", out)
-	}
-	if !strings.Contains(out, "DO NOT post any comment") {
-		t.Errorf("buildCommentPrompt must contain DO NOT post prohibition for member-triggered squad leader, got:\n%s", out)
-	}
-}
-
-// TestBuildPromptSquadLeaderNoActionForAgentTrigger verifies the rule also
-// fires for agent-triggered comments (the original path that already worked).
-func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
-	task := Task{
-		IssueID:               "issue-123",
-		TriggerCommentID:      "comment-456",
-		TriggerCommentContent: "Deploy complete.",
 		TriggerAuthorType:     "agent",
-		TriggerAuthorName:     "deploy-boy",
-		IsLeaderTask:          true,
-		LeaderRoleResolved:    true,
-		Agent: &AgentData{
-			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
-		},
-	}
-	out := BuildPrompt(task, "claude")
-	if !strings.Contains(out, "Squad leader no_action rule") {
-		t.Errorf("buildCommentPrompt must inject squad leader no_action rule for agent-triggered comments, got:\n%s", out)
+		TriggerAuthorName:     "Worker",
+		Agent:                 &AgentData{Name: "Regular", Instructions: "You are a regular agent."},
+	}, "claude")
+	if strings.Contains(nonLeader, "Unless your outcome is `no_action`") {
+		t.Errorf("non-leader prompt carries the leader-only carve-out\n---\n%s", nonLeader)
 	}
 }
 
@@ -511,14 +495,8 @@ func TestBuildPromptLegacyServerKeepsBriefingBasedLeaderRole(t *testing.T) {
 		},
 	}, "claude")
 
-	for _, want := range []string{
-		"Squad leader no_action rule",
-		"multica squad activity",
-		"DO NOT post any comment",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("legacy-server leader prompt lost %q\n---\n%s", want, out)
-		}
+	if !strings.Contains(out, "Unless your outcome is `no_action`, post your reply as a comment") {
+		t.Fatalf("legacy-server leader prompt lost the leader-only reply carve-out\n---\n%s", out)
 	}
 }
 
@@ -1069,55 +1047,6 @@ func TestBuildPromptDefaultScansRootsFirst(t *testing.T) {
 	}
 }
 
-func TestBuildPromptWarnsAboutActiveSiblingRuns(t *testing.T) {
-	task := Task{
-		IssueID: "issue-target",
-		ActiveSiblingRuns: []ActiveSiblingRunData{{
-			TaskID:          "task-existing",
-			IssueID:         "issue-source",
-			IssueIdentifier: "MUL-6000",
-			IssueTitle:      "Existing work",
-			Status:          "running",
-			StartedAt:       "2026-08-14T03:00:00Z",
-		}},
-	}
-	out := BuildPrompt(task, "claude")
-	for _, want := range []string{
-		"Active sibling runs",
-		"MUL-6000",
-		"task-existing",
-		"multica issue comment list issue-target --roots-only --summary --compact --output json",
-		"multica issue run-messages task-existing",
-		"--no-start",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("prompt missing %q\n--- output ---\n%s", want, out)
-		}
-	}
-	if strings.Contains(out, "multica issue runs") {
-		t.Errorf("prompt must not direct overlap checks to the target issue's run list\n--- output ---\n%s", out)
-	}
-	if strings.Contains(out, "run-messages task-existing --issue") {
-		t.Errorf("prompt must not resolve the issue when the task id is already complete\n--- output ---\n%s", out)
-	}
-}
-
-func TestBuildPromptOmitsActiveSiblingRunsForChatTask(t *testing.T) {
-	task := Task{
-		ChatSessionID: "chat-1",
-		ActiveSiblingRuns: []ActiveSiblingRunData{{
-			TaskID:          "task-existing",
-			IssueID:         "issue-source",
-			IssueIdentifier: "MUL-6000",
-			Status:          "running",
-		}},
-	}
-	out := BuildPrompt(task, "claude")
-	if strings.Contains(out, "Active sibling runs") || strings.Contains(out, "task-existing") {
-		t.Errorf("chat prompt must not include issue sibling guidance\n--- output ---\n%s", out)
-	}
-}
-
 // TestBuildPromptNonSquadLeaderNoRule verifies that non-squad-leader agents
 // do NOT get the squad leader no_action rule injected.
 func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {
@@ -1138,10 +1067,13 @@ func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {
 }
 
 // TestBuildPromptNewCommentsHint pins that a comment-triggered task whose agent
-// ran before on this issue (NewCommentsSince set, NewCommentCount > 0) gets the
-// since-delta hint with the ISSUE-WIDE new-comment count, but is steered to read
-// the triggering (parent) thread first rather than blindly pulling every new
-// comment.
+// ran before on this issue (NewCommentsSince set, NewCommentCount > 0) AND whose
+// provider session resumes gets the since-delta hint with the ISSUE-WIDE
+// new-comment count, the triggering (parent) thread's delta as the first read,
+// and the scan handed over as the wide read step 2 requires. The session is
+// part of the fixture on purpose: the hint is selected by resume first
+// (MUL-6984) — see TestBuildPromptDroppedResumeWithNewCommentsTakesFreshPath
+// for the same delta without a session.
 func TestBuildPromptNewCommentsHint(t *testing.T) {
 	const (
 		issueID = "issue-new-1"
@@ -1153,6 +1085,7 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 		TriggerThreadID:       "thread-root-1",
 		TriggerCommentContent: "please look",
 		TriggerAuthorType:     "member",
+		PriorSessionID:        "session-123",
 		NewCommentCount:       3,
 		NewCommentsSince:      since,
 	}
@@ -1162,9 +1095,10 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	if !strings.Contains(out, "3 new comment(s) on this issue since your last run") {
 		t.Errorf("hint must report the issue-wide new-comment count, got:\n%s", out)
 	}
-	// Don't-blindly-read-all guidance.
-	if !strings.Contains(out, "blindly") {
-		t.Errorf("hint must discourage blindly reading every new comment, got:\n%s", out)
+	// The hint carries facts and commands, no modality (MUL-6984): the scan is
+	// handed over as the wide read step 2 requires, never as an option.
+	if !strings.Contains(out, "across all threads") {
+		t.Errorf("hint must state the count is issue-wide, got:\n%s", out)
 	}
 	// Parent thread first: the --thread <trigger> read is the prioritized action.
 	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --since "+since+" --compact --output json") {
@@ -1173,11 +1107,16 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	if !strings.Contains(out, "--tail 30") {
 		t.Errorf("hint must offer the full-thread (--tail 30) option, got:\n%s", out)
 	}
-	// Issue-wide catch-up is demoted to an only-if-needed fallback, phrased as
-	// a rerun of the thread command minus `--thread` (MUL-5721 OPT-1) instead
-	// of a second full command that restated the UUID and anchor.
-	if !strings.Contains(out, "rerun it without `--thread` for the issue-wide catch-up") {
-		t.Errorf("hint must keep the issue-wide catch-up fallback, got:\n%s", out)
+	// The scan is phrased as a flag swap on the thread command (MUL-5721
+	// OPT-1) instead of a second full command that restated the UUID and
+	// anchor, and it is pointed at as the wide read step 2 requires.
+	if !strings.Contains(out, "`--roots-only --summary` in place of `--thread ... --since ...`") {
+		t.Errorf("hint must hand over the scan as the wide read, got:\n%s", out)
+	}
+	for _, banned := range []string{"blindly", "Only if you need", "rerun it without `--thread`"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("warm hint must not make the wide read optional (%q), got:\n%s", banned, out)
+		}
 	}
 	if strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
 		t.Errorf("warm hint must not render a second full issue-wide command (MUL-5721 OPT-1), got:\n%s", out)
@@ -1216,8 +1155,11 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	// flag surface here would put reference text on every cold turn. The scan
 	// is phrased as a flag swap on the thread command, not a second full
 	// command restating the UUID (MUL-5721 OPT-1).
-	if !strings.Contains(out, "Rerun with `--roots-only --summary` replacing `--thread ... --tail 30`") {
-		t.Errorf("cold start should offer the cheap roots scan for cross-thread background, got:\n%s", out)
+	if !strings.Contains(out, "`--roots-only --summary` in place of `--thread ... --tail 30`") {
+		t.Errorf("cold start must hand over the roots scan as the wide read, got:\n%s", out)
+	}
+	if strings.Contains(out, "Need cross-thread background") {
+		t.Errorf("cold hint must not make the scan optional (MUL-6984), got:\n%s", out)
 	}
 	if strings.Contains(out, "multica issue comment list "+issueID+" --roots-only --summary --output json") {
 		t.Errorf("cold hint must not render a second full command for the roots scan (MUL-5721 OPT-1), got:\n%s", out)
@@ -1242,14 +1184,20 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 		PriorSessionID:        "session-123",
 		NewCommentCount:       0,
 		NewCommentsSince:      "",
+		// The zero is the SERVER's answer, not a missing one. Without this the
+		// same fixture is the ambiguous zero (failed read / cold start / old
+		// server), which renders the scan instead of the waiver —
+		// TestBuildPromptResumedDeltaUnavailableStillRequiresScan owns that
+		// branch.
+		NewCommentsDeltaKnown: true,
 	}
 	out := BuildPrompt(task, "claude")
 
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"If your reply depends on thread context",
-		"do not rely only on resumed session memory",
+		"issue-wide delta is empty",
+		"if resumed memory is not enough",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
 		if !strings.Contains(out, want) {
@@ -1266,9 +1214,167 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 	if strings.Contains(out, "scoped to the triggering thread") {
 		t.Errorf("resumed/no-delta prompt must not claim the delta is thread-scoped, got:\n%s", out)
 	}
-	if strings.Contains(out, "Read the triggering conversation first") {
-		t.Errorf("resumed/no-delta prompt must not use the cold-start forced-read wording, got:\n%s", out)
+	if strings.Contains(out, "in place of `--thread ... --tail 30`") {
+		t.Errorf("resumed/no-delta prompt must not render the reconstruction (cold) hint, got:\n%s", out)
 	}
+}
+
+// TestBuildPromptDroppedResumeWithNewCommentsTakesFreshPath pins MUL-6984: the
+// hint is selected by whether the session RESUMES, then by the delta. A run
+// whose resume the daemon dropped still carries a since-anchor and a positive
+// count, but its memory is fresh — the delta hint would frame the triggering
+// thread's delta as the catch-up and the continuity notice would then tell the
+// agent to rebuild from the record. It takes the fresh-session path instead.
+func TestBuildPromptDroppedResumeWithNewCommentsTakesFreshPath(t *testing.T) {
+	const issueID = "issue-dropped-1"
+	task := Task{
+		IssueID:                       issueID,
+		TriggerCommentID:              "trigger-1",
+		TriggerThreadID:               "thread-root-1",
+		TriggerCommentContent:         "hi",
+		TriggerAuthorType:             "member",
+		NewCommentCount:               3,
+		NewCommentsSince:              "2026-05-28T11:00:00Z",
+		PriorSessionID:                "",
+		PriorSessionResumeUnavailable: true,
+	}
+	out := BuildPrompt(task, "claude")
+	for _, want := range []string{
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
+		"`--roots-only --summary` in place of `--thread ... --tail 30`",
+		"## Session Continuity Notice",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dropped-resume prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	for _, banned := range []string{
+		"new comment(s) on this issue since your last run",
+		"You're resuming the prior session",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("dropped-resume prompt must not render the resumed-path hint (%q)\n--- output ---\n%s", banned, out)
+		}
+	}
+}
+
+// TestBuildPromptOlderFallbackSessionRequiresReconstruction is the other half of the
+// dropped-resume contract, and the half a PriorSessionID != "" check cannot
+// see.
+//
+// MUL-5305 lets the server withhold a more recent Codex session whose rollout
+// is missing and hand back an OLDER session instead: PriorSessionResumeUnavailable
+// is true AND PriorSessionID is non-empty. The older session may resume
+// perfectly well — it is simply not the turn this run continues from. Treating
+// it as a warm resume would let the run skip the full trigger-thread read and,
+// on an empty delta, the scan too, on the strength of context it does not have.
+//
+// The prompt must also not call the session fresh. The daemon resumes that
+// older session — ResumeSessionID is not gated on the flag — so the agent may
+// well hold earlier turns' memory; what is true is only that the LATEST turn
+// did not come back. The hint says nothing about the session and the
+// continuity notice says the run "does not continue" the lost one.
+func TestBuildPromptOlderFallbackSessionRequiresReconstruction(t *testing.T) {
+	const issueID = "issue-fallback-1"
+	task := Task{
+		IssueID:               issueID,
+		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
+		TriggerCommentContent: "hi",
+		TriggerAuthorType:     "member",
+		// The server computed a real delta AND handed back a session id — every
+		// warm-path precondition except the one that matters.
+		NewCommentCount:               2,
+		NewCommentsSince:              "2026-05-28T11:00:00Z",
+		NewCommentsDeltaKnown:         true,
+		PriorSessionID:                "older-fallback-session",
+		PriorSessionResumeUnavailable: true,
+	}
+	out := BuildPrompt(task, "claude")
+
+	for _, want := range []string{
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
+		"`--roots-only --summary` in place of `--thread ... --tail 30`",
+		"## Session Continuity Notice",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("older-fallback prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	for _, banned := range []string{
+		"You're resuming the prior session",
+		"new comment(s) on this issue since your last run",
+		"fresh session",
+		"fresh one",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("older-fallback prompt claims a warm resume or a fresh session (%q)\n--- output ---\n%s", banned, out)
+		}
+	}
+}
+
+// TestBuildPromptResumedDeltaUnavailableStillRequiresScan pins the difference
+// between "the server looked and found nothing" and "the server could not
+// look".
+//
+// Both arrive as NewCommentCount == 0, and so do a cold start and an old
+// server that never sends the fields. Only the first answers the question
+// workflow step 2's scan exists to answer, so only the first may waive it —
+// NewCommentsDeltaKnown is what tells them apart. Waiving on the ambiguous
+// zero would delete the mandatory scan exactly when a count query has just
+// failed, which is when the run is least able to tell whether another thread
+// moved.
+func TestBuildPromptResumedDeltaUnavailableStillRequiresScan(t *testing.T) {
+	const issueID = "issue-unknown-delta-1"
+	base := Task{
+		IssueID:               issueID,
+		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
+		TriggerCommentContent: "hi",
+		TriggerAuthorType:     "member",
+		PriorSessionID:        "warm-session",
+	}
+
+	t.Run("delta not computed", func(t *testing.T) {
+		out := BuildPrompt(base, "claude")
+
+		// The session facts are real and still stated.
+		if !strings.Contains(out, "You're resuming the prior session") {
+			t.Errorf("resumed prompt lost the session fact\n--- output ---\n%s", out)
+		}
+		// The scan is handed over, not waived.
+		if !strings.Contains(out, "multica issue comment list "+issueID+" --roots-only --summary --compact --output json") {
+			t.Errorf("resumed prompt with no delta must hand over the scan\n--- output ---\n%s", out)
+		}
+		for _, banned := range []string{
+			"No other new comments on this issue since your last run",
+			"which answers the scan workflow step 2 requires",
+		} {
+			if strings.Contains(out, banned) {
+				t.Errorf("resumed prompt claims an answer it does not have (%q)\n--- output ---\n%s", banned, out)
+			}
+		}
+	})
+
+	t.Run("delta computed and empty", func(t *testing.T) {
+		task := base
+		task.NewCommentsDeltaKnown = true
+		out := BuildPrompt(task, "claude")
+
+		for _, want := range []string{
+			"No other new comments on this issue since your last run",
+			"which answers the scan workflow step 2 requires",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("authoritative empty delta lost the waiver %q\n--- output ---\n%s", want, out)
+			}
+		}
+		// The waiver is the whole point of this branch: it must not also hand
+		// the scan over, or the two branches are indistinguishable.
+		if strings.Contains(out, "nothing here answers the scan workflow step 2 requires") {
+			t.Errorf("authoritative empty delta rendered the unknown-delta hint\n--- output ---\n%s", out)
+		}
+	})
 }
 
 // TestBuildCommentPromptCoalescedCrossThread pins MUL-4195 review should-fix #3:
@@ -1713,7 +1819,6 @@ func TestTurnModeMarkersRetired(t *testing.T) {
 		{"comment-triggered with content", Task{IssueID: "issue-1", TriggerCommentID: "c-1", TriggerCommentContent: "please look"}},
 		{"comment-triggered with EMPTY content", Task{IssueID: "issue-1", TriggerCommentID: "c-1"}},
 		{"assignment-triggered", Task{IssueID: "issue-1"}},
-		{"assignment-triggered with handoff note", Task{IssueID: "issue-1", HandoffNote: "start with the API"}},
 		{"chat", Task{ChatSessionID: "chat-1"}},
 		{"quick-create", Task{QuickCreatePrompt: "make an issue"}},
 		{"autopilot", Task{AutopilotRunID: "run-1"}},

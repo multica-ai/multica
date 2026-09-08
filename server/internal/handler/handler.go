@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -173,14 +174,30 @@ type DaemonPendingWorkNotifier interface {
 	NotifyPendingWork(runtimeID, kind string)
 }
 
+// RuntimeGoneNotifier invalidates a runtime that was deleted while its daemon
+// still has an authenticated WebSocket connection.
+type RuntimeGoneNotifier interface {
+	NotifyRuntimeGone(runtimeID string)
+}
+
+// RuntimeRecoveryNotifier republishes the daemon:register lifecycle refresh
+// after a heartbeat actually flipped an offline runtime row back online
+// (sweeper-race fallback, batch-receipt reconciliation). Recovery paths already
+// know the workspace, so publishing never needs a follow-up database lookup.
+type RuntimeRecoveryNotifier interface {
+	NotifyRuntimeRecovered(ctx context.Context, workspaceID string)
+}
+
 type Handler struct {
 	Queries                *db.Queries
+	ReadSelector           *dbreader.Selector
 	DB                     dbExecutor
 	TxStarter              txStarter
 	Hub                    *realtime.Hub
 	DaemonHub              *daemonws.Hub
 	DaemonProfileRefresh   RuntimeProfileRefreshNotifier
 	DaemonWorkspaceRefresh WorkspaceSetRefreshNotifier
+	DaemonRuntimeGone      RuntimeGoneNotifier
 	Bus                    *events.Bus
 	TaskService            *service.TaskService
 	PluginService          *service.PluginService
@@ -235,6 +252,8 @@ type Handler struct {
 	InvitationRateLimiters       InvitationRateLimiters
 	WebhookDeliveryWorker        *WebhookDeliveryWorker
 	CloudRuntime                 cloudRuntimeProxy
+	// Test-only HTTP override; nil uses the default client in production.
+	googleOAuthHTTPClient *http.Client
 	// Lark integration. All three are nil when the Lark master key
 	// (MULTICA_LARK_SECRET_KEY) is unset; the corresponding HTTP
 	// handlers return 503 in that case so a misconfigured self-host
@@ -410,9 +429,11 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 	var daemonProfileRefresh RuntimeProfileRefreshNotifier
 	var daemonWorkspaceRefresh WorkspaceSetRefreshNotifier
+	var daemonRuntimeGone RuntimeGoneNotifier
 	if daemonHub != nil {
 		daemonProfileRefresh = daemonHub
 		daemonWorkspaceRefresh = daemonHub
+		daemonRuntimeGone = daemonHub
 	}
 
 	llmClient := llm.New(llm.Config{
@@ -444,12 +465,14 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	taskSvc.QuickActions = llmClient
 	h := &Handler{
 		Queries:                      queries,
+		ReadSelector:                 dbreader.NewPrimaryOnly(queries),
 		DB:                           executor,
 		TxStarter:                    txStarter,
 		Hub:                          hub,
 		DaemonHub:                    daemonHub,
 		DaemonProfileRefresh:         daemonProfileRefresh,
 		DaemonWorkspaceRefresh:       daemonWorkspaceRefresh,
+		DaemonRuntimeGone:            daemonRuntimeGone,
 		Bus:                          bus,
 		TaskService:                  taskSvc,
 		PluginService:                service.NewPluginService(queries, txStarter),
@@ -478,6 +501,11 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		cfg: cfg,
 	}
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
+	// The default passthrough scheduler reports sweeper-race recoveries so the
+	// daemon:register refresh fires even without the production batched wiring.
+	if passthrough, ok := h.HeartbeatScheduler.(*PassthroughHeartbeatScheduler); ok {
+		passthrough.RecoveryNotifier = h
+	}
 
 	// GitHub API snapshot pipeline for PR cards (MUL-5265). Built
 	// unconditionally but inert (every trigger no-ops) when the App private key
@@ -720,6 +748,25 @@ func (h *Handler) notifyDaemonWorkspacesChanged(userIDs ...string) {
 	}
 }
 
+// NotifyRuntimeGone emits the post-commit runtime invalidation signal. It is
+// exported so the runtime GC can use the same publisher as request handlers.
+func (h *Handler) NotifyRuntimeGone(runtimeID string) {
+	if h == nil || h.DaemonRuntimeGone == nil || runtimeID == "" {
+		return
+	}
+	h.DaemonRuntimeGone.NotifyRuntimeGone(runtimeID)
+}
+
+// NotifyRuntimeRecovered republishes the workspace-scoped daemon:register
+// lifecycle event after a heartbeat restored a runtime from offline. Runtime
+// details are intentionally omitted from the payload.
+func (h *Handler) NotifyRuntimeRecovered(_ context.Context, workspaceID string) {
+	if h == nil || workspaceID == "" {
+		return
+	}
+	h.PublishRuntimeRefresh(workspaceID, "system", "", "heartbeat_recovery")
+}
+
 // publishTask is publish() plus a TaskID hint so the realtime layer can route
 // the event to the per-task scope rather than the whole workspace.
 func (h *Handler) publishTask(eventType, workspaceID, actorType, actorID, taskID string, payload any) {
@@ -776,21 +823,25 @@ func requestUserID(r *http.Request) string {
 // stripped by the agent process. This is the path MUL-2600 relies on to
 // reject agent-process traffic on owner-only endpoints.
 //
-// Fallback signal (legacy CLI / member-token paths): the request MUST
-// carry both X-Agent-ID and a valid X-Task-ID, and the task must belong
-// to the claimed agent. Otherwise we fall back to "member".
+// Fallback signal: the request MUST carry both X-Agent-ID and a valid
+// X-Task-ID, and the task must belong to the claimed agent. Otherwise we
+// fall back to "member".
 //
-// X-Agent-ID alone is not trusted: any workspace member can guess or observe
-// an agent's UUID, and a member-supplied X-Agent-ID would otherwise let that
-// member impersonate the agent and bypass the private-agent gate (#2359
-// review). The daemon always pairs the two headers, so requiring both has
-// no effect on legitimate agent callers but closes the impersonation path.
+// This fallback is NOT a security boundary and must not be read as one. Both
+// ids are observable by any workspace member (GET /api/issues/{id}/task-runs
+// returns the pair), so requiring both proves nothing on its own — the older
+// comment here claimed it "closes the impersonation path", and it did not.
+// What closes it is the Auth / DaemonAuth middleware stripping both headers
+// from every client, leaving the mat_ branch as the only writer (MUL-3428).
+// The fallback survives that strip only for in-process callers and handler
+// unit tests, which set the headers directly.
 //
 // Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
 	if r.Header.Get("X-Actor-Source") == "task_token" {
-		// Server-set header — auth middleware also forced X-Agent-ID
-		// from the token row. Trust it directly without re-querying.
+		// Server-set header — the auth middleware stripped whatever the
+		// client sent and re-stamped X-Agent-ID from the token row. Trust
+		// it directly without re-querying.
 		return "agent", r.Header.Get("X-Agent-ID")
 	}
 	agentID := r.Header.Get("X-Agent-ID")

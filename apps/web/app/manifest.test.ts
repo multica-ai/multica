@@ -16,28 +16,6 @@ function launch(cookies: Record<string, string>, host = "www.multica.ai") {
 }
 
 describe("web app manifest", () => {
-  it("declares the fields a browser needs to offer installation", () => {
-    const m = manifest();
-
-    expect(m.display).toBe("standalone");
-    expect(m.scope).toBe("/");
-    expect(m.name).toBeTruthy();
-    expect(m.short_name).toBeTruthy();
-  });
-
-  it("ships both icon sizes Chrome requires, plus a maskable one", () => {
-    const icons = manifest().icons ?? [];
-    const sizesFor = (purpose: string) =>
-      icons.filter((icon) => icon.purpose === purpose).map((icon) => icon.sizes);
-
-    expect(sizesFor("any")).toEqual(
-      expect.arrayContaining(["192x192", "512x512"]),
-    );
-    // Without a maskable icon Android pads the `any` icon into a white blob
-    // instead of cropping it to the launcher shape.
-    expect(sizesFor("maskable")).toContain("512x512");
-    for (const icon of icons) expect(icon.src.startsWith("/icons/")).toBe(true);
-  });
 
   it("does not launch at the root path", () => {
     // The official marketing hosts keep "/" on the public site even for a

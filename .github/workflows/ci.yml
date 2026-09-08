@@ -11,6 +11,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  cursor-background-lifecycle:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: server/go.sum
+      - name: Verify Cursor background lifecycle and watchdog races
+        shell: bash
+        working-directory: server
+        # Explicit, verbose selection prevents the Unix regression from silently
+        # disappearing behind a build tag or the ordinary Windows test subset.
+        run: |
+          go test -race ./pkg/agent -v -run 'TestCursorBackground|TestCaptureCursorBackground' -count=1
+          go test -race ./internal/daemon -v -run 'Test.*Background.*Watchdog|Test.*IdleWatchdog' -count=1
+      - name: Repeat macOS finalization and verify cgo-free ownership
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: server
+        run: |
+          go test ./pkg/agent -run '^TestCursorBackgroundLifecycle/finish$' -count=5
+          go test -race ./pkg/agent -run '^TestCursorBackgroundLifecycle/finish$' -count=5
+          CGO_ENABLED=0 go test ./pkg/agent -run '^TestCaptureCursorBackground(KernelRejectsStaleIdentity|DetachedSession|LateDescendant)$' -count=1
+
   # Decides whether the heavy frontend validation jobs, the backend Go jobs
   # and sqlc verification have anything to do.
   # The frontend jobs validate the web/desktop apps, the shared packages,
@@ -95,10 +126,9 @@ jobs:
               # mode for everyone with no error anywhere, so a change to the
               # frontend half must run the backend suite.
               - 'packages/core/runtimes/cli-version.ts'
-              # internal/daemon/agent_command_names_test.go reads both of
-              # these as test inputs; the guard script is additionally the
-              # entry point scripts/test-go.sh runs, and the names file is
-              # the data that guard consumes.
+              # internal/daemon/agent_command_names_test.go exercises the
+              # guard script; scripts/test-go.sh also uses it as the backend
+              # test entry point, and the script reads the command names file.
               - 'scripts/agent-cli-command-names.txt'
               - 'scripts/go-test-with-agent-cli-guard.sh'
               - 'scripts/helm-config.test.sh'
@@ -521,6 +551,16 @@ jobs:
       - name: Build
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go build ./...
+
+      # The `agentintegration` files execute real agent CLIs, so no CI job runs
+      # them. Nothing compiled them either, which let them rot silently: a
+      # helper renamed in an ordinary test file, or two branches each defining
+      # the same helper in one package, breaks the tagged build with every
+      # untagged job still green. vet type-checks test files, so this is the
+      # cheapest gate that keeps them honest without needing an agent CLI.
+      - name: Vet tag-gated agent integration tests
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: cd server && go vet -tags agentintegration ./...
 
       - name: Run migrations
         if: ${{ needs.changes.outputs.backend == 'true' }}

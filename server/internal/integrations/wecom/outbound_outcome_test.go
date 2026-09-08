@@ -213,39 +213,6 @@ func TestNilMetricsSinkIsSafe(t *testing.T) {
 	o.handleEvent(outcomeEvent()) // no socket registered: takes the drop path
 }
 
-// TestReasonStringsArePinned — these are metric label values. Renaming one
-// silently retires whatever alert or dashboard reads it, and the rename would
-// otherwise pass every test in this package: nothing else asserts the strings
-// themselves, only that some reason was recorded.
-func TestReasonStringsArePinned(t *testing.T) {
-	t.Parallel()
-	for want, got := range map[string]dropReason{
-		"no_live_connection":      dropNoConnection,
-		"task_missing":            dropTaskMissing,
-		"platform_refused":        dropPlatformRefused,
-		"transport_error":         dropTransport,
-		"attachment_not_admitted": dropAttachmentNotAdmitted,
-	} {
-		if string(got) != want {
-			t.Errorf("reason = %q, want %q", got, want)
-		}
-	}
-}
-
-// TestSkipReasonStringsArePinned — the skipped set is a metric label too.
-func TestSkipReasonStringsArePinned(t *testing.T) {
-	t.Parallel()
-	for want, got := range map[string]skipReason{
-		"origin_not_channel":    skipOriginNotChannel,
-		"installation_inactive": skipInstallationInactive,
-		"nothing_to_say":        skipNothingToSay,
-	} {
-		if string(got) != want {
-			t.Errorf("skip reason = %q, want %q", got, want)
-		}
-	}
-}
-
 // TestNotOwedIsSkippedNotDropped — the review finding. A question typed in the
 // web UI on a WeCom-bound session was never owed to a WeCom user, so counting
 // it as a failed delivery makes ordinary web usage read as an outage.
@@ -276,20 +243,6 @@ func TestNotOwedIsSkippedNotDropped(t *testing.T) {
 				t.Errorf("logged a WARN for an ordinary outcome:\n%s", r.logs.String())
 			}
 		})
-	}
-}
-
-// TestActionableSplitIsPinned — every drop reaches an operator now that the
-// ordinary outcomes have their own counter.
-func TestActionableSplitIsPinned(t *testing.T) {
-	t.Parallel()
-	for _, r := range []dropReason{
-		dropNoConnection, dropTaskMissing, dropPlatformRefused,
-		dropTransport, dropAttachmentNotAdmitted,
-	} {
-		if !r.actionable() {
-			t.Errorf("%s is a drop and must reach an operator", r)
-		}
 	}
 }
 

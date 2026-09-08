@@ -108,6 +108,46 @@ func TestGateCachesByWorkspaceAndClonesResults(t *testing.T) {
 	if autopilot.Gate.Action != ActionEnforce || calls.Load() != 1 {
 		t.Fatalf("autopilot = %+v, calls = %d", autopilot, calls.Load())
 	}
+	if autopilot.Gate.Notifications == nil ||
+		autopilot.Gate.Notifications.OnRejection != NotificationFirstRejectionPerPeriod {
+		t.Fatalf("autopilot notifications = %+v", autopilot.Gate.Notifications)
+	}
+	autopilot.Gate.Notifications.OnRejection = "mutated"
+	cloned := client.Gate(context.Background(), workspaceID, GateAutopilotRuns)
+	if cloned.Gate.Notifications == nil ||
+		cloned.Gate.Notifications.OnRejection != NotificationFirstRejectionPerPeriod {
+		t.Fatalf("cloned notifications = %+v", cloned.Gate.Notifications)
+	}
+}
+
+func TestNotificationPolicyDoesNotControlQuotaValidity(t *testing.T) {
+	limit := 100
+	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+	base := wireGate{
+		Action: string(ActionEnforce), Limit: &limit,
+		PeriodStart: &start, PeriodEnd: &end, ResetAt: &end,
+	}
+
+	valid := base
+	valid.Notifications = &wireNotificationPolicy{
+		OnRejection: NotificationFirstRejectionPerPeriod,
+	}
+	gate, err := normalizeGate(GateAutopilotRuns, valid)
+	if err != nil || gate.Notifications == nil ||
+		gate.Notifications.OnRejection != NotificationFirstRejectionPerPeriod {
+		t.Fatalf("valid notification gate = %+v, err = %v", gate, err)
+	}
+
+	malformed := base
+	malformed.Notifications = &wireNotificationPolicy{
+		OnRejection: "future_mode",
+	}
+	gate, err = normalizeGate(GateAutopilotRuns, malformed)
+	if err != nil || gate.Action != ActionEnforce || gate.Notifications != nil {
+		t.Fatalf("malformed notification gate = %+v, err = %v; want enforced quota without notices", gate, err)
+	}
+
 }
 
 func TestConcurrentWorkspaceMissesUseSingleflight(t *testing.T) {
@@ -586,6 +626,9 @@ func samplePolicy(policyRevision, subscriptionVersion, validForSeconds int64, is
 			string(GateAutopilotRuns): {
 				Action: string(ActionEnforce), Limit: &autopilotLimit,
 				PeriodStart: &periodStart, PeriodEnd: &periodEnd, ResetAt: &periodEnd,
+				Notifications: &wireNotificationPolicy{
+					OnRejection: NotificationFirstRejectionPerPeriod,
+				},
 			},
 		},
 	}

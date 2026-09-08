@@ -2,20 +2,28 @@ package execenv
 
 import "fmt"
 
-// BuildNewCommentsHint returns the comment-reading pointer for the WARM path —
-// the agent ran on this issue before, so there is a since-anchor. The server
+// BuildNewCommentsHint returns the comment-reading pointer for a run that
+// RESUMES its provider session and has new comments to catch up on. The server
 // count is ISSUE-WIDE (every thread, not just the triggering one) and excludes
 // the triggering comment itself because that body is already injected into the
 // prompt. It ships only the COUNT and the cursor — never the comment bodies —
 // so the server stays cheap and the agent pulls details on demand.
 //
-// The agent is told the full issue-wide volume but steered to read the
-// triggering (parent) thread FIRST instead of blindly catching up on every
-// thread. The issue-wide `--since` catch-up is kept as an explicit
-// "only if you need it" fallback.
+// The hint carries facts and this turn's exact commands: the issue-wide
+// volume, the triggering thread's delta, and the scan that workflow step 2
+// requires — pointed at as the wide read, with `last_activity_at` as the way
+// to see which OTHER threads moved since the anchor. It states no modality:
+// whether the scan runs is decided by step 2 alone, never here. The earlier
+// wording ("don't read them all blindly … only if you need context from the
+// other threads") made the same read optional that the brief calls mandatory,
+// and measured across 537 comment-triggered runs the "only if needed" form
+// meant "never": 0 of 36 non-scanning runs opened a thread the prompt had not
+// already named, against 1 in 10 of the scanning runs (MUL-6984).
 //
 // Since MUL-5377 the per-turn prompt (daemon.buildCommentPrompt) is the only
-// caller — the brief must not carry per-run routing state.
+// caller — the brief must not carry per-run routing state. The caller invokes
+// this only when the session actually resumes; a run whose resume was dropped
+// takes the cold path even though it carries a since-anchor.
 //
 // Renders nothing on cold start (no prior run → newCommentsSince empty) or when
 // there are no new comments (newCommentCount <= 0) or issueID is empty. In those
@@ -26,40 +34,51 @@ func BuildNewCommentsHint(issueID, triggerCommentID, triggerThreadID, newComment
 		return ""
 	}
 	threadID := activeThreadID(triggerThreadID, triggerCommentID)
-	// When we know the triggering thread, steer the agent to read THAT thread
-	// first rather than blindly pulling every new comment issue-wide. The
-	// issue-wide --since catch-up is demoted to an only-if-needed fallback,
-	// phrased as a rerun of the thread command minus `--thread` instead of a
-	// second full command: the duplicate restated the issue UUID and anchor
-	// for no routing value (MUL-5721 OPT-1).
+	// The triggering thread's delta is the first command; the scan is phrased
+	// as a flag swap on it instead of a second full command, so the issue UUID
+	// and anchor are not restated for no routing value (MUL-5721 OPT-1).
 	if threadID != "" {
 		return fmt.Sprintf(
-			"%d new comment(s) on this issue since your last run — don't read them all blindly. "+
-				"Start with the thread your triggering comment is in: "+
+			"%d new comment(s) on this issue since your last run, across all threads. "+
+				"Triggering thread's delta: "+
 				"`multica issue comment list %s --thread %s --since %s --compact --output json` "+
-				"(swap `--since` for `--tail 30` if you need the full thread, not just the delta). "+
-				"Only if you need context from the other threads, rerun it without `--thread` for the issue-wide catch-up.\n\n",
+				"(swap `--since` for `--tail 30` for the full thread). "+
+				"The scan workflow step 2 requires is the same command with `--roots-only --summary` in place of `--thread ... --since ...`; "+
+				"its `last_activity_at` shows which other threads moved since your last run — expand those with `--thread <thread-id>` and the same `--since`.\n\n",
 			newCommentCount, issueID, threadID, newCommentsSince,
 		)
 	}
 	// Defensive: comment triggers always carry a trigger id, but if one is
-	// missing there is no thread to anchor on, so fall back to the plain
-	// issue-wide catch-up.
+	// missing there is no thread to anchor on, so hand over the scan directly.
 	return fmt.Sprintf(
-		"%d new comment(s) on this issue since your last run. Catch up: "+
-			"`multica issue comment list %s --since %s --compact --output json`.\n\n",
+		"%d new comment(s) on this issue since your last run, across all threads. "+
+			"The scan workflow step 2 requires: "+
+			"`multica issue comment list %s --roots-only --summary --compact --output json`; "+
+			"expand the threads that moved with `--thread <thread-id> --since %s --compact --output json`.\n\n",
 		newCommentCount, issueID, newCommentsSince,
 	)
 }
 
 // BuildResumedCommentsHint returns the comment-reading pointer for the WARM
-// no-delta path: the daemon is resuming a prior provider session and the
-// triggering comment body has already been injected into the per-turn prompt.
-// newCommentCount == 0 here means no new comments arrived issue-wide since the
-// last run (beyond the injected trigger and the agent's own replies). Keep the
-// read bounded and conditional, but make it explicit that context-dependent
-// replies should refresh the triggering conversation rather than trusting
-// resumed memory alone.
+// path where the server COMPUTED an issue-wide delta this claim and it came
+// back empty: the daemon is resuming a prior provider session, the triggering
+// comment body has already been injected into the per-turn prompt, and no
+// other comment arrived since the last run (beyond that trigger and the
+// agent's own replies).
+//
+// That zero is server-computed and issue-wide, so it IS the answer the scan in
+// workflow step 2 exists to produce; the hint says so, which is the one way a
+// per-turn message may satisfy the scan without a call. Re-reading the
+// triggering thread in full stays the agent's own call: step 2 leaves "which
+// threads to expand" to judgment, and this is that judgment, not a decision
+// about whether the wide read happens (MUL-6984).
+//
+// The caller must reach this ONLY on Task.NewCommentsDeltaKnown. A zero count
+// on its own does not mean the delta is empty — a failed anchor read, a failed
+// count read, a cold start and an old server all produce the same zero, and
+// none of them looked at the issue. Claiming the scan is answered from one of
+// those would delete the very fallback the mandatory scan exists to be; that
+// path renders BuildResumedUnknownDeltaCommentsHint instead.
 func BuildResumedCommentsHint(issueID, triggerCommentID, triggerThreadID string) string {
 	threadID := activeThreadID(triggerThreadID, triggerCommentID)
 	if issueID == "" || threadID == "" {
@@ -70,25 +89,65 @@ func BuildResumedCommentsHint(issueID, triggerCommentID, triggerThreadID string)
 	// id reaches the agent as the reply cookbook's `--parent` value.
 	return fmt.Sprintf(
 		"You're resuming the prior session, and the triggering comment is already included above. "+
-			"No other new comments on this issue since your last run. "+
-			"If your reply depends on thread context, do not rely only on resumed session memory — "+
-			"first pull the triggering conversation with: "+
+			"No other new comments on this issue since your last run — this turn's issue-wide delta is empty, "+
+			"which answers the scan workflow step 2 requires. "+
+			"Triggering thread in full, if resumed memory is not enough for the reply: "+
 			"`multica issue comment list %s --thread %s --tail 30 --compact --output json`.\n\n",
 		issueID, threadID,
 	)
 }
 
-// BuildColdCommentsHint returns the comment-reading pointer for the COLD path —
-// the agent has no prior run on this issue, so there is no since-anchor and
-// BuildNewCommentsHint renders nothing. Instead of dumping the whole flat
-// timeline (oldest-first, server cap 2000), point the agent at the triggering
-// CONVERSATION: `--thread <trigger> --tail 30` returns that thread's root plus
-// its 30 newest replies (root is always included, even at --tail 0) — the
-// context the triggering comment actually needs. Cross-thread background is a
-// cheap `--roots-only --summary` scan; the hint deliberately does NOT name
-// `--recent`, whose saturation trap and pagination live once in the brief's
-// `## Available Commands` (MUL-5372). Per-turn hints name only the reads they
-// actually want the agent to run.
+// BuildResumedUnknownDeltaCommentsHint returns the comment-reading pointer for
+// a resumed run whose issue-wide delta this claim does NOT carry: the count
+// query or its anchor lookup failed, or the server predates the delta fields.
+//
+// The session context is real, so the hint still says the trigger is injected
+// and offers the thread read. What it must not do is imply anything about the
+// rest of the issue: nothing here looked. Workflow step 2's scan is mandatory
+// by default and only an affirmative server report may waive it, so this hint
+// hands the scan over as a command instead of waiving it (MUL-6984).
+func BuildResumedUnknownDeltaCommentsHint(issueID, triggerCommentID, triggerThreadID string) string {
+	threadID := activeThreadID(triggerThreadID, triggerCommentID)
+	if issueID == "" {
+		return ""
+	}
+	if threadID == "" {
+		return fmt.Sprintf(
+			"You're resuming the prior session, and the triggering comment is already included above. "+
+				"This turn carries no issue-wide comment delta, so nothing here answers the scan workflow step 2 requires — run it: "+
+				"`multica issue comment list %s --roots-only --summary --compact --output json`.\n\n",
+			issueID,
+		)
+	}
+	return fmt.Sprintf(
+		"You're resuming the prior session, and the triggering comment is already included above. "+
+			"This turn carries no issue-wide comment delta, so nothing here answers the scan workflow step 2 requires — run it: "+
+			"`multica issue comment list %s --roots-only --summary --compact --output json`, "+
+			"and expand what its `last_activity_at` shows has moved. "+
+			"Triggering thread in full, if resumed memory is not enough for the reply: "+
+			"`multica issue comment list %s --thread %s --tail 30 --compact --output json`.\n\n",
+		issueID, issueID, threadID,
+	)
+}
+
+// BuildColdCommentsHint returns the comment-reading pointer for a run whose
+// latest turn on this issue did not come back — its first run, a resume the
+// daemon had to drop, an explicitly fresh rerun, or a MUL-5305 older-fallback
+// session, where the server hands back an OLDER session with the continuity
+// gap flagged and the daemon does resume it. The hint therefore states nothing
+// about the provider session: "fresh" is false for the fallback case, and no
+// decision depends on it — every one of these runs reconstructs from the issue
+// record with the same two reads (MUL-6984 review). Instead of dumping the
+// whole flat timeline (oldest-first, server cap 2000), point the agent at the
+// triggering CONVERSATION: `--thread <trigger> --tail 30` returns that thread's
+// root plus its 30 newest replies (root is always included, even at --tail 0)
+// — the context the triggering comment actually needs. The scan workflow step 2
+// requires is handed over as the wide read; the hint deliberately does NOT
+// name `--recent`, whose saturation trap and pagination live once in the
+// brief's `## Available Commands` (MUL-5372). Per-turn hints name only the
+// reads they actually want the agent to run, and state no modality: the
+// earlier "Need cross-thread background?" framing invited the agent to judge
+// a need it had no data to judge (MUL-6984).
 //
 // Since MUL-5377 the per-turn prompt is the only caller (same as
 // BuildNewCommentsHint). Returns "" when there is no triggering comment to
@@ -102,11 +161,10 @@ func BuildColdCommentsHint(issueID, triggerCommentID, triggerThreadID string) st
 	// a second full command: the duplicate restated the issue UUID for no
 	// routing value (MUL-5721 OPT-1).
 	return fmt.Sprintf(
-		"Read the triggering conversation first: "+
+		"Triggering thread: "+
 			"`multica issue comment list %s --thread %s --tail 30 --compact --output json` "+
 			"(that thread's root + its 30 newest replies). "+
-			"Need cross-thread background? Rerun with `--roots-only --summary` replacing `--thread ... --tail 30` "+
-			"to scan the other threads cheaply, and expand only what looks relevant.\n\n",
+			"The scan workflow step 2 requires is the same command with `--roots-only --summary` in place of `--thread ... --tail 30`.\n\n",
 		issueID, threadID,
 	)
 }

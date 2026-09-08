@@ -113,13 +113,6 @@ func (c *captureChatSession) BindMediaRefs(_ context.Context, in engine.BindMedi
 	return nil
 }
 
-func TestNewDingTalkResolverSetUsesDatabaseBackedIssueOrigin(t *testing.T) {
-	set := NewDingTalkResolverSet(nil, nil, nil, nil, nil, nil)
-	if set.OriginType != originDingTalkChat {
-		t.Fatalf("OriginType = %q, want %q", set.OriginType, originDingTalkChat)
-	}
-}
-
 func TestSessionBinder_MapsCommandTextAndMediaDeadline(t *testing.T) {
 	var session, sender, inst, claim pgtype.UUID
 	session.Bytes[0], sender.Bytes[0], inst.Bytes[0], claim.Bytes[0] = 2, 3, 4, 5
@@ -157,7 +150,7 @@ func TestSessionBinder_StartSessionCarriesDingTalkRouteAndFirstTurn(t *testing.T
 		Creator: pgtype.UUID{Bytes: [16]byte{4}, Valid: true},
 		Sender:  pgtype.UUID{Bytes: [16]byte{5}, Valid: true},
 		Message: channel.InboundMessage{
-			MessageID: "m1", Text: "first turn",
+			MessageID: "m1", Text: "first turn", CommandText: "current instruction",
 			Source: channel.Source{ChatID: "cid-platform", ChatType: channel.ChatTypeGroup, ThreadID: "thread-1"},
 		},
 		PersistMessage: true,
@@ -166,7 +159,7 @@ func TestSessionBinder_StartSessionCarriesDingTalkRouteAndFirstTurn(t *testing.T
 		t.Fatalf("StartSession: %v", err)
 	}
 	got := capture.start
-	if got.BindingKey != "cid-platform" || got.MessageID != "m1" || got.ThreadID != "thread-1" || got.Body != "first turn" || !got.PersistMessage {
+	if got.BindingKey != "cid-platform" || got.MessageID != "m1" || got.ThreadID != "thread-1" || got.Body != "first turn" || got.CommandText != "current instruction" || !got.PersistMessage {
 		t.Fatalf("start mapping wrong: %+v", got)
 	}
 	if got.Sender != (pgtype.UUID{Bytes: [16]byte{4}, Valid: true}) || got.Initiator != (pgtype.UUID{Bytes: [16]byte{5}, Valid: true}) {

@@ -312,6 +312,8 @@ export interface AgentTask {
   // coarse values; `string & {}` admits the rest without collapsing the
   // hints.
   failure_reason?: TaskFailureReason | (string & {}) | "";
+  /** The input comment was edited or deleted, invalidating this run. */
+  cancelled_by_comment_change?: boolean;
   created_at: string;
   /** Non-empty when the task was spawned from a chat session. */
   chat_session_id?: string;
@@ -348,16 +350,9 @@ export interface AgentTask {
    */
   trigger_summary?: string;
   /**
-   * Handoff instruction the assigner attached when starting this run (MUL-3375).
-   * Present only on assignment-triggered runs that carried a note; the execution
-   * log shows it inline as the trigger reason. Absent (legacy / no note) falls
-   * back to the generic "initial run" label.
-   */
-  handoff_note?: string;
-  /**
-   * Server-computed source discriminator used by the activity row to label
-   * tasks that have no linked issue (so e.g. quick-create tasks render
-   * with a meaningful title instead of falling through to "Untracked").
+   * Server-computed source discriminator used by task surfaces. Quick-create
+   * remains quick_create after its result issue is linked, so consumers can
+   * distinguish creation work from later direct runs on that issue.
    */
   kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
   /**
@@ -414,8 +409,8 @@ export interface AgentTask {
   attribution?: TaskAttribution;
   /**
    * This run's own token consumption, one entry per (provider, model) it used.
-   * Present on the issue execution-log endpoint only; the daemon claim path
-   * omits it.
+   * Present on issue execution logs and explicit agent-history accounting
+   * requests; normal UI history and daemon claims omit it.
    *
    * `undefined` (old backend, or a surface that doesn't hydrate it) and `[]`
    * (backend hydrated, this run has no recorded usage) both mean "no number to
@@ -473,6 +468,8 @@ export interface Agent {
   runtime_id: string;
   /** False exactly when the agent has no runtime. Older backends omit it. */
   runtime_bound?: boolean;
+  /** Privacy-safe coarse liveness for a runtime hidden from the runtime list. */
+  runtime_availability?: "online" | "unstable" | "offline";
   name: string;
   description: string;
   /** What this agent's owner wrote. For a system agent this holds only the
@@ -1111,6 +1108,22 @@ export interface RuntimeModel {
   supports_explicit_standard_service_tier?: boolean;
 }
 
+/**
+ * A model the runtime named but will not run on that host — today only Claude
+ * Code, reporting one that needs a newer CLI than the installed one.
+ *
+ * These arrive in their own list and never inside `models`, which is what keeps
+ * an older client from offering one: it reads `models`, and they are not there.
+ * The picker shows them greyed out with `reason` so the gap reads as "your CLI
+ * is behind" rather than "Multica does not support this model" (MUL-6961).
+ */
+export interface RuntimeUnavailableModel {
+  id: string;
+  label: string;
+  /** The runtime's own remedy, e.g. "Update to 2.1.255+ to use Fable 5.1". */
+  reason?: string;
+}
+
 export interface RuntimeModelServiceTier {
   /** Catalog ID sent to the provider protocol unchanged. */
   id: string;
@@ -1153,6 +1166,8 @@ export interface RuntimeModelListRequest {
   runtime_id: string;
   status: RuntimeModelListStatus;
   models?: RuntimeModel[];
+  /** Advisory rows the runtime cannot run; never selectable. */
+  unavailable_models?: RuntimeUnavailableModel[];
   supported: boolean;
   error?: string;
   created_at: string;
@@ -1173,6 +1188,13 @@ export interface RuntimeModelListRequest {
 // from "provider does not honour per-agent model selection".
 export interface RuntimeModelsResult {
   models: RuntimeModel[];
+  /**
+   * Rows the runtime named but cannot run. Kept out of `models` on purpose —
+   * see RuntimeUnavailableModel. Optional like `cached` beside it: the resolver
+   * always sets it, but a backend older than the field contributes nothing, so
+   * consumers read it defensively.
+   */
+  unavailableModels?: RuntimeUnavailableModel[];
   supported: boolean;
   /**
    * True when the server answered from its catalog cache rather than a live

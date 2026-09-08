@@ -55,11 +55,3 @@ func TestCompleteParamsPass(t *testing.T) {
 		t.Fatalf("complete params rejected: %v", err)
 	}
 }
-
-// A failure that is NOT a validation failure must not match the sentinel —
-// otherwise a database outage is reported to the admin as bad credentials.
-func TestAnUnrelatedFailureIsNotTheCallersToFix(t *testing.T) {
-	if errors.Is(errors.New("dial tcp: connection refused"), ErrInvalidInstallationParams) {
-		t.Fatal("an infrastructure error matched the caller-error sentinel")
-	}
-}

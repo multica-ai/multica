@@ -16,6 +16,8 @@ import {
 } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
+import { cn } from "@multica/ui/lib/utils";
 import { AppLink } from "../../navigation";
 import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
 import {
@@ -206,8 +208,8 @@ export function RuntimeDetailPage({
   const busyCount = machine.runningCount + machine.queuedCount;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="shrink-0 border-b bg-background px-4 pb-5 pt-3 sm:px-6">
-        <div className="mx-auto max-w-[1440px]">
+      <header className="shrink-0 border-b bg-background pb-5 pt-3">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
           <div className="flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
             <AppLink
               href={paths.runtimes()}
@@ -292,7 +294,7 @@ export function RuntimeDetailPage({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-background">
-        <div className="mx-auto w-full max-w-[1440px] p-4 sm:p-6">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6")}>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div className="min-w-0">
               <h2 className="text-body font-semibold">
@@ -369,18 +371,20 @@ export function RuntimeDetailPage({
 function MachineDetailSkeleton() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b px-6 pb-5 pt-3">
-        <Skeleton className="h-3 w-36" />
-        <div className="mt-4 flex items-start gap-4">
-          <Skeleton className="h-14 w-14 rounded-xl" />
-          <div className="flex-1">
-            <Skeleton className="h-7 w-64" />
-            <Skeleton className="mt-2 h-4 w-40" />
-            <Skeleton className="mt-3 h-3 w-72" />
+      <div className="border-b pb-5 pt-3">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
+          <Skeleton className="h-3 w-36" />
+          <div className="mt-4 flex items-start gap-4">
+            <Skeleton className="h-14 w-14 rounded-xl" />
+            <div className="flex-1">
+              <Skeleton className="h-7 w-64" />
+              <Skeleton className="mt-2 h-4 w-40" />
+              <Skeleton className="mt-3 h-3 w-72" />
+            </div>
           </div>
         </div>
       </div>
-      <div className="mx-auto w-full max-w-[1440px] p-6">
+      <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-6")}>
         <Skeleton className="h-4 w-24" />
         <Skeleton className="mt-2 h-3 w-72" />
         <div className="mt-4 overflow-hidden rounded-lg border">

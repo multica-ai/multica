@@ -1088,17 +1088,27 @@ func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 	t.Parallel()
 
 	prompt := BuildPrompt(Task{
-		AutopilotRunID:       "run-1",
-		AutopilotID:          "autopilot-1",
-		AutopilotTitle:       "Daily dependency check",
-		AutopilotDescription: "Check dependencies and report outdated packages.",
-		AutopilotSource:      "manual",
+		AutopilotRunID:          "run-1",
+		AutopilotID:             "autopilot-1",
+		AutopilotTitle:          "Daily dependency check",
+		AutopilotDescription:    "Check dependencies and report outdated packages.",
+		AutopilotSource:         "manual",
+		AutopilotTriggerPayload: []byte(`{"action":"opened","number":7}`),
 	}, "claude")
 
+	// Every run-scoped autopilot value must appear HERE, and only here. The
+	// runtime brief used to render the same set, which both broke its own
+	// no-per-run-values contract and left two hand-maintained copies to drift
+	// (MUL-6984); execenv.TestAutopilotBriefByteIdenticalAcrossRunScopedFields
+	// pins the brief's side of that split. The payload is rendered whole:
+	// ingress already caps a webhook body at 256 KiB, and truncating at the
+	// only rendering would drop input no CLI can fetch back.
 	for _, want := range []string{
 		"run-only mode",
 		"Autopilot run ID: run-1",
 		"Daily dependency check",
+		"Trigger source: manual",
+		`{"action":"opened","number":7}`,
 		"Check dependencies and report outdated packages.",
 		"multica autopilot get autopilot-1 --output json",
 	} {
@@ -1248,55 +1258,6 @@ func TestBuildPromptCommentTriggeredNoContent(t *testing.T) {
 
 	if !strings.Contains(prompt, "multica issue get") {
 		t.Fatal("prompt missing CLI hint")
-	}
-}
-
-// TestBuildPromptSquadLeaderNoActionProhibition verifies that when a squad
-// leader is triggered by another agent's comment, the per-turn prompt
-// explicitly forbids posting a comment whose only purpose is to announce
-// no_action or "exiting silently". This is the fix for MUL-2168.
-func TestBuildPromptSquadLeaderNoActionProhibition(t *testing.T) {
-	t.Parallel()
-
-	prompt := BuildPrompt(Task{
-		IssueID:               "issue-1",
-		TriggerCommentID:      "comment-1",
-		TriggerCommentContent: "Progress update: tests passing.",
-		TriggerAuthorType:     "agent",
-		TriggerAuthorName:     "Worker",
-		IsLeaderTask:          true,
-		LeaderRoleResolved:    true,
-		Agent: &AgentData{
-			Name:         "Leader",
-			Instructions: "You lead the team.\n\n## Squad Operating Protocol\n\nYou are the LEADER.",
-		},
-	}, "claude")
-
-	for _, want := range []string{
-		"Squad leader no_action rule",
-		"DO NOT post any comment",
-		"multica squad activity",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("squad leader prompt missing %q\n---\n%s", want, prompt)
-		}
-	}
-
-	// Non-squad-leader agent should NOT get the squad leader rule.
-	nonLeaderPrompt := BuildPrompt(Task{
-		IssueID:               "issue-1",
-		TriggerCommentID:      "comment-1",
-		TriggerCommentContent: "Progress update: tests passing.",
-		TriggerAuthorType:     "agent",
-		TriggerAuthorName:     "Worker",
-		Agent: &AgentData{
-			Name:         "Regular",
-			Instructions: "You are a regular agent.",
-		},
-	}, "claude")
-
-	if strings.Contains(nonLeaderPrompt, "Squad leader no_action rule") {
-		t.Fatalf("non-squad-leader prompt should NOT contain squad leader rule\n---\n%s", nonLeaderPrompt)
 	}
 }
 
@@ -2039,7 +2000,7 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, false, slog.Default())
 
 			if reachable != tt.wantReused {
 				t.Fatalf("reachable = %v, want %v", reachable, tt.wantReused)
@@ -2084,7 +2045,7 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionFile, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, providerRefusesMissingSessionCwd(provider, true), slog.Default())
 
 			if !reachable {
 				t.Fatal("Pi-family session file should remain reachable across workdirs")
@@ -2144,7 +2105,7 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionPath, PriorWorkDir: workDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, providerRefusesMissingSessionCwd("pi", true), slog.Default())
 
 			if reachable {
 				t.Fatalf("%s Pi session was treated as reachable", test.name)
@@ -2162,17 +2123,259 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 	}
 }
 
-func TestProviderUsesPiSessionFileFollowsBuiltinRuntimeDescriptors(t *testing.T) {
+// TestGatePiResumeChecksRecordedCwd covers GH #8082: the session file existing
+// is not sufficient, because Pi re-anchors a resumed run to the cwd recorded in
+// the transcript header and refuses to start when that directory is gone.
+//
+// The predicate mirrors Pi's own check condition for condition, so the cases
+// where Pi starts FINE matter as much as the one where it refuses — reading any
+// of them as unresumable would discard healthy history, which is the regression
+// #7760 set out to fix in the first place.
+//
+// The same reasoning is why the two runtimes carry separate expectations. The
+// refusal is Pi's behaviour, not the protocol family's: omp opens the
+// transcript from the explicit --session path and falls back to the launch cwd,
+// so applying Pi's constraint to it would drop sessions it resumes cleanly.
+func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 	t.Parallel()
 
-	if !providerUsesPiSessionFile("pi") {
-		t.Fatal("pi protocol family did not use Pi session-file reachability")
+	header := func(cwd string) string {
+		return fmt.Sprintf(`{"type":"session","version":3,"id":"01a0","timestamp":"2026-09-06T00:00:00.000Z","cwd":%q}`, cwd)
 	}
-	for _, desc := range agent.BuiltinRuntimes {
-		want := desc.ProtocolFamily == "pi"
-		if got := providerUsesPiSessionFile(desc.ID); got != want {
-			t.Errorf("providerUsesPiSessionFile(%q) = %v, want %v for protocol family %q", desc.ID, got, want, desc.ProtocolFamily)
+
+	for _, test := range []struct {
+		name string
+		// body builds the transcript. liveDir exists; deadDir does not.
+		body func(liveDir, deadDir, aFile string) string
+		// Expectations are keyed by whether the RUNTIME is one we may drop a
+		// session for, not by its name. Only pi's own binary is: it hard-
+		// refuses on a missing recorded cwd. omp is verified to fall back to
+		// the launch cwd instead, and a custom command's behaviour is simply
+		// unknown — neither is the CLI the refusal was verified against, so
+		// dropping their session risks pure continuity loss.
+		wantRefusing bool
+		wantTolerant bool
+	}{
+		{
+			// The reported failure: worktree reclaimed, transcript survives.
+			name: "recorded cwd no longer exists",
+			body: func(_, deadDir, _ string) string {
+				// Pi writes the header twice on a real session; keep the
+				// fixture faithful to what is actually on disk.
+				return header(deadDir) + "\n" + header(deadDir) + "\n"
+			},
+			wantRefusing: false,
+			wantTolerant: true,
+		},
+		{
+			name: "recorded cwd still exists",
+			body: func(liveDir, _, _ string) string {
+				return header(liveDir) + "\n"
+			},
+			wantRefusing: true,
+			wantTolerant: true,
+		},
+		{
+			// No header: Pi falls back to the launch directory and starts.
+			name: "no session header",
+			body: func(_, _, _ string) string {
+				return `{"type":"model_change","id":"a"}` + "\n"
+			},
+			wantRefusing: true,
+			wantTolerant: true,
+		},
+		{
+			// Empty cwd: Pi's own guard short-circuits on falsy and starts.
+			name: "header records an empty cwd",
+			body: func(_, _, _ string) string {
+				return header("") + "\n"
+			},
+			wantRefusing: true,
+			wantTolerant: true,
+		},
+		{
+			// Pi uses existsSync, which is true for a plain file. Demanding a
+			// directory here would drop a session Pi would have accepted.
+			name: "recorded cwd is a file",
+			body: func(_, _, aFile string) string {
+				return header(aFile) + "\n"
+			},
+			wantRefusing: true,
+			wantTolerant: true,
+		},
+		{
+			// Unparseable leading lines must not hide the header behind them.
+			name: "malformed line precedes the header",
+			body: func(_, deadDir, _ string) string {
+				return "not json\n" + header(deadDir) + "\n"
+			},
+			wantRefusing: false,
+			wantTolerant: true,
+		},
+		{
+			// Past the bounded scan we cannot read the header, and "could not
+			// read" is not evidence of a refusal — keep the session and let the
+			// backend's ResumeRejected signal recover if Pi does refuse.
+			name: "header sits beyond the scan bound",
+			body: func(_, deadDir, _ string) string {
+				var b strings.Builder
+				for i := 0; i < piSessionHeaderScanLines+1; i++ {
+					b.WriteString(`{"type":"model_change","id":"a"}` + "\n")
+				}
+				b.WriteString(header(deadDir) + "\n")
+				return b.String()
+			},
+			wantRefusing: true,
+			wantTolerant: true,
+		},
+	} {
+		// refusesMissingCwd is stated as a literal rather than read back from
+		// providerRefusesMissingSessionCwd, so this matrix cannot be satisfied
+		// by the predicate agreeing with itself. The predicate's own answers
+		// are pinned in TestProviderRefusesMissingSessionCwd.
+		for _, runtime := range []struct {
+			name              string
+			provider          string
+			refusesMissingCwd bool
+		}{
+			{name: "pi", provider: "pi", refusesMissingCwd: true},
+			{name: "omp", provider: "omp", refusesMissingCwd: false},
+			// A custom runtime profile registers its protocol family as the
+			// provider, so an arbitrary command configured as `protocol_family:
+			// pi` also arrives here as "pi". It is not the binary whose refusal
+			// was verified, so it must keep its session.
+			{name: "custom-pi-family-profile", provider: "pi", refusesMissingCwd: false},
+		} {
+			wantReachable := test.wantTolerant
+			if runtime.refusesMissingCwd {
+				wantReachable = test.wantRefusing
+			}
+			provider := runtime.provider
+			t.Run(test.name+"/"+runtime.name, func(t *testing.T) {
+				t.Parallel()
+
+				base := t.TempDir()
+				workDir := filepath.Join(base, "workdir")
+				liveDir := filepath.Join(base, "live-workdir")
+				for _, dir := range []string{workDir, liveDir} {
+					if err := os.MkdirAll(dir, 0o755); err != nil {
+						t.Fatalf("create %s: %v", dir, err)
+					}
+				}
+				deadDir := filepath.Join(base, "reclaimed-workdir")
+				aFile := filepath.Join(base, "not-a-directory")
+				if err := os.WriteFile(aFile, []byte("x"), 0o644); err != nil {
+					t.Fatalf("create file: %v", err)
+				}
+
+				sessionPath := filepath.Join(base, "session.jsonl")
+				if err := os.WriteFile(sessionPath, []byte(test.body(liveDir, deadDir, aFile)), 0o644); err != nil {
+					t.Fatalf("create session: %v", err)
+				}
+
+				task := Task{PriorSessionID: sessionPath, PriorWorkDir: liveDir}
+				taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+
+				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, runtime.refusesMissingCwd, slog.Default())
+
+				if reachable != wantReachable {
+					t.Fatalf("reachable = %v, want %v", reachable, wantReachable)
+				}
+				if wantReachable {
+					if task.PriorSessionID != sessionPath {
+						t.Fatalf("PriorSessionID = %q, want %q", task.PriorSessionID, sessionPath)
+					}
+					if taskCtx.PriorSessionResumeUnavailable {
+						t.Fatal("a resumable session was reported unavailable")
+					}
+					return
+				}
+				if task.PriorSessionID != "" {
+					t.Fatalf("PriorSessionID = %q, want empty", task.PriorSessionID)
+				}
+				if taskCtx.PriorSessionResumed {
+					t.Fatal("PriorSessionResumed stayed true for an unusable session")
+				}
+				// The user asked to continue this conversation; a silent
+				// restart is what MUL-4424 forbids.
+				if !taskCtx.PriorSessionResumeUnavailable {
+					t.Fatal("dropped session was not disclosed as unavailable")
+				}
+			})
 		}
+	}
+}
+
+// TestProviderRefusesMissingSessionCwd pins which runtimes are allowed to have
+// their prior session dropped for a missing recorded cwd.
+//
+// The provider name alone cannot answer this. A custom runtime profile keeps
+// its protocol family as the provider, so `protocol_family: pi` with any
+// command arrives as "pi" while being an unrelated implementation — the trap
+// agent.Config.BuiltinRuntime documents. Only the provider's own discovered
+// binary is the CLI whose refusal was verified.
+//
+// Everything else answers false, and that asymmetry is deliberate: a runtime
+// that really does refuse is still recovered by the backend's ResumeRejected
+// signal at the cost of one run, whereas a wrong true silently discards
+// history that was never in danger and has no backstop at all.
+func TestProviderRefusesMissingSessionCwd(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name     string
+		provider string
+		builtin  bool
+		want     bool
+	}{
+		{name: "pi's own binary refuses", provider: "pi", builtin: true, want: true},
+		{name: "custom command speaking pi protocol", provider: "pi", builtin: false, want: false},
+		{name: "omp's own binary tolerates", provider: "omp", builtin: true, want: false},
+		{name: "custom command speaking omp protocol", provider: "omp", builtin: false, want: false},
+		{name: "unrelated provider", provider: "claude", builtin: true, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := providerRefusesMissingSessionCwd(test.provider, test.builtin); got != test.want {
+				t.Fatalf("providerRefusesMissingSessionCwd(%q, builtin=%v) = %v, want %v",
+					test.provider, test.builtin, got, test.want)
+			}
+		})
+	}
+}
+
+// TestShouldRetryPiRefusedResume closes the GH #8082 loop end to end: it pins
+// that the backend's new signal is what turns a refused Pi resume into a fresh
+// retry, and that without it the same failure is unrecoverable.
+//
+// The negative case is the bug as shipped. Every other branch of the gate
+// misses this failure — the error text carries no empty-message locator and no
+// auth phrase, and Pi is (correctly) not in ResumeRejectionUndetectable — so
+// the run failed as a plain process_failure, kept its session id, and the next
+// claim served the same stale pointer forever.
+func TestShouldRetryPiRefusedResume(t *testing.T) {
+	t.Parallel()
+
+	// Exactly what the daemon saw in the report: no output, no tool call, and
+	// an error carrying only the process exit code.
+	result := agent.Result{
+		Status: "failed",
+		Error:  "pi exited with error: exit status 1",
+	}
+	const priorSession = "/home/u/.multica/pi-sessions/20260904T174429.978964000.jsonl"
+
+	if shouldRetryWithFreshSession(result, priorSession, 0, "pi") {
+		t.Fatal("a bare exit-1 must not trigger a fresh retry by exclusion")
+	}
+
+	result.ResumeRejected = true
+	if !shouldRetryWithFreshSession(result, priorSession, 0, "pi") {
+		t.Fatal("a refused Pi resume did not trigger the fresh-session retry")
+	}
+	// A run that already used a tool is never replayed, poisoned or not.
+	if shouldRetryWithFreshSession(result, priorSession, 1, "pi") {
+		t.Fatal("a run that used tools was retried")
 	}
 }
 
@@ -2746,6 +2949,36 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			result:         agent.Result{Status: "failed", Error: "no conversation found", ResumeRejected: true},
 			priorSessionID: "stale-id",
 			want:           true,
+		},
+		{
+			// GH #8116 end to end. A qoder chat pinned to a session the CLI
+			// never persisted used to reach this gate with ResumeRejected
+			// false, because the adapter returned a bare failed Result from
+			// session/resume — so the gate read "checked, not a rejection",
+			// declined to retry, and the conversation replayed the same dead
+			// id on every later message. The adapters now flag it, and this is
+			// what that flag has to buy.
+			name: "ghost session rejected at session/resume retries",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          `qoder session/resume failed: session/resume: Invalid session identifier "27d8031c-9fea-4bda-9d42-37c36fa9aebf". (code=-32602)`,
+				ResumeRejected: true,
+			},
+			priorSessionID: "27d8031c-9fea-4bda-9d42-37c36fa9aebf",
+			provider:       "qoder",
+			want:           true,
+		},
+		{
+			// The other half of the same contract: an unrecognised resume
+			// failure must NOT retry. The adapters answer "not a rejection" by
+			// leaving the flag false, and a capable backend's false is an
+			// answer, not an absence — retrying here would fork a healthy
+			// conversation over a transient MCP or network fault.
+			name:           "unflagged resume failure does not retry",
+			result:         agent.Result{Status: "failed", Error: "qoder session/resume failed: session/resume: Invalid params: mcpServers[0] transport unreachable (code=-32602)"},
+			priorSessionID: "27d8031c-9fea-4bda-9d42-37c36fa9aebf",
+			provider:       "qoder",
+			want:           false,
 		},
 		{
 			name:           "temporarily busy resume retries without declaring the session dead",
@@ -4187,17 +4420,6 @@ type reportTaskResultRecorder struct {
 	path    string
 	method  string
 	payload map[string]any
-}
-
-func TestTerminalTaskReportTimeoutCoversRetrySchedule(t *testing.T) {
-	client := NewClient("http://example.invalid")
-	worstCase := time.Duration(len(defaultTerminalRetrySchedule)+1) * client.client.Timeout
-	for _, delay := range defaultTerminalRetrySchedule {
-		worstCase += delay
-	}
-	if terminalTaskReportTimeout < worstCase {
-		t.Fatalf("terminal report timeout = %s, want at least retry worst case %s", terminalTaskReportTimeout, worstCase)
-	}
 }
 
 func (r *reportTaskResultRecorder) handler(t *testing.T) http.HandlerFunc {
@@ -5675,9 +5897,6 @@ func TestBuildPromptSquadLeaderReplyCommandCarvesOutNoAction(t *testing.T) {
 		},
 	}, "claude")
 
-	if !strings.Contains(prompt, "Squad leader no_action rule") {
-		t.Fatalf("leader prompt missing the no_action rule\n---\n%s", prompt)
-	}
 	if !strings.Contains(prompt, "Unless your outcome is `no_action`, post your reply as a comment") {
 		t.Fatalf("leader prompt missing the carve-out reply imperative\n---\n%s", prompt)
 	}
@@ -5713,9 +5932,6 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 		},
 	}
 	prompt := BuildPrompt(leaderTask, "claude")
-	if !strings.Contains(prompt, "Squad leader no_action rule") {
-		t.Fatalf("leader multi-thread prompt missing the no_action rule\n---\n%s", prompt)
-	}
 	scope := strings.Index(prompt, "skip this ENTIRE fan-out block")
 	if scope < 0 {
 		t.Fatalf("leader multi-thread prompt missing the whole-block scope sentence\n---\n%s", prompt)

@@ -29,15 +29,6 @@ func TestIssueDuplicateText(t *testing.T) {
 	}
 }
 
-func TestIssueUsageCopy(t *testing.T) {
-	if issueUsageText != "Please include an issue title. Use:\n\n`/issue <title>`\n\n`[description]` (optional)" {
-		t.Fatalf("plain issue usage copy = %q", issueUsageText)
-	}
-	if issueUsageWithMediaText != "Please add a title and resend with the image (*image can come before or after the command*):\n\n`/issue <title>`\n\n`[description]` (optional)" {
-		t.Fatalf("media issue usage copy = %q", issueUsageWithMediaText)
-	}
-}
-
 func TestDroppedReplyText(t *testing.T) {
 	issueMsg := channel.InboundMessage{Text: "[Image]", CommandText: "/issue login is broken", AddressedToBot: true}
 	cases := []struct {

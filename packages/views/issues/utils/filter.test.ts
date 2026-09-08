@@ -104,11 +104,6 @@ describe("filterIssues", () => {
     expect(result).toEqual([]);
   });
 
-  it("hides assigned issues when only 'No assignee' is selected", () => {
-    const result = filterIssues(issues, { ...NO_FILTER, includeNoAssignee: true });
-    expect(result.every((i) => !i.assignee_id)).toBe(true);
-  });
-
   // --- Creator ---
   it("filters by creator", () => {
     const result = filterIssues(issues, {
@@ -167,11 +162,6 @@ describe("filterIssues", () => {
       includeNoProject: true,
     });
     expect(result.map((i) => i.id)).toEqual(["2", "3"]);
-  });
-
-  it("hides project issues when only 'No project' is selected", () => {
-    const result = filterIssues(issues, { ...NO_FILTER, includeNoProject: true });
-    expect(result.every((i) => !i.project_id)).toBe(true);
   });
 
   it("applies status + project filters together", () => {

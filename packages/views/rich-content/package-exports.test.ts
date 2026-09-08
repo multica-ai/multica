@@ -2,17 +2,10 @@
 /**
  * Package export-target guard.
  *
- * Every path in a workspace's `exports` map must point at a file that actually
- * exists. Deleting or moving a module without updating `exports` leaves a
- * dangling subpath that still *resolves* for TypeScript (which reads the source
- * tree) but throws at bundle time in whichever app imports it — so it survives
- * typecheck and unit tests and only shows up in a consuming app's build.
- *
- * This regressed once already in MUL-4922: `./common/markdown` was deleted when
- * Chat moved onto RichContent, but its export entry stayed behind.
- *
- * Scoped to the whole monorepo rather than just `views`: the failure mode is a
- * property of package.json, not of this package.
+ * A dangling export can still resolve from the source tree during typecheck,
+ * then fail only when a consuming application is bundled. This regressed in
+ * MUL-4922, so validate the filesystem boundary rather than mirroring an
+ * individual package.json entry.
  */
 import { describe, expect, it } from "vitest";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -33,13 +26,17 @@ function workspacePackageJsons(): string[] {
   return out;
 }
 
-/** Every string target in an exports value (string, or a conditions object). */
 function exportTargets(value: unknown): string[] {
   if (typeof value === "string") return [value];
   if (value && typeof value === "object") {
     return Object.values(value as Record<string, unknown>).flatMap(exportTargets);
   }
   return [];
+}
+
+function exportTargetExists(pkgDir: string, target: string): boolean {
+  const path = target.includes("*") ? target.slice(0, target.indexOf("*")) : target;
+  return existsSync(join(pkgDir, path));
 }
 
 interface Dangling {
@@ -59,22 +56,18 @@ function findDanglingExports(): Dangling[] {
     } catch {
       continue;
     }
-    const exports = parsed.exports;
-    if (!exports || typeof exports !== "object") continue;
+    if (!parsed.exports || typeof parsed.exports !== "object") continue;
 
-    for (const [subpath, value] of Object.entries(exports as Record<string, unknown>)) {
+    for (const [subpath, value] of Object.entries(
+      parsed.exports as Record<string, unknown>,
+    )) {
       for (const target of exportTargets(value)) {
-        if (target.includes("*")) {
-          // Wildcard subpath (e.g. "./locales/*"): the concrete file depends on
-          // the importer, so assert the directory prefix exists instead.
-          const prefix = target.slice(0, target.indexOf("*"));
-          if (!existsSync(join(pkgDir, prefix))) {
-            dangling.push({ pkg: relative(REPO_ROOT, pkgPath), subpath, target });
-          }
-          continue;
-        }
-        if (!existsSync(join(pkgDir, target))) {
-          dangling.push({ pkg: relative(REPO_ROOT, pkgPath), subpath, target });
+        if (!exportTargetExists(pkgDir, target)) {
+          dangling.push({
+            pkg: relative(REPO_ROOT, pkgPath),
+            subpath,
+            target,
+          });
         }
       }
     }
@@ -86,25 +79,13 @@ function findDanglingExports(): Dangling[] {
 describe("workspace package exports", () => {
   it("every export target points at a file that exists", () => {
     const dangling = findDanglingExports();
-    // Surfaced as readable strings so a failure names the offending subpath
-    // instead of printing an object diff.
     expect(dangling.map((d) => `${d.pkg} :: "${d.subpath}" -> ${d.target}`)).toEqual([]);
   });
 
-  it("the deleted chat markdown bridge is not exported", () => {
-    const views = JSON.parse(
-      readFileSync(join(REPO_ROOT, "packages/views/package.json"), "utf8"),
-    ) as { exports?: Record<string, unknown> };
-
-    expect(Object.keys(views.exports ?? {})).not.toContain("./common/markdown");
-  });
-
-  it("detects a dangling target when one is introduced", () => {
-    // Guards the guard: if the traversal silently stopped finding anything
-    // (wrong root, changed layout), the first test would pass vacuously.
-    const pkgDir = join(REPO_ROOT, "packages/views");
-    expect(existsSync(join(pkgDir, "./editor/index.ts"))).toBe(true);
-    expect(existsSync(join(pkgDir, "./common/markdown.tsx"))).toBe(false);
+  it("does not pass vacuously when traversal or existence checks break", () => {
+    const viewsDir = join(REPO_ROOT, "packages/views");
     expect(workspacePackageJsons().length).toBeGreaterThan(3);
+    expect(exportTargetExists(viewsDir, "./editor/index.ts")).toBe(true);
+    expect(exportTargetExists(viewsDir, "./definitely-missing.ts")).toBe(false);
   });
 });

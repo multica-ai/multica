@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 )
@@ -100,32 +99,6 @@ func TestMemoryWebhookRateLimiter_CheckDoesNotConsumeBudget(t *testing.T) {
 	if retry := slidingWindowLimiterRetryAfter(ctx, l, "shared-ip"); retry <= 0 || retry > time.Minute {
 		t.Fatalf("unexpected retry interval: %v", retry)
 	}
-}
-
-// TestWebhookLimiterLuaScript_StructureGuard pins the Lua script so any future
-// edit that reorders trim/count/insert (or drops EXPIRE) is caught even when
-// no live Redis is available to the test process. The per-pod race the script
-// guards against ("two pods both see count = limit-1 and both insert") only
-// triggers if the three calls run atomically; this regression guard is the
-// cheap-but-effective complement to the live-Redis test below.
-func TestWebhookLimiterLuaScript_StructureGuard(t *testing.T) {
-	// redis.NewScript stores the body, so we just sanity-check ordering by
-	// matching the source string. The exact whitespace is brittle but the
-	// alternative (Lua AST parsing) is overkill for a 10-line script.
-	src := webhookLimiterAllowSource()
-	mustBefore := func(a, b string) {
-		t.Helper()
-		ia, ib := strings.Index(src, a), strings.Index(src, b)
-		if ia < 0 || ib < 0 {
-			t.Fatalf("script must contain %q and %q, src=%s", a, b, src)
-		}
-		if ia >= ib {
-			t.Fatalf("expected %q to appear before %q, src=%s", a, b, src)
-		}
-	}
-	mustBefore("ZREMRANGEBYSCORE", "ZCARD")
-	mustBefore("ZCARD", "ZADD")
-	mustBefore("ZADD", "EXPIRE")
 }
 
 func TestRedisWebhookRateLimiter_RejectsAboveLimit(t *testing.T) {

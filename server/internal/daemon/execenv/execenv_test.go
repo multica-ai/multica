@@ -510,17 +510,13 @@ func TestPrepareDirectoryMode(t *testing.T) {
 		t.Fatalf("MulticaConfigRoot mode = %o, want 700", got)
 	}
 
-	// Verify context file contains issue ID and CLI hints.
-	content, err := os.ReadFile(filepath.Join(env.WorkDir, ".agent_context", "issue_context.md"))
-	if err != nil {
-		t.Fatalf("failed to read issue_context.md: %v", err)
-	}
-	if !strings.Contains(string(content), "a1b2c3d4-e5f6-7890-abcd-ef1234567890") {
-		t.Fatalf("issue_context.md missing the issue id")
-	}
-	// The skill list lives in the runtime brief only (MUL-5529).
-	if strings.Contains(string(content), "code-review") {
-		t.Fatalf("issue_context.md should no longer carry a skill list:\n%s", content)
+	// No Markdown sidecar: the issue id, trigger and handoff facts reach the
+	// agent through the runtime brief and the per-turn message, and the file
+	// that used to repeat them had no reader (MUL-6984). The marker below is
+	// the one sidecar with a consumer — the CLI reads it to recognise a
+	// daemon task when a sandbox strips MULTICA_* from the environment.
+	if _, err := os.Stat(filepath.Join(env.WorkDir, ".agent_context", "issue_context.md")); !os.IsNotExist(err) {
+		t.Fatalf("Prepare wrote a sidecar brief; stat err = %v, want not-exist", err)
 	}
 
 	markerContent, err := os.ReadFile(filepath.Join(env.WorkDir, TaskContextMarkerRelPath))
@@ -830,24 +826,13 @@ func TestWriteContextFiles(t *testing.T) {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(dir, ".agent_context", "issue_context.md"))
-	if err != nil {
-		t.Fatalf("failed to read: %v", err)
-	}
-
-	s := string(content)
-	if !strings.Contains(s, "test-issue-id-1234") {
-		t.Errorf("content missing %q", "test-issue-id-1234")
-	}
-
-	// Issue details should NOT be in the context file (agent fetches via CLI).
-	//
-	// Nor the skill list: nothing ever read this copy, and the runtime brief
-	// carries the same names-only index (MUL-5529).
-	for _, absent := range []string{"## Description", "## Workspace Context", "## Agent Skills", "go-conventions"} {
-		if strings.Contains(s, absent) {
-			t.Errorf("content should NOT contain %q", absent)
-		}
+	// writeContextFiles hydrates skills; it writes no Markdown brief of its
+	// own. The sidecar it used to write, .agent_context/issue_context.md, was
+	// a third copy of the issue id / trigger / handoff facts that the runtime
+	// brief and the per-turn message already carry, and no provider ever read
+	// it (MUL-6984).
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); !os.IsNotExist(err) {
+		t.Fatalf("writeContextFiles wrote a sidecar brief; stat err = %v, want not-exist", err)
 	}
 
 	// Verify skill directory and files.
@@ -868,68 +853,27 @@ func TestWriteContextFiles(t *testing.T) {
 	}
 }
 
-func TestWriteContextFilesOmitsSkillsWhenEmpty(t *testing.T) {
+// TestWriteContextFilesLeavesNoAgentContextWhenNothingToWrite covers the task
+// with no skills and no project resources. Since the sidecar brief was removed
+// (MUL-6984) that task needs nothing under .agent_context at all, and the
+// directory must not be created speculatively: on a local_directory task this
+// is the USER's own checkout, where an empty managed directory is both noise
+// and something CleanupSidecars then has to reason about removing.
+func TestWriteContextFilesLeavesNoAgentContextWhenNothingToWrite(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	ctx := TaskContextForEnv{
-		IssueID: "minimal-issue-id",
-	}
-
-	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
+	if err := writeContextFiles(dir, "", TaskContextForEnv{IssueID: "minimal-issue-id"}, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(dir, ".agent_context", "issue_context.md"))
-	if err != nil {
-		t.Fatalf("failed to read: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
+		t.Fatalf(".agent_context created with nothing to put in it; stat err = %v, want not-exist", err)
 	}
-
-	s := string(content)
-	if !strings.Contains(s, "minimal-issue-id") {
-		t.Error("expected issue ID to be present")
-	}
-	if strings.Contains(s, "## Agent Skills") {
-		t.Error("expected skills section to be omitted when no skills")
-	}
-}
-
-func TestWriteContextFilesAutopilotRunOnly(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		AutopilotRunID:       "run-1",
-		AutopilotID:          "autopilot-1",
-		AutopilotTitle:       "Daily dependency check",
-		AutopilotDescription: "Check dependencies and report outdated packages.",
-		AutopilotSource:      "manual",
-	}
-
-	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	content, err := os.ReadFile(filepath.Join(dir, ".agent_context", "issue_context.md"))
-	if err != nil {
-		t.Fatalf("failed to read: %v", err)
-	}
-
-	s := string(content)
-	for _, want := range []string{
-		"# Autopilot Run",
-		"run-1",
-		"autopilot-1",
-		"Check dependencies and report outdated packages.",
-		"multica autopilot get autopilot-1 --output json",
-		"no assigned issue",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("autopilot context missing %q\n---\n%s", want, s)
-		}
-	}
-	if strings.Contains(s, "Run `multica issue get") {
-		t.Errorf("autopilot context should not contain issue get workflow\n---\n%s", s)
+	// The marker is a separate contract (the CLI's daemon-task fallback) and
+	// must still be there.
+	if _, err := os.Stat(filepath.Join(dir, TaskContextMarkerRelPath)); err != nil {
+		t.Fatalf("task context marker missing: %v", err)
 	}
 }
 
@@ -977,9 +921,12 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 		t.Error("expected .agent_context/skills/ to NOT exist for Claude provider")
 	}
 
-	// issue_context.md should still be in .agent_context/.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
-		t.Error("expected .agent_context/issue_context.md to exist")
+	// Nothing at all belongs under .agent_context for a native-skills
+	// provider now that the sidecar brief is gone (MUL-6984) — not even the
+	// directory. This runs in the user's own checkout on local_directory
+	// tasks, where an empty managed directory is noise.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
+		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
 	}
 }
 
@@ -1041,9 +988,12 @@ func TestWriteContextFilesCodebuddyNativeSkills(t *testing.T) {
 		t.Error("expected .agent_context/skills/ to NOT exist for codebuddy provider")
 	}
 
-	// issue_context.md should still be in .agent_context/.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
-		t.Error("expected .agent_context/issue_context.md to exist")
+	// Nothing at all belongs under .agent_context for a native-skills
+	// provider now that the sidecar brief is gone (MUL-6984) — not even the
+	// directory. This runs in the user's own checkout on local_directory
+	// tasks, where an empty managed directory is noise.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
+		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
 	}
 }
 
@@ -1632,9 +1582,12 @@ func TestWriteContextFilesCopilotNativeSkills(t *testing.T) {
 		t.Error("expected .agent_context/skills/ to NOT exist for Copilot provider")
 	}
 
-	// issue_context.md should still be in .agent_context/.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
-		t.Error("expected .agent_context/issue_context.md to exist")
+	// Nothing at all belongs under .agent_context for a native-skills
+	// provider now that the sidecar brief is gone (MUL-6984) — not even the
+	// directory. This runs in the user's own checkout on local_directory
+	// tasks, where an empty managed directory is noise.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
+		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
 	}
 }
 
@@ -1701,9 +1654,12 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 		t.Error("expected .agent_context/skills/ to NOT exist for OpenCode provider")
 	}
 
-	// issue_context.md should still be in .agent_context/.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
-		t.Error("expected .agent_context/issue_context.md to exist")
+	// Nothing at all belongs under .agent_context for a native-skills
+	// provider now that the sidecar brief is gone (MUL-6984) — not even the
+	// directory. This runs in the user's own checkout on local_directory
+	// tasks, where an empty managed directory is noise.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
+		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
 	}
 }
 
@@ -2580,7 +2536,9 @@ func TestInjectRuntimeConfigQuickCreateOutputPrefixAgnostic(t *testing.T) {
 	for _, want := range []string{
 		"quick-create task",
 		"Created <identifier-or-id>: <title>",
-		"identifier` from JSON output",
+		// Rules moved into the Workflow section (MUL-6984); the identifier
+		// must still come from the JSON, not from scraped human output.
+		"`identifier` (preferred) or `id` (fallback) from the JSON response",
 		"never assume a workspace issue prefix",
 	} {
 		if !strings.Contains(s, want) {
@@ -2619,9 +2577,7 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 
 	for _, want := range []string{
 		"Autopilot in run-only mode",
-		"Autopilot run ID: `run-1`",
-		"Check dependencies and report outdated packages.",
-		"multica autopilot get autopilot-1 --output json",
+		AutopilotIssueCommandsGuard,
 		"Your final assistant output is captured automatically as the autopilot run result",
 	} {
 		if !strings.Contains(s, want) {
@@ -2632,6 +2588,15 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 	for _, absent := range []string{
 		"Run `multica issue get",
 		"Final results MUST be delivered via `multica issue comment add`",
+		// Per-run VALUES belong to the per-turn message, which renders them
+		// once (daemon.buildAutopilotPrompt). This file is the prompt-cache
+		// prefix, and its own contract is that no per-run identifier reaches
+		// it (MUL-5377); a second copy of the data here also gave MUL-5696's
+		// drift somewhere to happen (MUL-6984).
+		"run-1",
+		"autopilot-1",
+		"Daily dependency check",
+		"Check dependencies and report outdated packages.",
 	} {
 		if strings.Contains(s, absent) {
 			t.Errorf("autopilot runtime config should not contain %q\n---\n%s", absent, s)
@@ -2726,9 +2691,10 @@ func TestWriteContextFilesHermesSkipsWorkdirSkills(t *testing.T) {
 		t.Errorf("expected no .agent_context/skills/ for Hermes, got err=%v", err)
 	}
 
-	// issue_context.md should still be written under .agent_context/.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); err != nil {
-		t.Errorf("expected .agent_context/issue_context.md to exist: %v", err)
+	// And no .agent_context at all: the sidecar brief that used to justify
+	// the directory is gone (MUL-6984), so Hermes leaves the workdir clean.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
+		t.Errorf(".agent_context created for Hermes; stat err = %v, want not-exist", err)
 	}
 }
 
@@ -5533,14 +5499,15 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 	}
 	s := string(data)
 
-	// The no_action rule lives on the leader variant of workflow step 4 since
-	// MUL-6417 (the reply-mode block that used to duplicate it is gone): the
-	// delivery imperative itself carries the carve-out, so no later bullet
-	// can contradict it (MUL-5442 #6493 review).
+	// Both delivery imperatives — workflow step 4 and ## Output — must carry
+	// the carve-out, so that no later bullet can contradict the no_action exit
+	// (MUL-5442 #6493 review). They carry the EXCEPTION, not the rule: the
+	// rule itself is stated once, by the Squad Operating Protocol the server
+	// appends to Instructions, and both sites point there (MUL-6984).
 	for _, want := range []string{
 		"unless your outcome is `no_action`",
-		"multica squad activity",
-		"DO NOT post a comment announcing no_action",
+		"see the no_action rule in your Squad Operating Protocol",
+		"which your Squad Operating Protocol states in full",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("squad leader comment-triggered CLAUDE.md missing %q", want)
@@ -5551,10 +5518,15 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 	if strings.Contains(s, "**Post your final results as a comment — this step is mandatory**") {
 		t.Errorf("squad leader CLAUDE.md still carries the unconditional delivery step")
 	}
-
-	// The Output section must use strong prohibition language.
-	if !strings.Contains(s, "you MUST exit without posting any comment") {
-		t.Errorf("Output section missing strong prohibition for squad leader no_action")
+	// And neither site may restate the rule's mechanics — that is what drifted
+	// when four copies of it existed.
+	for _, banned := range []string{
+		"DO NOT post a comment announcing no_action",
+		"you MUST exit without posting any comment",
+	} {
+		if strings.Contains(s, banned) {
+			t.Errorf("squad leader CLAUDE.md restates the protocol-owned no_action rule: %q", banned)
+		}
 	}
 
 	// Non-squad-leader should NOT have the squad leader rule in comment-triggered path.
@@ -5960,8 +5932,8 @@ func TestInjectRuntimeConfigBriefOmitsResumedThreadAnchor(t *testing.T) {
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"If your reply depends on thread context",
-		"do not rely only on resumed session memory",
+		"issue-wide delta is empty",
+		"if resumed memory is not enough",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
 		if !strings.Contains(hint, want) {
@@ -6099,72 +6071,40 @@ func TestInjectRuntimeConfigCatchUpScansRootsFirst(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigIssueMetadataSectionScope locks in MUL-2017:
-// the `## Issue Metadata` section (semantic guide + recommended keys +
-// pin/clear rules) and the metadata-read guidance on the issue-get step
-// are emitted only when the task carries a real issue id (comment-triggered
-// or assignment-triggered). Chat / quick-create / run-only autopilot don't
-// have an issue, so injecting the section there would just guarantee a
-// failed CLI call on every entry. The discovery line in Available
-// Commands → Core is global and must appear everywhere so that the agent
-// can still reach the commands if a future workflow path needs them.
-func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
+// TestBriefCarriesNoMetadataGuidance locks in MUL-6966 phase 1: the runtime
+// brief teaches issue metadata nowhere, on any task kind.
+//
+// This inverts TestInjectRuntimeConfigIssueMetadataSectionScope, which pinned
+// the opposite contract from MUL-2017 — the `## Issue Metadata` section plus
+// the read/pin steps on the issue kinds, absent everywhere else. Every anchor
+// that test required is required absent here, so the removal cannot be undone
+// by half.
+//
+// What is NOT asserted, deliberately: the CLI, the API, the UI, and the stored
+// bags all keep working. Phase 1 only stops the platform from recruiting new
+// writes; phase 2 removes the surface once the remaining consumers are known
+// to have migrated.
+func TestBriefCarriesNoMetadataGuidance(t *testing.T) {
 	t.Parallel()
 
-	// Discovery lines in Available Commands → Core appear in every runtime
-	// config except quick-create (whose minimal Available Commands lists
-	// only `issue create`). These are the single discovery point for the
-	// CLI when an agent decides to read or write metadata outside the
-	// numbered workflow.
-	coreDiscoveryLines := []string{
+	// Every anchor the retired section, its two workflow steps, and the
+	// Available Commands discovery block used to emit.
+	banned := []string{
+		"## Issue Metadata",
+		"**Read on entry.**",
+		"**Write on exit.**",
+		"Hints, not truth",
+		"never secrets or long content",
+		"Full write discipline:",
 		"multica issue metadata list <issue-id>",
 		"multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]",
 		"multica issue metadata delete <issue-id> --key <k>",
-	}
-
-	type wantSection struct {
-		// sentinel substrings that MUST appear when the Issue Metadata
-		// section is in scope
-		present []string
-		// substrings that MUST NOT appear (would mean the section leaked
-		// into a context where there's no issue id to act on)
-		absent []string
-	}
-
-	withSection := wantSection{
-		present: []string{
-			"## Issue Metadata",
-			"**Read on entry.**",
-			"**Write on exit.**",
-			"Hints, not truth",
-			// MUL-5442: the brief keeps only what the interface cannot
-			// express — the read stance, the re-read bar, and the two
-			// write-time boundaries (secrets, length). The full ban list
-			// and the key-naming conventions live in the
-			// multica-working-on-issues skill, pinned by
-			// TestWorkingOnIssuesSkillCoversIssueLoopContracts so this
-			// pointer cannot dangle. The recommended-keys block was
-			// removed outright: metadata is deliberately free-form custom
-			// state (owner decision on MUL-5442), not a vocabulary the
-			// platform curates in every brief.
-			"never secrets or long content",
-			"multica issue metadata delete",
-			"the `multica-working-on-issues` skill",
-		},
-	}
-	withoutSection := wantSection{
-		// We can't simply require `multica issue metadata list` absent
-		// because the Available Commands → Core discovery line is
-		// global (it uses `<issue-id>` placeholder text). What MUST be
-		// absent is the semantic section itself plus the workflow-step
-		// pointer back to it.
-		absent: []string{
-			"## Issue Metadata",
-			"high-signal scratchpad",
-			"**Read on entry.**",
-			"**Write on exit.**",
-			"the bar in `## Issue Metadata`",
-		},
+		"its JSON already carries the issue's `metadata` bag",
+		"What to look for: `## Issue Metadata`",
+		"the bar in `## Issue Metadata`",
+		// The standalone read step retired by #7016 must not come back
+		// through the phase-1 rewrite either.
+		"Read the metadata bag (`multica issue metadata list`)",
 	}
 
 	cases := []struct {
@@ -6172,96 +6112,46 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 		ctx      TaskContextForEnv
 		provider string
 		filename string
-		// workflowStepPresent is matched when the section is in scope —
-		// each entry must appear in the workflow numbered list to prove
-		// the metadata read step is wired in.
-		workflowStepPresent []string
-		// workflowAbsent lists workflow substrings that must NOT appear:
-		// in non-issue contexts, any metadata-list step that leaked into
-		// a workflow with no issue id; in issue contexts, the standalone
-		// metadata-list read step retired by #7016.
-		workflowAbsent []string
-		want           wantSection
 	}{
 		{
 			name: "comment_triggered",
 			ctx: TaskContextForEnv{
 				IssueID:          "issue-md-1",
 				TriggerCommentID: "comment-md-1",
+				AgentSkills:      []SkillContextForEnv{platformSkillFixture()},
 			},
 			provider: "claude",
 			filename: "CLAUDE.md",
-			workflowStepPresent: []string{
-				// #7016: the standalone `metadata list` read was folded
-				// into the issue-get step — `issue get` already returns
-				// the metadata bag, so the entry read costs zero extra
-				// calls. The old step's "CLI failures are normal"
-				// best-effort clause retired with it: when `issue get`
-				// itself fails, there is no bootstrap to unblock.
-				"its JSON already carries the issue's `metadata` bag",
-				// Both steps point at the section instead of restating its
-				// rules (MUL-5442); the entry step names what to look for,
-				// the exit step names the write bar.
-				"What to look for: `## Issue Metadata`",
-				"the bar in `## Issue Metadata`",
-				// Exit step must show both write and delete, not just
-				// "set" — stale-key cleanup is the half that keeps
-				// metadata from rotting.
-				"multica issue metadata set",
-				"multica issue metadata delete",
-				"Before exiting",
-			},
-			workflowAbsent: []string{
-				// The redundant standalone read must not come back (#7016).
-				"Read the metadata bag (`multica issue metadata list`)",
-			},
-			want: withSection,
 		},
 		{
-			name:     "assignment_triggered",
-			ctx:      TaskContextForEnv{IssueID: "issue-md-2"},
-			provider: "claude",
-			filename: "CLAUDE.md",
-			workflowStepPresent: []string{
-				"its JSON already carries the issue's `metadata` bag",
-				"What to look for: `## Issue Metadata`",
-				"the bar in `## Issue Metadata`",
-				"multica issue metadata set",
-				"multica issue metadata delete",
-				"Before exiting",
-			},
-			workflowAbsent: []string{
-				"Read the metadata bag (`multica issue metadata list`)",
-			},
-			want: withSection,
-		},
-		{
-			name: "quick_create_no_metadata_section",
+			name: "assignment_triggered",
 			ctx: TaskContextForEnv{
-				QuickCreatePrompt: "create a task about X",
+				IssueID:     "issue-md-2",
+				AgentSkills: []SkillContextForEnv{platformSkillFixture()},
 			},
+			provider: "claude",
+			filename: "CLAUDE.md",
+		},
+		{
+			name:     "quick_create",
+			ctx:      TaskContextForEnv{QuickCreatePrompt: "create a task about X"},
 			provider: "codex",
 			filename: "AGENTS.md",
-			want:     withoutSection,
 		},
 		{
-			name: "run_only_autopilot_no_metadata_section",
+			name: "run_only_autopilot",
 			ctx: TaskContextForEnv{
 				AutopilotRunID: "run-md-1",
 				AutopilotID:    "autopilot-md-1",
 			},
 			provider: "codex",
 			filename: "AGENTS.md",
-			want:     withoutSection,
 		},
 		{
-			name: "chat_no_metadata_section",
-			ctx: TaskContextForEnv{
-				ChatSessionID: "chat-md-1",
-			},
+			name:     "chat",
+			ctx:      TaskContextForEnv{ChatSessionID: "chat-md-1"},
 			provider: "claude",
 			filename: "CLAUDE.md",
-			want:     withoutSection,
 		},
 	}
 
@@ -6279,49 +6169,36 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			}
 			s := string(data)
 
-			// Global Core discovery lines apply everywhere EXCEPT
-			// quick-create, whose minimal Available Commands
-			// intentionally advertises only `issue create` — the hard
-			// guardrails forbid every other CLI call for that kind.
-			if tc.ctx.QuickCreatePrompt == "" {
-				for _, want := range coreDiscoveryLines {
-					if !strings.Contains(s, want) {
-						t.Errorf("Available Commands → Core missing %q\n---\n%s", want, s)
-					}
+			for _, b := range banned {
+				if strings.Contains(s, b) {
+					t.Errorf("%s brief still teaches metadata: %q\n---\n%s", tc.name, b, s)
 				}
 			}
 
-			for _, want := range tc.want.present {
+			// The steps the metadata clauses were spliced into must survive
+			// the removal — this is a deletion of guidance, not of workflow.
+			if tc.ctx.IssueID == "" {
+				return
+			}
+			for _, want := range []string{
+				"1. Read the issue (`multica issue get`) to understand the context.",
+				"5. Before exiting, confirm the status still matches where things actually stand.",
+			} {
 				if !strings.Contains(s, want) {
-					t.Errorf("expected %q in %s output\n---\n%s", want, tc.name, s)
-				}
-			}
-			for _, banned := range tc.want.absent {
-				if strings.Contains(s, banned) {
-					t.Errorf("%s output should NOT contain %q\n---\n%s", tc.name, banned, s)
-				}
-			}
-			for _, want := range tc.workflowStepPresent {
-				if !strings.Contains(s, want) {
-					t.Errorf("workflow step missing %q in %s\n---\n%s", want, tc.name, s)
-				}
-			}
-			for _, banned := range tc.workflowAbsent {
-				if strings.Contains(s, banned) {
-					t.Errorf("%s workflow should NOT contain %q\n---\n%s", tc.name, banned, s)
+					t.Errorf("%s workflow lost %q\n---\n%s", tc.name, want, s)
 				}
 			}
 		})
 	}
 }
 
-// TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged guarantees
-// that the new metadata wiring does not break the codex-specific comment
-// formatting rules (--content-file on every host, post-#4182). The
-// comment-formatting block lives below the metadata write step in the
-// workflow, so any reordering or accidental absorption of the codex
-// section would surface here.
-func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) {
+// TestInjectRuntimeConfigCodexCommentFormattingUnchanged guards the
+// codex-specific comment formatting rules (--content-file on every host,
+// post-#4182). It was written against the metadata write step, which sat
+// directly above the comment-formatting block and so would surface any
+// reordering or accidental absorption of the codex section; MUL-6966 removed
+// that step, and the assertions it existed to protect stay here.
+func TestInjectRuntimeConfigCodexCommentFormattingUnchanged(t *testing.T) {
 	// Not parallel: mutates the package-level runtimeGOOS.
 	oldGOOS := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = oldGOOS })
@@ -6342,18 +6219,7 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 		}
 		s := string(data)
 
-		// Metadata wiring is present...
-		if !strings.Contains(s, "## Issue Metadata") {
-			t.Fatalf("Issue Metadata section missing\n---\n%s", s)
-		}
-		if !strings.Contains(s, "its JSON already carries the issue's `metadata` bag") {
-			t.Fatalf("metadata-in-issue-get guidance missing\n---\n%s", s)
-		}
-		// The standalone read step retired by #7016 must not reappear.
-		if strings.Contains(s, "Read the metadata bag (`multica issue metadata list`)") {
-			t.Fatalf("redundant metadata list step present\n---\n%s", s)
-		}
-		// ...AND the post-#4182 file-first rule is still emitted on Linux.
+		// The post-#4182 file-first rule is still emitted on Linux...
 		if !strings.Contains(s, "always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`") {
 			t.Fatalf("codex linux --content-file rule missing\n---\n%s", s)
 		}
@@ -6380,9 +6246,6 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 		}
 		s := string(data)
 
-		if !strings.Contains(s, "## Issue Metadata") {
-			t.Fatalf("Issue Metadata section missing on windows\n---\n%s", s)
-		}
 		if !strings.Contains(s, "always write the comment body to a UTF-8 file") {
 			t.Fatalf("codex Windows --content-file rule missing\n---\n%s", s)
 		}
@@ -6435,11 +6298,14 @@ func TestPrepareLocalWorkDir(t *testing.T) {
 		t.Fatalf("expected envRoot/workdir to NOT exist for local_directory tasks; err=%v", err)
 	}
 
-	// Context files should still land in the user's directory so the
-	// agent can discover them.
-	contextPath := filepath.Join(userDir, ".agent_context", "issue_context.md")
-	if _, err := os.Stat(contextPath); err != nil {
-		t.Fatalf("expected context file in user dir: %v", err)
+	// Sidecars still land in the user's own directory, which is where the
+	// task runs. The marker is the one the CLI actually reads; the Markdown
+	// brief that used to sit beside it had no reader and is gone (MUL-6984).
+	if _, err := os.Stat(filepath.Join(userDir, TaskContextMarkerRelPath)); err != nil {
+		t.Fatalf("expected the task context marker in the user dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(userDir, ".agent_context")); !os.IsNotExist(err) {
+		t.Fatalf("Prepare left .agent_context in the user's own directory; stat err = %v, want not-exist", err)
 	}
 }
 

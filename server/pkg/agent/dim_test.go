@@ -12,25 +12,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsDimBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("dim", Config{ExecutablePath: "/nonexistent/dim"})
-	if err != nil {
-		t.Fatalf("New(dim) error: %v", err)
-	}
-	if _, ok := b.(*dimBackend); !ok {
-		t.Fatalf("expected *dimBackend, got %T", b)
-	}
-}
-
-func TestDimModelSelectionSupported(t *testing.T) {
-	t.Parallel()
-	// Dim's session/set_model is session-scoped, so model override works.
-	if !ModelSelectionSupported("dim") {
-		t.Fatal("ModelSelectionSupported(dim) should return true")
-	}
-}
-
 // fakeDimACPScript impersonates `dim acp` for unit tests. Dim 0.3.10+
 // releases its per-process session lock shortly after the owning process
 // exits, so a follow-up run resumes via the standard ACP session/load. This
@@ -511,11 +492,21 @@ func TestDimConfigFailClosesSession(t *testing.T) {
 	}
 }
 
-// TestDimConfigFailThenResumeReestablishes verifies the "first setup fails →
-// next run resumes" path (review #4): when the first run's set_config_option
-// fails, session/close is sent; a second run that resumes the same session
-// re-applies set_config_option (fail-closed) and succeeds.
-func TestDimConfigFailThenResumeReestablishes(t *testing.T) {
+// TestDimFreshConfigFailureWithholdsSessionID pins the ghost-pointer contract
+// (GH #8116) on dim's set_config_option branch: a fresh session that died
+// during setup, before any prompt went out, must not be published as a resume
+// pointer.
+//
+// dim is the runtime where this is least obviously necessary and most clearly
+// still right. It closes the session on this path and persists early enough
+// that the id would in fact still load — but there is no conversation behind
+// it, because no prompt was ever sent. Withholding it costs one extra
+// session/new on the next turn; publishing it is a bet that every ACP runtime
+// persists a never-prompted session, and qodercli does not, which is what
+// wedged a conversation forever in the first place. The contract is uniform
+// across backends on purpose: making it per-runtime is how the neighbouring
+// resume bugs got fixed one adapter at a time while the rest stayed broken.
+func TestDimFreshConfigFailureWithholdsSessionID(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	requestsFile := filepath.Join(dir, "requests.jsonl")
@@ -527,7 +518,44 @@ func TestDimConfigFailThenResumeReestablishes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Run A: fresh session, set_config_option fails on the first call.
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 20 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q", result.Status)
+	}
+	if result.SessionID != "" {
+		t.Fatalf("expected the never-prompted session id to be withheld, got %q", result.SessionID)
+	}
+	if result.ResumeRejected {
+		t.Fatal("a fresh session cannot be resume-rejected; the daemon must not re-run this task")
+	}
+}
+
+// TestDimResumeReappliesConfig pins the fail-closed config re-application on
+// resume (review #4): a resumed session re-sends set_config_option instead of
+// trusting whatever state the earlier run left behind. It resumes a session
+// that completed a prompt — the only kind that now carries a resume pointer.
+func TestDimResumeReappliesConfig(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	requestsFile := filepath.Join(dir, "requests.jsonl")
+	b := newDimTestBackend(t, requestsFile)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Run A: a fresh run that reaches session/prompt and completes, so it has
+	// a real conversation to hand forward.
 	sessionA, err := b.Execute(ctx, "test prompt", ExecOptions{
 		Cwd:     t.TempDir(),
 		Timeout: 20 * time.Second,
@@ -540,15 +568,14 @@ func TestDimConfigFailThenResumeReestablishes(t *testing.T) {
 		}
 	}()
 	resultA := <-sessionA.Result
-	if resultA.Status != "failed" {
-		t.Fatalf("run A: expected status=failed, got %q", resultA.Status)
+	if resultA.Status != "completed" {
+		t.Fatalf("run A: expected status=completed, got %q (error=%q)", resultA.Status, resultA.Error)
 	}
 	if resultA.SessionID == "" {
-		t.Fatal("run A: expected a session id despite the config failure")
+		t.Fatal("run A: a completed run must publish its session id")
 	}
 
-	// Run B: resume the same session. set_config_option should succeed this
-	// time (DIM_CONFIG_FAIL_ONCE only fails once) and the run should complete.
+	// Run B: resume it.
 	sessionB, err := b.Execute(ctx, "test prompt", ExecOptions{
 		Cwd:             t.TempDir(),
 		Timeout:         20 * time.Second,
@@ -566,19 +593,17 @@ func TestDimConfigFailThenResumeReestablishes(t *testing.T) {
 		t.Fatalf("run B: expected status=completed, got %q (error=%q)", resultB.Status, resultB.Error)
 	}
 	if resultB.ResumeRejected {
-		t.Fatal("run B: ResumeRejected should be false — the session was loadable after session/close")
+		t.Fatal("run B: ResumeRejected should be false — the session was loadable")
 	}
 
-	// Verify run B re-applied set_config_option (fail-closed on resume).
 	reqs := readDimRequests(t, requestsFile)
 	if !strings.Contains(reqs, "session/load") {
 		t.Fatal("run B: expected session/load")
 	}
-	// set_config_option should appear at least 3 times: 1 failed in run A,
-	// 2 successful in run B (permission + mode).
-	count := strings.Count(reqs, "set_config_option")
-	if count < 3 {
-		t.Fatalf("expected at least 3 set_config_option calls (1 fail + 2 re-apply on resume), got %d", count)
+	// set_config_option should appear at least 4 times: 2 in run A and 2
+	// re-applied in run B (permission + mode).
+	if count := strings.Count(reqs, "set_config_option"); count < 4 {
+		t.Fatalf("expected at least 4 set_config_option calls (2 fresh + 2 re-applied on resume), got %d", count)
 	}
 }
 

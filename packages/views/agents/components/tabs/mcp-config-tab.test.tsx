@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -178,16 +178,256 @@ describe("McpConfigTab", () => {
         version: 1,
         mcpServers: {
           fetch: { command: "uvx", args: ["mcp-server-fetch"] },
-          docs: { type: "http", url: "https://example.test/mcp" },
+          docs: { type: "http", url: "https://example.test/mcp", enabled: false },
         },
       },
     });
 
     expect(screen.getByText("fetch")).toBeInTheDocument();
     expect(screen.getByText("docs")).toBeInTheDocument();
+    expect(
+      within(screen.getByText("docs").closest("li")!).getByText("Off for agent"),
+    ).toBeVisible();
+    expect(screen.getByLabelText("STDIO")).toBeInTheDocument();
+    expect(screen.getByLabelText("Streamable HTTP")).toBeInTheDocument();
+    expect(screen.getByText("STDIO")).toBeVisible();
+    expect(screen.getByText("Streamable HTTP")).toBeVisible();
     expect(screen.getByRole("heading", { name: /managed by multica/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /inherited from runtime/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/MCP config JSON editor/i)).not.toBeInTheDocument();
+  });
+
+  it("renames a managed server inline without changing its configuration", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab({
+      mcp_config: {
+        version: 1,
+        mcpServers: {
+          fetch: { command: "uvx", args: ["mcp-server-fetch"] },
+        },
+      },
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /rename server fetch/i }),
+    );
+    const input = screen.getByRole("textbox", { name: "Rename server" });
+    await user.clear(input);
+    await user.type(input, "fetch-v2");
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      mcp_config: {
+        version: 1,
+        mcpServers: {
+          "fetch-v2": { command: "uvx", args: ["mcp-server-fetch"] },
+        },
+      },
+    });
+  });
+
+  it("preserves a refreshed server config when an inline rename is submitted", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const initialConfig = {
+      version: 1,
+      mcpServers: {
+        fetch: { command: "uvx", args: ["old"] },
+      },
+    };
+    const view = renderTab({ mcp_config: initialConfig }, onSave);
+
+    await user.click(
+      screen.getByRole("button", { name: /rename server fetch/i }),
+    );
+    const input = screen.getByRole("textbox", { name: "Rename server" });
+    await user.clear(input);
+    await user.type(input, "fetch-v2");
+
+    view.rerender(
+      <TestShell>
+        <McpConfigTab
+          agent={{
+            ...baseAgent,
+            mcp_config: {
+              version: 1,
+              mcpServers: {
+                fetch: { command: "uvx", args: ["new"] },
+              },
+            },
+          }}
+          runtime={null}
+          currentUserId="user-1"
+          onSave={onSave}
+        />
+      </TestShell>,
+    );
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      mcp_config: {
+        version: 1,
+        mcpServers: {
+          "fetch-v2": { command: "uvx", args: ["new"] },
+        },
+      },
+    });
+  });
+
+  it("rejects a managed rename when refreshed data removed the original server", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const otherContainer = { fetch: { command: "other-mcp-server" } };
+    const view = renderTab({
+      mcp_config: {
+        mcpServers: { fetch: { command: "uvx" } },
+        mcp: otherContainer,
+      },
+    }, onSave);
+
+    await user.click(screen.getByRole("button", { name: /rename server fetch/i }));
+    const input = screen.getByRole("textbox", { name: "Rename server" });
+    await user.clear(input);
+    await user.type(input, "fetch-v2");
+
+    // Removing the original entry reveals the same name in another supported
+    // container. The draft must not rename this different server or recreate
+    // the deleted entry from its stale snapshot.
+    view.rerender(
+      <TestShell>
+        <McpConfigTab
+          agent={{ ...baseAgent, mcp_config: { mcp: otherContainer } }}
+          runtime={null}
+          currentUserId="user-1"
+          onSave={onSave}
+        />
+      </TestShell>,
+    );
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not rename the MCP server");
+    expect(onSave).not.toHaveBeenCalled();
+    expect(input).toHaveValue("fetch-v2");
+    expect(input).not.toBeDisabled();
+  });
+
+  it("validates every managed rename branch and cancels a no-op", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab({
+      mcp_config: {
+        version: 1,
+        mcpServers: {
+          fetch: { command: "uvx" },
+          docs: { url: "https://example.test/mcp" },
+        },
+      },
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /rename server fetch/i }),
+    );
+    const input = screen.getByRole("textbox", { name: "Rename server" });
+
+    await user.clear(input);
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+    expect(screen.getByText("Enter a server name.")).toBeInTheDocument();
+
+    await user.type(input, "bad name");
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+    expect(
+      screen.getByText("Use only letters, numbers, hyphens, and underscores."),
+    ).toBeInTheDocument();
+
+    await user.clear(input);
+    await user.type(input, "docs");
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+    expect(
+      screen.getByText("A server with this name already exists."),
+    ).toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
+
+    await user.clear(input);
+    await user.type(input, "fetch");
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+    expect(screen.queryByRole("textbox", { name: "Rename server" })).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { reason: "an API error", error: new Error("Rename failed"), message: "Rename failed" },
+    { reason: "an empty error", error: new Error(""), message: "Could not rename the MCP server" },
+    { reason: "a non-Error rejection", error: null, message: "Could not rename the MCP server" },
+  ])("keeps a managed server rename open after $reason", async ({ error, message }) => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockRejectedValueOnce(error);
+    renderTab(
+      {
+        mcp_config: {
+          version: 1,
+          mcpServers: {
+            fetch: { command: "uvx", args: ["mcp-server-fetch"] },
+          },
+        },
+      },
+      onSave,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /rename server fetch/i }),
+    );
+    const input = screen.getByRole("textbox", { name: "Rename server" });
+    await user.clear(input);
+    await user.type(input, "fetch-v2");
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(input).toHaveValue("fetch-v2");
+    expect(input).not.toBeDisabled();
+  });
+
+  it("blocks competing managed actions while an inline rename is pending", async () => {
+    const user = userEvent.setup();
+    let finishRename!: () => void;
+    const onSave = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRename = resolve;
+        }),
+    );
+    renderTab(
+      {
+        mcp_config: {
+          version: 1,
+          mcpServers: {
+            fetch: { command: "uvx" },
+            docs: { url: "https://example.test/mcp" },
+          },
+        },
+      },
+      onSave,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /rename server fetch/i }),
+    );
+    const input = screen.getByRole("textbox", { name: "Rename server" });
+    await user.clear(input);
+    await user.type(input, "fetch-v2");
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(input).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save name" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel rename" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Add MCP/i })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /rename server docs/i }),
+    ).toBeDisabled();
+
+    finishRename();
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: "Rename server" })).toBeNull(),
+    );
   });
 
   it("adds one stdio server through the form and preserves historical top-level data", async () => {
@@ -195,9 +435,9 @@ describe("McpConfigTab", () => {
     const { onSave } = renderTab({ mcp_config: { version: 1 } });
 
     await user.click(screen.getByRole("button", { name: /add mcp/i }));
-    await user.type(screen.getByLabelText("Name"), "fetch");
+    await user.type(screen.getByLabelText("Server name"), "fetch");
     await user.type(screen.getByLabelText("Command"), "uvx");
-    await user.click(screen.getByRole("button", { name: /add server/i }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
 
     expect(onSave).toHaveBeenCalledWith({
       mcp_config: {
@@ -207,12 +447,24 @@ describe("McpConfigTab", () => {
     });
   });
 
+  it("opens a new agent MCP dialog without displaying validation errors", async () => {
+    const user = userEvent.setup();
+    renderTab();
+
+    await user.click(screen.getByRole("button", { name: /add mcp/i }));
+
+    expect(screen.getByLabelText("Server name")).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByLabelText("Command")).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText("Enter a server name.")).toBeNull();
+    expect(screen.queryByText(/Enter the command used/)).toBeNull();
+  });
+
   it("adds one HTTP server through JSON mode", async () => {
     const user = userEvent.setup();
     const { onSave } = renderTab();
 
     await user.click(screen.getByRole("button", { name: /add mcp/i }));
-    await user.type(screen.getByLabelText("Name"), "weather");
+    await user.type(screen.getByLabelText("Server name"), "weather");
     await user.click(screen.getByRole("tab", { name: "JSON" }));
     fireEvent.change(screen.getByLabelText(/MCP server JSON configuration/i), {
       target: {
@@ -222,7 +474,7 @@ describe("McpConfigTab", () => {
         }),
       },
     });
-    await user.click(screen.getByRole("button", { name: /add server/i }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
 
     expect(onSave).toHaveBeenCalledWith({
       mcp_config: {
@@ -252,12 +504,13 @@ describe("McpConfigTab", () => {
     const { onSave } = renderTab({ mcp_config: existing });
 
     await user.click(
-      screen.getByRole("button", { name: /edit mcp server fetch/i }),
+      screen.getByRole("button", { name: /edit configuration fetch/i }),
     );
+    expect(screen.queryByLabelText("Server name")).not.toBeInTheDocument();
     const command = screen.getByLabelText("Command");
     await user.clear(command);
     await user.type(command, "npx");
-    await user.click(screen.getByRole("button", { name: /save changes/i }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onSave).toHaveBeenCalledWith({
       mcp_config: {
@@ -269,6 +522,135 @@ describe("McpConfigTab", () => {
             command: "npx",
           },
           docs: { url: "https://example.test/mcp" },
+        },
+      },
+    });
+  });
+
+  it("round-trips empty stdio arguments and environment values", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab({
+      mcp_config: {
+        mcpServers: {
+          fetch: {
+            command: "uvx",
+            args: [""],
+            env: { EMPTY_VALUE: "" },
+          },
+        },
+      },
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /edit configuration fetch/i }),
+    );
+    expect(screen.getByLabelText("Startup arguments 1")).toHaveValue("");
+    expect(
+      screen.getByLabelText("Environment variables: Value 1"),
+    ).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      mcp_config: {
+        mcpServers: {
+          fetch: {
+            command: "uvx",
+            args: [""],
+            env: { EMPTY_VALUE: "" },
+          },
+        },
+      },
+    });
+  });
+
+  it("preserves leading, middle, and trailing empty stdio arguments", async () => {
+    const user = userEvent.setup();
+    const args = ["", "2222", "", "333", ""];
+    const { onSave } = renderTab({
+      mcp_config: {
+        mcpServers: {
+          fetch: { command: "uvx", args },
+        },
+      },
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /edit configuration fetch/i }),
+    );
+    for (const [index, value] of args.entries()) {
+      expect(screen.getByLabelText(`Startup arguments ${index + 1}`)).toHaveValue(
+        value,
+      );
+    }
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      mcp_config: {
+        mcpServers: {
+          fetch: { command: "uvx", args },
+        },
+      },
+    });
+  });
+
+  it("saves leading, middle, and trailing empty rows added in the form", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab({
+      mcp_config: {
+        mcpServers: {
+          fetch: { command: "uvx" },
+        },
+      },
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /edit configuration fetch/i }),
+    );
+    const addArgument = screen.getByRole("button", { name: "Add argument" });
+    for (let index = 0; index < 5; index += 1) {
+      await user.click(addArgument);
+    }
+    await user.type(screen.getByLabelText("Startup arguments 2"), "2222");
+    await user.type(screen.getByLabelText("Startup arguments 4"), "333");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      mcp_config: {
+        mcpServers: {
+          fetch: { command: "uvx", args: ["", "2222", "", "333", ""] },
+        },
+      },
+    });
+  });
+
+  it("round-trips empty HTTP header values", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab({
+      mcp_config: {
+        mcpServers: {
+          docs: {
+            type: "http",
+            url: "https://example.test/mcp",
+            headers: { "X-Empty": "" },
+          },
+        },
+      },
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /edit configuration docs/i }),
+    );
+    expect(screen.getByLabelText("HTTP headers: Value 1")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      mcp_config: {
+        mcpServers: {
+          docs: {
+            type: "http",
+            url: "https://example.test/mcp",
+            headers: { "X-Empty": "" },
+          },
         },
       },
     });
@@ -294,14 +676,20 @@ describe("McpConfigTab", () => {
     const { onSave } = renderTab();
 
     await user.click(screen.getByRole("button", { name: /add mcp/i }));
-    await user.type(screen.getByLabelText("Name"), "broken");
+    await user.type(screen.getByLabelText("Server name"), "broken");
     await user.click(screen.getByRole("tab", { name: "JSON" }));
     fireEvent.change(screen.getByLabelText(/MCP server JSON configuration/i), {
       target: { value: "{not json" },
     });
 
+    expect(screen.queryByText(/invalid json/i)).toBeNull();
+    const addButton = screen.getByRole("button", { name: "Add" });
+    expect(addButton).toBeEnabled();
+
+    await user.click(addButton);
+
     expect(screen.getByText(/invalid json/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /add server/i })).toBeDisabled();
+    expect(screen.getByLabelText(/MCP server JSON configuration/i)).toHaveFocus();
     expect(onSave).not.toHaveBeenCalled();
   });
 
@@ -317,7 +705,8 @@ describe("McpConfigTab", () => {
 
     renderTab({}, undefined, onlineRuntime);
 
-    expect(await screen.findByText("linear")).toBeInTheDocument();
+    const row = (await screen.findByText("linear")).closest("li")!;
+    expect(within(row).getByText("Streamable HTTP")).toBeVisible();
   });
 
   it("shows a permission notice when capability discovery is forbidden", async () => {
@@ -377,7 +766,8 @@ describe("McpConfigTab workspace servers", () => {
     workspaceMcp.assigned = [wsServer({ enabled: true })];
     renderTab({ mcp_config: null });
 
-    expect(await screen.findByText("shared-linear")).toBeInTheDocument();
+    const row = (await screen.findByText("shared-linear")).closest("li")!;
+    expect(within(row).getByText("Streamable HTTP")).toBeVisible();
     expect(screen.getByText(/From the workspace library/)).toBeInTheDocument();
   });
 
@@ -399,31 +789,11 @@ describe("McpConfigTab workspace servers", () => {
     renderTab({ mcp_config: null });
 
     await user.click(await screen.findByRole("button", { name: /Add from workspace/ }));
-    await user.click(await screen.findByRole("menuitem", { name: /pickable/ }));
+    const option = await screen.findByRole("menuitem", { name: /pickable/ });
+    expect(within(option).getByText("Streamable HTTP")).toBeVisible();
+    await user.click(option);
 
     await waitFor(() => expect(mockAddServer).toHaveBeenCalledWith("srv-9"));
-  });
-
-  // A workspace can accumulate a lot of shared servers, and the picker is a
-  // menu anchored to a small button: it has to stay inside a bounded, scrolling
-  // box and keep the trigger's width instead of growing down the page.
-  it("keeps the picker bounded, scrollable, and anchored when the library is long", async () => {
-    const user = userEvent.setup();
-    workspaceMcp.library = Array.from({ length: 40 }, (_, i) =>
-      wsServer({ id: `srv-${i}`, name: `shared-server-${i}` }),
-    );
-    renderTab({ mcp_config: null });
-
-    await user.click(
-      await screen.findByRole("button", { name: /Add from workspace/ }),
-    );
-
-    const items = await screen.findAllByRole("menuitem");
-    expect(items).toHaveLength(40);
-    const menu = items[0]!.closest("[data-slot='dropdown-menu-content']");
-    expect(menu?.className).toMatch(/\bmax-h-72\b/);
-    expect(menu?.className).toMatch(/\boverflow-y-auto\b/);
-    expect(menu?.className).toMatch(/min-w-\(--anchor-width\)/);
   });
 
   it("toggles an assignment off without dropping it", async () => {
@@ -471,7 +841,13 @@ describe("McpConfigTab workspace servers", () => {
     render(
       <TestShell>
         <McpConfigTab
-          agent={baseAgent}
+          agent={{
+            ...baseAgent,
+            mcp_config: {
+              version: 1,
+              mcpServers: { fetch: { command: "uvx" } },
+            },
+          }}
           runtime={null}
           canEdit={false}
           onSave={vi.fn()}
@@ -480,6 +856,11 @@ describe("McpConfigTab workspace servers", () => {
     );
 
     expect(await screen.findByText("shared-linear")).toBeInTheDocument();
+    expect(screen.getByText("fetch")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Add MCP/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Rename server fetch/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Edit configuration fetch/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Delete MCP server fetch/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Add from workspace/ })).toBeNull();
     expect(screen.queryByRole("switch")).toBeNull();
     expect(screen.queryByRole("button", { name: /Remove shared-linear/i })).toBeNull();
@@ -542,14 +923,14 @@ describe("McpConfigTab effective set", () => {
     renderTab({ mcp_config: { mcpServers: { streamy: entry } } });
 
     await user.click(
-      screen.getByRole("button", { name: /edit mcp server streamy/i }),
+      screen.getByRole("button", { name: /edit configuration streamy/i }),
     );
 
     expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    expect(screen.getByRole("tab", { name: "Form" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Visual editor" })).toHaveAttribute(
       "aria-disabled",
       "true",
     );
@@ -566,10 +947,10 @@ describe("McpConfigTab effective set", () => {
     renderTab({ mcp_config: { mcpServers: { normal: entry } } });
 
     await user.click(
-      screen.getByRole("button", { name: /edit mcp server normal/i }),
+      screen.getByRole("button", { name: /edit configuration normal/i }),
     );
 
-    expect(screen.getByRole("tab", { name: "Form" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Visual editor" })).toHaveAttribute(
       "aria-selected",
       "true",
     );

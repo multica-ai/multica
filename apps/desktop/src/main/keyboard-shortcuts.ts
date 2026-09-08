@@ -1,11 +1,13 @@
 import type { WebContents } from "electron";
+import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
 
-// Shape of the input subset we read from Electron's `before-input-event`.
-// Modeled as a structural type so the handler is unit-testable without a
-// real Electron Input instance.
+// Shape of the Electron `before-input-event` fields relevant to shortcut
+// policy. Modeled as a structural type so the handler is unit-testable
+// without a real Electron Input instance.
 export type ShortcutInput = {
   type: string;
   key: string;
+  code: string;
   control: boolean;
   meta: boolean;
   alt: boolean;
@@ -44,8 +46,14 @@ const ZOOM_MAX = 4.5;
  * - `"close-tab"`: Cmd/Ctrl+W intercepted — caller should send IPC to renderer
  * - `"open-settings"`: Cmd/Ctrl+, intercepted — caller should route the
  *   request to the tabbed main window
+ * - `{ action: "select-tab", key }`: Cmd/Ctrl+1..9 intercepted — caller
+ *   should route the requested browser-style tab position to the main window
  */
-export type ShortcutResult = boolean | "close-tab" | "open-settings";
+export type ShortcutResult =
+  | boolean
+  | "close-tab"
+  | "open-settings"
+  | { action: "select-tab"; key: TabSelectionShortcutKey };
 
 export function handleAppShortcut(
   input: ShortcutInput,
@@ -64,6 +72,23 @@ export function handleAppShortcut(
   }
 
   if (!primary || !noSecondaryModifiers) return false;
+
+  // Browser-style direct tab selection. 1..8 address that exact position;
+  // 9 is interpreted by the renderer as "last tab" regardless of count.
+  // Main owns the chord so it works while focus is inside any editor/control
+  // and can prevent both renderer handlers and native accelerators from also
+  // acting. Match the logical key, as Settings records and persists shortcuts
+  // using KeyboardEvent.key. This keeps an AZERTY Ctrl+& override reachable;
+  // pressing Shift on that layout produces the logical key "1" and selects
+  // tab 1. On QWERTY, Shift+Digit1 produces "!", so that chord stays distinct.
+  // Holding the chord is swallowed without repeatedly changing MRU.
+  if (/^[1-9]$/.test(input.key)) {
+    if (input.isAutoRepeat) return true;
+    return {
+      action: "select-tab",
+      key: Number(input.key) as TabSelectionShortcutKey,
+    };
+  }
 
   // Cmd/Ctrl + "=" (unshifted) or "+" (Shift+=) → zoom in.
   if (

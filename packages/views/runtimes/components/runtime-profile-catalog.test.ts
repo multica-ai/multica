@@ -31,10 +31,6 @@ function profile(
 }
 
 describe("buildRuntimeCatalog", () => {
-  it("offers CodeArts as an independent protocol family", () => {
-    expect(PROTOCOL_FAMILIES).toContain("codearts");
-  });
-
   it("keeps custom profiles separate from built-in protocol families", () => {
     const catalog = buildRuntimeCatalog([
       profile("prof-1", "Team Codex", "2026-01-02T00:00:00Z"),

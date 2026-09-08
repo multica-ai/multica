@@ -3,37 +3,15 @@ import { CheckCircle2 } from "lucide-react";
 import type { TimelineEntry } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { cn } from "@multica/ui/lib/utils";
+import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
-// ThreadMinimap — Linear-style quick-jump rail for comment threads
-// ---------------------------------------------------------------------------
-//
-// A vertical column of tick marks overlaid on the right edge of the issue
-// detail scroll area, just inside the scrollbar, one tick per top-level
-// comment thread (folded resolved bars included — they are jump targets too).
-// Ticks whose thread is currently inside the scroll viewport render darker, so
-// the rail doubles as a "you are here" minimap. Hovering magnifies ticks in a
-// Dock-style wave around the cursor (the hovered tick peaks, neighbours taper
-// off) and shows a preview card (bold first line + muted body excerpt, plus a
-// "Resolved" badge when the thread carries a resolution — the rail is the one
-// place a folded resolved thread is otherwise indistinguishable from an open
-// one); clicking jumps the timeline to that thread.
-//
-// It rides the scrollbar side on purpose: it looks and behaves like a scroll
-// affordance, and every precedent for that (the scrollbar itself, editor
-// minimaps, floating outlines) lives on the right — so the pointer is already
-// there, and the travel from scrolling to jumping is short (MUL-4522).
-//
-// The preview is ONE card owned by the rail, not a popover per tick: the
-// open-intent delay is paid once when the pointer enters the rail, and while
-// the pointer glides across ticks the card swaps content instantly and
-// slides to the hovered tick. Per-tick popovers re-paid the open delay and
-// exit/enter animations on every tick crossed, which read as lag when
-// scanning the rail continuously.
-//
-// The rail deliberately skips activity groups: they are timeline noise, not
-// navigation destinations.
+// ThreadMinimap — quick-jump rail with a complete thread outline.
+// The rail shows viewport position; hovering or focusing any tick opens one
+// stationary, scrollable list of every thread title. Rows jump to the same
+// timeline anchors as the ticks, including folded resolved threads.
 
 /** Minimum number of threads before the rail is worth its pixels. */
 const MIN_THREADS = 2;
@@ -72,8 +50,8 @@ export function waveScale(distancePx: number): number {
 }
 
 /**
- * Caps applied by `commentPreview`. The preview card clamps visually
- * (`truncate` / `line-clamp-3`), but agent comments can be tens of KB of
+ * Caps applied by `commentPreview`. Outline labels truncate visually,
+ * but agent comments can be tens of KB of
  * markdown — capping here keeps the flattened strings (and the aria-labels
  * derived from them) small instead of shipping the whole comment into the DOM.
  */
@@ -119,6 +97,8 @@ export interface ThreadMinimapThread {
    * a folded resolved thread expanded.
    */
   resolved: boolean;
+  /** Unique authors across the root and every nested reply, in first-seen order. */
+  participants: TimelineEntry[];
 }
 
 interface ThreadMinimapProps {
@@ -126,12 +106,6 @@ interface ThreadMinimapProps {
   /** The issue detail scroll container; null until its callback ref populates. */
   scrollContainerEl: HTMLElement | null;
   onJump: (threadId: string) => void;
-  /**
-   * Thread the header panel's pointer is currently resting on. The rail lights
-   * that tick in the brand colour so the two navigators read as one coordinate
-   * system rather than two competing lists (MUL-5755).
-   */
-  highlightedThreadId?: string | null;
   /** Positioning within the page (e.g. `absolute right-3 top-12 bottom-0`) — owned by the caller, like FindBar. */
   className?: string;
 }
@@ -142,8 +116,7 @@ interface ThreadMinimapProps {
 //
 // Which threads intersect the scroll viewport, so the rail can darken their
 // ticks. Deliberately the rail's alone: "on screen" is a set, not a point, and
-// only a column of ticks can show a span honestly — the header panel tried to
-// render the same set as list rows and it read as a broken multi-select.
+// only a column of ticks can show a span without suggesting multiple selection.
 //
 // Computed from DOM rects on scroll/resize instead of an IntersectionObserver
 // because Virtuoso mounts/unmounts rows while scrolling — an observer would
@@ -200,26 +173,22 @@ function useVisibleThreadIds(
   return visibleIds;
 }
 
-/** The rail-owned preview card's target: which tick, anchored at which shim-relative Y. */
+/** The thread currently highlighted in the outline and rail. */
 interface PreviewAnchor {
   index: number;
-  y: number;
 }
 
 function MinimapTick({
   label,
   inViewport,
-  isPreviewOpen,
   isHighlighted,
   onClick,
 }: {
   label: string;
   inViewport: boolean;
-  /** This tick's preview is the open card — hold the grown state even when the pointer is on the card. */
-  isPreviewOpen: boolean;
-  /** The header panel is hovering this thread's row. */
+  /** The corresponding outline row is active. */
   isHighlighted: boolean;
-  onClick: () => void;
+  onClick: React.MouseEventHandler<HTMLButtonElement>;
 }) {
   return (
     <button
@@ -242,19 +211,14 @@ function MinimapTick({
           // pointer samples and as the settle on leave.
           "h-0.5 w-3 origin-right rounded-full transition-[scale,background-color] duration-100 ease-out",
           inViewport ? "bg-foreground/70" : "bg-muted-foreground/30",
-          "group-hover/tick:bg-foreground",
+          !isHighlighted && "group-hover/tick:bg-foreground",
           // CSS floor states for when no inline wave value is present:
           // the open card's tick stays grown while the pointer rests on the
           // card, keyboard focus grows without a pointer, and reduced-motion
           // swaps the wave for a plain hover grow.
-          isPreviewOpen && "scale-x-[1.7] bg-foreground",
-          // Panel-driven highlight. Brand colour, not foreground: it marks
-          // "the panel is pointing here", which is a different statement from
-          // the rail's own hover/viewport greys and must stay distinguishable
-          // from both. Wins over `inViewport` because it is the more specific,
-          // user-driven state.
           isHighlighted && "scale-x-[1.7] bg-brand",
-          "group-focus-visible/tick:scale-x-[1.7] group-focus-visible/tick:bg-foreground",
+          "group-focus-visible/tick:scale-x-[1.7]",
+          !isHighlighted && "group-focus-visible/tick:bg-foreground",
           "motion-reduce:group-hover/tick:scale-x-[1.7]",
         )}
       />
@@ -266,11 +230,10 @@ export function ThreadMinimap({
   threads,
   scrollContainerEl,
   onJump,
-  highlightedThreadId,
   className,
 }: ThreadMinimapProps) {
   const { t } = useT("issues");
-  const { getActorName } = useActorName();
+  const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
   const threadIds = useMemo(() => threads.map((th) => th.id), [threads]);
   const visibleIds = useVisibleThreadIds(threadIds, scrollContainerEl);
 
@@ -299,8 +262,7 @@ export function ThreadMinimap({
   // Hover wave + preview targeting. Pointer position lives in refs and ticks
   // are scaled with direct style writes so pointermove never re-renders the
   // component; the rAF guard coalesces bursts to one batched read-then-write
-  // per frame. The same rect pass derives which tick the card should anchor
-  // to, so the card and the wave can never disagree about the hovered tick.
+  // per frame. The same rect pass selects the corresponding outline row.
   const waveRafRef = useRef(0);
   const pointerYRef = useRef<number | null>(null);
   const reducedMotionRef = useRef(false);
@@ -314,7 +276,7 @@ export function ThreadMinimap({
   const showPreview = useCallback((anchor: PreviewAnchor | null) => {
     previewRef.current = anchor;
     setPreview((prev) =>
-      prev?.index === anchor?.index && prev?.y === anchor?.y ? prev : anchor,
+      prev?.index === anchor?.index ? prev : anchor,
     );
   }, []);
 
@@ -341,9 +303,20 @@ export function ThreadMinimap({
     }
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null;
-      showPreview(null);
+      if (!shimRef.current?.contains(document.activeElement)) showPreview(null);
     }, PREVIEW_CLOSE_DELAY_MS);
   }, [cancelClose, showPreview]);
+
+  const handleJump = useCallback((threadId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+    // Mouse clicks must not pin a hover outline through leftover button focus.
+    // Keyboard activation keeps focus so the reader can continue navigating.
+    if (event.detail > 0) {
+      event.currentTarget.blur();
+      // Blur schedules a close; keep the card until the pointer actually leaves.
+      cancelClose();
+    }
+    onJump(threadId);
+  }, [cancelClose, onJump]);
 
   const runWave = useCallback(() => {
     waveRafRef.current = 0;
@@ -353,11 +326,8 @@ export function ThreadMinimap({
     const y = pointerYRef.current;
     const buttons = nav.querySelectorAll<HTMLButtonElement>("button");
     // Read pass, then write pass — never interleaved, one reflow at most.
-    const shimTop = shim.getBoundingClientRect().top;
-    const shimHeight = shim.clientHeight;
-    const cardHalf = (cardRef.current?.offsetHeight ?? 96) / 2;
     const scales: string[] = [];
-    let nearest: { index: number; centerY: number; dist: number } | null = null;
+    let nearest: { index: number; dist: number } | null = null;
     buttons.forEach((b, i) => {
       if (y === null) {
         scales.push("");
@@ -368,7 +338,7 @@ export function ThreadMinimap({
       const dist = Math.abs(y - centerY);
       const s = reducedMotionRef.current ? 1 : waveScale(y - centerY);
       scales.push(s > 1.001 ? `${s.toFixed(3)} 1` : "");
-      if (!nearest || dist < nearest.dist) nearest = { index: i, centerY, dist };
+      if (!nearest || dist < nearest.dist) nearest = { index: i, dist };
     });
     buttons.forEach((b, i) => {
       const tick = b.firstElementChild as HTMLElement | null;
@@ -380,17 +350,12 @@ export function ThreadMinimap({
       else tick.style.removeProperty("scale");
     });
 
-    // Preview targeting from the same pass. Clamp the anchor so the card
-    // never sticks out of the rail's column at the extremes.
     if (y === null || !nearest) return;
-    const { index, centerY } = nearest as { index: number; centerY: number };
-    const anchor: PreviewAnchor = {
-      index,
-      y: Math.min(Math.max(centerY - shimTop, cardHalf + 6), shimHeight - cardHalf - 6),
-    };
+    const { index } = nearest as { index: number };
+    const anchor: PreviewAnchor = { index };
     pendingAnchorRef.current = anchor;
     if (previewRef.current) {
-      // Already open: gliding retargets the card instantly — no re-delay.
+      // Already open: gliding highlights the matching row without moving the card.
       showPreview(anchor);
     } else if (openTimerRef.current === null) {
       openTimerRef.current = window.setTimeout(() => {
@@ -416,7 +381,7 @@ export function ThreadMinimap({
     scheduleClose();
   }, [scheduleWave, scheduleClose]);
 
-  // Keyboard parity: focusing a tick anchors the card to it immediately —
+  // Keyboard parity: focusing a tick opens its outline row immediately —
   // there is no pointer, so there is no accidental-hover to debounce.
   const handleFocus = useCallback(
     (e: React.FocusEvent) => {
@@ -428,30 +393,49 @@ export function ThreadMinimap({
       const buttons = [...nav.querySelectorAll<HTMLButtonElement>("button")];
       const index = buttons.indexOf(btn as HTMLButtonElement);
       if (index < 0) return;
-      const r = btn.getBoundingClientRect();
-      const cardHalf = (cardRef.current?.offsetHeight ?? 96) / 2;
-      const y = r.top + r.height / 2 - shim.getBoundingClientRect().top;
-      showPreview({
-        index,
-        y: Math.min(Math.max(y, cardHalf + 6), shim.clientHeight - cardHalf - 6),
-      });
+      showPreview({ index });
     },
     [cancelClose, showPreview],
   );
 
-  if (threads.length < MIN_THREADS) return null;
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card || !preview) return;
+    // Rail navigation should reveal its row in a long outline. Moving within
+    // the list itself must leave its scroll position under the reader's control.
+    if (pointerYRef.current === null && !navRef.current?.contains(document.activeElement)) return;
+    const row = card.querySelectorAll("li")[preview.index];
+    if (!row) return;
+    if (row.offsetTop < card.scrollTop) card.scrollTop = row.offsetTop;
+    else if (row.offsetTop + row.offsetHeight > card.scrollTop + card.clientHeight) {
+      card.scrollTop = row.offsetTop + row.offsetHeight - card.clientHeight;
+    }
+  }, [preview]);
 
-  const activeThread = preview ? threads[preview.index] : undefined;
-  const activePreview = preview ? previews[preview.index] : undefined;
-  const activeTitle = activeThread && activePreview
-    ? activePreview.title ||
-      getActorName(activeThread.entry.actor_type, activeThread.entry.actor_id)
-    : undefined;
+  if (threads.length < MIN_THREADS) return null;
 
   return (
     // Positioning shim; only the nav and the card take pointer events so the
     // strip never blocks content clicks.
-    <div ref={shimRef} className={cn("pointer-events-none z-10 flex flex-col justify-center py-6", className)}>
+    <div
+      ref={shimRef}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        const activeIndex = previewRef.current?.index;
+        if (cardRef.current?.contains(document.activeElement) && activeIndex !== undefined) {
+          navRef.current?.querySelectorAll("button")[activeIndex]?.focus();
+        }
+        cancelClose();
+        if (openTimerRef.current !== null) {
+          window.clearTimeout(openTimerRef.current);
+          openTimerRef.current = null;
+        }
+        showPreview(null);
+      }}
+      className={cn("pointer-events-none z-10 flex flex-col justify-center py-6", className)}
+    >
       <nav
         ref={navRef}
         aria-label={t(($) => $.detail.thread_nav_label)}
@@ -466,54 +450,100 @@ export function ThreadMinimap({
         {threads.map((thread, i) => {
           const title =
             previews[i]!.title ||
+            thread.entry.actor_name ||
             getActorName(thread.entry.actor_type, thread.entry.actor_id);
           return (
             <MinimapTick
               key={thread.id}
-              // The card is the visual channel for the resolved state, but a
-              // screen reader never sees it — the tick's name is the only
-              // thing announced on focus, so it carries the state too.
+              // Announce resolution on the tick as well as in the outline.
               label={
                 thread.resolved
                   ? t(($) => $.detail.thread_nav_resolved_label, { title })
                   : title
               }
               inViewport={visibleIds.has(thread.id)}
-              isPreviewOpen={preview?.index === i}
-              isHighlighted={highlightedThreadId === thread.id}
-              onClick={() => onJump(thread.id)}
+              isHighlighted={preview?.index === i}
+              onClick={(event) => handleJump(thread.id, event)}
             />
           );
         })}
       </nav>
 
-      {/* The rail's single preview card. Mounted without an enter animation
-          (the open-intent delay already gates accidental flashes; once the
-          user waited, showing content instantly is the responsive choice)
-          and slid between ticks with a short transform transition. Hovering
-          the card keeps it open so its text stays selectable. It opens
-          inward (leftward, over the content) — the only direction with room
-          next to the scrollbar. The resolved badge leads so the state is read
-          before the content, in the same `text-success` CommentCard uses for
-          its Resolution badge. */}
-      {preview && activeThread && activePreview && (
+      {preview && (
         <div
           ref={cardRef}
           onPointerEnter={cancelClose}
           onPointerLeave={scheduleClose}
-          className="pointer-events-auto absolute right-8 top-0 w-72 rounded-lg bg-popover p-2.5 text-body text-popover-foreground shadow-md ring-1 ring-foreground/10 transition-transform duration-150 ease-out motion-reduce:transition-none"
-          style={{ transform: `translateY(${preview.y}px) translateY(-50%)` }}
+          onFocusCapture={cancelClose}
+          onBlurCapture={scheduleClose}
+          className="pointer-events-auto absolute right-8 top-1/2 max-h-[calc(100%-3rem)] w-80 max-w-[calc(100vw-4rem)] -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl bg-popover p-2 text-body text-popover-foreground shadow-lg ring-1 ring-foreground/10"
         >
-          {activeThread.resolved && (
-            <p className="mb-1 flex items-center gap-1.5 text-caption font-medium text-success">
-              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-              {t(($) => $.comment.resolve.thread_resolved_badge)}
-            </p>
-          )}
-          <p className="truncate text-body font-semibold text-foreground">{activeTitle}</p>
-          {activePreview.body && (
-            <p className="mt-1 line-clamp-3 text-body text-muted-foreground">{activePreview.body}</p>
-          )}
+          <ul>
+            {threads.map((thread, index) => {
+              const title = previews[index]!.title || thread.entry.actor_name ||
+                getActorName(thread.entry.actor_type, thread.entry.actor_id);
+              const participantNames = thread.participants.map((participant) =>
+                participant.actor_name || getActorName(participant.actor_type, participant.actor_id),
+              );
+              return (
+                <li key={thread.id}>
+                  <button
+                    type="button"
+                    onPointerEnter={() => showPreview({ index })}
+                    onFocus={() => showPreview({ index })}
+                    onClick={(event) => handleJump(thread.id, event)}
+                    data-active={preview.index === index || undefined}
+                    aria-label={thread.resolved
+                      ? t(($) => $.detail.thread_nav_resolved_label, { title })
+                      : title}
+                    aria-description={participantNames.join(", ") || undefined}
+                    className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-body text-muted-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:font-medium data-active:text-brand"
+                  >
+                    <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                      <span className="truncate">{title}</span>
+                      {thread.resolved && (
+                        <CheckCircle2
+                          className="size-3.5 shrink-0 text-success"
+                          aria-label={t(($) => $.comment.resolve.thread_resolved_badge)}
+                        />
+                      )}
+                    </span>
+                    <span className="inline-flex shrink-0 items-center -space-x-1.5" aria-hidden="true">
+                      {thread.participants.slice(0, 3).map((participant, participantIndex) => {
+                        const name = participantNames[participantIndex]!;
+                        const avatarUrl = participant.actor_avatar_url?.startsWith("/")
+                          ? resolvePublicFileUrl(participant.actor_avatar_url)
+                          : participant.actor_avatar_url ?? getActorAvatarUrl(participant.actor_type, participant.actor_id);
+                        return (
+                          <span
+                            key={`${participant.actor_type}:${participant.actor_id}`}
+                            title={name}
+                            className="inline-flex rounded-full ring-2 ring-popover"
+                          >
+                            <ActorAvatar
+                              name={name}
+                              initials={getActorInitials(participant.actor_type, participant.actor_id, name)}
+                              avatarUrl={avatarUrl}
+                              isAgent={participant.actor_type === "agent"}
+                              size="sm"
+                            />
+                          </span>
+                        );
+                      })}
+                      {thread.participants.length > 3 && (
+                        <span
+                          title={participantNames.slice(3).join(", ")}
+                          className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-0.5 text-micro font-medium tabular-nums text-muted-foreground ring-2 ring-popover"
+                        >
+                          +{thread.participants.length - 3}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
     </div>

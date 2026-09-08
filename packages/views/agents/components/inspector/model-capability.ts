@@ -26,5 +26,13 @@ export function findModelCapabilityEntry(
 ): RuntimeModel | undefined {
   if (!model) return undefined;
   const lookupId = modelIdForCapabilityLookup(provider, model);
-  return models.find((entry) => entry.id === lookupId);
+  // Normalize the catalog side too. Claude discovery reports what the CLI
+  // would really run, tag included (`claude-opus-5[1m]`), so comparing a
+  // stripped query against raw catalog ids would miss the entry for the very
+  // model the user just picked — and hiding a model's own effort picker is how
+  // that failure would show up (MUL-6961). Mirrors the daemon's lookup in
+  // ValidateThinkingLevelWith.
+  return models.find(
+    (entry) => modelIdForCapabilityLookup(provider, entry.id) === lookupId,
+  );
 }

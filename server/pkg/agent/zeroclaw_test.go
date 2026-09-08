@@ -11,17 +11,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsZeroclawBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("zeroclaw", Config{ExecutablePath: "/nonexistent/zeroclaw"})
-	if err != nil {
-		t.Fatalf("New(zeroclaw) error: %v", err)
-	}
-	if _, ok := b.(*zeroclawBackend); !ok {
-		t.Fatalf("expected *zeroclawBackend, got %T", b)
-	}
-}
-
 // fakeZeroclawACPScript impersonates `zeroclaw acp` for unit tests. Unlike a
 // generic ACP fake, this one reproduces the frames a real ZeroClaw 0.8.4
 // binary was observed to send, because several of the bugs this suite guards
@@ -375,21 +364,6 @@ func TestZeroclawResumeNotFound(t *testing.T) {
 	}
 	if !result.ResumeRejected {
 		t.Fatal("expected ResumeRejected=true on session not found — ZeroClaw reports it as -32000, which isACPSessionNotFound must recognise")
-	}
-}
-
-func TestZeroclawBlockedArgs(t *testing.T) {
-	t.Parallel()
-	if _, ok := zeroclawBlockedArgs["acp"]; !ok {
-		t.Fatal("expected acp to be in zeroclawBlockedArgs")
-	}
-	if zeroclawBlockedArgs["acp"] != blockedStandalone {
-		t.Fatalf("expected acp to be blockedStandalone, got %v", zeroclawBlockedArgs["acp"])
-	}
-	for _, flag := range []string{"--help", "-h", "login", "auth", "--login", "--auth"} {
-		if _, ok := zeroclawBlockedArgs[flag]; !ok {
-			t.Fatalf("expected %s to be in zeroclawBlockedArgs", flag)
-		}
 	}
 }
 

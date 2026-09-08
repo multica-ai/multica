@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import { useIssuesScope, useIssuesScopeStore } from "./issues-scope-store";
+import { useIssuesScopeStore } from "./issues-scope-store";
 
 describe("issues scope store", () => {
   beforeEach(() => {
@@ -16,13 +16,6 @@ describe("issues scope store", () => {
     expect(scopes["project:p1"]).toBe("agents");
     expect(scopes["issues"]).toBe("members");
     expect(scopes["project:p2"]).toBeUndefined();
-  });
-
-  it("defaults an untouched page to the unrestricted tab", () => {
-    // Same fallback the useIssuesScope hook applies.
-    const { scopes } = useIssuesScopeStore.getState();
-    expect(scopes["project:p9"] ?? "all").toBe("all");
-    expect(useIssuesScope).toBeTypeOf("function");
   });
 
   it("migrates the v0 global tab onto the Issues page only", () => {

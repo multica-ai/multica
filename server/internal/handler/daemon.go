@@ -37,6 +37,13 @@ import (
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
+// claimPollHintMinDelay bounds a future mismatch between the hint query and
+// deferred-task promotion to at most one follow-up claim per second. Under the
+// shared eligibility fences an overdue task should normally be promoted by the
+// current request, so this is a defense-in-depth floor rather than the steady
+// state poll interval.
+const claimPollHintMinDelay = time.Second
+
 // ---------------------------------------------------------------------------
 // Daemon workspace ownership helpers
 // ---------------------------------------------------------------------------
@@ -873,6 +880,7 @@ func (h *Handler) mergeLegacyRuntime(ctx context.Context, newRuntimeID, oldRunti
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit merge: %w", err)
 	}
+	h.NotifyRuntimeGone(uuidToString(oldRuntimeID))
 
 	slog.Info("legacy runtime merged",
 		"legacy_daemon_id", legacyID,
@@ -940,11 +948,30 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	// Track affected workspaces for WS notifications.
 	affectedWorkspaces := make(map[string]bool)
 
+	// Batch the runtime lookups instead of one GetAgentRuntime per id (N+1),
+	// while keeping the MUL-6884 per-source attribution: getAgentRuntimes
+	// records one multica_agent_runtime_lookup_total result per requested id.
+	// A read error is NOT "the rows don't exist": fail closed with 500 (like
+	// ListRuntimesForClaim) so a transient blip can't report a successful
+	// deregister while every runtime silently stays online until the liveness
+	// sweep reaps it. GetMany keys rows by canonical UUID string so a
+	// differently-cased request id still matches; a genuinely missing id is
+	// simply absent from the map and falls through to the "runtime not found"
+	// skip below, preserving the per-runtime verify / setOffline semantics.
+	runtimesByID, err := h.getAgentRuntimes(r.Context(), obsmetrics.RuntimeLookupSourceDaemonAPI, runtimeUUIDs)
+	if err != nil {
+		slog.Error("deregister: batch runtime lookup failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load runtimes")
+		return
+	}
+
 	for i, rid := range req.RuntimeIDs {
-		// Look up the runtime and verify ownership.
-		rt, err := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceDaemonAPI, runtimeUUIDs[i])
-		if err != nil {
-			slog.Warn("deregister: runtime not found", "runtime_id", rid, "error", err)
+		// Look up the runtime and verify ownership. Key by the parsed UUID's
+		// canonical form (runtimeUUIDs[i]) so a differently-cased request id
+		// still matches the row; rid is kept for OfflineReasons and logging.
+		rt, ok := runtimesByID[uuidToString(runtimeUUIDs[i])]
+		if !ok {
+			slog.Warn("deregister: runtime not found", "runtime_id", rid)
 			continue
 		}
 
@@ -1113,8 +1140,16 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	authMs = time.Since(start).Milliseconds()
 
-	ack, m, err := h.processHeartbeat(r.Context(), rt, req.SupportsBatchImport)
-	updateMs = m.UpdateMs
+	updateStart := time.Now()
+	if err := h.recordHeartbeat(r.Context(), rt); err != nil {
+		updateMs = time.Since(updateStart).Milliseconds()
+		outcome = "error_update"
+		writeError(w, http.StatusInternalServerError, "heartbeat failed")
+		return
+	}
+	updateMs = time.Since(updateStart).Milliseconds()
+
+	ack, m, err := h.processHeartbeat(r.Context(), runtimeID, req.SupportsBatchImport)
 	probeModelMs = m.ProbeModelMs
 	popModelMs = m.PopModelMs
 	probeSkillsMs = m.ProbeSkillsMs
@@ -1153,41 +1188,41 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// HandleDaemonWSHeartbeat is the daemonws.HeartbeatHandler entry point: it
-// resolves the runtime, verifies the connection's workspace owns it, and
-// returns the ack payload. It is the WebSocket-side mirror of DaemonHeartbeat.
-//
-// Workspace authorization is re-checked on every heartbeat instead of trusted
-// from the upgrade-time check because runtime ownership can change (e.g. a
-// runtime is reassigned to another workspace mid-connection).
-//
-// When the runtime row is missing (pgx.ErrNoRows), the function returns a
-// successful ack with Status=HeartbeatStatusRuntimeGone and RuntimeGone=true
-// instead of an error. That keeps the hub from logging every beat at Warn,
-// and tells the daemon to drop the stale runtime and re-register. Other DB
-// errors still propagate as errors so they keep their existing Warn logging
-// and the daemon does not mistake a hiccup for a deletion.
+// HandleDaemonWSHeartbeat is the daemonws.HeartbeatHandler entry point. The
+// WebSocket upgrade already batch-authenticated the fixed runtime set and
+// captured each runtime's liveness state in a connection lease, so the hot
+// path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
+// fallback for a daemon that stops receiving WebSocket acknowledgements.
 func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
-	runtimeUUID, err := util.ParseUUID(runtimeID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid runtime_id: %w", err)
+	lease := identity.RuntimeLeases[runtimeID]
+	if lease == nil {
+		return nil, fmt.Errorf("runtime not in connection lease")
 	}
-	rt, err := h.getAgentRuntime(ctx, obsmetrics.RuntimeLookupSourceHeartbeatWS, runtimeUUID)
-	if err != nil {
-		if isNotFound(err) {
-			return &protocol.DaemonHeartbeatAckPayload{
-				RuntimeID:   runtimeID,
-				Status:      protocol.HeartbeatStatusRuntimeGone,
-				RuntimeGone: true,
-			}, nil
-		}
-		return nil, fmt.Errorf("get agent runtime: %w", err)
-	}
-	if !identity.AllowsWorkspace(uuidToString(rt.WorkspaceID)) {
+	// Defensive consistency assertion only: the workspace scope and lease came
+	// from the same connection-time query. This does not re-authorize against DB.
+	if !identity.AllowsWorkspace(lease.Snapshot().WorkspaceID) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
-	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport)
+	if err := h.recordHeartbeatLease(ctx, runtimeID, lease); err != nil {
+		if isNotFound(err) {
+			if h.DaemonRuntimeGone != nil {
+				h.NotifyRuntimeGone(runtimeID)
+				return nil, nil
+			}
+			return runtimeGoneHeartbeatAck(runtimeID), nil
+		}
+		return nil, err
+	}
+	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
 	return ack, err
+}
+
+func runtimeGoneHeartbeatAck(runtimeID string) *protocol.DaemonHeartbeatAckPayload {
+	return &protocol.DaemonHeartbeatAckPayload{
+		RuntimeID:   runtimeID,
+		Status:      protocol.HeartbeatStatusRuntimeGone,
+		RuntimeGone: true,
+	}
 }
 
 // recordHeartbeat marks the runtime as alive. When LivenessStore is available
@@ -1204,24 +1239,65 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 // coalesce many runtimes' bumps into one bulk UPDATE per tick. See
 // heartbeat_scheduler.go for the two implementations.
 func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error {
+	return h.recordHeartbeatState(ctx, rt.ID, uuidToString(rt.ID), heartbeatLivenessState{
+		Status:          rt.Status,
+		LastSeenAt:      rt.LastSeenAt.Time,
+		LastSeenAtValid: rt.LastSeenAt.Valid,
+		WorkspaceID:     rt.WorkspaceID,
+	}, nil)
+}
+
+func (h *Handler) recordHeartbeatLease(ctx context.Context, runtimeID string, lease *daemonws.RuntimeLease) error {
+	runtimeUUID, err := util.ParseUUID(runtimeID)
+	if err != nil {
+		return fmt.Errorf("invalid runtime_id: %w", err)
+	}
+	state := lease.Snapshot()
+	// Lenient parse: the workspace ID only feeds the recovery refresh payload.
+	// An invalid value suppresses the event instead of failing the heartbeat.
+	wsUUID, _ := util.ParseUUID(state.WorkspaceID)
+	return h.recordHeartbeatState(ctx, runtimeUUID, runtimeID, heartbeatLivenessState{
+		Status:          state.Status,
+		LastSeenAt:      state.LastSeenAt,
+		LastSeenAtValid: state.LastSeenAtValid,
+		WorkspaceID:     wsUUID,
+	}, lease.MarkDBWriteScheduled)
+}
+
+type heartbeatLivenessState struct {
+	Status          string
+	LastSeenAt      time.Time
+	LastSeenAtValid bool
+	// WorkspaceID feeds the recovery lifecycle refresh; it is already known
+	// from the lease snapshot or the HTTP row and never re-read from the DB.
+	WorkspaceID pgtype.UUID
+}
+
+func (h *Handler) recordHeartbeatState(
+	ctx context.Context,
+	runtimeUUID pgtype.UUID,
+	runtimeID string,
+	state heartbeatLivenessState,
+	markDBWriteScheduled func(time.Time),
+) error {
 	now := time.Now()
 
 	// Decide whether the DB row needs a write *before* touching Redis, so a
 	// Touch failure can simply force needDBWrite=true without re-evaluating
 	// the structural reasons.
 	needDBWrite := !h.LivenessStore.Available() ||
-		rt.Status != "online" ||
-		!rt.LastSeenAt.Valid ||
-		now.Sub(rt.LastSeenAt.Time) >= runtimeHeartbeatDBFlushInterval
+		state.Status != "online" ||
+		!state.LastSeenAtValid ||
+		now.Sub(state.LastSeenAt) >= runtimeHeartbeatDBFlushInterval
 
 	if h.LivenessStore.Available() {
-		if err := h.LivenessStore.Touch(ctx, uuidToString(rt.ID), runtimeLivenessTTL); err != nil {
+		if err := h.LivenessStore.Touch(ctx, runtimeID, runtimeLivenessTTL); err != nil {
 			// Redis hiccup: degrade transparently to the DB-only path for
 			// this beat. The sweeper falls back to its DB threshold the
 			// same way when IsAliveBatch fails, so end-to-end correctness
 			// is preserved.
 			slog.Warn("liveness touch failed; falling back to DB heartbeat",
-				"runtime_id", uuidToString(rt.ID), "error", err)
+				"runtime_id", runtimeID, "error", err)
 			needDBWrite = true
 		}
 	}
@@ -1230,33 +1306,55 @@ func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error
 		return nil
 	}
 
-	// Either bumps last_seen_at on an already-online row (Touch + race
-	// fallback) or flips status from offline to online. The scheduler
-	// chooses sync vs batched per case; see HeartbeatScheduler doc.
-	return h.HeartbeatScheduler.Schedule(ctx, rt)
+	// Status transitions remain synchronous so the acknowledgement cannot race
+	// dependent work that expects an online row. The steady-state online bump
+	// is ID-only and may be coalesced by the production scheduler.
+	if state.Status != "online" || !state.LastSeenAtValid {
+		// The conditional update reports whether this beat performed the
+		// offline → online flip. Only an actual flip publishes the lifecycle
+		// refresh; a beat that lost the race (or a never-seen row already
+		// online) stays silent and keeps the unconditional update below so
+		// last_seen_at is bumped and pgx.ErrNoRows is preserved for deletions.
+		flipped, err := h.Queries.MarkAgentRuntimeOnlineIfOffline(ctx, runtimeUUID)
+		if err != nil {
+			return err
+		}
+		if flipped > 0 {
+			// Reuse daemon:register so web and mobile invalidate both runtime and
+			// agent projections. Ordinary online heartbeats stay silent.
+			if state.WorkspaceID.Valid {
+				h.PublishRuntimeRefresh(uuidToString(state.WorkspaceID), "system", "", "heartbeat_recovery")
+			}
+		} else if _, err := h.Queries.MarkAgentRuntimeOnline(ctx, runtimeUUID); err != nil {
+			return err
+		}
+		if markDBWriteScheduled != nil {
+			markDBWriteScheduled(now)
+		}
+		return nil
+	}
+	if err := h.HeartbeatScheduler.Schedule(ctx, runtimeUUID, state.WorkspaceID); err != nil {
+		return err
+	}
+	if markDBWriteScheduled != nil {
+		markDBWriteScheduled(now)
+	}
+	return nil
 }
 
 // heartbeatMetrics carries per-stage timings out of processHeartbeat so the
 // HTTP slow-log can stay structured. The WS path discards them.
 type heartbeatMetrics struct {
-	UpdateMs, ProbeModelMs, PopModelMs, ProbeSkillsMs, PopSkillsMs, ProbeImportMs, PopImportMs int64
-	ProbeModelTimedOut, ProbeSkillsTimedOut, ProbeImportTimedOut                               bool
+	ProbeModelMs, PopModelMs, ProbeSkillsMs, PopSkillsMs, ProbeImportMs, PopImportMs int64
+	ProbeModelTimedOut, ProbeSkillsTimedOut, ProbeImportTimedOut                     bool
 }
 
-// processHeartbeat does the work shared by HTTP POST /api/daemon/heartbeat and
-// the WebSocket daemon:heartbeat path: records liveness and pulls any pending
-// actions queued for the runtime. Auth and request decoding live in the
-// caller because they differ between transports.
-func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
+// processHeartbeat pulls pending actions for both HTTP and WebSocket
+// heartbeats using only the runtime ID. Each transport records liveness first:
+// HTTP uses its stateless runtime row, while WebSocket uses the connection
+// lease. Auth and request decoding also remain transport-specific.
+func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
 	var m heartbeatMetrics
-	runtimeID := uuidToString(rt.ID)
-
-	updateStart := time.Now()
-	if err := h.recordHeartbeat(ctx, rt); err != nil {
-		m.UpdateMs = time.Since(updateStart).Milliseconds()
-		return nil, m, err
-	}
-	m.UpdateMs = time.Since(updateStart).Milliseconds()
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
 
@@ -1652,14 +1750,37 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 	// Resolve all requested runtimes in one query (instead of a point lookup
 	// per runtime), then authorize each; skip (don't fail) unknown/unauthorized
 	// ids so a single stale runtime can't sink the whole batch.
-	runtimes, err := h.Queries.GetAgentRuntimes(r.Context(), ids)
+	//
+	// This read goes through RuntimeLookup like every other agent_runtime read
+	// by id (MUL-6884), so the claim path is attributed on
+	// multica_agent_runtime_lookup_total instead of being invisible on it. That
+	// matters more here than on any other caller: both /tasks/claim and /claim
+	// route to this handler and the WebSocket claim RPC replays through it, so
+	// an unattributed read here would make the busiest reader in the system
+	// look idle next to once-per-shutdown deregisters.
+	foundByID, err := h.getAgentRuntimes(r.Context(), obsmetrics.RuntimeLookupSourceDaemonAPI, ids)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load runtimes")
 		return
 	}
-	runtimeByID := make(map[string]db.AgentRuntime, len(runtimes))
-	authorized := make([]pgtype.UUID, 0, len(runtimes))
-	for _, rt := range runtimes {
+	// Iterate ids rather than ranging the returned map: authorized[] is passed
+	// to ClaimTasksForRuntimes, where maxTasks can cut the set off partway, so
+	// map iteration order would decide which runtimes get the remaining slots.
+	// (ids is itself built from a map above, so this pins the order to one
+	// source rather than making it fully deterministic — worth tightening, but
+	// not in this change.)
+	//
+	// runtimeByID must end up holding ONLY authorized rows: the post-claim loop
+	// below treats a miss in it as a stray cross-daemon claim and drops the
+	// task. GetMany returns every row it found, so the authorized subset is
+	// collected separately rather than reusing its map.
+	runtimeByID := make(map[string]db.AgentRuntime, len(foundByID))
+	authorized := make([]pgtype.UUID, 0, len(foundByID))
+	for _, id := range ids {
+		rt, ok := foundByID[uuidToString(id)]
+		if !ok {
+			continue
+		}
 		if !h.verifyDaemonWorkspaceAccess(r, uuidToString(rt.WorkspaceID)) {
 			continue
 		}
@@ -1774,7 +1895,37 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			"runtimes", len(authorized), "requested_max", maxTasks, "claimed", len(out),
 			"total_ms", time.Since(start).Milliseconds())
 	}
-	writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": out})
+	response := map[string]any{"tasks": out}
+	// Only opted-in daemons understand this additive response metadata. Query
+	// after the claim so a future fire_at can shorten the long healthy-WS safety
+	// poll; a task that crossed fire_at during this request yields a bounded
+	// follow-up hint and is promoted on the next claim. If the lookup fails,
+	// omit the support bit so the daemon conservatively retains its ordinary
+	// PollInterval.
+	if len(out) < maxTasks && requestHasClientCapability(r, protocol.DaemonCapabilityClaimPollHintsV1) {
+		nextDeferred, nextErr := h.Queries.NextDeferredTaskFireAtForRuntimes(r.Context(), db.NextDeferredTaskFireAtForRuntimesParams{
+			RuntimeIds:       authorized,
+			RuntimeStaleSecs: service.RuntimeClaimFreshnessSeconds,
+		})
+		if nextErr != nil {
+			slog.Warn("batch claim: next deferred task lookup failed; retaining short client poll",
+				"error", nextErr)
+		} else {
+			response["claim_poll_hint_supported"] = true
+			if nextDeferred.Valid {
+				response["next_deferred_task_after_ms"] = claimPollHintDelay(time.Now(), nextDeferred.Time).Milliseconds()
+			}
+		}
+	}
+	writeMeasuredJSON(w, http.StatusOK, response)
+}
+
+func claimPollHintDelay(now, fireAt time.Time) time.Duration {
+	delay := fireAt.Sub(now)
+	if delay < claimPollHintMinDelay {
+		return claimPollHintMinDelay
+	}
+	return delay
 }
 
 // claimBuildFailure captures a pre-response failure from
@@ -2102,6 +2253,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		)
 	}
 	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
+	// A daemon older than the multica-platform merge assembles a brief that
+	// still names the built-ins this server stopped shipping. It cannot be
+	// fixed from here — the brief lives in the daemon binary — so the missing
+	// capability buys that daemon a redirect stub under the old name instead of
+	// a dangling pointer. Capability, not version: the version string is only
+	// ever shown to humans.
+	legacySkillRedirects := !requestHasClientCapability(r, protocol.DaemonCapabilityPlatformSkillV1)
 	var customEnv map[string]string
 	if agent.CustomEnv != nil {
 		if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
@@ -2187,7 +2345,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
 	}
 	if useSkillRefs {
-		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID, agent.SystemKey.String, legacySkillRedirects)
 		if err != nil {
 			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
 		}
@@ -2199,7 +2357,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
 		}
 		agentSkillCount = len(skills)
-		builtinSkills := h.TaskService.BuiltinSkills()
+		builtinSkills := h.TaskService.BuiltinSkills(agent.SystemKey.String, legacySkillRedirects)
 		builtinSkillCount = len(builtinSkills)
 		skills = append(skills, builtinSkills...)
 		resp.Agent.Skills = skills
@@ -2444,7 +2602,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				resp.TriggerCommentContent = comment.Content
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
-					resp.TriggerThreadID = uuidToString(comment.ParentID)
+					if root, err := h.Queries.GetCommentThreadRootID(r.Context(), comment.ID); err == nil {
+						resp.TriggerThreadID = uuidToString(root)
+					}
 				}
 				resp.TriggerAuthorType = comment.AuthorType
 				// The triggering comment's author is the task initiator — the
@@ -2485,6 +2645,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				// the triggering comment itself because that body is already
 				// injected into the prompt. Best-effort: any DB error or zero count
 				// leaves the hint suppressed.
+				//
+				// NewCommentsDeltaKnown is set on the success path REGARDLESS of
+				// the count, and is the only thing that distinguishes "the server
+				// looked and there is nothing" from "the server could not look".
+				// The count fields stay suppressed at zero — the daemon has no
+				// hint to render from a zero — but the daemon must still be able
+				// to tell a computed zero from a failed read, because only the
+				// computed one may waive the workflow's comment scan (MUL-6984).
 				if startedAt, err := h.Queries.GetLastTaskStartedAtForIssueAndAgent(r.Context(), db.GetLastTaskStartedAtForIssueAndAgentParams{
 					AgentID: task.AgentID,
 					IssueID: comment.IssueID,
@@ -2495,9 +2663,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						WorkspaceID: comment.WorkspaceID,
 						Since:       startedAt,
 						AuthorID:    task.AgentID,
-					}); err == nil && cnt > 0 {
-						resp.NewCommentCount = int(cnt)
-						resp.NewCommentsSince = startedAt.Time.UTC().Format(time.RFC3339)
+					}); err == nil {
+						resp.NewCommentsDeltaKnown = true
+						if cnt > 0 {
+							resp.NewCommentCount = int(cnt)
+							resp.NewCommentsSince = startedAt.Time.UTC().Format(time.RFC3339)
+						}
 					}
 				}
 			}
@@ -2776,21 +2947,54 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 
 		parts := make([]string, 0, len(unanswered))
+		// Batch attachment lookups instead of one query per unanswered message
+		// (N+1). The batch orders globally by created_at, so grouping by
+		// chat_message_id keeps each message's attachments in created_at order,
+		// and iterating unanswered below in its original order reproduces the
+		// exact append order of the previous per-message loop.
+		messageIDs := make([]pgtype.UUID, 0, len(unanswered))
+		for _, m := range unanswered {
+			messageIDs = append(messageIDs, m.ID)
+		}
+		attsByMessage := make(map[string][]db.Attachment, len(unanswered))
+		if len(messageIDs) > 0 {
+			atts, attErr := h.Queries.ListAttachmentsByChatMessageIDs(r.Context(), db.ListAttachmentsByChatMessageIDsParams{
+				Column1:     messageIDs,
+				WorkspaceID: parseUUID(resp.WorkspaceID),
+			})
+			// A read failure must NOT masquerade as "no attachments". Attachment
+			// IDs are the agent's only handle for downloading user files, and
+			// batching widened the blast radius from one message's attachments to
+			// the whole turn's. Fail closed exactly like the chat-input load above
+			// (MUL-6788 review): preserve the just-dispatched task so the
+			// stale-dispatched reclaim redelivers it, rather than starting the run
+			// with files silently missing.
+			if attErr != nil {
+				slog.Error("chat claim: load chat attachments failed; preserving task for redelivery",
+					"task_id", uuidToString(task.ID),
+					"chat_session_id", uuidToString(cs.ID),
+					"error", attErr)
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+					outcome: "error_chat_attachment_load",
+					status:  http.StatusInternalServerError,
+					message: "failed to load chat attachments",
+				}
+			}
+			for _, a := range atts {
+				mid := uuidToString(a.ChatMessageID)
+				attsByMessage[mid] = append(attsByMessage[mid], a)
+			}
+		}
 		for _, m := range unanswered {
 			if strings.TrimSpace(m.Content) != "" {
 				parts = append(parts, m.Content)
 			}
-			if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
-				ChatMessageID: m.ID,
-				WorkspaceID:   parseUUID(resp.WorkspaceID),
-			}); attErr == nil && len(atts) > 0 {
-				for _, a := range atts {
-					resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
-						ID:          uuidToString(a.ID),
-						Filename:    a.Filename,
-						ContentType: a.ContentType,
-					})
-				}
+			for _, a := range attsByMessage[uuidToString(m.ID)] {
+				resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
+					ID:          uuidToString(a.ID),
+					Filename:    a.Filename,
+					ContentType: a.ContentType,
+				})
 			}
 		}
 		resp.ChatMessage = strings.Join(parts, "\n\n")
@@ -2879,10 +3083,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		projectCtx.applyTo(&resp)
 	}
-
-	// Handoff note (MUL-3375) is populated by taskToResponse (the shared mapper
-	// resp came from above), so the daemon's prompt + issue_context.md render the
-	// assignment-handoff branch. Empty for all other task kinds.
 
 	// Quick-create task: no issue / chat / autopilot link — workspace and
 	// prompt come from the task's context JSONB. Resolve workspace from
@@ -3040,37 +3240,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// without any branch claiming it.
 	if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, hasQuickCreate); failure != nil {
 		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
-	}
-
-	// Surface a bounded snapshot of the same agent's other in-flight issue
-	// tasks. Queued tasks cannot coordinate yet and are intentionally omitted.
-	// This is advisory context, not a queue gate: cross-issue parallelism and
-	// serial handoffs remain valid, while the prompt can stop an unaware second
-	// run from opening a duplicate PR. Scope the query to the already-validated
-	// runtime workspace so corrupt cross-tenant task links never leak.
-	if siblings, err := h.Queries.ListActiveSiblingIssueTasks(r.Context(), db.ListActiveSiblingIssueTasksParams{
-		AgentID:     task.AgentID,
-		TaskID:      task.ID,
-		WorkspaceID: parseUUID(resp.WorkspaceID),
-	}); err == nil {
-		resp.ActiveSiblingRuns = make([]ActiveSiblingRunData, 0, len(siblings))
-		for _, sibling := range siblings {
-			resp.ActiveSiblingRuns = append(resp.ActiveSiblingRuns, ActiveSiblingRunData{
-				TaskID:          uuidToString(sibling.TaskID),
-				IssueID:         uuidToString(sibling.IssueID),
-				IssueIdentifier: fmt.Sprintf("%s-%d", sibling.IssuePrefix, sibling.IssueNumber),
-				IssueTitle:      sibling.IssueTitle,
-				Status:          sibling.Status,
-				CreatedAt:       timestampToString(sibling.CreatedAt),
-				StartedAt:       timestampToString(sibling.StartedAt),
-			})
-		}
-	} else {
-		slog.Warn("task claim: failed to load active sibling runs",
-			"task_id", uuidToString(task.ID),
-			"agent_id", uuidToString(task.AgentID),
-			"error", err,
-		)
 	}
 
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
@@ -3924,6 +4093,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		plannedCommentIDs = append(plannedCommentIDs, task.TriggerCommentID)
 	}
 	comments, err := h.Queries.ListReconcilableCommentsForIssueSince(ctx, db.ListReconcilableCommentsForIssueSinceParams{
+		CommentThreadID:   task.CommentThreadID,
 		IssueID:           task.IssueID,
 		Since:             task.CreatedAt,
 		PlannedCommentIds: plannedCommentIDs,
@@ -4004,21 +4174,12 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		actorType := c.AuthorType
 		actorID := uuidToString(c.AuthorID)
 		originatorUserID := actorID
-		var delegationAuthority string
 		if actorType != "member" {
 			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, c.ID))
-			// MUL-4857: this is the deferred replay of an already-accepted delegation
-			// (e.g. the mentioned target was busy at create time). Restore the SAME
-			// verified authorization context from the comment's stored source_task_id,
-			// so an unattributed autopilot delegation's follow-up still fires once the
-			// busy target frees up. The source_task_id is re-stamped on edit, so this
-			// tracks the current content's authoring action, not a stale one.
-			delegationAuthority = h.autopilotDelegationAuthorityFromComment(ctx, issue, c)
 		}
 		triggers, _ := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
-			ExcludeTriggerCommentID:            c.ID,
-			OriginatorUserID:                   originatorUserID,
-			AutopilotDelegationAuthorityUserID: delegationAuthority,
+			ExcludeTriggerCommentID: c.ID,
+			OriginatorUserID:        originatorUserID,
 		})
 		// For an AGENT author, compensate ONLY explicit @agent/@squad mentions.
 		// computeCommentAgentTriggers can also return the assigned-squad-leader
@@ -4140,7 +4301,11 @@ func (h *Handler) buildCoalescedCommentData(ctx context.Context, workspaceID pgt
 			CreatedAt:  timestampToString(comment.CreatedAt),
 		}
 		if comment.ParentID.Valid {
-			data.ThreadID = uuidToString(comment.ParentID)
+			root, err := h.Queries.GetCommentThreadRootID(ctx, comment.ID)
+			if err != nil {
+				continue
+			}
+			data.ThreadID = uuidToString(root)
 		}
 		if comment.AuthorID.Valid {
 			switch comment.AuthorType {
@@ -4880,7 +5045,69 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ListTasksByIssue returns all tasks (any status) for an issue — used for execution history.
+// familyActiveRunCap bounds a scope=family read.
+//
+// It is a response-size budget set to the shape of the normal case — a handful
+// of runs in flight at once (maintainer call, MUL-6846) — NOT a bound derived
+// from how much work can really be in flight. A family can legitimately exceed
+// it by a lot: a single agent may be configured up to
+// agentconfig.MaxMaxConcurrentTasks (50) on its own, this feature exists
+// precisely for the case where SEVERAL agents work a family at once, and the
+// returned set includes queued / dispatched / waiting_local_directory rows,
+// which no execution-slot limit bounds at all — a parent that fans out 200
+// children can have 200 of them enqueued.
+//
+// So truncation here is an ordinary outcome, not a pathological one, and that
+// is exactly why it must be reported. A cap that truncated silently would be
+// worse than no cap: "I saw no run on that sibling" and "the answer was cut
+// off" would look identical, and an agent would read the second as the first.
+// The handler asks for one row more than it will return and sets
+// HeaderActiveRunsTruncated when that extra row comes back. The query orders
+// running-first, so what the budget drops is the least decision-relevant.
+const familyActiveRunCap = 20
+
+// HeaderActiveRunsTruncated tells a caller its coordination read hit
+// familyActiveRunCap and is therefore an incomplete picture of who is working
+// in this family. Same shape and convention as HeaderTimelineTruncated: the
+// signal rides a header because the response body is a bare array that existing
+// callers parse positionally.
+const HeaderActiveRunsTruncated = "X-Active-Runs-Truncated"
+
+// ActiveRunSummary is one in-flight run as the coordination read reports it:
+// which issue, which agent, what state, since when, and the task id to follow
+// up with `multica issue run-messages`.
+//
+// Deliberately NOT AgentTaskResponse. That type is the execution log's row —
+// result, work_dir, attribution, coalesced comment ids — and it costs roughly
+// 5x the bytes of this one. A caller asking "is anyone working next to me?"
+// reads none of those fields, and it is an agent spending its own context on
+// the answer, so the payload is cut to what the question needs.
+type ActiveRunSummary struct {
+	TaskID          string  `json:"task_id"`
+	IssueID         string  `json:"issue_id"`
+	IssueIdentifier string  `json:"issue_identifier"`
+	IssueTitle      string  `json:"issue_title"`
+	AgentID         string  `json:"agent_id"`
+	Status          string  `json:"status"`
+	CreatedAt       string  `json:"created_at"`
+	StartedAt       *string `json:"started_at,omitempty"`
+}
+
+// ListTasksByIssue returns tasks for an issue — the execution history behind
+// the issue-detail sidebar, and the coordination reads behind
+// `multica issue runs --active` / `--siblings`.
+//
+// Two optional query params narrow or widen it; with neither, the response is
+// byte-identical to what it has always been (full history, newest first), which
+// is what the UI and the CLI's short-task-ID resolver both depend on:
+//
+//   - active=true — restrict to in-flight statuses, the same set the
+//     issue-detail "agent live" banner calls active.
+//   - scope=family — widen from this issue to its sub-issue family: the
+//     issue's parent (or the issue itself, when it has no parent) plus every
+//     child of that parent. Implies active=true, because a full execution
+//     history across a whole family is unbounded and answers no question anyone
+//     asked.
 func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -4888,13 +5115,88 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := h.Queries.ListTasksByIssue(r.Context(), issue.ID)
+	scope := r.URL.Query().Get("scope")
+	if scope != "" && scope != "issue" && scope != "family" {
+		writeError(w, http.StatusBadRequest, "scope must be 'issue' or 'family'")
+		return
+	}
+	// Parse rather than compare. `active=tru` answering with the full history
+	// under a 200 is the same silent-downgrade failure the unknown-scope check
+	// above rejects: the caller asked who is here NOW and would be handed every
+	// run that ever finished, which reads as "nobody is here" only after it has
+	// paid for the whole log. Same shape as the comment-list boolean params.
+	activeOnly := false
+	if activeStr := r.URL.Query().Get("active"); activeStr != "" {
+		switch activeStr {
+		case "true":
+			activeOnly = true
+		case "false":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid active parameter; expected boolean")
+			return
+		}
+	}
+
+	workspaceID := uuidToString(issue.WorkspaceID)
+
+	if scope == "family" {
+		// Root the family at the parent when there is one, so a child sees its
+		// siblings; at the issue itself otherwise, so a parent sees its children
+		// and a standalone issue degenerates to its own active runs. One rule,
+		// both directions.
+		root := issue.ID
+		if issue.ParentIssueID.Valid {
+			root = issue.ParentIssueID
+		}
+		// One row beyond the cap, so a full page can be told apart from a
+		// truncated one without a second count query.
+		rows, err := h.Queries.ListActiveTasksByIssueFamily(r.Context(), db.ListActiveTasksByIssueFamilyParams{
+			WorkspaceID: issue.WorkspaceID,
+			RootIssueID: root,
+			RowLimit:    familyActiveRunCap + 1,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list tasks")
+			return
+		}
+		if len(rows) > familyActiveRunCap {
+			rows = rows[:familyActiveRunCap]
+			w.Header().Set(HeaderActiveRunsTruncated, "true")
+		}
+		summaries := make([]ActiveRunSummary, len(rows))
+		for i, row := range rows {
+			summaries[i] = ActiveRunSummary{
+				TaskID:  uuidToString(row.TaskID),
+				IssueID: uuidToString(row.IssueID),
+				// Rows span several issues here, so each one has to carry the
+				// issue it belongs to — a caller cannot label it from the task.
+				IssueIdentifier: service.IssueIdentifier(row.IssuePrefix, row.IssueNumber),
+				IssueTitle:      row.IssueTitle,
+				AgentID:         uuidToString(row.AgentID),
+				Status:          row.Status,
+				CreatedAt:       timestampToString(row.CreatedAt),
+				StartedAt:       timestampToPtr(row.StartedAt),
+			}
+		}
+		// No attribution hydration either: it was the single largest field on
+		// the old payload and needed its own query, and "on behalf of whom" is
+		// an execution-log question, not a coordination one.
+		writeJSON(w, http.StatusOK, summaries)
+		return
+	}
+
+	var tasks []db.AgentTaskQueue
+	var err error
+	if activeOnly {
+		tasks, err = h.Queries.ListActiveTasksByIssue(r.Context(), issue.ID)
+	} else {
+		tasks, err = h.Queries.ListTasksByIssue(r.Context(), issue.ID)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list tasks")
 		return
 	}
 
-	workspaceID := uuidToString(issue.WorkspaceID)
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
@@ -4903,7 +5205,14 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	// issue-facing surface must resolve initiator/originator names (departed-safe,
 	// one batch) — otherwise the badge falls back to "someone" on issue detail.
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
-	h.hydrateTaskUsage(r.Context(), issue.ID, resp)
+	// Usage belongs to the execution log, not to a coordination read.
+	// ListIssueTaskUsage returns a row per (task, provider, model) for EVERY
+	// task the issue ever ran, so hydrating it on the active path would keep
+	// paying the full-history cost this filter exists to remove — and pay it
+	// for a column that is near-empty on runs that have not finished.
+	if !activeOnly {
+		h.hydrateTaskUsage(r.Context(), issue.ID, resp)
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -4927,23 +5236,72 @@ func (h *Handler) hydrateTaskUsage(ctx context.Context, issueID pgtype.UUID, res
 
 	byTask := make(map[string][]TaskUsageData, len(resp))
 	for _, row := range rows {
-		var cost *int64
-		if row.CostUsdTicks.Valid {
-			v := row.CostUsdTicks.Int64
-			cost = &v
-		}
-		taskID := uuidToString(row.TaskID)
-		byTask[taskID] = append(byTask[taskID], TaskUsageData{
-			Provider:         row.Provider,
-			Model:            row.Model,
-			InputTokens:      row.InputTokens,
-			OutputTokens:     row.OutputTokens,
-			CacheReadTokens:  row.CacheReadTokens,
-			CacheWriteTokens: row.CacheWriteTokens,
-			CostUsdTicks:     cost,
-		})
+		appendTaskUsage(byTask, row.TaskID, row.Provider, row.Model,
+			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
+			row.CacheWriteTokens, row.CostUsdTicks)
+	}
+	attachTaskUsage(resp, byTask)
+}
+
+// hydrateAgentTaskUsage attaches the same per-run accounting shape used by the
+// issue execution log to an agent's user-facing task history. One agent-scoped
+// query covers exactly the returned task IDs, avoiding unrelated history and an
+// N+1 query per task.
+func (h *Handler) hydrateAgentTaskUsage(ctx context.Context, agentID pgtype.UUID, taskIDs []pgtype.UUID, resp []AgentTaskResponse) error {
+	if len(resp) == 0 {
+		return nil
 	}
 
+	rows, err := h.Queries.ListAgentTaskUsage(ctx, db.ListAgentTaskUsageParams{
+		AgentID: agentID,
+		TaskIds: taskIDs,
+	})
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	byTask := make(map[string][]TaskUsageData, len(resp))
+	for _, row := range rows {
+		appendTaskUsage(byTask, row.TaskID, row.Provider, row.Model,
+			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
+			row.CacheWriteTokens, row.CostUsdTicks)
+	}
+	attachTaskUsage(resp, byTask)
+	return nil
+}
+
+func appendTaskUsage(
+	byTask map[string][]TaskUsageData,
+	taskID pgtype.UUID,
+	provider string,
+	model string,
+	inputTokens int64,
+	outputTokens int64,
+	cacheReadTokens int64,
+	cacheWriteTokens int64,
+	costUsdTicks pgtype.Int8,
+) {
+	var cost *int64
+	if costUsdTicks.Valid {
+		value := costUsdTicks.Int64
+		cost = &value
+	}
+	id := uuidToString(taskID)
+	byTask[id] = append(byTask[id], TaskUsageData{
+		Provider:         provider,
+		Model:            model,
+		InputTokens:      inputTokens,
+		OutputTokens:     outputTokens,
+		CacheReadTokens:  cacheReadTokens,
+		CacheWriteTokens: cacheWriteTokens,
+		CostUsdTicks:     cost,
+	})
+}
+
+func attachTaskUsage(resp []AgentTaskResponse, byTask map[string][]TaskUsageData) {
 	for i := range resp {
 		if usage, ok := byTask[resp[i].ID]; ok {
 			resp[i].Usage = usage

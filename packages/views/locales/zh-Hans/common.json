@@ -121,6 +121,11 @@
     "error_not_member": "你登录的 Multica 账号不是当前工作区成员。",
     "error_unknown": "出现未知错误。请稍后再试，如反复失败请联系工作区管理员。"
   },
+  "not_found": {
+    "title": "页面未找到",
+    "description": "你要查找的页面不存在或已被移动。",
+    "back_to_multica": "返回 Multica"
+  },
   "navigation": {
     "open_in_new_tab": "在新标签页打开"
   }

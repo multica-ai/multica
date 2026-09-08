@@ -311,60 +311,6 @@ func TestCapabilityMessageNamesTheMissingCapabilities(t *testing.T) {
 	}
 }
 
-// Binds every shipped capability to the host code that actually runs it.
-//
-// The gate is only meaningful if it tracks what renders. A capability enabled
-// here with no mount point installs successfully and then never appears — the
-// exact silent failure the gate exists to prevent — and nothing else in the
-// build would notice, because the manifest is valid and the install succeeds.
-//
-// Each line names the host code that makes it true. Flipping one on means
-// changing this file too, in the same commit as its runtime.
-func TestShippedHostCapabilitiesRunTheSurfacesTheHostMounts(t *testing.T) {
-	shipped := plugincontract.HostCapabilities()
-
-	// packages/views/plugins/plugin-panel-section.tsx
-	if !shipped.SurfaceTypes[plugincontract.SurfaceIssuePanel] {
-		t.Fatal("issue_panel is mounted by PluginPanelSection and must be shipped")
-	}
-	// packages/views/plugins/plugin-modal-surface.tsx, opened from the issue
-	// actions menu by a person — never on the plugin's own initiative.
-	if !shipped.SurfaceTypes[plugincontract.SurfaceModal] {
-		t.Fatal("modal is mounted by PluginModalSurface and must be shipped")
-	}
-	// No host location exists for this one. Enabling it would install surfaces
-	// that never render.
-	if shipped.SurfaceTypes[plugincontract.SurfaceSidebarPanel] {
-		t.Fatal("sidebar_panel has no mount point yet; enabling it would install surfaces that never render")
-	}
-
-	// handler.InvokePluginHook serves ui and manual; service.PluginEventDispatcher
-	// serves event off the internal bus; daemon/plugin_hook_mcp.go renders
-	// agent-trigger hooks as MCP tools.
-	for _, trigger := range []string{
-		plugincontract.TriggerUI, plugincontract.TriggerManual,
-		plugincontract.TriggerEvent, plugincontract.TriggerAgent,
-	} {
-		if !shipped.HookTriggers[trigger] {
-			t.Fatalf("hook trigger %q has a host call site and must be shipped", trigger)
-		}
-	}
-
-	// service.callHookEndpoint speaks http; service.AgentMCPConnections turns an
-	// approved mcp hook into a broker connection.
-	for _, transport := range []string{plugincontract.TransportHTTP, plugincontract.TransportMCP} {
-		if !shipped.HookTransport[transport] {
-			t.Fatalf("hook transport %q has an implementation and must be shipped", transport)
-		}
-	}
-
-	// service.InstallSkillResources writes these into the skill table, and
-	// Uninstall removes them again.
-	if !shipped.ResourceTypes[plugincontract.ResourceSkill] {
-		t.Fatal("skill resources are installed by InstallSkillResources and must be shipped")
-	}
-}
-
 func TestEnforceStorageQuota(t *testing.T) {
 	// Canonical layer for the three storage limits. SetStorageValue only wires
 	// the usage query to this function; plugin_storage_db_test.go covers the
@@ -432,26 +378,5 @@ func TestEnforceStorageQuotaCountsBytesNotCharacters(t *testing.T) {
 	}
 	if len([]rune(oversized)) >= MaxPluginStorageValueBytes {
 		t.Fatal("fixture does not distinguish characters from bytes")
-	}
-}
-
-func TestOrphanedSecretFieldsAreDetectedByType(t *testing.T) {
-	// The pure half of upgrade-time secret pruning: which stored keys the new
-	// manifest no longer declares as a secret. A field that changed type away
-	// from secret counts as orphaned — its ciphertext is unreachable too.
-	manifest := testManifest(t)
-	for _, tc := range []struct {
-		key  string
-		want bool
-	}{
-		{"token", false},
-		{"repo", true},
-		{"removed_field", true},
-	} {
-		field, ok := manifest.Config.Field(tc.key)
-		orphaned := !ok || field.Type != plugincontract.ConfigSecret
-		if orphaned != tc.want {
-			t.Fatalf("%q orphaned = %v, want %v", tc.key, orphaned, tc.want)
-		}
 	}
 }

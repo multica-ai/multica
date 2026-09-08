@@ -227,7 +227,6 @@ vi.mock("../issues/hooks/use-issue-trigger-preview", () => ({
     triggers: [],
     totalCount: 0,
     isLoading: false,
-    handoffSupported: false,
   }),
 }));
 
@@ -463,7 +462,7 @@ vi.mock("../issues/components", () => ({
       onClick={() => onOpenChange?.(false)}
     />
   ),
-  // Labels can now be hidden via Settings → Issue and revealed from the
+  // Labels can now be hidden via Settings → Preferences → Issue creation and revealed from the
   // overflow, so surface open/onOpenChange like the date pickers.
   LabelPicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
     <div
@@ -610,7 +609,6 @@ vi.mock("sonner", () => ({
 import {
   CreateIssueModal,
   ManualCreatePanel,
-  manualDialogContentClass,
 } from "./create-issue";
 
 function renderModal(element: React.ReactElement) {
@@ -1428,7 +1426,7 @@ describe("CreateIssueModal", () => {
     expect(screen.queryByTestId("due-date-picker")).not.toBeInTheDocument();
   });
 
-  it("hides toolbar fields turned off in Settings → Issue and re-reveals them from the overflow", async () => {
+  it("hides toolbar fields turned off in Settings → Preferences → Issue creation and re-reveals them from the overflow", async () => {
     const user = userEvent.setup();
     mockCreateSettingsStore.manualCreateFields = ["status", "priority", "assignee", "project"];
 
@@ -1456,7 +1454,7 @@ describe("CreateIssueModal", () => {
     expect(screen.queryByRole("button", { name: /Set labels/i })).not.toBeInTheDocument();
   });
 
-  it("renders due date inline when enabled in Settings → Issue", () => {
+  it("renders due date inline when enabled in Settings → Preferences → Issue creation", () => {
     mockCreateSettingsStore.manualCreateFields = [...DEFAULT_MANUAL_FIELDS, "due_date"];
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
@@ -1465,7 +1463,7 @@ describe("CreateIssueModal", () => {
     expect(screen.queryByRole("button", { name: /Set due date/i })).not.toBeInTheDocument();
   });
 
-  it("routes Customize fields to Settings → Issue and closes the dialog", async () => {
+  it("routes Customize fields to Settings → Preferences → Issue creation and closes the dialog", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
@@ -1474,7 +1472,7 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByRole("button", { name: /Customize fields/i }));
 
     expect(onClose).toHaveBeenCalled();
-    expect(mockPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/settings?tab=preferences&section=issue");
   });
 
   // MUL-5181: switching to agent must PRESERVE the manual draft. The agent
@@ -1830,35 +1828,11 @@ describe("CreateIssueModal", () => {
       createButton.focus();
       expect(createButton).toHaveFocus();
     });
-
-    it("carries its own disabled visuals, since the Button base only styles native disabled", () => {
-      renderManual();
-      const createButton = screen.getByRole("button", { name: "Create Issue" });
-
-      // Without these the control reads as a live primary button while
-      // aria-disabled. `pointer-events-none` is deliberately absent: it would
-      // kill the tooltip hover and the click that focuses the title.
-      expect(createButton.className).toContain("aria-disabled:opacity-50");
-      expect(createButton.className).toContain("aria-disabled:cursor-not-allowed");
-      expect(createButton.className).toContain("aria-disabled:active:translate-y-0");
-      expect(createButton.className).not.toContain("aria-disabled:pointer-events-none");
-    });
   });
 
   // MUL-6236 — the manual panel shares the agent panel's phone treatment; it
   // is one tap away behind "Switch to Manual", so it hit the same bugs.
   describe("phone layout", () => {
-    it("caps the dialog inside the viewport on phones", () => {
-      for (const isExpanded of [false, true]) {
-        const className = manualDialogContentClass(isExpanded);
-
-        // Without this the `!important` widths below also override
-        // DialogContent's own `max-w-[calc(100%-2rem)]` and the card runs
-        // edge to edge on a phone.
-        expect(className).toContain("!max-w-[calc(100vw-1.5rem)]");
-        expect(className).toContain(isExpanded ? "sm:!max-w-4xl" : "sm:!max-w-2xl");
-      }
-    });
 
     it("keeps every footer control a direct child of the grid container", () => {
       renderModal(<CreateIssueModal onClose={vi.fn()} />);

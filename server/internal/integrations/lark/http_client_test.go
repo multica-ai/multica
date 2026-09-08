@@ -1107,6 +1107,36 @@ func TestHTTPClient_SendBindingPromptCard_HappyPath(t *testing.T) {
 	}
 }
 
+func TestHTTPClient_SendBindingPromptCard_NoAvailabilityReturnsAPIError(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_bind_no_avail", 7200)
+
+	fake.mux.HandleFunc("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		fake.bindN.Add(1)
+		writeJSON(w, map[string]any{"code": 230013, "msg": "Bot has NO availability to this user.", "data": map[string]any{}})
+	})
+
+	c := newTestClient(fake, time.Now)
+	err := c.SendBindingPromptCard(context.Background(), BindingPromptParams{
+		InstallationID: testCreds(),
+		OpenID:         OpenID("ou_user_1"),
+		BindURL:        "https://multica.test/lark/bind?token=abc",
+	})
+	if err == nil {
+		t.Fatal("expected SendBindingPromptCard to fail")
+	}
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.Code != 230013 {
+		t.Fatalf("expected code=230013, got %d", apiErr.Code)
+	}
+	if apiErr.Msg != "Bot has NO availability to this user." {
+		t.Fatalf("unexpected msg: %q", apiErr.Msg)
+	}
+}
+
 func TestHTTPClient_TokenEndpointError(t *testing.T) {
 	fake := newLarkFake(t)
 	fake.stubTokenError(10003, "invalid app_id or app_secret")

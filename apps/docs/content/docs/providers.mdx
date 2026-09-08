@@ -30,18 +30,18 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | DeepSeek Harness | `dsh` | ✓ | ✓ | `.dsh/skills/` |
 | DevEco Code | `deveco` | ✓ | — | `.deveco/skills/` |
 | Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
-| Hermes | `hermes` | ✓ | ✓ | per-task `HERMES_HOME/skills/` |
+| Hermes | `hermes` | ✓ | ✓ | per-run `HERMES_HOME/skills/` |
 | Kimi CLI | `kimi` | ✓ | ✓ | `.kimi/skills/` |
 | Kiro CLI | `kiro-cli` | ✓ | ✓ | `.kiro/skills/` |
 | MiniMax Code | `mcode` | — | ✓ | `.minimax/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
 | Pi | `pi` | ✓ | — | `.pi/skills/` |
-| Oh-My-Pi | `omp` | ✓ | — | `.omp/skills/` |
+| Oh-My-Pi | `omp` | ✓ | ✓ | `.omp/skills/` |
 | Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | `.qwen/skills/` |
-| QwenPaw | `qwenpaw` | ✓ | ✓ | per-task workspace `skills/` |
+| QwenPaw | `qwenpaw` | ✓ | ✓ | per-run workspace `skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | — |
@@ -64,11 +64,11 @@ Different tools may use different model names. After switching AI coding tools, 
 
 ## Session resumption
 
-All tools marked ✓ support continuing an existing session in a later run. The prerequisites are that the original session still exists and the task is executed by a runtime that can reach it. MiniMax Code 0.1.2 advertises no session-loading capability over ACP, so Multica starts a fresh MCode session for a later run.
+All tools marked ✓ support continuing an existing session in a later run. The prerequisites are that the original session still exists and the run is executed by a runtime that can reach it. MiniMax Code 0.1.2 advertises no session-loading capability over ACP, so Multica starts a fresh MCode session for a later run.
 
 Multica stores the session identifier the tool returns. The next time work continues on the same issue, the runtime tries to resume that session; when it cannot, it creates a new session and keeps going. Pi stores a local session file path, so it depends more on the original computer and file.
 
-Retry and session-resumption rules are in [Tasks](/tasks#manual-retry).
+Retry and session-resumption rules are in [Runs](/tasks#manual-retry).
 
 ## MCP configuration
 
@@ -86,9 +86,9 @@ Skills that already exist in the repository are never overwritten. On a name col
 
 Codex, Hermes, and OpenClaw are handled slightly differently:
 
-- Codex uses a per-task `CODEX_HOME`, so skills are never written into the system-level Codex directory.
-- Hermes uses a per-task `HERMES_HOME`. Existing local configuration is still readable, but bound skills and session data are isolated per task. This isolation kicks in only when the agent has skills bound; tasks without bound skills use the machine's original Hermes home.
-- OpenClaw uses `skills/` under the current task's working directory, and the per-run configuration sets that directory as the workspace.
+- Codex uses a per-run `CODEX_HOME`, so skills are never written into the system-level Codex directory.
+- Hermes uses a per-run `HERMES_HOME`. Existing local configuration is still readable, but bound skills and session data are isolated per run. This isolation kicks in only when the agent has skills bound; runs without bound skills use the machine's original Hermes home.
+- OpenClaw uses `skills/` under the current run's working directory, and the per-run configuration sets that directory as the workspace.
 
 For creating and binding skills, see [Skills](/skills).
 

@@ -426,13 +426,3 @@ export function toolKindTotals(steps: TraceStep[]): ToolKindTotals {
   }
   return totals;
 }
-
-/** Below these, a timeline is chrome: it would render a handful of bars that
- *  say less than the durations already on each row. */
-export const TIMELINE_MIN_STEPS = 8;
-export const TIMELINE_MIN_MS = 60_000;
-
-export function shouldShowTimeline(steps: TraceStep[], lanes: TraceLanes | null): boolean {
-  if (!lanes) return false;
-  return steps.length >= TIMELINE_MIN_STEPS && lanes.totalMs >= TIMELINE_MIN_MS;
-}

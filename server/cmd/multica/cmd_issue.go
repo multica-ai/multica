@@ -112,7 +112,7 @@ func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePat
 	if !within {
 		return fmt.Errorf(
 			"--%s path %q resolves outside the current working directory; "+
-				"write agent temp files inside the task workdir (e.g. ./%s.md) rather than machine-shared "+
+				"write agent temp files inside the run workdir (e.g. ./%s.md) rather than machine-shared "+
 				"paths like /tmp, where another run's stale file can be read by mistake. "+
 				"Pass --allow-external-file to override.",
 			fileFlag, filePath, flagName)
@@ -318,15 +318,26 @@ var issueSubscriberRemoveCmd = &cobra.Command{
 
 // Execution history subcommands.
 
+// headerActiveRunsTruncated mirrors handler.HeaderActiveRunsTruncated. Declared
+// as a literal rather than imported because the CLI does not depend on the
+// handler package (same convention as headerTimelineTruncated in
+// `issue timeline`).
+const headerActiveRunsTruncated = "X-Active-Runs-Truncated"
+
 var issueRunsCmd = &cobra.Command{
 	Use:   "runs <issue-id>",
 	Short: "List execution history for an issue",
-	Args:  exactArgs(1),
-	RunE:  runIssueRuns,
+	Long: "List agent runs for an issue.\n\n" +
+		"Defaults to this issue's full execution history, newest first. Narrow it to " +
+		"work in flight with --active, or widen it across the sub-issue family with " +
+		"--siblings when you need to know whether another agent is already working " +
+		"next to you.",
+	Args: exactArgs(1),
+	RunE: runIssueRuns,
 }
 
 var issueRunMessagesCmd = &cobra.Command{
-	Use:   "run-messages <task-id>",
+	Use:   "run-messages <run-id>",
 	Short: "List messages for an execution",
 	Args:  exactArgs(1),
 	RunE:  runIssueRunMessages,
@@ -341,15 +352,15 @@ var issueUsageCmd = &cobra.Command{
 
 var issueRerunCmd = &cobra.Command{
 	Use:   "rerun <id>",
-	Short: "Re-enqueue an issue's current agent assignment as a fresh task",
+	Short: "Re-enqueue an issue's current agent assignment as a fresh run",
 	Args:  exactArgs(1),
 	RunE:  runIssueRerun,
 }
 
 var issueCancelTaskCmd = &cobra.Command{
-	Use:   "cancel-task <task-id>",
-	Short: "Cancel a running or queued task (interrupts in-flight agent)",
-	Long: "Cancel a single task by its ID. Accepts the short ID prefix shown by `issue runs`. " +
+	Use:   "cancel-task <run-id>",
+	Short: "Cancel an in-progress or queued run (interrupts in-flight agent)",
+	Long: "Cancel a single run by its ID. Accepts the short ID prefix shown by `issue runs`. " +
 		"Use --issue to scope short-ID resolution to a specific issue when ambiguous. " +
 		"Triggers daemon-side interrupt of any in-flight agent so it stops emitting tool calls promptly.",
 	Args: exactArgs(1),
@@ -392,6 +403,23 @@ var validIssuePriorities = []string{
 // only meaningful for the other columns.
 var validIssueSortColumns = []string{
 	"position", "title", "created_at", "start_date", "due_date", "priority",
+}
+
+// validIssueFields are the top-level keys /api/issues actually emits for
+// `issue list` — i.e. the JSON tags of handler.IssueResponse
+// (server/internal/handler/issue.go), minus reactions/attachments/
+// source_context, which are omitempty and never set by the list endpoint
+// (detail-only). TestValidIssueFieldsMatchListEndpointShape guards this
+// against drifting from that struct. There is no plain "assignee" field —
+// it is split into assignee_type/assignee_id — so that name is rejected
+// rather than silently ignored.
+var validIssueFields = []string{
+	"id", "workspace_id", "number", "identifier", "title", "description",
+	"status", "status_category", "status_name", "priority", "assignee_type",
+	"assignee_id", "creator_type", "creator_id", "parent_issue_id",
+	"project_id", "position", "stage", "start_date", "due_date", "created_at",
+	"updated_at", "revision", "last_activity_at", "metadata", "properties",
+	"labels",
 }
 
 // directionalIssueSortColumns are the sort keys for which --direction is
@@ -483,13 +511,17 @@ func init() {
 	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
+	issueListCmd.Flags().StringArray("property", nil, `Filter by custom property, written as "Name=Value" (repeatable, one value per flag). Name is a property name (case-insensitive) or its UUID. Value depends on the type: an option name or id for select and multi_select, true or false for checkbox, a member name, email, or id for actor types, and the value itself for text, url, number, and date (YYYY-MM-DD). Use __none__ to match issues where the property is unset; it works for every type, so an option or member actually named __none__ has to be given by id, as does a property whose name contains "=" or ends in <, > or ! (the >=, <=, and != spellings are reserved for comparison filters). Repeating a property matches ANY of its values; different properties must ALL match.`)
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return in one page (the server caps a page at 100; use --offset to page through more)")
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
-	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority")
-	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column (position is always ascending)")
+	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority, or property:<name-or-id> to sort by a custom property (select properties sort by option order)")
+	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column or a property sort (position is always ascending)")
+	issueListCmd.Flags().String("fields", "", "JSON output only: comma-separated list of issue fields to include (e.g. id,title,status,priority). Filtering happens client-side after the full response is fetched, so this shrinks CLI output size and agent context cost, not network/server-side cost. Omit for the full issue object (default, unchanged). Valid fields: "+strings.Join(validIssueFields, ", "))
+	issueListCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
+	issueGetCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
@@ -565,7 +597,9 @@ func init() {
 
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
-	issueRunsCmd.Flags().Bool("full-id", false, "Show full task UUIDs in table output")
+	issueRunsCmd.Flags().Bool("full-id", false, "Show full run UUIDs in table output")
+	issueRunsCmd.Flags().Bool("active", false, "Only in-flight runs (queued, dispatched, running, waiting_local_directory) instead of the full execution history. Answers \"is an agent working on this right now\" without pulling every past run.")
+	issueRunsCmd.Flags().Bool("siblings", false, "Widen to this issue's sub-issue family — its parent (or itself, when it has no parent) plus every child of that parent — so you can see whether another run is already working alongside you before starting overlapping code or PR work. Implies --active. Returns a compact per-run row (run, issue, agent, status, started) rather than the full execution-log record. Ordered running-first, newest-first within a status, and capped at 20 rows; when the cap truncates the answer the CLI says so on stderr, so a short list is never mistaken for a complete one. Advisory only: it reports work in flight, it does not reserve or serialise anything.")
 
 	// issue usage
 	issueUsageCmd.Flags().String("output", "table", "Output format: table or json")
@@ -574,18 +608,18 @@ func init() {
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
 	// issue cancel-task
 	issueCancelTaskCmd.Flags().String("output", "json", "Output format: table or json")
-	issueCancelTaskCmd.Flags().String("issue", "", "Issue ID/key to scope short task ID prefix resolution")
+	issueCancelTaskCmd.Flags().String("issue", "", "Issue ID/key to scope short run ID prefix resolution")
 	// issue run-messages
 	issueRunMessagesCmd.Flags().String("output", "json", "Output format: table or json")
 	issueRunMessagesCmd.Flags().Int("since", 0, "Only return messages after this sequence number")
-	issueRunMessagesCmd.Flags().String("issue", "", "Issue ID/key to scope short task ID prefix resolution")
+	issueRunMessagesCmd.Flags().String("issue", "", "Issue ID/key to scope short run ID prefix resolution")
 
 	// issue comment add
 	issueCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
 	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
-	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent task must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
+	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent run must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -666,8 +700,34 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		}
 		params.Set("metadata", filter)
 	}
+	// --property filtering and property:<ref> sorting both address definitions
+	// by name or UUID, so they share a single catalog fetch. An actor filter
+	// and --resolve-properties share one member request the same way.
+	const propertySortPrefix = "property:"
+	propertyFlags, _ := cmd.Flags().GetStringArray("property")
 	sortVal, _ := cmd.Flags().GetString("sort")
-	if sortVal != "" {
+	var properties []propertyDTO
+	var members memberDirectory
+	if len(propertyFlags) > 0 || strings.HasPrefix(sortVal, propertySortPrefix) {
+		var err error
+		if properties, err = fetchProperties(ctx, client); err != nil {
+			return err
+		}
+	}
+	if len(propertyFlags) > 0 {
+		filter, err := buildPropertiesFilterQueryParam(ctx, client, &members, properties, propertyFlags)
+		if err != nil {
+			return err
+		}
+		params.Set("properties", filter)
+	}
+	if strings.HasPrefix(sortVal, propertySortPrefix) {
+		property, err := resolveSortableProperty(properties, strings.TrimPrefix(sortVal, propertySortPrefix))
+		if err != nil {
+			return err
+		}
+		params.Set("sort", propertySortPrefix+property.ID)
+	} else if sortVal != "" {
 		valid := false
 		for _, c := range validIssueSortColumns {
 			if c == sortVal {
@@ -676,7 +736,7 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 			}
 		}
 		if !valid {
-			return fmt.Errorf("invalid --sort %q; valid values: %s", sortVal, strings.Join(validIssueSortColumns, ", "))
+			return fmt.Errorf("invalid --sort %q; valid values: %s, or property:<name-or-id> for a custom property", sortVal, strings.Join(validIssueSortColumns, ", "))
 		}
 		params.Set("sort", sortVal)
 	}
@@ -690,9 +750,43 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		// than silently dropping the flag — a passed-but-ignored flag is a
 		// footgun, especially in scripts.
 		if sortVal == "" || sortVal == "position" {
-			return fmt.Errorf("--direction requires --sort to be one of %s; position (the default manual board order) is always ascending", strings.Join(directionalIssueSortColumns, ", "))
+			return fmt.Errorf("--direction requires --sort to be one of %s, or a property:<name-or-id> sort; position (the default manual board order) is always ascending", strings.Join(directionalIssueSortColumns, ", "))
 		}
 		params.Set("direction", d)
+	}
+
+	var fields []string
+	if v, _ := cmd.Flags().GetString("fields"); v != "" {
+		valid := make(map[string]bool, len(validIssueFields))
+		for _, f := range validIssueFields {
+			valid[f] = true
+		}
+		keepsProperties := false
+		for _, f := range strings.Split(v, ",") {
+			f = strings.TrimSpace(f)
+			if !valid[f] {
+				return fmt.Errorf("invalid --fields value %q; valid values: %s", f, strings.Join(validIssueFields, ", "))
+			}
+			if f == "properties" {
+				keepsProperties = true
+			}
+			fields = append(fields, f)
+		}
+		// --fields without `properties` deletes the very key
+		// --resolve-properties rewrites, so the pair would either cost two
+		// requests for output nobody sees or leave the flag silently doing
+		// nothing. A passed-but-ignored flag is a footgun in scripts (the
+		// same reason --fields rejects "assignee" instead of dropping it),
+		// so say so instead of picking one of those.
+		//
+		// Only in JSON mode, though: both flags document themselves as having
+		// no effect on --output table, so a table reader who leaves them on
+		// the command line must still get their table.
+		outputFormat, _ := cmd.Flags().GetString("output")
+		resolve, _ := cmd.Flags().GetBool("resolve-properties")
+		if outputFormat == "json" && resolve && !keepsProperties {
+			return fmt.Errorf("--resolve-properties needs the properties field, but --fields does not include it; add properties to --fields or drop --resolve-properties")
+		}
 	}
 
 	path := "/api/issues"
@@ -709,6 +803,18 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
+		// --fields runs first so a page that drops `properties` never pays for
+		// the catalog and member requests resolving it would need. Combining
+		// the two with `properties` filtered out is rejected above, so nothing
+		// resolvable is deleted before it is resolved.
+		if len(fields) > 0 {
+			filterIssueFields(issuesRaw, fields)
+		}
+		if resolve, _ := cmd.Flags().GetBool("resolve-properties"); resolve {
+			if err := resolveIssueProperties(ctx, client, properties, &members, issuesRaw); err != nil {
+				return err
+			}
+		}
 		total, _ := result["total"].(float64)
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
@@ -879,6 +985,11 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	if resolve, _ := cmd.Flags().GetBool("resolve-properties"); resolve {
+		if err := resolveIssueProperties(ctx, client, nil, &memberDirectory{}, []any{issue}); err != nil {
+			return err
+		}
+	}
 	return cli.PrintJSON(os.Stdout, issue)
 }
 
@@ -1039,7 +1150,7 @@ func ensureAttachmentWithinWorkdir(cmd *cobra.Command, filePath string) error {
 	if !within {
 		return fmt.Errorf(
 			"--attachment path %q resolves outside the current working directory; "+
-				"attach files generated inside the task workdir rather than machine-shared "+
+				"attach files generated inside the run workdir rather than machine-shared "+
 				"paths like /tmp, where another run's stale file can be attached by mistake. "+
 				"Pass --allow-external-file to override.",
 			filePath)
@@ -2146,9 +2257,37 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 
+	activeOnly, _ := cmd.Flags().GetBool("active")
+	siblings, _ := cmd.Flags().GetBool("siblings")
+
+	params := url.Values{}
+	if siblings {
+		// The server implies active for a family read, so --siblings alone is
+		// enough; sending both keeps the request self-describing.
+		params.Set("scope", "family")
+		params.Set("active", "true")
+	} else if activeOnly {
+		params.Set("active", "true")
+	}
+
+	path := "/api/issues/" + issueRef.ID + "/task-runs"
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+
 	var runs []map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID+"/task-runs", &runs); err != nil {
+	respHeaders, err := client.GetJSONWithHeaders(ctx, path, &runs)
+	if err != nil {
 		return fmt.Errorf("list runs: %w", err)
+	}
+	// A truncated coordination read and a complete one look identical in the
+	// body, and reading the first as the second is exactly the wrong
+	// conclusion: "no run on that sibling" when the answer was simply cut off.
+	// Same stderr convention as the comment-list paging cursors.
+	if respHeaders.Get(headerActiveRunsTruncated) == "true" {
+		fmt.Fprintln(os.Stderr,
+			"warning: active runs truncated by the server cap: more runs are in flight than this read returns. "+
+				"\"No run on that issue\" cannot be concluded from this read.")
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -2158,6 +2297,32 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 
 	actors := loadActorDisplayLookup(ctx, client)
 	fullID, _ := cmd.Flags().GetBool("full-id")
+
+	// The family read returns a different, deliberately smaller row than the
+	// execution log — no completed_at or error, because every row in it is
+	// still in flight — and it spans issues, so it needs a column saying which.
+	// On a single-issue read that column would repeat the argument on every
+	// line, so it stays off there.
+	if siblings {
+		headers := []string{"RUN", "ISSUE", "AGENT", "STATUS", "STARTED"}
+		rows := make([][]string, 0, len(runs))
+		for _, r := range runs {
+			started := strVal(r, "started_at")
+			if len(started) >= 16 {
+				started = started[:16]
+			}
+			rows = append(rows, []string{
+				displayID(strVal(r, "task_id"), fullID),
+				strVal(r, "issue_identifier"),
+				actors.agent(strVal(r, "agent_id")),
+				strVal(r, "status"),
+				started,
+			})
+		}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+
 	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "ERROR"}
 	rows := make([][]string, 0, len(runs))
 	for _, r := range runs {
@@ -2244,7 +2409,7 @@ func runIssueRunMessages(cmd *cobra.Command, args []string) error {
 	}
 	taskRef, err := resolveTaskRunID(ctx, client, issueID, args[0])
 	if err != nil {
-		return fmt.Errorf("resolve task run: %w", err)
+		return fmt.Errorf("resolve run: %w", err)
 	}
 
 	path := "/api/tasks/" + url.PathEscape(taskRef.ID) + "/messages"
@@ -2316,7 +2481,7 @@ func runIssueRerun(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, task)
 	}
 	agent := loadActorDisplayLookup(ctx, client).agent(strVal(task, "agent_id"))
-	fmt.Fprintf(os.Stdout, "Re-enqueued task %s on agent %s\n", strVal(task, "id"), agent)
+	fmt.Fprintf(os.Stdout, "Re-enqueued run %s on agent %s\n", strVal(task, "id"), agent)
 	return nil
 }
 
@@ -2344,13 +2509,13 @@ func runIssueCancelTask(cmd *cobra.Command, args []string) error {
 	}
 	taskRef, err := resolveTaskRunID(ctx, client, issueScope, args[0])
 	if err != nil {
-		return fmt.Errorf("resolve task run: %w", err)
+		return fmt.Errorf("resolve run: %w", err)
 	}
 
 	var result map[string]any
 	path := "/api/tasks/" + url.PathEscape(taskRef.ID) + "/cancel"
 	if err := client.PostJSON(ctx, path, map[string]any{}, &result); err != nil {
-		return fmt.Errorf("cancel task: %w", err)
+		return fmt.Errorf("cancel run: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -2361,7 +2526,7 @@ func runIssueCancelTask(cmd *cobra.Command, args []string) error {
 	if status == "" {
 		status = "cancelled"
 	}
-	fmt.Fprintf(os.Stdout, "Task %s -> status=%s\n", taskRef.ID, status)
+	fmt.Fprintf(os.Stdout, "Run %s -> status=%s\n", taskRef.ID, status)
 	return nil
 }
 
@@ -2611,51 +2776,47 @@ func (k assigneeKinds) describe() string {
 	}
 }
 
+// assigneeCandidate is one directory entry matchAssignee ranks. aliases are
+// additional unique identifiers that select a candidate outright, ranked with
+// id matches rather than name matches — a member's email is as unambiguous as
+// their id, and is what people actually have to hand. Without it,
+// `--value bohan@example.com` fails to resolve.
+type assigneeCandidate struct {
+	assigneeMatch
+	aliases []string
+}
+
+func (c assigneeCandidate) matchesAlias(input string) bool {
+	for _, alias := range c.aliases {
+		if alias != "" && strings.EqualFold(alias, input) {
+			return true
+		}
+	}
+	return false
+}
+
+func memberCandidates(members []map[string]any) []assigneeCandidate {
+	candidates := make([]assigneeCandidate, 0, len(members))
+	for _, m := range members {
+		candidates = append(candidates, assigneeCandidate{
+			assigneeMatch: assigneeMatch{Type: "member", ID: strVal(m, "user_id"), Name: strVal(m, "name")},
+			aliases:       []string{strVal(m, "email")},
+		})
+	}
+	return candidates
+}
+
 func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, kinds assigneeKinds) (string, string, error) {
 	if client.WorkspaceID == "" {
 		return "", "", fmt.Errorf("workspace ID is required to resolve assignees; use --workspace-id or set MULTICA_WORKSPACE_ID")
 	}
-
-	input := normalizeAssigneeLookupInput(name)
-	if input == "" {
+	if normalizeAssigneeLookupInput(name) == "" {
 		return "", "", fmt.Errorf("no %s found matching %q", kinds.describe(), name)
 	}
-	inputLower := strings.ToLower(input)
 
-	// Matches are collected into three priority buckets. Higher-priority buckets
-	// short-circuit lower-priority matching so that, e.g., an exact name match
-	// always wins over a substring collision with another candidate.
-	//   1. idMatches        — full UUID or 8-char ShortID (as shown by `truncateID`).
-	//   2. exactMatches     — case-insensitive full name equality.
-	//   3. substringMatches — preserves the existing partial-name UX.
-	var idMatches, exactMatches, substringMatches []assigneeMatch
+	var candidates []assigneeCandidate
 	var errs []error
 	var fetchAttempts int
-
-	// exactAliases are additional unique identifiers that select a candidate
-	// outright, ranked with id matches rather than name matches — a member's
-	// email is as unambiguous as their id, and is what people actually have to
-	// hand. Without it, `--value bohan@example.com` fails to resolve.
-	classify := func(entityType, id, displayName string, exactAliases ...string) {
-		match := assigneeMatch{Type: entityType, ID: id, Name: displayName}
-		if id != "" && (strings.EqualFold(id, input) || strings.EqualFold(truncateID(id), input)) {
-			idMatches = append(idMatches, match)
-			return
-		}
-		for _, alias := range exactAliases {
-			if alias != "" && strings.EqualFold(alias, input) {
-				idMatches = append(idMatches, match)
-				return
-			}
-		}
-		if strings.EqualFold(displayName, input) {
-			exactMatches = append(exactMatches, match)
-			return
-		}
-		if strings.Contains(strings.ToLower(displayName), inputLower) {
-			substringMatches = append(substringMatches, match)
-		}
-	}
 
 	// Search members.
 	if kinds.member {
@@ -2664,9 +2825,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 		if err := getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err != nil {
 			errs = append(errs, fmt.Errorf("fetch members: %w", err))
 		} else {
-			for _, m := range members {
-				classify("member", strVal(m, "user_id"), strVal(m, "name"), strVal(m, "email"))
-			}
+			candidates = append(candidates, memberCandidates(members)...)
 		}
 	}
 
@@ -2679,7 +2838,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 			errs = append(errs, fmt.Errorf("fetch agents: %w", err))
 		} else {
 			for _, a := range agents {
-				classify("agent", strVal(a, "id"), strVal(a, "name"))
+				candidates = append(candidates, assigneeCandidate{assigneeMatch: assigneeMatch{Type: "agent", ID: strVal(a, "id"), Name: strVal(a, "name")}})
 			}
 		}
 	}
@@ -2701,7 +2860,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 				if strVal(s, "archived_at") != "" {
 					continue
 				}
-				classify("squad", strVal(s, "id"), strVal(s, "name"))
+				candidates = append(candidates, assigneeCandidate{assigneeMatch: assigneeMatch{Type: "squad", ID: strVal(s, "id"), Name: strVal(s, "name")}})
 			}
 		}
 	}
@@ -2713,6 +2872,37 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 			msgs[i] = e.Error()
 		}
 		return "", "", fmt.Errorf("failed to resolve assignee: %s", strings.Join(msgs, "; "))
+	}
+
+	return matchAssignee(name, kinds, candidates)
+}
+
+// matchAssignee resolves name against candidates a caller already fetched.
+// Matches are collected into three priority buckets. Higher-priority buckets
+// short-circuit lower-priority matching so that, e.g., an exact name match
+// always wins over a substring collision with another candidate.
+//  1. idMatches        — full UUID or 8-char ShortID (as shown by `truncateID`), or an alias.
+//  2. exactMatches     — case-insensitive full name equality.
+//  3. substringMatches — preserves the existing partial-name UX.
+func matchAssignee(name string, kinds assigneeKinds, candidates []assigneeCandidate) (string, string, error) {
+	input := normalizeAssigneeLookupInput(name)
+	if input == "" {
+		return "", "", fmt.Errorf("no %s found matching %q", kinds.describe(), name)
+	}
+	inputLower := strings.ToLower(input)
+
+	var idMatches, exactMatches, substringMatches []assigneeMatch
+	for _, c := range candidates {
+		switch {
+		case c.ID != "" && (strings.EqualFold(c.ID, input) || strings.EqualFold(truncateID(c.ID), input)):
+			idMatches = append(idMatches, c.assigneeMatch)
+		case c.matchesAlias(input):
+			idMatches = append(idMatches, c.assigneeMatch)
+		case strings.EqualFold(c.Name, input):
+			exactMatches = append(exactMatches, c.assigneeMatch)
+		case strings.Contains(strings.ToLower(c.Name), inputLower):
+			substringMatches = append(substringMatches, c.assigneeMatch)
+		}
 	}
 
 	for _, bucket := range [][]assigneeMatch{idMatches, exactMatches, substringMatches} {
@@ -2867,6 +3057,27 @@ func formatAssignee(issue map[string]any, actors actorDisplayLookup) string {
 		return ""
 	}
 	return actors.actor(aType, aID)
+}
+
+// filterIssueFields keeps only the requested top-level keys on each issue,
+// dropping everything else — including description, which makes up most of
+// a typical issue payload. Opt-in via --fields on JSON output only.
+func filterIssueFields(issuesRaw []any, fields []string) {
+	keep := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		keep[f] = true
+	}
+	for _, raw := range issuesRaw {
+		issue, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		for k := range issue {
+			if !keep[k] {
+				delete(issue, k)
+			}
+		}
+	}
 }
 
 func truncateID(id string) string {

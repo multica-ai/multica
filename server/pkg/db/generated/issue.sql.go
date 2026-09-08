@@ -1233,11 +1233,14 @@ WHERE i.workspace_id = $1
   --   {"__op__": "<op>", "def": "<id>", "value": "<v>"}       — scalar operator
   -- (contains / gt / gte / lt / lte / before / after), where the contains
   -- value arrives already ILIKE-escaped and the op was validated in Go, so
-  -- the per-op branches below only ever see legal values. The correlated
-  -- form skips the GIN index, which is fine here: open_only is an
-  -- unpaginated workspace scan. The terminal-status predicate intentionally
-  -- remains a filter rather than a positive index narrowing so unknown legacy
-  -- status keys stay visible.
+  -- the per-op branches below only ever see legal values. A contains pattern
+  -- additionally carries "prefilter" when its needle survives jsonb text
+  -- serialization intact; the clause it enables is redundant by construction
+  -- (prefilterableContainsNeedle in property.go) and stays here so both renderings
+  -- of the filter keep matching row for row. The correlated form skips the GIN
+  -- index, which is fine here: open_only is an unpaginated workspace scan. The
+  -- terminal-status predicate intentionally remains a filter rather than a
+  -- positive index narrowing so unknown legacy status keys stay visible.
   AND (
     $9::jsonb IS NULL
     OR NOT EXISTS (
@@ -1253,6 +1256,8 @@ WHERE i.workspace_id = $1
                AND i.properties ->> (alt.pattern ->> 'def') IS NOT NULL
                AND (
                  (alt.pattern ->> '__op__' = 'contains'
+                  AND (NOT (alt.pattern ? 'prefilter')
+                       OR LOWER(i.properties::text) LIKE LOWER('%' || (alt.pattern ->> 'prefilter') || '%'))
                   AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'string'
                   AND (i.properties ->> (alt.pattern ->> 'def')) ILIKE '%' || (alt.pattern ->> 'value') || '%')
                  OR (alt.pattern ->> '__op__' = 'gt'

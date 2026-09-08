@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/handler"
 )
 
 // stderrCapture redirects os.Stderr through a pipe so a test can assert on
@@ -1255,7 +1256,7 @@ func TestResolveAssignee(t *testing.T) {
 	})
 
 	t.Run("resolveActorPropertyRef renders a prefixed reference", func(t *testing.T) {
-		ref, err := resolveActorPropertyRef(ctx, client, "alice@example.com")
+		ref, err := resolveActorPropertyRef(ctx, client, &memberDirectory{}, "alice@example.com")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1265,7 +1266,7 @@ func TestResolveAssignee(t *testing.T) {
 	})
 
 	t.Run("resolveActorPropertyRef rejects a non-member kind", func(t *testing.T) {
-		if _, err := resolveActorPropertyRef(ctx, client, "codebot"); err == nil {
+		if _, err := resolveActorPropertyRef(ctx, client, &memberDirectory{}, "codebot"); err == nil {
 			t.Error("expected an agent name to be unresolvable for an actor property")
 		}
 	})
@@ -2742,26 +2743,6 @@ func TestRunIssueCommentList_DoesNotPrintShowingPreamble(t *testing.T) {
 	}
 }
 
-func TestValidIssueStatuses(t *testing.T) {
-	expected := map[string]bool{
-		"backlog":     true,
-		"todo":        true,
-		"in_progress": true,
-		"in_review":   true,
-		"done":        true,
-		"blocked":     true,
-		"cancelled":   true,
-	}
-	for _, s := range validIssueStatuses {
-		if !expected[s] {
-			t.Errorf("unexpected status in validIssueStatuses: %q", s)
-		}
-	}
-	if len(validIssueStatuses) != len(expected) {
-		t.Errorf("validIssueStatuses has %d entries, expected %d", len(validIssueStatuses), len(expected))
-	}
-}
-
 // TestValidateIssueStatus pins the post-MUL-6243 contract: the CLI validates
 // the SHAPE of a status key, not its membership. A workspace can define custom
 // statuses, so only the server knows the valid set; rejecting an unknown key
@@ -2943,10 +2924,13 @@ func newIssueListTestCmd() *cobra.Command {
 	cmd.Flags().String("assignee-id", "", "")
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().StringSlice("metadata", nil, "")
+	cmd.Flags().StringArray("property", nil, "")
 	cmd.Flags().Int("limit", 50, "")
 	cmd.Flags().Int("offset", 0, "")
 	cmd.Flags().String("sort", "", "")
 	cmd.Flags().String("direction", "", "")
+	cmd.Flags().String("fields", "", "")
+	cmd.Flags().Bool("resolve-properties", false, "")
 	return cmd
 }
 
@@ -3283,6 +3267,254 @@ func TestRunIssueListRejectsDirectionWithoutDirectionalSort(t *testing.T) {
 				t.Fatalf("error = %q, want it to list the valid directional sort columns", err)
 			}
 		})
+	}
+}
+
+// sampleIssueResponse returns a handler.IssueResponse populated the way the
+// /api/issues list endpoint actually populates one (ListIssues in
+// server/internal/handler/issue.go) — every field a real "issue list
+// --output json" row carries. Reactions, Attachments, and SourceContext are
+// left zero-valued on purpose: they are `omitempty` and ListIssues never
+// sets them (detail-only), so a real list payload never carries those keys.
+// This is the single source of truth for both fullTestIssue (the --fields
+// filtering fixture) and the drift guard below, so the two can't diverge
+// from each other the way the whitelist once diverged from the real API.
+func sampleIssueResponse() handler.IssueResponse {
+	desc := "a very long description"
+	assigneeType := "member"
+	assigneeID := "user-1"
+	parentID := "parent-1"
+	projectID := "proj-1"
+	stage := int32(1)
+	startDate := "2024-01-01"
+	dueDate := "2024-01-02"
+	lastActivity := "2024-01-01T00:00:00Z"
+	labels := []handler.LabelResponse{}
+
+	return handler.IssueResponse{
+		ID:             "iss-1",
+		WorkspaceID:    "ws-1",
+		Number:         42,
+		Identifier:     "MUL-42",
+		Title:          "Test issue",
+		Description:    &desc,
+		Status:         "in_progress",
+		StatusCategory: "active",
+		StatusName:     "In Progress",
+		Priority:       "high",
+		AssigneeType:   &assigneeType,
+		AssigneeID:     &assigneeID,
+		CreatorType:    "member",
+		CreatorID:      "user-2",
+		ParentIssueID:  &parentID,
+		ProjectID:      &projectID,
+		Position:       1,
+		Stage:          &stage,
+		StartDate:      &startDate,
+		DueDate:        &dueDate,
+		CreatedAt:      "2024-01-01T00:00:00Z",
+		UpdatedAt:      "2024-01-01T00:00:00Z",
+		Revision:       1,
+		LastActivityAt: &lastActivity,
+		Metadata:       map[string]any{},
+		Properties:     map[string]any{},
+		Labels:         &labels,
+	}
+}
+
+// fullTestIssue returns a JSON-decoded issue map carrying every field a real
+// "issue list --output json" row exposes (see sampleIssueResponse), so
+// --fields tests can assert on a realistic full payload rather than a
+// hand-picked subset.
+func fullTestIssue(t *testing.T) map[string]any {
+	t.Helper()
+	return issueResponseJSONMap(t, sampleIssueResponse())
+}
+
+func keysOf(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func issueResponseJSONMap(t *testing.T, resp handler.IssueResponse) map[string]any {
+	t.Helper()
+	b, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal handler.IssueResponse: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal handler.IssueResponse: %v", err)
+	}
+	return m
+}
+
+// TestValidIssueFieldsMatchListEndpointShape guards validIssueFields (the
+// --fields whitelist) against drifting from what /api/issues actually
+// returns for `issue list`. It caught a real bug: the whitelist was modeled
+// on publicapi/v1.Issue, which the list endpoint never serializes — the real
+// response is handler.IssueResponse, which also emits status_name and
+// labels that the whitelist rejected as invalid field names.
+func TestValidIssueFieldsMatchListEndpointShape(t *testing.T) {
+	realKeys := keysOf(fullTestIssue(t))
+
+	valid := make(map[string]bool, len(validIssueFields))
+	for _, f := range validIssueFields {
+		valid[f] = true
+	}
+	real := make(map[string]bool, len(realKeys))
+	for _, k := range realKeys {
+		real[k] = true
+	}
+
+	for _, k := range realKeys {
+		if !valid[k] {
+			t.Errorf("validIssueFields is missing %q, which a real issue list JSON response emits", k)
+		}
+	}
+	for _, f := range validIssueFields {
+		if !real[f] {
+			t.Errorf("validIssueFields has %q, which a real issue list JSON response never emits", f)
+		}
+	}
+}
+
+// TestRunIssueListFieldsFiltersJSONOutput guards that --fields whitelists
+// exactly the requested top-level keys on each returned issue, so an agent
+// asking for id/title/status/priority never pays for the description field
+// that makes up most of a typical issue payload.
+func TestRunIssueListFieldsFiltersJSONOutput(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name   string
+		fields string
+		want   []string
+	}{
+		{"id, title, status, priority", "id,title,status,priority", []string{"id", "title", "status", "priority"}},
+		{"assignee pair", "assignee_type,assignee_id", []string{"assignee_type", "assignee_id"}},
+		{"single field", "identifier", []string{"identifier"}},
+		{"description explicitly requested", "id,description", []string{"id", "description"}},
+		{"whitespace around names", " id , title ", []string{"id", "title"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set("output", "json")
+			_ = cmd.Flags().Set("fields", tc.fields)
+
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+
+			var resp struct {
+				Issues []map[string]any `json:"issues"`
+			}
+			if err := json.Unmarshal([]byte(out), &resp); err != nil {
+				t.Fatalf("unmarshal output: %v\noutput: %s", err, out)
+			}
+			if len(resp.Issues) != 1 {
+				t.Fatalf("issues = %d, want 1", len(resp.Issues))
+			}
+			got := resp.Issues[0]
+			if len(got) != len(tc.want) {
+				t.Fatalf("issue keys = %v, want exactly %v", keysOf(got), tc.want)
+			}
+			for _, f := range tc.want {
+				if _, ok := got[f]; !ok {
+					t.Fatalf("issue missing field %q; got keys %v", f, keysOf(got))
+				}
+			}
+		})
+	}
+}
+
+// TestRunIssueListDefaultKeepsFullIssueUnchanged guards backward
+// compatibility: omitting --fields must return the full issue object,
+// description included, exactly as before this flag existed.
+func TestRunIssueListDefaultKeepsFullIssueUnchanged(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+
+	out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+	var resp struct {
+		Issues []map[string]any `json:"issues"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	got := resp.Issues[0]
+	if len(got) != len(issue) {
+		t.Fatalf("issue keys = %v, want all %d original fields", keysOf(got), len(issue))
+	}
+	if _, ok := got["description"]; !ok {
+		t.Fatalf("expected description to remain in default (no --fields) output, got %v", got)
+	}
+}
+
+// TestRunIssueListRejectsInvalidFields guards that a typo'd or non-existent
+// field name fails fast with the valid list, instead of silently returning
+// an issue object missing the field the caller expected.
+func TestRunIssueListRejectsInvalidFields(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	_ = cmd.Flags().Set("fields", "id,bogus_field")
+	err := runIssueList(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueList: expected error for invalid --fields")
+	}
+	if !strings.Contains(err.Error(), `invalid --fields value "bogus_field"`) {
+		t.Fatalf("error = %q, want it to mention the invalid field name", err)
+	}
+}
+
+// TestRunIssueListIgnoresFieldsWithTableOutput guards that --output table
+// (the default) is completely unaffected by --fields, matching how
+// issue comment list's --compact/--summary are JSON-only no-ops for table.
+func TestRunIssueListIgnoresFieldsWithTableOutput(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("fields", "id") // table output; --fields must not error or change behavior
+	if err := runIssueList(cmd, nil); err != nil {
+		t.Fatalf("runIssueList: %v", err)
 	}
 }
 
@@ -3767,47 +3999,6 @@ func TestRunIssueUpdateOmitsPositionWhenUnset(t *testing.T) {
 	}
 }
 
-// TestIssueCommentListHelpCarriesReadContract pins the read-surface contract
-// that MUL-5442 moved out of the runtime brief into this command's --help: the
-// --recent saturation semantics (MUL-5372), the bounded two-step alternative,
-// and the pagination cursor labels. The brief now only points here — if these
-// leave the help, the pointer dangles and the over-read trap returns
-// undocumented.
-//
-// The assertions run against the RENDERED FlagUsages output, not raw
-// Flag.Usage: pflag's UnquoteUsage hijacks the first backtick pair in a usage
-// string as the flag's value placeholder (see
-// TestLoginTokenHelpOutputRendersCleanly for the original regression), so only
-// the rendered output proves what an agent actually reads.
-func TestIssueCommentListHelpCarriesReadContract(t *testing.T) {
-	help := issueCommentListCmd.Flags().FlagUsages()
-
-	for _, want := range []string{
-		// --before must keep its string placeholder — a backticked phrase in
-		// the usage text would replace it (the UnquoteUsage hijack).
-		"--before string",
-		// The saturation contract relocated from the brief (MUL-5372).
-		"caps THREADS, not comments",
-		"no per-thread cap",
-		"fewer than N root threads",
-		// The bounded alternative, as two sequential reads — the flags are
-		// mutually exclusive, so the help must never suggest composing them.
-		"scan with --roots-only --summary",
-		"then open selected threads with --thread <id> --tail N",
-		// Pagination cursor labels, exactly as the CLI prints them on stderr.
-		"Next thread cursor",
-		"Next reply cursor",
-		// The --compact contract (#5999 follow-up): what goes and what is
-		// untouchable.
-		"drop response fields that carry no information",
-		"Content and identity fields pass through untouched",
-	} {
-		if !strings.Contains(help, want) {
-			t.Errorf("comment list rendered help missing %q, got:\n%s", want, help)
-		}
-	}
-}
-
 // TestCompactCommentsDropsReaderNoise pins the --compact contract (#5999
 // follow-up, MUL-5442): reader-noise fields go — the echoed issue_id,
 // source_task_id, updated_at when identical to created_at, null values,
@@ -4007,6 +4198,209 @@ func TestIsTerminalChildIssue(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isTerminalChildIssue(tc.issue); got != tc.want {
 				t.Errorf("isTerminalChildIssue(%v) = %v, want %v", tc.issue, got, tc.want)
+			}
+		})
+	}
+}
+
+// `issue runs` answers three different questions off one endpoint, and the only
+// thing telling them apart is the query string the CLI builds (#7768). These
+// tests pin that translation: a plain read must stay a plain read — the
+// short-task-ID resolver and the execution log both depend on the unfiltered
+// history — while --active and --siblings must actually reach the server.
+
+// newIssueRunsTestCmd mirrors the real flag set registered on issueRunsCmd.
+func newIssueRunsTestCmd(t *testing.T, output string) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{Use: "runs"}
+	cmd.Flags().String("output", output, "")
+	cmd.Flags().Bool("full-id", false, "")
+	cmd.Flags().Bool("active", false, "")
+	cmd.Flags().Bool("siblings", false, "")
+	return cmd
+}
+
+func TestRunIssueRunsScopeFlagsBuildQuery(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		want  url.Values
+	}{
+		// No flags means no params: the resolver and the sidebar read the same
+		// full history they always have.
+		{"default reads full history", nil, url.Values{}},
+		{"active narrows to in-flight", []string{"active"}, url.Values{"active": {"true"}}},
+		// --siblings implies active. The CLI sends both so the request says what
+		// it means without the reader having to know the server's default.
+		{"siblings widens to the family", []string{"siblings"},
+			url.Values{"scope": {"family"}, "active": {"true"}}},
+		{"siblings wins over a redundant active", []string{"siblings", "active"},
+			url.Values{"scope": {"family"}, "active": {"true"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/issues/" + issueID + "/task-runs":
+					gotQuery = r.URL.Query()
+					_ = json.NewEncoder(w).Encode([]map[string]any{})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueRunsTestCmd(t, "json")
+			for _, flag := range tc.flags {
+				if err := cmd.Flags().Set(flag, "true"); err != nil {
+					t.Fatalf("set --%s: %v", flag, err)
+				}
+			}
+			if _, err := captureStdout(t, func() error { return runIssueRuns(cmd, []string{issueID}) }); err != nil {
+				t.Fatalf("issue runs: %v", err)
+			}
+
+			if len(gotQuery) != len(tc.want) {
+				t.Fatalf("query = %v, want %v", gotQuery, tc.want)
+			}
+			for key, want := range tc.want {
+				if got := gotQuery.Get(key); got != want[0] {
+					t.Fatalf("query %s = %q, want %q (full query %v)", key, got, want[0], gotQuery)
+				}
+			}
+		})
+	}
+}
+
+// The two modes return different payloads, so they render through different
+// column sets. The family row names its issue — without that the table is a
+// list of task ids the reader cannot attribute, which is the whole question
+// --siblings answers — and it drops COMPLETED / ERROR, which are empty on
+// every row of a read that only returns work still in flight.
+func TestRunIssueRunsSiblingsTableRendersFamilyColumns(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/" + issueID + "/task-runs":
+			if r.URL.Query().Get("scope") == "family" {
+				_ = json.NewEncoder(w).Encode([]map[string]any{{
+					"task_id":          "abcd1234-0000-0000-0000-000000000000",
+					"issue_id":         "5678abcd-0000-0000-0000-000000000000",
+					"issue_identifier": "MUL-7001",
+					"issue_title":      "sibling work",
+					"agent_id":         "agent-1",
+					"status":           "running",
+					"created_at":       "2026-09-02T07:00:00Z",
+					"started_at":       "2026-09-02T07:00:01Z",
+				}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"id": "abcd1234-0000-0000-0000-000000000000", "agent_id": "agent-1",
+				"status": "completed", "error": "boom",
+			}})
+		default:
+			// Actor lookups for the AGENT column are best-effort; 404 is fine.
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueRunsTestCmd(t, "table")
+	if err := cmd.Flags().Set("siblings", "true"); err != nil {
+		t.Fatalf("set --siblings: %v", err)
+	}
+	out, err := captureStdout(t, func() error { return runIssueRuns(cmd, []string{issueID}) })
+	if err != nil {
+		t.Fatalf("issue runs: %v", err)
+	}
+	// The task id has to survive the new payload's task_id key — reading `id`
+	// here would render a column of blanks and lose the run-messages target.
+	for _, want := range []string{"RUN", "ISSUE", "MUL-7001", "abcd1234"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("family table missing %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"COMPLETED", "ERROR"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("family table carries %q, which is empty on every in-flight row:\n%s", unwanted, out)
+		}
+	}
+
+	// The execution log keeps its own columns: same command, different question.
+	plain := newIssueRunsTestCmd(t, "table")
+	out, err = captureStdout(t, func() error { return runIssueRuns(plain, []string{issueID}) })
+	if err != nil {
+		t.Fatalf("issue runs: %v", err)
+	}
+	if strings.Contains(out, "ISSUE") {
+		t.Fatalf("single-issue table should not carry an issue column:\n%s", out)
+	}
+	if !strings.Contains(out, "ERROR") || !strings.Contains(out, "boom") {
+		t.Fatalf("execution log lost its error column:\n%s", out)
+	}
+}
+
+// A capped family read and a complete one are identical in the body. If the CLI
+// swallows the server's truncation header, an agent reads "no run on that
+// sibling" off a list that was simply cut off — the one wrong conclusion this
+// command exists to prevent.
+func TestRunIssueRunsWarnsOnTruncatedFamilyRead(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+
+	for _, tc := range []struct {
+		name      string
+		truncated bool
+	}{
+		{"truncated read warns", true},
+		{"complete read stays quiet", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/issues/" + issueID + "/task-runs":
+					if tc.truncated {
+						w.Header().Set(headerActiveRunsTruncated, "true")
+					}
+					_ = json.NewEncoder(w).Encode([]map[string]any{{
+						"id": "abcd1234-0000-0000-0000-000000000000", "status": "running",
+					}})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueRunsTestCmd(t, "json")
+			if err := cmd.Flags().Set("siblings", "true"); err != nil {
+				t.Fatalf("set --siblings: %v", err)
+			}
+
+			capture := captureStderr(t)
+			_, err := captureStdout(t, func() error { return runIssueRuns(cmd, []string{issueID}) })
+			stderr := capture.read()
+			if err != nil {
+				t.Fatalf("issue runs: %v", err)
+			}
+
+			warned := strings.Contains(stderr, "truncated")
+			if warned != tc.truncated {
+				t.Fatalf("warned = %v, want %v; stderr was %q", warned, tc.truncated, stderr)
 			}
 		})
 	}

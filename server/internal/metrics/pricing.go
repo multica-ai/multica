@@ -25,10 +25,9 @@ var modelPrices = map[string]ModelPrice{
 	// GPT-5.6 announcement (openai.com/index/previewing-gpt-5-6-sol). For 5.6+
 	// cache read is the 90%-off cached-input rate (0.1x input) and cache write
 	// is billed at 1.25x the uncached input rate — unlike earlier OpenAI SKUs,
-	// which don't bill cache writes separately. NOTE: Codex's app-server usage
-	// stream (0.144.1) does not yet report cache-write tokens separately, so
-	// today those tokens fall into plain input and are billed at 1x; the
-	// CacheWrite rate below is correct but not yet exercised for Codex.
+	// which don't bill cache writes separately. Codex app-server v0.147 reports
+	// cache-write input separately while including it in the raw input total;
+	// the collector normalizes those into mutually exclusive billing buckets.
 	"openai:gpt-5.6-sol":   {Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 30.00},
 	"openai:gpt-5.6-terra": {Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 3.125, OutputPerM: 15.00},
 	"openai:gpt-5.6-luna":  {Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 6.00},
@@ -41,6 +40,7 @@ var modelPrices = map[string]ModelPrice{
 	// static table cannot schedule the published post-intro $3 / $15 change yet,
 	// so keep the intro rate here and update the row when catalog support exists.
 	"anthropic:claude-sonnet-5":   {Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 10.00},
+	"anthropic:claude-fable-5-1":  {Provider: "anthropic", Model: "claude-fable-5-1", InputPerM: 10.00, CacheReadPerM: 0.25, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	"anthropic:claude-fable-5":    {Provider: "anthropic", Model: "claude-fable-5", InputPerM: 10.00, CacheReadPerM: 1.00, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	"anthropic:claude-opus-5":     {Provider: "anthropic", Model: "claude-opus-5", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
 	"anthropic:claude-opus-4.8":   {Provider: "anthropic", Model: "claude-opus-4.8", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
@@ -103,6 +103,32 @@ var modelPrices = map[string]ModelPrice{
 	// a guessed rate (same convention as xAI's `grok-composer-*`).
 }
 
+// claudeVersionEnd terminates a Claude family rule: at most one suffix that
+// the frontend resolver normalizes away, and then the END of the id. Appending
+// it keeps a rule from swallowing a later SKU in the same family — without it
+// `claude-fable-5` also matches `claude-fable-5-1`, whose cache reads are a
+// quarter of Fable 5's, so those reads bill at 4x.
+//
+// The admitted suffixes are exactly what `stripContextTag` and `stripDate`
+// remove in packages/views/runtimes/utils.ts before its exact-key lookup, so
+// both sides accept the same suffix forms. (Only the suffixes: the Claude
+// rules are still substring matches, so a malformed PREFIX is out of scope
+// here.) The trailing `$` is what makes that true and is not optional: these rules are substring matches, so an
+// alternative that merely starts a suffix still matches when arbitrary text
+// follows it (`claude-fable-5-1-latest-preview`, `claude-fable-5-1[1m]junk`),
+// which is the silent tier-borrowing this constant exists to prevent. The
+// bracket form requires a complete tag for the same reason.
+//
+// A date snapshot carrying a context tag (`claude-fable-5-20260401[1m]`) is
+// covered by the tag-stripping retry in PriceForModelAlias, so it does not
+// need a combined alternative here.
+//
+// Anything else — another version digit, a `-preview`-style qualifier — is a
+// distinct SKU at an unknown rate and stays unmapped until it gets a row of
+// its own, the same "every catalog SKU needs its own row" rule the frontend
+// table states.
+const claudeVersionEnd = `(?:-20\d{6}|-20\d{2}-\d{2}-\d{2}|-latest|\[[^\]]+\])?$`
+
 var modelAliasRules = []struct {
 	re       *regexp.Regexp
 	priceKey string
@@ -123,7 +149,12 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]3-codex$`), "openai:gpt-5.3-codex"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]2-codex$`), "openai:gpt-5.2-codex"},
 	{regexp.MustCompile(`claude-sonnet-5|claude-5-sonnet`), "anthropic:claude-sonnet-5"},
-	{regexp.MustCompile(`claude-fable-5`), "anthropic:claude-fable-5"},
+	// Fable 5.1 shares Fable 5's $10 / $50 and $12.50 cache write but prices
+	// cache reads at 0.025x input ($0.25) instead of the standard 0.1x, so it
+	// needs its own row, and both rules end at their own version
+	// (claudeVersionEnd) so neither can swallow the other's ids.
+	{regexp.MustCompile(`claude-fable-5[-.]1` + claudeVersionEnd), "anthropic:claude-fable-5-1"},
+	{regexp.MustCompile(`claude-fable-5` + claudeVersionEnd), "anthropic:claude-fable-5"},
 	{regexp.MustCompile(`claude-opus-5`), "anthropic:claude-opus-5"},
 	{regexp.MustCompile(`claude-opus-4[-.]8`), "anthropic:claude-opus-4.8"},
 	{regexp.MustCompile(`claude-opus-4[-.]7`), "anthropic:claude-opus-4.7"},
@@ -201,7 +232,18 @@ func PriceForModelAlias(model string) (ModelPrice, bool) {
 	// `$`, so without this a bracketed variant would take the unpriced branch
 	// in RecordLLMUsage. Only ever turns a miss into a hit — the raw form is
 	// tried first, so an explicit bracketed rule still wins.
+	//
+	// Exactly ONE tag, matching the frontend: `canonicalCandidates` in
+	// packages/views/runtimes/utils.ts strips a single trailing tag and does
+	// not re-strip the result. Retrying a doubly-tagged id would peel `[2m]`
+	// off `claude-fable-5[1m][2m]` and let the leftover `[1m]` satisfy a rule
+	// that already, correctly, rejected the raw form — the dashboard leaves
+	// that id unmapped, so pricing it here would put two different costs on
+	// one usage row. A second tag means the id is not a shape we recognise.
 	if stripped := contextTagRe.ReplaceAllString(model, ""); stripped != model {
+		if contextTagRe.MatchString(stripped) {
+			return ModelPrice{}, false
+		}
 		return matchModelAlias(stripped)
 	}
 	return ModelPrice{}, false

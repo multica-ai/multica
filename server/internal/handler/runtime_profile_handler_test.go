@@ -105,7 +105,10 @@ VALUES ($1, $2, 'feishu', 'oc_rp', 'p2p')`, rpChat, rpInstallID); err != nil {
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles/"+profileID, nil)
 	req = withURLParams(req, "id", testWorkspaceID, "profileId", profileID)
-	testHandler.DeleteRuntimeProfile(w, req)
+	notifier := &recordingRuntimeGoneNotifier{}
+	h := *testHandler
+	h.DaemonRuntimeGone = notifier
+	h.DeleteRuntimeProfile(w, req)
 
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
@@ -152,6 +155,9 @@ VALUES ($1, $2, 'feishu', 'oc_rp', 'p2p')`, rpChat, rpInstallID); err != nil {
 	if bindingRows != 1 {
 		t.Fatalf("surviving installation's chat-session binding was swept: %d rows", bindingRows)
 	}
+	if len(notifier.runtimeIDs) != 1 || notifier.runtimeIDs[0] != runtimeID {
+		t.Fatalf("runtime-gone notifications = %v, want [%s]", notifier.runtimeIDs, runtimeID)
+	}
 }
 
 // TestDeleteRuntimeProfile_ActiveAgentBlocks confirms the guard still refuses
@@ -170,7 +176,10 @@ func TestDeleteRuntimeProfile_ActiveAgentBlocks(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles/"+profileID, nil)
 	req = withURLParams(req, "id", testWorkspaceID, "profileId", profileID)
-	testHandler.DeleteRuntimeProfile(w, req)
+	notifier := &recordingRuntimeGoneNotifier{}
+	h := *testHandler
+	h.DaemonRuntimeGone = notifier
+	h.DeleteRuntimeProfile(w, req)
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
@@ -188,6 +197,9 @@ func TestDeleteRuntimeProfile_ActiveAgentBlocks(t *testing.T) {
 	}
 	if rtRows != 1 {
 		t.Fatalf("expected runtime to survive 409, found %d", rtRows)
+	}
+	if len(notifier.runtimeIDs) != 0 {
+		t.Fatalf("rollback/refusal emitted runtime-gone notifications: %v", notifier.runtimeIDs)
 	}
 }
 

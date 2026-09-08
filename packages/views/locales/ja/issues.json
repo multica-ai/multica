@@ -1,4 +1,25 @@
 {
+  "inline_run": {
+    "label": "{{name}} の実行",
+    "stop": "停止",
+    "stopping": "停止中...",
+    "queued": "利用可能なエージェントを待っています。",
+    "starting": "エージェントのセッションを準備しています。",
+    "waiting_directory": "別の実行が作業ディレクトリを解放するのを待っています。",
+    "thinking": "思考中",
+    "waiting_response": "エージェントの応答を待っています。",
+    "view_activity": "実行過程を表示",
+    "steps_other": "{{count}} ステップ",
+    "loading": "実行過程を読み込み中...",
+    "load_failed": "実行過程を読み込めませんでした。",
+    "try_again": "再試行",
+    "empty": "実行記録はまだありません。",
+    "show_earlier": "前の {{count}} ステップを表示",
+    "full_log": "完全なログを開く",
+    "message": "エージェントのメッセージ",
+    "error": "エラー",
+    "waiting_result": "ツールの結果を待っています..."
+  },
   "status_catalog_error": {
     "title": "ステータス一覧を読み込めませんでした",
     "hint": "これがないとステータスの絞り込みを適用できないため、タスクは表示されません。",
@@ -68,7 +89,6 @@
   "revision": {
     "conflict": "タスクまたはコメントが変更されました。最新版に更新したので、比較してからもう一度保存してください。",
     "compare_title": "タイトルが同時に変更されました。両方の内容を比較してください。",
-    "compare_description": "説明が同時に変更されました。両方の内容を比較してください。",
     "compare_comment": "コメントが同時に変更されました。両方の内容を比較してください。",
     "server_version": "サーバー上の最新版",
     "local_version": "ローカル版",
@@ -340,7 +360,7 @@
     "quick_action_runs_as": "{{name}} が実行します",
     "quick_action_target_fallback": "このエージェント",
     "quick_action_queued": "{{name}} が作業を開始しました",
-    "quick_action_coalesced": "{{name}} の実行中の作業に追加しました",
+    "quick_action_coalesced": "{{name}} の進行中の実行に追加しました",
     "quick_action_deferred": "{{name}} はオフラインです。復帰後に開始します",
     "quick_action_blocked": "{{name}} を実行できませんでした",
     "quick_action_posted": "コメントを投稿しました",
@@ -403,24 +423,6 @@
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "thread_nav_label": "スレッドへ移動",
     "thread_nav_resolved_label": "{{title}}（解決済み）",
-    "thread_nav": {
-      "button_label_other": "スレッド（{{count}}）",
-      "search_placeholder": "スレッド・作成者を検索",
-      "match_count_other": "{{count}} 件ヒット",
-      "filter_all": "すべて",
-      "filter_unresolved": "未解決",
-      "filter_resolved": "解決済み",
-      "filter_mine": "@自分",
-      "group": {
-        "today": "今日",
-        "yesterday": "昨日",
-        "earlier": "それ以前"
-      },
-      "empty": "一致するスレッドはありません",
-      "hint_select": "選択",
-      "hint_jump": "移動",
-      "hint_close": "閉じる"
-    },
     "sidebar_tooltip": "右サイドバーの開閉",
     "find": {
       "placeholder": "タスク内を検索...",
@@ -456,8 +458,8 @@
     "due_date_removed": "期限を削除しました",
     "title_renamed": "このタスクのタイトルを \"{{from}}\" から \"{{to}}\" に変更しました",
     "description_updated": "説明を更新しました",
-    "task_completed_other": "作業を完了しました（{{count}} 回）",
-    "task_failed_other": "作業が失敗しました（{{count}} 回）",
+    "task_completed_other": "実行を完了しました（{{count}} 回）",
+    "task_failed_other": "実行が失敗しました（{{count}} 回）",
     "squad_leader_evaluated": "スクワッドのトリガーを評価しました",
     "squad_leader_action": "評価してアクションを実行しました",
     "squad_leader_action_reason": "評価してアクションを実行しました: {{reason}}",
@@ -470,6 +472,9 @@
     "show_more_activities_other": "アクティビティをさらに {{count}} 件表示"
   },
   "comment": {
+    "add_reaction": "リアクションを追加",
+    "collapse_thread": "スレッドを折りたたむ",
+    "expand_thread": "スレッドを展開",
     "delete_title": "コメントを削除",
     "delete_desc": "このコメントは完全に削除されます。この操作は元に戻せません。",
     "delete_desc_with_replies": "このコメントとすべての返信が完全に削除されます。この操作は元に戻せません。",
@@ -542,14 +547,14 @@
   },
   "agent_activity": {
     "hover_header_other": "作業中のエージェント {{count}} 件",
-    "hover_header_tasks_other": "実行中の作業 {{count}} 件",
+    "hover_header_tasks_other": "進行中の実行 {{count}} 件",
     "hover_header_queued_other": "待機中のエージェント {{count}} 件",
     "status_running": "作業中",
     "status_queued": "待機中",
     "empty_hover": "現在作業中のエージェントはありません",
     "unknown_hover": "作業中のエージェント: まだ読み込まれていません",
     "filter_active_label": "エージェントが作業中のタスクを表示中",
-    "tasks_count_other": "task {{count}} 件",
+    "tasks_count_other": "実行 {{count}} 件",
     "chip_agents_working_other": "作業中のエージェント {{count}} 件",
     "issues_count_other": "タスク {{count}} 件",
     "chip_agents_working_unknown": "作業中のエージェント: —"
@@ -569,20 +574,20 @@
     "transcript_button": "トランスクリプトを表示",
     "stop_button": "停止",
     "stop_tooltip": "エージェントを停止",
-    "cancel_failed": "作業をキャンセルできませんでした"
+    "cancel_failed": "実行をキャンセルできませんでした"
   },
   "execution_log": {
     "section": "実行ログ",
     "show_past": "過去の実行を表示 ({{count}})",
     "hide_past": "過去の実行を非表示 ({{count}})",
-    "cancel_task_tooltip": "作業をキャンセル",
-    "cancel_task_aria": "作業をキャンセル",
-    "retry_task_tooltip": "作業を再試行",
-    "retry_task_aria": "作業を再試行",
-    "retry_failed": "作業を再試行できませんでした",
+    "cancel_task_tooltip": "実行をキャンセル",
+    "cancel_task_aria": "実行をキャンセル",
+    "retry_task_tooltip": "実行を再試行",
+    "retry_task_aria": "実行を再試行",
+    "retry_failed": "実行を再試行できませんでした",
     "retry_blocked": "再試行されませんでした — このエージェントを使用する権限がありません",
     "transcript_tooltip": "トランスクリプトを表示",
-    "cancel_failed": "作業をキャンセルできませんでした",
+    "cancel_failed": "実行をキャンセルできませんでした",
     "trigger_retry": "再試行",
     "trigger_retry_attempt": "再試行 #{{attempt}}",
     "trigger_retry_attempt_prefix": "再試行 #{{attempt}} · ",
@@ -590,7 +595,6 @@
     "trigger_autopilot": "オートパイロット実行",
     "trigger_comment": "コメントトリガー",
     "trigger_initial": "初回実行",
-    "trigger_handoff_prefix": "引き継ぎ：",
     "included_comments_other": "{{count}} 件のコメントを含む",
     "status_queued": "待機中",
     "status_dispatched": "開始中",
@@ -640,11 +644,11 @@
     "note_estimate": "費用は公開モデル料金からの概算です（プロバイダーが独自の費用を返した分を除く）。"
   },
   "terminate_dialog": {
-    "title": "この作業を停止しますか？",
-    "body": "作業はキャンセルされ、再開できません。",
+    "title": "この実行を停止しますか？",
+    "body": "実行はキャンセルされ、再開できません。",
     "running_note": " 実行中の処理が完全に停止するまで数秒かかる場合があります。",
     "keep": "実行を続ける",
-    "confirm": "作業を停止"
+    "confirm": "実行を停止"
   },
   "batch": {
     "selected": "{{count}} 件選択中",

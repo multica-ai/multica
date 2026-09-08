@@ -20,7 +20,7 @@ When an agent works an issue inside the project, Multica adds the project name, 
 
 The workspace's linked repository list is always included in the run context. Repositories linked to the project additionally specify the code and default ref this body of work uses.
 
-A local directory only applies to the daemon it is bound to. When the daemon running a task has a matching local directory, the agent works directly in that directory; other computers keep using the project's GitHub repositories or the workspace repositories.
+A local directory only applies to the daemon it is bound to. When the daemon executing a run has a matching local directory, the agent works directly in that directory; other computers keep using the project's GitHub repositories or the workspace repositories.
 
 ## Add a GitHub repository
 
@@ -37,16 +37,16 @@ A resource's `ref` sets the branch, tag, or commit that later checkouts use by d
 The UI for adding a local directory is Desktop-only, because browsers cannot pick folders on your computer.
 
 <Callout type="warning">
-**This is an escape hatch, not a more convenient default.** `local_directory` exists for people who have no other option — the canonical case is a game project whose checkout is tens of gigabytes, where re-cloning per task is simply not viable.
+**This is an escape hatch, not a more convenient default.** `local_directory` exists for people who have no other option — the canonical case is a game project whose checkout is tens of gigabytes, where re-cloning per run is simply not viable.
 
-If your directory is an ordinary git repo you can clone, **use `github_repo` instead**: it runs in worktree mode by default, so tasks on the same repo run with unlimited concurrency. A `local_directory` runs **one task at a time by default**; if the directory is a git repo you can opt into worktree mode to get concurrency back (see "How tasks share the directory"). Read "When to pick" below before you commit to it.
+If your directory is an ordinary git repo you can clone, **use `github_repo` instead**: it uses worktree mode by default, allowing unlimited concurrent runs on the same repo. A `local_directory` processes **one run at a time by default**; if the directory is a git repo you can opt into worktree mode to get concurrency back (see "How runs share the directory"). Read "When to pick" below before you commit to it.
 </Callout>
 
 
 1. Make sure Desktop's local daemon is online.
 2. Open the project's **Resources**, or the **Local directory** tab of the create-project dialog — the same choice is available before the project exists.
 3. Choose "Add local directory", then pick the folder to use.
-4. Pick how tasks should use it — **Direct** or **Parallel**, described under "How tasks share the directory". Desktop preselects **Parallel** when the folder is a git repository the runtime on that machine can isolate, and **Direct** otherwise. Change it right there, or later from **Resources** with the pencil next to the directory.
+4. Pick how runs should use it — **Direct** or **Parallel**, described under "How runs share the directory". Desktop preselects **Parallel** when the folder is a git repository the runtime on that machine can isolate, and **Direct** otherwise. Change it right there, or later from **Resources** with the pencil next to the directory.
 
 Preselection applies only to a directory you are linking now. A directory linked earlier keeps the mode it was saved with — an existing setup is never switched under you.
 
@@ -55,39 +55,41 @@ The directory must be an absolute path, must already exist, and must be readable
 Each project can link at most one local directory per daemon. Different computers on a team can each link their own directory for the same project.
 
 <Callout type="warning">
-In the default `in_place` mode a local directory is not an isolated environment: the agent directly sees and modifies your current branch and uncommitted files, and Multica does not automatically switch branches, stash, commit, push, or open PRs. Worktree mode changes this — see "How tasks share the directory" below.
+In the default `in_place` mode a local directory is not an isolated environment: the agent directly sees and modifies your current branch and uncommitted files, and Multica does not automatically switch branches, stash, commit, push, or open PRs. Worktree mode changes this — see "How runs share the directory" below.
 </Callout>
 
-## How tasks share the directory
+<span id="how-tasks-share-the-directory" />
+
+## How runs share the directory
 
 A local directory has two execution modes, set per resource with `execution_mode`. Desktop labels them **Direct** and **Parallel**; the API, the CLI and the rest of this page use the identifiers.
 
 ### `in_place` (default) — "Direct"
 
-The agent works directly in your directory, and tasks run one at a time. When two tasks use the same real directory, the later one enters `waiting_local_directory` and continues after the earlier one releases the directory. Two paths that reach the same directory through different symlinks serialize the same way.
+The agent works directly in your directory, and runs execute one at a time. When two runs use the same real directory, the later one enters `waiting_local_directory` and continues after the earlier one releases the directory. Two paths that reach the same directory through different symlinks serialize the same way.
 
-Waiting does not modify the directory. A waiting task can be cancelled; otherwise it waits until the directory becomes available.
+Waiting does not modify the directory. A waiting run can be cancelled; otherwise it waits until the directory becomes available.
 
 ### `worktree` — "Parallel"
 
-Each task gets its own [git worktree](https://git-scm.com/docs/git-worktree) of your repo, created inside the runtime's own workspace directory. **Tasks on the same directory run concurrently — none of them wait**, and none of them write to your working copy.
+Each run gets its own [git worktree](https://git-scm.com/docs/git-worktree) of your repo, created inside the runtime's own workspace directory. **Runs on the same directory run concurrently — none of them wait**, and none of them write to your working copy.
 
-Requires the directory to be a git repository with at least one commit. If it is not, tasks fail with an explicit error rather than quietly falling back to serial execution. The runtime on that machine must also implement the mode. It declares that when it connects, and Multica gates on the declaration rather than on a version number — a development build can carry a version string that looks new enough while having none of the implementation. The declaration is checked twice: saving the resource is refused, with a hint to update the app on that machine, while its runtime does not declare the capability; and each task is checked again against the runtime that actually claims it — so a machine downgraded after the resource was saved has its tasks cancelled with a reason instead of silently running them in place. Asking for `worktree` is asking for isolation; editing your working copy instead is never the fallback.
+Requires the directory to be a git repository with at least one commit. If it is not, runs fail with an explicit error rather than quietly falling back to serial execution. The runtime on that machine must also implement the mode. It declares that when it connects, and Multica gates on the declaration rather than on a version number — a development build can carry a version string that looks new enough while having none of the implementation. The declaration is checked twice: saving the resource is refused, with a hint to update the app on that machine, while its runtime does not declare the capability; and each run is checked again against the runtime that actually claims it — so a machine downgraded after the resource was saved has its runs cancelled with a reason instead of silently running them in place. Asking for `worktree` is asking for isolation; editing your working copy instead is never the fallback.
 
 What the agent sees, and what you get back:
 
-- **The agent starts from what you see, not from `HEAD`.** Your uncommitted edits and your untracked files are replayed into the worktree, so the agent is not reviewing code you no longer have. Your own working copy, index, and stash list are never touched. If that state cannot be reproduced faithfully — including when there is more untracked content than the replay covers (2000 files / 200 MiB) — the task fails instead of starting from a tree you would not recognise. The usual fix is to gitignore or clean up build output that is not already ignored.
+- **The agent starts from what you see, not from `HEAD`.** Your uncommitted edits and your untracked files are replayed into the worktree, so the agent is not reviewing code you no longer have. Your own working copy, index, and stash list are never touched. If that state cannot be reproduced faithfully — including when there is more untracked content than the replay covers (2000 files / 200 MiB) — the run fails instead of starting from a tree you would not recognise. The usual fix is to gitignore or clean up build output that is not already ignored.
 - **The result is a branch in your repo**, one per issue rather than one per run: `agent/<agent>/<issue>` (a chat gets `agent/<agent>/chat-<session>`). The run's **Run details** panel shows the branch name (and lets you copy it); you can also find it with `git branch`. Review it with `git log` / `git diff`, and merge or cherry-pick it yourself. Multica never merges it for you. A run that failed partway still reports its branch, because it still committed whatever the agent had produced.
 - **A follow-up continues where the last run stopped.** The next comment on the same issue checks that branch out again, so the agent is standing on the work it just delivered instead of starting from `HEAD` with its own changes stranded on another branch. Only what you changed in your own directory since the last run is replayed on top — the branch already carries the rest. Merge the branch and the next run starts from your `HEAD` again. If two runs on one issue overlap, the second one forks from the first's work onto `agent/<agent>/<issue>-<task>`, because git allows one worktree per branch.
 - **If your edits collide with the agent's, the agent resolves them.** When you rewrite the same lines the agent rewrote, git cannot decide which version wins, so the run starts on a conflicted worktree and is told to finish the merge before anything else — `git status` in that worktree lists the unmerged paths. A run that leaves any file unmerged delivers nothing: it fails, keeps the worktree, and the next run offers the same edits again, so your change is never quietly dropped.
-- **Only branches Multica owns are continued.** Continuing a branch is decided by an ownership record, not by its name: the record names the conversation, and it names the commit the branch was left at. A branch you created yourself that happens to be called `agent/<agent>/<issue>` is never checked out, appended to, or read as a previous run — and neither is one that no longer contains the recorded commit, so deleting Multica's branch and making your own under that name, or force-moving it onto other history, is safe. In those cases the task takes `agent/<agent>/<issue>-<id>` instead. Committing on top of a delivered branch is the normal case and keeps it continuing — your commit is simply there in the next run. Every branch also starts with a baseline commit of its own, marking the tree the first run began from — that commit is what identifies the branch later, and `git diff <baseline>..<branch>` is exactly the agent's work. A run that could not record its branch — it failed before finishing, the record could not be written, or it reset its worktree past the commit that carried your edits into the branch — reports failure and keeps its worktree, and later runs start a new branch rather than continuing one they cannot prove is theirs.
-- **Nothing is silently dropped.** Anything the agent leaves uncommitted is committed to that branch before the worktree is removed, including when the task fails partway. In the rare case that commit itself cannot be made — for example a repo with `commit.gpgSign` and no signing key available to the runtime — the worktree is deliberately kept instead of removed, the task is reported as failed, and `git worktree list` in your repo points at the directory holding the work.
-- **A task that changes nothing leaves nothing behind.** Its branch is deleted rather than left as an empty entry in `git branch` — unless it is the issue's branch carrying earlier runs' work, which always survives.
+- **Only branches Multica owns are continued.** Continuing a branch is decided by an ownership record, not by its name: the record names the conversation, and it names the commit the branch was left at. A branch you created yourself that happens to be called `agent/<agent>/<issue>` is never checked out, appended to, or read as a previous run — and neither is one that no longer contains the recorded commit, so deleting Multica's branch and making your own under that name, or force-moving it onto other history, is safe. In those cases the run takes `agent/<agent>/<issue>-<id>` instead. Committing on top of a delivered branch is the normal case and keeps it continuing — your commit is simply there in the next run. Every branch also starts with a baseline commit of its own, marking the tree the first run began from — that commit is what identifies the branch later, and `git diff <baseline>..<branch>` is exactly the agent's work. A run that could not record its branch — it failed before finishing, the record could not be written, or it reset its worktree past the commit that carried your edits into the branch — reports failure and keeps its worktree, and later runs start a new branch rather than continuing one they cannot prove is theirs.
+- **Nothing is silently dropped.** Anything the agent leaves uncommitted is committed to that branch before the worktree is removed, including when the run fails partway. In the rare case that commit itself cannot be made — for example a repo with `commit.gpgSign` and no signing key available to the runtime — the worktree is deliberately kept instead of removed, the run is reported as failed, and `git worktree list` in your repo points at the directory holding the work.
+- **A run that changes nothing leaves nothing behind.** Its branch is deleted rather than left as an empty entry in `git branch` — unless it is the issue's branch carrying earlier runs' work, which always survives.
 
-Because the worktree lives in the runtime's workspace directory, it is reclaimed on the normal cleanup schedule. Two things persist in your repo: the branch, and one hidden ref per branch under `refs/multica/local-state/` recording who owns it and what your directory looked like when it was last continued. The hidden refs never appear in `git branch`; list them with `git for-each-ref refs/multica`. Multica deletes each one with its branch, and drops any whose branch you deleted yourself the next time a task runs on that repo — or you can remove them at once with `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d`.
+Because the worktree lives in the runtime's workspace directory, it is reclaimed on the normal cleanup schedule. Two things persist in your repo: the branch, and one hidden ref per branch under `refs/multica/local-state/` recording who owns it and what your directory looked like when it was last continued. The hidden refs never appear in `git branch`; list them with `git for-each-ref refs/multica`. Multica deletes each one with its branch, and drops any whose branch you deleted yourself the next time a run starts on that repo — or you can remove them at once with `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d`.
 
 <Callout type="warn">
-**Self-hosted operators:** isolation for this mode is enforced by the server (at save time and again when a runtime claims each task), so a runtime downgraded at any point is caught. The combination that is *not* caught is rolling the server back to a build that predates this feature while runtimes that do not implement the mode are still connected — an old server has no gate, and such a runtime ignores `execution_mode` and would run the task in place. Do not roll the server back past this release while `worktree` resources exist unless every runtime on those machines is up to date.
+**Self-hosted operators:** isolation for this mode is enforced by the server (at save time and again when a runtime claims each run), so a runtime downgraded at any point is caught. The combination that is *not* caught is rolling the server back to a build that predates this feature while runtimes that do not implement the mode are still connected — an old server has no gate, and such a runtime ignores `execution_mode` and would execute the run in place. Do not roll the server back past this release while `worktree` resources exist unless every runtime on those machines is up to date.
 </Callout>
 
 <Callout type="info">
@@ -121,7 +123,7 @@ multica project resource add <project-id> \
   --local-path /absolute/path/to/repo \
   --daemon-id <daemon-id>
 
-# Link a local git repo and let tasks run concurrently in their own worktrees
+# Link a local git repo and let runs execute concurrently in their own worktrees
 multica project resource add <project-id> \
   --type local_directory \
   --local-path /absolute/path/to/repo \
@@ -136,10 +138,10 @@ multica project resource update <project-id> <resource-id> --execution-mode in_p
 multica project resource remove <project-id> <resource-id>
 ```
 
-Resource changes affect tasks created afterwards; they do not rewrite records of runs that already ended.
+Resource changes affect runs created afterwards; they do not rewrite records of runs that already ended.
 
 ## Next steps
 
 - [Projects](/projects) — learn about project context, progress, and the lead.
-- [Daemons and runtimes](/daemon-runtimes) — learn which computer picks up a task.
-- [Tasks](/tasks) — see run states such as `waiting_local_directory`.
+- [Daemons and runtimes](/daemon-runtimes) — learn which computer picks up a run.
+- [Runs](/tasks) — see run states such as `waiting_local_directory`.

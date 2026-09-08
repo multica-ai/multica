@@ -237,17 +237,20 @@ func TestTimelineDetail(t *testing.T) {
 func TestTimelineActorSystemWithoutIDRendersType(t *testing.T) {
 	var actors actorDisplayLookup
 
-	if got := timelineActor("system", "", actors, false); got != "system" {
+	if got := timelineActor("system", "", "", actors, false); got != "system" {
 		t.Fatalf("system actor = %q, want %q", got, "system")
 	}
-	if got := timelineActor("", "", actors, false); got != "" {
+	if got := timelineActor("", "", "", actors, false); got != "" {
 		t.Fatalf("empty actor = %q, want empty", got)
 	}
-	if got := timelineActor("member", "abcdefgh1234", actors, false); got != "member:abcdefgh" {
+	if got := timelineActor("member", "abcdefgh1234", "", actors, false); got != "member:abcdefgh" {
 		t.Fatalf("member actor = %q, want member:abcdefgh", got)
 	}
-	if got := timelineActor("member", "abcdefgh1234", actors, true); got != "member:abcdefgh1234" {
+	if got := timelineActor("member", "abcdefgh1234", "", actors, true); got != "member:abcdefgh1234" {
 		t.Fatalf("member actor with --full-id = %q, want the full id", got)
+	}
+	if got := timelineActor("member", "abcdefgh1234", "Former Member", actors, false); got != "member:Former Member" {
+		t.Fatalf("hydrated former member = %q, want member:Former Member", got)
 	}
 }
 
@@ -359,40 +362,6 @@ func TestRunIssueTimelineSilentWhenNotTruncated(t *testing.T) {
 	}
 	if len(stderr) != 0 {
 		t.Fatalf("stderr = %q, want nothing when the response is complete", string(stderr))
-	}
-}
-
-// The help text is the discovery surface: this command is deliberately absent
-// from the runtime brief, so an agent only finds it by scanning `issue --help`
-// for the question it is trying to answer. These anchors are the contract.
-func TestIssueTimelineHelpCarriesDiscoveryContract(t *testing.T) {
-	if want := "how long it has been stuck"; !strings.Contains(issueTimelineCmd.Short, want) {
-		t.Errorf("timeline Short missing %q, got: %s", want, issueTimelineCmd.Short)
-	}
-
-	for _, want := range []string{
-		// Points back at the authoritative current state, so nobody
-		// reconstructs "now" from history.
-		"issue get",
-		"authoritative",
-		// Why comments alone cannot answer this.
-		"never a comment",
-		// The truncation caveat must be discoverable, not just printed.
-		"truncated",
-	} {
-		if !strings.Contains(issueTimelineCmd.Long, want) {
-			t.Errorf("timeline Long missing %q, got:\n%s", want, issueTimelineCmd.Long)
-		}
-	}
-
-	// The action list must stay honest about what the server actually writes;
-	// omitting the task events is what made the first cut of this command
-	// misdescribe --activity-only.
-	help := issueTimelineCmd.Flags().FlagUsages()
-	for _, want := range []string{"task_completed", "task_failed", "status_changed", "Implies --activity-only"} {
-		if !strings.Contains(help, want) {
-			t.Errorf("timeline rendered flag help missing %q, got:\n%s", want, help)
-		}
 	}
 }
 

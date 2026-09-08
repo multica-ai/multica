@@ -466,7 +466,7 @@ func TestPreviewCommentTriggers_ExplicitMentionSuppressesAssigneeFallback(t *tes
 	}
 }
 
-func TestCreateComment_ExplicitMentionKeepsPendingRouteWithoutDuplicateTask(t *testing.T) {
+func TestCreateComment_ExplicitMentionQueuesDifferentThreadsIndependently(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -487,8 +487,8 @@ func TestCreateComment_ExplicitMentionKeepsPendingRouteWithoutDuplicateTask(t *t
 	}
 
 	postCommentForTriggerPreviewTest(t, issueID, map[string]any{"content": content + " again"})
-	if got := countQueuedCommentTriggerTasks(t, issueID, mentionedID); got != 1 {
-		t.Fatalf("duplicate pending mention queued tasks = %d, want 1", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, mentionedID); got != 2 {
+		t.Fatalf("separate thread queued tasks = %d, want 2", got)
 	}
 }
 
@@ -1277,7 +1277,7 @@ func TestPreviewCommentTriggers_MalformedMentionIDDoesNotPanic(t *testing.T) {
 	}
 }
 
-func TestPreviewCommentTriggers_AllSuppressesAssigneeAndPendingDedupes(t *testing.T) {
+func TestPreviewCommentTriggers_AllSuppressesAssigneeAndNewThreadQueuesSeparately(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -1311,8 +1311,8 @@ func TestPreviewCommentTriggers_AllSuppressesAssigneeAndPendingDedupes(t *testin
 	postCommentForTriggerPreviewTest(t, issueID, map[string]any{
 		"content": "can you continue here?",
 	})
-	if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 1 {
-		t.Fatalf("pending assignee create queued tasks = %d, want 1", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 2 {
+		t.Fatalf("assignment and new comment thread queued tasks = %d, want 2", got)
 	}
 }
 

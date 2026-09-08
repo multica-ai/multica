@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica はプロセス起動時に環境変数を読み込みます。変更後は、該当する API・Web・デーモンのプロセスを再起動してください。Docker Compose の `docker compose restart` は `.env` を再読み込みしません。`up -d` でコンテナを再作成して初めて反映されます。
 
-このページにはデプロイ運用者向けの設定のみを載せています。テスト用変数や内部作業用の変数は扱いません。グループ別のリファレンスとして使い、完全なデプロイ手順は[セルフホストクイックスタート](/self-host-quickstart)を参照してください。
+このページにはデプロイ運用者向けの設定のみを載せています。テスト用変数や内部実行用の変数は扱いません。グループ別のリファレンスとして使い、完全なデプロイ手順は[セルフホストクイックスタート](/self-host-quickstart)を参照してください。
 
 ## プロダクションの最小構成
 
@@ -33,6 +33,10 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | ローカルの `multica` データベース | PostgreSQL 接続文字列 |
 | `DATABASE_MAX_CONNS` | `25` | API プロセスあたりの最大データベース接続数 |
 | `DATABASE_MIN_CONNS` | `5` | API プロセスが保持する最小接続数 |
+| `DATABASE_SEARCH_WORK_MEM_MB` | `64` | 検索プランの各ノードに対する PostgreSQL `work_mem` 上限（MB）。`1`～`64` で引き下げ、`0` でデータベース／セッションの既定値を使用 |
+| `DATABASE_REPLICA_URL` | 空 | オプションの PostgreSQL 読み取り専用レプリカ接続文字列。新しい接続では読み取り専用状態が検証され、各機能はコードで結果整合性読み取りを明示的に選択する必要があります |
+| `DATABASE_REPLICA_MAX_CONNS` | `10` | API プロセスあたりの最大レプリカ接続数 |
+| `DATABASE_REPLICA_MIN_CONNS` | `0` | API プロセスが保持する最小レプリカ接続数 |
 | `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | コンテナ起動時に migration と API が共有する、一時的なデータベース障害への再試行時間。`0` にすると各フェーズで 1 回だけ試行します |
 | `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | 起動時の接続試行ごとのフォールバックタイムアウト。pgx ネイティブの `connect_timeout`、`PGCONNECT_TIMEOUT`、service 設定が優先されます |
 | `PORT` | `8080` | API のリッスンポート |
@@ -44,6 +48,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | オフラインのランタイムが処理中の作業を失敗させずに再接続できる猶予時間。`150s` 未満は `150s` に補正されます |
 
 Kubernetes で shutdown hold を設定する場合、`terminationGracePeriodSeconds` は hold と実際のシャットダウンにかかる時間の合計より大きくしてください。
+
+primary とレプリカの接続上限は独立しています。全 API プロセスの合計が PostgreSQL クラスターの接続上限に収まるように設定してください。レプリカ接続はデフォルトで 5 分後に再作成され、昇格後に読み取り専用状態を再検証します。接続失敗時はインフラストラクチャが透過的に primary へフォールバックし、短時間のパッシブサーキットを開きます。バックグラウンドのデータベースプローブは追加されません。アプリケーションはレプリカデータの最大経過時間を保証しないため、データベース層でレプリケーション遅延を監視し、整合性が必要な読み取りは primary に残してください。
 
 ## 公開アドレスとブラウザアクセス
 
@@ -191,7 +197,7 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 
 ## サーバーサイド LLM
 
-このグループは、会話タイトルなどサーバー側の補助生成機能の設定です。エージェントが作業を実行するときに使う AI コーディングツールの資格情報ではありません。
+このグループは、会話タイトルなどサーバー側の補助生成機能の設定です。エージェントの実行時に使う AI コーディングツールの資格情報ではありません。
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
@@ -210,7 +216,7 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 API key と base URL の両方が空の場合、このレイヤーは無効になり、上流へのリクエストを一切行いません。上記 2 つの機能はどちらも何も送信しなくなります。このレイヤーからチャットの内容をデプロイ外へ出せないポリシーでは、これがサポートされた構成です。セッションはクライアントが最初のメッセージから生成したタイトルをそのまま使い、フォローアップ質問のボタンは表示されず、他の機能への影響はありません。
 
 <Callout type="info">
-これは補助生成レイヤーのみに関する説明です。エージェントの実行は別のデータ経路です。エージェントがチャットに応答するとき、デーモンはそのエージェントの AI コーディングツールをツール自身の資格情報で実行し、上記の `MULTICA_LLM_*` 設定をツールへ渡すことはありません。（エージェント自身が必要とする作業単位の Multica 接続用変数は、デーモンが別途注入します。）上記の変数を空にしてもこの経路には影響しないため、エージェントのランタイム設定側で制御してください。
+これは補助生成レイヤーのみに関する説明です。エージェントの実行は別のデータ経路です。エージェントがチャットに応答するとき、デーモンはそのエージェントの AI コーディングツールをツール自身の資格情報で実行し、上記の `MULTICA_LLM_*` 設定をツールへ渡すことはありません。（エージェント自身が必要とする実行単位の Multica 接続用変数は、デーモンが別途注入します。）上記の変数を空にしてもこの経路には影響しないため、エージェントのランタイム設定側で制御してください。
 </Callout>
 
 ## デーモン設定
@@ -222,22 +228,26 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Multica API / WebSocket アドレス。`http(s)` も受け付けます |
 | `MULTICA_DAEMON_DEVICE_NAME` | ホスト名 | ランタイム一覧に表示されるデバイス名 |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | ランタイムの表示名 |
-| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | ウェイクイベントがないときの作業ポーリング間隔 |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | ウェイクイベントがないときの実行ポーリング間隔 |
+| `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | 正常な WebSocket での claim 安全ポーリング上限。`MULTICA_DAEMON_POLL_INTERVAL` とは独立して設定され、下方向のジッターにより既定値は実際には `2m30s`–`2m45s` となり、旧 Server または結果が不確実な claim では通常のポーリング間隔を維持します |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | ハートビート間隔 |
-| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | デーモン 1 つあたりの同時作業上限 |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | デーモン 1 つあたりの同時実行上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 1 回の実行の絶対時間上限。`0` は上限なし |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 出力もツール実行もない状態の静穏上限。`0` で watchdog 全体を無効化 |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG` と同じ | 単一のツール呼び出しが静穏なままでいられる上限。モデルより長い余裕をツールに与えたい場合のみ設定し、`0` はツール実行中に強制停止しません |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG` と同じ | 単一のツール呼び出しが静穏なままでいられる上限。モデルより長い余裕をツールに与えたい場合のみ設定し、`0` はツール実行中に強制停止しません。Cursor のバックグラウンドシェルは、起動したプロセスが終了するまで実行中として扱われます。この上限に達すると、デーモンはそれらのプロセスを停止し、Cursor が最終結果を出すための新しい watchdog 予算を与えます。プロセスの所有権やクリーンアップを検証できない場合は、通常の実行キャンセル方針に従います |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 専用の静穏しきい値 |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `MULTICA_AGENT_IDLE_WATCHDOG` と同じ | Codex のセマンティック静穏しきい値。Codex 自身のタイマーはツール実行中かどうかを判別できないため、独自の短い上限を持たず idle / tool 予算の大きい方に追従します |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Codex 初回ターンの無進捗上限を明示的に上書き；`0` はデフォルトを維持。実効の初回ターン待機は依然として `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` と全体の実行タイムアウトに制限される——`MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` をこの値より厳密に大きく（余裕を持たせて）設定すること。さもないと待機はその値で打ち切られ、モデルカタログの起動リトライがスキップされる。同値では不十分：セマンティックタイマーが先に起動するため、同値の場合でもリトライが失われることがある |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`、`thread/start`・`thread/resume`：`60s` | Codex app-server 起動ハンドシェイクの上限。明示的な値は両方の予算を一括で上書きします |
+| `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | キャンセル後に Codex app-server が `turn/interrupt` を確認し `turn/completed` を送信するまでの猶予時間。プロセスを強制終了する前に最終トークン使用量を保持します。特に遅いホストでは daemon ログに記録された割り込み遅延を基に調整できます |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud は `true`、セルフホストは `false` | CLI の更新を自動でチェックして適用するか |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 更新チェックの間隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 帯域外で置き換えられた `multica` バイナリ（`brew upgrade`、再ダウンロード、ローカルビルド）へ再起動して追従するかどうか。`MULTICA_DAEMON_AUTO_UPDATE` とは独立 |
-| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 作業作業ディレクトリのルート |
+| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 実行用作業ディレクトリのルート |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | Linux/macOS 専用。作業ごとのプライベート一時ディレクトリの親ディレクトリ。既存かつ書き込み可能な絶対パスである必要があり、無効な値の場合は `/tmp` にフォールバックせず作業の開始に失敗します。短いパスを選んでください。子ツールがその配下に AF_UNIX ソケットを作成する場合があり、`sun_path` の上限は Linux で 108 バイト、macOS で 104 バイトです |
-| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | デバッグ用に作業ディレクトリを保持 |
+| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | デバッグ用に実行ディレクトリを保持 |
+
+デーモンがエージェント作業に注入する内部コンテキストについては、[作業ランタイム環境](/daemon-runtimes#作業ランタイム環境)を参照してください。
 
 各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` でコマンドパスを上書きでき、モデル上書き対応ツールでは `MULTICA_<PROVIDER>_MODEL` も利用できます。QwenPaw と MiniMax Code にはモデル変数がなく、MiniMax Code のパス変数は `MULTICA_MCODE_PATH` です。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。ZeroClaw は `MULTICA_ZEROCLAW_PATH` に対応しますが、モデル変数はありません。モデルは ZeroClaw のエージェント設定で管理します。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
 
@@ -245,6 +255,10 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
+
+Cursor の検証済みバックグラウンドクリーンアップには、Linux 6.9 以降（プロセスグループ pidfd）、macOS カーネルによるプロセス識別子の照会と audit token を用いたシグナル送信のサポート、または Windows で正常に割り当てられた入れ子の Job Object が必要です。macOS では各プロセスへのシグナル送信にカーネルが検証する PID version を用いるため、同一セッションのグループに参加する必要はありません。これらの macOS API は非公開であり、プロセス捕捉時に確認されます。所有権を確保できなかったバックグラウンドプロセスは元のツール結果を返し、ツール watchdog が `0` の場合も含めて通常の idle watchdog に従います。すでに所有している作業は、クリーンアップを確認できない場合も実行中のままです。ツール watchdog を `0` にした場合はこの境界自体が存在せず、所有済みのバックグラウンド作業が生きている限り実行は継続します。その場合の実行は `MULTICA_AGENT_TIMEOUT` だけに制限され、これも既定値は `0` です。
+
+所有している Cursor のバックグラウンドプロセスは、実行が正常に完了したときにも停止されます。したがって、その実行が起動したバックグラウンドサーバーが意図的に終了処理後まで生き残ることはありません。macOS は保持された元の親プロセスの識別子によって後から生まれた子プロセスを認識できますが、観測前に中間プロセスが消えた連鎖は証明できません。そのようなプロセス、追跡対象のグループから外れた作業、および継続的な所有権や送信のエラーは、バックグラウンド作業を残す可能性があります。確認できなかったクリーンアップはログに記録され、「クリーンアップ成功」による回復ウィンドウを与えることはありません。数値の PID やプロセスグループだけを根拠に未知のプロセスを終了させることはありません。
 
 優先順位はコマンドラインフラグ → 環境変数 → `~/.multica/config.json` → 組み込みデフォルトです。watchdog の動作は[デーモンとランタイム](/daemon-runtimes)を参照してください。
 
@@ -266,9 +280,10 @@ multica config show
 | `workspace_id` | 空 | デフォルトのワークスペース |
 | `device_name` | ホスト名 | ランタイム一覧に表示されるデバイス名 |
 | `runtime_name` | `Local Agent` | ランタイムの表示名 |
-| `workspaces_root` | `~` 配下のプロファイル別パス | 作業作業ディレクトリのルート |
-| `max_concurrent_tasks` | `20` | 同時作業上限。`0` または空は未設定を意味します |
-| `poll_interval` | `30s` | 作業のポーリング間隔 |
+| `workspaces_root` | `~` 配下のプロファイル別パス | 実行用作業ディレクトリのルート |
+| `max_concurrent_tasks` | `20` | 同時実行上限。`0` または空は未設定を意味します |
+| `poll_interval` | `30s` | 実行のポーリング間隔 |
+| `ws_claim_poll_interval` | `3m` | 正常な WebSocket での claim 安全ポーリング上限。`poll_interval` とは独立して設定され、Daemon は下方向のジッターを適用します |
 | `heartbeat_interval` | `15s` | ハートビート間隔 |
 | `agent_timeout` | 無制限 | 1 回の実行の絶対時間上限 |
 | `codex_semantic_inactivity_timeout` | 派生値 | Codex のセマンティック静穏しきい値。未設定なら idle と tool の watchdog 予算のうち大きい方を採用し、tool 予算が `0` の場合は idle 予算に回帰します。Codex 自身の `10m` が残るのは watchdog 一式を無効化したときだけです |

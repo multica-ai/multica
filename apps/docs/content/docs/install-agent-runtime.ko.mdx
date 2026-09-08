@@ -47,7 +47,7 @@ Multica는 현재 다음 명령을 감지합니다.
 
 설치 후 터미널에서 도구를 한 번 직접 실행하고 도구 자체의 절차에 따라 로그인하거나 모델 서비스를 설정합니다. 터미널에서 요청을 완료하지 못하면 데몬이 호출할 때도 실패합니다.
 
-CodeArts는 TUI뿐 아니라 `codearts run --model provider/model "OK만 응답하세요"`로 비대화형 모드도 확인하세요. 현재 CodeArts CLI에서는 사용자 지정 provider가 TUI에서 동작하더라도 `run`, `models`, `serve`에 여전히 [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html)가 필요할 수 있습니다. Multica는 `~/.codeartsdoer/codearts_cli.json` 또는 `.jsonc`에서 사용자 지정 모델을 찾을 수 있지만, 작업 실행에는 `codearts run`을 사용하므로 해당 인증 요구 사항을 따릅니다.
+CodeArts는 TUI뿐 아니라 `codearts run --model provider/model "OK만 응답하세요"`로 비대화형 모드도 확인하세요. 현재 CodeArts CLI에서는 사용자 지정 provider가 TUI에서 동작하더라도 `run`, `models`, `serve`에 여전히 [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html)가 필요할 수 있습니다. Multica는 `~/.codeartsdoer/codearts_cli.json` 또는 `.jsonc`에서 사용자 지정 모델을 찾을 수 있지만, 실행에는 `codearts run`을 사용하므로 해당 인증 요구 사항을 따릅니다.
 
 Reasonix를 사용할 때는 데몬을 시작하기 전에 `reasonix setup`을 실행해 기본 공급자와 모델을 설정하세요.
 

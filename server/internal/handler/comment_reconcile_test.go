@@ -94,6 +94,8 @@ func TestCompleteTask_ReconcilesMemberCommentPostedDuringRun(t *testing.T) {
 		VALUES ($1, $2, 'member', $3, 'wait, also handle this', 'comment', now() - interval '1 minute')
 	`, issueID, testWorkspaceID, testUserID)
 
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE issue_id=$1 AND id<>$2`, issueID, triggerCommentID)
+
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -287,11 +289,12 @@ func TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent(t *testing.
 		VALUES ($1, $2, 'agent', $3, $4, 'comment')
 		RETURNING id
 	`, issueID, testWorkspaceID, agentA, mention).Scan(&mentionCommentID)
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE id=$1`, mentionCommentID, triggerCommentID)
 	mentionComment, err := testHandler.Queries.GetComment(ctx, util.MustParseUUID(mentionCommentID))
 	if err != nil {
 		t.Fatalf("setup: load mention comment: %v", err)
 	}
-	testHandler.triggerTasksForComment(ctx, issue, mentionComment, nil, "agent", agentA, "", "", nil)
+	testHandler.triggerTasksForComment(ctx, issue, mentionComment, nil, "agent", agentA, "", nil)
 
 	// Drop happened: the mention found no queued task to merge into and an
 	// active (dispatched) task exists, so NO fresh queued follow-up was created.
@@ -493,14 +496,16 @@ func TestConsecutiveCommentsDifferentOriginatorsFullEnqueuePath(t *testing.T) {
 
 	// A's comment → creates the queued task (originator A).
 	cA := insertMemberComment(testUserID, "first, from A")
-	testHandler.triggerTasksForComment(ctx, issue, cA, nil, "member", testUserID, testUserID, "", nil)
+	testHandler.triggerTasksForComment(ctx, issue, cA, nil, "member", testUserID, testUserID, nil)
 	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
 		t.Fatalf("after A's comment expected exactly 1 queued task, got %d", n)
 	}
 
 	// B's comment (different originator) before start → must fold in, NOT drop.
 	cB := insertMemberComment(userB, "second, from B — different user")
-	testHandler.triggerTasksForComment(ctx, issue, cB, nil, "member", userB, userB, "", nil)
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE id=$1`, cB.ID, cA.ID)
+	cB.ParentID = cA.ID
+	testHandler.triggerTasksForComment(ctx, issue, cB, nil, "member", userB, userB, nil)
 
 	// Still exactly one task (bounded concurrency, no unique-index collision).
 	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
@@ -563,6 +568,8 @@ func TestCompleteTask_ReconcilesDispatchedWindowComment(t *testing.T) {
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
 		VALUES ($1, $2, 'member', $3, 'squeezed in before start', 'comment', now() - interval '3 minutes')
 	`, issueID, testWorkspaceID, testUserID)
+
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE issue_id=$1 AND id<>$2`, issueID, triggerCommentID)
 
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -655,6 +662,8 @@ func TestCompleteTask_ReconcilesPreDispatchMergeRaceComment(t *testing.T) {
 	`, agentID, runtimeID, issueID, triggerCommentID, deliveredCoalescedID).Scan(&taskID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
 
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE issue_id=$1 AND id<>$2`, issueID, triggerCommentID)
+
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -713,8 +722,9 @@ func TestCompleteTask_ReconcilesPlannedButUndeliveredComments(t *testing.T) {
 				return id
 			}
 			old1 := insertComment("planned old one", "10 minutes")
-			old2 := insertComment("planned old two", "9 minutes")
+			old2 := insertComment("[@Agent](mention://agent/"+agentID+") planned old two", "9 minutes")
 			trigger := insertComment("planned trigger", "8 minutes")
+			dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE issue_id=$1 AND id<>$2`, issueID, old1)
 			delivered := []string{trigger}
 			if tc.deliveredOldCount > 0 {
 				delivered = append([]string{old1}, delivered...)

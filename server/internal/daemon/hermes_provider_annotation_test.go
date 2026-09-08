@@ -114,26 +114,3 @@ func TestAnnotationCannotChangeMachineDecisions(t *testing.T) {
 		})
 	}
 }
-
-// TestAnnotationAvoidsPersistedRowGuards covers the one reader the test above
-// cannot execute: the SQL text guards in pkg/db/queries/agent.sql, which scan
-// agent_task_queue.error long after the daemon that wrote it is gone. Keep this
-// list in sync with GetLastTaskSession / GetLastChatTaskSession — a hint that
-// matched one of these would quietly exclude healthy sessions from resume.
-func TestAnnotationAvoidsPersistedRowGuards(t *testing.T) {
-	t.Parallel()
-
-	hint := strings.ToLower(hermesProviderUnconfiguredHint)
-	forbidden := []string{
-		"400", "invalid_request_error",
-		"image dimensions exceed max allowed size", "image.source.base64.data",
-		"could not resolve authentication method",
-		"must not be empty", "must be non-empty", "must have non-empty",
-		"non-empty content", "cannot be empty", "should not be empty",
-	}
-	for _, phrase := range forbidden {
-		if strings.Contains(hint, phrase) {
-			t.Errorf("hint contains %q, which a persisted-row resume guard matches on", phrase)
-		}
-	}
-}

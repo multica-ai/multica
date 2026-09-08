@@ -424,8 +424,10 @@ type fakeReader struct {
 }
 
 type fakeChannelChatLifecycle struct {
-	mu      sync.Mutex
-	started []ChannelChatStartedEvent
+	mu                   sync.Mutex
+	started              []ChannelChatStartedEvent
+	generatedSourceTexts []string
+	initializedTitles    []string
 }
 
 func (f *fakeChannelChatLifecycle) ChannelChatStarted(event ChannelChatStartedEvent) {
@@ -433,9 +435,15 @@ func (f *fakeChannelChatLifecycle) ChannelChatStarted(event ChannelChatStartedEv
 	defer f.mu.Unlock()
 	f.started = append(f.started, event)
 }
-func (*fakeChannelChatLifecycle) ChannelChatTitleInitialized(pgtype.UUID, pgtype.UUID, pgtype.UUID, string) {
+func (f *fakeChannelChatLifecycle) ChannelChatTitleInitialized(_ pgtype.UUID, _ pgtype.UUID, _ pgtype.UUID, title string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.initializedTitles = append(f.initializedTitles, title)
 }
-func (*fakeChannelChatLifecycle) GenerateChannelChatTitle(pgtype.UUID, pgtype.UUID, pgtype.UUID, string, string) {
+func (f *fakeChannelChatLifecycle) GenerateChannelChatTitle(_ pgtype.UUID, _ pgtype.UUID, _ pgtype.UUID, _ string, source string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.generatedSourceTexts = append(f.generatedSourceTexts, source)
 }
 
 func (f *fakeReader) GetChatSession(_ context.Context, _ pgtype.UUID) (db.ChatSession, error) {
@@ -509,7 +517,7 @@ func newHarness(t *testing.T) *harness {
 		media:     &fakeMedia{},
 		issues:    &fakeIssues{},
 		tasks:     &fakeTasks{},
-		reader:    &fakeReader{ws: db.Workspace{IssuePrefix: "MUL"}},
+		reader:    &fakeReader{ws: db.Workspace{IssuePrefix: "MUL", Slug: "demo-web"}},
 		lifecycle: &fakeChannelChatLifecycle{},
 	}
 	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{Logger: discardLogger(), Lifecycle: h.lifecycle})
@@ -1066,7 +1074,7 @@ func TestRouter_IssueCommand_Creates(t *testing.T) {
 	}
 	if !waitFor(time.Second, func() bool {
 		for _, r := range h.replier.calls() {
-			if r.IssueIdentifier == "MUL-42" && r.IssueTitle == "Fix login" {
+			if r.IssueIdentifier == "MUL-42" && r.IssueWorkspaceSlug == "demo-web" && r.IssueTitle == "Fix login" {
 				return true
 			}
 		}
@@ -1134,7 +1142,7 @@ func TestRouter_IssueCommand_ActiveDuplicateIsTerminalProductOutcome(t *testing.
 	}
 	if !waitFor(time.Second, func() bool {
 		for _, result := range h.replier.calls() {
-			if result.IssueDuplicate && result.IssueID == duplicate.ID && result.IssueIdentifier == "MUL-44" && result.IssueTitle == duplicate.Title {
+			if result.IssueDuplicate && result.IssueID == duplicate.ID && result.IssueIdentifier == "MUL-44" && result.IssueWorkspaceSlug == "demo-web" && result.IssueTitle == duplicate.Title {
 				return true
 			}
 		}
