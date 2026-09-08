@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -43,14 +44,11 @@ func dupRaceFixture(t *testing.T, agentName string, issueNumber int) (agentID, i
 
 func insertDupRaceComment(t *testing.T, issueID, content, age string) string {
 	t.Helper()
-	var id string
-	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
-		VALUES ($1, $2, 'member', $3, $4, 'comment', now() - $5::interval)
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID, content, age).Scan(&id); err != nil {
-		t.Fatalf("insert comment %q: %v", content, err)
-	}
+	// These race cases compete for the same thread slot.
+	var parentID *string
+	dbfx.QueryRow(t, `SELECT (SELECT id::text FROM comment WHERE issue_id=$1 AND parent_id IS NULL ORDER BY created_at, id LIMIT 1)`, issueID).Scan(&parentID)
+	id := dbfx.Comment(t, issueID, content, testutil.Cols{"parent_id": parentID})
+	dbfx.Exec(t, `UPDATE comment SET created_at=now()-$2::interval WHERE id=$1`, id, age)
 	return id
 }
 
@@ -396,7 +394,7 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 	if _, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, util.MustParseUUID(winnerCommentID)); err != nil {
 		t.Fatalf("enqueue winning task: %v", err)
 	}
-	// Losing comment authored by M2.
+	// Losing comment authored by M2 in the same thread.
 	var loserCommentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
@@ -405,6 +403,8 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 	`, issueID, testWorkspaceID, m2).Scan(&loserCommentID); err != nil {
 		t.Fatalf("insert M2 loser comment: %v", err)
 	}
+
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE id=$1`, loserCommentID, winnerCommentID)
 
 	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
 	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(loserCommentID), []commentAgentTrigger{trigger})

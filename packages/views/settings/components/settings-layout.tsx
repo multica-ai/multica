@@ -47,7 +47,9 @@ export function SettingsSection({
       {title || description || action ? (
         <div className="flex min-w-0 items-end justify-between gap-4 px-0.5">
           <div className="min-w-0">
-            {title ? <h3 className="text-body font-semibold">{title}</h3> : null}
+            {title ? (
+              <h3 className="text-body font-semibold">{title}</h3>
+            ) : null}
             {description ? (
               <p className="mt-1 text-caption leading-5 text-muted-foreground">
                 {description}
@@ -119,8 +121,15 @@ export function SettingsRow({
   return (
     <div
       className={cn(
-        "flex min-h-16 flex-col gap-3 px-4 py-3.5 sm:flex-row sm:justify-between sm:gap-8",
-        align === "center" ? "sm:items-center" : "sm:items-start",
+        "flex min-h-16 gap-4 px-4 py-3.5 sm:justify-between sm:gap-8",
+        size ? "flex-col sm:flex-row" : "flex-row justify-between",
+        align === "center"
+          ? size
+            ? "sm:items-center"
+            : "items-center"
+          : size
+            ? "sm:items-start"
+            : "items-start",
         className,
       )}
     >
@@ -134,7 +143,8 @@ export function SettingsRow({
       </div>
       <div
         className={cn(
-          "w-full shrink-0 sm:w-auto sm:max-w-[56%]",
+          "shrink-0 sm:w-auto sm:max-w-[56%]",
+          size ? "w-full" : "w-auto max-w-[56%]",
           size ? SETTINGS_CONTROL_WIDTHS[size] : undefined,
         )}
       >

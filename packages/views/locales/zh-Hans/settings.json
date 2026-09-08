@@ -127,7 +127,12 @@
     "sticky_comment_bar": {
       "title": "固定评论栏",
       "hint": "滚动任务页面时，评论栏始终固定在底部。"
-    }
+    },
+    "description": "调整你在 Multica 中的使用偏好。",
+    "issue_title": "任务创建",
+    "comments_title": "评论",
+    "device_hint": "保存在当前设备上。",
+    "issue_scope": "这些偏好仅对当前设备上的当前工作区生效，只影响创建任务时显示的字段。"
   },
   "shortcuts": {
     "title": "快捷键",
@@ -182,10 +187,6 @@
       "findInIssue": {
         "label": "在任务中查找",
         "description": "搜索当前打开的任务详情。"
-      },
-      "openThreadNav": {
-        "label": "打开讨论导航",
-        "description": "列出、搜索并跳转当前任务的评论讨论。"
       },
       "archiveInboxItem": {
         "label": "归档通知",
@@ -343,7 +344,16 @@
       "plugins": "Plugins",
       "mcp": "MCP",
       "billing": "账单与套餐"
-    }
+    },
+    "groups": {
+      "personal": "个人设置",
+      "workspace": "工作区管理",
+      "issues": "任务配置",
+      "connections": "连接与扩展",
+      "device": "桌面应用"
+    },
+    "navigate": "前往设置页面",
+    "device_scope": "当前设备"
   },
   "plugins": {
     "title": "Plugins",
@@ -1304,5 +1314,21 @@
     "expiry_7d": "7 天",
     "expiry_30d": "30 天",
     "expiry_never": "永久有效"
+  },
+  "integrations": {
+    "description": "连接常用工具，分别管理每项集成。",
+    "code_title": "代码与仓库",
+    "messaging_title": "消息渠道",
+    "apps_title": "我的应用连接",
+    "apps_scope": "这些应用连接属于你的账号。工作区的消息渠道连接在上方管理。",
+    "github_hint": "连接 GitHub，配置拉取请求关联。",
+    "vcs_hint": "连接 GitLab、Gitea 或 Forgejo。",
+    "apps_hint": "通过 Composio 为智能体授权应用。",
+    "back": "全部集成",
+    "status_connected": "已连接",
+    "status_not_connected": "未连接",
+    "status_loading": "正在检查...",
+    "status_unknown": "状态暂不可用",
+    "channel_hint": "在 {{channel}} 中与智能体对话、创建任务。"
   }
 }

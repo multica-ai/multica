@@ -502,3 +502,43 @@ func TestEnrichResolvesMentionsInChildren(t *testing.T) {
 		t.Errorf("child mention not resolved: %q", out.Body)
 	}
 }
+
+func TestEnrichSelectedContextSurvivesBareControl(t *testing.T) {
+	for _, command := range []string{"/new", "/clear"} {
+		for _, unavailable := range []bool{false, true} {
+			t.Run(command+map[bool]string{false: "/quote", true: "/unavailable"}[unavailable], func(t *testing.T) {
+				fake := newEnricherFake()
+				fake.byID["parent"] = []LarkMessage{textMsg("parent", "author", "selected text", "1000")}
+				if unavailable {
+					fake.errByID["parent"] = errors.New("unavailable")
+				}
+				out := enrich(t, fake, InboundMessage{MessageType: "text", Body: command, CommandBody: command, ParentID: "parent"}, InboundEnricherConfig{})
+				normalized := channelMessageFromLark(out)
+				if !normalized.HasSelectedContext || normalized.CommandText != command || !strings.Contains(normalized.Text, "<quoted_message ") || strings.Contains(normalized.Text, command) || normalized.ForceFresh != (command == "/clear") {
+					t.Fatalf("selected Lark control = %+v", normalized)
+				}
+			})
+		}
+	}
+	fake := newEnricherFake()
+	fake.byChat["group"] = []LarkMessage{textMsg("recent", "author", "recent only", "1000")}
+	out := enrich(t, fake, InboundMessage{MessageType: "text", ChatType: ChatTypeGroup, ChatID: "group", AddressedToBot: true, Body: "/clear", CommandBody: "/clear"}, InboundEnricherConfig{RecentContextSize: 5})
+	if out.HasSelectedContext {
+		t.Fatal("automatic recent history must not count as sender-selected input")
+	}
+}
+
+func TestEnrichForwardMarksSelectedContext(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		fake := newEnricherFake()
+		fake.byID["forward"] = []LarkMessage{{MessageID: "forward", MessageType: "merge_forward"}, textMsg("child", "sender", "selected forward", "1000")}
+		if failed {
+			fake.errByID["forward"] = errors.New("unavailable")
+		}
+		out := enrich(t, fake, InboundMessage{MessageID: "forward", MessageType: "merge_forward"}, InboundEnricherConfig{})
+		normalized := channelMessageFromLark(out)
+		if !normalized.HasSelectedContext || !strings.Contains(normalized.Text, "<forwarded_messages") {
+			t.Fatalf("forward selection or original format lost: %+v", normalized)
+		}
+	}
+}

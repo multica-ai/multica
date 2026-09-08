@@ -18,6 +18,9 @@ import (
 var concurrentIndexNamePattern = regexp.MustCompile(
 	`(?i)CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z0-9_]+)`)
 
+var pgBigmConcurrentIndexPattern = regexp.MustCompile(
+	`(?is)CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b[^;]*\bgin_bigm_ops\b`)
+
 // stripSQLLineComments drops `--` comment lines so prose that mentions SQL is
 // not mistaken for SQL.
 func stripSQLLineComments(body []byte) []byte {
@@ -83,6 +86,30 @@ func TestEveryConcurrentDownBuildHasCleanup(t *testing.T) {
 // `CREATE`), so the check belongs here rather than in review.
 func TestEveryConcurrentUpBuildHasCleanup(t *testing.T) {
 	assertEveryConcurrentBuildHasCleanup(t, "up", concurrentIndexCleanups)
+}
+
+// pg_bigm is optional, so every rollback that names its operator class in a
+// concurrent build must be gated. Otherwise a pg_bigm-less self-hosted database
+// can fail during startup merely because an operator class is unavailable.
+func TestEveryPGBigmConcurrentDownBuildHasCondition(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "migrations", "*.down.sql"))
+	if err != nil {
+		t.Fatalf("glob down migrations: %v", err)
+	}
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("%s: read: %v", path, err)
+			continue
+		}
+		if !pgBigmConcurrentIndexPattern.Match(stripSQLLineComments(body)) {
+			continue
+		}
+		version := strings.TrimSuffix(filepath.Base(path), ".down.sql")
+		if downMigrationConditions[version] == nil {
+			t.Errorf("%s: builds a pg_bigm index concurrently on down but has no down condition", version)
+		}
+	}
 }
 
 func assertEveryConcurrentBuildHasCleanup(t *testing.T, direction string, cleanups map[string]string) {

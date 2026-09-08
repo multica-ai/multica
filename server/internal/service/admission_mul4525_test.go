@@ -93,9 +93,9 @@ func TestRerunIssueBlockedBeforeMutationWhenInvokeDenied(t *testing.T) {
 }
 
 // TestAutopilotDispatchAdmitsClickerNotCreator is the acceptance test for
-// MUL-4525 §3: a MANUAL "run now" admits on the CURRENT clicker's invoke
-// permission (not the autopilot creator's), while automation (no human actor)
-// still falls back to the creator gate. The two must not fork.
+// MUL-4525 §3: a MANUAL "run now" admits on the invoke permission of the human
+// who ordered it (not the autopilot creator's), while a dispatch that resolves
+// no principal at all is refused. The two must not fork.
 func TestAutopilotDispatchAdmitsClickerNotCreator(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
@@ -127,20 +127,32 @@ func TestAutopilotDispatchAdmitsClickerNotCreator(t *testing.T) {
 	}
 	svc := &AutopilotService{Queries: q}
 
-	// Manual dispatch by the agent owner (the clicker) is admitted.
+	// Manual dispatch by the agent owner is admitted. actorUserID is the human who
+	// ORDERED the run — the clicking member, or the originator an agent acts for;
+	// the handler resolves and authorizes it (requireAutopilotTriggerInvoker) before
+	// this gate ever sees it.
 	if reason, _, skip := svc.shouldSkipDispatch(ctx, ap, util.MustParseUUID(ownerID), pgtype.UUID{}); skip {
 		t.Fatalf("manual dispatch by the agent owner should be admitted, got skip: %q", reason)
 	}
 
-	// Automation (no human actor) resolves the trigger's creator (MUL-6951). With
-	// no trigger id there is no principal at all, so it denies — and the typed
-	// reason code is decided at that branch, not guessed from text.
+	// Neither an actor nor a trigger: no principal exists to judge, so the gate
+	// denies. This argument shape reaches the service only from an automation path
+	// that lost its trigger — the manual entry point is refused upstream (#8078).
+	//
+	// The reason must NOT blame a trigger owner here. Until #8078 it did, and
+	// because a manual "run now" passes exactly this pair (no member actor, no
+	// trigger row), every agent-initiated trigger reported a broken trigger owner
+	// for a trigger that never existed — which is what made the regression cost a
+	// day to diagnose. Assert the phrasing, not just the skip.
 	reason, code, skip := svc.shouldSkipDispatch(ctx, ap, pgtype.UUID{}, pgtype.UUID{})
 	if !skip {
-		t.Fatalf("automation dispatch with no resolvable principal should be blocked")
+		t.Fatalf("dispatch with no resolvable principal should be blocked")
 	}
-	if !strings.Contains(strings.ToLower(reason), "trigger") {
-		t.Errorf("automation skip reason = %q, want the trigger-principal phrasing", reason)
+	if !strings.Contains(strings.ToLower(reason), "no authorizing human") {
+		t.Errorf("no-principal skip reason = %q, want the no-authorizing-human phrasing", reason)
+	}
+	if strings.Contains(strings.ToLower(reason), "trigger's owner") {
+		t.Errorf("no-principal skip reason = %q, must not blame a trigger row that does not exist", reason)
 	}
 	if code != dispatch.ReasonInvocationNotAllowed {
 		t.Errorf("skip reason_code = %q, want invocation_not_allowed", code)

@@ -72,7 +72,7 @@ func (h *Handler) shouldSuppressActiveSelfAssignment(ctx context.Context, actorT
 	if actorType != "agent" || actorID == "" || actorID != uuidToString(targetAgentID) {
 		return false
 	}
-	active, err := h.hasActiveTaskForIssueAndAgent(ctx, issueID, targetAgentID)
+	active, err := h.Queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{IssueID: issueID, AgentID: targetAgentID})
 	return active || err != nil
 }
 

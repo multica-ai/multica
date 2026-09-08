@@ -900,3 +900,155 @@ func TestRelativeTimestampAt(t *testing.T) {
 		})
 	}
 }
+
+// TestAutopilotRunStarted pins the success whitelist for a manual trigger.
+//
+// Before #8078 the CLI printed "Autopilot triggered" and exited 0 for every
+// response the server returned, including a `skipped` run that dispatched
+// nothing — so an operator, and any agent running the command on their behalf,
+// read success and moved on. Success must therefore be an explicit start
+// status, never "anything that is not skipped or failed": the run schema accepts
+// any status string for forward compatibility, so an unknown one has to read as
+// "did not start". Mirrors runNowToastKind on the web client.
+func TestAutopilotRunStarted(t *testing.T) {
+	cases := []struct {
+		status string
+		want   bool
+	}{
+		{"issue_created", true},
+		{"running", true},
+		{"skipped", false},
+		{"failed", false},
+		{"pending", false},
+		{"completed", false},
+		{"", false},
+		// A status this build has never heard of must not be reported as a
+		// successful trigger.
+		{"deferred", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.status, func(t *testing.T) {
+			if got := autopilotRunStarted(tc.status); got != tc.want {
+				t.Errorf("autopilotRunStarted(%q) = %v, want %v", tc.status, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAutopilotWriteRequestError_SurfacesRefusalToTheUser is the same
+// assertion for the other autopilot writes (create / update / delete /
+// trigger-*), which refuse for the same reasons a trigger does: an agent whose
+// run records no human, or whose human holds nothing here.
+//
+// It runs the real cli.FormatError for the same reason: FormatError collapses
+// every 403 into "no access", which for an agent caller is a statement about
+// the WRONG person — the fact worth printing is that the refusal belongs to
+// whoever asked (MUL-7108).
+func TestAutopilotWriteRequestError_SurfacesRefusalToTheUser(t *testing.T) {
+	forbidden := func(body string) error {
+		return &cli.HTTPError{
+			Method:     "PATCH",
+			Path:       "/api/autopilots/x",
+			StatusCode: 403,
+			Body:       body,
+		}
+	}
+
+	cases := []struct {
+		name     string
+		body     string
+		wantText string
+	}{
+		{
+			name:     "no originator names the missing human",
+			body:     `{"error":"no human authorized this change: the calling run records no originator","code":"autopilot_no_originator"}`,
+			wantText: "no originating human",
+		},
+		{
+			name:     "forbidden names who may manage the autopilot",
+			body:     `{"error":"only the autopilot creator, a workspace admin, or a granted collaborator can manage this autopilot","code":"autopilot_forbidden"}`,
+			wantText: "granted collaborator",
+		},
+		{
+			// create's refusal is a different fact: nobody is being told to
+			// go get a collaborator grant they could not hold anyway.
+			name:     "non-member names the workspace, not a grant",
+			body:     `{"error":"the person this run acts for is not a member of this workspace","code":"autopilot_actor_not_member"}`,
+			wantText: "not a member of this workspace",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := autopilotWriteRequestError("update autopilot", forbidden(tc.body))
+			got := cli.FormatError(err, false)
+			if !strings.Contains(got, tc.wantText) {
+				t.Errorf("output = %q, want it to contain %q", got, tc.wantText)
+			}
+			if cli.ExitCodeFor(err) == 0 {
+				t.Error("a refused write must not exit 0")
+			}
+		})
+	}
+
+	// A 403 this command has not opted into keeps the deliberately vague copy,
+	// and the action name still says which call failed.
+	t.Run("unrecognized 403 keeps the generic copy", func(t *testing.T) {
+		err := autopilotWriteRequestError("delete autopilot", forbidden(`{"error":"some other resource is off limits"}`))
+		got := cli.FormatError(err, false)
+		if strings.Contains(got, "some other resource is off limits") {
+			t.Errorf("output = %q, must not echo an un-opted-in 403 body", got)
+		}
+		if !strings.Contains(err.Error(), "delete autopilot") {
+			t.Errorf("error = %q, want it to name the failed action", err.Error())
+		}
+	})
+}
+
+// TestAutopilotTriggerRequestError_SurfacesRefusalToTheUser is the end-to-end
+// assertion for what a person (or an agent reading its own output) actually sees
+// when a manual trigger is refused.
+//
+// It runs the real cli.FormatError, because the defect it guards is precisely
+// that FormatError collapses a 403 into generic "no access" copy: the handler
+// can name the cause perfectly and the user still learns nothing. Asserting only
+// that the code was matched would not catch a regression in that collapse.
+func TestAutopilotTriggerRequestError_SurfacesRefusalToTheUser(t *testing.T) {
+	forbidden := func(body string) error {
+		return &cli.HTTPError{
+			Method:     "POST",
+			Path:       "/api/autopilots/x/trigger",
+			StatusCode: 403,
+			Body:       body,
+		}
+	}
+
+	t.Run("no originator names the missing human", func(t *testing.T) {
+		err := autopilotTriggerRequestError(forbidden(
+			`{"error":"no human authorized this trigger: the calling run records no originator","code":"autopilot_trigger_no_originator"}`))
+		got := cli.FormatError(err, false)
+		if !strings.Contains(got, "no originating human") {
+			t.Errorf("output = %q, want it to name the missing originator", got)
+		}
+		if cli.ExitCodeFor(err) == 0 {
+			t.Error("a refused trigger must not exit 0")
+		}
+	})
+
+	t.Run("forbidden names who may trigger", func(t *testing.T) {
+		got := cli.FormatError(autopilotTriggerRequestError(forbidden(
+			`{"error":"only the autopilot creator, a workspace admin, or a granted collaborator can trigger this autopilot","code":"autopilot_trigger_forbidden"}`)), false)
+		if !strings.Contains(got, "granted collaborator") {
+			t.Errorf("output = %q, want it to name who may trigger", got)
+		}
+	})
+
+	// A 403 this command has not opted into keeps the deliberately vague copy:
+	// the opt-out is per-code, not "surface every 403 body".
+	t.Run("unrecognized 403 keeps the generic copy", func(t *testing.T) {
+		got := cli.FormatError(autopilotTriggerRequestError(forbidden(
+			`{"error":"some other resource is off limits"}`)), false)
+		if strings.Contains(got, "some other resource is off limits") {
+			t.Errorf("output = %q, must not echo an un-opted-in 403 body", got)
+		}
+	})
+}

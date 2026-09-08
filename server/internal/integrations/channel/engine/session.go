@@ -359,9 +359,19 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 
 // AppendInput is the channel-agnostic input for AppendUserMessage. Body is the
 // full stored text (including any platform enrichment); CommandText is the
-// user's OWN typed text used for `/issue` parsing (empty falls back to Body) —
-// the adapter supplies it because enrichment is platform-specific. ClaimToken
-// is the dedup owner-fence: when valid, the Mark runs inside this method's tx.
+// user's OWN typed text, used for `/issue` parsing AND for first-title
+// selection (empty falls back to Body) — the adapter supplies it because
+// enrichment is platform-specific. ClaimToken is the dedup owner-fence: when
+// valid, the Mark runs inside this method's tx.
+//
+// With ForceFresh set, CommandText must carry the WHOLE original source
+// INCLUDING the leading /clear directive rather than the bare directive:
+// chatTitleSource consumes exactly one already-applied directive from it, so a
+// bare "/clear" leaves nothing behind and the Chat silently keeps an empty
+// title. Router-driven channels satisfy this because Router never rewrites
+// CommandText for /clear; an adapter handling a native slash command has
+// already split the two and must rejoin them (slackDMControlStarter's
+// ClearSlackDMContext is the one such caller today).
 //
 // MessageID and ThreadID are the REAL platform message id and thread id of this
 // trigger — the outbound reply target recorded on the binding (last_message_id /
@@ -392,8 +402,12 @@ type StartSessionInput struct {
 	EnsureSessionInput
 	// Initiator is the authenticated sender of the /new command. Sender in the
 	// embedded EnsureSessionInput remains the owner of the newly created Chat.
-	Initiator              pgtype.UUID
-	Body                   string
+	Initiator pgtype.UUID
+	Body      string
+	// CommandText is the current member-authored instruction before adapter
+	// context enrichment. It is used only for the initial Chat title; Body
+	// remains the canonical persisted/agent-visible content.
+	CommandText            string
 	MessageID              string
 	DedupMessageID         string
 	ThreadID               string
@@ -468,7 +482,7 @@ func (s *ChatSession) StartSession(ctx context.Context, in StartSessionInput) (S
 
 	title := ""
 	if in.PersistMessage {
-		title = deriveFirstMessageTitle(in.Body, in.MediaPendingSeconds > 0)
+		title = deriveFirstMessageTitle(chatTitleSource(in.Body, in.CommandText, false), in.MediaPendingSeconds > 0)
 	}
 	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
 		ID: dbid.NewV7(), WorkspaceID: in.WorkspaceID, AgentID: in.AgentID,
@@ -645,7 +659,7 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	becameVisible := cmd == nil && !hadPublicUserMessage && !currentSession.ExplicitlyCreatedAt.Valid
 	initializedTitle := ""
 	if cmd == nil {
-		title := deriveFirstMessageTitle(in.Body, in.MediaPendingSeconds > 0)
+		title := deriveFirstMessageTitle(chatTitleSource(in.Body, in.CommandText, in.ForceFresh), in.MediaPendingSeconds > 0)
 		if becameVisible {
 			if _, err := qtx.ReplaceImplicitChatSessionTitle(ctx, db.ReplaceImplicitChatSessionTitleParams{ID: in.SessionID, Title: title}); err != nil {
 				return AppendResult{}, fmt.Errorf("replace implicit chat title: %w", err)

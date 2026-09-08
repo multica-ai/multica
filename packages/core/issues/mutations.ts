@@ -1137,3 +1137,19 @@ export function useUnsubscribeFromIssueSubtree(issueId: string) {
     },
   });
 }
+
+export function useCancelIssueRun(issueId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) => api.cancelTask(issueId, taskId),
+    onSuccess: () => client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
+  });
+}
+
+export function useRetryIssueRun(issueId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) => api.rerunIssue(issueId, taskId),
+    onSuccess: () => client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
+  });
+}

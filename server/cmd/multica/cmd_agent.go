@@ -874,15 +874,20 @@ func runAgentTasks(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	output, _ := cmd.Flags().GetString("output")
+	path := "/api/agents/" + args[0] + "/tasks"
+	if output == "json" {
+		path += "?include_usage=true"
+	}
+
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var tasks []map[string]any
-	if err := client.GetJSON(ctx, "/api/agents/"+args[0]+"/tasks", &tasks); err != nil {
+	if err := client.GetJSON(ctx, path, &tasks); err != nil {
 		return fmt.Errorf("list agent runs: %w", err)
 	}
 
-	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, tasks)
 	}

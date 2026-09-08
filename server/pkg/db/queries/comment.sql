@@ -381,6 +381,8 @@ LIMIT 1;
 -- the first.
 SELECT * FROM comment
 WHERE issue_id = @issue_id
+  AND (id = ANY(@planned_comment_ids::uuid[])
+       OR comment_thread_root_id(id) = sqlc.narg('comment_thread_id')::uuid)
   AND (
       (
           author_type IN ('member', 'agent')

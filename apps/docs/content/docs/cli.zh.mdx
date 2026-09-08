@@ -224,8 +224,8 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 
 | 命令 | 子命令 | 用途 | 关键 flag |
 | --- | --- | --- | --- |
-| `issue` | `list` | 列出任务 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（可重复）、`--property`（可重复，`"名称=值"`；`__none__` 匹配未设置）、`--limit`、`--offset`、`--sort`（支持 `property:<名称或 id>`）、`--full-id` |
-| | `get <id>` | 查看单个任务 | |
+| `issue` | `list` | 列出任务 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（可重复）、`--property`（可重复，`"名称=值"`；`__none__` 匹配未设置）、`--limit`、`--offset`、`--sort`（支持 `property:<名称或 id>`）、`--full-id`、`--resolve-properties`（仅 JSON；在保存的 id 旁附上属性、选项和成员名称） |
+| | `get <id>` | 查看单个任务 | `--resolve-properties`（仅 JSON；在保存的 id 旁附上属性、选项和成员名称） |
 | | `create` | 创建任务 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重复） |
 | | `update <id>` | 更新任务字段 | 与 `create` 同类字段，另有 `--position`、`--no-start` |
 | | `assign <id>` | 指派或取消指派 | `--to`（名称模糊匹配成员、智能体或小队）、`--to-id`、`--unassign`、`--no-start` |

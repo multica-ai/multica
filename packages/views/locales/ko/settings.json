@@ -127,7 +127,12 @@
     "sticky_comment_bar": {
       "title": "댓글 입력창 고정",
       "hint": "태스크 페이지를 스크롤할 때 댓글 입력창을 항상 하단에 고정합니다."
-    }
+    },
+    "description": "Multica 사용 환경을 맞춤 설정합니다.",
+    "issue_title": "태스크 생성",
+    "comments_title": "댓글",
+    "device_hint": "현재 기기에 저장됩니다.",
+    "issue_scope": "이 설정은 현재 기기의 현재 워크스페이스에 적용되며 태스크 생성 시 표시되는 필드만 변경합니다."
   },
   "shortcuts": {
     "title": "키보드 단축키",
@@ -182,10 +187,6 @@
       "findInIssue": {
         "label": "태스크에서 찾기",
         "description": "열린 태스크 상세 내용에서 검색합니다."
-      },
-      "openThreadNav": {
-        "label": "스레드 내비게이터 열기",
-        "description": "열린 태스크의 댓글 스레드를 나열하고 검색해 이동합니다."
       },
       "archiveInboxItem": {
         "label": "알림 보관",
@@ -343,7 +344,16 @@
       "plugins": "Plugins",
       "mcp": "MCP",
       "billing": "결제 및 요금제"
-    }
+    },
+    "groups": {
+      "personal": "개인 설정",
+      "workspace": "워크스페이스 관리",
+      "issues": "태스크 설정",
+      "connections": "연결 및 확장",
+      "device": "데스크톱 앱"
+    },
+    "navigate": "설정 페이지로 이동",
+    "device_scope": "현재 기기"
   },
   "plugins": {
     "title": "Plugins",
@@ -1304,5 +1314,21 @@
     "byo_credentials_unverifiable": "WeCom에 연결하지 못해 이 봇을 확인할 수 없었어요. 인증 정보는 변경되지 않았어요. 잠시 후 다시 시도해 주세요.",
     "byo_install_failed": "봇을 저장하지 못했어요. 저희 쪽 문제입니다. 인증 정보는 변경되지 않았어요. 다시 시도해 보시고, 계속 실패하면 지원팀에 문의해 주세요.",
     "byo_failed_toast": "WeCom 봇을 연결하지 못했어요"
+  },
+  "integrations": {
+    "description": "도구를 연결하고 각 연동을 관리하세요.",
+    "code_title": "코드 및 저장소",
+    "messaging_title": "메시지 채널",
+    "apps_title": "내 앱 연결",
+    "apps_scope": "이 앱 연결은 내 계정에 속합니다. 워크스페이스 채널 연결은 위에서 관리합니다.",
+    "github_hint": "GitHub를 연결하고 풀 리퀘스트 연결을 설정합니다.",
+    "vcs_hint": "GitLab, Gitea 또는 Forgejo를 연결합니다.",
+    "apps_hint": "Composio를 통해 에이전트용 앱을 승인합니다.",
+    "back": "모든 연동",
+    "status_connected": "연결됨",
+    "status_not_connected": "연결되지 않음",
+    "status_loading": "확인 중...",
+    "status_unknown": "상태를 확인할 수 없음",
+    "channel_hint": "{{channel}}에서 에이전트와 대화하고 태스크를 생성합니다."
   }
 }

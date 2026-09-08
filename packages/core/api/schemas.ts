@@ -1738,6 +1738,7 @@ const TaskUsageSchema = z.object({
 }).loose();
 
 export const AgentTaskSchema = z.object({
+  cancelled_by_comment_change: z.boolean().optional().catch(undefined),
   id: z.string(),
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),

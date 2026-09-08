@@ -33,6 +33,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | 本地 `multica` 数据库 | PostgreSQL 连接地址 |
 | `DATABASE_MAX_CONNS` | `25` | 单个 API 进程的最大数据库连接数 |
 | `DATABASE_MIN_CONNS` | `5` | 单个 API 进程保留的最小连接数 |
+| `DATABASE_SEARCH_WORK_MEM_MB` | `64` | 每个搜索计划算子的 PostgreSQL `work_mem` 上限（MB）；设为 `1`–`64` 可调低，设为 `0` 则沿用数据库/会话默认值 |
 | `DATABASE_REPLICA_URL` | 空 | 可选的 PostgreSQL 只读从库连接地址；新连接会强制校验只读状态，业务仍需在代码中显式选择最终一致读取 |
 | `DATABASE_REPLICA_MAX_CONNS` | `10` | 单个 API 进程的最大从库连接数 |
 | `DATABASE_REPLICA_MIN_CONNS` | `0` | 单个 API 进程保留的最小从库连接数 |
@@ -233,11 +234,12 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 单个守护进程的并发运行上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 单次执行的绝对时限；`0` 表示不设置 |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 没有输出且没有工具执行时的静默上限；`0` 表示整套 watchdog 关闭 |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | 单个工具调用持续静默的上限；只有希望工具比模型有更多余量时才单独设置，`0` 表示工具执行期间永不强制停止 |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | 单个工具调用持续静默的上限；只有希望工具比模型有更多余量时才单独设置，`0` 表示工具执行期间永不强制停止。Cursor 的后台 shell 在它启动的进程退出前一直算作执行中；到达这个上限时，守护进程会停止这些进程，并给 Cursor 一段新的 watchdog 预算来产出终态结果。若进程归属或清理无法验证，则回到普通的运行取消策略 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 专用静默阈值 |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | Codex 语义静默阈值。Codex 自己的计时器看不到工具是否在执行，因此跟随 idle / tool 预算中较大的那个，而不再单独保留一个更短的上限 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | 显式覆盖 Codex 首轮无进展上限；`0` 保持默认值。实际首轮等待仍受 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 和总执行超时限制——需将 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 设为严格大于此值（并留出余量），否则等待会被截断至该值，且会跳过模型目录启动重试。设为相等还不够：语义计时器先启动，两者相等时仍可能丢失该重试 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 启动握手上限；显式设置后会统一覆盖两类预算 |
+| `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | 任务取消后等待 Codex app-server 确认 `turn/interrupt` 并发出 `turn/completed` 的宽限期，以便在强制清理进程前保留最终 token 用量。主机异常缓慢时，可根据 daemon 日志记录的中断延迟调整 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自托管 `false` | 是否自动检查并更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 检查更新的间隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二进制被带外替换（`brew upgrade`、重新下载、本地构建）后重启到新二进制。与 `MULTICA_DAEMON_AUTO_UPDATE` 相互独立 |
@@ -253,6 +255,10 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
+
+Cursor 已验证的后台清理需要 Linux 6.9 及以上（进程组 pidfd）、macOS 内核对进程身份查询与 audit token 发信号的支持，或 Windows 上成功分配的嵌套 Job Object。在 macOS 上，每个进程都按内核校验的 PID version 发信号，不需要加入同一 session 的进程组；这些 macOS 接口是私有的，会在捕获时做探测。无法认领的后台启动会返回它原本的工具结果并回到普通的 idle watchdog，工具 watchdog 为 `0` 时同样如此。已经认领的工作在清理无法确认时会继续算作执行中。当工具 watchdog 设为 `0` 时则完全没有这个边界：已认领的后台工作只要还活着就一直让运行处于执行中，此时运行仅受 `MULTICA_AGENT_TIMEOUT` 约束，而它默认也是 `0`。
+
+运行正常结束时，被认领的 Cursor 后台进程同样会被停止，因此该次运行启动的后台服务不会有意地在收尾之后继续存活。macOS 可以通过保留的原始父进程身份识别后期产生的子进程，但无法证明中间进程在被观察到之前就已消失的那条链路。这类进程、离开被追踪进程组的工作，以及持续的归属或发信号错误，都可能留下残余的后台工作。未确认的清理会被记录下来，且永远不会换取一次「清理成功」的恢复窗口；不会仅凭数字 PID 或进程组就去杀掉未知进程。
 
 优先级为命令行 flag → 环境变量 → `~/.multica/config.json` → 内置默认。watchdog 的行为见[守护进程与运行时](/daemon-runtimes)。
 
