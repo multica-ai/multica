@@ -1413,7 +1413,13 @@ func isACPSessionNotFound(err error) bool {
 	if !isACPSessionErrorCode(rpcErr.Code) {
 		return false
 	}
-	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
+	return acpSessionNotFoundWording(strings.ToLower(rpcErr.Message + " " + rpcErr.Data))
+}
+
+// acpSessionNotFoundWording is the wording half of isACPSessionNotFound, split
+// out so isACPResumeRejected can run it over text it has already scrubbed of
+// request-shaped complaints. Callers pass lower-cased Message+Data.
+func acpSessionNotFoundWording(text string) bool {
 	return strings.Contains(text, "session not found") ||
 		strings.Contains(text, "no session found") ||
 		strings.Contains(text, "unknown session")

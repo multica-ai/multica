@@ -34,9 +34,6 @@ import (
 // no literal in the original set matched, so a conversation pinned to a dead
 // id retried it forever.
 func isACPResumeRejected(err error) bool {
-	if isACPSessionNotFound(err) {
-		return true
-	}
 	var rpcErr *acpRPCError
 	if !errors.As(err, &rpcErr) {
 		return false
@@ -58,7 +55,19 @@ func isACPResumeRejected(err error) bool {
 	// own "session" would otherwise satisfy the noun half of every error this
 	// RPC can produce and quietly turn the predicate into the exclusion rule
 	// the doc above rejects.
-	return acpSessionUnusableRe.MatchString(strings.ToLower(rpcErr.Message + " " + rpcErr.Data))
+	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
+	// Delete request-shaped complaints before matching rather than returning
+	// false on sight of one. A message can carry both — "invalid session
+	// request: session not found" — and vetoing the whole string would throw
+	// away a real rejection sitting next to a complaint about our own call.
+	//
+	// This runs BEFORE both wording checks, which is why the isACPSessionNotFound
+	// literals are consulted through acpSessionNotFoundWording rather than by
+	// calling the helper on the raw error: "unknown session" is one of those
+	// literals, so "unknown session capability requested" would otherwise be
+	// answered true before the scrub ever ran.
+	text = acpSessionRequestComplaintRe.ReplaceAllString(text, " ")
+	return acpSessionNotFoundWording(text) || acpSessionUnusableRe.MatchString(text)
 }
 
 // acpSessionUnusableRe matches a runtime saying the session id itself is no
@@ -68,6 +77,7 @@ func isACPResumeRejected(err error) bool {
 //	unknown session <id>                         (Reasonix — verdict, then noun)
 //	Session not found                            (Hermes — noun, then verdict)
 //	session ses_abc does not exist               (noun, id, then verdict)
+//	No session found with id ses_abc             (Kiro — the "no <noun> found" shape)
 //
 // The verdict-first form demands the noun IMMEDIATELY after the verdict, and the
 // noun-first form allows only an "id"/"identifier" word and one id-shaped token
@@ -80,9 +90,28 @@ func isACPResumeRejected(err error) bool {
 // is explicitly documented never to flag, and matching one does not merely waste
 // a retry: it retires a live conversation's pointer and forks it irreversibly.
 // TestIsACPResumeRejected pins every one of them as a negative.
+//
+// The "no <noun> found" alternative is deliberately spelled out here even
+// though isACPSessionNotFound already matches that literal: that helper keeps
+// its error-code gate, so relying on it for this shape would quietly reinstate
+// the code dependency this predicate exists without. Kiro's real frame is
+// -32603 and would pass the gate anyway; the point is that the wording alone
+// decides, for every shape and not just the ones in the regex.
 var acpSessionUnusableRe = regexp.MustCompile(
 	`(no such|unknown|invalid|expired|unrecogni[sz]ed|nonexistent|missing)\s+(session|conversation|thread)` +
+		`|no\s+(session|conversation|thread)\s+found` +
 		`|(session|conversation|thread)(\s+(id|identifier))?(\s+"?[\w-]+"?)?\s+(is\s+)?(not found|does not exist|doesn't exist|no longer exists|expired|invalid|unknown|unrecogni[sz]ed)`)
+
+// acpSessionRequestComplaintRe matches the one verdict-first shape that is NOT
+// about the recorded session: a generic noun after it turns the phrase into a
+// complaint about the call we just made. "Invalid session parameters: cwd must
+// be absolute", "invalid session request" and "unknown session capability
+// requested" all say our request was malformed, not that the transcript is
+// gone — and a fresh session would fail identically, after the pointer had
+// already been retired. Reaching one of these needs a client-side bug first,
+// which is why it is a stop-list rather than a redesign.
+var acpSessionRequestComplaintRe = regexp.MustCompile(
+	`(no such|unknown|invalid|expired|unrecogni[sz]ed|nonexistent|missing)\s+(session|conversation|thread)\s+(params?|parameters?|request|requests|config|configuration|option|options|capability|capabilities|mode|setup)`)
 
 // setupFailureWithholdsSessionID reports whether a run that failed during setup
 // — after session/new, before session/prompt — must report an empty SessionID

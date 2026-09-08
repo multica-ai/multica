@@ -129,6 +129,41 @@ func TestIsACPResumeRejected(t *testing.T) {
 			want: false,
 		},
 		{
+			// Steve's re-review nit: a generic noun after the verdict turns the
+			// phrase into a complaint about the call we just made, not about
+			// the recorded session. A fresh session would fail identically —
+			// after the pointer had already been retired.
+			name: "invalid session parameters is about our request",
+			err:  &acpRPCError{Method: "session/resume", Code: -32602, Message: "Invalid session parameters: cwd must be absolute"},
+			want: false,
+		},
+		{
+			name: "invalid session request is about our request",
+			err:  &acpRPCError{Method: "session/load", Code: -32602, Message: "invalid session request"},
+			want: false,
+		},
+		{
+			name: "unknown session capability is about our request",
+			err:  &acpRPCError{Method: "session/resume", Code: -32602, Message: "unknown session capability requested"},
+			want: false,
+		},
+		{
+			// The stop-list deletes the complaint rather than vetoing the whole
+			// message, so a real rejection sitting next to one still counts.
+			name: "request complaint alongside a real rejection still counts",
+			err:  &acpRPCError{Method: "session/resume", Code: -32602, Message: "invalid session request: session not found"},
+			want: true,
+		},
+		{
+			// Kiro's wording, under a code OUTSIDE the accepted set. It matches
+			// via the regex rather than via isACPSessionNotFound, which keeps
+			// its code gate — otherwise this predicate's code-independence
+			// would silently not hold for the three inherited literals.
+			name: "kiro no-session-found wording under an unusual code",
+			err:  &acpRPCError{Method: "session/load", Code: -32099, Message: "Internal error", Data: "No session found with id ses_abc"},
+			want: true,
+		},
+		{
 			// Captured by hand from qodercli 1.0.20 (`--yolo --acp`, not logged
 			// in): session/resume answers with this before it ever looks the id
 			// up. Proof that this RPC really does surface errors with nothing to
