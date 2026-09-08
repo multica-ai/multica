@@ -37,7 +37,10 @@ import (
 )
 
 const (
-	defaultAPIBase = "https://api.github.com"
+	apiBaseEnv         = "GITHUB_API_URL"
+	defaultAPIBase     = "https://api.github.com"
+	graphQLBaseEnv     = "GITHUB_GRAPHQL_URL"
+	defaultGraphQLBase = "https://api.github.com/graphql"
 	// Renew an installation token this long before it actually expires so an
 	// in-flight request never races the expiry boundary. GitHub tokens live
 	// one hour.
@@ -59,12 +62,18 @@ func (e *RateLimitError) Error() string {
 // *Client is a valid "feature disabled" value — every method the refresh
 // pipeline calls tolerates it — so a deployment without a GitHub App private
 // key degrades cleanly (acceptance criterion 4).
+//
+// The two roots are configured separately because they only coincide on
+// github.com: a GitHub Enterprise Server instance serves REST from
+// https://HOST/api/v3 and GraphQL from https://HOST/api/graphql, so deriving
+// one from the other would produce an endpoint that does not exist.
 type Client struct {
-	appID      string
-	privateKey *rsa.PrivateKey
-	apiBase    string
-	httpClient *http.Client
-	now        func() time.Time
+	appID       string
+	privateKey  *rsa.PrivateKey
+	apiBase     string
+	graphQLBase string
+	httpClient  *http.Client
+	now         func() time.Time
 
 	mu     sync.Mutex
 	tokens map[int64]cachedToken
@@ -79,7 +88,8 @@ type cachedToken struct {
 	expiry time.Time
 }
 
-// NewClientFromEnv builds a Client from GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY.
+// NewClientFromEnv builds a Client from GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY,
+// pointed at the roots configured by GITHUB_API_URL and GITHUB_GRAPHQL_URL.
 //
 //   - Both unset → (nil, nil): the App API is simply not configured for this
 //     deployment; the caller degrades the whole feature off.
@@ -96,13 +106,25 @@ func NewClientFromEnv() (*Client, error) {
 		return nil, fmt.Errorf("parse GITHUB_APP_PRIVATE_KEY: %w", err)
 	}
 	return &Client{
-		appID:      appID,
-		privateKey: key,
-		apiBase:    defaultAPIBase,
-		httpClient: &http.Client{Timeout: 20 * time.Second},
-		now:        time.Now,
-		tokens:     map[int64]cachedToken{},
+		appID:       appID,
+		privateKey:  key,
+		apiBase:     rootFromEnv(apiBaseEnv, defaultAPIBase),
+		graphQLBase: rootFromEnv(graphQLBaseEnv, defaultGraphQLBase),
+		httpClient:  &http.Client{Timeout: 20 * time.Second},
+		now:         time.Now,
+		tokens:      map[int64]cachedToken{},
 	}, nil
+}
+
+// rootFromEnv reads a configured API root, falling back to the api.github.com
+// default when the variable is unset or blank. A trailing slash is dropped so
+// the value concatenates cleanly with endpoint paths.
+func rootFromEnv(name, fallback string) string {
+	configured := strings.TrimSpace(os.Getenv(name))
+	if configured == "" {
+		return fallback
+	}
+	return strings.TrimRight(configured, "/")
 }
 
 // Enabled reports whether the App API is configured. A nil client is disabled.
@@ -222,8 +244,7 @@ func (c *Client) graphQL(ctx context.Context, installationID int64, query string
 	if err != nil {
 		return nil, err
 	}
-	endpoint := strings.TrimRight(c.apiBase, "/") + "/graphql"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.graphQLBase, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}

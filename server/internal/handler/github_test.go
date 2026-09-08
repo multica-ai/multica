@@ -2373,6 +2373,74 @@ func TestListGitHubInstallationRepositoriesRejectsCrossWorkspaceRow(t *testing.T
 	}
 }
 
+// TestGitHubAPIBaseFromEnv pins the resolution of GITHUB_API_URL: an
+// unset or blank variable must keep api.github.com, so deployments that never
+// configure it are unaffected, and a configured root is normalized by dropping
+// the trailing slash callers would otherwise double up.
+func TestGitHubAPIBaseFromEnv(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{name: "unset_keeps_default", env: "", want: "https://api.github.com"},
+		{name: "blank_keeps_default", env: "   ", want: "https://api.github.com"},
+		{
+			name: "enterprise_server_root",
+			env:  "https://github.example.com/api/v3",
+			want: "https://github.example.com/api/v3",
+		},
+		{
+			name: "trailing_slash_trimmed",
+			env:  "https://github.example.com/api/v3/",
+			want: "https://github.example.com/api/v3",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(githubAPIBaseEnv, tc.env)
+			if got := githubAPIBaseFromEnv(); got != tc.want {
+				t.Errorf("githubAPIBaseFromEnv() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFetchInstallationAccount_UsesConfiguredAPIBase verifies that a
+// configured API root reaches the App-authenticated call intact, path prefix
+// included: a GitHub Enterprise Server root such as
+// `https://github.example.com/api/v3` must produce
+// `/api/v3/app/installations/{id}`, not `/app/installations/{id}`.
+func TestFetchInstallationAccount_UsesConfiguredAPIBase(t *testing.T) {
+	pemBytes, _ := generateTestRSAKeyPEM(t)
+	t.Setenv("GITHUB_APP_ID", "11111")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", string(pemBytes))
+
+	const wantInstallationID int64 = 4242
+	var sawPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath = r.URL.Path
+		writeJSON(w, http.StatusOK, map[string]any{
+			"account": map[string]any{"login": "enterprise-org", "type": "Organization"},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Setenv(githubAPIBaseEnv, srv.URL+"/api/v3/")
+	oldBase := githubAPIBase
+	githubAPIBase = githubAPIBaseFromEnv()
+	t.Cleanup(func() { githubAPIBase = oldBase })
+
+	login, _, _ := fetchInstallationAccount(context.Background(), wantInstallationID)
+	if login != "enterprise-org" {
+		t.Errorf("login = %q, want enterprise-org", login)
+	}
+	wantPath := fmt.Sprintf("/api/v3/app/installations/%d", wantInstallationID)
+	if sawPath != wantPath {
+		t.Errorf("request path = %q, want %q", sawPath, wantPath)
+	}
+}
+
 // TestFetchInstallationAccount_AuthenticatedPopulatesRow simulates the
 // GitHub `/app/installations/{id}` endpoint with a JWT-gated mock and
 // verifies that fetchInstallationAccount, when fully configured,

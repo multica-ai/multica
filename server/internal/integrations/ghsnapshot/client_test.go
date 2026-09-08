@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,15 @@ import (
 	"time"
 )
 
+func testPrivateKeyPEM(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
+}
+
 func newTestClient(t *testing.T, apiBase string) *Client {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -22,12 +32,13 @@ func newTestClient(t *testing.T, apiBase string) *Client {
 		t.Fatal(err)
 	}
 	return &Client{
-		appID:      "123",
-		privateKey: key,
-		apiBase:    apiBase,
-		httpClient: &http.Client{Timeout: 5 * time.Second},
-		now:        time.Now,
-		tokens:     map[int64]cachedToken{},
+		appID:       "123",
+		privateKey:  key,
+		apiBase:     apiBase,
+		graphQLBase: apiBase + "/graphql",
+		httpClient:  &http.Client{Timeout: 5 * time.Second},
+		now:         time.Now,
+		tokens:      map[int64]cachedToken{},
 	}
 }
 
@@ -193,13 +204,112 @@ func TestNewClientFromEnv(t *testing.T) {
 		}
 	})
 	t.Run("valid key enables the client", func(t *testing.T) {
-		key, _ := rsa.GenerateKey(rand.Reader, 2048)
-		pemBytes := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 		t.Setenv("GITHUB_APP_ID", "1")
-		t.Setenv("GITHUB_APP_PRIVATE_KEY", string(pemBytes))
+		t.Setenv("GITHUB_APP_PRIVATE_KEY", testPrivateKeyPEM(t))
 		c, err := NewClientFromEnv()
 		if err != nil || !c.Enabled() {
 			t.Fatalf("got (%v, %v), want enabled client", c, err)
 		}
 	})
+}
+
+// TestNewClientFromEnvResolvesAPIRoots pins the resolution of both roots: unset
+// or blank keeps api.github.com, so deployments that never configure them are
+// unaffected, and a configured root is normalized by dropping the trailing
+// slash callers would otherwise double up.
+func TestNewClientFromEnvResolvesAPIRoots(t *testing.T) {
+	cases := []struct {
+		name        string
+		apiURL      string
+		graphQLURL  string
+		wantAPI     string
+		wantGraphQL string
+	}{
+		{
+			name:        "unset keeps the defaults",
+			wantAPI:     "https://api.github.com",
+			wantGraphQL: "https://api.github.com/graphql",
+		},
+		{
+			name:        "blank keeps the defaults",
+			apiURL:      "   ",
+			graphQLURL:  "   ",
+			wantAPI:     "https://api.github.com",
+			wantGraphQL: "https://api.github.com/graphql",
+		},
+		{
+			name:        "enterprise server roots",
+			apiURL:      "https://github.example.com/api/v3",
+			graphQLURL:  "https://github.example.com/api/graphql",
+			wantAPI:     "https://github.example.com/api/v3",
+			wantGraphQL: "https://github.example.com/api/graphql",
+		},
+		{
+			name:        "trailing slash trimmed",
+			apiURL:      "https://github.example.com/api/v3/",
+			graphQLURL:  "https://github.example.com/api/graphql/",
+			wantAPI:     "https://github.example.com/api/v3",
+			wantGraphQL: "https://github.example.com/api/graphql",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GITHUB_APP_ID", "1")
+			t.Setenv("GITHUB_APP_PRIVATE_KEY", testPrivateKeyPEM(t))
+			t.Setenv(apiBaseEnv, tc.apiURL)
+			t.Setenv(graphQLBaseEnv, tc.graphQLURL)
+
+			c, err := NewClientFromEnv()
+			if err != nil {
+				t.Fatalf("NewClientFromEnv: %v", err)
+			}
+			if c.apiBase != tc.wantAPI {
+				t.Errorf("apiBase = %q, want %q", c.apiBase, tc.wantAPI)
+			}
+			if c.graphQLBase != tc.wantGraphQL {
+				t.Errorf("graphQLBase = %q, want %q", c.graphQLBase, tc.wantGraphQL)
+			}
+		})
+	}
+}
+
+// TestEnterpriseServerRootsStaySeparate proves the two roots never bleed into
+// each other on a GitHub Enterprise Server instance, where REST lives under
+// /api/v3 and GraphQL under /api/graphql: the token mint must reach
+// /api/v3/app/installations/{id}/access_tokens and the query /api/graphql,
+// never /api/v3/graphql.
+func TestEnterpriseServerRootsStaySeparate(t *testing.T) {
+	const installationID int64 = 4242
+	var tokenPath, queryPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/access_tokens") {
+			tokenPath = r.URL.Path
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"token":"ghs_secret","expires_at":"` +
+				time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `"}`))
+			return
+		}
+		queryPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"data":{"ok":true}}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("GITHUB_APP_ID", "1")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", testPrivateKeyPEM(t))
+	t.Setenv(apiBaseEnv, srv.URL+"/api/v3")
+	t.Setenv(graphQLBaseEnv, srv.URL+"/api/graphql")
+
+	c, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("NewClientFromEnv: %v", err)
+	}
+	if _, err := c.graphQL(context.Background(), installationID, "query{}", nil); err != nil {
+		t.Fatalf("graphQL: %v", err)
+	}
+	if want := fmt.Sprintf("/api/v3/app/installations/%d/access_tokens", installationID); tokenPath != want {
+		t.Errorf("token path = %q, want %q", tokenPath, want)
+	}
+	if want := "/api/graphql"; queryPath != want {
+		t.Errorf("query path = %q, want %q", queryPath, want)
+	}
 }
