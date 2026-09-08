@@ -314,14 +314,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				b.cfg.Logger.Warn("qoder set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("qoder could not switch to model %q: %v", opts.Model, err)
-				if opts.ResumeSessionID == "" {
-					// A fresh session that never reached session/prompt has no
-					// conversation worth resuming, and the runtime may never have
-					// persisted it at all — qodercli exits without writing one.
-					// Publishing its id can only pin a ghost pointer that every
-					// later turn then fails to resume (GH #8116), so withhold it.
-					// Nothing is lost: there is no transcript behind an id that
-					// never ran a prompt.
+				if setupFailureWithholdsSessionID(opts) {
 					sessionID = ""
 				} else if isACPSessionNotFound(err) {
 					// On a resumed session with a model override, the dead

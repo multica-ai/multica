@@ -68,6 +68,57 @@ func TestIsACPResumeRejected(t *testing.T) {
 			want: false,
 		},
 		{
+			// The eight below are the shapes a looser adjacency window let
+			// through: ordinary English error prose that happens to put a
+			// verdict word and the word "session" a few tokens apart while
+			// meaning something entirely different. Four are auth or unknown
+			// failures, which Result.ResumeRejected is documented never to
+			// flag; matching any of them forks a live conversation.
+			name: "unknown error while loading session",
+			err:  &acpRPCError{Method: "session/resume", Code: -32603, Message: "unknown error while loading session"},
+			want: false,
+		},
+		{
+			name: "unknown error restoring a named session",
+			err:  &acpRPCError{Method: "session/resume", Code: -32603, Message: "unknown error restoring session ses_abc"},
+			want: false,
+		},
+		{
+			name: "invalid token for session",
+			err:  &acpRPCError{Method: "session/load", Code: -32602, Message: "invalid token for session ses_abc"},
+			want: false,
+		},
+		{
+			name: "invalid credentials for this session",
+			err:  &acpRPCError{Method: "session/load", Code: -32603, Message: "invalid credentials for this session"},
+			want: false,
+		},
+		{
+			name: "sessionid is the wrong type",
+			err:  &acpRPCError{Method: "session/resume", Code: -32602, Message: "Invalid params: sessionId must be a string"},
+			want: false,
+		},
+		{
+			name: "missing cwd reported against a session",
+			err:  &acpRPCError{Method: "session/load", Code: -32603, Message: "cwd does not exist for session ses_abc"},
+			want: false,
+		},
+		{
+			name: "session config option rejected",
+			err:  &acpRPCError{Method: "session/load", Code: -32602, Message: "session config option invalid"},
+			want: false,
+		},
+		{
+			name: "model rejected inside a session",
+			err:  &acpRPCError{Method: "session/resume", Code: -32602, Message: "session ses_abc: model gpt-x invalid"},
+			want: false,
+		},
+		{
+			name: "session id spelled out before the verdict",
+			err:  &acpRPCError{Method: "session/resume", Code: -32602, Message: "session ses_abc does not exist"},
+			want: true,
+		},
+		{
 			name: "provider rate limit during resume",
 			err:  &acpRPCError{Method: "session/resume", Code: -32603, Message: "Internal error", Data: "upstream provider returned HTTP 429"},
 			want: false,
@@ -78,9 +129,24 @@ func TestIsACPResumeRejected(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "session wording under an unrelated code",
-			err:  &acpRPCError{Method: "session/resume", Code: -32601, Message: "Invalid session identifier"},
+			// Captured by hand from qodercli 1.0.20 (`--yolo --acp`, not logged
+			// in): session/resume answers with this before it ever looks the id
+			// up. Proof that this RPC really does surface errors with nothing to
+			// do with the session — under -32000, which IS an accepted
+			// session-error code — so the wording, not the code, has to carry
+			// the decision.
+			name: "qodercli auth gate on session/resume",
+			err:  &acpRPCError{Method: "session/resume", Code: -32000, Message: "Authentication required: Authentication is required."},
 			want: false,
+		},
+		{
+			// Deliberately matches despite an unusual code: gating on the code
+			// set would make this fix miss its own bug if qodercli ever moved
+			// off -32602, and a runtime naming the session unusable has said so
+			// whatever number it attaches.
+			name: "rejection wording under an unusual code still counts",
+			err:  &acpRPCError{Method: "session/resume", Code: -32099, Message: "Invalid session identifier"},
+			want: true,
 		},
 		{
 			name: "plain error is never a rejection",

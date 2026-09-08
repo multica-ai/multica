@@ -530,10 +530,8 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 				closeCtx, closeCancel := context.WithTimeout(context.Background(), dimSessionCloseTimeout)
 				_, _ = c.request(closeCtx, "session/close", map[string]any{"sessionId": sessionID})
 				closeCancel()
-				if opts.ResumeSessionID == "" {
-					// Fresh session, closed just above and never prompted: there is
-					// no transcript behind this id, so publishing it can only pin a
-					// ghost pointer for the next turn to fail on (GH #8116).
+				if setupFailureWithholdsSessionID(opts) {
+					// Closed just above, and never prompted either way.
 					sessionID = ""
 				}
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), SessionID: sessionID, ResumeRejected: resumeRejected}
@@ -555,10 +553,8 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 				closeCtx, closeCancel := context.WithTimeout(context.Background(), dimSessionCloseTimeout)
 				_, _ = c.request(closeCtx, "session/close", map[string]any{"sessionId": sessionID})
 				closeCancel()
-				if opts.ResumeSessionID == "" {
-					// Fresh session, closed just above and never prompted: there is
-					// no transcript behind this id, so publishing it can only pin a
-					// ghost pointer for the next turn to fail on (GH #8116).
+				if setupFailureWithholdsSessionID(opts) {
+					// Closed just above, and never prompted either way.
 					sessionID = ""
 				}
 				resCh <- Result{

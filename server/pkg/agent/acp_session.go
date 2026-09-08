@@ -41,9 +41,19 @@ func isACPResumeRejected(err error) bool {
 	if !errors.As(err, &rpcErr) {
 		return false
 	}
-	if !isACPSessionErrorCode(rpcErr.Code) {
-		return false
-	}
+	// No isACPSessionErrorCode gate here, unlike isACPSessionNotFound, and that
+	// is a deliberate narrowing of what this fix depends on. The reported
+	// qodercli frame is invalid_params (-32602) — inside the accepted set — but
+	// that rests on the reporter's capture rather than anything we can
+	// re-derive: a qodercli without a login answers session/resume with an auth
+	// error long before it ever looks the id up, so the rejection path is
+	// unreachable locally. Gating on the code would make the whole fix miss its
+	// own bug if a runtime picks a code outside the set, and the code buys
+	// nothing at this boundary anyway: a runtime that states the session is
+	// unusable has said so whatever number it attaches. The wording carries the
+	// decision — which is what isACPSessionNotFound's own doc already concedes
+	// about the generic -32000 and -32603.
+	//
 	// Message and Data only. acpRPCError.Method holds "session/resume", whose
 	// own "session" would otherwise satisfy the noun half of every error this
 	// RPC can produce and quietly turn the predicate into the exclusion rule
@@ -51,25 +61,47 @@ func isACPResumeRejected(err error) bool {
 	return acpSessionUnusableRe.MatchString(strings.ToLower(rpcErr.Message + " " + rpcErr.Data))
 }
 
-// acpSessionUnusableRe matches a session-shaped noun and an "unusable" verdict
-// standing next to each other, in either order — the shape every runtime's
-// rejection wording has taken so far:
+// acpSessionUnusableRe matches a runtime saying the session id itself is no
+// good. Two shapes, because that is how the wordings actually read:
 //
-//	Invalid session identifier "27d8031c-…"   (qodercli)
-//	Session not found                         (Hermes)
-//	unknown session <id>                      (Reasonix)
-//	No session found with id …                (Kiro, via isACPSessionNotFound)
+//	Invalid session identifier "27d8031c-…"      (qodercli — verdict, then noun)
+//	unknown session <id>                         (Reasonix — verdict, then noun)
+//	Session not found                            (Hermes — noun, then verdict)
+//	session ses_abc does not exist               (noun, id, then verdict)
 //
-// Adjacency is what keeps it narrow, and it is load-bearing. Both halves appear
-// independently in errors that have nothing to do with the session — an invalid
-// mcpServers entry says "Invalid params" while the error's `data` echoes the
-// sessionId we passed — and a bare AND over the whole string would match that
-// pair and discard a healthy pointer. Requiring them within one short,
-// separator-free window is what tells "invalid session identifier" apart from
-// "invalid params … {sessionId: …}".
+// The verdict-first form demands the noun IMMEDIATELY after the verdict, and the
+// noun-first form allows only an "id"/"identifier" word and one id-shaped token
+// in between. That tightness is the whole safety argument, and a looser window
+// is not a detail: the natural English for errors this RPC really does produce
+// puts the same two halves a few words apart while meaning something entirely
+// different — "unknown error while loading session", "invalid token for session
+// abc", "invalid credentials for this session", "cwd does not exist for session
+// abc". Those are auth and infrastructure failures, which Result.ResumeRejected
+// is explicitly documented never to flag, and matching one does not merely waste
+// a retry: it retires a live conversation's pointer and forks it irreversibly.
+// TestIsACPResumeRejected pins every one of them as a negative.
 var acpSessionUnusableRe = regexp.MustCompile(
-	`(session|conversation|thread)[^,;\n]{0,24}(not found|no such|unknown|invalid|expired|does not exist|doesn't exist|no longer|unrecogni[sz]ed)` +
-		`|(not found|no such|unknown|invalid|expired|does not exist|doesn't exist|no longer|unrecogni[sz]ed)[^,;\n]{0,24}(session|conversation|thread)`)
+	`(no such|unknown|invalid|expired|unrecogni[sz]ed|nonexistent|missing)\s+(session|conversation|thread)` +
+		`|(session|conversation|thread)(\s+(id|identifier))?(\s+"?[\w-]+"?)?\s+(is\s+)?(not found|does not exist|doesn't exist|no longer exists|expired|invalid|unknown|unrecogni[sz]ed)`)
+
+// setupFailureWithholdsSessionID reports whether a run that failed during setup
+// — after session/new, before session/prompt — must report an empty SessionID
+// instead of the id it just created.
+//
+// True exactly when the session is fresh. Such a session has no transcript
+// behind it: no prompt was ever sent, so there is no conversation to continue
+// and withholding the id costs one extra session/new next turn. Publishing it
+// bets that every ACP runtime persists a never-prompted session, and qodercli
+// does not — it exits without writing one, leaving the daemon pinned to an id
+// that does not exist and every later message in that chat failing to resume it
+// forever (GH #8116).
+//
+// A RESUMED session is the opposite case and keeps today's behaviour: its
+// transcript predates this run, so the id stays unless the runtime actively
+// rejected it.
+func setupFailureWithholdsSessionID(opts ExecOptions) bool {
+	return opts.ResumeSessionID == ""
+}
 
 // classifyACPResumeFailure turns an error from session/resume or session/load
 // into this turn's terminal status, message and resume-rejection flag. Every
