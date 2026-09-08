@@ -23,7 +23,7 @@ func TestBuildSearchQuery_SingleTerm(t *testing.T) {
 	if !strings.Contains(query, "LOWER(COALESCE(i.description, '')) LIKE") {
 		t.Error("query should contain LOWER(COALESCE(i.description, '')) LIKE")
 	}
-	if !strings.Contains(query, "lowered_comment.content LIKE") {
+	if !strings.Contains(query, "lowered_comment.lowered LIKE") {
 		t.Error("query should match against the pre-lowered comment content")
 	}
 
@@ -112,10 +112,17 @@ func TestBuildSearchQuery_LowersCommentContentOnce(t *testing.T) {
 	if count := strings.Count(query, "LOWER(c.content)"); count != 1 {
 		t.Fatalf("query lowers comment content %d times, want exactly once:\n%s", count, query)
 	}
-	if !strings.Contains(query, "CROSS JOIN LATERAL (") ||
-		!strings.Contains(query, "SELECT LOWER(c.content) AS content") ||
-		!strings.Contains(query, "OFFSET 0\n\t\t\t) lowered_comment") {
+	if !strings.Contains(query, "CROSS JOIN LATERAL (") {
+		t.Fatalf("query does not use a lateral join for comment lowercasing:\n%s", query)
+	}
+	if !strings.Contains(query, "SELECT LOWER(c.content) AS lowered") {
+		t.Fatalf("query does not project pre-lowered comment content:\n%s", query)
+	}
+	if !strings.Contains(query, "OFFSET 0") {
 		t.Fatalf("query does not retain the OFFSET 0 planner fence around comment lowercasing:\n%s", query)
+	}
+	if !strings.Contains(query, ") lowered_comment") {
+		t.Fatalf("query does not retain the lateral alias after comment lowercasing:\n%s", query)
 	}
 	if strings.Contains(query, "LOWER(c.content) LIKE") {
 		t.Fatalf("comment predicates bypass the pre-lowered value:\n%s", query)
@@ -350,7 +357,7 @@ func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
 	if fromCountMulti != 1 {
 		t.Errorf("multi-term query has %d comment scans, want exactly one:\n%s", fromCountMulti, multiQuery)
 	}
-	if !strings.Contains(multiQuery, "BOOL_OR((lowered_comment.content LIKE") || !strings.Contains(multiQuery, "AS comment_all_terms") {
+	if !strings.Contains(multiQuery, "BOOL_OR((lowered_comment.lowered LIKE") || !strings.Contains(multiQuery, "AS comment_all_terms") {
 		t.Errorf("multi-term query does not retain the same-comment all-terms flag:\n%s", multiQuery)
 	}
 	if !strings.Contains(multiQuery, "ARRAY_AGG(c.id ORDER BY c.created_at DESC, c.id DESC)") {
@@ -373,7 +380,7 @@ func TestBuildSearchQuery_HydratesOnlyTheSelectedPage(t *testing.T) {
 	if limitAt == -1 || issueHydrationAt < limitAt || commentHydrationAt < limitAt {
 		t.Fatalf("full issue/comment hydration must happen after LIMIT/OFFSET:\n%s", query)
 	}
-	if lastTextMatch := strings.LastIndex(query, "lowered_comment.content LIKE"); lastTextMatch > limitAt {
+	if lastTextMatch := strings.LastIndex(query, "lowered_comment.lowered LIKE"); lastTextMatch > limitAt {
 		t.Errorf("comment hydration repeats a text search after LIMIT/OFFSET:\n%s", query)
 	}
 }

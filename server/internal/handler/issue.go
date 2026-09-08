@@ -702,7 +702,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	// final page is known. Per-term BOOL_OR flags keep the legacy eligibility rule
 	// where terms may be spread across comments, while comment_all_terms keeps
 	// ranking/snippet tied to one comment.
-	const loweredCommentContent = "lowered_comment.content"
+	const loweredCommentContent = "lowered_comment.lowered"
 	commentFlagColumns := []string{
 		"c.issue_id",
 		fmt.Sprintf("BOOL_OR(%s LIKE %s) AS comment_phrase", loweredCommentContent, phraseContainsParam),
@@ -747,7 +747,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 			SELECT %s
 			FROM comment c
 			CROSS JOIN LATERAL (
-				SELECT LOWER(c.content) AS content
+				SELECT LOWER(c.content) AS lowered
 				OFFSET 0
 			) lowered_comment
 			WHERE c.workspace_id = %s
