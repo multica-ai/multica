@@ -3743,17 +3743,19 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 }
 
 // FinalizeTaskClaim atomically persists the task-scoped agent token, an
-// optional short-lived daemon token used by the Remote MCP broker, and, for a
-// comment-backed task, the exact comment ids embedded in the response. The
-// handler must call this only after the full payload has been built and before
-// writing any response bytes. A failure rolls every write back so the claim can
-// be safely returned to the queue.
+// optional short-lived daemon token used by the Remote MCP broker, the digest
+// of the agent configuration this response delivers, and, for a comment-backed
+// task, the exact comment ids embedded in the response. The handler must call
+// this only after the full payload has been built and before writing any
+// response bytes. A failure rolls every write back so the claim can be safely
+// returned to the queue.
 func (s *TaskService) FinalizeTaskClaim(
 	ctx context.Context,
 	task db.AgentTaskQueue,
 	token db.CreateTaskTokenParams,
 	deliveredCommentIDs []pgtype.UUID,
 	recordCommentReceipt bool,
+	agentConfigDigest string,
 	daemonTokens ...db.CreateDaemonTokenParams,
 ) ([]pgtype.UUID, error) {
 	if len(daemonTokens) > 1 {
@@ -3763,6 +3765,21 @@ func (s *TaskService) FinalizeTaskClaim(
 	err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		if _, err := qtx.CreateTaskToken(ctx, token); err != nil {
 			return fmt.Errorf("create task token: %w", err)
+		}
+		// Record what this claim actually handed the model, in the same
+		// transaction that authorizes the run: the next task on this pair
+		// resumes its session only when its own configuration digests the same
+		// (GH #8070). Writing it anywhere later would let a run execute under a
+		// configuration no row names.
+		if agentConfigDigest != "" {
+			if err := qtx.SetTaskAgentConfigDigest(ctx, db.SetTaskAgentConfigDigestParams{
+				AgentConfigDigest: pgtype.Text{String: agentConfigDigest, Valid: true},
+				TaskID:            task.ID,
+				RuntimeID:         task.RuntimeID,
+				DispatchedAt:      task.DispatchedAt,
+			}); err != nil {
+				return fmt.Errorf("set agent config digest: %w", err)
+			}
 		}
 		if len(daemonTokens) == 1 {
 			// Opportunistic bounded cleanup keeps short-lived per-task daemon

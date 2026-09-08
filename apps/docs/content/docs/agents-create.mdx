@@ -57,6 +57,8 @@ Do not modify code directly. Post findings in an issue comment,
 ordered by severity; when nothing blocks, state clearly that the change can merge.
 ```
 
+Editing the instructions later starts a new session on every issue the agent is already working on. Its next run there begins a fresh conversation, because resuming one would replay the previous instructions the agent has already read and keep following them. Files in the working directory are kept, and the run is told its earlier context was not carried over. Chat conversations are unaffected.
+
 ## Adding skills
 
 During creation you can pick one or more [skills](/skills) from the workspace.

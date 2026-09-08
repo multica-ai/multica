@@ -1874,7 +1874,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: parseUUID(resp.WorkspaceID),
 			UserID:      rt.OwnerID,
 			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-		}, deliveredCommentIDs, commentBackedTask, daemonTokens...)
+		}, deliveredCommentIDs, commentBackedTask, claimAgentConfigDigest(resp), daemonTokens...)
 		if ferr != nil {
 			slog.Error("batch claim: finalize task claim failed; requeueing claim",
 				"task_id", uuidToString(task.ID), "error", ferr)
@@ -2152,6 +2152,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
 	var issueNumber int32
+	// The agent-config digest recorded by whichever task produced the session
+	// this claim is about to resume. Empty when nothing was selected, or when
+	// the producing row predates the column. Read by the freshness gate at the
+	// end of this function, once resp.Agent.Instructions is final.
+	var priorSessionConfigDigest string
 	// Claim-only capability: this server resolves the squad-leader role on the
 	// wire (is_leader_task / squad_id), so the daemon must not re-derive it
 	// from the briefing text. Set unconditionally — on every claim, leader or
@@ -2723,6 +2728,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
 					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = src.SessionID.String
+					priorSessionConfigDigest = src.AgentConfigDigest.String
 				}
 				// MUL-5305: if the source task withheld its Codex session because
 				// the rollout was missing, this rerun has nothing resumable from it
@@ -2753,6 +2759,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}); err == nil && prior.SessionID.Valid {
 				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
+					priorSessionConfigDigest = prior.AgentConfigDigest.String
 				}
 				if prior.WorkDir.Valid {
 					resp.PriorWorkDir = prior.WorkDir.String
@@ -3357,7 +3364,61 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
+	gateResumeToCurrentAgentConfig(&resp, priorSessionConfigDigest, task)
+
 	return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil
+}
+
+// claimAgentConfigDigest fingerprints the agent configuration this response
+// delivers. Called only after the payload is complete: the instructions the
+// daemon receives are composed during the build (system-agent layer,
+// squad-leader briefing), and a digest taken mid-assembly would describe a
+// payload nobody runs.
+func claimAgentConfigDigest(resp AgentTaskResponse) string {
+	if resp.Agent == nil {
+		return ""
+	}
+	return service.AgentConfigDigest(resp.Agent.Instructions)
+}
+
+// gateResumeToCurrentAgentConfig drops a resume whose session was built under a
+// different agent configuration than this run delivers (GH #8070 / MUL-7082).
+//
+// Updating an agent's instructions used to have no effect on a live
+// conversation: the daemon rewrites CLAUDE.md from the claim payload on every
+// run, but the resumed transcript still carries the older text the model had
+// already read, and the model keeps following it. Operators had no way out
+// short of rotating the agent to a new agent_id, because the resume pointer is
+// keyed on (agent_id, issue_id).
+//
+// The gate runs LAST, on a session some earlier branch already selected, and
+// can only take a resume away. Selecting by digest instead would be wrong: with
+// configurations A then B then A again, picking "the newest session whose
+// digest matches" reaches back past the B turns into the first A conversation.
+//
+// The workdir is deliberately left in place. A session that must not be resumed
+// says nothing about the working tree, and discarding both would throw away
+// in-progress work on every instruction edit (#7998).
+func gateResumeToCurrentAgentConfig(resp *AgentTaskResponse, priorConfigDigest string, task *db.AgentTaskQueue) {
+	if resp.PriorSessionID == "" {
+		return
+	}
+	if !service.AgentConfigChanged(priorConfigDigest, claimAgentConfigDigest(*resp)) {
+		return
+	}
+	slog.Info("task claim: dropping prior session; agent configuration changed since it was created",
+		"task_id", uuidToString(task.ID),
+		"agent_id", uuidToString(task.AgentID),
+		"issue_id", uuidToString(task.IssueID),
+		"session_id", resp.PriorSessionID,
+		"prior_agent_config_digest", priorConfigDigest,
+	)
+	resp.PriorSessionID = ""
+	// The run was going to continue this conversation and now cannot, so it
+	// must reconstruct from the issue instead of trusting context it does not
+	// have. Same disclosure the reachability gates use (MUL-4424 / MUL-5305);
+	// the daemon renders it as the session-continuity notice.
+	resp.PriorSessionResumeUnavailable = true
 }
 
 // worktreeClaimBlockReason returns a user-facing reason when this runtime must
@@ -3537,7 +3598,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: parseUUID(resp.WorkspaceID),
 		UserID:      runtime.OwnerID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-	}, deliveredCommentIDs, commentBackedTask, daemonTokens...)
+	}, deliveredCommentIDs, commentBackedTask, claimAgentConfigDigest(resp), daemonTokens...)
 	if ferr != nil {
 		outcome = "error_claim_finalize"
 		slog.Error("task claim: failed to finalize token and comment delivery receipt",

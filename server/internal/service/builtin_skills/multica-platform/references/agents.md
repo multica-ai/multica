@@ -52,6 +52,16 @@ Two distinct text fields, often confused:
   Persona, responsibilities, boundaries, output and escalation rules go here,
   not in `description`.
 
+Editing `instructions` starts a fresh provider session on every issue the agent
+holds one on: resuming would replay a conversation that still carries the
+previous instructions, and the model keeps following them. The working
+directory is kept, and the run is told its earlier context was not carried
+over. Scope: issue runs only — Chat sessions still resume — and only
+`instructions`; renaming the agent or changing its avatar, visibility, model,
+or runtime leaves every conversation intact. Bound skills are not covered
+either: a skill body edited after the model already read it stays stale in a
+resumed issue conversation (GH #8070).
+
 ## CLI / API entry points
 
 Minimum create call (`--name` and `--runtime-id` are both required):

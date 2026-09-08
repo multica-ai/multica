@@ -841,6 +841,24 @@ WHERE id = @task_id
   )
 RETURNING delivered_comment_ids;
 
+-- name: SetTaskAgentConfigDigest :exec
+-- Record the digest of the agent configuration this claim actually delivered
+-- (GH #8070 / MUL-7082). The next run on the same (agent, issue) pair compares
+-- its own digest against this one and refuses to resume a session that was
+-- built from a different configuration.
+--
+-- The CAS pins the write to this exact claim generation: a stale handler whose
+-- response was never delivered must not overwrite the digest of the reclaim
+-- that is actually running. :exec rather than :one on purpose — a CAS miss
+-- leaves the column NULL, which the claim handler reads as "unknown" and
+-- resumes, so a lost digest degrades to today's behaviour instead of failing
+-- the claim.
+UPDATE agent_task_queue
+SET agent_config_digest = @agent_config_digest
+WHERE id = @task_id
+  AND runtime_id = @runtime_id
+  AND dispatched_at = @dispatched_at;
+
 -- name: RequeueAgentTaskAfterClaimFailure :one
 -- Claim finalization (task token + optional comment receipt) failed before any
 -- response bytes were written. Return only that exact claim generation to the
@@ -1136,7 +1154,7 @@ WITH retired_sessions AS (
       )
 ), latest_per_session AS (
     SELECT DISTINCT ON (t.session_id)
-        t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason, t.error,
+        t.session_id, t.work_dir, t.runtime_id, t.agent_config_digest, t.status, t.failure_reason, t.error,
         COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
     FROM agent_task_queue t
     WHERE t.agent_id = $1 AND t.issue_id = $2
@@ -1144,7 +1162,7 @@ WITH retired_sessions AS (
       AND t.status IN ('completed', 'failed', 'cancelled')
     ORDER BY t.session_id, COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
 )
-SELECT session_id, work_dir, runtime_id FROM latest_per_session
+SELECT session_id, work_dir, runtime_id, agent_config_digest FROM latest_per_session
 WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
   AND (
     status IN ('completed', 'cancelled')
