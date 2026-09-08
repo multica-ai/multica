@@ -371,13 +371,18 @@ describe("workspace-switcher dropdown per-workspace dot", () => {
   });
 });
 
-describe("navigation typography", () => {
-  it("does not downsize Analytics and Settings below the other nav items", () => {
+describe("navigation item presentation", () => {
+  it("keeps Analytics and Settings styled like the other nav items", () => {
     const { container } = render(<AppSidebar />);
+    const referenceClassName = container.querySelector(
+      'button[data-href="/acme/issues"]',
+    )?.className;
+
+    expect(referenceClassName).toBeTruthy();
 
     for (const href of ["/acme/usage", "/acme/settings"]) {
-      expect(container.querySelector(`button[data-href="${href}"]`)).not.toHaveClass(
-        "text-caption",
+      expect(container.querySelector(`button[data-href="${href}"]`)?.className).toBe(
+        referenceClassName,
       );
     }
   });
