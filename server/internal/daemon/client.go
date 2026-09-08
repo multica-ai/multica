@@ -542,7 +542,7 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	if retiredSessionID != "" {
 		body["retired_session_id"] = retiredSessionID
 	}
-	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil, defaultTerminalRetrySchedule)
+	return c.postTerminalJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil, defaultTerminalRetrySchedule)
 }
 
 func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
@@ -580,7 +580,7 @@ func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDi
 	if retiredSessionID != "" {
 		body["retired_session_id"] = retiredSessionID
 	}
-	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil, defaultTerminalRetrySchedule)
+	return c.postTerminalJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil, defaultTerminalRetrySchedule)
 }
 
 // PinTaskSession persists the agent's session_id and work_dir on the task
@@ -1075,6 +1075,23 @@ func isTransientError(err error) bool {
 	return true
 }
 
+// isTerminalCallbackTransientError extends the ordinary transport predicate
+// for the complete/fail callback only. During an upstream restart the edge can
+// briefly answer a registered daemon route with chi's plain-text unmatched
+// route response. That response is operationally transient, while the JSON
+// 404 returned by the task handler is a permanent "task not found" signal.
+// Keep this distinction local to terminal callbacks: other compatibility
+// probes intentionally use the same plain-text 404 to detect an older server.
+func isTerminalCallbackTransientError(err error) bool {
+	if isTransientError(err) {
+		return true
+	}
+	var reqErr *requestError
+	return errors.As(err, &reqErr) &&
+		reqErr.StatusCode == http.StatusNotFound &&
+		strings.TrimSpace(reqErr.Body) == "404 page not found"
+}
+
 // postJSONWithRetry posts a JSON body with bounded exponential backoff,
 // intended for "must reach the server" terminal callbacks (CompleteTask /
 // FailTask). It retries transient errors per isTransientError and stops
@@ -1091,13 +1108,21 @@ func isTransientError(err error) bool {
 // idempotent success (see service/task.go), so a duplicate replay from a
 // retry is safe even if the server's prior response was lost in transit.
 func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any, respBody any, schedule []time.Duration) error {
-	return c.postJSONViaWithRetry(ctx, c.client, path, reqBody, respBody, schedule, nil)
+	return c.postJSONViaWithRetryWhen(ctx, c.client, path, reqBody, respBody, schedule, nil, isTransientError)
+}
+
+func (c *Client) postTerminalJSONWithRetry(ctx context.Context, path string, reqBody any, respBody any, schedule []time.Duration) error {
+	return c.postJSONViaWithRetryWhen(ctx, c.client, path, reqBody, respBody, schedule, nil, isTerminalCallbackTransientError)
 }
 
 // postJSONViaWithRetry is postJSONWithRetry over an explicit http.Client, so
 // large-body endpoints can run on bundleClient (deadline from ctx) while the
 // control-plane keeps its fixed 30s client.
 func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any, schedule []time.Duration, stats *TransferStats) error {
+	return c.postJSONViaWithRetryWhen(ctx, httpClient, path, reqBody, respBody, schedule, stats, isTransientError)
+}
+
+func (c *Client) postJSONViaWithRetryWhen(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any, schedule []time.Duration, stats *TransferStats, shouldRetry func(error) bool) error {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -1111,7 +1136,7 @@ func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Clie
 			return nil
 		}
 		lastErr = err
-		if !isTransientError(err) {
+		if !shouldRetry(err) {
 			return err
 		}
 		if attempt >= len(schedule) {

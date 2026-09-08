@@ -4697,6 +4697,46 @@ func TestReportTaskResult_TransientCompleteExhaustedDoesNotFallback(t *testing.T
 	}
 }
 
+// A reverse proxy can briefly return chi's plain-text unmatched-route body
+// while the backend is restarting. That response is not the task handler's
+// durable JSON 404, so exhausting retries must preserve the successful result
+// in running state instead of downgrading it through /fail.
+func TestReportTaskResult_Edge404CompleteExhaustedDoesNotFallback(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	prevSchedule := defaultTerminalRetrySchedule
+	defaultTerminalRetrySchedule = []time.Duration{time.Nanosecond, time.Nanosecond}
+	t.Cleanup(func() { defaultTerminalRetrySchedule = prevSchedule })
+
+	var completeCalls, failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/complete"):
+			completeCalls.Add(1)
+			http.Error(w, "404 page not found", http.StatusNotFound)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(context.Background(), "task-edge-404", TaskResult{
+		Status:  "completed",
+		Comment: "ok",
+	}, slog.Default())
+
+	if got := completeCalls.Load(); got != int32(len(defaultTerminalRetrySchedule)+1) {
+		t.Fatalf("expected %d complete attempts, got %d", len(defaultTerminalRetrySchedule)+1, got)
+	}
+	if got := failCalls.Load(); got != 0 {
+		t.Fatalf("exhausted edge 404 retries must NOT fall back to /fail; got %d", got)
+	}
+}
+
 // On permanent 4xx from /complete (e.g. 400 bad body, 404 task not found)
 // the helper bails immediately and the daemon falls back to /fail so the
 // UI shows a concrete failure rather than a perpetually-running task.

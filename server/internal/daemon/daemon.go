@@ -5920,7 +5920,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		// warrant the legacy fallback, because at that point the server
 		// has already refused this task and the only useful UI signal
 		// left is a concrete failure.
-		if isTransientError(err) {
+		if isTerminalCallbackTransientError(err) {
 			taskLog.Error("complete task failed after retries; leaving task in running rather than falling back to fail", "error", err)
 			return
 		}

@@ -288,6 +288,27 @@ func TestIsTransientError(t *testing.T) {
 	}
 }
 
+func TestIsTerminalCallbackTransientError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"plain-text edge 404 is transient", &requestError{StatusCode: http.StatusNotFound, Body: "404 page not found"}, true},
+		{"plain-text edge 404 tolerates whitespace", &requestError{StatusCode: http.StatusNotFound, Body: " 404 page not found\n"}, true},
+		{"JSON task-not-found 404 is permanent", &requestError{StatusCode: http.StatusNotFound, Body: `{"error":"task not found"}`}, false},
+		{"other 404 is permanent", &requestError{StatusCode: http.StatusNotFound, Body: "not found"}, false},
+		{"5xx remains transient", &requestError{StatusCode: http.StatusBadGateway}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTerminalCallbackTransientError(tc.err); got != tc.want {
+				t.Fatalf("isTerminalCallbackTransientError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestIsIssueGCBatchUnsupported(t *testing.T) {
 	tests := []struct {
 		name string
@@ -369,6 +390,50 @@ func TestFailTask_RetriesOnTransient5xxThenSucceeds(t *testing.T) {
 	}
 	if got := calls.Load(); got != 3 {
 		t.Fatalf("expected 3 attempts (2 transient 5xx + 1 success), got %d", got)
+	}
+}
+
+func TestCompleteTask_RetriesPlainTextEdge404ThenSucceeds(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) < 3 {
+			http.Error(w, "404 page not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	if err := c.CompleteTask(context.Background(), "task-1", "done", "", "", "", false, "", ""); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("expected 3 attempts (2 edge 404s + 1 success), got %d", got)
+	}
+}
+
+func TestCompleteTask_JSONTaskNotFoundBailsImmediately(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"task not found"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	err := c.CompleteTask(context.Background(), "task-1", "done", "", "", "", false, "", "")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 attempt for a real task-not-found response, got %d", got)
 	}
 }
 
