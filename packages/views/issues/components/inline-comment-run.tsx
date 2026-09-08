@@ -32,8 +32,16 @@ import { useRunDisclosureMotion } from "./use-run-comment-motion";
 export function useInlineCommentRunState() {
   const [expanded, setExpanded] = useState(false);
   const [fullLogOpen, setFullLogOpen] = useState(false);
+  // A click carrying no detail count came from Enter/Space. Only that reader
+  // needs focus handed back when the log closes; giving it back after a
+  // pointer open is what leaves this trigger ringed and tooltipped on Esc.
+  const [logFromKeyboard, setLogFromKeyboard] = useState(false);
   const disclosure = useRunDisclosureMotion(expanded);
-  return { expanded, setExpanded, fullLogOpen, setFullLogOpen, disclosure };
+  const openFullLog = (event: React.MouseEvent<HTMLElement>) => {
+    setLogFromKeyboard(event.detail === 0);
+    setFullLogOpen(true);
+  };
+  return { expanded, setExpanded, fullLogOpen, setFullLogOpen, openFullLog, logFromKeyboard, disclosure };
 }
 
 export type InlineCommentRunState = ReturnType<typeof useInlineCommentRunState>;
@@ -54,7 +62,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const active = isActiveCommentRun(task);
   const localViewState = useInlineCommentRunState();
   const state = viewState ?? localViewState;
-  const { expanded, setExpanded, fullLogOpen, setFullLogOpen } = state;
+  const { expanded, setExpanded, fullLogOpen, setFullLogOpen, openFullLog, logFromKeyboard } = state;
   const [confirmStop, setConfirmStop] = useState(false);
   const [now, setNow] = useState(Date.now);
   const [visibleCount, setVisibleCount] = useState(12);
@@ -101,7 +109,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const stepLabel = steps.length > 0 ? t(($) => $.inline_run.steps, { count: steps.length }) : "";
   const stopLabel = cancel.isPending || cancel.isSuccess ? t(($) => $.inline_run.stopping) : t(($) => $.inline_run.stop);
   const transcript = fullLogOpen && <AgentTranscriptDialog open onOpenChange={setFullLogOpen}
-    task={task} items={items} agentName={name} isLive={active}
+    task={task} items={items} agentName={name} isLive={active} finalFocus={logFromKeyboard}
     contentState={isPending ? <p role="status" className="text-body text-muted-foreground">{t(($) => $.inline_run.loading)}</p>
       : isError ? <div role="alert" className="text-body text-destructive">{t(($) => $.inline_run.load_failed)}
         <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button>
@@ -120,7 +128,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
         <TooltipTrigger render={<Button type="button" size="icon-sm" variant="ghost"
           className="text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
           aria-label={t(($) => $.inline_run.full_log)} aria-haspopup="dialog" aria-expanded={fullLogOpen}
-          onClick={() => setFullLogOpen(true)}>
+          onClick={openFullLog}>
           <ScrollText aria-hidden className="size-3.5" />
         </Button>} />
         <TooltipContent>{t(($) => $.inline_run.full_log)}</TooltipContent>
@@ -178,7 +186,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
             onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
           {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={active} formatText={formatText} />)}
           <button type="button" className="flex items-center gap-1.5 rounded py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => setFullLogOpen(true)}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
+            onClick={openFullLog}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
         </div>}
       </div>
       {transcript}

@@ -117,6 +117,14 @@ interface AgentTranscriptDialogProps {
   items: TimelineItem[];
   agentName: string;
   isLive?: boolean;
+  /**
+   * Whether focus returns to the trigger when the dialog closes. Pass `true`
+   * only for a keyboard open, where the reader has no other way back. After a
+   * pointer open, returning focus is what leaves the trigger wearing a focus
+   * ring and its tooltip once Esc closes the log — and, on the hover-revealed
+   * comment action row, holds the whole row visible with the pointer long gone.
+   */
+  finalFocus?: boolean;
   /** Loading/error content while the caller retrieves the transcript. */
   contentState?: React.ReactNode;
   /**
@@ -307,6 +315,7 @@ export function AgentTranscriptDialog({
   items,
   agentName,
   isLive = false,
+  finalFocus = false,
   headerSlot,
   contentState,
 }: AgentTranscriptDialogProps) {
@@ -854,6 +863,7 @@ export function AgentTranscriptDialog({
       <DialogContent
         className="!max-w-5xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
         showCloseButton={false}
+        finalFocus={finalFocus}
       >
         <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>
 

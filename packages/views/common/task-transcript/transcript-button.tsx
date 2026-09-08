@@ -72,6 +72,10 @@ export function TranscriptButton({
   headerSlot,
 }: TranscriptButtonProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  // A click carrying no detail count came from Enter/Space. Only that reader
+  // gets focus handed back when the dialog closes: after a pointer open it
+  // would return a focus ring and this button's tooltip on Esc.
+  const [fromKeyboard, setFromKeyboard] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadedItems, setLoadedItems] = useState<TimelineItem[] | null>(null);
   const open = controlledOpen ?? uncontrolledOpen;
@@ -105,6 +109,7 @@ export function TranscriptButton({
     (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      setFromKeyboard(e.detail === 0);
       if (liveCacheMode) {
         setLiveSession(true);
         setOpen(true);
@@ -175,6 +180,7 @@ export function TranscriptButton({
             agentName={agentName}
             isLive={isLive}
             onOpenChange={setOpen}
+            finalFocus={fromKeyboard}
             headerSlot={headerSlot}
           />
         ) : (
@@ -185,6 +191,7 @@ export function TranscriptButton({
             items={items}
             agentName={agentName}
             isLive={isLive}
+            finalFocus={fromKeyboard}
             headerSlot={headerSlot}
           />
         ))}
@@ -197,6 +204,7 @@ interface LiveTranscriptDialogProps {
   agentName: string;
   isLive: boolean;
   onOpenChange: (open: boolean) => void;
+  finalFocus?: boolean;
   headerSlot?: React.ReactNode;
 }
 
@@ -216,6 +224,7 @@ function LiveTranscriptDialog({
   agentName,
   isLive,
   onOpenChange,
+  finalFocus,
   headerSlot,
 }: LiveTranscriptDialogProps) {
   const queryClient = useQueryClient();
@@ -260,6 +269,7 @@ function LiveTranscriptDialog({
       items={items}
       agentName={agentName}
       isLive={isLive}
+      finalFocus={finalFocus}
       headerSlot={headerSlot}
     />
   );
