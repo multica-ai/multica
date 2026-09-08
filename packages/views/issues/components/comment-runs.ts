@@ -40,6 +40,16 @@ export function buildCommentRunView(
   previous = new Map<string, CommentRun[]>(),
 ): { timeline: readonly TimelineEntry[]; runs: Map<string, CommentRun[]>; standaloneRuns: CommentRun[] } {
   const comments = new Map(timeline.filter((entry) => entry.type === "comment").map((entry) => [entry.id, entry]));
+  const threadRoot = (id: string): string | undefined => {
+    const seen = new Set<string>();
+    let entry = comments.get(id);
+    while (entry?.parent_id) {
+      if (seen.has(entry.id)) return undefined;
+      seen.add(entry.id);
+      entry = comments.get(entry.parent_id);
+    }
+    return entry?.id;
+  };
   const replies = new Map<string, TimelineEntry>();
   for (const entry of comments.values()) {
     if (!entry.source_task_id || entry.actor_type !== "agent") continue;
@@ -49,6 +59,7 @@ export function buildCommentRunView(
     }
   }
   const byTask = new Map(tasks.map((task) => [task.id, task]));
+  const priorAnchors = new Map([...previous.values()].flatMap((runs) => runs.map((run) => [run.task.id, run.anchorCommentId] as const)));
   const placements: CommentRun[] = [];
   for (const task of [...tasks].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))) {
     const reply = replies.get(task.id);
@@ -75,6 +86,19 @@ export function buildCommentRunView(
         ? source.trigger_comment_id
         : candidates.sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.id
           ?? ids.find((id) => !!id);
+      // Same-thread batches retain their first input's slot as newer replies
+      // coalesce. Wait for missing comments instead of guessing their thread;
+      // historical batches spanning several threads retain their trigger.
+      const root = candidates[0] && threadRoot(candidates[0].id);
+      if (root && candidates.length === ids.filter(Boolean).length
+        && candidates.every((entry) => threadRoot(entry.id) === root)) {
+        anchorId = candidates.sort((a, b) => a.created_at.localeCompare(b.created_at)
+          || timeline.indexOf(a) - timeline.indexOf(b))[0]?.id;
+      }
+      const priorAnchor = priorAnchors.get(source.id);
+      if (priorAnchor && ids.includes(priorAnchor) && candidates.length < ids.filter(Boolean).length) {
+        anchorId = priorAnchor;
+      }
       source = source.parent_task_id ? byTask.get(source.parent_task_id) : undefined;
     }
     placements.push({ task, commentId: reply?.id ?? anchorId, anchorCommentId: anchorId, hasReply: !!reply });

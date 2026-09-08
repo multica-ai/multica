@@ -40,8 +40,26 @@ describe("groupCommentRuns", () => {
     expect(before.standaloneRuns).toEqual([]);
     expect(before.runs.size).toBe(0);
     const after = buildCommentRunView([original, retry], [old, next]);
-    expect(after.runs.get(old.id)?.map((run) => run.anchorCommentId)).toEqual([next.id, next.id]);
+    expect(after.runs.get(old.id)?.map((run) => run.anchorCommentId)).toEqual([old.id, old.id]);
     expect(after.standaloneRuns).toEqual([]);
+  });
+
+  it("keeps a queued run in place as its thread receives more instructions and its answer", () => {
+    const root = comment("root");
+    const first = comment("first", { parent_id: root.id });
+    const other = comment("other-thread");
+    const second = comment("second", { parent_id: root.id, created_at: "2026-09-07T00:01:00Z" });
+    const run = task("run", { status: "queued", trigger_comment_id: first.id });
+    const before = buildCommentRunView([run], [root, first, other]);
+    const merged = { ...run, trigger_comment_id: second.id, coalesced_comment_ids: [first.id] };
+    const awaitingComment = buildCommentRunView([merged], [root, first, other], before.runs);
+    expect(awaitingComment.runs.get(root.id)?.[0]?.anchorCommentId).toBe(first.id);
+    const after = buildCommentRunView([merged], [root, first, other, second], before.runs);
+    expect(after.runs.get(root.id)?.[0]?.anchorCommentId).toBe(first.id);
+    expect(after.runs.has(other.id)).toBe(false);
+    const answer = comment("answer", { actor_type: "agent", source_task_id: run.id });
+    const complete = buildCommentRunView([{ ...merged, status: "completed", delivered_comment_ids: [first.id, second.id] }], [root, first, other, second, answer]);
+    expect(complete.runs.get(root.id)?.[0]).toMatchObject({ anchorCommentId: first.id, commentId: answer.id, hasReply: true });
   });
 
   it("projects chained answers and assignment subtrees before finding run roots", () => {
@@ -103,10 +121,10 @@ describe("groupCommentRuns", () => {
     expect(buildCommentRunView([run], [reply]).standaloneRuns).toHaveLength(1);
     expect(buildCommentRunView([run], []).standaloneRuns).toEqual([]);
   });
-  it("places merged runs once under their newest trigger, including nested replies", () => {
+  it("keeps merged runs at their earliest input, including nested replies", () => {
     const timeline = [comment("root"), comment("reply", { parent_id: "root" }), comment("nested", { parent_id: "reply" })];
     const run = task("run", { trigger_comment_id: "nested", coalesced_comment_ids: ["root", "reply"], delivered_comment_ids: ["root", "reply", "nested"] });
-    expect([...groupCommentRuns([run], timeline)]).toEqual([["root", [{ task: run, commentId: "nested", anchorCommentId: "nested", hasReply: false }]]]);
+    expect([...groupCommentRuns([run], timeline)]).toEqual([["root", [{ task: run, commentId: "root", anchorCommentId: "root", hasReply: false }]]]);
   });
 
   it.each([{ receipt: [] }, { receipt: ["old"] }])("uses planned comment coverage while queued, even with a delivery receipt of $receipt", ({ receipt }) => {
