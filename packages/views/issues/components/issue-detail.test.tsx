@@ -2096,6 +2096,17 @@ describe("IssueDetail (shared)", () => {
     expect(mockApiObj.updateIssue).toHaveBeenCalledTimes(callsBeforeDiscard);
   });
 
+  it("returns to the issue title and description from the outline", async () => {
+    // Destination behavior is covered by thread-minimap.test.tsx; this tests the scroller wiring.
+    mockApiObj.listTimeline.mockResolvedValue([mockTimeline.find((entry) => entry.type === "comment")!]);
+    const { container } = renderIssueDetail();
+    const tick = await screen.findByRole("button", { name: "Issue description" });
+    const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
+    scroller.scrollTop = 800;
+    fireEvent.click(tick);
+    expect(scroller.scrollTop).toBe(0);
+  });
+
   describe("sub-issues list", () => {
     beforeEach(() => {
       useSubIssueDisplayStore.setState({
@@ -2122,6 +2133,29 @@ describe("IssueDetail (shared)", () => {
       due_date: null,
       priority: "none",
       ...overrides,
+    });
+
+    it("jumps from the outline to the expanded sub-issues section without comments", async () => {
+      // Preview/order behavior lives in thread-minimap.test.tsx; this tests the real section.
+      mockApiObj.listTimeline.mockResolvedValue([]);
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [subIssue({ id: "child-1", title: "Child destination" })],
+      });
+      const { container } = renderIssueDetail();
+      await screen.findByText("Child destination");
+      const section = container.querySelector<HTMLDivElement>(".group\\/sub-issues")!;
+      fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
+      expect(screen.queryByText("Child destination")).not.toBeInTheDocument();
+
+      const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
+      scroller.scrollTop = 600;
+      vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+      vi.spyOn(section, "getBoundingClientRect").mockReturnValue({ top: -200 } as DOMRect);
+      fireEvent.click(within(screen.getByRole("navigation", { name: "Quick navigation" }))
+        .getByRole("button", { name: "Sub-issues" }));
+
+      expect(await screen.findByText("Child destination")).toBeInTheDocument();
+      await waitFor(() => expect(scroller.scrollTop).toBe(284));
     });
 
     it("renders priority, labels, due date and nested progress on rows", async () => {
