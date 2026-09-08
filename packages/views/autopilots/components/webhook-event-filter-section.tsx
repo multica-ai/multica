@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { forwardRef, useImperativeHandle, useState } from "react";
 import { X, Plus, Filter, ExternalLink } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { WebhookEventFilter } from "@multica/core/types";
@@ -11,10 +11,21 @@ interface WebhookEventFilterSectionProps {
   onChange: (filters: WebhookEventFilter[]) => void;
 }
 
-export function WebhookEventFilterSection({
-  filters,
-  onChange,
-}: WebhookEventFilterSectionProps) {
+export interface WebhookEventFilterSectionRef {
+  /**
+   * Commit the draft event/actions row to the parent's filter list and clear
+   * the inputs, returning the resulting filters so a caller that needs the
+   * value before the next render (the dialog's Save handler) can avoid a
+   * stale-closure read of the parent's state. A no-op when the event field is
+   * empty, returning the current filters unchanged.
+   */
+  flushDraft: () => WebhookEventFilter[];
+}
+
+export const WebhookEventFilterSection = forwardRef<
+  WebhookEventFilterSectionRef,
+  WebhookEventFilterSectionProps
+>(function WebhookEventFilterSection({ filters, onChange }, ref) {
   const { t, i18n } = useT("autopilots");
   const [newEvent, setNewEvent] = useState("");
   const [newActions, setNewActions] = useState("");
@@ -24,17 +35,24 @@ export function WebhookEventFilterSection({
 
   const addFilter = () => {
     const event = newEvent.trim();
-    if (!event) return;
+    if (!event) return filters;
     const actions = newActions
       .split(",")
       .map((a) => a.trim())
       .filter((a) => a.length > 0);
     const next: WebhookEventFilter = { event };
     if (actions.length > 0) next.actions = actions;
-    onChange([...filters, next]);
+    const combined = [...filters, next];
+    onChange(combined);
     setNewEvent("");
     setNewActions("");
+    return combined;
   };
+
+  // Exposed so the dialog can flush an uncommitted draft row on Save —
+  // without this, text typed into the inputs but not yet committed via
+  // Enter or the + button is silently discarded.
+  useImperativeHandle(ref, () => ({ flushDraft: addFilter }));
 
   const removeFilter = (idx: number) => {
     onChange(filters.filter((_, i) => i !== idx));
@@ -133,4 +151,4 @@ export function WebhookEventFilterSection({
       </p>
     </div>
   );
-}
+});
