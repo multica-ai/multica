@@ -3,6 +3,7 @@ import {
   getWebNotificationPermission,
   isWebNotificationSupported,
   registerSystemNotificationClickHandler,
+  registerSystemNotificationSoundPlayer,
   requestWebNotificationPermission,
   showWebNotification,
   type SystemNotificationPayload,
@@ -54,6 +55,7 @@ afterEach(() => {
   FakeNotification.permission = "granted";
   FakeNotification.requestPermission.mockClear();
   registerSystemNotificationClickHandler(null);
+  registerSystemNotificationSoundPlayer(null);
   delete (globalThis as Record<string, unknown>).window;
 });
 
@@ -112,7 +114,26 @@ describe("showWebNotification", () => {
     showWebNotification(payload());
     expect(created).toHaveLength(1);
     expect(created[0]?.title).toBe("Mentioned you");
-    expect(created[0]?.options).toMatchObject({ body: "in a comment", tag: "item-1" });
+    expect(created[0]?.options).toMatchObject({
+      body: "in a comment",
+      tag: "item-1",
+      renotify: true,
+    });
+  });
+
+  it("plays the registered sound without risking the visual notification", () => {
+    installWindow(FakeNotification);
+    const play = vi.fn();
+    registerSystemNotificationSoundPlayer(play);
+
+    showWebNotification(payload());
+    expect(play).toHaveBeenCalledTimes(1);
+
+    registerSystemNotificationSoundPlayer(() => {
+      throw new Error("audio unavailable");
+    });
+    expect(() => showWebNotification(payload())).not.toThrow();
+    expect(created).toHaveLength(2);
   });
 
   it("routes a click to the registered handler and closes the banner", () => {

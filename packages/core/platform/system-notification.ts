@@ -30,11 +30,13 @@ export interface SystemNotificationPayload {
 }
 
 type ClickHandler = (payload: SystemNotificationPayload) => void;
+type SoundPlayer = () => void;
 
 // Module-level singleton — mirrors how the desktop preload registers its
 // behavior once at boot. The web shell registers a router-aware handler; while
 // unregistered (SSR, tests, pre-mount) a click is a silent no-op.
 let clickHandler: ClickHandler | null = null;
+let soundPlayer: SoundPlayer | null = null;
 
 /**
  * Register how a clicked web notification routes (focus + navigate to the
@@ -46,6 +48,13 @@ export function registerSystemNotificationClickHandler(
   handler: ClickHandler | null,
 ): void {
   clickHandler = handler;
+}
+
+/** Register the web host's best-effort notification sound player. */
+export function registerSystemNotificationSoundPlayer(
+  player: SoundPlayer | null,
+): void {
+  soundPlayer = player;
 }
 
 // Read the Notification constructor off `window` (rather than the bare global)
@@ -104,12 +113,18 @@ export function showWebNotification(payload: SystemNotificationPayload): void {
       // Collapse repeat banners for the same inbox row (e.g. a reconnect
       // replays the `inbox:new` event).
       tag: payload.itemId,
-    });
+      renotify: true,
+    } as NotificationOptions & { renotify: boolean });
   } catch {
     // Some engines require an active ServiceWorkerRegistration to construct a
     // Notification (notably Chrome on Android). Degrade silently — the in-app
     // inbox and unread badge still surface the new item.
     return;
+  }
+  try {
+    soundPlayer?.();
+  } catch {
+    // Sound is best-effort and must never suppress the visual notification.
   }
   notification.onclick = () => {
     try {
