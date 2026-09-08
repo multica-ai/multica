@@ -472,6 +472,8 @@
     "show_more_activities_other": "アクティビティをさらに {{count}} 件表示"
   },
   "comment": {
+    "collapse_thread": "スレッドを折りたたむ",
+    "expand_thread": "スレッドを展開",
     "delete_title": "コメントを削除",
     "delete_desc": "このコメントは完全に削除されます。この操作は元に戻せません。",
     "delete_desc_with_replies": "このコメントとすべての返信が完全に削除されます。この操作は元に戻せません。",

@@ -1009,22 +1009,13 @@ function CommentCardImpl({
             wrapper the header's containing block is the whole thread and it
             stays stuck behind every reply. */}
         <div className={cn("transition-colors duration-700", isHighlighted && highlightedCommentBackgroundClass)}>
-          {/* Header — always visible, acts as toggle */}
+          {/* Keep the author aligned with replies; thread controls sit on the right. */}
           <StickyHeaderShell
             sticky={stickyHeader}
             highlighted={isHighlighted}
             className="px-4 max-md:px-3 py-3"
           >
             <div className="flex items-center gap-2.5">
-              <button
-                type="button"
-                aria-expanded={open}
-                aria-controls={`comment-body-${entry.id}`}
-                onClick={handleToggle}
-                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-              >
-                <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
-              </button>
               <ActorAvatar
                 actorType={entry.actor_type}
                 actorId={entry.actor_id}
@@ -1062,8 +1053,21 @@ function CommentCardImpl({
                 </span>
               )}
 
-              {open && (
-                <div className="ml-auto flex items-center gap-0.5">
+              <div className="ml-auto flex shrink-0 items-center gap-0.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={open ? t(($) => $.comment.collapse_thread) : t(($) => $.comment.expand_thread)}
+                  title={open ? t(($) => $.comment.collapse_thread) : t(($) => $.comment.expand_thread)}
+                  aria-expanded={open}
+                  aria-controls={open ? `comment-body-${entry.id}` : undefined}
+                  onClick={handleToggle}
+                  className="text-muted-foreground"
+                >
+                  <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
+                </Button>
+                {open && <>
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
@@ -1136,8 +1140,8 @@ function CommentCardImpl({
                     onConfirm={() => onDelete(entry.id)}
                     hasReplies
                   />
-                </div>
-              )}
+                </>}
+              </div>
             </div>
           </StickyHeaderShell>
 
@@ -1149,7 +1153,7 @@ function CommentCardImpl({
             {edit.editing ? (
               <div
                 {...edit.dropZoneProps}
-                className="relative pl-10 max-md:pl-0"
+                className="relative pl-8 max-md:pl-0"
                 onKeyDown={(e) => { if (e.key === "Escape") edit.cancelEdit(); }}
               >
                 <div className="text-body leading-relaxed">
@@ -1226,26 +1230,26 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
-                <div data-comment-content={entry.id} className="pl-10 max-md:pl-0 text-body leading-relaxed text-foreground">
+                <div data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
-                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10 max-md:pl-0" />
+                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
                 {retryableAgentFailureComment(entry) && (
                   <TaskCommentRetryButton
                     issueId={issueId}
                     taskId={entry.source_task_id}
-                    className="mt-2 pl-10 max-md:pl-0"
+                    className="mt-2 pl-8 max-md:pl-0"
                   />
                 )}
               </>
             )}
-            <div className="pl-10 max-md:pl-0">{renderRuns(entry.id)}</div>
+            <div className="pl-8 max-md:pl-0">{renderRuns(entry.id)}</div>
             {!edit.editing && <ReactionBar
               reactions={reactions}
               currentUserId={currentUserId}
               onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
               getActorName={getActorName}
-              className="mt-1.5 pl-10 max-md:pl-0"
+              className="mt-1.5 pl-8 max-md:pl-0"
             />}
           </div>
         )}

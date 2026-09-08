@@ -472,6 +472,8 @@
     "show_more_activities_other": "활동 {{count}}개 더 보기"
   },
   "comment": {
+    "collapse_thread": "스레드 접기",
+    "expand_thread": "스레드 펼치기",
     "delete_title": "댓글 삭제",
     "delete_desc": "이 댓글이 영구 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
     "delete_desc_with_replies": "이 댓글과 모든 답글이 영구 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
