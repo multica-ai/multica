@@ -59,14 +59,16 @@ describe("InlineCommentRun", () => {
     expect(api.listTaskMessages).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps published reply logs live and stoppable until the run finishes", async () => {
+  it("keeps published replies visually settled while their full log remains live", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
     const current = task();
     const { rerender } = setup(current, true, "header");
     expect(screen.queryByRole("button", { name: /View activity/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Working");
-    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
     const trigger = screen.getByRole("button", { name: "Open full log" });
+    const icon = trigger.querySelector("svg");
+    expect(icon).not.toHaveClass("animate-spin");
     fireEvent.click(trigger);
     await screen.findByText("Full transcript");
     expect(screen.getByRole("dialog")).toHaveAttribute("data-live", "true");
@@ -74,6 +76,7 @@ describe("InlineCommentRun", () => {
     expect(screen.getByRole("button", { name: "Open full log" })).toBe(trigger);
     expect(screen.getByRole("dialog")).toHaveTextContent("Full transcript");
     expect(screen.getByRole("dialog")).toHaveAttribute("data-live", "false");
+    expect(trigger.querySelector("svg")).toBe(icon);
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /View activity/ })).not.toBeInTheDocument();
   });
@@ -181,9 +184,9 @@ describe("InlineCommentRun", () => {
     expect(api.listTaskMessages).not.toHaveBeenCalled();
   });
 
-  it.each(["queued", "published"] as const)("confirms stopping the specific %s run", async (state) => {
+  it.each(["queued", "running"] as const)("confirms stopping the specific %s run before its reply", async (state) => {
     vi.mocked(api.cancelTask).mockResolvedValue(task({ status: "cancelled" }));
-    setup(task({ status: state === "queued" ? "queued" : "running" }), state === "published", state === "published" ? "header" : "inline");
+    setup(task({ status: state }));
     if (state === "queued") {
       expect(screen.getByText("Waiting for an available agent.")).toBeInTheDocument();
       expect(api.listTaskMessages).not.toHaveBeenCalled();

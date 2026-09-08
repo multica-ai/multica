@@ -1265,7 +1265,7 @@ describe("IssueDetail (shared)", () => {
     expect(container.querySelector(`[data-run-comment-id="${taskId}"]`)).toBeNull();
     expect(userBlock.querySelector("[data-run-id]")).toBeNull();
     expect(within(replyRow as HTMLElement).queryByRole("button", { name: /View activity/ })).not.toBeInTheDocument();
-    expect(within(run as HTMLElement).getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(within(run as HTMLElement).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
     const logButton = within(run as HTMLElement).getByRole("button", { name: "Open full log" });
     expect(logButton.closest("[data-comment-block]")?.querySelector("[data-run-summary-row]")).toBeNull();
     mockApiObj.listTasksByIssue.mockResolvedValue([completed]);
@@ -1323,7 +1323,7 @@ describe("IssueDetail (shared)", () => {
     expect(container.querySelectorAll(`[data-run-id="${task.id}"]`)).toHaveLength(1);
     const headerLog = within(replyBlock as HTMLElement).getByRole("button", { name: "Open full log" });
     expect(replyBlock.querySelector("[data-run-summary-row]")).toBeNull();
-    expect(within(replyBlock as HTMLElement).getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(within(replyBlock as HTMLElement).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
     mockApiObj.listTasksByIssue.mockResolvedValue([completed]);
     act(() => queryClient.setQueryData(issueKeys.tasks("issue-1"), [completed]));
     await waitFor(() => expect(within(replyBlock as HTMLElement).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument());

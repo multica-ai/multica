@@ -121,15 +121,11 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           className="text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
           aria-label={t(($) => $.inline_run.full_log)} aria-haspopup="dialog" aria-expanded={fullLogOpen}
           onClick={() => setFullLogOpen(true)}>
-          {active ? <Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
-            : <ScrollText aria-hidden className="size-3.5" />}
+          <ScrollText aria-hidden className="size-3.5" />
         </Button>} />
-        <TooltipContent>{t(($) => $.inline_run.full_log)} · {status}{elapsed && ` · ${elapsed}`}</TooltipContent>
+        <TooltipContent>{t(($) => $.inline_run.full_log)}</TooltipContent>
       </Tooltip>
-      {active && <span role="status" className="sr-only">{status}</span>}
-      {stopButton}
       {transcript}
-      {stopDialog}
     </span>;
   }
   return (
