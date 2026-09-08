@@ -15,6 +15,7 @@ import type {
 import type {
   CommentCreatedPayload,
   CommentUpdatedPayload,
+  CommentFollowUpsUpdatedPayload,
   CommentDeletedPayload,
   CommentResolvedPayload,
   CommentUnresolvedPayload,
@@ -64,6 +65,7 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
     resolved_by_type: c.resolved_by_type,
     resolved_by_id: c.resolved_by_id,
     source_task_id: c.source_task_id,
+    suggested_follow_ups: c.suggested_follow_ups,
   };
 }
 
@@ -161,6 +163,21 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         const { comment } = payload as CommentUpdatedPayload;
         if (comment.issue_id !== issueId) return;
         applyCommentSnapshot(qc, issueId, comment);
+      },
+      [qc, issueId],
+    ),
+  );
+
+  useWSEvent(
+    "comment:follow_ups_updated",
+    useCallback(
+      (payload: unknown) => {
+        const update = payload as CommentFollowUpsUpdatedPayload;
+        if (update.issue_id !== issueId) return;
+        // Generation can publish after a newer edit cleared these suggestions.
+        // This infrequent enrichment event has no revision: refetch rather
+        // than restoring stale action IDs into the authoritative snapshot.
+        void qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
       },
       [qc, issueId],
     ),

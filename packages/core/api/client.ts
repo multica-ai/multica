@@ -1300,6 +1300,20 @@ export class ApiClient {
     });
   }
 
+  async runIssueCommentFollowUp(
+    issueId: string,
+    commentId: string,
+    actionId: string,
+  ): Promise<Comment> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${issueId}/comments/${commentId}/follow-ups/${actionId}/run`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, {
+      endpoint: "POST /api/issues/{id}/comments/{commentId}/follow-ups/{actionId}/run",
+    });
+  }
+
   async previewCommentTriggers(issueId: string, content: string, parentId?: string, editingCommentId?: string): Promise<CommentTriggerPreview> {
     const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments/trigger-preview`, {
       method: "POST",

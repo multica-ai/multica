@@ -365,6 +365,22 @@ func TestCommentMutationsFollowIssueTeardownLockOrder(t *testing.T) {
 		mutate    func(context.Context, string) error
 	}{
 		{
+			name:      "follow_up",
+			queryName: "GetCommentInWorkspaceForUpdate",
+			mutate: func(ctx context.Context, commentID string) error {
+				_, err := testHandler.Queries.GetCommentInWorkspaceForUpdate(ctx, db.GetCommentInWorkspaceForUpdateParams{
+					ID: parseUUID(commentID), WorkspaceID: parseUUID(testWorkspaceID),
+				})
+				if errors.Is(err, pgx.ErrNoRows) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				return errors.New("follow-up source locked before its issue")
+			},
+		},
+		{
 			name:      "update",
 			queryName: "UpdateComment",
 			mutate: func(ctx context.Context, commentID string) error {

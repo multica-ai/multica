@@ -46,9 +46,10 @@ type CommentResponse struct {
 	// raw prompt body. It is NOT settable through this endpoint — there is no
 	// request field for it — which is exactly why the card keys off this id
 	// rather than a `type` value the client controls.
-	QuickActionID *string              `json:"quick_action_id,omitempty"`
-	Reactions     []ReactionResponse   `json:"reactions"`
-	Attachments   []AttachmentResponse `json:"attachments"`
+	QuickActionID      *string                         `json:"quick_action_id,omitempty"`
+	SuggestedFollowUps []protocol.IssueCommentFollowUp `json:"suggested_follow_ups,omitempty"`
+	Reactions          []ReactionResponse              `json:"reactions"`
+	Attachments        []AttachmentResponse            `json:"attachments"`
 	// Orientation stats — populated only on the roots_only path and omitted in
 	// every other mode, so the default response shape stays byte-identical for
 	// existing callers. ReplyCount is the number of descendants in the thread;
@@ -99,24 +100,29 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 	if attachments == nil {
 		attachments = []AttachmentResponse{}
 	}
+	var suggestedFollowUps []protocol.IssueCommentFollowUp
+	if len(c.SuggestedFollowUps) > 0 {
+		_ = json.Unmarshal(c.SuggestedFollowUps, &suggestedFollowUps)
+	}
 	return CommentResponse{
-		ID:             uuidToString(c.ID),
-		IssueID:        uuidToString(c.IssueID),
-		AuthorType:     c.AuthorType,
-		AuthorID:       uuidToString(c.AuthorID),
-		Content:        c.Content,
-		Type:           c.Type,
-		ParentID:       uuidToPtr(c.ParentID),
-		CreatedAt:      timestampToString(c.CreatedAt),
-		UpdatedAt:      timestampToString(c.UpdatedAt),
-		Revision:       c.Revision,
-		ResolvedAt:     timestampToPtr(c.ResolvedAt),
-		ResolvedByType: textToPtr(c.ResolvedByType),
-		ResolvedByID:   uuidToPtr(c.ResolvedByID),
-		SourceTaskID:   uuidToPtr(c.SourceTaskID),
-		QuickActionID:  uuidToPtr(c.QuickActionID),
-		Reactions:      reactions,
-		Attachments:    attachments,
+		ID:                 uuidToString(c.ID),
+		IssueID:            uuidToString(c.IssueID),
+		AuthorType:         c.AuthorType,
+		AuthorID:           uuidToString(c.AuthorID),
+		Content:            c.Content,
+		Type:               c.Type,
+		ParentID:           uuidToPtr(c.ParentID),
+		CreatedAt:          timestampToString(c.CreatedAt),
+		UpdatedAt:          timestampToString(c.UpdatedAt),
+		Revision:           c.Revision,
+		ResolvedAt:         timestampToPtr(c.ResolvedAt),
+		ResolvedByType:     textToPtr(c.ResolvedByType),
+		ResolvedByID:       uuidToPtr(c.ResolvedByID),
+		SourceTaskID:       uuidToPtr(c.SourceTaskID),
+		QuickActionID:      uuidToPtr(c.QuickActionID),
+		SuggestedFollowUps: suggestedFollowUps,
+		Reactions:          reactions,
+		Attachments:        attachments,
 	}
 }
 
@@ -788,22 +794,23 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 			replies := make([]db.Comment, 0, len(rows))
 			for _, r := range rows {
 				c := db.Comment{
-					ID:             r.ID,
-					IssueID:        r.IssueID,
-					AuthorType:     r.AuthorType,
-					AuthorID:       r.AuthorID,
-					Content:        r.Content,
-					Type:           r.Type,
-					CreatedAt:      r.CreatedAt,
-					UpdatedAt:      r.UpdatedAt,
-					ParentID:       r.ParentID,
-					WorkspaceID:    r.WorkspaceID,
-					ResolvedAt:     r.ResolvedAt,
-					ResolvedByType: r.ResolvedByType,
-					ResolvedByID:   r.ResolvedByID,
-					SourceTaskID:   r.SourceTaskID,
-					QuickActionID:  r.QuickActionID,
-					Revision:       r.Revision,
+					ID:                 r.ID,
+					IssueID:            r.IssueID,
+					AuthorType:         r.AuthorType,
+					AuthorID:           r.AuthorID,
+					Content:            r.Content,
+					Type:               r.Type,
+					CreatedAt:          r.CreatedAt,
+					UpdatedAt:          r.UpdatedAt,
+					ParentID:           r.ParentID,
+					WorkspaceID:        r.WorkspaceID,
+					ResolvedAt:         r.ResolvedAt,
+					ResolvedByType:     r.ResolvedByType,
+					ResolvedByID:       r.ResolvedByID,
+					SourceTaskID:       r.SourceTaskID,
+					QuickActionID:      r.QuickActionID,
+					SuggestedFollowUps: r.SuggestedFollowUps,
+					Revision:           r.Revision,
 				}
 				if !r.ParentID.Valid {
 					root := c
@@ -882,22 +889,23 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		replies := make([]db.Comment, 0, len(rows))
 		for _, r := range rows {
 			c := db.Comment{
-				ID:             r.ID,
-				IssueID:        r.IssueID,
-				AuthorType:     r.AuthorType,
-				AuthorID:       r.AuthorID,
-				Content:        r.Content,
-				Type:           r.Type,
-				CreatedAt:      r.CreatedAt,
-				UpdatedAt:      r.UpdatedAt,
-				ParentID:       r.ParentID,
-				WorkspaceID:    r.WorkspaceID,
-				ResolvedAt:     r.ResolvedAt,
-				ResolvedByType: r.ResolvedByType,
-				ResolvedByID:   r.ResolvedByID,
-				SourceTaskID:   r.SourceTaskID,
-				QuickActionID:  r.QuickActionID,
-				Revision:       r.Revision,
+				ID:                 r.ID,
+				IssueID:            r.IssueID,
+				AuthorType:         r.AuthorType,
+				AuthorID:           r.AuthorID,
+				Content:            r.Content,
+				Type:               r.Type,
+				CreatedAt:          r.CreatedAt,
+				UpdatedAt:          r.UpdatedAt,
+				ParentID:           r.ParentID,
+				WorkspaceID:        r.WorkspaceID,
+				ResolvedAt:         r.ResolvedAt,
+				ResolvedByType:     r.ResolvedByType,
+				ResolvedByID:       r.ResolvedByID,
+				SourceTaskID:       r.SourceTaskID,
+				QuickActionID:      r.QuickActionID,
+				SuggestedFollowUps: r.SuggestedFollowUps,
+				Revision:           r.Revision,
 			}
 			if !r.ParentID.Valid {
 				root := c
@@ -970,22 +978,23 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				continue
 			}
 			comments = append(comments, db.Comment{
-				ID:             r.ID,
-				IssueID:        r.IssueID,
-				AuthorType:     r.AuthorType,
-				AuthorID:       r.AuthorID,
-				Content:        r.Content,
-				Type:           r.Type,
-				CreatedAt:      r.CreatedAt,
-				UpdatedAt:      r.UpdatedAt,
-				ParentID:       r.ParentID,
-				WorkspaceID:    r.WorkspaceID,
-				ResolvedAt:     r.ResolvedAt,
-				ResolvedByType: r.ResolvedByType,
-				ResolvedByID:   r.ResolvedByID,
-				SourceTaskID:   r.SourceTaskID,
-				QuickActionID:  r.QuickActionID,
-				Revision:       r.Revision,
+				ID:                 r.ID,
+				IssueID:            r.IssueID,
+				AuthorType:         r.AuthorType,
+				AuthorID:           r.AuthorID,
+				Content:            r.Content,
+				Type:               r.Type,
+				CreatedAt:          r.CreatedAt,
+				UpdatedAt:          r.UpdatedAt,
+				ParentID:           r.ParentID,
+				WorkspaceID:        r.WorkspaceID,
+				ResolvedAt:         r.ResolvedAt,
+				ResolvedByType:     r.ResolvedByType,
+				ResolvedByID:       r.ResolvedByID,
+				SourceTaskID:       r.SourceTaskID,
+				QuickActionID:      r.QuickActionID,
+				SuggestedFollowUps: r.SuggestedFollowUps,
+				Revision:           r.Revision,
 			})
 		}
 
@@ -1044,7 +1053,8 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 					ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
 					ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
-					SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
+					SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID,
+					SuggestedFollowUps: r.SuggestedFollowUps, Revision: r.Revision,
 				}
 				stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
 			}
@@ -1074,7 +1084,8 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 				ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
 				ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
-				SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
+				SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID,
+				SuggestedFollowUps: r.SuggestedFollowUps, Revision: r.Revision,
 			}
 			stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
 		}

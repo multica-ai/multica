@@ -124,6 +124,33 @@ describe("useIssueTimeline", () => {
     cacheUpdates.invalidations = 0;
   });
 
+  it("refetches follow-ups without restoring stale suggestions after an edit", () => {
+    queryState.data = [{ id: "c1", revision: 2, suggested_follow_ups: [] }];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    act(() => {
+      wsHandlers.get("comment:follow_ups_updated")!({
+        issue_id: "issue-1",
+        comment_id: "c1",
+        suggested_follow_ups: [{ id: "old-action", label: "Continue", prompt: "Old instruction" }],
+      });
+    });
+
+    expect(cacheUpdates.last).toBeNull();
+    expect(cacheUpdates.invalidations).toBe(1);
+  });
+
+  it("ignores follow-up events from other issues", () => {
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    act(() => {
+      wsHandlers.get("comment:follow_ups_updated")!({
+        issue_id: "other-issue", comment_id: "c1", suggested_follow_ups: [],
+      });
+    });
+    expect(cacheUpdates.last).toBeNull();
+    expect(cacheUpdates.invalidations).toBe(0);
+  });
+
   // CommentCard is wrapped in React.memo (perf fix for long timelines, see
   // multica#1968). The memo only pays off if the callbacks passed down keep
   // the same identity across unrelated parent re-renders. TanStack Query v5
