@@ -638,7 +638,7 @@ function CommentRow({
   const reactions = entry.reactions ?? [];
 
   return (
-    <div className="py-1.5">
+    <div className="pb-3">
       {/* Header pins to the timeline's scroll parent within this reply's own
           row box, so a LONG reply keeps its
           author + actions visible while you scroll its body, then releases once
@@ -646,7 +646,7 @@ function CommentRow({
           highlight state while it occludes the body scrolling underneath. */}
       <StickyHeaderShell
         highlighted={isHighlighted}
-        className="flex items-center gap-2.5 px-4 max-md:px-3 pt-1 pb-1.5"
+        className="flex items-center gap-2.5 px-4 max-md:px-3 pt-3 pb-2"
       >
         <ActorAvatar
           actorType={entry.actor_type}
@@ -841,7 +841,7 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 pt-1 text-body leading-relaxed text-foreground">
+          <div data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
@@ -1029,7 +1029,7 @@ function CommentCardImpl({
           <StickyHeaderShell
             sticky={stickyHeader}
             highlighted={isHighlighted}
-            className="px-4 max-md:px-3 py-3"
+            className={cn("px-4 max-md:px-3", open ? "pt-3 pb-2" : "py-3")}
           >
             <div className="flex items-center gap-2.5">
               <ActorAvatar
@@ -1173,7 +1173,7 @@ function CommentCardImpl({
             probes computed styles to detect animations, forcing a style
             recalculation across long issue-detail documents. */}
         {open && (
-          <div id={`comment-body-${entry.id}`} className="px-4 max-md:px-3 pt-1 pb-3">
+          <div id={`comment-body-${entry.id}`} className="px-4 max-md:px-3 pb-3">
             {edit.editing ? (
               <div
                 {...edit.dropZoneProps}
