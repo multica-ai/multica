@@ -58,6 +58,7 @@ import {
   DropdownMenuSubContent,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { toast } from "sonner";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import {
@@ -758,27 +759,12 @@ export function MembersTab() {
       .finally(() => setShareLinkActionId(null));
   };
 
-  const handleCopyShareLink = (link: ShareLink) => {
+  const handleCopyShareLink = async (link: ShareLink) => {
     const joinUrl = buildShareLinkUrl(navigation, link.code);
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(joinUrl).then(
-        () => toast.success(t(($) => $.members.toast_share_link_copied)),
-        () => toast.error(t(($) => $.members.toast_share_link_copy_failed)),
-      );
+    if (await copyText(joinUrl)) {
+      toast.success(t(($) => $.members.toast_share_link_copied));
     } else {
-      const textArea = document.createElement("textarea");
-      textArea.value = joinUrl;
-      textArea.style.position = "fixed";
-      textArea.style.left = "-9999px";
-      document.body.appendChild(textArea);
-      textArea.select();
-      try {
-        document.execCommand("copy");
-        toast.success(t(($) => $.members.toast_share_link_copied));
-      } catch {
-        toast.error(t(($) => $.members.toast_share_link_copy_failed));
-      }
-      document.body.removeChild(textArea);
+      toast.error(t(($) => $.members.toast_share_link_copy_failed));
     }
   };
 
