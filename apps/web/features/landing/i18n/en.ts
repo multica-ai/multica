@@ -294,6 +294,31 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.5.0",
+        date: "2026-09-08",
+        title: "Inline agent runs in comment threads, per-thread task queues, steadier sessions, and fewer search timeouts",
+        changes: [],
+        features: [
+          "Agent runs now play out inside the comment thread you started them from — queue, steps, stop, retry, and full logs.",
+          "Each root comment thread runs its own tasks, so separate discussions no longer merge or lose replies.",
+          "Comment threads have their own outline on the right, and long titles stay readable.",
+        ],
+        improvements: [
+          "Tasks you start from quick create no longer fill up an Issue's activity, but stay in run history.",
+          "Complex searches finish instead of giving up early, and searching comments is faster.",
+        ],
+        fixes: [
+          "Replying to a message in DingTalk with /new or /clear keeps the quote and your command separate.",
+          "When a Lark binding card can't reach you in a DM, the group now says so.",
+          "Telegram no longer sends a second copy of a reply that is already on its way.",
+          "Stopping a Codex run still records the tokens it already used.",
+          "A stuck qoder, kiro, grok, kimi, or hermes conversation picks up again on your next message.",
+          "Issue links from Lark open in the right workspace.",
+          "A Cursor task that leaves a service running no longer looks finished early or hangs.",
+          "The Issue split view no longer shows two sidebar toggles, and the AI Team heading reads correctly.",
+        ],
+      },
+      {
         version: "0.4.41",
         date: "2026-09-07",
         title: "A reorganized sidebar, a regrouped Settings page, faster search in large workspaces, and Autopilot manual runs",
