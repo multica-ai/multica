@@ -7770,13 +7770,14 @@ func (q *Queries) RebindAgentBuilderRuntime(ctx context.Context, arg RebindAgent
 const reclaimStaleDispatchedTaskForRuntime = `-- name: ReclaimStaleDispatchedTaskForRuntime :one
 UPDATE agent_task_queue
 SET dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => $2::double precision)
+    prepare_lease_expires_at = now() + make_interval(secs => $2::double precision),
+    agent_config_digest = COALESCE(agent_config_digest, $3)
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = $1
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
-      AND atq.dispatched_at < now() - make_interval(secs => $3::double precision)
+      AND atq.dispatched_at < now() - make_interval(secs => $4::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
       AND EXISTS (
           -- Keep this authorization fence in sync with ClaimAgentTask.
@@ -7798,7 +7799,7 @@ WHERE id = (
             )
             AND r.status = 'online'
             AND COALESCE(r.last_seen_at, r.updated_at) >=
-                now() - make_interval(secs => $4::double precision)
+                now() - make_interval(secs => $5::double precision)
       )
     ORDER BY atq.priority DESC, atq.dispatched_at ASC
     LIMIT 1
@@ -7810,6 +7811,7 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 type ReclaimStaleDispatchedTaskForRuntimeParams struct {
 	RuntimeID         pgtype.UUID `json:"runtime_id"`
 	PrepareLeaseSecs  float64     `json:"prepare_lease_secs"`
+	AmbiguousDigest   pgtype.Text `json:"ambiguous_digest"`
 	ClaimRecoverySecs float64     `json:"claim_recovery_secs"`
 	RuntimeStaleSecs  float64     `json:"runtime_stale_secs"`
 }
@@ -7819,10 +7821,22 @@ type ReclaimStaleDispatchedTaskForRuntimeParams struct {
 // with no `started_at`, so the daemon has not acknowledged it via StartTask.
 // Refresh dispatched_at so the server-side dispatch timeout measures from the
 // recovered delivery attempt.
+//
+// A row reaching here was already handed out once, so a NULL agent_config_digest
+// is not "never delivered" — it is "delivered by a server that predates the
+// column" (GH #8070 review). Letting the recovered claim write its own digest
+// into that NULL would certify the row for a configuration the first delivery
+// never saw, and the first delivery can still be the one that reaches
+// StartAgentTask. Stamp the ambiguity marker instead; SetTaskAgentConfigDigest
+// keeps it, so the session this row eventually reports is never resumed on the
+// strength of a delivery nobody can identify. A first claim (ClaimAgentTask,
+// queued -> dispatched) is the only path that may turn a NULL into a real
+// digest.
 func (q *Queries) ReclaimStaleDispatchedTaskForRuntime(ctx context.Context, arg ReclaimStaleDispatchedTaskForRuntimeParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, reclaimStaleDispatchedTaskForRuntime,
 		arg.RuntimeID,
 		arg.PrepareLeaseSecs,
+		arg.AmbiguousDigest,
 		arg.ClaimRecoverySecs,
 		arg.RuntimeStaleSecs,
 	)
@@ -7891,13 +7905,14 @@ func (q *Queries) ReclaimStaleDispatchedTaskForRuntime(ctx context.Context, arg 
 const reclaimStaleDispatchedTasksForRuntimes = `-- name: ReclaimStaleDispatchedTasksForRuntimes :many
 UPDATE agent_task_queue
 SET dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => $1::double precision)
+    prepare_lease_expires_at = now() + make_interval(secs => $1::double precision),
+    agent_config_digest = COALESCE(agent_config_digest, $2)
 WHERE id IN (
     SELECT atq.id FROM agent_task_queue atq
-    WHERE atq.runtime_id = ANY($2::uuid[])
+    WHERE atq.runtime_id = ANY($3::uuid[])
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
-      AND atq.dispatched_at < now() - make_interval(secs => $3::double precision)
+      AND atq.dispatched_at < now() - make_interval(secs => $4::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
       AND EXISTS (
           -- Keep this authorization fence in sync with ClaimAgentTask.
@@ -7919,10 +7934,10 @@ WHERE id IN (
             )
             AND r.status = 'online'
             AND COALESCE(r.last_seen_at, r.updated_at) >=
-                now() - make_interval(secs => $4::double precision)
+                now() - make_interval(secs => $5::double precision)
       )
     ORDER BY atq.priority DESC, atq.dispatched_at ASC
-    LIMIT $5::int
+    LIMIT $6::int
     FOR UPDATE SKIP LOCKED
 )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, agent_config_digest
@@ -7930,6 +7945,7 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 
 type ReclaimStaleDispatchedTasksForRuntimesParams struct {
 	PrepareLeaseSecs  float64       `json:"prepare_lease_secs"`
+	AmbiguousDigest   pgtype.Text   `json:"ambiguous_digest"`
 	RuntimeIds        []pgtype.UUID `json:"runtime_ids"`
 	ClaimRecoverySecs float64       `json:"claim_recovery_secs"`
 	RuntimeStaleSecs  float64       `json:"runtime_stale_secs"`
@@ -7941,11 +7957,13 @@ type ReclaimStaleDispatchedTasksForRuntimesParams struct {
 // machine-level batch claim recovers lost-response dispatches for every runtime
 // it hosts without one query per runtime. Same eligibility as the singular
 // query (dispatched, never started, past the recovery window, expired/absent
-// prepare lease) and the same dispatched_at refresh; only the runtime filter
-// (= ANY) and the LIMIT (max_tasks instead of 1) differ.
+// prepare lease), the same dispatched_at refresh and the same
+// unidentifiable-prior-delivery marking; only the runtime filter (= ANY) and
+// the LIMIT (max_tasks instead of 1) differ.
 func (q *Queries) ReclaimStaleDispatchedTasksForRuntimes(ctx context.Context, arg ReclaimStaleDispatchedTasksForRuntimesParams) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, reclaimStaleDispatchedTasksForRuntimes,
 		arg.PrepareLeaseSecs,
+		arg.AmbiguousDigest,
 		arg.RuntimeIds,
 		arg.ClaimRecoverySecs,
 		arg.RuntimeStaleSecs,

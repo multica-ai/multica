@@ -899,9 +899,21 @@ RETURNING *;
 -- with no `started_at`, so the daemon has not acknowledged it via StartTask.
 -- Refresh dispatched_at so the server-side dispatch timeout measures from the
 -- recovered delivery attempt.
+--
+-- A row reaching here was already handed out once, so a NULL agent_config_digest
+-- is not "never delivered" — it is "delivered by a server that predates the
+-- column" (GH #8070 review). Letting the recovered claim write its own digest
+-- into that NULL would certify the row for a configuration the first delivery
+-- never saw, and the first delivery can still be the one that reaches
+-- StartAgentTask. Stamp the ambiguity marker instead; SetTaskAgentConfigDigest
+-- keeps it, so the session this row eventually reports is never resumed on the
+-- strength of a delivery nobody can identify. A first claim (ClaimAgentTask,
+-- queued -> dispatched) is the only path that may turn a NULL into a real
+-- digest.
 UPDATE agent_task_queue
 SET dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision),
+    agent_config_digest = COALESCE(agent_config_digest, @ambiguous_digest)
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = $1
@@ -943,11 +955,13 @@ RETURNING *;
 -- machine-level batch claim recovers lost-response dispatches for every runtime
 -- it hosts without one query per runtime. Same eligibility as the singular
 -- query (dispatched, never started, past the recovery window, expired/absent
--- prepare lease) and the same dispatched_at refresh; only the runtime filter
--- (= ANY) and the LIMIT (max_tasks instead of 1) differ.
+-- prepare lease), the same dispatched_at refresh and the same
+-- unidentifiable-prior-delivery marking; only the runtime filter (= ANY) and
+-- the LIMIT (max_tasks instead of 1) differ.
 UPDATE agent_task_queue
 SET dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision),
+    agent_config_digest = COALESCE(agent_config_digest, @ambiguous_digest)
 WHERE id IN (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])

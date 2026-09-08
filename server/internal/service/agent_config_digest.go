@@ -13,11 +13,14 @@ import (
 // is the honest reading of "the configuration that decides the prompt changed".
 const agentConfigDigestVersion = "v1"
 
-// AgentConfigDigestAmbiguous marks a task row that was delivered more than once
-// under DIFFERENT configurations. Both deliveries can reach StartAgentTask —
-// it admits whichever calls first, with no claim-generation check — so the row
-// cannot name the configuration the session it reports was actually built
-// from. It is not a digest and never equals one (real values are
+// AgentConfigDigestAmbiguous marks a task row whose earlier delivery cannot be
+// identified, so the row must not vouch for the session it eventually reports.
+// StartAgentTask admits whichever delivery calls it first, with no
+// claim-generation check, so an earlier one can always be the one that ran.
+// Two shapes reach this: a redelivery carrying a different configuration than
+// the delivery already recorded, and a reclaim of a row delivered by a server
+// that predates the column (where NULL means "unknown", not "never
+// delivered"). It is not a digest and never equals one (real values are
 // "v1:<hex>"), so the comparison below reads it as "do not resume" without
 // needing a special case.
 const AgentConfigDigestAmbiguous = "ambiguous:multiple-deliveries"

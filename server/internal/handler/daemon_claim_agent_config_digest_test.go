@@ -396,6 +396,75 @@ func TestClaimTaskByRuntime_SupersededDeliveryCannotVouchForSession(t *testing.T
 	}
 }
 
+// TestClaimTaskByRuntime_ReclaimOfUnversionedDeliveryCannotVouch covers the
+// upgrade boundary (review of PR #8160).
+//
+// Migration 456 leaves every in-flight row with a NULL digest, including rows a
+// pre-column server had already handed to a daemon. On such a row NULL does not
+// mean "never delivered" — so a reclaim that wrote its own digest there would
+// certify the row for a configuration the first delivery never saw, and the
+// first delivery can still be the one that reaches StartAgentTask. Only a first
+// claim may turn a NULL into a real digest; a reclaim marks it ambiguous.
+func TestClaimTaskByRuntime_ReclaimOfUnversionedDeliveryCannotVouch(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Unversioned delivery runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Unversioned delivery agent")
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+
+	// The row shape migration 456 leaves behind for a delivery the old server
+	// already made: dispatched, never started, no digest. Its payload may still
+	// be preparing on the daemon.
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":          runtimeID,
+		"issue_id":            issueID,
+		"status":              "dispatched",
+		"dispatched_at":       testutil.Raw("now() - interval '2 minutes'"),
+		"agent_config_digest": nil,
+	})
+	dbfx.Exec(t, `UPDATE agent SET instructions = 'RULE B' WHERE id = $1`, agentID)
+
+	reclaimed, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if reclaimed == nil || reclaimed.ID != taskID {
+		t.Fatalf("expected the stale reclaim to re-deliver this row: %s", body)
+	}
+
+	var recorded string
+	dbfx.QueryRow(t, `SELECT COALESCE(agent_config_digest, '') FROM agent_task_queue WHERE id = $1`, taskID).Scan(&recorded)
+	if recorded == service.AgentConfigDigest("RULE B") {
+		t.Fatal("a reclaim must not certify a row whose earlier delivery carried an unknown configuration")
+	}
+	if recorded != service.AgentConfigDigestAmbiguous {
+		t.Fatalf("an unversioned prior delivery must mark the row ambiguous; got %q", recorded)
+	}
+
+	// The earlier, unversioned delivery can still be the one that starts and
+	// reports a session — which is exactly why the row must not vouch for it.
+	if _, err := testHandler.TaskService.StartTask(ctx, parseUUID(taskID)); err != nil {
+		t.Fatalf("start unversioned delivery: %v", err)
+	}
+	dbfx.Exec(t, `UPDATE agent_task_queue
+		SET status = 'completed', completed_at = now(),
+		    session_id = 'SESSION-UNVERSIONED', work_dir = '/tmp/unversioned'
+		WHERE id = $1`, taskID)
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"issue_id":   issueID,
+		"priority":   1000,
+	})
+
+	probe := claimResumeForRuntime(t, runtimeID, "unversioned-delivery")
+	if probe.Task.PriorSessionID != "" {
+		t.Fatalf("a session from an unversioned delivery must not be resumed; task=%+v", *probe.Task)
+	}
+	if probe.Task.PriorWorkDir != "/tmp/unversioned" {
+		t.Fatalf("expected the workdir to survive the cold start; task=%+v", *probe.Task)
+	}
+}
+
 func mustLoadTask(t *testing.T, taskID string) db.AgentTaskQueue {
 	t.Helper()
 	task, err := testHandler.Queries.GetAgentTask(context.Background(), parseUUID(taskID))

@@ -3653,6 +3653,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 			ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
 			PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
 			RuntimeStaleSecs:  RuntimeClaimFreshnessSeconds,
+			AmbiguousDigest:   pgtype.Text{String: AgentConfigDigestAmbiguous, Valid: true},
 		})
 		if err == nil {
 			s.ReclaimCheck.MarkChecked(
@@ -3947,6 +3948,7 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 			PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
 			RuntimeStaleSecs:  RuntimeClaimFreshnessSeconds,
 			MaxTasks:          int32(maxTasks),
+			AmbiguousDigest:   pgtype.Text{String: AgentConfigDigestAmbiguous, Valid: true},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("reclaim stale dispatched tasks: %w", err)
