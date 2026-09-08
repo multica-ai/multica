@@ -19,6 +19,7 @@ import { formatDuration } from "../../agents/components/agent-activity-hover-con
 import { TranscriptButton } from "../../common/task-transcript";
 import { cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
+import { compareActiveIssueTasks } from "./active-task-order";
 import {
   formatTokens,
   formatUsd,
@@ -93,7 +94,7 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
           // what tells the user the agent is alive and will resume.
           t.status === "waiting_local_directory" ||
           t.status === "running",
-      ),
+      ).toSorted(compareActiveIssueTasks),
     [tasks],
   );
 

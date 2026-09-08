@@ -16,6 +16,7 @@ import { TranscriptButton } from "../../common/task-transcript";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { ActiveTaskRow } from "./execution-log-section";
 import { useT } from "../../i18n";
+import { compareActiveIssueTasks } from "./active-task-order";
 
 // Per-issue "is an agent working on this right now?" chip for the issue
 // detail header. Lives in the header (not the scrollable body) so the live
@@ -59,9 +60,9 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
   const { running, queued } = useMemo(() => {
     const running: AgentTask[] = [];
     const queued: AgentTask[] = [];
-    // The list is already issue-scoped by the endpoint, so only the status
-    // split matters here.
-    for (const task of tasks) {
+    // The endpoint returns history newest first. Active work instead uses
+    // execution/queue order, shared with the right-panel log.
+    for (const task of tasks.toSorted(compareActiveIssueTasks)) {
       if (task.status === "running") running.push(task);
       else if (
         task.status === "queued" ||
