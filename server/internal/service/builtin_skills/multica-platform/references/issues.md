@@ -263,6 +263,14 @@ multica issue runs <issue-id> --active --output json     # in-flight runs on thi
 multica issue runs <issue-id> --siblings --output json   # ...and across the sub-issue family
 ```
 
+Comment replies stay with the directly replied-to agent or the thread owner;
+they never schedule a delayed run for the issue assignee. Waiting for an offline
+or busy agent does not change the recipient. Explicitly @-mention another agent to
+involve it. New top-level comments without a target still route to the assignee.
+Issue and agent run history omit unused assignee fallbacks from older versions;
+cancelled fallbacks are hidden even if dispatched, provided execution never
+started. Ordinary cancellations and fallbacks that started remain visible.
+
 `--active` drops the execution history and returns only `queued` / `dispatched`
 / `running` / `waiting_local_directory` runs. `--siblings` widens the same read
 to the issue's family — its parent (or itself, when it has no parent) plus every

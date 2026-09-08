@@ -7,9 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 func createCommentTriggerPreviewIssue(t *testing.T, title string, assigneeType, assigneeID string) string {
@@ -573,309 +572,66 @@ func TestPreviewCommentTriggers_MemberMentionSuppressesAssigneeFallback(t *testi
 	}
 }
 
-func TestCreateComment_ThreadParentQueuesParentAndPromotesDeferredFallback(t *testing.T) {
+func TestCreateComment_ThreadReplyDoesNotEscalateToAssignee(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	ctx := context.Background()
-
-	assigneeID := createHandlerTestAgent(t, "Thread Parent Assignee", nil)
-	parentAgentID := createHandlerTestAgent(t, "Thread Parent Owner", nil)
-	issueID := createCommentTriggerPreviewIssue(t, "thread parent deferred fallback", "agent", assigneeID)
-
-	var parentCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
-		VALUES ($1, $2, 'agent', $3, 'I am handling this')
-		RETURNING id
-	`, testWorkspaceID, issueID, parentAgentID).Scan(&parentCommentID); err != nil {
-		t.Fatalf("insert parent agent comment: %v", err)
-	}
-
-	replyContent := "can you follow up here?"
-	preview := previewCommentTriggersForTest(t, issueID, CommentTriggerPreviewRequest{
-		Content:  replyContent,
-		ParentID: &parentCommentID,
-	})
-	requirePreviewAgents(t, preview, parentAgentID)
-	if preview.Agents[0].Source != string(commentTriggerSourceThreadParent) {
-		t.Fatalf("preview source = %q, want %q", preview.Agents[0].Source, commentTriggerSourceThreadParent)
-	}
-
-	replyID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
-		"content":   replyContent,
-		"parent_id": parentCommentID,
-	})
-	if got := countQueuedCommentTriggerTasks(t, issueID, parentAgentID); got != 1 {
-		t.Fatalf("parent agent queued tasks = %d, want 1", got)
-	}
-	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 0 {
-		t.Fatalf("assignee queued tasks before timeout = %d, want 0", got)
-	}
-
-	var primaryTaskID string
-	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
-	`, issueID, parentAgentID).Scan(&primaryTaskID); err != nil {
-		t.Fatalf("load primary task: %v", err)
-	}
-
-	var fallbackTaskID, escalationForTaskID, triggerCommentID string
-	var fireAt time.Time
-	if err := testPool.QueryRow(ctx, `
-		SELECT id, escalation_for_task_id, trigger_comment_id, fire_at
-		FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2 AND status = 'deferred'
-	`, issueID, assigneeID).Scan(&fallbackTaskID, &escalationForTaskID, &triggerCommentID, &fireAt); err != nil {
-		t.Fatalf("load deferred fallback task: %v", err)
-	}
-	if escalationForTaskID != primaryTaskID {
-		t.Fatalf("deferred fallback escalation_for_task_id = %s, want %s", escalationForTaskID, primaryTaskID)
-	}
-	if triggerCommentID != replyID {
-		t.Fatalf("deferred fallback trigger_comment_id = %s, want %s", triggerCommentID, replyID)
-	}
-	if fireAt.Before(time.Now().Add(4*time.Minute)) || fireAt.After(time.Now().Add(6*time.Minute)) {
-		t.Fatalf("deferred fallback fire_at = %s, want about 5 minutes from now", fireAt.Format(time.RFC3339))
-	}
-
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET fire_at = now() - interval '1 second' WHERE id = $1`, fallbackTaskID); err != nil {
-		t.Fatalf("make deferred fallback due: %v", err)
-	}
-	if err := testHandler.TaskService.PromoteDueDeferredTasksForRuntime(ctx, util.MustParseUUID(testRuntimeID)); err != nil {
-		t.Fatalf("promote due deferred fallback: %v", err)
-	}
-	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 1 {
-		t.Fatalf("assignee queued tasks after timeout promotion = %d, want 1", got)
-	}
-}
-
-func TestCreateComment_ThreadParentSkipsDeferredFallbackWhenParentIsAssignee(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	assigneeID := createHandlerTestAgent(t, "Thread Parent Same Assignee", nil)
-	issueID := createCommentTriggerPreviewIssue(t, "thread parent same as assignee", "agent", assigneeID)
-
-	var parentCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
-		VALUES ($1, $2, 'agent', $3, 'I am handling this')
-		RETURNING id
-	`, testWorkspaceID, issueID, assigneeID).Scan(&parentCommentID); err != nil {
-		t.Fatalf("insert parent agent comment: %v", err)
-	}
-
-	postCommentForTriggerPreviewTest(t, issueID, map[string]any{
-		"content":   "can you follow up here?",
-		"parent_id": parentCommentID,
-	})
-	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 1 {
-		t.Fatalf("parent assignee queued tasks = %d, want 1", got)
-	}
-	if got := countCommentTriggerTasksWithStatus(t, issueID, assigneeID, "deferred"); got != 0 {
-		t.Fatalf("deferred fallback for same parent assignee = %d, want 0", got)
-	}
-}
-
-func TestCreateComment_ThreadParentEscalationCanBeDisabled(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	var previousSettings string
-	if err := testPool.QueryRow(ctx,
-		`SELECT COALESCE(settings, '{}'::jsonb)::text FROM workspace WHERE id = $1`,
-		testWorkspaceID,
-	).Scan(&previousSettings); err != nil {
-		t.Fatalf("load workspace settings: %v", err)
-	}
-	if _, err := testPool.Exec(ctx,
-		`UPDATE workspace SET settings = '{"comment_routing":{"escalation_seconds":0}}'::jsonb WHERE id = $1`,
-		testWorkspaceID,
-	); err != nil {
-		t.Fatalf("disable comment routing escalation: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `UPDATE workspace SET settings = $1::jsonb WHERE id = $2`, previousSettings, testWorkspaceID)
-	})
-
-	assigneeID := createHandlerTestAgent(t, "Thread Parent Disabled Assignee", nil)
-	parentAgentID := createHandlerTestAgent(t, "Thread Parent Disabled Owner", nil)
-	issueID := createCommentTriggerPreviewIssue(t, "thread parent disabled fallback", "agent", assigneeID)
-
-	var parentCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
-		VALUES ($1, $2, 'agent', $3, 'I am handling this')
-		RETURNING id
-	`, testWorkspaceID, issueID, parentAgentID).Scan(&parentCommentID); err != nil {
-		t.Fatalf("insert parent agent comment: %v", err)
-	}
-
-	postCommentForTriggerPreviewTest(t, issueID, map[string]any{
-		"content":   "can you follow up here?",
-		"parent_id": parentCommentID,
-	})
-	if got := countQueuedCommentTriggerTasks(t, issueID, parentAgentID); got != 1 {
-		t.Fatalf("parent agent queued tasks = %d, want 1", got)
-	}
-	if got := countCommentTriggerTasksWithStatus(t, issueID, assigneeID, "deferred"); got != 0 {
-		t.Fatalf("disabled deferred assignee fallback = %d, want 0", got)
-	}
-}
-
-func TestCreateComment_ParentAgentReplyCancelsPromotedFallbackBeforeClaim(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	assigneeID := createHandlerTestAgent(t, "Thread Parent Cancel Assignee", nil)
-	parentAgentID := createHandlerTestAgent(t, "Thread Parent Cancel Owner", nil)
-	issueID := createCommentTriggerPreviewIssue(t, "thread parent deferred cancel", "agent", assigneeID)
-
-	var parentCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
-		VALUES ($1, $2, 'agent', $3, 'I am handling this')
-		RETURNING id
-	`, testWorkspaceID, issueID, parentAgentID).Scan(&parentCommentID); err != nil {
-		t.Fatalf("insert parent agent comment: %v", err)
-	}
-
-	memberReplyID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
-		"content":   "can you follow up here?",
-		"parent_id": parentCommentID,
-	})
-	if got := countCommentTriggerTasksWithStatus(t, issueID, assigneeID, "deferred"); got != 1 {
-		t.Fatalf("deferred assignee fallback before parent ack = %d, want 1", got)
-	}
-
-	var primaryTaskID, fallbackTaskID string
-	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
-	`, issueID, parentAgentID).Scan(&primaryTaskID); err != nil {
-		t.Fatalf("load primary task: %v", err)
-	}
-	if err := testPool.QueryRow(ctx, `
-		UPDATE agent_task_queue
-		SET fire_at = now() - interval '1 second'
-		WHERE issue_id = $1 AND agent_id = $2 AND status = 'deferred'
-		RETURNING id
-	`, issueID, assigneeID).Scan(&fallbackTaskID); err != nil {
-		t.Fatalf("make deferred fallback due: %v", err)
-	}
-	if err := testHandler.TaskService.PromoteDueDeferredTasksForRuntime(ctx, util.MustParseUUID(testRuntimeID)); err != nil {
-		t.Fatalf("promote due deferred fallback: %v", err)
-	}
-	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 1 {
-		t.Fatalf("queued assignee fallback before parent ack = %d, want 1", got)
-	}
-
-	w := httptest.NewRecorder()
-	r := newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{
-		"content":   "acknowledged",
-		"parent_id": memberReplyID,
-	})
-	r = withURLParam(r, "id", issueID)
-	r.Header.Set("X-Agent-ID", parentAgentID)
-	r.Header.Set("X-Task-ID", primaryTaskID)
-	testHandler.CreateComment(w, r)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("agent ack comment: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-
-	if got := countCommentTriggerTasksWithStatus(t, issueID, assigneeID, "deferred"); got != 0 {
-		t.Fatalf("deferred assignee fallback after parent ack = %d, want 0", got)
-	}
-	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 0 {
-		t.Fatalf("queued assignee fallback after parent ack = %d, want 0", got)
-	}
-	if got := countCommentTriggerTasksWithStatus(t, issueID, assigneeID, "cancelled"); got != 1 {
-		t.Fatalf("cancelled assignee fallback after parent ack = %d, want 1", got)
-	}
-	claimed, err := testHandler.TaskService.ClaimTask(ctx, util.MustParseUUID(assigneeID))
-	if err != nil {
-		t.Fatalf("claim assignee fallback after parent ack: %v", err)
-	}
-	if claimed != nil {
-		t.Fatalf("assignee claimed cancelled fallback %s after parent ack; fallback task was %s", util.UUIDToString(claimed.ID), fallbackTaskID)
-	}
-}
-
-func TestStartTaskCancelsPromotedFallbackBeforeAssigneeCanClaim(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	assigneeID := createHandlerTestAgent(t, "Thread Parent Start Cancel Assignee", nil)
-	parentAgentID := createHandlerTestAgent(t, "Thread Parent Start Cancel Owner", nil)
-	issueID := createCommentTriggerPreviewIssue(t, "thread parent start cancels fallback", "agent", assigneeID)
-
-	var parentCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
-		VALUES ($1, $2, 'agent', $3, 'I am handling this')
-		RETURNING id
-	`, testWorkspaceID, issueID, parentAgentID).Scan(&parentCommentID); err != nil {
-		t.Fatalf("insert parent agent comment: %v", err)
-	}
-
-	postCommentForTriggerPreviewTest(t, issueID, map[string]any{
-		"content":   "can you follow up here?",
-		"parent_id": parentCommentID,
-	})
-	if got := countCommentTriggerTasksWithStatus(t, issueID, assigneeID, "deferred"); got != 1 {
-		t.Fatalf("deferred assignee fallback before start = %d, want 1", got)
-	}
-
-	primary, err := testHandler.TaskService.ClaimTask(ctx, util.MustParseUUID(parentAgentID))
-	if err != nil {
-		t.Fatalf("claim parent task: %v", err)
-	}
-	if primary == nil {
-		t.Fatal("claim parent task returned nil")
-	}
-
-	var fallbackTaskID string
-	if err := testPool.QueryRow(ctx, `
-		UPDATE agent_task_queue
-		SET fire_at = now() - interval '1 second'
-		WHERE issue_id = $1 AND agent_id = $2 AND status = 'deferred'
-		RETURNING id
-	`, issueID, assigneeID).Scan(&fallbackTaskID); err != nil {
-		t.Fatalf("make deferred fallback due: %v", err)
-	}
-	if err := testHandler.TaskService.PromoteDueDeferredTasksForRuntime(ctx, util.MustParseUUID(testRuntimeID)); err != nil {
-		t.Fatalf("promote due deferred fallback: %v", err)
-	}
-	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 1 {
-		t.Fatalf("queued assignee fallback before parent start = %d, want 1", got)
-	}
-
-	if _, err := testHandler.TaskService.StartTask(ctx, primary.ID); err != nil {
-		t.Fatalf("start parent task: %v", err)
-	}
-
-	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 0 {
-		t.Fatalf("queued assignee fallback after parent start = %d, want 0", got)
-	}
-	if got := countCommentTriggerTasksWithStatus(t, issueID, assigneeID, "cancelled"); got != 1 {
-		t.Fatalf("cancelled assignee fallback after parent start = %d, want 1", got)
-	}
-	claimed, err := testHandler.TaskService.ClaimTask(ctx, util.MustParseUUID(assigneeID))
-	if err != nil {
-		t.Fatalf("claim assignee fallback after parent start: %v", err)
-	}
-	if claimed != nil {
-		t.Fatalf("assignee claimed cancelled fallback %s after parent start; fallback task was %s", util.UUIDToString(claimed.ID), fallbackTaskID)
+	for _, tc := range []struct {
+		name          string
+		memberRoot    bool
+		squadAssignee bool
+		sameAssignee  bool
+	}{
+		{name: "direct agent reply"},
+		{name: "member root owner", memberRoot: true},
+		{name: "direct reply with squad assignee", squadAssignee: true},
+		{name: "root owner with squad assignee", memberRoot: true, squadAssignee: true},
+		{name: "reply to assignee", sameAssignee: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			ownerID := createHandlerTestAgent(t, "Thread Owner", nil)
+			assigneeID := ownerID
+			if !tc.sameAssignee {
+				assigneeID = createHandlerTestAgent(t, "Issue Assignee", nil)
+			}
+			assigneeType := "agent"
+			if tc.squadAssignee {
+				assigneeID = dbfx.Squad(t, "Issue Squad", assigneeID)
+				assigneeType = "squad"
+			}
+			issueID := dbfx.Issue(t, "thread reply", testutil.Cols{"assignee_type": assigneeType, "assignee_id": assigneeID})
+			parentID := ""
+			if tc.memberRoot {
+				parentID = dbfx.Comment(t, issueID, fmt.Sprintf("[@Owner](mention://agent/%s) please investigate", ownerID))
+			} else {
+				parentID = dbfx.Comment(t, issueID, "I am handling this", testutil.Cols{"author_type": "agent", "author_id": ownerID})
+			}
+			body := map[string]any{"content": "please follow up", "parent_id": parentID}
+			requirePreviewAgents(t, previewCommentTriggersForTest(t, issueID, body), ownerID)
+			replyID := postCommentForTriggerPreviewTest(t, issueID, body)
+			// Read raw rows so hiding unused fallbacks in history cannot satisfy this assertion.
+			tasks, err := testHandler.Queries.ListTasksByIssue(ctx, parseUUID(issueID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(tasks) != 1 || uuidToString(tasks[0].AgentID) != ownerID || uuidToString(tasks[0].TriggerCommentID) != replyID {
+				t.Fatalf("reply must create only the thread owner's task, got %+v", tasks)
+			}
+			primary, err := testHandler.TaskService.ClaimTask(ctx, parseUUID(ownerID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if primary == nil {
+				t.Fatal("thread owner task was not claimable")
+			}
+			if _, err := testHandler.TaskService.StartTask(ctx, primary.ID); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := taskIDs(runsRequest(t, issueID, "")), sortedCopy(uuidToString(primary.ID)); !sameIDs(got, want) {
+				t.Fatalf("reply history = %v, want only the thread owner's run %v", got, want)
+			}
+		})
 	}
 }
 
