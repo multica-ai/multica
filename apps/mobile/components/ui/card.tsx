@@ -8,7 +8,7 @@ const Card = React.forwardRef<View, ViewProps & { className?: string }>(
     <View
       ref={ref}
       className={cn(
-        "rounded-2xl border border-border bg-card p-4",
+        "rounded-xl border border-border bg-card p-4",
         className,
       )}
       style={[continuousCorners, style]}
@@ -25,7 +25,7 @@ const CardPressable = React.forwardRef<
   <Pressable
     ref={ref as React.Ref<View>}
     className={cn(
-      "rounded-2xl border border-border bg-card p-4 active:bg-secondary",
+      "rounded-xl border border-border bg-card p-4 active:bg-secondary",
       className,
     )}
     style={

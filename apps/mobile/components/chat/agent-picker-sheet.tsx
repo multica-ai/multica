@@ -47,7 +47,7 @@ export function AgentPickerSheet({
         <View className="flex-1 items-center justify-center px-6">
           <Pressable onPress={() => {}} className="w-full max-w-sm">
             <View
-              className="bg-popover rounded-2xl overflow-hidden"
+              className="bg-popover rounded-xl overflow-hidden"
               style={continuousCorners}
             >
               <View className="px-4 py-3 border-b border-border">

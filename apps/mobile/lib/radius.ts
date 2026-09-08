@@ -1,27 +1,10 @@
 import type { ViewStyle } from "react-native";
+import radiusTokens from "./radius-tokens.json";
 
-/** Mirrors the compact product radius ladder in tailwind.config.js. */
-export const MOBILE_RADIUS = {
-  xs: 3,
-  sm: 4,
-  md: 6,
-  lg: 8,
-  xl: 10,
-  "2xl": 12,
-  "3xl": 16,
-} as const;
+/** Shared by NativeWind utilities and inline React Native styles. */
+export const MOBILE_RADIUS = radiusTokens;
 
 /** iOS-style continuous curves for mobile surfaces with large corner radii. */
 export const continuousCorners = {
   borderCurve: "continuous",
 } satisfies ViewStyle;
-
-/** Entity avatars are proportional soft squares on every client and size. */
-export function entityAvatarStyle(size: number) {
-  return {
-    width: size,
-    height: size,
-    borderRadius: Math.round(size / 4),
-    borderCurve: "continuous",
-  } satisfies ViewStyle;
-}

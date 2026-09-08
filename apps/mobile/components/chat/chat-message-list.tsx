@@ -301,7 +301,7 @@ function MessageRow({
     const body = (
       <View
         className={cn(
-          "self-end max-w-[80%] gap-1.5 rounded-2xl border-2 px-3.5 py-2 transition-colors",
+          "self-end max-w-[80%] gap-1.5 rounded-xl border-2 px-3.5 py-2 transition-colors",
           isSelecting
             ? "bg-primary/5 border-primary/30"
             : longPress.isPressed
@@ -546,7 +546,7 @@ function FailureBubble({
     <View className="self-start max-w-[80%]">
       <View
         className={cn(
-          "rounded-2xl border-2 bg-destructive/10 px-3.5 py-2 transition-colors",
+          "rounded-xl border-2 bg-destructive/10 px-3.5 py-2 transition-colors",
           isSelecting || longPress.isPressed
             ? "border-primary/30"
             : "border-destructive/30",

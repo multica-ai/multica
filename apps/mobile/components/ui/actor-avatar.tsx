@@ -26,7 +26,6 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { useAgentPresence } from "@/lib/use-agent-presence";
 import { PresenceDot } from "@/components/ui/presence-dot";
 import { THEME } from "@/lib/theme";
-import { entityAvatarStyle } from "@/lib/radius";
 
 // `system` actors are server-side automation (state changes triggered by the
 // platform itself, not a member or an agent). InboxItem.actor_type carries
@@ -98,13 +97,10 @@ function BareAvatar({
       ? THEME.dark.mutedForeground
       : THEME.light.mutedForeground;
 
-  // Squad gets the same proportional soft-square used by workspace entities
-  // on web and mobile, so a group never reads as a person at a glance.
+  // Squad gets a soft-square tile (matches web actor-avatar.tsx:42 which uses
+  // rounded-md) so a group never reads as a single person at a glance.
   // Everyone else stays round.
-  const avatarStyle =
-    type === "squad"
-      ? entityAvatarStyle(size)
-      : { width: size, height: size, borderRadius: size / 2 };
+  const radius = type === "squad" ? Math.round(size * 0.22) : size / 2;
 
   // URL lookup runs BEFORE the squad/system icon fallbacks so a squad with
   // an avatar_url renders its image instead of the generic group glyph.
@@ -132,7 +128,7 @@ function BareAvatar({
   if (emoji) {
     return (
       <View
-        style={avatarStyle}
+        style={{ width: size, height: size, borderRadius: radius }}
         className="items-center justify-center bg-muted"
       >
         <Text
@@ -150,7 +146,7 @@ function BareAvatar({
       <Image
         source={{ uri: url }}
         accessibilityLabel={displayName}
-        style={avatarStyle}
+        style={{ width: size, height: size, borderRadius: radius }}
         className="bg-muted"
       />
     );
@@ -159,7 +155,7 @@ function BareAvatar({
   if (type === "system") {
     return (
       <View
-        style={avatarStyle}
+        style={{ width: size, height: size, borderRadius: radius }}
         className="items-center justify-center bg-muted"
       >
         <Ionicons name="cog" size={Math.round(size * 0.55)} color={iconColor} />
@@ -170,7 +166,7 @@ function BareAvatar({
   if (type === "squad") {
     return (
       <View
-        style={avatarStyle}
+        style={{ width: size, height: size, borderRadius: radius }}
         className="items-center justify-center bg-muted"
       >
         <Ionicons name="people" size={Math.round(size * 0.55)} color={iconColor} />
@@ -181,7 +177,7 @@ function BareAvatar({
   const isAgent = type === "agent";
   return (
     <View
-      style={avatarStyle}
+      style={{ width: size, height: size, borderRadius: radius }}
       className={cn(
         "items-center justify-center",
         isAgent ? "bg-brand/15" : "bg-muted",

@@ -51,10 +51,13 @@ export default function GlobalError({
           <button
             type="button"
             onClick={reset}
+            // This boundary replaces the root layout, so neither design
+            // tokens nor utility classes are available here. Keep this 6px
+            // fallback aligned with the resolved product `radius-md`.
             style={{
               marginTop: 16,
               padding: "8px 16px",
-              borderRadius: 8,
+              borderRadius: 6,
               border: "1px solid #ccc",
               cursor: "pointer",
             }}

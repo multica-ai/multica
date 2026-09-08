@@ -62,9 +62,6 @@
     --radius-2xl: calc(var(--radius) * 2);
     --radius-3xl: calc(var(--radius) * 2.5);
     --radius-4xl: calc(var(--radius) * 3);
-    /* Workspaces and squads are entities rather than people. A proportional
-       soft square stays recognizable at every avatar size. */
-    --radius-entity: 25%;
 }
 
 /* Type scale — the only font sizes product UI may use.

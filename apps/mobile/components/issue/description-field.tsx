@@ -1,7 +1,7 @@
 /**
  * Description input block shared by `new-issue.tsx` and `issue/[id]/edit.tsx`.
  *
- * Focus-tinted `rounded-2xl` container wrapping the `AutosizeTextArea` —
+ * Focus-tinted `rounded-xl` container wrapping the `AutosizeTextArea` —
  * matches the "write markdown body" treatment used by the comment composer
  * so all three surfaces feel like the same control.
  *
@@ -31,7 +31,7 @@ export function DescriptionField({
   return (
     <View
       className={cn(
-        "rounded-2xl border px-3",
+        "rounded-xl border px-3",
         focused
           ? "border-primary/30 bg-secondary"
           : "border-transparent bg-secondary/40",

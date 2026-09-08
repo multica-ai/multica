@@ -23,7 +23,6 @@ import { Image as ExpoImage } from "expo-image";
 import { Text } from "@/components/ui/text";
 import { resolveAttachmentUrl } from "@/lib/attachment-url";
 import { cn } from "@/lib/utils";
-import { entityAvatarStyle } from "@/lib/radius";
 
 export function WorkspaceAvatar({
   name,
@@ -37,11 +36,13 @@ export function WorkspaceAvatar({
   className?: string;
 }) {
   const resolved = resolveAttachmentUrl(avatarUrl);
+  const borderRadius = Math.round(size / 4);
+
   if (resolved) {
     return (
       <View
         className={cn("overflow-hidden border border-border", className)}
-        style={entityAvatarStyle(size)}
+        style={{ width: size, height: size, borderRadius }}
       >
         <ExpoImage
           source={{ uri: resolved }}
@@ -56,7 +57,7 @@ export function WorkspaceAvatar({
   return (
     <View
       className={cn("items-center justify-center bg-muted border border-border", className)}
-      style={entityAvatarStyle(size)}
+      style={{ width: size, height: size, borderRadius }}
     >
       <Text
         className="font-semibold text-muted-foreground"

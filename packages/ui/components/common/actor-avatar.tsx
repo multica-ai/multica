@@ -40,8 +40,9 @@ function ActorAvatar({
     setImgError(false);
   }, [avatarUrl]);
 
-  // People, agents, and system actors are circles. Squads use the entity
-  // soft-square shared with workspace avatars so groups never read as people.
+  // Every actor — member, agent, squad, or system — renders as a circle. This
+  // is the single source of truth for avatar shape; the upload editors mirror
+  // it (packages/views/common/avatar-upload-control.tsx).
   return (
     <div
       data-slot="avatar"
@@ -49,8 +50,9 @@ function ActorAvatar({
         "inline-flex shrink-0 items-center justify-center font-medium overflow-hidden",
         (!avatarUrl || emoji || imgError) && "bg-muted text-muted-foreground",
         className,
-        // Shape stays last so a call-site cannot override the taxonomy.
-        isSquad ? "rounded-entity" : "rounded-full"
+        // rounded-full stays last so a call-site `className` can never override
+        // the circle — avatar shape is a hard invariant, not a per-site choice.
+        "rounded-full"
       )}
       style={{ width: px, height: px, fontSize: px * 0.45 }}
     >

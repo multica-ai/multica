@@ -519,7 +519,7 @@ export function MessageComposer({
       )}
 
       <View
-        className="rounded-3xl border border-border bg-secondary"
+        className="rounded-2xl border border-border bg-secondary"
         style={continuousCorners}
       >
         {(mentions.length > 0 || attachments.length > 0) ? (
