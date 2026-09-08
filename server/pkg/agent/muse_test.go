@@ -183,8 +183,9 @@ func TestMuseThinkingEnums(t *testing.T) {
 	if !ThinkingControlSupported("muse") {
 		t.Fatal("ThinkingControlSupported(muse) should be true")
 	}
-	// Muse Code 1.0.3 added `max` between `xhigh` and `ultra`; 1.0.1 and 1.0.2
-	// did not have it. `ultra` remains the ceiling.
+	// Muse Code 1.0.3 added `max`; 1.0.1 and 1.0.2 did not have it. `ultra`
+	// parses everywhere but is account-gated and silently degrades to xhigh
+	// when closed, so `max` is the effective ceiling in practice.
 	for _, v := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"} {
 		if !IsKnownThinkingValue("muse", v) {
 			t.Fatalf("IsKnownThinkingValue(muse, %q) should be true", v)
