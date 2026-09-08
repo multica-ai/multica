@@ -337,6 +337,7 @@ func TestBuildLoginShellResolveScript_ShapeAndContent(t *testing.T) {
 // doesn't honour ENV (which would defeat the simulation — not the function's
 // fault).
 func TestResolveAgentsViaLoginShell_ResolvesViaInteractiveShell(t *testing.T) {
+	t.Setenv("MULTICA_LOGIN_SHELL_PROBE", "true")
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell not available on Windows")
 	}
@@ -391,6 +392,7 @@ func TestResolveAgentsViaLoginShell_ResolvesViaInteractiveShell(t *testing.T) {
 }
 
 func TestResolveAgentsViaLoginShell_SkipsUnsupportedShell(t *testing.T) {
+	t.Setenv("MULTICA_LOGIN_SHELL_PROBE", "true")
 	t.Setenv("SHELL", "/usr/bin/fish")
 	got := resolveAgentsViaLoginShell([]string{"claude"})
 	if len(got) != 0 {
@@ -399,6 +401,7 @@ func TestResolveAgentsViaLoginShell_SkipsUnsupportedShell(t *testing.T) {
 }
 
 func TestResolveAgentsViaLoginShell_EmptyShellNoCrash(t *testing.T) {
+	t.Setenv("MULTICA_LOGIN_SHELL_PROBE", "true")
 	t.Setenv("SHELL", "")
 	got := resolveAgentsViaLoginShell([]string{"claude"})
 	if len(got) != 0 {
@@ -407,6 +410,7 @@ func TestResolveAgentsViaLoginShell_EmptyShellNoCrash(t *testing.T) {
 }
 
 func TestResolveAgentsViaLoginShell_EmptyInput(t *testing.T) {
+	t.Setenv("MULTICA_LOGIN_SHELL_PROBE", "true")
 	t.Setenv("SHELL", "/bin/sh")
 	got := resolveAgentsViaLoginShell(nil)
 	if len(got) != 0 {
@@ -569,6 +573,7 @@ func TestLoadConfig_SkipsMulticaHooksShadowingAgentBinaries(t *testing.T) {
 }
 
 func TestLoadConfig_SkipsMulticaHooksFromLoginShellFallback(t *testing.T) {
+	t.Setenv("MULTICA_LOGIN_SHELL_PROBE", "true")
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell not available on Windows")
 	}
@@ -1154,6 +1159,7 @@ func TestLoadConfig_AutoReload_OffSwitches(t *testing.T) {
 // suite but silently dropped this case (alias text is not absolute, so the
 // `case "$p" in /*)` filter rejected it).
 func TestResolveAgentsViaLoginShell_StripsAliasShadowing(t *testing.T) {
+	t.Setenv("MULTICA_LOGIN_SHELL_PROBE", "true")
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell not available on Windows")
 	}
@@ -1223,6 +1229,7 @@ func TestResolveAgentsViaLoginShell_StripsAliasShadowing(t *testing.T) {
 // loginShellResolveTimeout + loginShellResolveWaitDelay, not the survivor's
 // lifetime.
 func TestResolveAgentsViaLoginShell_HardTimeoutOnBackgroundedStdout(t *testing.T) {
+	t.Setenv("MULTICA_LOGIN_SHELL_PROBE", "true")
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell not available on Windows")
 	}
@@ -1269,6 +1276,7 @@ func TestResolveAgentsViaLoginShell_HardTimeoutOnBackgroundedStdout(t *testing.T
 // the shell-fallback path must not run. We assert this by pointing SHELL at
 // a sentinel script that touches a marker file when invoked.
 func TestLoadConfig_SkipsLoginShellWhenLookPathSucceeds(t *testing.T) {
+	t.Setenv("MULTICA_LOGIN_SHELL_PROBE", "true")
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell not available on Windows")
 	}
