@@ -2,6 +2,7 @@ package sharecrm
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -41,6 +42,24 @@ func (f *captureChatSession) AppendUserMessage(_ context.Context, in engine.Appe
 func (f *captureChatSession) BindMediaRefs(_ context.Context, in engine.BindMediaInput) error {
 	f.mediaIn = in
 	return nil
+}
+
+func TestExternalSessionIDFromBindingConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config []byte
+		want   string
+	}{
+		{"value", []byte(`{"chat_id":"chat","session_id":" session-1 "}`), "session-1"},
+		{"missing", []byte(`{"chat_id":"chat"}`), ""},
+		{"malformed", []byte(`{"session_id":`), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ExternalSessionIDFromBindingConfig(tc.config); got != tc.want {
+				t.Fatalf("ExternalSessionIDFromBindingConfig() = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestShareCRMSessionBinder_AppendPreservesFreshContextIntent(t *testing.T) {
@@ -99,6 +118,7 @@ func TestShareCRMSessionBinder_StartSessionForwardsRouting(t *testing.T) {
 			MessageID:   "m-new",
 			Text:        "hello after /new",
 			CommandText: "current instruction",
+			Raw:         []byte(`{"session_id":" external-session-1 "}`),
 			Source: channel.Source{
 				ChatID:   "0:fs:session-new:",
 				ChatType: channel.ChatTypeP2P,
@@ -111,6 +131,13 @@ func TestShareCRMSessionBinder_StartSessionForwardsRouting(t *testing.T) {
 
 	if session.startIn.BindingKey != "0:fs:session-new:" {
 		t.Fatalf("BindingKey = %q, want chat id", session.startIn.BindingKey)
+	}
+	var bindingConfig sharecrmBindingConfig
+	if err := json.Unmarshal(session.startIn.BindingConfig, &bindingConfig); err != nil {
+		t.Fatalf("BindingConfig: %v", err)
+	}
+	if bindingConfig.SessionID != "external-session-1" {
+		t.Fatalf("binding session_id = %q, want external-session-1", bindingConfig.SessionID)
 	}
 	if session.startIn.Sender != creator {
 		t.Fatalf("embedded Sender = %v, want creator", session.startIn.Sender)

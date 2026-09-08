@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -47,15 +48,33 @@ var (
 	_ engine.Auditor              = (*auditor)(nil)
 )
 
-// sharecrmBindingConfig is stored on the chat session binding for outbound.
+// sharecrmBindingConfig is stored on the chat session binding for outbound
+// routing and the optional external session context for the task that came
+// from this binding.
 type sharecrmBindingConfig struct {
-	ChatID string `json:"chat_id"`
+	ChatID    string `json:"chat_id"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 func sharecrmSessionRouting(msg channel.InboundMessage) (bindingKey string, config []byte) {
 	chatID := msg.Source.ChatID
-	raw, _ := json.Marshal(sharecrmBindingConfig{ChatID: chatID})
-	return chatID, raw
+	cfg := sharecrmBindingConfig{ChatID: chatID}
+	if raw, err := decodeShareCRMRaw(msg); err == nil {
+		cfg.SessionID = strings.TrimSpace(raw.SessionID)
+	}
+	encoded, _ := json.Marshal(cfg)
+	return chatID, encoded
+}
+
+// ExternalSessionIDFromBindingConfig exposes the optional external session
+// context from the ShareCRM binding snapshot. Old or malformed configs remain
+// harmless.
+func ExternalSessionIDFromBindingConfig(config []byte) string {
+	var cfg sharecrmBindingConfig
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.SessionID)
 }
 
 func outboundChatID(b db.ChannelChatSessionBinding) string {
