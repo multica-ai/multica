@@ -1,6 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
+import { renderWithI18n } from "../test/i18n";
 import { AppSidebar } from "./app-sidebar";
 
 const { appForeground, chatSessions, chatStore, detail, deletePin, inboxItems, navigation, pins, sidebarState, summary, workspaces } = vi.hoisted(() => ({
@@ -57,12 +58,13 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
     children,
     isActive,
     render,
+    ...props
   }: {
     children: React.ReactNode;
     isActive?: boolean;
     render?: React.ReactElement<{ href?: string }>;
-  }) => (
-    <button type="button" data-active={isActive ? "true" : undefined} data-href={render?.props.href}>
+  } & React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button {...props} type="button" data-active={isActive ? "true" : undefined} data-href={render?.props.href}>
       {children}
     </button>
   ),
@@ -233,6 +235,42 @@ describe("PinRow", () => {
       "true",
     );
     expect(container.querySelector('button[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+  });
+
+  it("keeps the parent route active until a hidden pin is expanded", () => {
+    const originalPins = pins.current;
+    pins.current = Array.from({ length: 6 }, (_, index) => ({
+      ...originalPins[0]!,
+      id: `pin-${index + 1}`,
+      item_id: `issue-${index + 1}`,
+      position: index,
+    }));
+    navigation.current.pathname = "/acme/issues/issue-6";
+    detail.current = {
+      isPending: false,
+      isError: false,
+      data: { identifier: "MUL-123", title: "Pinned issue", status: "todo" },
+      error: null,
+    };
+
+    try {
+      const { container } = renderWithI18n(<AppSidebar />);
+      const parent = () => container.querySelector('button[data-href="/acme/issues"]');
+      const lastPin = () => container.querySelector('button[data-href="/acme/issues/issue-6"]');
+
+      expect(lastPin()).not.toBeInTheDocument();
+      expect(parent()).toHaveAttribute("data-active", "true");
+
+      fireEvent.click(screen.getByRole("button", { name: "Show 1 more…" }));
+      expect(lastPin()).toHaveAttribute("data-active", "true");
+      expect(parent()).not.toHaveAttribute("data-active");
+
+      fireEvent.click(screen.getByRole("button", { name: "Show fewer" }));
+      expect(lastPin()).not.toBeInTheDocument();
+      expect(parent()).toHaveAttribute("data-active", "true");
+    } finally {
+      pins.current = originalPins;
+    }
   });
 });
 

@@ -52,8 +52,10 @@
     "new_issue": "新規タスク",
     "new_issue_shortcut": "C",
     "pinned_label": "ピン留め済み",
-    "workspace_group": "ワークスペース",
-    "configure_group": "設定",
+    "work_group": "仕事",
+    "ai_team_group": "AI チーム",
+    "show_more_pins": "さらに {{count}} 件を表示…",
+    "show_fewer_pins": "表示を減らす",
     "unread_overflow": "99+",
     "discord_card": {
       "title": "Discord に参加",

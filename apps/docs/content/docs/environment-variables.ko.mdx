@@ -33,6 +33,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | 로컬 `multica` 데이터베이스 | PostgreSQL 연결 주소 |
 | `DATABASE_MAX_CONNS` | `25` | API 프로세스 하나의 최대 데이터베이스 연결 수 |
 | `DATABASE_MIN_CONNS` | `5` | API 프로세스 하나가 유지하는 최소 연결 수 |
+| `DATABASE_SEARCH_WORK_MEM_MB` | `64` | 검색 계획의 각 노드에 적용되는 PostgreSQL `work_mem` 상한(MB). `1`~`64`로 낮추거나 `0`으로 데이터베이스/세션 기본값 사용 |
 | `DATABASE_REPLICA_URL` | 비어 있음 | 선택적 PostgreSQL 읽기 전용 복제본 연결 주소. 새 연결은 읽기 전용 상태를 검증하며 각 기능은 코드에서 최종 일관성 읽기를 명시적으로 선택해야 함 |
 | `DATABASE_REPLICA_MAX_CONNS` | `10` | API 프로세스당 최대 복제본 연결 수 |
 | `DATABASE_REPLICA_MIN_CONNS` | `0` | API 프로세스가 유지하는 최소 복제본 연결 수 |

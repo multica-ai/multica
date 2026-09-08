@@ -2171,7 +2171,9 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 }
 
 // TestBriefIssuePointerFollowsTheInstalledSkill covers the compatibility
-// direction the server cannot reach (MUL-6986).
+// direction the server cannot reach (MUL-6986). The brief carried two
+// pointers at this skill; MUL-6966 retired the metadata one, so the
+// sub-issue pointer is now the single subject here.
 //
 // The brief is assembled here, in the daemon, from a binary the user installs
 // on their own schedule. A backend deploy does not rewrite it, and an app
@@ -2237,7 +2239,6 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 			for _, always := range []string{
 				"`--status todo` starts an agent-assigned child immediately",
 				"`--stage <N>` groups children into ordered stages",
-				"never secrets or long content",
 			} {
 				if !strings.Contains(out, always) {
 					t.Errorf("brief lost unconditional content %q", always)
@@ -2245,15 +2246,10 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 			}
 
 			if tc.want == "" {
-				for _, banned := range []string{"Full write discipline:", "Before creating sub-issues, read"} {
-					if strings.Contains(out, banned) {
-						t.Errorf("brief points at a skill with none installed (%q):\n%s", banned, out)
-					}
+				if strings.Contains(out, "Before creating sub-issues, read") {
+					t.Errorf("brief points at a skill with none installed:\n%s", out)
 				}
 				return
-			}
-			if !strings.Contains(out, "Full write discipline: "+tc.want+".") {
-				t.Errorf("metadata pointer does not name %q:\n%s", tc.want, out)
 			}
 			if !strings.Contains(out, "Before creating sub-issues, read "+tc.want+" —") {
 				t.Errorf("sub-issue pointer does not name %q:\n%s", tc.want, out)

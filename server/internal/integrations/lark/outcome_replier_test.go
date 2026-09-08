@@ -73,10 +73,10 @@ func (s *stubAPIClientWithRecorder) SendMarkdownCard(ctx context.Context, p Send
 func (s *stubAPIClientWithRecorder) SendBindingPromptCard(ctx context.Context, p BindingPromptParams) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.bindingCalls = append(s.bindingCalls, p)
 	if s.bindingErr != nil {
 		return s.bindingErr
 	}
-	s.bindingCalls = append(s.bindingCalls, p)
 	return nil
 }
 
@@ -357,6 +357,227 @@ func TestLarkOutcomeReplierUsesAppURLForWebLinks(t *testing.T) {
 	}
 	if !strings.Contains(stub.textOut[0].Text, "https://app.multica.test/issues/MUL-42") {
 		t.Fatalf("issue-created text should use AppURL; got %q", stub.textOut[0].Text)
+	}
+}
+
+func TestLarkOutcomeReplierNeedsBindingFallsBackToGroupNoticeWhenPrivateUnavailable(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{
+		configured: true,
+		bindingErr: &APIError{
+			Op:   "send binding prompt",
+			Code: codeNoAvailability,
+			Msg:  "Bot has NO availability to this user.",
+		},
+	}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  fakeBindingMinter{raw: "token"},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		AppURL:      "https://multica.test",
+		Logger:      log,
+	})
+
+	inst := Installation{AppID: "cli_x"}
+	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
+	inst.WorkspaceID = mustUUID("33333333-3333-3333-3333-333333333333")
+	rep.Reply(context.Background(), inst, InboundMessage{ChatID: "oc_chat", ChatType: ChatTypeGroup, SenderOpenID: "ou_user"},
+		DispatchResult{Outcome: OutcomeNeedsBinding, SenderOpenID: "ou_user"})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.bindingCalls) != 1 {
+		t.Fatalf("expected one binding prompt attempt, got %d", len(stub.bindingCalls))
+	}
+	if got := stub.bindingCalls[0].OpenID; got != "ou_user" {
+		t.Fatalf("binding prompt should target sender open_id; got %q", got)
+	}
+	if len(stub.interactiveOut) != 1 {
+		t.Fatalf("expected one fallback card, got %d", len(stub.interactiveOut))
+	}
+	if !strings.Contains(stub.interactiveOut[0].CardJSON, "请先打开机器人对话并发送一条消息，再回到群里重试") {
+		t.Fatalf("fallback card should contain private-send-unavailable guidance: %q", stub.interactiveOut[0].CardJSON)
+	}
+}
+
+func TestLarkOutcomeReplierNeedsBindingFallsBackForStatusErrorNoAvailabilityCode(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{
+		configured: true,
+		bindingErr: &larkAPIStatusError{
+			StatusCode: 400,
+			Code:       codeNoAvailability,
+			Msg:        "localized or otherwise arbitrary copy",
+			Raw:        `{"code":230013,"msg":"localized or otherwise arbitrary copy"}`,
+		},
+	}
+	inst := Installation{AppID: "cli_x"}
+	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
+	inst.WorkspaceID = mustUUID("33333333-3333-3333-3333-333333333333")
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  fakeBindingMinter{raw: "token"},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		AppURL:      "https://multica.test",
+		Logger:      log,
+	})
+
+	rep.Reply(context.Background(), inst, InboundMessage{ChatID: "oc_chat", ChatType: ChatTypeGroup, SenderOpenID: "ou_user"},
+		DispatchResult{Outcome: OutcomeNeedsBinding, SenderOpenID: "ou_user"})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.bindingCalls) != 1 {
+		t.Fatalf("expected one binding prompt attempt, got %d", len(stub.bindingCalls))
+	}
+	if len(stub.interactiveOut) != 1 {
+		t.Fatalf("expected one fallback card, got %d", len(stub.interactiveOut))
+	}
+}
+
+func TestLarkOutcomeReplierNeedsBindingDoesNotFallbackForUnstructuredNoAvailabilityText(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{
+		configured: true,
+		bindingErr: errors.New("proxy reported no availability while retrying"),
+	}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  fakeBindingMinter{raw: "token"},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		AppURL:      "https://multica.test",
+		Logger:      log,
+	})
+
+	rep.Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc_chat", ChatType: ChatTypeGroup, SenderOpenID: "ou_user"},
+		DispatchResult{Outcome: OutcomeNeedsBinding, SenderOpenID: "ou_user"})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.bindingCalls) != 1 {
+		t.Fatalf("expected one binding prompt attempt, got %d", len(stub.bindingCalls))
+	}
+	if len(stub.interactiveOut) != 0 {
+		t.Fatalf("did not expect fallback card on unstructured error text, got %d", len(stub.interactiveOut))
+	}
+}
+
+func TestLarkOutcomeReplierNeedsBindingSuppressesFallbackOutsideGroupChats(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		chatType ChatType
+	}{
+		{name: "p2p", chatType: ChatTypeP2P},
+		{name: "unspecified", chatType: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+			stub := &stubAPIClientWithRecorder{
+				configured: true,
+				bindingErr: &APIError{
+					Op:   "send binding prompt",
+					Code: codeNoAvailability,
+					Msg:  "Bot has no availability to this user.",
+				},
+			}
+			rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+				APIClient:   stub,
+				BindingSvc:  fakeBindingMinter{raw: "token"},
+				Credentials: stubCredentialsResolver{secret: "s"},
+				Queries:     stubReplierQueries{},
+				AppURL:      "https://multica.test",
+				Logger:      log,
+			})
+
+			rep.Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc_chat", ChatType: tc.chatType, SenderOpenID: "ou_user"},
+				DispatchResult{Outcome: OutcomeNeedsBinding, SenderOpenID: "ou_user"})
+
+			stub.mu.Lock()
+			defer stub.mu.Unlock()
+			if len(stub.bindingCalls) != 1 {
+				t.Fatalf("expected one binding prompt attempt, got %d", len(stub.bindingCalls))
+			}
+			if len(stub.interactiveOut) != 0 {
+				t.Fatalf("did not expect fallback card outside group chat, got %d", len(stub.interactiveOut))
+			}
+		})
+	}
+}
+
+func TestLarkOutcomeReplierNeedsBindingPreservesPromptAndFallbackErrors(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	bindingErr := &APIError{Op: "send binding prompt", Code: codeNoAvailability, Msg: "private unavailable"}
+	fallbackErr := errors.New("fallback send failed")
+	stub := &stubAPIClientWithRecorder{
+		configured: true,
+		bindingErr: bindingErr,
+		sendErr:    fallbackErr,
+	}
+	inst := Installation{AppID: "cli_x"}
+	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
+	inst.WorkspaceID = mustUUID("33333333-3333-3333-3333-333333333333")
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  fakeBindingMinter{raw: "token"},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		AppURL:      "https://multica.test",
+		Logger:      log,
+	})
+
+	err := rep.(*LarkOutcomeReplier).sendBindingPrompt(context.Background(), inst, InboundMessage{ChatID: "oc_chat", ChatType: ChatTypeGroup, SenderOpenID: "ou_user"},
+		DispatchResult{Outcome: OutcomeNeedsBinding, SenderOpenID: "ou_user"})
+	if err == nil {
+		t.Fatal("expected fallback failure")
+	}
+	if !strings.Contains(err.Error(), bindingErr.Error()) {
+		t.Fatalf("error should preserve original binding failure %q, got %q", bindingErr.Error(), err.Error())
+	}
+	if !errors.Is(err, fallbackErr) {
+		t.Fatalf("error should wrap fallback failure; got %v", err)
+	}
+}
+
+func TestLarkOutcomeReplierNeedsBindingDoesNotFallbackForNonAvailabilityError(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{
+		configured: true,
+		bindingErr: &APIError{
+			Op:   "send binding prompt",
+			Code: 230002,
+			Msg:  "some other business error",
+		},
+	}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  fakeBindingMinter{raw: "token"},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		AppURL:      "https://multica.test",
+		Logger:      log,
+	})
+
+	rep.Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc_chat", ChatType: ChatTypeGroup, SenderOpenID: "ou_user"},
+		DispatchResult{Outcome: OutcomeNeedsBinding, SenderOpenID: "ou_user"})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.bindingCalls) != 1 {
+		t.Fatalf("expected one binding prompt attempt, got %d", len(stub.bindingCalls))
+	}
+	if len(stub.interactiveOut) != 0 {
+		t.Fatalf("did not expect fallback card on unrelated binding error, got %d", len(stub.interactiveOut))
 	}
 }
 

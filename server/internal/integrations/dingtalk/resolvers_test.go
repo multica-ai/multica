@@ -150,7 +150,7 @@ func TestSessionBinder_StartSessionCarriesDingTalkRouteAndFirstTurn(t *testing.T
 		Creator: pgtype.UUID{Bytes: [16]byte{4}, Valid: true},
 		Sender:  pgtype.UUID{Bytes: [16]byte{5}, Valid: true},
 		Message: channel.InboundMessage{
-			MessageID: "m1", Text: "first turn",
+			MessageID: "m1", Text: "first turn", CommandText: "current instruction",
 			Source: channel.Source{ChatID: "cid-platform", ChatType: channel.ChatTypeGroup, ThreadID: "thread-1"},
 		},
 		PersistMessage: true,
@@ -159,7 +159,7 @@ func TestSessionBinder_StartSessionCarriesDingTalkRouteAndFirstTurn(t *testing.T
 		t.Fatalf("StartSession: %v", err)
 	}
 	got := capture.start
-	if got.BindingKey != "cid-platform" || got.MessageID != "m1" || got.ThreadID != "thread-1" || got.Body != "first turn" || !got.PersistMessage {
+	if got.BindingKey != "cid-platform" || got.MessageID != "m1" || got.ThreadID != "thread-1" || got.Body != "first turn" || got.CommandText != "current instruction" || !got.PersistMessage {
 		t.Fatalf("start mapping wrong: %+v", got)
 	}
 	if got.Sender != (pgtype.UUID{Bytes: [16]byte{4}, Valid: true}) || got.Initiator != (pgtype.UUID{Bytes: [16]byte{5}, Valid: true}) {

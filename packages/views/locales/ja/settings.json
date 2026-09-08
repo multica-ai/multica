@@ -127,7 +127,12 @@
     "sticky_comment_bar": {
       "title": "コメントバーを固定",
       "hint": "タスクのページをスクロールしても、コメントバーを常に下部に固定します。"
-    }
+    },
+    "description": "Multica の使い方をカスタマイズします。",
+    "issue_title": "タスク作成",
+    "comments_title": "コメント",
+    "device_hint": "このデバイスに保存されます。",
+    "issue_scope": "この設定は、このデバイスの現在のワークスペースに適用され、タスク作成時に表示するフィールドのみを変更します。"
   },
   "shortcuts": {
     "title": "キーボードショートカット",
@@ -182,10 +187,6 @@
       "findInIssue": {
         "label": "タスク内を検索",
         "description": "開いているタスクの詳細を検索します。"
-      },
-      "openThreadNav": {
-        "label": "スレッドナビゲーターを開く",
-        "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。"
       },
       "archiveInboxItem": {
         "label": "通知をアーカイブ",
@@ -343,7 +344,16 @@
       "plugins": "Plugins",
       "mcp": "MCP",
       "billing": "請求とプラン"
-    }
+    },
+    "groups": {
+      "personal": "個人設定",
+      "workspace": "ワークスペース管理",
+      "issues": "タスク設定",
+      "connections": "接続と拡張機能",
+      "device": "デスクトップアプリ"
+    },
+    "navigate": "設定ページへ移動",
+    "device_scope": "このデバイス"
   },
   "plugins": {
     "title": "Plugins",
@@ -1304,5 +1314,21 @@
     "expiry_7d": "7日",
     "expiry_30d": "30日",
     "expiry_never": "無期限"
+  },
+  "integrations": {
+    "description": "ツールを接続して、各連携を管理します。",
+    "code_title": "コードとリポジトリ",
+    "messaging_title": "メッセージチャネル",
+    "apps_title": "自分のアプリ接続",
+    "apps_scope": "これらのアプリ接続はあなたのアカウントに属します。ワークスペースのチャネル接続は上で管理します。",
+    "github_hint": "GitHub を接続し、プルリクエストの関連付けを設定します。",
+    "vcs_hint": "GitLab、Gitea、Forgejo を接続します。",
+    "apps_hint": "Composio 経由でエージェント用のアプリを認可します。",
+    "back": "すべての連携",
+    "status_connected": "接続済み",
+    "status_not_connected": "未接続",
+    "status_loading": "確認中...",
+    "status_unknown": "状態を取得できません",
+    "channel_hint": "{{channel}} でエージェントと会話し、タスクを作成します。"
   }
 }

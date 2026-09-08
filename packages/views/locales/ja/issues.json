@@ -402,24 +402,6 @@
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "thread_nav_label": "スレッドへ移動",
     "thread_nav_resolved_label": "{{title}}（解決済み）",
-    "thread_nav": {
-      "button_label_other": "スレッド（{{count}}）",
-      "search_placeholder": "スレッド・作成者を検索",
-      "match_count_other": "{{count}} 件ヒット",
-      "filter_all": "すべて",
-      "filter_unresolved": "未解決",
-      "filter_resolved": "解決済み",
-      "filter_mine": "@自分",
-      "group": {
-        "today": "今日",
-        "yesterday": "昨日",
-        "earlier": "それ以前"
-      },
-      "empty": "一致するスレッドはありません",
-      "hint_select": "選択",
-      "hint_jump": "移動",
-      "hint_close": "閉じる"
-    },
     "sidebar_tooltip": "右サイドバーの開閉",
     "find": {
       "placeholder": "タスク内を検索...",

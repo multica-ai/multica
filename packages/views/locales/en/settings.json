@@ -127,7 +127,12 @@
     "sticky_comment_bar": {
       "title": "Sticky comment bar",
       "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
-    }
+    },
+    "description": "Customize how you work in Multica.",
+    "issue_title": "Issue creation",
+    "comments_title": "Comments",
+    "device_hint": "Saved on this device.",
+    "issue_scope": "These preferences apply to this workspace on this device. They only change which fields you see when creating an issue."
   },
   "shortcuts": {
     "title": "Keyboard Shortcuts",
@@ -182,10 +187,6 @@
       "findInIssue": {
         "label": "Find in issue",
         "description": "Search within the open issue detail."
-      },
-      "openThreadNav": {
-        "label": "Open thread navigator",
-        "description": "List, search, and jump between the comment threads of the open issue."
       },
       "archiveInboxItem": {
         "label": "Archive notification",
@@ -343,7 +344,16 @@
       "plugins": "Plugins",
       "mcp": "MCP",
       "billing": "Billing"
-    }
+    },
+    "groups": {
+      "personal": "Personal",
+      "workspace": "Workspace",
+      "issues": "Issue configuration",
+      "connections": "Connections & extensions",
+      "device": "Desktop app"
+    },
+    "navigate": "Go to settings page",
+    "device_scope": "This device"
   },
   "plugins": {
     "title": "Plugins",
@@ -1311,5 +1321,21 @@
     "expiry_7d": "7 days",
     "expiry_30d": "30 days",
     "expiry_never": "Never"
+  },
+  "integrations": {
+    "description": "Connect your tools and manage each integration in one place.",
+    "code_title": "Code & repositories",
+    "messaging_title": "Messaging channels",
+    "apps_title": "Your connected apps",
+    "apps_scope": "These app connections belong to your account. Workspace channel connections are managed above.",
+    "github_hint": "Connect GitHub and configure pull request linking.",
+    "vcs_hint": "Connect GitLab, Gitea, or Forgejo.",
+    "apps_hint": "Authorize apps for your agents through Composio.",
+    "back": "All integrations",
+    "status_connected": "Connected",
+    "status_not_connected": "Not connected",
+    "status_loading": "Checking...",
+    "status_unknown": "Status unavailable",
+    "channel_hint": "Chat with agents and create issues from {{channel}}."
   }
 }

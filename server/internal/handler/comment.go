@@ -1768,10 +1768,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// task originator is unattributed, effectiveUser resolves to "", and the
 	// private-agent gate denies the wake (MUL-4015).
 	//
-	// The header is NOT client-chosen: the task token forces X-Task-ID and
-	// X-Agent-ID from its own row, and resolveActor rejects the JWT path unless
-	// the named task belongs to the named agent. So the stamp always records the
-	// authoring agent's own run.
+	// The header is NOT client-chosen: the auth middleware deletes any
+	// client-supplied X-Agent-ID / X-Task-ID and re-stamps both from the mat_
+	// token's own row (MUL-3428). So the stamp always records the authoring
+	// agent's own run.
 	//
 	// It is deliberately NOT scoped to that run's own issue (MUL-6490 / GH
 	// #7328). A run that legitimately comments on ANOTHER issue — the ordinary

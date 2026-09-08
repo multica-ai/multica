@@ -312,6 +312,17 @@ func TestLegacyRedirectsFollowTheDaemonsBrief(t *testing.T) {
 	if !strings.Contains(body, PlatformSkillName) || !strings.Contains(body, "references/issues.md") {
 		t.Errorf("redirect stub does not name where the contracts went:\n%s", body)
 	}
+	// MUL-6966: the stub used to promise "Nothing was dropped in the move".
+	// The metadata guidance since was dropped, and the daemons that reach
+	// this stub are exactly the ones whose frozen brief still sends them
+	// here for it — so the one place the claim is read is the one place it
+	// is false. It has to state the replacement rule instead.
+	if strings.Contains(body, "Nothing was dropped") {
+		t.Errorf("redirect stub still promises nothing was dropped:\n%s", body)
+	}
+	if !strings.Contains(body, "goes in the result comment") {
+		t.Errorf("redirect stub does not say where the retired state now belongs:\n%s", body)
+	}
 	if n := strings.Count(body, "\n") + 1; n > 40 {
 		t.Errorf("redirect stub is %d lines; a signpost that grows contracts will rot against the real reference", n)
 	}
@@ -449,11 +460,12 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"include the PR URL when a PR exists",
 				"Closes MUL-123",
 				"--status backlog",
-				// The only sanctioned pr_url reference is the negative
-				// compatibility warning about pre-existing data — not a write
-				// recommendation (MUL-5442 owner ruling: no curated key
-				// vocabulary).
-				"`pr_url` metadata (which can be",
+				// The link table is the only sanctioned source of PR state,
+				// and the guard against stale data survives MUL-6966 without
+				// naming the key it used to name: `issue get` still returns
+				// whatever an older run left on the issue, but a warning that
+				// spells out a metadata key teaches the key.
+				"stale values left on the issue by an earlier run",
 				// MUL-5442: the brief's Sub-issue Creation section is a
 				// one-line map pointing here. These anchors are the demoted
 				// playbook — if they leave, the brief pointer dangles.
@@ -461,19 +473,13 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"`--stage <N>`",
 				"when a whole stage finishes",
 				"multica issue status <child-id> todo",
-				// MUL-5442: the brief's Issue Metadata section defers the full
-				// write discipline here. Every relocated ban is anchored
-				// individually — both defining categories AND each example —
-				// so no single item or category boundary can be dropped while
-				// the brief still points here.
-				"Never store secrets, tokens, or API keys",
-				"Not metadata: logs or summaries",
-				"bookkeeping such as timestamps",
-				"attempt counts, or agent IDs",
-				"other single-run details",
-				"files touched and investigation notes",
-				"belong in the result comment",
-				"the platform curates no vocabulary",
+				// MUL-6966 phase 1 retired the metadata write discipline
+				// along with the brief section that pointed here. What the
+				// bans were protecting still needs a home, so the
+				// where-state-belongs bullet under custom properties keeps
+				// the routing rule they encoded.
+				"workflow state a human should see and filter by goes in",
+				"goes in the result comment",
 				// #7768: nothing about concurrent runs is pushed into the
 				// prompt any more (MUL-6984), so the skill has to carry the
 				// pull path itself. All three anchors are load-bearing — the
@@ -484,14 +490,27 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"multica issue runs <issue-id> --siblings --output json",
 				"capped at 20",
 				"Nothing here reserves an issue or serialises anything",
+				// #8008: the read path for typed properties. The flag, the
+				// per-item names and the promise that the stored ids stay
+				// beside them are each what a script joins on.
+				"--resolve-properties",
+				"display_values",
+				"`value` keeps the stored ids",
 			},
 			notWant: []string{
+				// MUL-6966 phase 1: this reference must not teach the KV bag
+				// at all — not as a section, not as a command, and not as a
+				// named key inside a warning. A blanket ban on the vocabulary
+				// is the contract; anything that needs the word back needs
+				// this decision revisited first.
+				"metadata",
+				"Metadata",
+				"pr_url",
 				// A curated key list is the "recommended fields" concept the
 				// owner ruled out on MUL-5442.
 				"High-signal keys",
 				"reuse these names so queries stay consistent",
 				"scratchpad for run state",
-				"(`pr_url`, `waiting_on`",
 				// Per-turn workflow the runtime brief owns; duplicating it here
 				// is how the two drift apart.
 				"Start from the trigger, not from memory",

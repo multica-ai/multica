@@ -169,7 +169,7 @@ describe("ComposioTab", () => {
     });
     expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ["composio", "connections"] });
     // The one-shot param is stripped while ?tab is preserved.
-    expect(mockReplace).toHaveBeenCalledWith("/acme/settings?tab=integrations");
+    expect(mockReplace).toHaveBeenCalledWith("/acme/settings?tab=integrations&integration=composio");
   });
 
   it("toasts error on a failed callback", async () => {
@@ -178,7 +178,7 @@ describe("ComposioTab", () => {
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(enSettings.composio.toast_connect_failed);
     });
-    expect(mockReplace).toHaveBeenCalledWith("/acme/settings?tab=integrations");
+    expect(mockReplace).toHaveBeenCalledWith("/acme/settings?tab=integrations&integration=composio");
   });
 
   it("fires the success callback exactly once under StrictMode double-invoke", async () => {

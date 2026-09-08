@@ -424,8 +424,10 @@ type fakeReader struct {
 }
 
 type fakeChannelChatLifecycle struct {
-	mu      sync.Mutex
-	started []ChannelChatStartedEvent
+	mu                   sync.Mutex
+	started              []ChannelChatStartedEvent
+	generatedSourceTexts []string
+	initializedTitles    []string
 }
 
 func (f *fakeChannelChatLifecycle) ChannelChatStarted(event ChannelChatStartedEvent) {
@@ -433,9 +435,15 @@ func (f *fakeChannelChatLifecycle) ChannelChatStarted(event ChannelChatStartedEv
 	defer f.mu.Unlock()
 	f.started = append(f.started, event)
 }
-func (*fakeChannelChatLifecycle) ChannelChatTitleInitialized(pgtype.UUID, pgtype.UUID, pgtype.UUID, string) {
+func (f *fakeChannelChatLifecycle) ChannelChatTitleInitialized(_ pgtype.UUID, _ pgtype.UUID, _ pgtype.UUID, title string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.initializedTitles = append(f.initializedTitles, title)
 }
-func (*fakeChannelChatLifecycle) GenerateChannelChatTitle(pgtype.UUID, pgtype.UUID, pgtype.UUID, string, string) {
+func (f *fakeChannelChatLifecycle) GenerateChannelChatTitle(_ pgtype.UUID, _ pgtype.UUID, _ pgtype.UUID, _ string, source string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.generatedSourceTexts = append(f.generatedSourceTexts, source)
 }
 
 func (f *fakeReader) GetChatSession(_ context.Context, _ pgtype.UUID) (db.ChatSession, error) {

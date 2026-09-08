@@ -67,6 +67,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
+import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
 import { useSkillPermissions } from "@multica/core/permissions";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
@@ -311,8 +312,14 @@ function SkillIdentity({
   const sourceUrl = originSourceUrl(origin);
 
   return (
-    <div className="shrink-0 border-b px-4 py-3 sm:px-6">
-      <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-x-4 gap-y-1.5">
+    <div className="shrink-0 border-b py-3">
+      <div
+        className={cn(
+          PAGE_RAIL,
+          PAGE_GUTTER,
+          "flex flex-wrap items-center gap-x-4 gap-y-1.5",
+        )}
+      >
         <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-muted text-muted-foreground">
             <SkillIcon className="h-4 w-4" aria-hidden="true" />
@@ -462,84 +469,86 @@ function OverviewTab({
   const { t } = useT("skills");
 
   return (
-    <div className="mx-auto w-full max-w-3xl p-4 sm:p-6 md:p-8">
-      <section>
-        <h2 className="text-title-sm font-medium">{t(($) => $.detail.overview.properties)}</h2>
-        <p className="mt-1 text-caption text-muted-foreground">
-          {t(($) => $.detail.overview.properties_hint)}
+    <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6 md:py-8")}>
+      <div className="w-full max-w-3xl">
+        <section>
+          <h2 className="text-title-sm font-medium">{t(($) => $.detail.overview.properties)}</h2>
+          <p className="mt-1 text-caption text-muted-foreground">
+            {t(($) => $.detail.overview.properties_hint)}
+          </p>
+          <div className="mt-4 divide-y">
+            <PropertyRow label={t(($) => $.detail.overview.name)} htmlFor="skill-name">
+              <Input
+                id="skill-name"
+                value={name}
+                readOnly={!canEdit}
+                onChange={(e) => onNameChange(e.target.value)}
+                placeholder={t(($) => $.detail.name_placeholder)}
+                className="font-mono text-body read-only:cursor-default"
+              />
+            </PropertyRow>
+
+            <PropertyRow
+              label={t(($) => $.detail.overview.description)}
+              htmlFor="skill-description"
+            >
+              {/* Real descriptions run 500–900 characters (they carry the
+                  trigger vocabulary an agent matches on), so this field is
+                  sized for the data rather than the two rows it had before. */}
+              <Textarea
+                id="skill-description"
+                value={description}
+                readOnly={!canEdit}
+                onChange={(e) => onDescriptionChange(e.target.value)}
+                placeholder={t(($) => $.detail.description_placeholder)}
+                rows={6}
+                className="text-body leading-relaxed read-only:cursor-default"
+              />
+              <p className="mt-1.5 text-caption text-muted-foreground">
+                {t(($) => $.detail.overview.description_hint, {
+                  count: description.length,
+                })}
+              </p>
+            </PropertyRow>
+
+            <PropertyRow label={t(($) => $.detail.overview.labels)}>
+              <ResourceLabelPicker
+                resourceType="skill"
+                resourceId={skill.id}
+                canEdit={canEdit}
+              />
+            </PropertyRow>
+          </div>
+        </section>
+
+        <section className="mt-10">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="min-w-0 text-title-sm font-medium">
+              {t(($) => $.detail.overview.used_by, { count: skillAgents.length })}
+            </h2>
+            <Button
+              variant="outline"
+              size="xs"
+              className="shrink-0 gap-1"
+              onClick={onAddToAgents}
+            >
+              <UserPlus className="h-3 w-3" />
+              {t(($) => $.actions.add_to_agent)}
+            </Button>
+          </div>
+          <div className="mt-3">
+            <UsedByList agents={skillAgents} />
+          </div>
+        </section>
+
+        <p className="mt-10 rounded-lg bg-muted px-3 py-2.5 text-caption leading-relaxed text-muted-foreground">
+          {canEdit
+            ? t(($) => $.detail.overview.permissions_owner)
+            : creatorName
+              ? t(($) => $.detail.overview.permissions_locked_creator, { name: creatorName })
+              : t(($) => $.detail.overview.permissions_locked)}
         </p>
-        <div className="mt-4 divide-y">
-          <PropertyRow label={t(($) => $.detail.overview.name)} htmlFor="skill-name">
-            <Input
-              id="skill-name"
-              value={name}
-              readOnly={!canEdit}
-              onChange={(e) => onNameChange(e.target.value)}
-              placeholder={t(($) => $.detail.name_placeholder)}
-              className="font-mono text-body read-only:cursor-default"
-            />
-          </PropertyRow>
-
-          <PropertyRow
-            label={t(($) => $.detail.overview.description)}
-            htmlFor="skill-description"
-          >
-            {/* Real descriptions run 500–900 characters (they carry the
-                trigger vocabulary an agent matches on), so this field is
-                sized for the data rather than the two rows it had before. */}
-            <Textarea
-              id="skill-description"
-              value={description}
-              readOnly={!canEdit}
-              onChange={(e) => onDescriptionChange(e.target.value)}
-              placeholder={t(($) => $.detail.description_placeholder)}
-              rows={6}
-              className="text-body leading-relaxed read-only:cursor-default"
-            />
-            <p className="mt-1.5 text-caption text-muted-foreground">
-              {t(($) => $.detail.overview.description_hint, {
-                count: description.length,
-              })}
-            </p>
-          </PropertyRow>
-
-          <PropertyRow label={t(($) => $.detail.overview.labels)}>
-            <ResourceLabelPicker
-              resourceType="skill"
-              resourceId={skill.id}
-              canEdit={canEdit}
-            />
-          </PropertyRow>
-        </div>
-      </section>
-
-      <section className="mt-10">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="min-w-0 text-title-sm font-medium">
-            {t(($) => $.detail.overview.used_by, { count: skillAgents.length })}
-          </h2>
-          <Button
-            variant="outline"
-            size="xs"
-            className="shrink-0 gap-1"
-            onClick={onAddToAgents}
-          >
-            <UserPlus className="h-3 w-3" />
-            {t(($) => $.actions.add_to_agent)}
-          </Button>
-        </div>
-        <div className="mt-3">
-          <UsedByList agents={skillAgents} />
-        </div>
-      </section>
-
-      <p className="mt-10 rounded-lg bg-muted px-3 py-2.5 text-caption leading-relaxed text-muted-foreground">
-        {canEdit
-          ? t(($) => $.detail.overview.permissions_owner)
-          : creatorName
-            ? t(($) => $.detail.overview.permissions_locked_creator, { name: creatorName })
-            : t(($) => $.detail.overview.permissions_locked)}
-      </p>
+      </div>
     </div>
   );
 }
@@ -603,7 +612,7 @@ function FilesTab({
     : undefined;
 
   return (
-    <div className="flex min-h-full flex-col md:h-full md:flex-row">
+    <div className={cn(PAGE_RAIL, "flex min-h-full flex-col md:h-full md:flex-row")}>
       {/* The file list IS the second-level navigation, so it uses the same
           rail treatment as the agent detail page's capability/settings nav
           instead of inventing a third sidebar style. */}
@@ -611,7 +620,10 @@ function FilesTab({
         role="tablist"
         aria-orientation="vertical"
         aria-label={t(($) => $.detail.files.list_aria)}
-        className="shrink-0 border-b border-surface-border p-3 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:p-4"
+        className={cn(
+          "shrink-0 border-b border-surface-border py-3 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:py-4",
+          PAGE_GUTTER,
+        )}
       >
         <p className="px-2.5 pb-1 text-micro font-semibold uppercase tracking-wider text-muted-foreground">
           {t(($) => $.detail.files.main)}
@@ -1088,7 +1100,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           <Skeleton className="h-3 w-3 rounded" />
           <Skeleton className="h-4 w-40" />
         </div>
-        <div className="space-y-3 p-6">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "space-y-3 py-6")}>
           <Skeleton className="h-4 w-full" />
           <Skeleton className="h-4 w-5/6" />
           <Skeleton className="h-4 w-3/4" />
@@ -1218,7 +1230,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       />
 
       {!canEdit && (
-        <div className="px-4 pt-3 sm:px-6">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "pt-3")}>
           <CapabilityBanner
             reason={skillPermissions.canEdit.reason}
             resource="skill"
@@ -1230,10 +1242,12 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       {supportingQueryDown && (
         <div
           role="status"
-          className="flex shrink-0 items-start gap-2 border-b bg-warning/10 px-4 py-2 text-caption text-muted-foreground sm:px-6"
+          className="shrink-0 border-b bg-warning/10 py-2 text-caption text-muted-foreground"
         >
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-          <span>{t(($) => $.detail.supporting_data_warning)}</span>
+          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-start gap-2")}>
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+            <span>{t(($) => $.detail.supporting_data_warning)}</span>
+          </div>
         </div>
       )}
 
@@ -1246,11 +1260,11 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       />
 
       <div
-        className="shrink-0 overflow-x-auto border-b px-4 sm:px-6"
+        className="shrink-0 overflow-x-auto border-b"
         role="tablist"
         aria-label={t(($) => $.detail.tabs.aria)}
       >
-        <div className="mx-auto flex max-w-[1440px] items-center gap-6">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-6")}>
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -1275,15 +1289,17 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         <div
           role="status"
           aria-live="polite"
-          className="flex shrink-0 items-start gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2 text-caption sm:px-6"
+          className="shrink-0 border-b border-warning/30 bg-warning/10 py-2 text-caption"
         >
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-          <div className="flex-1">
-            <div className="font-medium text-foreground">
-              {t(($) => $.detail.conflict_banner.title)}
-            </div>
-            <div className="mt-0.5 text-muted-foreground">
-              {t(($) => $.detail.conflict_banner.body)}
+          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-start gap-2")}>
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+            <div className="flex-1">
+              <div className="font-medium text-foreground">
+                {t(($) => $.detail.conflict_banner.title)}
+              </div>
+              <div className="mt-0.5 text-muted-foreground">
+                {t(($) => $.detail.conflict_banner.body)}
+              </div>
             </div>
           </div>
         </div>

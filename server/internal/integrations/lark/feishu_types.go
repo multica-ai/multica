@@ -59,6 +59,10 @@ type InboundMessage struct {
 	// enricher prepends quoted/forwarded context). `/issue` is parsed from
 	// THIS, not the enriched Body.
 	CommandBody string
+
+	// HasSelectedContext is set when enrichment renders an explicitly selected
+	// quote or forward; automatic recent context does not set it.
+	HasSelectedContext bool
 }
 
 // Outcome categorizes what the inbound pipeline decided. The OutcomeReplier
