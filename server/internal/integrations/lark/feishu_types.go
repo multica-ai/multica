@@ -102,6 +102,8 @@ type DispatchResult struct {
 	// IssueIdentifier is the workspace-qualified key ("MUL-42") for the
 	// created issue, used verbatim in the confirmation message.
 	IssueIdentifier string
+	// IssueWorkspaceSlug is the workspace route segment used in deep links.
+	IssueWorkspaceSlug string
 	// IssueTitle is the title supplied on /issue, echoed in the confirmation.
 	IssueTitle string
 	// IssueDuplicate distinguishes an active-issue conflict from a successful
