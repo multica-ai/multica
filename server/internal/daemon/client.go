@@ -599,6 +599,25 @@ func (c *Client) PinTaskSession(ctx context.Context, taskID, sessionID, workDir 
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/session", taskID), body, nil)
 }
 
+// RecordTaskCheckoutBranch reports the branch a live task checked its repo out
+// on, plus the repo URL it cloned, so the server can persist a repo+branch →
+// issue mapping for exact PR auto-linking (HOM-16). The server derives the
+// canonical repo identity from the URL. Best-effort and fire-and-forget from
+// the checkout path: the mapping is a fast path the identifier scan already
+// backstops, so a lost report degrades to the existing behaviour rather than
+// failing checkout. Idempotent server-side (the update only fills empty slots on
+// a live row), so a plain postJSON without the terminal retry schedule is
+// enough.
+func (c *Client) RecordTaskCheckoutBranch(ctx context.Context, taskID, branchName, repoURL string) error {
+	if branchName == "" {
+		return nil
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/checkout-branch", taskID), map[string]any{
+		"branch_name": branchName,
+		"repo_url":    repoURL,
+	}, nil)
+}
+
 // RecoverOrphans tells the server to fail any dispatched/running tasks the
 // previous daemon process for this runtime left behind. The server will
 // auto-retry eligible tasks.

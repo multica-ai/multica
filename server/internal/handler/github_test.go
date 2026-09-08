@@ -83,6 +83,47 @@ func TestExtractIdentifiers(t *testing.T) {
 	}
 }
 
+// TestRepoIdentityFromGitURL covers the canonical host/owner/repo derivation
+// the branch-exact PR auto-link path relies on to scope a match to the repo a
+// run actually cloned (HOM-16 follow-up).
+func TestRepoIdentityFromGitURL(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"https_git_suffix", "https://github.com/acme/widget.git", "github.com/acme/widget"},
+		{"https_no_suffix", "https://github.com/Acme/Widget", "github.com/acme/widget"},
+		{"https_trailing_slash", "https://github.com/acme/widget/", "github.com/acme/widget"},
+		{"scp_shorthand", "git@github.com:acme/widget.git", "github.com/acme/widget"},
+		{"ssh_scheme", "ssh://git@github.com/acme/widget.git", "github.com/acme/widget"},
+		{"gitlab_subgroup", "https://gitlab.com/grp/sub/widget.git", "gitlab.com/grp/sub/widget"},
+		{"non_github_host", "https://gitlab.com/acme/widget", "gitlab.com/acme/widget"},
+		{"empty", "", ""},
+		{"no_owner", "https://github.com/widget", ""},
+		{"garbage", "not a url", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := repoIdentityFromGitURL(tc.in); got != tc.want {
+				t.Errorf("repoIdentityFromGitURL(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGitHubWebhookRepoIdentity confirms the webhook side always stamps the
+// github.com host, so it can only match a checkout recorded for a github repo.
+func TestGitHubWebhookRepoIdentity(t *testing.T) {
+	if got := githubWebhookRepoIdentity("Acme", "Widget"); got != "github.com/acme/widget" {
+		t.Errorf("githubWebhookRepoIdentity = %q, want github.com/acme/widget", got)
+	}
+	// A gitlab checkout identity can never equal a github webhook identity.
+	if repoIdentityFromGitURL("https://gitlab.com/acme/widget") == githubWebhookRepoIdentity("acme", "widget") {
+		t.Error("gitlab checkout identity must not equal github webhook identity")
+	}
+}
+
 func TestExtractClosingIdentifiers(t *testing.T) {
 	cases := []struct {
 		name string
@@ -554,6 +595,189 @@ func TestWebhook_MergedPR_PreservesCancelled(t *testing.T) {
 	}
 	if updated.Status != "cancelled" {
 		t.Errorf("expected status to remain 'cancelled', got %q", updated.Status)
+	}
+}
+
+// TestWebhook_PR_LinksByExactBranchMatch is the HOM-16 primary path: a Multica
+// run recorded its checkout branch on its task row, and a PR opened from that
+// exact branch links to the owning issue even though the PR title/body carry NO
+// PREFIX-NUMBER identifier. The branch-exact match is a qualifying (non
+// reference_only) link, and — since branch names never carry closing intent —
+// merging it does NOT auto-advance the issue to done.
+func TestWebhook_PR_LinksByExactBranchMatch(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "branch-exact-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Branch-exact link test",
+		"status": "in_progress",
+	})
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	agentID := createHandlerTestAgent(t, "BranchExactAgent", []byte("[]"))
+	const branch = "agent/branch-exact-agent/deadbeefcafe"
+
+	// Seed the run's task row carrying the recorded checkout branch AND the
+	// identity of the github repo it was cloned from — the webhook matches on
+	// both, so the identity must line up with the PR's repo (acme/widget).
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, branch_name, checkout_repo_identity, runtime_id)
+		VALUES ($1, $2, 'running', $3, 'github.com/acme/widget', $4)`,
+		agentID, created.ID, branch, handlerTestRuntimeID(t)); err != nil {
+		t.Fatalf("seed task row: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 55443322
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "branch-exact-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	// PR opened from the recorded branch, with NO identifier anywhere.
+	body, _ := json.Marshal(map[string]any{
+		"action": "closed",
+		"pull_request": map[string]any{
+			"number": 4321, "html_url": "https://github.com/acme/widget/pull/4321",
+			"title": "Implement the thing", "body": "no identifier here",
+			"state": "closed", "merged": true, "draft": false,
+			"merged_at": "2026-04-29T00:00:00Z", "closed_at": "2026-04-29T00:00:00Z",
+			"created_at": "2026-04-28T00:00:00Z", "updated_at": "2026-04-29T00:00:00Z",
+			"head": map[string]any{"ref": branch}, "user": map[string]any{"login": "octocat"},
+		},
+		"repository":   map[string]any{"name": "widget", "owner": map[string]any{"login": "acme"}},
+		"installation": map[string]any{"id": installationID},
+	})
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	req2 := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(body))
+	req2.Header.Set("X-GitHub-Event", "pull_request")
+	req2.Header.Set("X-Hub-Signature-256", sig)
+	testutil.Call(t, testHandler.HandleGitHubWebhook, req2).Want(http.StatusAccepted)
+
+	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Fatalf("expected 1 branch-exact linked PR, got %d", len(linked))
+	}
+
+	// Branch names never declare closing intent, so a merge alone must not
+	// advance the issue — it stays where the run left it.
+	updated, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if updated.Status != "in_progress" {
+		t.Errorf("expected status to remain 'in_progress' (branch match carries no close intent), got %q", updated.Status)
+	}
+}
+
+// TestWebhook_PR_BranchMatch_DoesNotCrossLinkForeignRepo guards the HOM-16
+// follow-up: the branch-exact path is scoped to the exact repo the run cloned,
+// not just the branch name. Every Multica run — GitHub or not — checks out the
+// SAME deterministic branch shape (agent/<name>/<task>), so a run whose task
+// recorded a NON-github checkout (here a gitlab.com repo) must NOT be linked by
+// a GitHub webhook that happens to fire on a PR with the identical branch name
+// and NO identifier. Without the repo-identity filter this PR would be
+// mislinked to an unrelated issue; with it, the row is structurally excluded
+// and the PR links to nothing.
+func TestWebhook_PR_BranchMatch_DoesNotCrossLinkForeignRepo(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "branch-foreign-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Foreign-repo branch test",
+		"status": "in_progress",
+	})
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	agentID := createHandlerTestAgent(t, "ForeignRepoAgent", []byte("[]"))
+	const branch = "agent/foreign-repo-agent/feedfacecafe"
+
+	// The run checked out a gitlab.com repo, not the github repo the webhook
+	// will fire on. Same branch name, different repo identity.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, branch_name, checkout_repo_identity, runtime_id)
+		VALUES ($1, $2, 'running', $3, 'gitlab.com/acme/widget', $4)`,
+		agentID, created.ID, branch, handlerTestRuntimeID(t)); err != nil {
+		t.Fatalf("seed task row: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 66554433
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "foreign-repo-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	// GitHub PR on github.com/acme/widget, same branch, NO identifier anywhere.
+	body, _ := json.Marshal(map[string]any{
+		"action": "opened",
+		"pull_request": map[string]any{
+			"number": 5678, "html_url": "https://github.com/acme/widget/pull/5678",
+			"title": "Some unrelated change", "body": "no identifier here",
+			"state": "open", "merged": false, "draft": false,
+			"created_at": "2026-04-28T00:00:00Z", "updated_at": "2026-04-28T00:00:00Z",
+			"head": map[string]any{"ref": branch}, "user": map[string]any{"login": "octocat"},
+		},
+		"repository":   map[string]any{"name": "widget", "owner": map[string]any{"login": "acme"}},
+		"installation": map[string]any{"id": installationID},
+	})
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	req2 := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(body))
+	req2.Header.Set("X-GitHub-Event", "pull_request")
+	req2.Header.Set("X-Hub-Signature-256", sig)
+	testutil.Call(t, testHandler.HandleGitHubWebhook, req2).Want(http.StatusAccepted)
+
+	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(linked) != 0 {
+		t.Fatalf("expected 0 links (foreign-repo checkout must not cross-link a github PR), got %d", len(linked))
 	}
 }
 

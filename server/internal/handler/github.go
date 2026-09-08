@@ -1620,13 +1620,19 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// keyword, but the earlier link row carries close_intent=true, so
 		// MUL-1 still advances.
 		reevalIssues := make([]db.Issue, 0, len(idents))
-		for _, id := range idents {
-			issue, ok := h.lookupIssueByIdentifier(ctx, wsID, prefix, id)
-			if !ok {
-				continue
+		linkedIssueSet := make(map[string]struct{}, len(idents)+1)
+		// linkIssue upserts one issue↔PR link row and records the issue for
+		// auto-advance re-evaluation, deduplicating so an issue reached by both
+		// the branch-exact path and the identifier scan is linked once. declared
+		// means a closing keyword named this issue; qualifies means the link is a
+		// real working link (title prefix, branch reference, branch-exact match,
+		// or closing keyword) rather than a bare body mention.
+		linkIssue := func(issue db.Issue, declared, qualifies bool) {
+			key := uuidToString(issue.ID)
+			if _, dup := linkedIssueSet[key]; dup {
+				return
 			}
-			_, declared := closingIdents[id]
-			if declared && !closePolicy.permits(id, workspaceID) {
+			if declared && !closePolicy.permits(issueIdentifier(issue, prefix), workspaceID) {
 				// The delivery-wide scan did not prove this workspace is the one
 				// this closing keyword refers to, so it does not act on it.
 				// Falling through with declared=false also clears close_intent
@@ -1635,7 +1641,6 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 				declared = false
 			}
 			closeIntent := declared && !preserveCloseIntent
-			_, qualifies := qualifyingIdents[id]
 			referenceOnly := !qualifies
 			if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
 				IssueID:             issue.ID,
@@ -1647,10 +1652,53 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 				LinkedByID:          pgtype.UUID{},
 			}); err != nil {
 				slog.Warn("github: link failed", "err", err)
+				return
+			}
+			linkedIssueSet[key] = struct{}{}
+			linkedIssueIDs = append(linkedIssueIDs, key)
+			reevalIssues = append(reevalIssues, issue)
+		}
+
+		// Branch-exact match is the primary path for PRs opened from a branch a
+		// Multica run created (HOM-16). The run persisted repo+branch → issue at
+		// checkout, so the head branch resolves the owning issue with zero
+		// ambiguity — no prefix, no identifier scan. It is a qualifying link (not
+		// reference_only), but never carries close_intent on its own: branch
+		// names are excluded from closing declarations for the same reason
+		// extractClosingIdentifiers ignores them. A closing keyword in the
+		// title/body still applies below via the identifier scan (which
+		// dedupes against this link). The identifier scan remains the fallback
+		// for human PRs, reused/renamed branches, and multi-issue references.
+		//
+		// The lookup is scoped to BOTH the branch name AND the exact repo the
+		// run checked out (host/owner/repo). Branch names are identical across
+		// every repo — and every provider — a run might clone (agent/<name>/<task>),
+		// so a bare branch match would let this GitHub webhook cross-link a PR to
+		// an issue whose run actually checked out a *different* github repo, or a
+		// non-GitHub (GitLab/Forgejo/local) repo that happens to share the branch
+		// name. Pinning to this webhook's repo identity (github.com/<owner>/<name>)
+		// closes both the cross-repo and cross-provider mislink gaps.
+		if branchRef := strings.TrimSpace(p.PullRequest.Head.Ref); branchRef != "" {
+			if issue, err := h.Queries.GetIssueByWorkspaceTaskBranch(ctx, db.GetIssueByWorkspaceTaskBranchParams{
+				WorkspaceID:  wsID,
+				BranchName:   pgtype.Text{String: branchRef, Valid: true},
+				RepoIdentity: pgtype.Text{String: githubWebhookRepoIdentity(p.Repository.Owner.Login, p.Repository.Name), Valid: true},
+			}); err == nil {
+				_, declared := closingIdents[issueIdentifier(issue, prefix)]
+				linkIssue(issue, declared, true)
+			} else if !isNotFound(err) {
+				slog.Warn("github: branch-exact issue lookup failed", "err", err, "branch", branchRef)
+			}
+		}
+
+		for _, id := range idents {
+			issue, ok := h.lookupIssueByIdentifier(ctx, wsID, prefix, id)
+			if !ok {
 				continue
 			}
-			linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
-			reevalIssues = append(reevalIssues, issue)
+			_, declared := closingIdents[id]
+			_, qualifies := qualifyingIdents[id]
+			linkIssue(issue, declared, qualifies)
 		}
 
 		// A terminal PR event (`merged` or `closed`) may be the moment the
@@ -1873,6 +1921,85 @@ func issueNumberForPrefix(identifier, prefix string) (int32, bool) {
 		return 0, false
 	}
 	return int32(n), true
+}
+
+// githubRepoIdentityHost is the host every GitHub App webhook is scoped to.
+// The branch-exact auto-link path stamps this in front of the owner/repo it
+// resolves so it can only ever match a checkout the daemon recorded for a
+// github.com repo — a non-GitHub checkout's identity carries a different host
+// and is structurally excluded (HOM-16 follow-up).
+const githubRepoIdentityHost = "github.com"
+
+// repoIdentity is the canonical "host/owner/repo" key the branch-exact PR
+// auto-link path matches on, so a branch name (which is identical across every
+// repo a run might check out) is only ever matched against the repo the run
+// actually cloned. Lowercased, ".git" stripped, host trailing dot removed. The
+// empty string means "no usable identity" — such rows never participate in the
+// exact-match path and fall back to the identifier scan.
+func repoIdentity(host, owner, repo string) string {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	owner = strings.ToLower(strings.TrimSpace(owner))
+	repo = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(repo), ".git"))
+	if host == "" || owner == "" || repo == "" {
+		return ""
+	}
+	return host + "/" + owner + "/" + repo
+}
+
+// githubWebhookRepoIdentity is the repoIdentity for the repo a GitHub webhook
+// fired on. The host is always github.com (GitHub App installations only ever
+// deliver github.com repos), and owner/name come straight off the payload.
+func githubWebhookRepoIdentity(owner, name string) string {
+	return repoIdentity(githubRepoIdentityHost, owner, name)
+}
+
+// repoIdentityFromGitURL derives the canonical repoIdentity from a git remote
+// URL (https://host/owner/repo[.git], ssh://host/owner/repo, or scp-like
+// git@host:owner/repo.git). It is what the checkout callback stamps on the task
+// row so the webhook can match by repo, not just branch. Returns "" for a URL it
+// cannot confidently split into host + owner + repo — the row then simply does
+// not participate in the exact-match path.
+func repoIdentityFromGitURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	host, path := "", ""
+	if u, err := url.Parse(raw); err == nil && u.Host != "" && strings.Contains(raw, "://") {
+		host = u.Hostname()
+		path = strings.Trim(u.Path, "/")
+	} else {
+		// scp-like shorthand: [user@]host:owner/repo(.git)
+		at := strings.Index(raw, "@")
+		colon := strings.Index(raw, ":")
+		if colon <= 0 || at >= colon {
+			return ""
+		}
+		hostStart := 0
+		if at >= 0 {
+			hostStart = at + 1
+		}
+		host = raw[hostStart:colon]
+		path = strings.Trim(raw[colon+1:], "/")
+	}
+	path = strings.TrimSuffix(path, ".git")
+	idx := strings.LastIndex(path, "/")
+	if idx <= 0 {
+		return ""
+	}
+	// owner is everything before the final segment (keeps GitLab subgroups),
+	// repo is the final segment.
+	owner, repo := path[:idx], path[idx+1:]
+	return repoIdentity(host, owner, repo)
+}
+
+// issueIdentifier renders an issue's canonical "PREFIX-NUMBER" identifier from
+// the workspace prefix, matching the uppercase form extractIdentifiers /
+// extractClosingIdentifiers produce. Used to reconcile a branch-exact issue
+// match against the title/body closing-keyword set and the close-intent policy,
+// both of which are keyed by identifier string.
+func issueIdentifier(issue db.Issue, prefix string) string {
+	return strings.ToUpper(prefix) + "-" + strconv.Itoa(int(issue.Number))
 }
 
 // lookupIssueByIdentifier looks up an issue in the given workspace by its

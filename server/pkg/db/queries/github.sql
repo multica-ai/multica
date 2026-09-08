@@ -280,3 +280,26 @@ ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
 -- name: UnlinkIssueFromPullRequest :exec
 DELETE FROM issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2;
+
+-- name: GetIssueByWorkspaceTaskBranch :one
+-- Resolves the issue a Multica run created a branch for, by exact branch match
+-- (HOM-16). When a run checks out its repo it records the deterministic branch
+-- name (agent/<name>/<task>) AND the repo it cloned (checkout_repo_identity,
+-- e.g. github.com/owner/repo) on its task row; the GitHub webhook uses this to
+-- attribute a PR opened from that branch to its issue WITHOUT scraping
+-- PREFIX-NUMBER identifiers. Scoped to the workspace (via the task's issue) so a
+-- branch name reused across workspaces can never cross-link, AND to the exact
+-- repo the PR came from: branch names are identical across every repo/provider a
+-- run might check out, so without the repo filter a non-GitHub (or different
+-- GitHub) checkout sharing the branch name would be mislinked on this GitHub
+-- webhook path. When several tasks share a branch name within the same repo (a
+-- branch reused across runs of the same issue chain), the most recent task wins
+-- — its issue is the one this branch is currently doing work for.
+SELECT i.*
+FROM agent_task_queue q
+JOIN issue i ON i.id = q.issue_id
+WHERE i.workspace_id = $1
+  AND q.branch_name = sqlc.arg('branch_name')
+  AND q.checkout_repo_identity = sqlc.arg('repo_identity')
+ORDER BY q.created_at DESC
+LIMIT 1;
