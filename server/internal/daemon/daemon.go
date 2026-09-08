@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -930,6 +931,17 @@ func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending
 // Overridable for tests to avoid real sleeps.
 var runtimeReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
 
+// taskTerminalReportBackoffs keeps a finished agent attached to its server-side
+// task while a short coordinator or reverse-proxy outage clears. Terminal
+// reports are idempotent on the server, so retrying the same complete/fail
+// payload is safe even when the server committed the first request but the
+// response was lost.
+//
+// The wider window than runtimeReportBackoffs is intentional: a terminal task
+// result has no later heartbeat cycle that can repair a missed callback.
+// Overridable for tests to avoid real sleeps.
+var taskTerminalReportBackoffs = []time.Duration{0, time.Second, 4 * time.Second, 10 * time.Second, 30 * time.Second}
+
 // reportLocalSkillListResult delivers a list-report to the server with retry
 // on transient failures. See reportRuntimeResultWithRetry for semantics.
 func (d *Daemon) reportLocalSkillListResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
@@ -1007,6 +1019,63 @@ func (d *Daemon) reportRuntimeResultWithRetry(ctx context.Context, kind, runtime
 	}
 	d.logger.Error("runtime async report exhausted retries",
 		"kind", kind, "runtime_id", runtimeID, "request_id", requestID, "error", lastErr)
+}
+
+// shouldRetryTaskTerminalReport distinguishes a real missing task from a
+// transient proxy/router 404. The daemon API returns a structured "task not
+// found" body when the task was deleted; generic "404 page not found" bodies
+// can be emitted temporarily by the same-origin proxy while the backend is
+// unavailable and are safe to retry.
+func shouldRetryTaskTerminalReport(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return true
+	}
+	if reqErr.StatusCode >= 500 {
+		return true
+	}
+	if reqErr.StatusCode == http.StatusRequestTimeout || reqErr.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	return reqErr.StatusCode == http.StatusNotFound && !isTaskNotFoundError(err)
+}
+
+// reportTaskTerminalWithRetry delivers the final complete/fail payload with a
+// bounded retry window. Returning the last error lets handleTask leave a clear
+// local diagnostic without misclassifying successful agent work as a failure.
+func (d *Daemon) reportTaskTerminalWithRetry(ctx context.Context, taskID, outcome string, fn func(context.Context) error) error {
+	var lastErr error
+	for attempt, wait := range taskTerminalReportBackoffs {
+		if wait > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+
+		err := fn(ctx)
+		if err == nil {
+			if attempt > 0 {
+				d.logger.Info("task terminal report succeeded after retry",
+					"task_id", taskID, "outcome", outcome, "attempt", attempt+1)
+			}
+			return nil
+		}
+		lastErr = err
+		if !shouldRetryTaskTerminalReport(err) {
+			return err
+		}
+		if attempt+1 < len(taskTerminalReportBackoffs) {
+			d.logger.Warn("task terminal report failed — will retry",
+				"task_id", taskID, "outcome", outcome, "attempt", attempt+1, "error", err)
+		}
+	}
+	return lastErr
 }
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.
@@ -1455,7 +1524,9 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		taskLog.Error("task failed", "error", err)
 		// runTask returned without a TaskResult, so we don't have a SessionID
 		// to forward — best we can do is record the failure.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "agent_error"); failErr != nil {
+		if failErr := d.reportTaskTerminalWithRetry(ctx, task.ID, "failed", func(ctx context.Context) error {
+			return d.client.FailTask(ctx, task.ID, err.Error(), "", "", "agent_error")
+		}); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
@@ -1489,16 +1560,17 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		if failureReason == "" {
 			failureReason = "agent_error"
 		}
-		if err := d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
+		if err := d.reportTaskTerminalWithRetry(ctx, task.ID, "blocked", func(ctx context.Context) error {
+			return d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir, failureReason)
+		}); err != nil {
 			taskLog.Error("report blocked task failed", "error", err)
 		}
 	default:
 		taskLog.Info("task completed", "status", result.Status)
-		if err := d.client.CompleteTask(ctx, task.ID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
-			taskLog.Error("complete task failed, falling back to fail", "error", err)
-			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
-				taskLog.Error("fail task fallback also failed", "error", failErr)
-			}
+		if err := d.reportTaskTerminalWithRetry(ctx, task.ID, "completed", func(ctx context.Context) error {
+			return d.client.CompleteTask(ctx, task.ID, result.Comment, result.BranchName, result.SessionID, result.WorkDir)
+		}); err != nil {
+			taskLog.Error("complete task delivery failed", "error", err)
 		}
 	}
 
