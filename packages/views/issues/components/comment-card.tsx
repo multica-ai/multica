@@ -641,7 +641,7 @@ function CommentRow({
   const reactions = entry.reactions ?? [];
 
   return (
-    <div className="pb-3">
+    <div data-comment-block className="pb-3">
       {/* Header pins to the timeline's scroll parent within this reply's own
           row box, so a LONG reply keeps its
           author + actions visible while you scroll its body, then releases once
@@ -685,7 +685,7 @@ function CommentRow({
           </span>
         )}
 
-        <div className="ml-auto flex shrink-0 items-center gap-0.5">
+        <div data-comment-actions className="ml-auto flex shrink-0 items-center gap-0.5">
           {!edit.editing && <QuickEmojiPicker
             onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
             ariaLabel={t(($) => $.comment.add_reaction)}
@@ -1027,7 +1027,7 @@ function CommentCardImpl({
             That is what keeps exactly one header pinned at a time: without this
             wrapper the header's containing block is the whole thread and it
             stays stuck behind every reply. */}
-        <div className={cn("transition-colors duration-700", isHighlighted && highlightedCommentBackgroundClass)}>
+        <div data-comment-block className={cn("transition-colors duration-700", isHighlighted && highlightedCommentBackgroundClass)}>
           {/* Keep the author aligned with replies; thread controls sit on the right. */}
           <StickyHeaderShell
             sticky={stickyHeader}
@@ -1074,7 +1074,7 @@ function CommentCardImpl({
                 </span>
               )}
 
-              <div className="ml-auto flex shrink-0 items-center gap-0.5">
+              <div data-comment-actions className="ml-auto flex shrink-0 items-center gap-0.5">
                 <Button
                   type="button"
                   variant="ghost"
