@@ -126,10 +126,11 @@ func TestClaimTask_IssueResumesCancelledTaskSession(t *testing.T) {
 	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
-			status, priority, started_at, completed_at, session_id, work_dir
+			status, priority, started_at, completed_at, session_id, work_dir,
+			agent_config_digest
 		)
-		VALUES ($1, $2, $3, 'cancelled', 0, now(), now(), 'cancelled-issue-session', '/tmp/cancelled-issue-workdir')
-	`, agentID, runtimeID, issueID)
+		VALUES ($1, $2, $3, 'cancelled', 0, now(), now(), 'cancelled-issue-session', '/tmp/cancelled-issue-workdir', $4)
+	`, agentID, runtimeID, issueID, agentConfigDigestFor(t, agentID))
 	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 0)

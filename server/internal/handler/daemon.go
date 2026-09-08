@@ -2153,10 +2153,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	resp = taskToResponse(*task, runtimeWorkspaceID)
 	var issueNumber int32
 	// The agent-config digest recorded by whichever task produced the session
-	// this claim is about to resume. Empty when nothing was selected, or when
-	// the producing row predates the column. Read by the freshness gate at the
-	// end of this function, once resp.Agent.Instructions is final.
+	// this claim is about to resume, and whether that selection went through a
+	// branch the freshness gate covers. The two are separate because an empty
+	// digest is meaningful ONLY inside a covered branch, where it means "the
+	// producing row cannot vouch for this session". Outside one — the chat
+	// claim path, which resolves its pointer from chat_session rather than
+	// from the task that produced it — an empty digest means the gate has no
+	// opinion, and reading it as "changed" would cold-start every chat turn
+	// forever. Both are read at the end of this function, once
+	// resp.Agent.Instructions is final.
 	var priorSessionConfigDigest string
+	var priorSessionConfigGated bool
 	// Claim-only capability: this server resolves the squad-leader role on the
 	// wire (is_leader_task / squad_id), so the daemon must not re-derive it
 	// from the briefing text. Set unconditionally — on every claim, leader or
@@ -2729,6 +2736,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = src.SessionID.String
 					priorSessionConfigDigest = src.AgentConfigDigest.String
+					priorSessionConfigGated = true
 				}
 				// MUL-5305: if the source task withheld its Codex session because
 				// the rollout was missing, this rerun has nothing resumable from it
@@ -2760,6 +2768,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 					priorSessionConfigDigest = prior.AgentConfigDigest.String
+					priorSessionConfigGated = true
 				}
 				if prior.WorkDir.Valid {
 					resp.PriorWorkDir = prior.WorkDir.String
@@ -3364,7 +3373,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
-	gateResumeToCurrentAgentConfig(&resp, priorSessionConfigDigest, task)
+	gateResumeToCurrentAgentConfig(&resp, priorSessionConfigDigest, priorSessionConfigGated, task)
 
 	return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil
 }
@@ -3396,11 +3405,16 @@ func claimAgentConfigDigest(resp AgentTaskResponse) string {
 // configurations A then B then A again, picking "the newest session whose
 // digest matches" reaches back past the B turns into the first A conversation.
 //
+// Only an exact match resumes. A row that carries no digest — written before
+// the column existed — reads as "cannot vouch for this session" and starts
+// fresh, because resuming it once would stamp THIS run's digest onto a session
+// built from something else and make every later run match it.
+//
 // The workdir is deliberately left in place. A session that must not be resumed
 // says nothing about the working tree, and discarding both would throw away
 // in-progress work on every instruction edit (#7998).
-func gateResumeToCurrentAgentConfig(resp *AgentTaskResponse, priorConfigDigest string, task *db.AgentTaskQueue) {
-	if resp.PriorSessionID == "" {
+func gateResumeToCurrentAgentConfig(resp *AgentTaskResponse, priorConfigDigest string, gated bool, task *db.AgentTaskQueue) {
+	if resp.PriorSessionID == "" || !gated {
 		return
 	}
 	if !service.AgentConfigChanged(priorConfigDigest, claimAgentConfigDigest(*resp)) {

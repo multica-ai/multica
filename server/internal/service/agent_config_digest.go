@@ -13,6 +13,15 @@ import (
 // is the honest reading of "the configuration that decides the prompt changed".
 const agentConfigDigestVersion = "v1"
 
+// AgentConfigDigestAmbiguous marks a task row that was delivered more than once
+// under DIFFERENT configurations. Both deliveries can reach StartAgentTask —
+// it admits whichever calls first, with no claim-generation check — so the row
+// cannot name the configuration the session it reports was actually built
+// from. It is not a digest and never equals one (real values are
+// "v1:<hex>"), so the comparison below reads it as "do not resume" without
+// needing a special case.
+const AgentConfigDigestAmbiguous = "ambiguous:multiple-deliveries"
+
 // AgentConfigDigest fingerprints the agent configuration a claim delivers to
 // the model, so the next run on the same (agent, issue) pair can tell whether
 // the session it is about to resume was built from the same configuration
@@ -23,7 +32,7 @@ const agentConfigDigestVersion = "v1"
 // briefing have been folded in, not the raw agent.instructions column. That is
 // the whole point of digesting the delivered payload rather than reading
 // updated_at off the agent row: agent.updated_at is bumped by writes that never
-// reach the prompt (avatar, visibility, status, max_concurrent_tasks, runtime
+// reach the prompt (avatar, visibility, max_concurrent_tasks, runtime
 // rebinding), and every one of those would otherwise cold-start every
 // conversation the agent owns.
 //
@@ -41,21 +50,28 @@ func AgentConfigDigest(instructions string) string {
 	return agentConfigDigestVersion + ":" + hex.EncodeToString(h.Sum(nil))
 }
 
-// AgentConfigChanged reports whether a candidate session recorded under prior
-// must not be resumed by a run whose configuration digests to current.
+// AgentConfigChanged reports whether a candidate session must not be resumed by
+// a run whose delivered configuration digests to current.
 //
-// An empty prior is "unknown", not "different": rows written before the digest
-// column existed carry no value, and a claim whose digest write lost its CAS
-// carries none either. Both resume, so shipping the gate does not cold-start
-// every live conversation at once — each pair starts comparing from its next
-// run, once one task has recorded a digest.
+// Anything that is not exactly this run's digest answers "do not resume", which
+// covers all three ways a row fails to vouch for a session: a different
+// configuration, AgentConfigDigestAmbiguous, and a row written before the
+// column existed. That last one used to resume, on the reasoning that unknown
+// is not stale. It is not safe: a pre-column session built under A resumes once
+// under B and the resuming task then records B as that session's digest, so the
+// session is labelled with a configuration it never saw and every later run
+// matches it. The cost of the strict reading is one cold start per live pair on
+// the deploy that ships this, and each pair records a real digest from then on.
+//
+// An empty current is the one case that cannot judge anything: it means the
+// claim carried no agent payload at all, so there is nothing to compare and the
+// resume decision is left where the earlier gates put it.
 func AgentConfigChanged(prior, current string) bool {
-	prior = strings.TrimSpace(prior)
 	current = strings.TrimSpace(current)
-	if prior == "" || current == "" {
+	if current == "" {
 		return false
 	}
-	return prior != current
+	return strings.TrimSpace(prior) != current
 }
 
 func writeDigestField(h interface{ Write([]byte) (int, error) }, field string) {

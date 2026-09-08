@@ -46,12 +46,23 @@ func TestAgentConfigChanged(t *testing.T) {
 	if !AgentConfigChanged(a, b) {
 		t.Fatal("a changed configuration must not resume")
 	}
-	// Rows written before the column existed, and claims whose digest write
-	// lost its CAS, carry nothing. Unknown is not stale: they keep resuming so
-	// shipping the gate does not cold-start every live conversation at once.
-	if AgentConfigChanged("", b) {
-		t.Fatal("a prior task with no recorded digest must still resume")
+	// A row written before the column existed cannot vouch for its session.
+	// Resuming it once would stamp this run's digest onto a session built from
+	// something else, and every later run would then match it.
+	if !AgentConfigChanged("", b) {
+		t.Fatal("a session no row can vouch for must not be resumed")
 	}
+	// One task row can be delivered twice under different configurations, and
+	// either delivery can be the one that starts.
+	if !AgentConfigChanged(AgentConfigDigestAmbiguous, b) {
+		t.Fatal("an ambiguous row must not be resumed")
+	}
+	if AgentConfigDigestAmbiguous == b || strings.HasPrefix(AgentConfigDigestAmbiguous, agentConfigDigestVersion+":") {
+		t.Fatal("the ambiguity marker must never collide with a real digest")
+	}
+	// The one case that judges nothing: no agent payload at all means there is
+	// nothing to compare, so the resume decision stays where earlier gates put
+	// it rather than being dropped arbitrarily.
 	if AgentConfigChanged(a, "") {
 		t.Fatal("a claim that could not compute a digest must not drop the session")
 	}

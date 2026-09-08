@@ -56,11 +56,19 @@ Editing `instructions` starts a fresh provider session on every issue the agent
 holds one on: resuming would replay a conversation that still carries the
 previous instructions, and the model keeps following them. The working
 directory is kept, and the run is told its earlier context was not carried
-over. Scope: issue runs only — Chat sessions still resume — and only
-`instructions`; renaming the agent or changing its avatar, visibility, model,
-or runtime leaves every conversation intact. Bound skills are not covered
-either: a skill body edited after the model already read it stays stale in a
-resumed issue conversation (GH #8070).
+over.
+
+What counts as "the instructions" is the composed text the daemon receives, not
+the column alone — a system agent's product-owned instruction layer (which
+carries its name) and a squad leader's briefing (which lists the roster and
+each member's skills) are part of it. So renaming a system agent, or changing a
+squad's membership, also starts fresh sessions for the agents whose composed
+text those inputs feed. Changing an avatar, visibility, model, or runtime never
+does.
+
+Scope: issue runs only — Chat sessions still resume — and only the composed
+instructions. Bound skills are not covered: a skill body edited after the model
+already read it stays stale in a resumed issue conversation (GH #8070).
 
 ## CLI / API entry points
 

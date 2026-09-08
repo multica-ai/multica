@@ -3771,14 +3771,26 @@ func (s *TaskService) FinalizeTaskClaim(
 		// resumes its session only when its own configuration digests the same
 		// (GH #8070). Writing it anywhere later would let a run execute under a
 		// configuration no row names.
+		//
+		// The row count is the claim-generation fence. A handler whose claim was
+		// superseded by a stale reclaim updates nothing, and must not go on to
+		// commit a token: it would deliver a payload the row does not describe,
+		// and the next run would compare against the reclaim's digest while the
+		// session that actually ran was built from this one. Fail closed — the
+		// caller requeues the exact claim, same as a lost delivery receipt.
 		if agentConfigDigest != "" {
-			if err := qtx.SetTaskAgentConfigDigest(ctx, db.SetTaskAgentConfigDigestParams{
+			rows, err := qtx.SetTaskAgentConfigDigest(ctx, db.SetTaskAgentConfigDigestParams{
 				AgentConfigDigest: pgtype.Text{String: agentConfigDigest, Valid: true},
+				AmbiguousDigest:   pgtype.Text{String: AgentConfigDigestAmbiguous, Valid: true},
 				TaskID:            task.ID,
 				RuntimeID:         task.RuntimeID,
 				DispatchedAt:      task.DispatchedAt,
-			}); err != nil {
+			})
+			if err != nil {
 				return fmt.Errorf("set agent config digest: %w", err)
+			}
+			if rows == 0 {
+				return fmt.Errorf("set agent config digest: claim no longer owns task %s", util.UUIDToString(task.ID))
 			}
 		}
 		if len(daemonTokens) == 1 {

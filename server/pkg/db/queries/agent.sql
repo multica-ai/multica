@@ -841,23 +841,39 @@ WHERE id = @task_id
   )
 RETURNING delivered_comment_ids;
 
--- name: SetTaskAgentConfigDigest :exec
+-- name: SetTaskAgentConfigDigest :execrows
 -- Record the digest of the agent configuration this claim actually delivered
 -- (GH #8070 / MUL-7082). The next run on the same (agent, issue) pair compares
 -- its own digest against this one and refuses to resume a session that was
 -- built from a different configuration.
 --
--- The CAS pins the write to this exact claim generation: a stale handler whose
--- response was never delivered must not overwrite the digest of the reclaim
--- that is actually running. :exec rather than :one on purpose — a CAS miss
--- leaves the column NULL, which the claim handler reads as "unknown" and
--- resumes, so a lost digest degrades to today's behaviour instead of failing
--- the claim.
+-- The CAS is the same claim-generation fence SetTaskDeliveredCommentIDs uses,
+-- and :execrows is what makes it a fence rather than a hint: a stale handler
+-- whose response never reached a daemon updates no row, and FinalizeTaskClaim
+-- turns that into a rolled-back, rejected claim. Without the row count it
+-- would commit a token for a payload the row does not describe, and a later
+-- run would compare against the reclaim's digest while a session built from
+-- the stale payload was the one that actually ran.
+--
+-- One task row can be delivered more than once (ReclaimStaleDispatchedTask*
+-- refreshes dispatched_at without starting the task), and StartAgentTask
+-- admits whichever delivery calls it first. So when a second delivery carries
+-- a DIFFERENT configuration, the row can no longer name the one that ran:
+-- mark it ambiguous instead of overwriting, and the next run treats it like
+-- any other non-matching value and starts fresh. The marker is sticky —
+-- a third delivery matching neither leaves it in place — so a repeat
+-- redelivery cannot launder the row back into a definite answer.
 UPDATE agent_task_queue
-SET agent_config_digest = @agent_config_digest
+SET agent_config_digest = CASE
+        WHEN agent_config_digest IS NULL
+          OR agent_config_digest = @agent_config_digest THEN @agent_config_digest
+        ELSE @ambiguous_digest
+    END
 WHERE id = @task_id
   AND runtime_id = @runtime_id
-  AND dispatched_at = @dispatched_at;
+  AND dispatched_at = @dispatched_at
+  AND status = 'dispatched'
+  AND started_at IS NULL;
 
 -- name: RequeueAgentTaskAfterClaimFailure :one
 -- Claim finalization (task token + optional comment receipt) failed before any

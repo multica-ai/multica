@@ -8488,16 +8488,23 @@ func (q *Queries) SetDeferredChannelIssueTaskRuntimeOverlay(ctx context.Context,
 	return result.RowsAffected(), nil
 }
 
-const setTaskAgentConfigDigest = `-- name: SetTaskAgentConfigDigest :exec
+const setTaskAgentConfigDigest = `-- name: SetTaskAgentConfigDigest :execrows
 UPDATE agent_task_queue
-SET agent_config_digest = $1
-WHERE id = $2
-  AND runtime_id = $3
-  AND dispatched_at = $4
+SET agent_config_digest = CASE
+        WHEN agent_config_digest IS NULL
+          OR agent_config_digest = $1 THEN $1
+        ELSE $2
+    END
+WHERE id = $3
+  AND runtime_id = $4
+  AND dispatched_at = $5
+  AND status = 'dispatched'
+  AND started_at IS NULL
 `
 
 type SetTaskAgentConfigDigestParams struct {
 	AgentConfigDigest pgtype.Text        `json:"agent_config_digest"`
+	AmbiguousDigest   pgtype.Text        `json:"ambiguous_digest"`
 	TaskID            pgtype.UUID        `json:"task_id"`
 	RuntimeID         pgtype.UUID        `json:"runtime_id"`
 	DispatchedAt      pgtype.Timestamptz `json:"dispatched_at"`
@@ -8508,20 +8515,34 @@ type SetTaskAgentConfigDigestParams struct {
 // its own digest against this one and refuses to resume a session that was
 // built from a different configuration.
 //
-// The CAS pins the write to this exact claim generation: a stale handler whose
-// response was never delivered must not overwrite the digest of the reclaim
-// that is actually running. :exec rather than :one on purpose — a CAS miss
-// leaves the column NULL, which the claim handler reads as "unknown" and
-// resumes, so a lost digest degrades to today's behaviour instead of failing
-// the claim.
-func (q *Queries) SetTaskAgentConfigDigest(ctx context.Context, arg SetTaskAgentConfigDigestParams) error {
-	_, err := q.db.Exec(ctx, setTaskAgentConfigDigest,
+// The CAS is the same claim-generation fence SetTaskDeliveredCommentIDs uses,
+// and :execrows is what makes it a fence rather than a hint: a stale handler
+// whose response never reached a daemon updates no row, and FinalizeTaskClaim
+// turns that into a rolled-back, rejected claim. Without the row count it
+// would commit a token for a payload the row does not describe, and a later
+// run would compare against the reclaim's digest while a session built from
+// the stale payload was the one that actually ran.
+//
+// One task row can be delivered more than once (ReclaimStaleDispatchedTask*
+// refreshes dispatched_at without starting the task), and StartAgentTask
+// admits whichever delivery calls it first. So when a second delivery carries
+// a DIFFERENT configuration, the row can no longer name the one that ran:
+// mark it ambiguous instead of overwriting, and the next run treats it like
+// any other non-matching value and starts fresh. The marker is sticky —
+// a third delivery matching neither leaves it in place — so a repeat
+// redelivery cannot launder the row back into a definite answer.
+func (q *Queries) SetTaskAgentConfigDigest(ctx context.Context, arg SetTaskAgentConfigDigestParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setTaskAgentConfigDigest,
 		arg.AgentConfigDigest,
+		arg.AmbiguousDigest,
 		arg.TaskID,
 		arg.RuntimeID,
 		arg.DispatchedAt,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setTaskDeliveredCommentIDs = `-- name: SetTaskDeliveredCommentIDs :one

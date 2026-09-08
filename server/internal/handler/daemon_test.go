@@ -2906,10 +2906,10 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
-			session_id, work_dir
+			session_id, work_dir, agent_config_digest
 		)
-		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'same-runtime-session', '/tmp/same-runtime-workdir')
-	`, agentID, runtimeID, resumeIssueID)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'same-runtime-session', '/tmp/same-runtime-workdir', $4)
+	`, agentID, runtimeID, resumeIssueID, agentConfigDigestFor(t, agentID))
 	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
@@ -2936,10 +2936,10 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
-			session_id, work_dir
+			session_id, work_dir, agent_config_digest
 		)
-		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'comment-prior-session', '/tmp/comment-prior-workdir')
-	`, agentID, runtimeID, commentIssueID)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'comment-prior-session', '/tmp/comment-prior-workdir', $4)
+	`, agentID, runtimeID, commentIssueID, agentConfigDigestFor(t, agentID))
 	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id, trigger_comment_id,
@@ -3024,13 +3024,14 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 			"number": issueNum,
 		})
 		sourceID := dbfx.Task(t, agentID, testutil.Cols{
-			"runtime_id":     sourceRuntimeID,
-			"issue_id":       issueID,
-			"status":         "failed",
-			"failure_reason": failureReason,
-			"error":          errorText,
-			"session_id":     session,
-			"work_dir":       workdir,
+			"runtime_id":          sourceRuntimeID,
+			"issue_id":            issueID,
+			"status":              "failed",
+			"failure_reason":      failureReason,
+			"error":               errorText,
+			"session_id":          session,
+			"work_dir":            workdir,
+			"agent_config_digest": agentConfigDigestFor(t, agentID),
 		})
 		// force_fresh_session is always true on a rerun row (rollback-safe); the
 		// new claim handler resumes from the source task regardless.
@@ -4195,11 +4196,12 @@ func TestClaimTaskByRuntime_CommentResumeDefaultOn(t *testing.T) {
 	// A prior completed task on the same (agent, issue, runtime) with a session.
 	const priorSession = "sess-prior-123"
 	dbfx.Task(t, agentID, testutil.Cols{
-		"runtime_id":   runtimeID,
-		"issue_id":     issueID,
-		"status":       "completed",
-		"session_id":   priorSession,
-		"completed_at": testutil.Raw("now()"),
+		"runtime_id":          runtimeID,
+		"issue_id":            issueID,
+		"status":              "completed",
+		"session_id":          priorSession,
+		"completed_at":        testutil.Raw("now()"),
+		"agent_config_digest": agentConfigDigestFor(t, agentID),
 	})
 
 	createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
