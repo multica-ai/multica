@@ -134,6 +134,8 @@ export {
 export type {
   TimelineEntry,
   AssigneeFrequencyEntry,
+  StatusDurationEntry,
+  StatusDurations,
 } from "./activity";
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";

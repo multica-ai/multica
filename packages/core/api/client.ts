@@ -80,6 +80,7 @@ import type {
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
   TimelineEntry,
+  StatusDurations,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
@@ -288,6 +289,7 @@ import {
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
+  EMPTY_STATUS_DURATIONS,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
@@ -322,6 +324,7 @@ import {
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
+  StatusDurationsSchema,
   TimelineEntriesSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
@@ -1340,6 +1343,24 @@ export class ApiClient {
     );
     return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
       endpoint: "GET /api/issues/:id/timeline",
+    });
+  }
+
+  /**
+   * "Time in status" aggregate for one issue.
+   *
+   * Deliberately a separate request rather than something derived from
+   * `listTimeline`: the timeline caps at the newest 2000 entries and discards
+   * the OLDEST rows first, which are exactly the ones a duration aggregate
+   * needs. Deriving it client-side would produce a confidently wrong number on
+   * any issue busy enough to hit the cap.
+   */
+  async getIssueStatusDurations(issueId: string): Promise<StatusDurations> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${issueId}/status-durations`,
+    );
+    return parseWithFallback(raw, StatusDurationsSchema, EMPTY_STATUS_DURATIONS, {
+      endpoint: "GET /api/issues/:id/status-durations",
     });
   }
 
