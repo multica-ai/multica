@@ -623,6 +623,110 @@ func (h *Handler) StopControllerIssue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, json.RawMessage(body))
 }
 
+// ReleaseControllerIssue relinquishes controller ownership only after the
+// stopped or terminal issue is fully drained and its final projection has been
+// read back. Historical run, event and effect receipts remain immutable. A
+// later enrollment must establish fresh scope and action identities.
+func (h *Handler) ReleaseControllerIssue(w http.ResponseWriter, r *http.Request) {
+	var p struct {
+		ExpectedRevision int64  `json:"expected_revision"`
+		EventID          string `json:"event_id"`
+		Reason           string `json:"reason"`
+	}
+	if !controllerDecode(w, r, &p) {
+		return
+	}
+	if p.EventID == "" || p.Reason == "" || len(p.EventID) > 512 || len(p.Reason) > 1000 {
+		writeError(w, 400, "release event and concise reason required")
+		return
+	}
+	tx, issue, ok := h.controllerTx(w, r)
+	if !ok {
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	key := "release:" + p.EventID
+	hash := runcontrol.Digest(p)
+	var oldHash string
+	var prior json.RawMessage
+	err := tx.QueryRow(r.Context(), `SELECT request_hash,body FROM controller_event WHERE workspace_id=$1 AND issue_id=$2 AND event_id=$3`, issue.WorkspaceID, issue.ID, key).Scan(&oldHash, &prior)
+	if err == nil {
+		if oldHash != hash {
+			writeError(w, 409, "release event reused with different input")
+			return
+		}
+		w.Header().Set("X-Controller-Replayed", "true")
+		writeJSON(w, 200, prior)
+		return
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 503, "release ledger unavailable")
+		return
+	}
+
+	s, err := loadController(r, tx, issue)
+	if err != nil {
+		writeError(w, 404, "issue is not controlled")
+		return
+	}
+	if s.Revision != p.ExpectedRevision {
+		writeError(w, 409, "controller revision changed")
+		return
+	}
+	terminal := issue.Status == s.Policy.Statuses["Done"] || issue.Status == s.Policy.Statuses["Live"]
+	if !s.Stopped && !terminal {
+		writeError(w, 409, "stop or finish the issue before releasing controller ownership")
+		return
+	}
+
+	var activeRuns, ambiguousEffects, undelivered bool
+	if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM agent_task_queue WHERE issue_id=$1 AND status IN ('queued','dispatched','running','waiting_local_directory','deferred'))`, issue.ID).Scan(&activeRuns); err != nil {
+		writeError(w, 503, "cannot prove issue is drained")
+		return
+	}
+	if activeRuns {
+		writeError(w, 409, "controller ownership cannot be released while native runs remain active")
+		return
+	}
+	if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM controller_effect WHERE workspace_id=$1 AND issue_id=$2 AND phase='executing')`, issue.WorkspaceID, issue.ID).Scan(&ambiguousEffects); err != nil {
+		writeError(w, 503, "cannot prove effects are reconciled")
+		return
+	}
+	if ambiguousEffects {
+		writeError(w, 409, "executing effects require acknowledgment or reconciliation before release")
+		return
+	}
+	if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM controller_outbox WHERE workspace_id=$1 AND issue_id=$2 AND delivered_at IS NULL)`, issue.WorkspaceID, issue.ID).Scan(&undelivered); err != nil {
+		writeError(w, 503, "cannot prove final projection delivery")
+		return
+	}
+	if undelivered {
+		writeError(w, 409, "acknowledge the final native projection before releasing ownership")
+		return
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"released": true, "revision": s.Revision, "authority_epoch": s.AuthorityEpoch,
+		"reason": p.Reason, "issue_revision": issue.Revision,
+		"released_at": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if _, err = tx.Exec(r.Context(), `INSERT INTO controller_event(workspace_id,issue_id,event_id,request_hash,revision,body) VALUES($1,$2,$3,$4,$5,$6)`, issue.WorkspaceID, issue.ID, key, hash, s.Revision, body); err != nil {
+		writeError(w, 503, "release receipt failed")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `DELETE FROM issue_controller WHERE workspace_id=$1 AND issue_id=$2`, issue.WorkspaceID, issue.ID); err != nil {
+		writeError(w, 503, "controller ownership release failed")
+		return
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		writeError(w, 503, "release commit uncertain; retry this exact event")
+		return
+	}
+	h.publishControllerReadback(r, issue)
+	writeJSON(w, 200, json.RawMessage(body))
+}
+
 func (h *Handler) controllerOwnsMutation(w http.ResponseWriter, r *http.Request, issueID string) bool {
 	id, ok := parseUUIDOrBadRequest(w, issueID, "issue_id")
 	if !ok {

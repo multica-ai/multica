@@ -1319,6 +1319,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Put("/issues/{id}/projection", h.ProjectControllerIssue)
 		r.Post("/issues/{id}/launch", h.LaunchControllerRun)
 		r.Post("/issues/{id}/stop", h.StopControllerIssue)
+		r.Post("/issues/{id}/release", h.ReleaseControllerIssue)
 		r.Post("/issues/{id}/effects", h.ControllerEffect)
 		r.Get("/issues/{id}/outbox", h.GetControllerOutbox)
 		r.Post("/issues/{id}/outbox/ack", h.AckControllerOutbox)

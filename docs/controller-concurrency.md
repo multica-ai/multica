@@ -44,6 +44,10 @@ payload from the same typed snapshot it validates; start refuses later drift.
 - `POST .../stop`: revoke launch/effect authority, atomically project Blocked and
   the stop reason, then cancel native attempts. Replaying the exact event retries
   cancellation without another projection revision.
+- `POST .../release`: after stop or a terminal owner decision, require all native
+  runs drained, all executing effects reconciled, and the final projection read
+  back; then remove the controller guard while preserving every immutable receipt.
+  Re-enrollment establishes a fresh scope and fresh action identities.
 - `GET .../outbox` and `POST .../outbox/ack`: recover committed projection work
   after restart and acknowledge matching native readback. This is not a receipt
   that a particular browser received a WebSocket message.
@@ -58,13 +62,13 @@ cohort. Existing owner Needs You and terminal gates remain authoritative.
 
 ## Release limits
 
-This is a bounded enrollment version. STOP is irreversible within its enrolled
-scope. Owner completion, ownership release, policy renewal and reconciliation of
-expired executing effects require a supported administrative migration and a
-drained cohort; no automatic renewal or terminal authority is inferred. Ordinary
-protected issue writes, deletion, runtime teardown and unbound orphan recovery
-are refused while enrollment owns them. Do not enroll an ongoing production
-cohort without accepting and preparing those lifecycle operations.
+This is a bounded enrollment version. STOP immediately and permanently revokes
+the current enrolled authority epoch. Once the final projection is acknowledged,
+native work is drained, and executing effects are reconciled, release removes the
+guard without deleting historical receipts. Policy renewal uses release followed
+by enrollment with a fresh scope and fresh action identities; it is never inferred
+from a worker response. Ordinary protected issue writes, deletion, runtime teardown
+and unbound orphan recovery are refused while enrollment owns them.
 
 The effect endpoint advertises `external_effect_gateway=false`. This is a
 durable lease ledger, not an external-write gateway or an OS sandbox. Native

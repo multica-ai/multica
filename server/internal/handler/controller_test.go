@@ -337,6 +337,56 @@ func TestControllerWorkingStopProjectsAndReplaysOnce(t *testing.T) {
 	controllerCall(t, f, f.h.AckControllerOutbox, map[string]any{"revision": current.Controller.Revision, "issue_revision": current.IssueRevision}).Want(200)
 }
 
+func TestControllerReleaseRequiresDrainReadbackAndPreservesReplay(t *testing.T) {
+	f := newControllerFixture(t)
+	_, m := f.launch(t, "release-drain")
+	s := f.read(t)
+	stop := map[string]any{"expected_revision": s.Controller.Revision, "event_id": "stop-before-release", "reason": "Stop before releasing ownership"}
+	controllerCall(t, f, f.h.StopControllerIssue, stop).Want(200)
+	stopped := f.read(t)
+	release := map[string]any{"expected_revision": stopped.Controller.Revision, "event_id": "owner-release", "reason": "Return the drained issue to normal scheduling"}
+
+	// The stop projection must be observed before its guard can be removed.
+	controllerCall(t, f, f.h.ReleaseControllerIssue, release).Want(409)
+	controllerCall(t, f, f.h.AckControllerOutbox, map[string]any{"revision": stopped.Controller.Revision, "issue_revision": stopped.IssueRevision}).Want(200)
+	controllerCall(t, f, f.h.ReleaseControllerIssue, release).Want(200)
+	replayed := controllerCall(t, f, f.h.ReleaseControllerIssue, release).Want(200)
+	if replayed.Header().Get("X-Controller-Replayed") != "true" {
+		t.Fatal("release replay not marked")
+	}
+
+	var owned bool
+	if err := testPool.QueryRow(context.Background(), `SELECT EXISTS(SELECT 1 FROM issue_controller WHERE issue_id=$1)`, f.issue).Scan(&owned); err != nil || owned {
+		t.Fatalf("controller ownership remains after release: %v %v", owned, err)
+	}
+	var runCount int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM controlled_run WHERE issue_id=$1 AND run_id=$2`, f.issue, m.RunID).Scan(&runCount); err != nil || runCount != 1 {
+		t.Fatalf("release lost immutable run history: %d %v", runCount, err)
+	}
+	r := testutil.WithURLParams(testutil.WithHeaders(testutil.JSONRequest("PUT", "/api/issues/"+f.issue, map[string]any{"status": "todo"}), "X-User-ID", testUserID, "X-Workspace-ID", testWorkspaceID), "id", f.issue)
+	testutil.Call(t, f.h.UpdateIssue, r).Want(200)
+}
+
+func TestControllerReleaseRejectsUnreconciledExecutingEffect(t *testing.T) {
+	f := newControllerFixture(t)
+	p := effectRequest{EventID: "reserve-release", OperationID: "release-op", ResourceKey: f.host, CandidateIdentity: "candidate-1", AuthorityRecordID: "effect-fixture", AuthorityEpoch: 1, Phase: "reserve"}
+	var reserved struct {
+		FencingToken int64 `json:"fencing_token"`
+	}
+	controllerCall(t, f, f.h.ControllerEffect, p).Want(200).JSON(&reserved)
+	p.EventID = "begin-release"
+	p.Phase = "begin"
+	p.FencingToken = reserved.FencingToken
+	controllerCall(t, f, f.h.ControllerEffect, p).Want(200)
+	s := f.read(t)
+	stop := map[string]any{"expected_revision": s.Controller.Revision, "event_id": "stop-with-effect", "reason": "Stop while effect receipt is pending"}
+	controllerCall(t, f, f.h.StopControllerIssue, stop).Want(200)
+	stopped := f.read(t)
+	controllerCall(t, f, f.h.AckControllerOutbox, map[string]any{"revision": stopped.Controller.Revision, "issue_revision": stopped.IssueRevision}).Want(200)
+	release := map[string]any{"expected_revision": stopped.Controller.Revision, "event_id": "unsafe-release", "reason": "Must fail while effect is ambiguous"}
+	controllerCall(t, f, f.h.ReleaseControllerIssue, release).Want(409)
+}
+
 func TestControllerClaimCannotValidateRevertedPayload(t *testing.T) {
 	f := newControllerFixture(t)
 	_, m := f.launch(t, "immutable-profile")
