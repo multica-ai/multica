@@ -471,6 +471,7 @@ type AgentTaskResponse struct {
 	// scan. Absent on old servers, which is the safe reading (MUL-6984).
 	NewCommentsDeltaKnown    bool                 `json:"new_comments_delta_known,omitempty"`
 	ChatSessionID            string               `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
+	ExternalSessionID        string               `json:"external_session_id,omitempty"`         // opaque external channel session context for this task
 	ChatChannelType          string               `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
 	ChatChannelDeliversFiles bool                 `json:"chat_channel_delivers_files,omitempty"` // server capability: THIS deployment can put a file the agent produced into THIS conversation — the adapter goes back for the bound attachment AND object storage exists to go back to. Absent/false on a server predating it, which is the safe reading: the agent is told to describe its file in words. Never inferred daemon-side from chat_channel_type; see handler.Handler.channelDeliversFiles
 	ChatType                 string               `json:"chat_type,omitempty"`                   // channel_chat_session_binding.chat_type — "group" for a shared room, "p2p" for a 1:1 with the bot. Lets the per-turn prompt tell the agent who else can read its replies; empty for a web-only chat

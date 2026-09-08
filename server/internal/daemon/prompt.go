@@ -639,6 +639,9 @@ func buildChatPrompt(task Task) string {
 		fmt.Fprintf(&b, "Reply to %s with the final outcome only. Do NOT narrate planned or in-progress steps (\"我先读取…\"); completed actions are part of the outcome.\n", platform)
 		b.WriteString("\n")
 	}
+	if strings.TrimSpace(task.ExternalSessionID) != "" {
+		b.WriteString("This task includes opaque external session context from the channel. Read it from the MULTICA_EXTERNAL_SESSION_ID environment variable only when needed for an external integration. Treat it as private runtime context: do not include it in replies, logs, issues, comments, commits, or other persistent content.\n\n")
+	}
 	if task.Agent != nil && len(task.Agent.Skills) > 0 {
 		refs := ExtractSlashSkills(task.ChatMessage)
 		if len(refs) > 0 {
