@@ -25,7 +25,7 @@ import { cancelReasonLabel, failureReasonLabel } from "../../agents/components/t
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel } from "./task-run-labels";
-import { commentRunOutput, isActiveCommentRun, type CommentRun } from "./comment-runs";
+import { commentRunOutput, isActiveCommentRun, showCommentRunInHeader, type CommentRun } from "./comment-runs";
 
 import { useRunDisclosureMotion } from "./use-run-comment-motion";
 
@@ -106,18 +106,30 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       : isError ? <div role="alert" className="text-body text-destructive">{t(($) => $.inline_run.load_failed)}
         <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button>
       </div> : undefined} />;
-  if (presentation === "header" && task.status === "completed" && hasReply) {
+  const stopButton = active && <Button size="icon-sm" variant="ghost" className="text-muted-foreground"
+    aria-label={stopLabel} title={stopLabel} disabled={cancel.isPending || cancel.isSuccess}
+    onClick={() => setConfirmStop(true)}>
+    {cancel.isPending || cancel.isSuccess ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
+  </Button>;
+  const stopDialog = <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
+    showRunningNote={task.status !== "queued"}
+    onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />;
+  if (presentation === "header" && showCommentRunInHeader(run)) {
     return <span className="inline-flex shrink-0" data-run-id={task.id}>
       <Tooltip>
         <TooltipTrigger render={<Button type="button" size="icon-sm" variant="ghost"
           className="text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
           aria-label={t(($) => $.inline_run.full_log)} aria-haspopup="dialog" aria-expanded={fullLogOpen}
           onClick={() => setFullLogOpen(true)}>
-          <ScrollText aria-hidden className="size-3.5" />
+          {active ? <Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+            : <ScrollText aria-hidden className="size-3.5" />}
         </Button>} />
         <TooltipContent>{t(($) => $.inline_run.full_log)} · {status}{elapsed && ` · ${elapsed}`}</TooltipContent>
       </Tooltip>
+      {active && <span role="status" className="sr-only">{status}</span>}
+      {stopButton}
       {transcript}
+      {stopDialog}
     </span>;
   }
   return (
@@ -148,11 +160,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
         </button>
         <span className={cn("shrink-0 whitespace-nowrap text-caption tabular-nums text-muted-foreground", showIdentity && !active && "max-sm:hidden")}>{elapsed}</span>
-        {active && <Button size="icon-sm" variant="ghost" className="text-muted-foreground"
-          aria-label={stopLabel} title={stopLabel} disabled={cancel.isPending || cancel.isSuccess}
-          onClick={() => setConfirmStop(true)}>
-          {cancel.isPending || cancel.isSuccess ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
-        </Button>}
+        {stopButton}
         {!hasReply && (task.status === "failed" || task.status === "cancelled") && <Button
           size="sm" variant="ghost" className={cn("text-muted-foreground", showIdentity && "max-sm:size-7 max-sm:p-0")} disabled={retry.isPending || retry.isSuccess}
           onClick={() => retry.mutate(task.id, { onError: (error) => toast.error(
@@ -177,9 +185,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
         </div>}
       </div>
       {transcript}
-      <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
-        showRunningNote={task.status !== "queued"}
-        onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />
+      {stopDialog}
     </section>
   );
 }

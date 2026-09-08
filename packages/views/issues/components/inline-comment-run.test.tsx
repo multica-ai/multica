@@ -17,7 +17,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActo
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 vi.mock("../../editor", () => ({ ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock("../../common/task-transcript/agent-transcript-dialog", () => ({
-  AgentTranscriptDialog: ({ contentState }: { contentState?: ReactNode }) => <div role="dialog">{contentState ?? "Full transcript"}</div>,
+  AgentTranscriptDialog: ({ contentState, isLive }: { contentState?: ReactNode; isLive?: boolean }) => <div role="dialog" data-live={isLive}>{contentState ?? "Full transcript"}</div>,
   StepBody: ({ item }: { item: { output?: string } }) => <div>{item.output}</div>,
 }));
 
@@ -57,6 +57,25 @@ describe("InlineCommentRun", () => {
     await act(async () => resolve(messages));
     await screen.findByText("Full transcript");
     expect(api.listTaskMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps published reply logs live and stoppable until the run finishes", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
+    const current = task();
+    const { rerender } = setup(current, true, "header");
+    expect(screen.queryByRole("button", { name: /View activity/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Working");
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Open full log" });
+    fireEvent.click(trigger);
+    await screen.findByText("Full transcript");
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-live", "true");
+    rerender({ ...current, status: "completed", completed_at: "2026-09-07T00:01:23Z" });
+    expect(screen.getByRole("button", { name: "Open full log" })).toBe(trigger);
+    expect(screen.getByRole("dialog")).toHaveTextContent("Full transcript");
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-live", "false");
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /View activity/ })).not.toBeInTheDocument();
   });
 
   it("lets a completed header log recover when its initial fetch fails", async () => {
@@ -162,15 +181,17 @@ describe("InlineCommentRun", () => {
     expect(api.listTaskMessages).not.toHaveBeenCalled();
   });
 
-  it("explains queued runs and confirms stopping the specific run", async () => {
+  it.each(["queued", "published"] as const)("confirms stopping the specific %s run", async (state) => {
     vi.mocked(api.cancelTask).mockResolvedValue(task({ status: "cancelled" }));
-    setup(task({ status: "queued" }));
-    expect(screen.getByText("Waiting for an available agent.")).toBeInTheDocument();
-    expect(api.listTaskMessages).not.toHaveBeenCalled();
-    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
-    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
-    await screen.findByText("No activity recorded yet.");
-    expect(screen.queryByText("Waiting for the agent to respond.")).not.toBeInTheDocument();
+    setup(task({ status: state === "queued" ? "queued" : "running" }), state === "published", state === "published" ? "header" : "inline");
+    if (state === "queued") {
+      expect(screen.getByText("Waiting for an available agent.")).toBeInTheDocument();
+      expect(api.listTaskMessages).not.toHaveBeenCalled();
+      vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+      fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+      await screen.findByText("No activity recorded yet.");
+      expect(screen.queryByText("Waiting for the agent to respond.")).not.toBeInTheDocument();
+    }
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(api.cancelTask).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Stop run" }));

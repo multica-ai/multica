@@ -46,7 +46,7 @@ import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { InlineCommentRun, useInlineCommentRunState, type InlineCommentRunState } from "./inline-comment-run";
-import { EMPTY_COMMENT_RUNS, type CommentRun } from "./comment-runs";
+import { EMPTY_COMMENT_RUNS, showCommentRunInHeader, type CommentRun } from "./comment-runs";
 import { useRunCommentMotion } from "./use-run-comment-motion";
 
 const commentActionClassName =
@@ -891,9 +891,9 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
         <CommentRow {...commentProps}
           isHighlighted={commentProps.highlightedCommentId === reply?.id}
           isResolution={!!reply?.resolved_at}
-          runHeader={run.task.status === "completed" && run.hasReply
+          runHeader={showCommentRunInHeader(run)
             ? <InlineCommentRun run={run} viewState={viewState} presentation="header" /> : undefined}
-          runMetadata={run.task.status !== "completed" || !run.hasReply
+          runMetadata={!showCommentRunInHeader(run)
             ? <InlineCommentRun run={run} viewState={viewState} /> : undefined} />
       ) : <div className="px-4 max-md:px-3">
         <InlineCommentRun run={run} viewState={viewState} showIdentity />
@@ -957,7 +957,7 @@ function CommentCardImpl({
   const slottedReplyIds = new Set(runs.filter((run) => run.hasReply && run.anchorCommentId && run.commentId !== entry.id)
     .map((run) => run.commentId));
   const renderRuns = (commentId: string, presentation: "inline" | "header" = "inline") => runs.filter((run) => run.commentId === commentId && run.hasReply
-    && (run.task.status === "completed") === (presentation === "header")
+    && showCommentRunInHeader(run) === (presentation === "header")
     && (!run.anchorCommentId || run.anchorCommentId === commentId || replyFolded))
     .map((run) => <InlineCommentRun key={run.task.id} run={run} presentation={presentation} viewState={run.commentId === entry.id ? runViewState : undefined} />);
 

@@ -22,6 +22,11 @@ export function isActiveCommentRun(task: AgentTask): boolean {
   return ["queued", "dispatched", "waiting_local_directory", "running"].includes(task.status);
 }
 
+/** Published replies own their log entry even while the agent finishes its run. */
+export function showCommentRunInHeader(run: CommentRun): boolean {
+  return run.hasReply && (isActiveCommentRun(run.task) || run.task.status === "completed");
+}
+
 /** Invalidated queued input is history, not an agent response to the new text. */
 function isObsoleteCommentRun(task: AgentTask): boolean {
   return task.status === "cancelled" && task.cancelled_by_comment_change === true
