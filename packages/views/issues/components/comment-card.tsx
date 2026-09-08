@@ -593,6 +593,7 @@ function CommentRevisionConflict({
 // ---------------------------------------------------------------------------
 
 function CommentRow({
+  runHeader,
   runMetadata,
   issueId,
   entry,
@@ -606,6 +607,7 @@ function CommentRow({
   onCreateSubIssue,
   onResolveToggle,
 }: {
+  runHeader?: ReactNode;
   runMetadata?: ReactNode;
   issueId: string;
   entry: TimelineEntry;
@@ -671,6 +673,8 @@ function CommentRow({
             {new Date(entry.created_at).toLocaleString(locale)}
           </TooltipContent>
         </Tooltip>
+
+        {runHeader}
 
         {isResolution && (
           <span className="text-caption font-medium text-success">
@@ -884,7 +888,10 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
         <CommentRow {...commentProps}
           isHighlighted={commentProps.highlightedCommentId === reply?.id}
           isResolution={!!reply?.resolved_at}
-          runMetadata={<InlineCommentRun run={run} viewState={viewState} />} />
+          runHeader={run.task.status === "completed" && run.hasReply
+            ? <InlineCommentRun run={run} viewState={viewState} presentation="header" /> : undefined}
+          runMetadata={run.task.status !== "completed" || !run.hasReply
+            ? <InlineCommentRun run={run} viewState={viewState} /> : undefined} />
       ) : <div className="px-4 max-md:px-3">
         <InlineCommentRun run={run} viewState={viewState} showIdentity />
       </div>}
@@ -946,9 +953,10 @@ function CommentCardImpl({
   const allNestedReplies = replies;
   const slottedReplyIds = new Set(runs.filter((run) => run.hasReply && run.anchorCommentId && run.commentId !== entry.id)
     .map((run) => run.commentId));
-  const renderRuns = (commentId: string) => runs.filter((run) => run.commentId === commentId && run.hasReply
+  const renderRuns = (commentId: string, presentation: "inline" | "header" = "inline") => runs.filter((run) => run.commentId === commentId && run.hasReply
+    && (run.task.status === "completed") === (presentation === "header")
     && (!run.anchorCommentId || run.anchorCommentId === commentId || replyFolded))
-    .map((run) => <InlineCommentRun key={run.task.id} run={run} viewState={run.commentId === entry.id ? runViewState : undefined} />);
+    .map((run) => <InlineCommentRun key={run.task.id} run={run} presentation={presentation} viewState={run.commentId === entry.id ? runViewState : undefined} />);
 
   const renderAnchoredRuns = (commentId: string) => runs.filter((run) => run.anchorCommentId === commentId
     && !(replyFolded && run.hasReply))
@@ -1049,6 +1057,8 @@ function CommentCardImpl({
                   {new Date(entry.created_at).toLocaleString(locale)}
                 </TooltipContent>
               </Tooltip>
+
+              {renderRuns(entry.id, "header")}
 
               {!open && contentPreview && (
                 <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">
@@ -1299,6 +1309,7 @@ function CommentCardImpl({
                     <CommentRow
                       issueId={issueId}
                       entry={resolutionReply}
+                      runHeader={renderRuns(resolutionReply.id, "header")}
                       runMetadata={renderRuns(resolutionReply.id)}
                       currentUserId={currentUserId}
                       canModerate={canModerate}
@@ -1342,6 +1353,7 @@ function CommentCardImpl({
                     <CommentRow
                       issueId={issueId}
                       entry={reply}
+                      runHeader={renderRuns(reply.id, "header")}
                       runMetadata={renderRuns(reply.id)}
                       currentUserId={currentUserId}
                       canModerate={canModerate}

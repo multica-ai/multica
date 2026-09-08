@@ -320,6 +320,8 @@ const mockApiObj = vi.hoisted(() => ({
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
   listAgents: vi.fn().mockResolvedValue([]),
+  getAgent: vi.fn().mockResolvedValue(null),
+  listRuntimes: vi.fn().mockResolvedValue([]),
   getProject: vi.fn(),
   listProjects: vi.fn().mockResolvedValue({ projects: [] }),
 }));
@@ -1251,7 +1253,8 @@ describe("IssueDetail (shared)", () => {
     });
     const body = await screen.findByText(reply.content!);
     const replyRow = container.querySelector("#comment-run-reply")!;
-    await waitFor(() => expect(within(replyRow as HTMLElement).getByText("Completed")).toBeInTheDocument());
+    await waitFor(() => expect(within(replyRow as HTMLElement).getByRole("button", { name: "Open full log" })).toBeInTheDocument());
+    expect(within(replyRow as HTMLElement).queryByText("Completed")).not.toBeInTheDocument();
     const run = replyRow.querySelector(`[data-run-id="${taskId}"]`)!;
     expect(run.querySelector('[data-slot="card"]')).toBeNull();
     expect(container.querySelectorAll(`[data-run-id="${taskId}"]`)).toHaveLength(1);
@@ -1260,8 +1263,8 @@ describe("IssueDetail (shared)", () => {
     expect(container.querySelector(`[data-run-comment-id="${taskId}"]`)).toBeNull();
     expect(userBlock.querySelector("[data-run-id]")).toBeNull();
     expect(within(run as HTMLElement).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
-    fireEvent.click(within(run as HTMLElement).getByRole("button", { name: /View activity/ }));
-    await waitFor(() => expect(within(run as HTMLElement).getByText("pnpm test")).toBeInTheDocument());
+    fireEvent.click(within(run as HTMLElement).getByRole("button", { name: "Open full log" }));
+    await screen.findByRole("dialog");
     expect(mockApiObj.listTaskMessages).toHaveBeenCalledWith(taskId);
   });
 
@@ -1350,7 +1353,8 @@ describe("IssueDetail (shared)", () => {
       expect(slots[index]!.textContent).toContain(reply.content);
       expect(container.querySelectorAll(`[data-run-id="${tasks[index]!.id}"]`)).toHaveLength(1);
     }
-    expect(within(slots[0] as HTMLElement).getByRole("button", { name: /View activity/ })).toHaveAttribute("aria-expanded", "true");
+    expect(within(slots[0] as HTMLElement).getByRole("button", { name: "Open full log" })).toBeInTheDocument();
+    expect(within(slots[0] as HTMLElement).queryByRole("button", { name: /View activity/ })).not.toBeInTheDocument();
     expect(slots[0]!.nextElementSibling?.id).toBe("comment-request-two");
     expect(slots[1]!.nextElementSibling?.id).toBe("comment-request-three");
     expect(container.querySelector(`[data-run-slot-id="${tasks[2]!.id}"]`)).toBe(slots[2]);

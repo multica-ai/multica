@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { AlertCircle, Brain, ChevronRight, ExternalLink, Loader2, MessageSquare, RotateCcw, Square, Terminal } from "lucide-react";
+import { AlertCircle, Brain, ChevronRight, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useTraceIssueLabels } from "../../common/task-transcript/use-trace-issue-labels";
@@ -11,6 +11,7 @@ import { useCancelIssueRun, useRetryIssueRun } from "@multica/core/issues/mutati
 import { dispatchReasonCode } from "@multica/core/api";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
@@ -37,11 +38,12 @@ export function useInlineCommentRunState() {
 
 export type InlineCommentRunState = ReturnType<typeof useInlineCommentRunState>;
 
-export function InlineCommentRun({ run, className, viewState, showIdentity = false }: {
+export function InlineCommentRun({ run, className, viewState, showIdentity = false, presentation = "inline" }: {
   run: CommentRun;
   className?: string;
   viewState?: InlineCommentRunState;
   showIdentity?: boolean;
+  presentation?: "inline" | "header";
 }) {
   const { task, hasReply } = run;
   const { t } = useT("issues");
@@ -61,9 +63,10 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const regionId = useId();
   // Keep one disclosure button mounted across queued, live, and historical states.
   // Historical, collapsed runs still don't fetch transcripts.
-  const { data, isPending, isError, refetch } = useTaskMessages(task.id, active, task.status === "running" || expanded || fullLogOpen);
+  const loadTranscript = task.status === "running" || (presentation === "inline" && expanded) || fullLogOpen;
+  const { data, isPending, isError, refetch } = useTaskMessages(task.id, active, loadTranscript);
   const items = useMemo(() => buildTimeline(data ?? []), [data]);
-  const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, task.status === "running" || expanded || fullLogOpen);
+  const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, loadTranscript);
   const steps = useMemo(() => buildSteps(items), [items]);
   const rows = useMemo(() => groupSteps(steps), [steps]);
   useEffect(() => {
@@ -97,6 +100,26 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const activityLabel = t(($) => $.inline_run.view_activity);
   const stepLabel = steps.length > 0 ? t(($) => $.inline_run.steps, { count: steps.length }) : "";
   const stopLabel = cancel.isPending || cancel.isSuccess ? t(($) => $.inline_run.stopping) : t(($) => $.inline_run.stop);
+  const transcript = fullLogOpen && <AgentTranscriptDialog open onOpenChange={setFullLogOpen}
+    task={task} items={items} agentName={name} isLive={active}
+    contentState={isPending ? <p role="status" className="text-body text-muted-foreground">{t(($) => $.inline_run.loading)}</p>
+      : isError ? <div role="alert" className="text-body text-destructive">{t(($) => $.inline_run.load_failed)}
+        <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button>
+      </div> : undefined} />;
+  if (presentation === "header" && task.status === "completed" && hasReply) {
+    return <span className="inline-flex shrink-0" data-run-id={task.id}>
+      <Tooltip>
+        <TooltipTrigger render={<Button type="button" size="icon-sm" variant="ghost"
+          className="text-muted-foreground hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent"
+          aria-label={t(($) => $.inline_run.full_log)} aria-haspopup="dialog" aria-expanded={fullLogOpen}
+          onClick={() => setFullLogOpen(true)}>
+          <ScrollText aria-hidden className="size-3.5" />
+        </Button>} />
+        <TooltipContent>{t(($) => $.inline_run.full_log)} · {status}{elapsed && ` · ${elapsed}`}</TooltipContent>
+      </Tooltip>
+      {transcript}
+    </span>;
+  }
   return (
     <section aria-label={t(($) => $.inline_run.label, { name })}
       className={cn("min-w-0 py-2", className)} data-run-id={task.id}>
@@ -150,7 +173,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
             onClick={() => setFullLogOpen(true)}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
         </div>}
       </div>
-      {fullLogOpen && <AgentTranscriptDialog open onOpenChange={setFullLogOpen} task={task} items={items} agentName={name} isLive={active} />}
+      {transcript}
       <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
         showRunningNote={task.status !== "queued"}
         onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />

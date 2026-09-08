@@ -117,6 +117,8 @@ interface AgentTranscriptDialogProps {
   items: TimelineItem[];
   agentName: string;
   isLive?: boolean;
+  /** Loading/error content while the caller retrieves the transcript. */
+  contentState?: React.ReactNode;
   /**
    * Optional content rendered between the header chips and the event list.
    * Used by autopilot run rows to surface the inbound webhook trigger
@@ -306,6 +308,7 @@ export function AgentTranscriptDialog({
   agentName,
   isLive = false,
   headerSlot,
+  contentState,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const locale = useLocale();
@@ -1199,7 +1202,7 @@ export function AgentTranscriptDialog({
         {/* ── Steps, and the inspector when one is selected ───────────── */}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-            {displayRows.length === 0 ? (
+            {contentState ? <div className="flex h-full items-center justify-center p-4">{contentState}</div> : displayRows.length === 0 ? (
               <div className="flex h-full items-center justify-center text-body text-muted-foreground">
                 {isAntigravityLiveEmpty ? (
                   <div className="flex max-w-md items-center gap-2 px-4 text-center">

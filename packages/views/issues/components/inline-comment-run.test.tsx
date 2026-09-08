@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import { api } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";
 import type { AgentTask } from "@multica/core/types";
@@ -16,7 +17,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActo
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 vi.mock("../../editor", () => ({ ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock("../../common/task-transcript/agent-transcript-dialog", () => ({
-  AgentTranscriptDialog: () => <div role="dialog">Full transcript</div>,
+  AgentTranscriptDialog: ({ contentState }: { contentState?: ReactNode }) => <div role="dialog">{contentState ?? "Full transcript"}</div>,
   StepBody: ({ item }: { item: { output?: string } }) => <div>{item.output}</div>,
 }));
 
@@ -32,16 +33,43 @@ const messages: TaskMessagePayload[] = [
 ];
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
-function setup(initialTask: AgentTask, hasReply = false) {
+function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" | "header" = "inline") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const view = (current: AgentTask, reply = hasReply) => <QueryClientProvider client={client}>
-    <InlineCommentRun run={{ task: current, commentId: "comment", hasReply: reply }} />
+    <InlineCommentRun run={{ task: current, commentId: "comment", hasReply: reply }} presentation={presentation} />
   </QueryClientProvider>;
   const rendered = renderWithI18n(view(initialTask));
   return { client, rerender: (current: AgentTask, reply = hasReply) => rendered.rerender(view(current, reply)) };
 }
 
 describe("InlineCommentRun", () => {
+  it("opens completed reply logs from a compact header button and loads only on demand", async () => {
+    let resolve!: (value: TaskMessagePayload[]) => void;
+    vi.mocked(api.listTaskMessages).mockImplementation(() => new Promise((done) => { resolve = done; }));
+    setup(task({ status: "completed", completed_at: "2026-09-07T00:01:23Z" }), true, "header");
+    expect(screen.queryByText("Completed")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /View activity/ })).not.toBeInTheDocument();
+    expect(api.listTaskMessages).not.toHaveBeenCalled();
+    const trigger = screen.getByRole("button", { name: "Open full log" });
+    expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog")).toHaveTextContent("Loading activity");
+    await act(async () => resolve(messages));
+    await screen.findByText("Full transcript");
+    expect(api.listTaskMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a completed header log recover when its initial fetch fails", async () => {
+    vi.mocked(api.listTaskMessages).mockRejectedValueOnce(new Error("offline"));
+    setup(task({ status: "completed" }), true, "header");
+    fireEvent.click(screen.getByRole("button", { name: "Open full log" }));
+    await screen.findByRole("alert");
+    vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByText("Full transcript");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("uses a readable issue identifier in live progress and expanded activity", async () => {
     const issueId = "01a07eca-8e82-775e-be06-e4a97ccfa299";
     vi.mocked(api.getIssue).mockResolvedValue({ id: issueId, identifier: "DEV-17" } as Awaited<ReturnType<typeof api.getIssue>>);
