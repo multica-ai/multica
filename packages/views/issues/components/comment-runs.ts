@@ -38,7 +38,7 @@ export function buildCommentRunView(
   tasks: readonly AgentTask[],
   timeline: readonly TimelineEntry[],
   previous = new Map<string, CommentRun[]>(),
-): { timeline: readonly TimelineEntry[]; runs: Map<string, CommentRun[]> } {
+): { timeline: readonly TimelineEntry[]; runs: Map<string, CommentRun[]>; standaloneRuns: CommentRun[] } {
   const comments = new Map(timeline.filter((entry) => entry.type === "comment").map((entry) => [entry.id, entry]));
   const replies = new Map<string, TimelineEntry>();
   for (const entry of comments.values()) {
@@ -53,25 +53,31 @@ export function buildCommentRunView(
   for (const task of [...tasks].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))) {
     const reply = replies.get(task.id);
     if (isObsoleteCommentRun(task) && !reply) continue;
-    let anchor: TimelineEntry | undefined;
+    let anchorId: string | undefined;
     let source: AgentTask | undefined = task;
     const visited = new Set<string>();
-    while (!anchor && source && !visited.has(source.id)) {
+    while (!anchorId && source && !visited.has(source.id)) {
       visited.add(source.id);
       // Before claim, the receipt is empty (or belongs to a previous claim).
-      // Keep that planned anchor if the run terminates before dispatch, too.
+      // Dispatch can precede receipt persistence; retain the planned anchor
+      // until delivery is known, or if the run terminates before dispatch.
       const usesPlannedCoverage = source.status === "queued"
+        || (source.status === "dispatched" && !source.delivered_comment_ids?.length)
         || ((source.status === "cancelled" || source.status === "failed")
           && !source.dispatched_at && !source.started_at);
       const ids = !usesPlannedCoverage && source.delivered_comment_ids !== undefined
         ? source.delivered_comment_ids
         : [source.trigger_comment_id, ...(source.coalesced_comment_ids ?? [])];
       const candidates = ids.flatMap((id) => id && comments.has(id) ? [comments.get(id)!] : []);
-      anchor = candidates.find((entry) => entry.id === source?.trigger_comment_id)
-        ?? candidates.sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+      // Task events can arrive before their comments. Preserve the intended
+      // anchor even when it cannot be rendered yet; it is not an assignment.
+      anchorId = source.trigger_comment_id && ids.includes(source.trigger_comment_id)
+        ? source.trigger_comment_id
+        : candidates.sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.id
+          ?? ids.find((id) => !!id);
       source = source.parent_task_id ? byTask.get(source.parent_task_id) : undefined;
     }
-    placements.push({ task, commentId: reply?.id ?? anchor?.id, anchorCommentId: anchor?.id, hasReply: !!reply });
+    placements.push({ task, commentId: reply?.id ?? anchorId, anchorCommentId: anchorId, hasReply: !!reply });
   }
   // Project every task-owned answer first, then use that same tree for run
   // grouping, replies, resolution, and navigation. Assignment answers become
@@ -120,16 +126,10 @@ export function buildCommentRunView(
       grouped.set(root, prior);
     }
   }
-  return { timeline: projected, runs: grouped };
-}
-
-/** Runs without a comment anchor still appear as their own agent activity. */
-export function standaloneCommentRuns(
-  tasks: readonly AgentTask[],
-  grouped: ReadonlyMap<string, readonly CommentRun[]>,
-): CommentRun[] {
-  const known = new Map([...grouped.values()].flatMap((runs) => runs.map((run) => [run.task.id, run] as const)));
-  return tasks.filter((task) => (!isObsoleteCommentRun(task) || known.get(task.id)?.hasReply === true)
-    && !known.get(task.id)?.anchorCommentId)
-    .map((task) => known.get(task.id) ?? { task, hasReply: false });
+  // Missing comment data must not turn a thread-owned run into a root block.
+  return {
+    timeline: projected,
+    runs: grouped,
+    standaloneRuns: placements.filter((run) => !run.anchorCommentId),
+  };
 }

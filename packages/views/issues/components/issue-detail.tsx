@@ -80,7 +80,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { useNewRunIds } from "./use-run-comment-motion";
 import { AgentRunComment, CommentCard } from "./comment-card";
-import { EMPTY_COMMENT_RUNS, buildCommentRunView, standaloneCommentRuns, type CommentRun } from "./comment-runs";
+import { EMPTY_COMMENT_RUNS, buildCommentRunView, type CommentRun } from "./comment-runs";
 import { issueTasksOptions } from "@multica/core/issues/queries";
 import { SourceContextBadge } from "./source-context-viewer";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
@@ -1433,12 +1433,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: commentTasks } = useQuery(issueTasksOptions(id));
   const enteringRunIds = useNewRunIds(id, commentTasks);
   const previousCommentRuns = useRef(new Map<string, CommentRun[]>());
-  const { runs: commentRuns, timeline: displayTimeline } = useMemo(() => {
+  const { runs: commentRuns, timeline: displayTimeline, standaloneRuns } = useMemo(() => {
     const next = buildCommentRunView(commentTasks ?? [], timeline, previousCommentRuns.current);
     previousCommentRuns.current = next.runs;
     return next;
   }, [commentTasks, timeline]);
-  const standaloneRuns = useMemo(() => standaloneCommentRuns(commentTasks ?? [], commentRuns), [commentTasks, commentRuns]);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the

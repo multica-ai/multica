@@ -1214,7 +1214,7 @@ describe("IssueDetail (shared)", () => {
       trigger_comment_id: "comment-1", delivered_comment_ids: [],
     };
     const root = mockTimeline[0]!;
-    mockApiObj.listTimeline.mockResolvedValue([root]);
+    mockApiObj.listTimeline.mockResolvedValue([]);
     mockApiObj.listTasksByIssue.mockResolvedValue([task]);
     mockApiObj.listTaskMessages.mockResolvedValue([
       { task_id: taskId, issue_id: "issue-1", seq: 1, type: "tool_use", tool: "exec_command", input: { command: "pnpm test" } },
@@ -1227,6 +1227,11 @@ describe("IssueDetail (shared)", () => {
         </QueryClientProvider>
       </I18nProvider>,
     );
+    await waitFor(() => expect(client.getQueryData(issueKeys.tasks("issue-1"))).toEqual([task]));
+    await waitFor(() => expect(client.getQueryData(issueKeys.timeline("issue-1"))).toEqual([]));
+    expect(container.querySelector(`[data-run-id="${taskId}"]`)).toBeNull();
+    mockApiObj.listTimeline.mockResolvedValue([root]);
+    act(() => client.setQueryData(issueKeys.timeline("issue-1"), [root]));
     await screen.findByText("Waiting for an available agent.");
     const userBlock = container.querySelector(`#comment-body-${root.id}`)!.parentElement!;
     const agentBlock = container.querySelector(`[data-run-comment-id="${taskId}"]`)!;

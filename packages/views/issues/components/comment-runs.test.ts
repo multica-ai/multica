@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
-import { commentRunOutput, buildCommentRunView, standaloneCommentRuns } from "./comment-runs";
+import { commentRunOutput, buildCommentRunView } from "./comment-runs";
 
 const groupCommentRuns = (...args: Parameters<typeof buildCommentRunView>) => buildCommentRunView(...args).runs;
 
@@ -14,6 +14,36 @@ function comment(id: string, overrides: Partial<TimelineEntry> = {}): TimelineEn
 }
 
 describe("groupCommentRuns", () => {
+  it.each(["queued", "dispatched", "running", "completed"] as const)("waits for a missing trigger before placing a %s run and its reply", (status) => {
+    const run = task("run", { status, trigger_comment_id: "trigger",
+      delivered_comment_ids: status === "queued" || status === "dispatched" ? [] : ["trigger"] });
+    const root = comment("root");
+    const trigger = comment("trigger", { parent_id: root.id });
+    const before = buildCommentRunView([run], [root]);
+    expect(before.standaloneRuns).toEqual([]);
+    expect(before.runs.size).toBe(0);
+    const reply = comment("answer", { actor_type: "agent", source_task_id: run.id });
+    const earlyReply = buildCommentRunView([run], [root, reply]);
+    expect(earlyReply.standaloneRuns).toEqual([]);
+    expect(earlyReply.timeline.find((entry) => entry.id === reply.id)?.parent_id).toBe(trigger.id);
+    const after = buildCommentRunView([run], [root, trigger, reply]);
+    expect(after.standaloneRuns).toEqual([]);
+    expect(after.runs.get(root.id)).toEqual([{ task: run, anchorCommentId: trigger.id, commentId: reply.id, hasReply: true }]);
+  });
+
+  it("waits for the intended merged trigger and preserves retry ancestry", () => {
+    const original = task("original", { status: "queued", trigger_comment_id: "new", coalesced_comment_ids: ["old"], delivered_comment_ids: [] });
+    const retry = task("retry", { status: "queued", parent_task_id: original.id, delivered_comment_ids: [] });
+    const old = comment("old");
+    const next = comment("new", { parent_id: old.id });
+    const before = buildCommentRunView([original, retry], [old]);
+    expect(before.standaloneRuns).toEqual([]);
+    expect(before.runs.size).toBe(0);
+    const after = buildCommentRunView([original, retry], [old, next]);
+    expect(after.runs.get(old.id)?.map((run) => run.anchorCommentId)).toEqual([next.id, next.id]);
+    expect(after.standaloneRuns).toEqual([]);
+  });
+
   it("projects chained answers and assignment subtrees before finding run roots", () => {
     const first = task("first", { trigger_comment_id: "root" });
     const second = task("second", { trigger_comment_id: "answer-a" });
@@ -48,7 +78,7 @@ describe("groupCommentRuns", () => {
     const timeline = [comment("root"), comment("followup", { parent_id: "root" })];
     const grouped = groupCommentRuns(tasks, timeline);
     expect(grouped.get("root")?.map((run) => run.task.id)).toEqual(["later", "new"]);
-    expect(standaloneCommentRuns(tasks, grouped)).toEqual([]);
+    expect(buildCommentRunView(tasks, timeline).standaloneRuns).toEqual([]);
     expect(tasks).toHaveLength(4); // Full execution history remains intact.
     const reply = comment("answer", { actor_type: "agent", source_task_id: next.id });
     expect(groupCommentRuns(tasks, [...timeline, reply]).get("root")?.find((run) => run.task.id === next.id))
@@ -70,9 +100,8 @@ describe("groupCommentRuns", () => {
   it("keeps actual replies even when cancellation metadata says the input changed", () => {
     const run = task("old", { status: "cancelled", cancelled_by_comment_change: true });
     const reply = comment("answer", { actor_type: "agent", source_task_id: run.id });
-    const grouped = groupCommentRuns([run], [reply]);
-    expect(standaloneCommentRuns([run], grouped)).toHaveLength(1);
-    expect(standaloneCommentRuns([run], groupCommentRuns([run], []))).toEqual([]);
+    expect(buildCommentRunView([run], [reply]).standaloneRuns).toHaveLength(1);
+    expect(buildCommentRunView([run], []).standaloneRuns).toEqual([]);
   });
   it("places merged runs once under their newest trigger, including nested replies", () => {
     const timeline = [comment("root"), comment("reply", { parent_id: "root" }), comment("nested", { parent_id: "reply" })];
@@ -149,7 +178,7 @@ describe("commentRunOutput", () => {
 describe("standaloneCommentRuns", () => {
   it.each(["queued", "dispatched", "running", "failed", "cancelled", "completed"] as const)("keeps an unanchored %s run visible", (status) => {
     const run = task("assignment", { status, delivered_comment_ids: [] });
-    expect(standaloneCommentRuns([run], groupCommentRuns([run], [])))
+    expect(buildCommentRunView([run], []).standaloneRuns)
       .toEqual([{ task: run, hasReply: false }]);
   });
 
@@ -158,9 +187,9 @@ describe("standaloneCommentRuns", () => {
     const triggered = task("comment-run", { trigger_comment_id: "trigger" });
     const tasks = [assigned, triggered];
     const timeline = [comment("trigger")];
-    expect(standaloneCommentRuns(tasks, groupCommentRuns(tasks, timeline)).map((run) => run.task.id)).toEqual([assigned.id]);
+    expect(buildCommentRunView(tasks, timeline).standaloneRuns.map((run) => run.task.id)).toEqual([assigned.id]);
     const reply = comment("answer", { actor_type: "agent", source_task_id: assigned.id });
-    expect(standaloneCommentRuns(tasks, groupCommentRuns(tasks, [...timeline, reply])))
+    expect(buildCommentRunView(tasks, [...timeline, reply]).standaloneRuns)
       .toEqual([{ task: assigned, commentId: reply.id, anchorCommentId: undefined, hasReply: true }]);
   });
 });
