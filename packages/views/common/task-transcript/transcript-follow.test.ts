@@ -218,14 +218,100 @@ describe("createLiveEndFollow", () => {
     expect(follow.onScroll(400)).toBe(false); // no pinning once disengaged
   });
 
-  it("input the surface never consumed does not release, and never blocks the pin", () => {
+  it("input the surface never consumed defers the pin only to the frame boundary", () => {
     // A wheel over a nested scroller (or a list too short to scroll) bubbles
-    // to the container without moving it: no scroll ever attributes it.
+    // to the container without moving it: no scroll ever attributes it. While
+    // the claim is staged the pin is deferred — it might be a real tick whose
+    // animated scroll has not arrived yet — but once the wiring discards the
+    // claim, the deferred pin fires.
     const { follow } = makeFollow();
     follow.input(300);
     expect(follow.isFollowing()).toBe(true);
-    expect(follow.onResize(180)).toBe(true); // growth pins straight away
+    expect(follow.onResize(180)).toBe(false); // deferred: claim may still confirm
+    follow.endInputFrame();
+    expect(follow.onResize(180)).toBe(true); // claim discarded: pin fires now
     expect(follow.isFollowing()).toBe(true);
+  });
+
+  it("defers pins while a wheel tick's animated scroll is in flight", () => {
+    // A mouse wheel tick delivers its input at once; the browser animates the
+    // displacement over the following frames. A pin landing mid-animation
+    // would cancel it and revert the tick — the reader could never accumulate
+    // a release against a stream. The pin waits until the carry is spent.
+    const { follow, tick } = makeFollow();
+    follow.input(100);
+    tick(16);
+    expect(follow.onScroll(10)).toBe(false); // first frame confirms the claim
+    follow.endInputFrame();
+    expect(follow.onResize(190)).toBe(false); // chunk mid-animation: deferred
+    tick(16);
+    expect(follow.onScroll(220)).toBe(false); // the rest of the tick still lands
+    tick(16);
+    expect(follow.onScroll(280)).toBe(false); // animation complete: 100px taken
+    tick(301); // gesture settles, carry spent
+    expect(follow.onResize(460)).toBe(true); // pinning resumes
+    expect(follow.isFollowing()).toBe(true); // 100px is inside the zone
+  });
+
+  it("accumulates a release across animated ticks despite mid-flight growth", () => {
+    const { follow } = makeFollow();
+    follow.input(100);
+    expect(follow.onScroll(20)).toBe(false);
+    expect(follow.onResize(200)).toBe(false); // chunk: deferred, tick survives
+    expect(follow.onScroll(280)).toBe(false); // tick 1 finishes: 100px taken
+    follow.input(100); // tick 2, overlapping the settle window
+    expect(follow.onScroll(380)).toBe(false); // 200px taken
+    expect(follow.isFollowing()).toBe(false);
+  });
+
+  it("reports no deferral for a scroll the reader fully confirmed", () => {
+    // The frame-boundary re-judge exists only for pins an in-flight gesture
+    // deferred. A confirmed sub-threshold scroll deferred nothing, so the
+    // wiring must not re-judge — that would snap the reader back one frame
+    // after a touchpad tick or arrow key the latch had left alone.
+    const { follow } = makeFollow();
+    follow.input(60);
+    expect(follow.onScroll(60)).toBe(false);
+    expect(follow.endInputFrame()).toBe(false);
+  });
+
+  it("reports a deferred pin at the frame boundary, once", () => {
+    const { follow } = makeFollow();
+    follow.input(300); // never consumed
+    expect(follow.onResize(180)).toBe(false); // deferred behind the claim
+    expect(follow.endInputFrame()).toBe(true); // the wiring re-judges now
+    expect(follow.onResize(180)).toBe(true); // and the pin fires
+    expect(follow.endInputFrame()).toBe(false); // flag does not linger
+  });
+
+  it("re-following through an over-claimed toward gesture leaves no stale carry", () => {
+    // End stages the whole scrollHeight; the scroll to the live end consumes
+    // only the real distance. Re-following must clear the leftover carry, or
+    // it defers every pin for the rest of the settle window.
+    const { follow } = makeFollow();
+    follow.disengage();
+    follow.onScroll(200);
+    follow.input(-300);
+    expect(follow.onScroll(0)).toBe(false); // arrives at the live end: re-follows
+    follow.endInputFrame();
+    expect(follow.onResize(180)).toBe(true); // growth pins immediately again
+  });
+
+  it("bounds carry-residue deferral by the settle window", () => {
+    // The browser can deliver less displacement than the claim (scroll extent
+    // reached, delta scaling off): the carry never drains, so pins stay
+    // deferred — but only until the settle window expires.
+    const { follow, tick } = makeFollow();
+    follow.input(100);
+    expect(follow.onScroll(40)).toBe(false); // only 40 of the 100 ever lands
+    follow.endInputFrame();
+    tick(100);
+    expect(follow.onResize(220)).toBe(false); // still deferred
+    tick(250);
+    expect(follow.onResize(400)).toBe(true); // settle window over: pin resumes
+    // The resolved pin settled the deferral: a later gesture's frame boundary
+    // must not inherit it and re-judge a pin that gesture never earned.
+    expect(follow.endInputFrame()).toBe(false);
   });
 
   it("pins a system shift after the surface left input unconsumed", () => {
