@@ -130,7 +130,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   }
   return (
     <section aria-label={t(($) => $.inline_run.label, { name })}
-      className={cn("min-w-0 py-2", className)} data-run-id={task.id}>
+      className={cn("@container/run min-w-0 py-2", className)} data-run-id={task.id}>
       <div className="flex min-h-7 min-w-0 items-center gap-2" data-run-summary-row>
         {showIdentity && <>
           <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard />
@@ -142,7 +142,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
         </span>
         <button type="button"
           className={cn("flex min-w-0 items-center gap-1.5 rounded py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            showProgress ? "flex-1 text-body" : "order-last ml-auto shrink-0")}
+            showProgress ? "flex-1 text-body" : "order-last ml-auto shrink-0",
+            showIdentity && !showProgress && "@max-[32rem]/run:min-w-7 @max-[32rem]/run:justify-center")}
           aria-label={stepLabel ? `${activityLabel} · ${stepLabel}` : activityLabel}
           aria-expanded={expanded} aria-controls={expanded ? regionId : undefined}
           onClick={(event) => { state.disclosure.onTrigger(event); setExpanded(!expanded); }}>
@@ -151,18 +152,18 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
                 <span className={cn("inline-block max-w-full truncate align-bottom",
                   (task.status === "running" || task.status === "dispatched") && "animate-chat-text-shimmer")}>{summary}</span>
               </span>
-            : <span className={cn(showIdentity && "max-sm:sr-only")}>{activityLabel}</span>}
-          {!showProgress && stepLabel && <span className="text-faint-foreground max-sm:hidden">· {stepLabel}</span>}
+            : <span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{activityLabel}</span>}
+          {!showProgress && stepLabel && <span className="text-faint-foreground @max-[32rem]/run:hidden">· {stepLabel}</span>}
           <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
         </button>
-        <span className={cn("shrink-0 whitespace-nowrap text-caption tabular-nums text-muted-foreground", showIdentity && !active && "max-sm:hidden")}>{elapsed}</span>
+        <span className={cn("shrink-0 whitespace-nowrap text-caption tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
         {stopButton}
         {!hasReply && (task.status === "failed" || task.status === "cancelled") && <Button
-          size="sm" variant="ghost" className={cn("text-muted-foreground", showIdentity && "max-sm:size-7 max-sm:p-0")} disabled={retry.isPending || retry.isSuccess}
+          size="sm" variant="ghost" className={cn("text-muted-foreground", showIdentity && "@max-[32rem]/run:size-7 @max-[32rem]/run:p-0")} disabled={retry.isPending || retry.isSuccess}
           onClick={() => retry.mutate(task.id, { onError: (error) => toast.error(
             dispatchReasonCode(error) === "invocation_not_allowed" ? t(($) => $.execution_log.retry_blocked) : t(($) => $.execution_log.retry_failed),
           ) })}>
-          <RotateCcw className="size-3.5" /><span className={cn(showIdentity && "max-sm:sr-only")}>{t(($) => $.execution_log.retry_task_tooltip)}</span>
+          <RotateCcw className="size-3.5" /><span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{t(($) => $.execution_log.retry_task_tooltip)}</span>
         </Button>}
       </div>
       <div className={cn(showIdentity && "pl-8")}>
