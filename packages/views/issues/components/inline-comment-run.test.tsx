@@ -125,6 +125,13 @@ describe("InlineCommentRun", () => {
     const current = task();
     const { client, rerender } = setup(current);
     await screen.findByText("pnpm test");
+    const progress = screen.getByText("pnpm test");
+    expect(progress).not.toHaveClass("animate-chat-text-shimmer");
+    expect(progress.closest("[data-run-summary]")).toHaveClass("h-[1lh]", "overflow-hidden");
+    expect(document.querySelector("[data-run-loading-indicator]")).toHaveClass(
+      "motion-safe:animate-spin",
+      "motion-safe:[animation-duration:900ms]",
+    );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     const toggle = screen.getByRole("button", { name: /View activity/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -132,7 +139,7 @@ describe("InlineCommentRun", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     const tail: TaskMessagePayload = { task_id: id, issue_id: "issue", seq: 3, type: "tool_result", tool: "exec_command", output: "12 passed" };
     act(() => client.setQueryData(chatKeys.taskMessages(id), [...messages, tail]));
-    expect(screen.queryByText("Waiting for the agent to respond.")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Waiting for the agent to respond.")).not.toBeInTheDocument());
     vi.mocked(api.listTaskMessages).mockResolvedValue([...messages, tail]);
     rerender({ ...current, status: "completed", completed_at: "2026-09-07T00:01:23Z" }, true);
     await screen.findByText("Completed");
@@ -161,12 +168,14 @@ describe("InlineCommentRun", () => {
     await screen.findByText("pnpm test");
     await receive({ type: "tool_result", tool: "exec_command", output: "12 passed" });
     expect(screen.getByText("pnpm test")).toBeInTheDocument();
-    expect(screen.queryByText("Waiting for the agent to respond.")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Waiting for the agent to respond.")).not.toBeInTheDocument());
     await receive({ type: "text", content: "  " });
     expect(screen.getByText("pnpm test")).toBeInTheDocument();
     await receive({ type: "text", content: "Tests passed. Reviewing the changes." });
     await screen.findByText("Tests passed. Reviewing the changes.");
-    expect(screen.queryByText("pnpm test")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText("pnpm test")).not.toBeInTheDocument(),
+    );
   });
 
   it("keeps completed replies readable without fetching or duplicating their deliverable", () => {

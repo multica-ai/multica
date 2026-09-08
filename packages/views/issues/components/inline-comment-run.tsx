@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { AlertCircle, Brain, ChevronRight, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AlertCircle, Brain, ChevronRight, CirclePause, Clock3, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useTraceIssueLabels } from "../../common/task-transcript/use-trace-issue-labels";
@@ -9,10 +10,12 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useTaskMessages } from "@multica/core/chat/queries";
 import { useCancelIssueRun, useRetryIssueRun } from "@multica/core/issues/mutations";
 import { dispatchReasonCode } from "@multica/core/api";
+import type { AgentTask } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
 import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceRow } from "../../common/task-transcript/build-steps";
@@ -27,7 +30,7 @@ import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel } from "./task-run-labels";
 import { commentRunOutput, isActiveCommentRun, showCommentRunInHeader, type CommentRun } from "./comment-runs";
 
-import { useRunDisclosureMotion } from "./use-run-comment-motion";
+import { useRunAnimationVisibility, useRunDisclosureMotion } from "./use-run-comment-motion";
 
 export function useInlineCommentRunState() {
   const [expanded, setExpanded] = useState(false);
@@ -58,6 +61,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const [confirmStop, setConfirmStop] = useState(false);
   const [now, setNow] = useState(Date.now);
   const [visibleCount, setVisibleCount] = useState(12);
+  const animationVisibility = useRunAnimationVisibility<HTMLDivElement>();
   const cancel = useCancelIssueRun(task.issue_id);
   const retry = useRetryIssueRun(task.issue_id);
   const regionId = useId();
@@ -96,6 +100,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     : task.status === "dispatched" ? t(($) => $.inline_run.starting)
     : task.status === "waiting_local_directory" ? t(($) => $.inline_run.waiting_directory)
     : activitySummary;
+  const summaryMotionKey = `${task.status}:${current?.seq ?? "empty"}`;
   const showProgress = active && !hasReply;
   const activityLabel = t(($) => $.inline_run.view_activity);
   const stepLabel = steps.length > 0 ? t(($) => $.inline_run.steps, { count: steps.length }) : "";
@@ -131,7 +136,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   return (
     <section aria-label={t(($) => $.inline_run.label, { name })}
       className={cn("@container/run min-w-0 py-2", className)} data-run-id={task.id}>
-      <div className="flex min-h-7 min-w-0 items-center gap-2" data-run-summary-row>
+      <div ref={animationVisibility.ref} className="flex min-h-7 min-w-0 items-center gap-2" data-run-summary-row>
         {showIdentity && <>
           <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard />
           <span className="max-w-[30%] shrink-0 truncate text-body font-medium" title={name}>{name}</span>
@@ -148,10 +153,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           aria-expanded={expanded} aria-controls={expanded ? regionId : undefined}
           onClick={(event) => { state.disclosure.onTrigger(event); setExpanded(!expanded); }}>
           {showProgress
-            ? <span data-run-summary className="min-w-0 flex-1 truncate" title={summary}>
-                <span className={cn("inline-block max-w-full truncate align-bottom",
-                  (task.status === "running" || task.status === "dispatched") && "animate-chat-text-shimmer")}>{summary}</span>
-              </span>
+            ? <><RunActivityIndicator status={task.status} animate={animationVisibility.visible} />
+                <RunActivitySummary summary={summary} motionKey={summaryMotionKey} /></>
             : <span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{activityLabel}</span>}
           {!showProgress && stepLabel && <span className="text-faint-foreground @max-[32rem]/run:hidden">· {stepLabel}</span>}
           <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
@@ -169,7 +172,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       <div className={cn(showIdentity && "pl-8")}>
         {output && <div className="mt-2 text-body"><ReadonlyContent content={redactSecrets(output)} /></div>}
         {failure && <p className="mt-1 text-caption text-destructive">{failure}</p>}
-        {expanded && <div ref={state.disclosure.contentRef} id={regionId} className="mt-2 min-w-0 space-y-1">
+        {expanded && <div id={regionId} className="mt-2 min-w-0 space-y-1">
           {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
           {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}
             <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button></div>}
@@ -214,7 +217,7 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
       </span>}
       <ChevronRight ref={disclosure.chevronRef} aria-hidden className={cn("size-3 shrink-0 text-muted-foreground", open && "rotate-90")} />
     </summary>
-    {open && <div ref={disclosure.contentRef} className="min-w-0 space-y-2 overflow-hidden pl-5.5">
+    {open && <div className="min-w-0 space-y-2 overflow-hidden pl-5.5">
       {grouped ? <>
         {row.steps.length > limit && <button type="button" className="py-1 text-muted-foreground" onClick={() => setLimit((value) => value + 12)}>
           {t(($) => $.inline_run.show_earlier, { count: row.steps.length - limit })}</button>}
@@ -226,4 +229,36 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
       </> : <StepBody item={row.item} />}
     </div>}
   </details>;
+}
+
+function RunActivityIndicator({ status, animate }: { status: AgentTask["status"]; animate: boolean }) {
+  if (status === "running" || status === "dispatched") {
+    return <Loader2 aria-hidden data-run-loading-indicator className={cn(
+      "size-3.5 shrink-0 stroke-[2.25] text-info",
+      animate && "motion-safe:animate-spin motion-safe:[animation-duration:900ms]",
+    )} />;
+  }
+  if (status === "waiting_local_directory") {
+    return <CirclePause aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />;
+  }
+  return <Clock3 aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />;
+}
+
+function RunActivitySummary({ summary, motionKey }: { summary: string; motionKey: string }) {
+  const shouldReduceMotion = useReducedMotion() ?? false;
+  return <span data-run-summary className="grid h-[1lh] min-w-0 flex-1 overflow-hidden" title={summary}>
+    <AnimatePresence initial={false}>
+      <motion.span key={motionKey}
+        className="col-start-1 row-start-1 block min-w-0 max-w-full truncate"
+        initial={shouldReduceMotion ? false : { opacity: 0, transform: "translateY(6px)" }}
+        animate={shouldReduceMotion ? undefined : { opacity: 1, transform: "translateY(0)", transition: {
+          duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT,
+        } }}
+        exit={shouldReduceMotion ? undefined : { opacity: 0, transform: "translateY(-6px)", transition: {
+          duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN,
+        } }}>
+        {summary}
+      </motion.span>
+    </AnimatePresence>
+  </span>;
 }

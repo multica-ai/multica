@@ -1,17 +1,18 @@
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import type { AgentTask } from "@multica/core/types";
+import { UI_EASE_OUT_CSS, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 
 const EMPTY_IDS: ReadonlySet<string> = new Set();
-const EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
 
 function reveal(element: HTMLElement | null, duration: number, translate = 0) {
   if (!element?.animate) return;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  if (reduced) return;
   return element.animate(
-    translate && !reduced
+    translate
       ? [{ opacity: 0, transform: `translateY(${translate}px)` }, { opacity: 1, transform: "translateY(0)" }]
       : [{ opacity: 0 }, { opacity: 1 }],
-    { duration: reduced ? 60 : duration, easing: EASING },
+    { duration, easing: UI_EASE_OUT_CSS },
   );
 }
 
@@ -37,6 +38,20 @@ export function useNewRunIds(issueId: string, tasks: readonly AgentTask[] | unde
   return arrivals.issueId === issueId ? arrivals.ids : EMPTY_IDS;
 }
 
+/** Pause ambient run motion outside the viewport, including Virtuoso overscan. */
+export function useRunAnimationVisibility<T extends Element>() {
+  const [element, setElement] = useState<T | null>(null);
+  const [visible, setVisible] = useState(true);
+  const ref = useCallback((node: T | null) => setElement(node), []);
+  useEffect(() => {
+    if (!element || typeof IntersectionObserver !== "function") return;
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry?.isIntersecting ?? true));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+  return { ref, visible };
+}
+
 /** Animate observed changes only. A virtualized row's first mount is always still. */
 export function useRunCommentMotion(entering: boolean, replyId: string | undefined, status: string) {
   const ref = useRef<HTMLDivElement>(null);
@@ -45,13 +60,15 @@ export function useRunCommentMotion(entering: boolean, replyId: string | undefin
     const before = previous.current;
     previous.current = { entering, replyId, status };
     const animations: (Animation | undefined)[] = [];
-    if (entering && !before.entering) animations.push(reveal(ref.current, 160, 4));
-    if (replyId && replyId !== before.replyId) {
+    if (entering && !before.entering) {
+      animations.push(reveal(ref.current, UI_MOTION_DURATION.fast * 1000, 4));
+    } else if (replyId && replyId !== before.replyId) {
       const body = Array.from(ref.current?.querySelectorAll<HTMLElement>("[data-comment-content]") ?? [])
         .find((element) => element.dataset.commentContent === replyId);
-      animations.push(reveal(body ?? null, 160));
+      animations.push(reveal(body ?? null, UI_MOTION_DURATION.fast * 1000));
+    } else if (status !== before.status) {
+      animations.push(reveal(ref.current?.querySelector("[data-run-status]") ?? null, UI_MOTION_DURATION.micro * 1000));
     }
-    if (status !== before.status) animations.push(reveal(ref.current?.querySelector("[data-run-status]") ?? null, 100));
     return () => { for (const animation of animations) animation?.cancel(); };
   }, [entering, replyId, status]);
   return ref;
@@ -59,7 +76,6 @@ export function useRunCommentMotion(entering: boolean, replyId: string | undefin
 
 /** Animate the toggle itself, including when historical runs mount a new trigger. */
 export function useRunDisclosureMotion(open: boolean) {
-  const contentRef = useRef<HTMLDivElement>(null);
   const chevronRef = useRef<SVGSVGElement>(null);
   const pending = useRef(false);
   const focusedTrigger = useRef<HTMLElement | null>(null);
@@ -74,16 +90,15 @@ export function useRunDisclosureMotion(open: boolean) {
     }
     if (!requested) return;
     const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    const duration = open ? 180 : 120;
-    const arrow = !reduced ? chevronRef.current?.animate?.(
+    if (reduced) return;
+    const duration = (open ? UI_MOTION_DURATION.fast : UI_MOTION_DURATION.micro) * 1000;
+    const arrow = chevronRef.current?.animate?.(
       [{ rotate: fromRotation.current }, { rotate: open ? "90deg" : "0deg" }],
-      { duration, easing: EASING },
-    ) : undefined;
-    const content = open ? reveal(contentRef.current, duration, -4) : undefined;
-    return () => { arrow?.cancel(); content?.cancel(); };
+      { duration, easing: UI_EASE_OUT_CSS },
+    );
+    return () => { arrow?.cancel(); };
   }, [open]);
   return {
-    contentRef,
     chevronRef,
     onTrigger(event: MouseEvent<HTMLElement>) {
       pending.current = event.detail > 0;

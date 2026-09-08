@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
-import { useNewRunIds, useRunCommentMotion, useRunDisclosureMotion } from "./use-run-comment-motion";
+import { useNewRunIds, useRunAnimationVisibility, useRunCommentMotion, useRunDisclosureMotion } from "./use-run-comment-motion";
 
 const animate = vi.fn((_frames: Keyframe[], _options: KeyframeAnimationOptions) => ({ cancel: vi.fn() }));
 const originalAnimate = Object.getOwnPropertyDescriptor(Element.prototype, "animate");
@@ -37,8 +37,12 @@ function Disclosure() {
     <button key={String(open)} onClick={(event) => { motion.onTrigger(event); setOpen(!open); }}>
       <svg ref={motion.chevronRef} style={{ rotate: open ? "90deg" : "0deg" }} />Toggle
     </button>
-    {open && <div ref={motion.contentRef}>Activity</div>}
+    {open && <div>Activity</div>}
   </>;
+}
+function Visibility() {
+  const { ref, visible } = useRunAnimationVisibility<HTMLDivElement>();
+  return <div ref={ref} data-testid="visibility" data-visible={visible} />;
 }
 
 describe("run comment motion", () => {
@@ -58,13 +62,13 @@ describe("run comment motion", () => {
     expect(result.current.size).toBe(0);
   });
 
-  it("animates live arrival once and never replays on a virtualized remount", () => {
+  it("animates live arrival once with shared timing and never replays on a virtualized remount", () => {
     const view = render(<Slot />);
     expect(animate).not.toHaveBeenCalled();
     view.rerender(<Slot entering />);
     expect(animate).toHaveBeenCalledWith(
       [{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "translateY(0)" }],
-      expect.objectContaining({ duration: 160 }),
+      expect.objectContaining({ duration: 150, easing: "cubic-bezier(0.23, 1, 0.32, 1)" }),
     );
     view.rerender(<Slot entering />);
     expect(animate).toHaveBeenCalledTimes(1);
@@ -76,50 +80,74 @@ describe("run comment motion", () => {
     expect(animate).not.toHaveBeenCalled();
   });
 
-  it("fades only the arriving reply and changed status, not routine rerenders", () => {
+  it("prioritizes an arriving reply over a simultaneous status change", () => {
     const view = render(<Slot status="running" />);
     view.rerender(<Slot status="completed" replyId="reply" />);
-    expect(animate.mock.instances).toEqual([screen.getByText("Reply"), screen.getByText("completed")]);
-    expect(animate.mock.calls.map((call) => call[1].duration)).toEqual([160, 100]);
+    expect(animate.mock.instances).toEqual([screen.getByText("Reply")]);
+    expect(animate.mock.calls.map((call) => call[1].duration)).toEqual([150]);
     view.rerender(<Slot status="completed" replyId="reply" />);
-    expect(animate).toHaveBeenCalledTimes(2);
+    expect(animate).toHaveBeenCalledTimes(1);
     view.unmount();
     animate.mockClear();
     render(<Slot status="completed" replyId="reply" />);
     expect(animate).not.toHaveBeenCalled();
   });
 
-  it("keeps reduced motion to a short fade without displacement", () => {
+  it("uses the micro timing for a status-only change", () => {
+    const view = render(<Slot status="running" />);
+    view.rerender(<Slot status="completed" />);
+    expect(animate.mock.instances).toEqual([screen.getByText("completed")]);
+    expect(animate.mock.calls.map((call) => call[1].duration)).toEqual([100]);
+  });
+
+  it("disables run arrival motion when reduced motion is requested", () => {
     reduced = true;
     const view = render(<Slot />);
     view.rerender(<Slot entering />);
-    expect(animate).toHaveBeenCalledWith([{ opacity: 0 }, { opacity: 1 }], expect.objectContaining({ duration: 60 }));
+    expect(animate).not.toHaveBeenCalled();
   });
 
-  it("fades pointer disclosure once and keeps keyboard disclosure immediate", () => {
+  it("pauses ambient run motion outside the viewport", async () => {
+    let notify!: IntersectionObserverCallback;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: IntersectionObserverCallback) {
+        notify = callback;
+      }
+      observe = observe;
+      disconnect = disconnect;
+    });
+    const view = render(<Visibility />);
+    await waitFor(() => expect(observe).toHaveBeenCalledWith(screen.getByTestId("visibility")));
+    act(() => notify([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver));
+    expect(screen.getByTestId("visibility")).toHaveAttribute("data-visible", "false");
+    act(() => notify([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
+    expect(screen.getByTestId("visibility")).toHaveAttribute("data-visible", "true");
+    view.unmount();
+    expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("rotates pointer disclosure with shared timing and keeps keyboard disclosure immediate", () => {
     render(<Disclosure />);
     const toggle = () => screen.getByRole("button", { name: "Toggle" });
     fireEvent.click(toggle(), { detail: 1 });
     expect(screen.getByText("Activity")).toBeInTheDocument();
-    expect(animate).toHaveBeenCalledWith(
-      [{ opacity: 0, transform: "translateY(-4px)" }, { opacity: 1, transform: "translateY(0)" }],
-      expect.objectContaining({ duration: 180 }),
-    );
-    expect(animate).toHaveBeenCalledWith([{ rotate: "0deg" }, { rotate: "90deg" }], expect.objectContaining({ duration: 180 }));
+    expect(animate).toHaveBeenCalledTimes(1);
+    expect(animate).toHaveBeenCalledWith([{ rotate: "0deg" }, { rotate: "90deg" }], expect.objectContaining({ duration: 150 }));
     fireEvent.click(toggle(), { detail: 1 });
-    expect(animate).toHaveBeenCalledWith([{ rotate: "90deg" }, { rotate: "0deg" }], expect.objectContaining({ duration: 120 }));
+    expect(animate).toHaveBeenCalledWith([{ rotate: "90deg" }, { rotate: "0deg" }], expect.objectContaining({ duration: 100 }));
     animate.mockClear();
     fireEvent.click(toggle(), { detail: 0 });
     expect(screen.getByText("Activity")).toBeInTheDocument();
     expect(animate).not.toHaveBeenCalled();
   });
 
-  it("uses only a short content fade for reduced-motion disclosure", () => {
+  it("disables pointer disclosure motion when reduced motion is requested", () => {
     reduced = true;
     render(<Disclosure />);
     fireEvent.click(screen.getByRole("button", { name: "Toggle" }), { detail: 1 });
-    expect(animate).toHaveBeenCalledTimes(1);
-    expect(animate).toHaveBeenCalledWith([{ opacity: 0 }, { opacity: 1 }], expect.objectContaining({ duration: 60 }));
+    expect(animate).not.toHaveBeenCalled();
   });
 
   it("reverses a rapid toggle from the visible arrow angle and cancels stale motion", () => {
@@ -131,7 +159,7 @@ describe("run comment motion", () => {
     computed.rotate = "42deg";
     const style = vi.spyOn(window, "getComputedStyle").mockReturnValue(computed);
     fireEvent.click(toggle, { detail: 1 });
-    expect(animate).toHaveBeenLastCalledWith([{ rotate: "42deg" }, { rotate: "0deg" }], expect.objectContaining({ duration: 120 }));
+    expect(animate).toHaveBeenLastCalledWith([{ rotate: "42deg" }, { rotate: "0deg" }], expect.objectContaining({ duration: 100 }));
     for (const animation of firstAnimations) expect(animation.cancel).toHaveBeenCalled();
     style.mockRestore();
   });
