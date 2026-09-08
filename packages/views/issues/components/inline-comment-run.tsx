@@ -3,6 +3,8 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { AlertCircle, Brain, ChevronRight, ExternalLink, Loader2, MessageSquare, RotateCcw, Square, Terminal } from "lucide-react";
 import { toast } from "sonner";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useTraceIssueLabels } from "../../common/task-transcript/use-trace-issue-labels";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTaskMessages } from "@multica/core/chat/queries";
 import { useCancelIssueRun, useRetryIssueRun } from "@multica/core/issues/mutations";
@@ -61,6 +63,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   // Historical, collapsed runs still don't fetch transcripts.
   const { data, isPending, isError, refetch } = useTaskMessages(task.id, active, task.status === "running" || expanded || fullLogOpen);
   const items = useMemo(() => buildTimeline(data ?? []), [data]);
+  const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, task.status === "running" || expanded || fullLogOpen);
   const steps = useMemo(() => buildSteps(items), [items]);
   const rows = useMemo(() => groupSteps(steps), [steps]);
   useEffect(() => {
@@ -81,8 +84,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const current = pendingCall ?? latest;
   // Keep the last activity visible after a tool returns, until new progress arrives.
   const activitySummary = current && isCallStep(current)
-    ? redactSecrets(traceToolArgSummary(current.call?.input) || current.tool)
-    : current?.kind === "text" ? redactSecrets(current.item.content ?? "")
+    ? redactSecrets(traceToolArgSummary(current.call?.input, { formatText }) || current.tool)
+    : current?.kind === "text" ? redactSecrets(formatText(current.item.content ?? ""))
     : current?.kind === "thinking" ? t(($) => $.inline_run.thinking)
     : current?.kind === "error" ? t(($) => $.inline_run.error)
     : t(($) => $.inline_run.waiting_response);
@@ -142,7 +145,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {!isPending && !isError && rows.length === 0 && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.empty)}</p>}
           {rows.length > visibleCount && <button type="button" className="py-1 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
-          {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={active} />)}
+          {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={active} formatText={formatText} />)}
           <button type="button" className="flex items-center gap-1.5 rounded py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={() => setFullLogOpen(true)}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
         </div>}
@@ -155,7 +158,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   );
 }
 
-function InlineStep({ row, live }: { row: TraceRow; live: boolean }) {
+function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; formatText: (text: string) => string }) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(false);
   const disclosure = useRunDisclosureMotion(open);
@@ -167,7 +170,7 @@ function InlineStep({ row, live }: { row: TraceRow; live: boolean }) {
   const error = !grouped && !call && row.kind === "error";
   const Icon = grouped || call ? Terminal : row.kind === "text" ? MessageSquare : row.kind === "thinking" ? Brain : AlertCircle;
   const summary = call
-    ? redactSecrets(traceToolArgSummary(row.call?.input) || (row.result ? traceEventSummary(row.result) : "")) || row.tool
+    ? redactSecrets(traceToolArgSummary(row.call?.input, { formatText }) || (row.result ? traceEventSummary(row.result, { formatText }) : "")) || row.tool
     : grouped ? row.tool
     : row.kind === "text" ? t(($) => $.inline_run.message)
     : row.kind === "thinking" ? t(($) => $.inline_run.thinking)
@@ -186,7 +189,7 @@ function InlineStep({ row, live }: { row: TraceRow; live: boolean }) {
       {grouped ? <>
         {row.steps.length > limit && <button type="button" className="py-1 text-muted-foreground" onClick={() => setLimit((value) => value + 12)}>
           {t(($) => $.inline_run.show_earlier, { count: row.steps.length - limit })}</button>}
-        {row.steps.slice(-limit).map((step) => <InlineStep key={step.seq} row={step} live={live} />)}
+        {row.steps.slice(-limit).map((step) => <InlineStep key={step.seq} row={step} live={live} formatText={formatText} />)}
       </> : call ? <>
         {row.call && <StepBody item={row.call} />}
         {row.result && <StepBody item={row.result} />}

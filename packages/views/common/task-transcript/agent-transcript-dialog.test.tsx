@@ -12,6 +12,11 @@ import { renderWithI18n } from "../../test/i18n";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import type { TimelineItem } from "./build-timeline";
 
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
+vi.mock("./use-trace-issue-labels", () => ({
+  useTraceIssueLabels: () => (text: string) => text.replaceAll("01a07eca-8e82-775e-be06-e4a97ccfa299", "DEV-17"),
+}));
+
 const copyTextMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 
 vi.mock("@multica/core/api", () => ({
@@ -900,5 +905,19 @@ describe("AgentTranscriptDialog — reason vs raw diagnostics", () => {
 
     expect(screen.queryByText("Technical details")).not.toBeInTheDocument();
     expect(screen.queryByText("Reason")).not.toBeInTheDocument();
+  });
+});
+
+
+describe("readable issue references", () => {
+  it("searches both the displayed identifier and original UUID", async () => {
+    const issueId = "01a07eca-8e82-775e-be06-e4a97ccfa299";
+    renderDialog([{ seq: 1, type: "tool_use", tool: "exec_command", input: { command: `multica issue get ${issueId} --output json` } }]);
+    expect(screen.getByText("multica issue get DEV-17 --output json")).toBeInTheDocument();
+    const search = screen.getByRole("textbox");
+    fireEvent.change(search, { target: { value: "DEV-17" } });
+    expect(screen.getByText("multica issue get DEV-17 --output json")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: issueId } });
+    expect(screen.getByText("multica issue get DEV-17 --output json")).toBeInTheDocument();
   });
 });

@@ -9,8 +9,9 @@ import { renderWithI18n } from "../../test/i18n";
 import { InlineCommentRun } from "./inline-comment-run";
 
 vi.mock("@multica/core/api", () => ({ api: {
-  listTaskMessages: vi.fn(), cancelTask: vi.fn(), rerunIssue: vi.fn(),
+  getIssue: vi.fn(), listTaskMessages: vi.fn(), cancelTask: vi.fn(), rerunIssue: vi.fn(),
 }, dispatchReasonCode: () => undefined }));
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Reviewer" }) }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 vi.mock("../../editor", () => ({ ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div> }));
@@ -41,6 +42,19 @@ function setup(initialTask: AgentTask, hasReply = false) {
 }
 
 describe("InlineCommentRun", () => {
+  it("uses a readable issue identifier in live progress and expanded activity", async () => {
+    const issueId = "01a07eca-8e82-775e-be06-e4a97ccfa299";
+    vi.mocked(api.getIssue).mockResolvedValue({ id: issueId, identifier: "DEV-17" } as Awaited<ReturnType<typeof api.getIssue>>);
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: issueId, seq: 1, type: "tool_use", tool: "exec_command", input: { command: `multica issue get ${issueId} --output json` } },
+    ]);
+    setup(task({ issue_id: issueId }));
+    await screen.findByText("multica issue get DEV-17 --output json");
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    expect(screen.getAllByText("multica issue get DEV-17 --output json")).toHaveLength(2);
+    expect(api.getIssue).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["completed", "queued"] as const)("keeps the same focused disclosure button for a %s run", async (status) => {
     vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
     setup(task({ status }));
