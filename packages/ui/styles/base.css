@@ -302,8 +302,23 @@ html[data-dnd-dragging="true"] * {
     animation: none;
   }
 
+  .animate-chat-text-shimmer {
+    background-image: none;
+    color: var(--muted-foreground);
+    -webkit-text-fill-color: currentColor;
+  }
+
   [data-right-sidebar-panel] {
     transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .animate-chat-text-shimmer {
+    animation: none;
+    background-image: none;
+    color: CanvasText;
+    -webkit-text-fill-color: currentColor;
   }
 }
 

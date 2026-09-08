@@ -139,7 +139,10 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           aria-expanded={expanded} aria-controls={expanded ? regionId : undefined}
           onClick={(event) => { state.disclosure.onTrigger(event); setExpanded(!expanded); }}>
           {showProgress
-            ? <span data-run-summary className="min-w-0 flex-1 truncate" title={summary}>{summary}</span>
+            ? <span data-run-summary className="min-w-0 flex-1 truncate" title={summary}>
+                <span className={cn("inline-block max-w-full truncate align-bottom",
+                  (task.status === "running" || task.status === "dispatched") && "animate-chat-text-shimmer")}>{summary}</span>
+              </span>
             : <span className={cn(showIdentity && "max-sm:sr-only")}>{activityLabel}</span>}
           {!showProgress && stepLabel && <span className="text-faint-foreground max-sm:hidden">· {stepLabel}</span>}
           <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
