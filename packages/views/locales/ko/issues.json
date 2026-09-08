@@ -472,6 +472,7 @@
     "show_more_activities_other": "활동 {{count}}개 더 보기"
   },
   "comment": {
+    "add_reaction": "반응 추가",
     "collapse_thread": "스레드 접기",
     "expand_thread": "스레드 펼치기",
     "delete_title": "댓글 삭제",

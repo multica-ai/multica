@@ -472,6 +472,7 @@
     "show_more_activities_other": "アクティビティをさらに {{count}} 件表示"
   },
   "comment": {
+    "add_reaction": "リアクションを追加",
     "collapse_thread": "スレッドを折りたたむ",
     "expand_thread": "スレッドを展開",
     "delete_title": "コメントを削除",

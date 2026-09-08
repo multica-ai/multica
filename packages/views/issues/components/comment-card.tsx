@@ -25,6 +25,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
+import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-picker";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -677,7 +678,13 @@ function CommentRow({
           </span>
         )}
 
-        <div className="ml-auto flex items-center gap-0.5">
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          {!edit.editing && <QuickEmojiPicker
+            onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
+            ariaLabel={t(($) => $.comment.add_reaction)}
+            align="end"
+            className="h-7 w-7 hover:bg-transparent"
+          />}
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -846,6 +853,7 @@ function CommentRow({
       <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">{runMetadata}</div>
       {!edit.editing && <ReactionBar
         reactions={reactions}
+        showPicker={false}
         currentUserId={currentUserId}
         onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
         getActorName={getActorName}
@@ -1068,6 +1076,12 @@ function CommentCardImpl({
                   <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
                 </Button>
                 {open && <>
+                  {!edit.editing && <QuickEmojiPicker
+                    onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
+                    ariaLabel={t(($) => $.comment.add_reaction)}
+                    align="end"
+                    className="h-7 w-7 hover:bg-transparent"
+                  />}
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
@@ -1246,6 +1260,7 @@ function CommentCardImpl({
             <div className="pl-8 max-md:pl-0">{renderRuns(entry.id)}</div>
             {!edit.editing && <ReactionBar
               reactions={reactions}
+              showPicker={false}
               currentUserId={currentUserId}
               onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
               getActorName={getActorName}

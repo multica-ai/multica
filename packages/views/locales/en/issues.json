@@ -481,6 +481,7 @@
     "show_more_activities_other": "Show {{count}} more activities"
   },
   "comment": {
+    "add_reaction": "Add reaction",
     "collapse_thread": "Collapse thread",
     "expand_thread": "Expand thread",
     "delete_title": "Delete comment",
