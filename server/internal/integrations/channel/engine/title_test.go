@@ -52,11 +52,28 @@ func TestChatTitleSourceConsumesOnlyAppliedFreshDirective(t *testing.T) {
 		// Do not read this row as a contract — a later fix that returns "" here
 		// and lets the attachment path name the Chat should change this
 		// expectation rather than work around it.
+		{"inferred current request", "Respond to the current_request. Background only.\n<current_request source=\"preceding_messages\" status=\"ready\">\n<source_message message_id=\"om_new\">\nChoose two scenes\n</source_message>\n</current_request>", "", "Choose two scenes", false},
 		{"missing current text", "body fallback", "  ", "body fallback", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := chatTitleSource(tc.body, tc.command, tc.fresh); got != tc.want {
 				t.Fatalf("title source = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDeriveChatTitleUsesCurrentRequest(t *testing.T) {
+	cases := []struct{ name, body, want string }{
+		{"direct", "Respond to the current_request. Background only.\n<reference_context>old topic</reference_context>\n<current_request source=\"message\" status=\"ready\">\nChoose two scenes\n</current_request>", "Choose two scenes"},
+		{"inferred", "Respond to the current_request. Background only.\n<current_request source=\"preceding_messages\" status=\"ready\">\n<source_message message_id=\"om_a\">\nDesign the entry point\n</source_message>\n</current_request>", "Design the entry point"},
+		{"unclear", "Respond to the current_request. Background only.\n<current_request status=\"needs_clarification\">\nAsk which message\n</current_request>", ""},
+		{"ordinary text", "Discuss current_request", "Discuss currentrequest"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DeriveChatTitle(tc.body); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
 	}

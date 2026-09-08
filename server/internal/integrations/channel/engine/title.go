@@ -10,7 +10,7 @@ import (
 // DeriveChatTitle is the deterministic fallback shared by channel-created
 // Chats. It measures Unicode code points, including the trailing ellipsis.
 func DeriveChatTitle(body string) string {
-	return chattitle.Derive(body)
+	return chattitle.Derive(currentRequestTitleBody(body))
 }
 
 // chatTitleSource prefers the user's own typed text over the contextual body.
@@ -26,7 +26,7 @@ func chatTitleSource(body, commandText string, consumedFresh bool) string {
 		}
 		return commandText
 	}
-	return body
+	return currentRequestTitleBody(body)
 }
 
 func deriveFirstMessageTitle(body string, hasMedia bool) string {
@@ -60,4 +60,36 @@ func mediaTypeTitle(kind channel.MsgType) string {
 	default:
 		return "File chat"
 	}
+}
+
+// currentRequestTitleBody keeps adapter framing out of the visible chat title.
+// Only the known generated envelope is unwrapped; ordinary text is unchanged.
+func currentRequestTitleBody(body string) string {
+	if !strings.HasPrefix(body, "Respond to the current_request. ") {
+		return body
+	}
+	start := strings.LastIndex(body, "\n<current_request ")
+	end := strings.LastIndex(body, "\n</current_request>")
+	if start < 0 || end <= start {
+		return body
+	}
+	headerEnd := strings.Index(body[start:], ">\n")
+	if headerEnd < 0 || start+headerEnd+2 > end {
+		return body
+	}
+	if strings.Contains(body[start:start+headerEnd], `status="needs_clarification"`) {
+		return ""
+	}
+	request := body[start+headerEnd+2 : end]
+	lines := make([]string, 0)
+	for _, line := range strings.Split(request, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "<source_message ") || trimmed == "</source_message>" ||
+			strings.HasPrefix(trimmed, "<quoted_message ") || trimmed == "</quoted_message>" ||
+			strings.HasPrefix(trimmed, "<forwarded_messages ") || trimmed == "</forwarded_messages>" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
