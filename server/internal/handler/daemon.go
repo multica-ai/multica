@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/runcontrol"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -105,6 +106,18 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(rt.WorkspaceID)) {
 		return db.AgentRuntime{}, false
 	}
+	if h.DB != nil {
+		var controlled bool
+		err := h.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM issue_controller c,jsonb_array_elements(c.config->'targets') t WHERE c.workspace_id=$1 AND t->>'runtime_id'=$2)`, rt.WorkspaceID, uuidToString(rt.ID)).Scan(&controlled)
+		if err != nil {
+			writeError(w, 503, "controller runtime authority unavailable")
+			return db.AgentRuntime{}, false
+		}
+		if controlled && (middleware.DaemonIDFromContext(r.Context()) == "" || middleware.DaemonIDFromContext(r.Context()) != rt.DaemonID.String) {
+			writeError(w, 403, "controlled runtime requires its bound daemon credential")
+			return db.AgentRuntime{}, false
+		}
+	}
 	return rt, true
 }
 
@@ -147,6 +160,9 @@ func (h *Handler) requireDaemonTaskAccessWithWorkspace(w http.ResponseWriter, r 
 	}
 
 	if !h.requireDaemonWorkspaceAccess(w, r, wsID) {
+		return db.AgentTaskQueue{}, "", false
+	}
+	if !h.controllerTaskAccess(w, r, task) {
 		return db.AgentTaskQueue{}, "", false
 	}
 	return task, wsID, true
@@ -2173,6 +2189,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			message: "failed to load task agent",
 		}
 	}
+	var controllerInputs *runcontrol.ProfileSnapshot
+	if authority, authorityErr := h.controllerManifestForTask(r, *task); authorityErr != nil {
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(r.Context(), task, authorityErr.Error(), taskfailure.ReasonInvalidTaskIdentity, "error_controller_authority", http.StatusConflict, authorityErr.Error())
+	} else if authority != nil {
+		inputs, inputErr := service.LoadControllerProfile(r.Context(), h.Queries, agent)
+		if inputErr != nil || inputs.Hash() != authority.ProfileHash {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(r.Context(), task, "Controller execution profile changed", taskfailure.ReasonInvalidTaskIdentity, "error_controller_profile", http.StatusConflict, "controller execution profile changed")
+		}
+		controllerInputs = &inputs
+		agent = inputs.Agent
+		runtime = inputs.Runtime
+	}
 	// The SQL claim narrows candidates and repeats the access predicate before
 	// changing task state, but Agent mutations do not stay locked through HTTP
 	// response assembly. Recheck the freshly loaded Agent here so a rebind or
@@ -2241,7 +2269,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// lands on the agent's next task with nothing to restart. Errors —
 	// including a failed read — leave the agent config untouched: a broken
 	// shared entry must never take away servers the agent runs with today.
-	if bound, err := h.Queries.ListEnabledAgentMcpServers(r.Context(), agent.ID); err != nil {
+	if bound, err := func() ([]db.ListEnabledAgentMcpServersRow, error) {
+		if controllerInputs != nil {
+			return controllerInputs.Bindings, nil
+		}
+		return h.Queries.ListEnabledAgentMcpServers(r.Context(), agent.ID)
+	}(); err != nil {
 		slog.Warn("daemon claim: load agent mcp servers failed; using agent mcp_config",
 			"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
 	} else if len(bound) > 0 {
@@ -2302,7 +2335,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if agent.SystemKey.String == service.MikaSystemKey {
 		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
 	}
-	if useSkillRefs {
+	if controllerInputs != nil {
+		resp.Agent.Skills = controllerSkills(*controllerInputs)
+		agentSkillCount = len(resp.Agent.Skills)
+		builtins := h.TaskService.BuiltinSkills(agent.SystemKey.String, legacySkillRedirects)
+		builtinSkillCount = len(builtins)
+		resp.Agent.Skills = append(resp.Agent.Skills, builtins...)
+	} else if useSkillRefs {
 		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID, agent.SystemKey.String, legacySkillRedirects)
 		if err != nil {
 			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
@@ -3218,6 +3257,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
+	if err := h.applyControllerClaim(r, *task, &resp, controllerInputs); err != nil {
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(r.Context(), task, err.Error(), taskfailure.ReasonInvalidTaskIdentity, "error_controller_authority", http.StatusConflict, err.Error())
+	}
+
 	// Last gate before dispatch: refuse to hand a worktree-mode local_directory
 	// task to a daemon that cannot implement the mode.
 	//
@@ -3232,6 +3275,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.ProjectResources,
 		runtime,
 		requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeV1),
+		requestHasClientCapability(r, protocol.DaemonCapabilityRunWorkspaceV1),
 	); reason != "" {
 		slog.Error("task claim: runtime too old for worktree mode; cancelling rather than running in place",
 			"task_id", uuidToString(task.ID),
@@ -3297,11 +3341,8 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 // Only resources bound to the claiming runtime's own daemon are considered: a
 // project may carry one local_directory per machine, and another machine's
 // worktree resource says nothing about this one's ability to run the task.
-func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, hasWorktreeCapability bool) string {
+func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, hasWorktreeCapability bool, runWorkspaceCapability ...bool) string {
 	if !runtime.DaemonID.Valid || runtime.DaemonID.String == "" {
-		return ""
-	}
-	if hasWorktreeCapability {
 		return ""
 	}
 	for _, res := range resources {
@@ -3312,7 +3353,12 @@ func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentR
 		if err := json.Unmarshal(res.ResourceRef, &ref); err != nil {
 			continue
 		}
-		if ref.ExecutionMode != localDirectoryModeWorktree || ref.DaemonID != runtime.DaemonID.String {
+		if ref.DaemonID == runtime.DaemonID.String && ref.ExecutionMode == localDirectoryModeRunOwned {
+			if len(runWorkspaceCapability) == 0 || !runWorkspaceCapability[0] {
+				return "This machine does not support run-owned workspaces; update its Multica runtime before retrying. No shared directory was used."
+			}
+		}
+		if hasWorktreeCapability || ref.ExecutionMode != localDirectoryModeWorktree || ref.DaemonID != runtime.DaemonID.String {
 			continue
 		}
 		return fmt.Sprintf(
@@ -3682,6 +3728,11 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	task, err := h.TaskService.StartTask(r.Context(), parseUUID(taskID))
+	if errors.Is(err, service.ErrTaskExecutionCapacity) {
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusTooManyRequests, "execution_capacity_unavailable")
+		return
+	}
 	if err != nil {
 		slog.Warn("start task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -3695,6 +3746,7 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 // TaskWaitLocalDirectoryRequest is the body the daemon POSTs when it parks
 // a freshly-dispatched task on a busy local_directory path.
 type TaskWaitLocalDirectoryRequest struct {
+	ReleaseCapacity bool `json:"release_capacity"`
 	// Reason is a short hint surfaced by the UI alongside the status —
 	// typically "<path>" or "<path> (holder: <task short id>)". Small
 	// enough to fit on the issue card. Empty is accepted; the column is
@@ -3722,7 +3774,7 @@ func (h *Handler) MarkTaskWaitingLocalDirectory(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	task, err := h.TaskService.MarkTaskWaitingLocalDirectory(r.Context(), parseUUID(taskID), req.Reason)
+	task, err := h.TaskService.MarkTaskWaitingLocalDirectory(r.Context(), parseUUID(taskID), req.Reason, req.ReleaseCapacity && requestHasClientCapability(r, protocol.DaemonCapabilityRunWorkspaceV1))
 	if err != nil {
 		slog.Warn("mark task waiting_local_directory failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())

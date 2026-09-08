@@ -169,6 +169,10 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.controllerOwnsMutation(w, r, uuidToString(issue.ID)) {
+		return
+	}
+
 	// Body is optional. A zero-length body or `{}` keeps the legacy
 	// assignee-driven rerun behaviour the CLI relies on.
 	var req RerunIssueRequest

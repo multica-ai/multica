@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY controller_effect_operation_identity;

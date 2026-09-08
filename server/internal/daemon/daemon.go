@@ -2107,6 +2107,9 @@ func (d *Daemon) resolveAuth() error {
 		return fmt.Errorf("not authenticated: run %s first", loginHint)
 	}
 	d.client.SetToken(cfg.Token)
+	if err := d.client.SetControllerDaemonToken(strings.TrimSpace(os.Getenv("MULTICA_CONTROLLER_DAEMON_TOKEN"))); err != nil {
+		return err
+	}
 	d.logger.Info("authenticated")
 	d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_len", len(cfg.Token))
 	return nil
@@ -5143,16 +5146,9 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			go func(t Task, slot int) {
 				defer taskWG.Done()
 				defer d.activeTasks.Add(-1)
-				defer func() {
-					// Release local capacity before waking the poller. The task's
-					// terminal callback and local cleanup have both finished at this
-					// point, so a successor that was previously blocked by agent
-					// capacity or per-(issue, agent) serialization can be claimed
-					// immediately instead of waiting for PollInterval.
-					sem <- slot
-					signalPollerWakeup(wakeup)
-				}()
-				d.handleTask(parentCtx, t, slot)
+				reservation := &taskExecutionReservation{slots: sem, slot: slot, held: true, wakeup: wakeup}
+				defer reservation.release()
+				d.handleTask(context.WithValue(parentCtx, taskReservationKey{}, reservation), t, slot)
 			}(t, slot)
 			dispatched++
 		}
@@ -5735,7 +5731,11 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		}
 		return nil, true
 	}
-	if err := validateLocalPath(assignment.AbsPath); err != nil {
+	validatePath := validateLocalPath
+	if assignment.UsesRunWorkspace() {
+		validatePath = validateLocalSourcePath
+	}
+	if err := validatePath(assignment.AbsPath); err != nil {
 		taskLog.Error("local_directory: path validation failed", "error", err)
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
@@ -5754,7 +5754,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	// what lets sibling tasks on one directory run concurrently. Path
 	// validation above still applies — git needs to write worktree
 	// registrations into the user's repo.
-	if assignment.UsesWorktree() {
+	if assignment.UsesWorktree() || assignment.UsesRunWorkspace() {
 		taskLog.Info("local_directory: worktree mode, skipping path mutex")
 		return nil, false
 	}
@@ -5827,6 +5827,8 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			// we still want to block on the lock and proceed when free.
 			// The UI just won't see the explicit "waiting" badge.
 			taskLog.Warn("local_directory: mark waiting status failed", "error", waitErr)
+		} else {
+			releaseTaskExecutionSlot(ctx)
 		}
 		prepareLeaseOnce.Do(func() {
 			stopPrepareLease = d.startTaskPrepareLeaseExtender(waitCtx, task, taskLog)
@@ -5847,7 +5849,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			}()
 		})
 	}
-	release, err = d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
+	release, err = d.localPathLocks.AcquireOrdered(waitCtx, assignment.RealPath, task.ID, task.Priority, taskQueueTime(task), onWait)
 	if err != nil {
 		// If the wait was cut short because the server finalized the task
 		// (terminal state) or deleted the row, the row is already in a
@@ -5875,6 +5877,10 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory lock cancel", "error", failErr)
 		}
+		return nil, true
+	}
+	if err := reacquireTaskExecutionSlot(waitCtx); err != nil {
+		release()
 		return nil, true
 	}
 	taskLog.Info("local_directory: lock acquired")
@@ -7303,6 +7309,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// which must not extend to arbitrary commands sharing a protocol family.
 	var usesCustomProfileCommand bool
 	if customSpec, isCustom := d.customProfileLaunchForRuntime(task.RuntimeID); isCustom {
+		if task.LaunchAuthority != nil {
+			return TaskResult{}, fmt.Errorf("controlled runs do not permit custom runtime commands")
+		}
 		usesCustomProfileCommand = true
 		entry.Path = customSpec.path
 		resolvedVersion = customSpec.version
@@ -7334,6 +7343,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	stopPrepareLease := d.startTaskPrepareLeaseExtender(prepareCtx, task, taskLog)
 	defer stopPrepareLease()
 
+	if err := validateControllerTask(task, d.cfg.DaemonID); err != nil {
+		return TaskResult{}, err
+	}
+
 	if err := d.ensureTaskSkillBundles(prepareCtx, &task); err != nil {
 		return TaskResult{}, err
 	}
@@ -7344,6 +7357,27 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	agentName = task.Agent.Name
 	skills = task.Agent.Skills
 	instructions = task.Agent.Instructions
+
+	// Run-owned attempts never inherit another attempt's workdir or provider session.
+	runAssignment, assignmentErr := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	if assignmentErr != nil {
+		return TaskResult{}, assignmentErr
+	}
+	var repositoryPolicy map[string]string
+	if runAssignment.UsesRunWorkspace() {
+		repositoryPolicy = make(map[string]string, len(task.Repos))
+		for _, repo := range task.Repos {
+			if len(repo.Ref) != 40 || strings.Trim(repo.Ref, "0123456789abcdef") != "" {
+				return TaskResult{}, fmt.Errorf("run-owned repository %s requires an immutable base commit", repo.URL)
+			}
+			repositoryPolicy[repo.URL] = repo.Ref
+		}
+		task.PriorWorkDir = ""
+		task.PriorSessionID = ""
+		if runAssignment.Ref.InheritWorkspaceRepositories == nil || *runAssignment.Ref.InheritWorkspaceRepositories {
+			return TaskResult{}, fmt.Errorf("run_owned requires an explicit non-inheriting repository policy")
+		}
+	}
 
 	// Prepare isolated execution environment.
 	// Repos are passed as metadata only — the agent checks them out on demand
@@ -7737,7 +7771,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}
-		if localAssignment.UsesWorktree() {
+		if localAssignment.UsesRunWorkspace() {
+			prepParams.RunWorkspace = &execenv.RunWorkspaceParams{
+				Authority:  task.LaunchAuthority,
+				SourcePath: localAssignment.RealPath, BaseCommit: localAssignment.Ref.BaseCommit,
+				HostID: d.cfg.DaemonID, RuntimeID: task.RuntimeID,
+			}
+			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
+			if err != nil {
+				return TaskResult{}, asEnvironmentSetupFailure(err)
+			}
+		} else if localAssignment.UsesWorktree() {
 			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
@@ -7769,7 +7813,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// LocalPathLocker invokes onWait synchronously, in this goroutine,
 			// at most once per Acquire — see the in-place call site.
 			waitCounted := false
-			release, lockErr := d.localPathLocks.Acquire(waitCtx, localAssignment.RealPath, task.ID, func(holder string) {
+			release, lockErr := d.localPathLocks.AcquireOrdered(waitCtx, localAssignment.RealPath, task.ID, task.Priority, taskQueueTime(task), func(holder string) {
 				d.resourceWaitTasks.Add(1)
 				waitCounted = true
 				reason := fmt.Sprintf("local_directory %s", localAssignment.AbsPath)
@@ -7782,6 +7826,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 					// Non-fatal: the wait still happens, the UI just won't
 					// show the explicit "waiting" badge.
 					taskLog.Warn("local_directory: mark waiting status failed", "error", waitErr)
+				} else {
+					releaseTaskExecutionSlot(waitCtx)
 				}
 				cancelled := d.watchTaskCancellation(waitCtx, task.ID, pollInterval, taskLog)
 				go func() {
@@ -7798,6 +7844,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			if lockErr != nil {
 				return TaskResult{}, fmt.Errorf("local_directory worktree: wait for a consistent snapshot of %s: %w",
 					localAssignment.AbsPath, lockErr)
+			}
+			if err := reacquireTaskExecutionSlot(waitCtx); err != nil {
+				release()
+				return TaskResult{}, err
 			}
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 			release()
@@ -7971,7 +8021,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// taskfailure.Classify path records the failure with the same
 	// "start task failed: <…>" string and the same failure_reason
 	// taxonomy as before — see MUL-2946 for the classifier contract.
-	if err := d.client.StartTask(prepareCtx, task.ID); err != nil {
+	if err := d.startTaskWithAdmission(prepareCtx, task.ID); err != nil {
 		stopPrepareLease()
 		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
 	}
@@ -8009,7 +8059,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// is the one thing it cannot work out from its own context — tell it.
 	// Worktree mode is excluded: there the tree is this task's private checkout.
 	var promptOptions []PromptOption
-	if localAssignment != nil && !localAssignment.UsesWorktree() && localDirectoryLockExempt(task) {
+	if localAssignment != nil && !localAssignment.UsesWorktree() && !localAssignment.UsesRunWorkspace() && localDirectoryLockExempt(task) {
 		promptOptions = append(promptOptions, WithSharedLocalDirectory())
 	}
 	// Worktree mode hands this turn a tree that is mid-merge when the user's
@@ -8034,6 +8084,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
 		return TaskResult{}, err
 	}
+	slot = currentTaskExecutionSlot(ctx, slot)
 	agentEnv := taskMulticaEnvironment(task, agentName, agentToken, env.MulticaConfigRoot, d.cfg.WorkspacesRoot, d.cfg.ServerBaseURL, d.cfg.HealthPort, slot, taskTempDir)
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode
@@ -8311,11 +8362,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// fields or ambient process environment. Register only for the provider
 	// execution window and always remove the credential afterwards.
 	d.registerActiveRepoCheckoutTask(agentToken, activeRepoCheckoutTask{
-		WorkspaceID: task.WorkspaceID,
-		TaskID:      task.ID,
-		AgentID:     task.AgentID,
-		AgentName:   task.Agent.Name,
-		WorkDir:     env.WorkDir,
+		RepositoryPolicy: repositoryPolicy,
+		WorkspaceID:      task.WorkspaceID,
+		TaskID:           task.ID,
+		AgentID:          task.AgentID,
+		AgentName:        task.Agent.Name,
+		WorkDir:          env.WorkDir,
 	})
 	defer d.clearActiveRepoCheckoutTask(agentToken)
 

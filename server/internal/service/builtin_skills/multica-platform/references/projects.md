@@ -153,3 +153,8 @@ is task-local checkout state.
 Project create/update/delete/status and project resource add/update/remove
 mutate durable workspace state and affect future tasks. Ask before changing
 `local_directory` unless the user explicitly requested that exact local path.
+
+
+## Run-owned rooms
+
+A capable server/daemon supports `local_directory.execution_mode=run_owned` through the generic JSON `--ref` interface. Set `inherit_workspace_repositories=false` explicitly. Omit `base_commit` for empty operational scratch, or supply a full immutable 40-character commit for a clean repository room. No owner edits or ignored files are copied. Additional project repositories require pinned commits, and the daemon enforces their exact per-run allowlist. Existing modes are unchanged. Use this only after a drained, authorized configuration change; the desktop mode editor does not yet configure this policy. See `docs/run-owned-workspaces.md` for preservation and rollout boundaries.

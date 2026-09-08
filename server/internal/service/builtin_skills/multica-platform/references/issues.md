@@ -366,3 +366,12 @@ multica issue create --title "Step 1" --parent <issue-id> --assignee <agent> --s
 multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --stage 2 --status backlog
 multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --stage 3 --status backlog
 ```
+# Controlled issue authority
+
+An enrolled issue has one controller for launch and board projection. A task
+worker must not retry protected status, Progress, Current Picture, metadata,
+assignment, rerun or deletion writes after a controller-authority rejection.
+Report native evidence through the ordinary task receipt and comments. A queued
+attempt is not proof of execution; a finished attempt is not owner completion or
+release approval. Controller credentials belong only to the controller service
+and must never appear in task prompts, environment, tools or room receipts.

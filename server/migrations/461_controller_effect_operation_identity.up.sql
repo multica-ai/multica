@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY controller_effect_operation_identity ON controller_effect_operation(workspace_id,operation_id);

@@ -1232,6 +1232,13 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 }
 
 func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz) (db.AgentTaskQueue, error) {
+	owned, controlErr := s.Queries.ControllerOwnsIssue(ctx, issue.ID)
+	if controlErr != nil {
+		return db.AgentTaskQueue{}, controlErr
+	}
+	if owned {
+		return db.AgentTaskQueue{}, errors.New("issue requires controller launch authority")
+	}
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1395,6 +1402,13 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 }
 
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
+	owned, controlErr := s.Queries.ControllerOwnsIssue(ctx, issue.ID)
+	if controlErr != nil {
+		return db.AgentTaskQueue{}, controlErr
+	}
+	if owned {
+		return db.AgentTaskQueue{}, errors.New("issue requires controller launch authority")
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -3994,43 +4008,49 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		}
 	}
 
-	// 6. Claim per distinct agent through the runtime-scoped helper, preserving
+	// 6. Revisit eligible agents until headroom is exhausted, preserving
 	// per-(issue, agent) serialization, capacity caps, and dispatch side effects.
-	triedAgents := make(map[string]struct{}, len(candidates))
-	for i := range candidates {
-		if len(claimed) >= maxTasks {
+	for len(claimed) < maxTasks {
+		before := len(claimed)
+		triedAgents := make(map[string]struct{}, len(candidates))
+		for i := range candidates {
+			if len(claimed) >= maxTasks {
+				break
+			}
+			agentKey := util.UUIDToString(candidates[i].AgentID)
+			if _, tried := triedAgents[agentKey]; tried {
+				continue
+			}
+			triedAgents[agentKey] = struct{}{}
+
+			task, err := s.claimTask(ctx, candidates[i].AgentID, candidates[i].RuntimeID)
+			if err != nil {
+				// Each scoped claim commits in its own transaction, so earlier
+				// iterations (and step-2 reclaims) are already dispatched
+				// server-side. Returning nil here would drop them and force the
+				// daemon to double-claim via HTTP fallback (MUL-4257). Return the
+				// partial batch instead; the failed agent's task stays queued.
+				if len(claimed) > 0 {
+					slog.Error("batch claim: claim task failed after partial success; returning claimed tasks to avoid loss",
+						"error", err, "claimed", len(claimed))
+					return claimed, nil
+				}
+				return nil, fmt.Errorf("claim task: %w", err)
+			}
+			if task == nil {
+				continue
+			}
+			// The SQL claim is scoped to the candidate runtime. Retain this guard as
+			// a defensive contract check so a future query change cannot route work
+			// to a runtime this daemon does not host.
+			if _, ok := runtimeInSet[util.UUIDToString(task.RuntimeID)]; !ok {
+				continue
+			}
+			claimed = append(claimed, *task)
+		}
+		if len(claimed) == before {
 			break
 		}
-		agentKey := util.UUIDToString(candidates[i].AgentID)
-		if _, tried := triedAgents[agentKey]; tried {
-			continue
-		}
-		triedAgents[agentKey] = struct{}{}
-
-		task, err := s.claimTask(ctx, candidates[i].AgentID, candidates[i].RuntimeID)
-		if err != nil {
-			// Each scoped claim commits in its own transaction, so earlier
-			// iterations (and step-2 reclaims) are already dispatched
-			// server-side. Returning nil here would drop them and force the
-			// daemon to double-claim via HTTP fallback (MUL-4257). Return the
-			// partial batch instead; the failed agent's task stays queued.
-			if len(claimed) > 0 {
-				slog.Error("batch claim: claim task failed after partial success; returning claimed tasks to avoid loss",
-					"error", err, "claimed", len(claimed))
-				return claimed, nil
-			}
-			return nil, fmt.Errorf("claim task: %w", err)
-		}
-		if task == nil {
-			continue
-		}
-		// The SQL claim is scoped to the candidate runtime. Retain this guard as
-		// a defensive contract check so a future query change cannot route work
-		// to a runtime this daemon does not host.
-		if _, ok := runtimeInSet[util.UUIDToString(task.RuntimeID)]; !ok {
-			continue
-		}
-		claimed = append(claimed, *task)
 	}
 
 	return claimed, nil
@@ -4118,8 +4138,46 @@ func (s *TaskService) maybeLogClaimSlow(agentID pgtype.UUID, outcome string, sta
 
 // StartTask transitions a dispatched task to running.
 // Issue status is NOT changed here — the agent manages it via the CLI.
+var ErrTaskExecutionCapacity = errors.New("execution_capacity_unavailable")
+
 func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
-	task, err := s.Queries.StartAgentTask(ctx, taskID)
+	var task db.AgentTaskQueue
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		current, err := qtx.GetAgentTask(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		profile, err := qtx.GetAgentForClaimUpdate(ctx, current.AgentID)
+		if err != nil {
+			return err
+		}
+		current, err = qtx.GetAgentTask(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		var state struct {
+			Released bool `json:"execution_capacity_released"`
+		}
+		if current.Status == "waiting_local_directory" && len(current.Context) > 0 {
+			if err := json.Unmarshal(current.Context, &state); err != nil {
+				return err
+			}
+		}
+		if current.Status == "waiting_local_directory" && state.Released {
+			running, err := qtx.CountRunningTasks(ctx, current.AgentID)
+			if err != nil {
+				return err
+			}
+			if running >= int64(profile.MaxConcurrentTasks) {
+				return ErrTaskExecutionCapacity
+			}
+		}
+		if err := s.checkControllerAdmission(ctx, qtx, current); err != nil {
+			return err
+		}
+		task, err = qtx.StartAgentTask(ctx, taskID)
+		return err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("start task: %w", err)
 	}
@@ -4209,12 +4267,13 @@ func (s *TaskService) ExtendTaskPrepareLease(ctx context.Context, taskID, runtim
 // human-readable hint (typically the contested path) that the UI surfaces
 // next to the status. Returns the updated row so the daemon can confirm the
 // transition and so the broadcast carries the up-to-date snapshot.
-func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID pgtype.UUID, reason string) (*db.AgentTaskQueue, error) {
+func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID pgtype.UUID, reason string, releaseCapacity ...bool) (*db.AgentTaskQueue, error) {
 	reason = sanitizeWaitReason(reason)
 	task, err := s.Queries.MarkAgentTaskWaitingLocalDirectory(ctx, db.MarkAgentTaskWaitingLocalDirectoryParams{
 		ID:               taskID,
 		WaitReason:       pgtype.Text{String: reason, Valid: reason != ""},
 		PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
+		ReleaseCapacity:  len(releaseCapacity) > 0 && releaseCapacity[0],
 	})
 	if err != nil {
 		return nil, fmt.Errorf("mark task waiting_local_directory: %w", err)
@@ -4241,6 +4300,9 @@ func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID 
 		extra["wait_reason"] = reason
 	}
 	s.broadcastTaskEvent(ctx, protocol.EventTaskWaitingLocalDirectory, task, extra)
+	if len(releaseCapacity) > 0 && releaseCapacity[0] {
+		s.NotifyTaskFinished(task)
+	}
 	return &task, nil
 }
 
@@ -4901,6 +4963,15 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		// can never abort this transaction — which also carries the parent's
 		// failed status.
 		createRetry := wantRetry
+		if t.IssueID.Valid {
+			controlled, err := qtx.ControllerOwnsIssue(ctx, t.IssueID)
+			if err != nil {
+				return err
+			}
+			if controlled {
+				createRetry = false
+			}
+		}
 		if createRetry {
 			successor, herr := hasRunnableSuccessor(ctx, qtx, t)
 			if herr != nil {
@@ -5312,6 +5383,15 @@ func hasRunnableSuccessor(ctx context.Context, q *db.Queries, task db.AgentTaskQ
 // Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
 // its own re-run cadence and we don't want to double-fire it.
 func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue) (*db.AgentTaskQueue, error) {
+	if parent.IssueID.Valid {
+		controlled, err := s.Queries.ControllerOwnsIssue(ctx, parent.IssueID)
+		if err != nil {
+			return nil, err
+		}
+		if controlled {
+			return nil, nil
+		}
+	}
 	if parent.Status != "failed" {
 		return nil, nil
 	}
@@ -5902,7 +5982,8 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				// status it inherits, so a custom review gate is excluded for
 				// the same reason In Review is. (MUL-6243)
 				effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
-				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
+				owned, controlErr := s.Queries.ControllerOwnsIssue(ctx, t.IssueID)
+				if controlErr == nil && !owned && effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {
@@ -6472,6 +6553,15 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 // delegated terminal; the production terminal paths deliberately retain their
 // legacy raw-error notice alongside the richer coordinator recovery signal.
 func (s *TaskService) recoverDelegatedTaskFailure(ctx context.Context, failed db.AgentTaskQueue) (handled bool, err error) {
+	if failed.IssueID.Valid {
+		controlled, err := s.Queries.ControllerOwnsIssue(ctx, failed.IssueID)
+		if err != nil {
+			return false, err
+		}
+		if controlled {
+			return true, nil
+		}
+	}
 	target, _, err := s.ensureDelegatedFailureRecoveryComment(ctx, failed.ID)
 	if err != nil || target == nil {
 		return false, err

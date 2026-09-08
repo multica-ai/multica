@@ -88,6 +88,7 @@ type PrepareParams struct {
 	// Mutually exclusive with LocalWorkDir — the daemon picks one based on the
 	// resource's execution_mode.
 	LocalWorktree *LocalWorktreeParams
+	RunWorkspace  *RunWorkspaceParams
 	// HermesSourceHome is the shared Hermes home the per-task overlay is seeded
 	// from — resolved by the daemon via execenv.ResolveHermesProfile so it honors
 	// the agent's custom_env HERMES_HOME and any -p/--profile or sticky selection.
@@ -550,6 +551,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		// files, in which case git doesn't materialise it in the worktree.
 		if err := os.MkdirAll(workDir, 0o755); err != nil {
 			return nil, fmt.Errorf("execenv: create worktree workdir %s: %w", workDir, err)
+		}
+	}
+
+	if params.RunWorkspace != nil {
+		if params.LocalWorkDir != "" || params.LocalWorktree != nil {
+			return nil, fmt.Errorf("run workspace cannot share a local workdir or native worktree")
+		}
+		if err := prepareRunWorkspace(params, envRoot, workDir); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1619,6 +1629,12 @@ func ReadEnvRootOwner(envRoot string) (*EnvRootOwner, error) {
 // directory instead would drop both the claim and the lock for as long as the
 // recreate takes, which is exactly the window claimEnvRoot exists to close.
 func resetEnvRootContents(envRoot string) error {
+	if _, err := os.Lstat(filepath.Join(envRoot, "run-workspace.json")); err == nil {
+		return fmt.Errorf("run-owned attempt already has a durable room; preserve it and reconcile before creating a new attempt")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
 	entries, err := os.ReadDir(envRoot)
 	if err != nil {
 		return err

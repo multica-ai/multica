@@ -439,6 +439,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		ServerVersion:            normalizeServerVersion(version),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	h.Controller = handler.ControllerSettings{TokenHash: os.Getenv("MULTICA_CONTROLLER_TOKEN_SHA256"), WorkspaceID: os.Getenv("MULTICA_CONTROLLER_WORKSPACE_ID"), AllowedHostIDs: strings.Split(os.Getenv("MULTICA_CONTROLLER_ALLOWED_HOST_IDS"), ",")}
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
@@ -1308,6 +1309,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+
+	r.Get("/api/controller/capabilities", h.ControllerCapabilities)
+	r.Route("/api/controller", func(r chi.Router) {
+		r.Use(h.ControllerAuth)
+		r.Get("/profiles/{id}", h.GetControllerProfile)
+		r.Post("/issues/{id}/enroll", h.EnrollControllerIssue)
+		r.Get("/issues/{id}", h.GetControllerIssue)
+		r.Put("/issues/{id}/projection", h.ProjectControllerIssue)
+		r.Post("/issues/{id}/launch", h.LaunchControllerRun)
+		r.Post("/issues/{id}/stop", h.StopControllerIssue)
+		r.Post("/issues/{id}/release", h.ReleaseControllerIssue)
+		r.Post("/issues/{id}/effects", h.ControllerEffect)
+		r.Get("/issues/{id}/outbox", h.GetControllerOutbox)
+		r.Post("/issues/{id}/outbox/ack", h.AckControllerOutbox)
+	})
 
 	// Health / readiness checks
 	r.Get("/health", health.liveHandler)

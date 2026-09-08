@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -653,7 +654,7 @@ func main() {
 	// the scheduler's Run goroutine starts so the field write is race-free.
 	heartbeatScheduler.RecoveryNotifier = h
 
-	srv := newMainHTTPServer(":"+port, r)
+	srv := newMainHTTPServer(net.JoinHostPort(os.Getenv("MULTICA_BIND_HOST"), port), r)
 	profilingServer := profiling.NewServer()
 
 	// Start background workers.

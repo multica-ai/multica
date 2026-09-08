@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/runcontrol"
 	"io"
 	"log/slog"
 	"net/http"
@@ -346,6 +347,8 @@ type TaskIssueStatusData struct {
 }
 
 type AgentTaskResponse struct {
+	LaunchAuthority      *runcontrol.Manifest   `json:"launch_authority,omitempty"`
+	OriginalQueuedAt     string                 `json:"original_queued_at,omitempty"`
 	ID                   string                 `json:"id"`
 	AgentID              string                 `json:"agent_id"`
 	RuntimeID            string                 `json:"runtime_id"`
@@ -777,6 +780,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		handoffNote = t.HandoffNote.String
 	}
 	return AgentTaskResponse{
+		OriginalQueuedAt:       timestampToString(t.OriginalQueuedAt),
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),
 		RuntimeID:              uuidToString(t.RuntimeID),

@@ -189,6 +189,7 @@ type RuntimeRecoveryNotifier interface {
 }
 
 type Handler struct {
+	Controller             ControllerSettings
 	Queries                *db.Queries
 	ReadSelector           *dbreader.Selector
 	DB                     dbExecutor

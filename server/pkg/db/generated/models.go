@@ -164,14 +164,15 @@ type AgentTaskQueue struct {
 	// The row id referenced by trigger_evidence_kind (a comment id, autopilot_run id, rule_version id, source task id, ...). No FK; resolvable per-kind in the app layer (MUL-4302 §2).
 	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
 	// The one human accountable for this run, for audit / visibility / cost only — NEVER consulted for authorization (that is originator_user_id). Invariant: when originator_user_id IS NOT NULL, this equals it; the two diverge only when originator_user_id IS NULL (autopilot rule_owner / degraded owner_fallback name an accountable human while authorization carries none). No FK, no cascade (MUL-4302 §1/§7). NULL means no accountable human was resolved: a pre-migration row, OR a NEW row whose audit source is not-yet-resolved / unattributed (e.g. run_only autopilot until rule_owner lands) — NOT pre-migration only.
-	AccountableUserID         pgtype.UUID `json:"accountable_user_id"`
-	SessionRolloutMissing     bool        `json:"session_rollout_missing"`
-	RetiredSessionID          pgtype.Text `json:"retired_session_id"`
-	QuickActionsDisabled      bool        `json:"quick_actions_disabled"`
-	RegenerateQuickActionsFor pgtype.UUID `json:"regenerate_quick_actions_for"`
-	BranchName                pgtype.Text `json:"branch_name"`
-	DurableWorkDir            pgtype.Text `json:"durable_work_dir"`
-	ChannelContextRevision    pgtype.Int8 `json:"channel_context_revision"`
+	AccountableUserID         pgtype.UUID        `json:"accountable_user_id"`
+	SessionRolloutMissing     bool               `json:"session_rollout_missing"`
+	RetiredSessionID          pgtype.Text        `json:"retired_session_id"`
+	QuickActionsDisabled      bool               `json:"quick_actions_disabled"`
+	RegenerateQuickActionsFor pgtype.UUID        `json:"regenerate_quick_actions_for"`
+	BranchName                pgtype.Text        `json:"branch_name"`
+	DurableWorkDir            pgtype.Text        `json:"durable_work_dir"`
+	ChannelContextRevision    pgtype.Int8        `json:"channel_context_revision"`
+	OriginalQueuedAt          pgtype.Timestamptz `json:"original_queued_at"`
 }
 
 type AgentToLabel struct {
@@ -583,6 +584,60 @@ type ContactSalesInquiry struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type ControlledRun struct {
+	RunID        pgtype.UUID        `json:"run_id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	ActionID     string             `json:"action_id"`
+	Manifest     []byte             `json:"manifest"`
+	ManifestHash string             `json:"manifest_hash"`
+	Receipt      []byte             `json:"receipt"`
+	Phase        string             `json:"phase"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	RequestHash  string             `json:"request_hash"`
+}
+
+type ControllerEffect struct {
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ResourceKey       string             `json:"resource_key"`
+	OperationID       string             `json:"operation_id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	CandidateIdentity string             `json:"candidate_identity"`
+	AuthorityEpoch    int64              `json:"authority_epoch"`
+	FencingToken      int64              `json:"fencing_token"`
+	LeaseExpiresAt    pgtype.Timestamptz `json:"lease_expires_at"`
+	Phase             string             `json:"phase"`
+	Receipt           []byte             `json:"receipt"`
+}
+
+type ControllerEffectOperation struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	OperationID string             `json:"operation_id"`
+	ResourceKey string             `json:"resource_key"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	RequestHash string             `json:"request_hash"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type ControllerEvent struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	EventID     string             `json:"event_id"`
+	RequestHash string             `json:"request_hash"`
+	Revision    int64              `json:"revision"`
+	Body        []byte             `json:"body"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type ControllerOutbox struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	EventID     string             `json:"event_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Revision    int64              `json:"revision"`
+	Body        []byte             `json:"body"`
+	DeliveredAt pgtype.Timestamptz `json:"delivered_at"`
+}
+
 type DaemonConnection struct {
 	ID              pgtype.UUID        `json:"id"`
 	AgentID         pgtype.UUID        `json:"agent_id"`
@@ -782,6 +837,18 @@ type Issue struct {
 	Properties         []byte             `json:"properties"`
 	Revision           int64              `json:"revision"`
 	LastActivityAt     pgtype.Timestamptz `json:"last_activity_at"`
+}
+
+type IssueController struct {
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ScopeRevision  string             `json:"scope_revision"`
+	Revision       int64              `json:"revision"`
+	AuthorityEpoch int64              `json:"authority_epoch"`
+	IsStopped      bool               `json:"is_stopped"`
+	Config         []byte             `json:"config"`
+	State          []byte             `json:"state"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type IssueDependency struct {

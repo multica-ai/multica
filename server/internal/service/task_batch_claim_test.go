@@ -95,8 +95,8 @@ func batchClaimFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (r
 }
 
 // TestClaimTasksForRuntimes_MultiRuntimeDrain verifies the machine-level batch
-// claim (MUL-4257): a single call claims across all runtimes, one task per
-// agent per call (matching the singular path's dedup), routes each task to its
+// claim (MUL-4257): a single call claims across all runtimes, all eligible independent tasks
+// in one call while preserving same-conversation serialization, routes each task to its
 // runtime, respects a subsequent drain, and reports empty once nothing is
 // queued.
 func TestClaimTasksForRuntimes_MultiRuntimeDrain(t *testing.T) {
@@ -107,33 +107,29 @@ func TestClaimTasksForRuntimes_MultiRuntimeDrain(t *testing.T) {
 	rt1, rt2 := batchClaimFixture(t, ctx, pool)
 	ids := []pgtype.UUID{util.MustParseUUID(rt1), util.MustParseUUID(rt2)}
 
-	// Call 1: one task per agent (agent1→rt1, agent2→rt2) => 2 tasks, one per runtime.
+	// Call 1: fill spare capacity for both agents in one round trip.
 	got1, err := svc.ClaimTasksForRuntimes(ctx, ids, 5)
 	if err != nil {
 		t.Fatalf("call1: %v", err)
 	}
-	if len(got1) != 2 {
-		t.Fatalf("call1 claimed %d tasks, want 2", len(got1))
+	if len(got1) != 3 {
+		t.Fatalf("call1 claimed %d tasks, want 3", len(got1))
 	}
 	seen := map[string]int{}
 	for _, task := range got1 {
 		seen[util.UUIDToString(task.RuntimeID)]++
 	}
-	if seen[rt1] != 1 || seen[rt2] != 1 {
-		t.Fatalf("call1 runtime distribution = %v, want one task each for rt1/rt2", seen)
+	if seen[rt1] != 2 || seen[rt2] != 1 {
+		t.Fatalf("call1 runtime distribution = %v, want two tasks for rt1 and one for rt2", seen)
 	}
 
-	// Call 2: agent1 still has a second queued task (different issue, capacity 5);
-	// agent2 is drained => exactly 1 task, on rt1.
+	// Call 2: both agents are drained already; no fallback polling is needed.
 	got2, err := svc.ClaimTasksForRuntimes(ctx, ids, 5)
 	if err != nil {
 		t.Fatalf("call2: %v", err)
 	}
-	if len(got2) != 1 {
-		t.Fatalf("call2 claimed %d tasks, want 1", len(got2))
-	}
-	if util.UUIDToString(got2[0].RuntimeID) != rt1 {
-		t.Fatalf("call2 claimed runtime = %s, want rt1", util.UUIDToString(got2[0].RuntimeID))
+	if len(got2) != 0 {
+		t.Fatalf("call2 claimed %d tasks, want 0", len(got2))
 	}
 
 	// Call 3: everything dispatched => empty.

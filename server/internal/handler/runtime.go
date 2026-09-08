@@ -848,6 +848,10 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "you can only delete your own runtimes")
 		return
 	}
+	if h.controllerRuntimeMutation(w, r, runtimeID) {
+		return
+	}
+
 	userID := uuidToString(member.UserID)
 
 	hasLiveProfile, err := h.runtimeHasLiveProfile(r.Context(), rt)
@@ -1068,6 +1072,10 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusForbidden, "you can only delete your own runtimes")
 		return
 	}
+	if h.controllerRuntimeMutation(w, r, runtimeID) {
+		return
+	}
+
 	userID := uuidToString(member.UserID)
 
 	hasLiveProfile, err := h.runtimeHasLiveProfile(r.Context(), rt)

@@ -3351,6 +3351,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Track which fields were explicitly present in JSON (even if null)
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
+	if controllerProtectedFields(rawFields) && h.controllerOwnsMutation(w, r, uuidToString(prevIssue.ID)) {
+		return
+	}
 
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
@@ -3888,6 +3891,9 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if h.controllerOwnsMutation(w, r, uuidToString(issue.ID)) {
+		return
+	}
 
 	h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
@@ -4051,6 +4057,18 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(raw, &rawUpdates)
 	}
 
+	if controllerProtectedFields(rawUpdates) {
+		// Check the complete cohort before updating any row.
+		for _, id := range req.IssueIDs {
+			issue, ok := h.loadIssueForUser(w, r, id)
+			if !ok {
+				return
+			}
+			if h.controllerOwnsMutation(w, r, uuidToString(issue.ID)) {
+				return
+			}
+		}
+	}
 	// Short-circuit when no mutation field is present in `updates`. Without
 	// this, the loop below runs N no-op UPDATEs (every if-guard skips, every
 	// COALESCE preserves the existing value) and reports `{"updated": N}` —
@@ -4434,8 +4452,14 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		seenIssueIDs[issueUUID] = struct{}{}
+		if h.controllerOwnsMutation(w, r, uuidToString(issue.ID)) {
+			return
+		}
 		issues = append(issues, issue)
 		excludedIDs = append(excludedIDs, issue.ID)
+	}
+	// Validate the entire batch before cancelling any native work.
+	for _, issue := range issues {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 		_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 	}
