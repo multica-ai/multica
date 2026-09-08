@@ -509,12 +509,12 @@ func (q *Queries) LinkAttachmentsToChatMessage(ctx context.Context, arg LinkAtta
 	return items, nil
 }
 
-const linkAttachmentsToComment = `-- name: LinkAttachmentsToComment :exec
+const linkAttachmentsToComment = `-- name: LinkAttachmentsToComment :execrows
 UPDATE attachment
 SET comment_id = $1
 WHERE issue_id = $2
-  AND comment_id IS NULL
   AND source_context_id IS NULL
+  AND (comment_id IS NULL OR comment_id = $1)
   AND id = ANY($3::uuid[])
 `
 
@@ -524,9 +524,12 @@ type LinkAttachmentsToCommentParams struct {
 	Column3   []pgtype.UUID `json:"column_3"`
 }
 
-func (q *Queries) LinkAttachmentsToComment(ctx context.Context, arg LinkAttachmentsToCommentParams) error {
-	_, err := q.db.Exec(ctx, linkAttachmentsToComment, arg.CommentID, arg.IssueID, arg.Column3)
-	return err
+func (q *Queries) LinkAttachmentsToComment(ctx context.Context, arg LinkAttachmentsToCommentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkAttachmentsToComment, arg.CommentID, arg.IssueID, arg.Column3)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const linkAttachmentsToIssue = `-- name: LinkAttachmentsToIssue :one

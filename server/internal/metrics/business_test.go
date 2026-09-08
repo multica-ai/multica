@@ -55,6 +55,23 @@ func TestBusinessMetricsLifecycleCountersAndGauge(t *testing.T) {
 	}
 }
 
+func TestBusinessMetricsReplyAdmissionIsBoundedAndObservable(t *testing.T) {
+	m := NewBusinessMetrics()
+	m.RecordReplyAdmission(ReplyAdmissionPathCreateComment, ReplyAdmissionOutcomeRejected, "missing_requester_mention", 2*time.Millisecond)
+	m.RecordReplyAdmission(ReplyAdmissionPathTaskCompletion, ReplyAdmissionOutcomeAllowed, "requester_mention_present", 3*time.Millisecond)
+	m.RecordReplyAdmission("unexpected-path", "unexpected-outcome", "issue-identifier-must-not-be-a-label", -time.Second)
+
+	if got := testutil.ToFloat64(m.replyAdmissionDecisions.WithLabelValues(ReplyAdmissionPathCreateComment, ReplyAdmissionOutcomeRejected, "missing_requester_mention")); got != 1 {
+		t.Fatalf("reply admission rejection counter = %v, want 1", got)
+	}
+	if got := testutil.CollectAndCount(m.replyAdmissionDuration); got != 3 {
+		t.Fatalf("reply admission duration series = %d, want 3", got)
+	}
+	if got := testutil.CollectAndCount(m.replyAdmissionDecisions); got != 3 {
+		t.Fatalf("reply admission decision series = %d, want 3", got)
+	}
+}
+
 func TestBusinessMetricsFailureReasonUsesCanonicalClassifier(t *testing.T) {
 	m := NewBusinessMetrics()
 
@@ -187,6 +204,7 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordEntitlementVersionRegression()
 	m.RecordAutopilotQuotaDecision("observe", "manual", "admitted")
 	m.ObserveRuntimeSweepStage(RuntimeSweepStageLiveness, time.Second, 2, 1)
+	m.RecordReplyAdmission(ReplyAdmissionPathCreateComment, ReplyAdmissionOutcomeAllowed, "not_applicable", time.Millisecond)
 
 	families, err := registry.Gather()
 	if err != nil {

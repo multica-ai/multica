@@ -84,12 +84,12 @@ WHERE a.issue_id = $1
 SELECT url FROM attachment
 WHERE comment_id = $1;
 
--- name: LinkAttachmentsToComment :exec
+-- name: LinkAttachmentsToComment :execrows
 UPDATE attachment
 SET comment_id = $1
 WHERE issue_id = $2
-  AND comment_id IS NULL
   AND source_context_id IS NULL
+  AND (comment_id IS NULL OR comment_id = $1)
   AND id = ANY($3::uuid[]);
 
 -- name: ReplaceCommentAttachments :execrows

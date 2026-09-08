@@ -556,6 +556,18 @@ type Comment struct {
 	RecoverySettledAt pgtype.Timestamptz `json:"recovery_settled_at"`
 }
 
+type CommentIdempotency struct {
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	IdempotencyKey         string             `json:"idempotency_key"`
+	RequestHash            string             `json:"request_hash"`
+	CommentID              pgtype.UUID        `json:"comment_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	AttachmentIds          []pgtype.UUID      `json:"attachment_ids"`
+	SuppressAgentIds       []pgtype.UUID      `json:"suppress_agent_ids"`
+	SideEffectsCompletedAt pgtype.Timestamptz `json:"side_effects_completed_at"`
+	SideEffectsClaimedAt   pgtype.Timestamptz `json:"side_effects_claimed_at"`
+}
+
 type CommentReaction struct {
 	ID          pgtype.UUID        `json:"id"`
 	CommentID   pgtype.UUID        `json:"comment_id"`

@@ -399,6 +399,86 @@ ORDER BY created_at ASC, id ASC;
 SELECT * FROM comment
 WHERE id = $1;
 
+-- name: GetCommentForUpdate :one
+-- Admission checks must serialize with edits to the request being answered.
+-- Callers use this inside the same transaction as the guarded write.
+SELECT * FROM comment
+WHERE id = $1
+FOR UPDATE;
+
+-- name: LockCommentIdempotencyKey :exec
+-- Serialize retries for one workspace/key without locking every comment on the
+-- issue. Advisory locks are transaction-scoped and are released on commit or
+-- rollback; the key is supplied as a workspace-qualified string by callers.
+SELECT pg_advisory_xact_lock(hashtextextended(@lock_key::text, 0));
+
+-- name: GetCommentIdempotency :one
+SELECT workspace_id, idempotency_key, request_hash, comment_id,
+       attachment_ids, suppress_agent_ids, created_at,
+       side_effects_completed_at, side_effects_claimed_at
+FROM comment_idempotency
+WHERE workspace_id = @workspace_id
+  AND idempotency_key = @idempotency_key;
+
+-- name: CreateCommentIdempotency :exec
+INSERT INTO comment_idempotency (
+    workspace_id, idempotency_key, request_hash, comment_id,
+    attachment_ids, suppress_agent_ids, side_effects_claimed_at
+)
+VALUES (
+    @workspace_id, @idempotency_key, @request_hash, @comment_id,
+    @attachment_ids, @suppress_agent_ids, now()
+);
+
+-- name: ClaimCommentIdempotencySideEffects :execrows
+-- The creating request claims its own row on insert. Retries and the
+-- background reconciler may take over only after the lease expires.
+UPDATE comment_idempotency
+SET side_effects_claimed_at = now()
+WHERE workspace_id = @workspace_id
+  AND idempotency_key = @idempotency_key
+  AND request_hash = @request_hash
+  AND side_effects_completed_at IS NULL
+  AND (side_effects_claimed_at IS NULL OR side_effects_claimed_at < @lease_before);
+
+-- name: ListPendingCommentIdempotency :many
+-- Rows whose comment committed but whose post-commit side effects were not
+-- durably acknowledged. The caller takes the per-key advisory lock before
+-- rechecking and replaying a row, so multiple server replicas converge.
+SELECT workspace_id, idempotency_key, request_hash, comment_id,
+       attachment_ids, suppress_agent_ids, created_at,
+       side_effects_completed_at, side_effects_claimed_at
+FROM comment_idempotency
+WHERE side_effects_completed_at IS NULL
+  AND created_at >= $1
+ORDER BY created_at ASC, workspace_id ASC, idempotency_key ASC
+LIMIT $2;
+
+-- name: MarkCommentIdempotencySideEffectsCompleted :execrows
+UPDATE comment_idempotency
+SET side_effects_completed_at = COALESCE(side_effects_completed_at, now())
+WHERE workspace_id = @workspace_id
+  AND idempotency_key = @idempotency_key
+  AND request_hash = @request_hash
+  AND side_effects_completed_at IS NULL;
+
+-- name: DeleteExpiredCommentIdempotency :execrows
+-- Replay keys are operational deduplication state, not comment history. Keep a
+-- bounded replay window and delete in small, lock-skipping batches so cleanup
+-- cannot monopolize the comment write path or block another server replica.
+WITH victims AS (
+    SELECT c.workspace_id, c.idempotency_key
+    FROM comment_idempotency AS c
+    WHERE c.created_at < $1
+    ORDER BY c.created_at ASC, c.workspace_id ASC, c.idempotency_key ASC
+    LIMIT $2
+    FOR UPDATE SKIP LOCKED
+)
+DELETE FROM comment_idempotency AS c
+USING victims AS v
+WHERE c.workspace_id = v.workspace_id
+  AND c.idempotency_key = v.idempotency_key;
+
 -- name: GetCommentInWorkspace :one
 SELECT * FROM comment
 WHERE id = $1 AND workspace_id = $2;
