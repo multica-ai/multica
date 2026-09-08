@@ -1,0 +1,26 @@
+---
+description: Multica 代码索引边界 — 改代码前先读 CODE-INDEX
+alwaysApply: true
+---
+
+# Code Index
+
+本仓代码索引权威文档：
+
+1. [docs/CODE-INDEX.md](../../docs/CODE-INDEX.md) — 模块地图与决策树
+2. [docs/KNOWLEDGE-BASE.md](../../docs/KNOWLEDGE-BASE.md) — 知识库与文档顺序
+3. [CLAUDE.md](../../CLAUDE.md) — 编码硬规则
+4. [AGENTS.md](../../AGENTS.md) — Agent 入口
+
+## 索引边界
+
+- **索引**：`server/` · `apps/` · `packages/` · `e2e/` · `scripts/` · `docs/` · `.ai-company/`（不含 run-logs）
+- **不索引**：见根目录 [.cursorignore](../../.cursorignore)
+
+## 子系统分界
+
+| 目录 | 说明 |
+|------|------|
+| `packages/core` / `ui` / `views` | 硬包边界，见 CLAUDE.md |
+| `apps/mobile/` | 独立产品面；先读该目录 CLAUDE.md |
+| `.ai-company/` | 卫星交付流水线，不是本仓产品代码 |

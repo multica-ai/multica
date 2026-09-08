@@ -1,0 +1,81 @@
+# Per-machine company asset registry (gitignored).
+# Copy to company-assets.local.yaml — NEVER commit secrets or API key values.
+#
+# Keys: project id from project-registry.yaml
+
+company:
+  updated: 2026-08-29
+  owner: CEO
+
+projects:
+  beatscape:
+    repo: chenzh/MusicSaas
+    tier: production
+    domains:
+      production: ""          # e.g. play.example.com
+      staging: ""
+    hosting:
+      provider: ""            # e.g. cloudflare-pages | vercel | self
+      project: ""
+    github_secrets:           # names only
+      - SLACK_WEBHOOK_URL
+    human_only:
+      - MLX inference / gateway
+      - apps/gateway/**
+    notes: "Agent scope: apps/beatscape/** only"
+
+  landing-tool-a:
+    repo: chenzh/landing-tool-a
+    tier: experiment
+    domains:
+      production: ""
+    hosting:
+      provider: ""
+      project: ""
+    github_secrets:
+      - SLACK_WEBHOOK_URL
+
+  saas-stripe-mvp:
+    repo: chenzh/saas-stripe-mvp
+    tier: staging
+    domains:
+      production: ""
+    github_secrets:
+      - SLACK_WEBHOOK_URL
+    human_only:
+      - Stripe Checkout / Webhook
+      - "**/payment/**"
+
+  json-site:
+    repo: chenzh/json-site
+    tier: experiment
+    domains:
+      production: ""
+    hosting:
+      provider: cloudflare-pages
+      project: json-site
+    github_secrets:
+      - SLACK_WEBHOOK_URL
+      - CLOUDFLARE_API_TOKEN
+
+  metadata-viewer:
+    repo: chenzh/metadata-viewer
+    tier: production
+    domains:
+      production: www.nowifiwebgames.com
+    hosting:
+      provider: cloudflare-pages
+      project: no-wifi-games
+    github_secrets: []
+    notes: "MetaViewer / No WiFi Games — WIN-METAVIEWER lineage"
+
+  openworld:
+    repo: chenzh/openworld
+    tier: staging
+    domains:
+      production: hermes.nowifiwebgames.com
+    hosting:
+      provider: ""
+      project: ""
+    github_secrets: []
+    notes: "出海 monorepo — hermes-mobile/revoice/games/workshop"

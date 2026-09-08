@@ -238,6 +238,17 @@ troubleshooting. The iOS client lives in [`apps/mobile/`](apps/mobile/) — its
 
 We release most weekdays, so `main` moves quickly — pull often.
 
+### Harness（外接第二大脑）
+
+Local / contributor Agent workflow (not the product runtime):
+
+- **Continue / strategic todos**: [`SESSION.md`](SESSION.md)
+- **Knowledge + code index**: [`docs/KNOWLEDGE-BASE.md`](docs/KNOWLEDGE-BASE.md) · [`docs/CODE-INDEX.md`](docs/CODE-INDEX.md)
+- **Status**: `bash scripts/print-status.sh`
+- **Vault snapshot**: [`docs/VAULT-HARNESS.md`](docs/VAULT-HARNESS.md)
+
+Authoritative coding rules remain [`CLAUDE.md`](CLAUDE.md).
+
 ---
 
 ## Why "Multica"?

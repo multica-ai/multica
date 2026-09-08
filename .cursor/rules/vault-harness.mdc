@@ -1,0 +1,14 @@
+---
+description: 外接大脑项目规范 — 开干前读 Vault HARNESS
+alwaysApply: true
+---
+
+# Vault Harness
+
+本仓已外接第二大脑。**写代码前**：
+
+1. 读 Vault `10-SYSTEM/HARNESS/registry.json` 匹配本仓（slug: **multica**）
+2. 依次读：`HARNESS/global.md` → `profiles/multica-monorepo.md` → `projects/multica.md`
+3. 口令：`同步第二大脑规则` · `同步项目规范到全部外接仓库` · `打包第二大脑上下文：multica`
+
+权威源在 SecondBrain 仓；本文件仅为 Cursor 触发器。版本 **2026-07-06**。

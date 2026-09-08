@@ -1,0 +1,30 @@
+openapi: 3.1.0
+info:
+  title: <Project API>
+  version: 0.1.0
+  description: |
+    Contract source of truth for <project-slug>.
+    Implementations must pass vacuum lint and oasdiff breaking check in CI.
+servers:
+  - url: https://api.example.com
+    description: Production
+  - url: http://localhost:8080
+    description: Local
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+components: {}

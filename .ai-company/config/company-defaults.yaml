@@ -1,0 +1,65 @@
+# AI 公司 — 全局默认参数
+# 复制到新环境后按实际修改。不 secrets。
+
+company:
+  name: your-ai-company
+  timezone: Asia/Shanghai
+
+budget:
+  monthly_cursor_usd: 500
+  alert_threshold_percent: 80
+  pause_autopilot_on_exceed: true
+
+concurrency:
+  max_parallel_cloud_agents: 3
+  max_verify_loops: 3
+
+nightly:
+  enabled: true                   # local: install-nightly-cron.sh --install
+  cron: "0 21 * * *"              # 21:00 Asia/Shanghai — match install-nightly-cron.sh
+  max_total_tickets: 5
+  dispatch_before_brief: true       # ceo-nightly.sh
+  brief_script: scripts/ai-company/ceo-daily-brief.sh
+  # Product dispatch: CEO machine portfolio-dispatch.sh (local cursor-agent only)
+
+notifications:
+  slack_webhook_secret: SLACK_WEBHOOK_URL   # GitHub Secret 名
+  alert_on:
+    - agent_blocked
+    - ci_failed_on_agent_pr
+  silent_on:
+    - auto_merge_denied_by_policy
+
+multica:
+  self_host: true
+  prefer_workspace_mcp: true    # per-agent MCP 已知 issue，优先全局
+
+workers:
+  primary: cursor-agent
+  optional:
+    - hermes    # review only, no orchestration
+    - openclaw  # intel only
+
+langgraph:
+  enabled: false
+  enable_when_daily_tickets_above: 10
+
+compliance:
+  hermes_self_evolution: false  # 无人值守流水线必须 false
+  script_gates_before_agent_review: true
+
+portfolio:
+  registry_path: .ai-company/templates/project-registry.yaml
+  # Product dispatch: CEO machine ceo-nightly.sh → portfolio-dispatch.sh (local cursor-agent)
+  # PORTFOLIO_DISPATCH_ASYNC=1 (default): nohup per slot — UI shows local-cli-async; set 0 for sync wait
+  dispatch_async: true
+
+content:
+  workbench_url: https://hq.revoices.app/#content/review   # 内容审稿 HQ（lighthouse）
+  agent_url: https://agent.revoices.app/                   # Worker / tunnel
+  remote_ssh: lighthouse                                   # ssh 别名
+
+openworld:
+  hermes_dashboard_url: https://hermes.nowifiwebgames.com
+  metadata_viewer_site: https://www.nowifiwebgames.com
+  monorepo_root_env: OPENWORLD_ROOT                        # 换机可覆盖 checkout 路径

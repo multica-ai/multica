@@ -1,0 +1,26 @@
+# Portfolio dispatch — CEO machine only (local cursor-agent session).
+#
+# Agent dispatch does NOT run on GitHub-hosted runners. Use:
+#   bash scripts/ai-company/ceo-nightly.sh
+#   bash scripts/ai-company/portfolio-dispatch.sh --max-total 5
+#
+# This workflow exists only as a manual reminder if triggered from the UI.
+
+name: Portfolio agent dispatch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reminder
+        run: |
+          echo "::error::Portfolio dispatch runs on the CEO machine via local cursor-agent (cursor-agent login)."
+          echo "Run: bash scripts/ai-company/portfolio-dispatch.sh --max-total 5"
+          echo "Or nightly: bash scripts/ai-company/ceo-nightly.sh"
+          exit 1

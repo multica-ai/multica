@@ -1,0 +1,19 @@
+# Multica — Agent 代码索引边界
+**/node_modules/
+**/.next/
+**/.turbo/
+**/dist/
+**/build/
+**/coverage/
+**/__pycache__/
+**/*.tsbuildinfo
+server/bin/
+server/tmp/
+data/
+test-results/
+.ai-company/run-logs/
+.context
+.agent_context/
+.multica/
+*.log
+.DS_Store

@@ -1,0 +1,32 @@
+{
+  "$schema": "Generic agent delivery auto-merge policy. Deny wins over allow.",
+  "autoMergeEnabled": true,
+  "requireLabels": ["agent-safe"],
+  "branchNamePrefix": "cursor-issue",
+  "allow": [
+    "docs/**",
+    "**/*.md",
+    "**/*.mdx",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*_test.go",
+    "public/**",
+    "assets/**",
+    "locales/**",
+    "i18n/**"
+  ],
+  "deny": [
+    "**/migrations/**",
+    "**/auth/**",
+    "**/payment/**",
+    "**/billing/**",
+    "api/openapi.yaml",
+    "**/.env*",
+    "**/secrets/**",
+    ".github/workflows/**",
+    "docker-compose*.yml",
+    "Dockerfile",
+    "Makefile"
+  ]
+}

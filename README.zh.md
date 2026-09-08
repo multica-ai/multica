@@ -230,6 +230,17 @@ iOS 客户端在 [`apps/mobile/`](apps/mobile/)，怎么编译装到自己 iPhon
 
 我们几乎每个工作日都发版，`main` 走得很快——记得常拉最新代码。
 
+### Harness（外接第二大脑）
+
+本地 / 贡献者 Agent 工作流（不是产品运行时）：
+
+- **续作 / 战略待办**：[`SESSION.md`](SESSION.md)
+- **知识库 + 代码索引**：[`docs/KNOWLEDGE-BASE.md`](docs/KNOWLEDGE-BASE.md) · [`docs/CODE-INDEX.md`](docs/CODE-INDEX.md)
+- **一键状态**：`bash scripts/print-status.sh`
+- **Vault 快照**：[`docs/VAULT-HARNESS.md`](docs/VAULT-HARNESS.md)
+
+编码权威仍是 [`CLAUDE.md`](CLAUDE.md)。
+
 ---
 
 ## 为什么叫 "Multica"

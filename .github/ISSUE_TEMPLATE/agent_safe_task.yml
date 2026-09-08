@@ -1,0 +1,58 @@
+name: "Agent-safe task"
+description: Bounded task for autonomous agent delivery (agent-safe label).
+title: "[Agent]: "
+labels: ["agent-safe"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tasks with label `agent-safe` may be picked up by the nightly agent delivery workflow.
+        See [.delivery/README.md](https://github.com/multica-ai/multica/blob/main/.delivery/README.md).
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What & why (max 3 sentences)
+      placeholder: |
+        Add pagination to the leaderboard API. Users with 10k+ scores need paged results.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria (checkbox list)
+      description: Each line must be testable. Verifier and CI gate on these.
+      placeholder: |
+        - [ ] GET /api/... returns page size 20 by default
+        - [ ] page=2 returns correct offset
+        - [ ] unauthenticated request returns 401
+        - [ ] make check passes
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope (required)
+      description: Paths or behaviors the agent must NOT touch.
+      placeholder: |
+        - No server/migrations changes
+        - Do not modify packages/core/api/schema.ts
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Primary area
+      options:
+        - packages/views
+        - packages/core
+        - packages/ui
+        - apps/web
+        - apps/desktop
+        - server
+        - docs only
+    validations:
+      required: true

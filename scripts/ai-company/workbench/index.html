@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI 公司工作台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <div>
+          <h1>AI 公司工作台</h1>
+          <p class="subtitle">工程 portfolio + 内容审稿 · 唯一指挥入口（内容深链 hq.revoices.app）</p>
+        </div>
+        <div class="header-actions">
+          <span class="pill" id="org-label">org: -</span>
+          <span class="pill" id="dispatch-mode">检查中…</span>
+          <button id="refresh-btn">刷新</button>
+        </div>
+      </header>
+
+      <section class="card runtime-card" style="margin-bottom: 16px">
+        <div class="panel-title">
+          <h2>Multica / 本机 CLI</h2>
+          <span class="pill" id="runtime-daemon">检查中…</span>
+        </div>
+        <div class="runtime-grid" id="runtime-agents"></div>
+        <p class="subtitle" id="runtime-cli">本机 cursor-agent 进程: -</p>
+      </section>
+
+      <section class="card company-overview" style="margin-bottom: 16px">
+        <div class="panel-title">
+          <h2>公司指挥舱</h2>
+          <div class="header-actions">
+            <span class="pill" id="hq-sha">HQ —</span>
+            <button id="verify-refresh-btn" type="button">重跑脱手验收</button>
+          </div>
+        </div>
+        <div class="lights-grid" id="process-lights"></div>
+        <div class="norm-links" id="norm-links"></div>
+        <table class="assets-table">
+          <thead>
+            <tr>
+              <th>项目</th>
+              <th>Tier</th>
+              <th>本机 path</th>
+              <th>规范副本</th>
+              <th>域名 / CF</th>
+              <th>队列</th>
+            </tr>
+          </thead>
+          <tbody id="assets-body"></tbody>
+        </table>
+      </section>
+
+      <section class="card content-cockpit" style="margin-bottom: 16px">
+        <div class="panel-title">
+          <h2>内容线（远程 lighthouse）</h2>
+          <div class="header-actions">
+            <a class="primary link-btn" id="content-hq-link" href="https://hq.revoices.app/#content/review" target="_blank" rel="noreferrer">打开内容审稿 HQ</a>
+            <a class="pill link-btn" id="content-agent-link" href="https://agent.revoices.app/" target="_blank" rel="noreferrer">agent.revoices.app</a>
+          </div>
+        </div>
+        <p class="subtitle" id="content-remote-hint">执行在 <code>ssh lighthouse</code>；队列真相源 GitHub Issues；审稿在 hq.revoices.app（非 Kanban 派单）。</p>
+        <div class="content-metrics grid" id="content-metrics"></div>
+        <table class="assets-table">
+          <thead>
+            <tr>
+              <th>内容项目</th>
+              <th>派单模式</th>
+              <th>队列</th>
+              <th>审稿</th>
+            </tr>
+          </thead>
+          <tbody id="content-body"></tbody>
+        </table>
+      </section>
+
+      <section class="card openworld-cockpit content-cockpit" style="margin-bottom: 16px">
+        <div class="panel-title">
+          <h2>OpenWorld 系（出海 + MetaViewer）</h2>
+          <div class="header-actions">
+            <a class="primary link-btn" id="openworld-hermes-link" href="https://hermes.nowifiwebgames.com" target="_blank" rel="noreferrer">Hermes 面板</a>
+            <a class="pill link-btn" id="openworld-metaviewer-link" href="https://www.nowifiwebgames.com" target="_blank" rel="noreferrer">MetaViewer 生产站</a>
+          </div>
+        </div>
+        <p class="subtitle" id="openworld-hint">monorepo <code>openworld</code> + 生产站 <code>metadata-viewer</code>；本机路径经 <code>repo-paths.local.yaml</code>；装 harness 后取消 paused 进夜间队列。</p>
+        <div class="content-metrics grid" id="openworld-metrics"></div>
+        <table class="assets-table">
+          <thead>
+            <tr>
+              <th>项目</th>
+              <th>本机路径</th>
+              <th>队列</th>
+              <th>外链</th>
+            </tr>
+          </thead>
+          <tbody id="openworld-body"></tbody>
+        </table>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <div class="metric-label">BLOCKED</div>
+          <div class="metric-value" id="metric-blocked">0</div>
+        </div>
+        <div class="card">
+          <div class="metric-label">RUNNING</div>
+          <div class="metric-value" id="metric-running">0</div>
+        </div>
+        <div class="card">
+          <div class="metric-label">QUEUE</div>
+          <div class="metric-value" id="metric-queue">0</div>
+        </div>
+        <div class="card">
+          <div class="metric-label">MERGED</div>
+          <div class="metric-value" id="metric-merged">0</div>
+        </div>
+      </section>
+
+      <section class="card" style="margin-bottom: 16px">
+        <div class="panel-title">
+          <h2>一句话建站</h2>
+          <button class="primary" id="site-factory-submit">启动流水线</button>
+        </div>
+        <p class="subtitle">飞书同款 intake：竞品调研 → MVP → Cloudflare 脚手架 → Issue 派单。</p>
+        <textarea
+          id="site-factory-intake"
+          class="select"
+          rows="2"
+          placeholder="做一个 JSON 格式化网站"
+          style="width: 100%; margin-top: 8px; padding: 10px; resize: vertical"
+        ></textarea>
+        <label style="display: inline-flex; align-items: center; gap: 8px; margin-top: 8px">
+          <input type="checkbox" id="site-factory-create-repo" />
+          创建 GitHub 仓库并 push
+        </label>
+        <label
+          id="site-factory-autopilot-wrap"
+          style="display: none; align-items: center; gap: 8px; margin-top: 8px; margin-left: 1.5rem"
+        >
+          <input type="checkbox" id="site-factory-activate-autopilot" checked />
+          接入自迭代（registry + 本机路径 + 首票派单）
+        </label>
+      </section>
+
+      <section class="card" style="margin-bottom: 16px">
+        <div class="panel-title">
+          <h2>派单</h2>
+          <div class="header-actions">
+            <label>
+              最多
+              <select id="max-total" class="select">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="5">5</option>
+              </select>
+              单
+            </label>
+            <button class="primary" id="dispatch-portfolio">智能派单</button>
+          </div>
+        </div>
+        <p class="subtitle">按 `project-registry.yaml` 优先级自动挑 issue，走本地 `cursor-agent`。</p>
+      </section>
+
+      <section class="layout">
+        <div class="card">
+          <div class="panel-title">
+            <h2>项目</h2>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>项目</th>
+                <th>Blocked</th>
+                <th>Running</th>
+                <th>Queue</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="projects-body"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="panel-title">
+            <h2 id="queue-title">队列</h2>
+            <button id="dispatch-one">派下一单</button>
+          </div>
+          <p class="subtitle" id="path-hint"></p>
+          <div id="queue-panel" class="empty">选择左侧项目查看队列</div>
+        </div>
+      </section>
+
+      <section class="card jobs">
+        <div class="panel-title">
+          <h2>最近派单</h2>
+        </div>
+        <div id="jobs-panel" class="empty">加载中…</div>
+        <div class="log-box" id="log-box">选择任务查看日志尾部</div>
+      </section>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

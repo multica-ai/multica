@@ -1,0 +1,45 @@
+name: "Agent-safe task"
+description: Bounded task for autonomous agent delivery (agent-safe label).
+title: "[Agent]: "
+labels: ["agent-safe"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tasks with label `agent-safe` may be picked up by the agent delivery workflow.
+        See `.delivery/README.md`, `.delivery/COMPANY-OS.md`, and `.delivery/company-os/` (norms snapshot).
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What & why (max 3 sentences)
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria (checkbox list)
+      description: Verifier and CI gate on these. Include commands with exit code 0.
+      placeholder: |
+        - [ ] pnpm test passes
+        - [ ] make test passes
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope (required)
+      placeholder: |
+        - No migrations
+        - No auth/payment changes
+    validations:
+      required: true
+
+  - type: input
+    id: delivery_slug
+    attributes:
+      label: Delivery slug (optional)
+      description: Folder under `.delivery/<slug>/` if not using issue-only input.
+      placeholder: music-game-sea

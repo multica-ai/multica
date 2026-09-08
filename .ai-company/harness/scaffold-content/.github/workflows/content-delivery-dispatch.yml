@@ -1,0 +1,86 @@
+name: Content delivery dispatch
+
+# Triggered from CEO HQ: portfolio-dispatch.sh (dispatch_mode: gha)
+# Runs on a self-hosted runner on the Hermes media machine (label: content-hermes).
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_tasks:
+        description: Maximum issues to dispatch this run
+        required: true
+        default: "1"
+        type: string
+      issue_number:
+        description: Optional single issue number (overrides queue scan)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: content-delivery-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: [self-hosted, content-hermes]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Verify Hermes
+        run: |
+          set -euo pipefail
+          if ! command -v hermes >/dev/null 2>&1; then
+            echo "::error::hermes not on PATH — install on self-hosted runner"
+            exit 1
+          fi
+
+      - name: Resolve issue queue
+        id: queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SINGLE: ${{ inputs.issue_number }}
+          MAX: ${{ inputs.max_tasks }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SINGLE" ]; then
+            echo "numbers=$SINGLE" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mapfile -t nums < <(gh issue list \
+            --label "agent-safe" \
+            --state open \
+            --json number,labels \
+            --jq '.[] | select([.labels[].name] | (index("agent-running") | not) and (index("agent-blocked") | not) and (index("agent-done") | not)) | .number' \
+            | head -n "$MAX")
+          if [ "${#nums[@]}" -eq 0 ]; then
+            echo "numbers=" >> "$GITHUB_OUTPUT"
+            echo "No eligible issues in queue."
+            exit 0
+          fi
+          joined="$(IFS=,; echo "${nums[*]}")"
+          echo "numbers=$joined" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch Hermes
+        if: steps.queue.outputs.numbers != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/content-delivery/*.sh
+          IFS=',' read -ra ISSUES <<< "${{ steps.queue.outputs.numbers }}"
+          failed=0
+          for n in "${ISSUES[@]}"; do
+            n="$(echo "$n" | xargs)"
+            [ -z "$n" ] && continue
+            echo "Dispatching content issue #$n"
+            if ! bash scripts/content-delivery/dispatch-hermes-cli.sh "$n"; then
+              failed=1
+            fi
+          done
+          exit "$failed"

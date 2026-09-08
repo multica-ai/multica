@@ -8,6 +8,19 @@ This file provides guidance to AI agents when working with code in this reposito
 > Use `Makefile`, `package.json`, and `pnpm-workspace.yaml` as the
 > source of truth for the full command list.
 
+<!-- zbrain-harness:start -->
+## zbrain / SecondBrain (generated)
+
+This repo is joined to SecondBrain. **Before coding:**
+
+1. Read `CLAUDE.md`, then `docs/KNOWLEDGE-BASE.md` and `docs/CODE-INDEX.md`
+2. Continue via `SESSION.md` (project) or `sessions/<chat-id>.md` (per-chat)
+3. Snapshot: `docs/VAULT-HARNESS.md` · triggers: `.cursor/rules/vault-harness.mdc` · `.cursor/rules/company-harness.mdc`
+4. Do not duplicate Vault or Company OS rules here — resync with `同步项目规范到全部外接仓库` / `rollout-harness-tier0.sh`
+
+Gateway on a machine with the Vault cloned: `zb status` / `zb advance`
+<!-- zbrain-harness:end -->
+
 ## Quick Reference
 
 ### Architecture
@@ -55,3 +68,16 @@ make check            # Full verification pipeline
 ```
 
 See CLAUDE.md for the authoritative rules and common commands.
+
+### AI 公司规范（与产品代码分开）
+
+本仓 **两套规范** 并存：
+
+| 范围 | 权威文档 |
+|------|----------|
+| Multica **产品代码**（Go/TS/apps/packages） | 根目录 `CLAUDE.md` + [conventions.mdx](apps/docs/content/docs/developers/conventions.mdx) |
+| **AI 公司 OS**（portfolio、DoD、.harness、examples） | `.ai-company/docs/29-harness-layout.md` · 硅谷纪律 `docs/30-silicon-valley-doc-standards.md` |
+
+- 改全公司规则 → `.ai-company/docs/` + `sync-company-norms.sh`
+- 复制新产品种子 → `.ai-company/examples/<slug>/`（见 `examples/README.md`）
+- 安装交付脚手架 → `.ai-company/harness/install.sh`
