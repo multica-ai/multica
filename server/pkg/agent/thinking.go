@@ -830,9 +830,10 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 	},
-	// Muse reasoning effort: none|minimal|low|medium|high|xhigh|ultra.
-	// This is a CLI-level flag, not a per-model one — verified unchanged from
-	// `muse exec --help` on Muse Code 1.0.1 and 1.0.2.
+	// Muse reasoning effort: none|minimal|low|medium|high|xhigh|max|ultra.
+	// This is a CLI-level flag, not a per-model one. Verified against
+	// `muse exec --help` on Muse Code 1.0.1, 1.0.2 and 1.0.3; 1.0.3 added
+	// `max` between `xhigh` and `ultra`, so `ultra` remains the ceiling.
 	"muse": {
 		"none":    true,
 		"minimal": true,
@@ -840,6 +841,7 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"medium":  true,
 		"high":    true,
 		"xhigh":   true,
+		"max":     true,
 		"ultra":   true,
 	},
 }
