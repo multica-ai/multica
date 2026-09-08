@@ -13,15 +13,16 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
-// The managed Codex cache (codex-home/.sandbox-bin, a ~285 MiB copy of the
-// Codex binary) used to be reclaimed only on the issue decision path. Every
-// other kind held it for as long as its parent record said "keep the
-// directory" — unbounded for a chat session, which stays "active" with no time
-// limit. See #6782, and #5654 for the original issue-path fix.
+// The managed Codex caches (codex-home/.sandbox-bin, a ~285 MiB copy of the
+// Codex binary, and codex-home/.tmp plugin caches) are reclaimed independently
+// from task work products. Every task kind must eventually give them back even
+// when its parent record keeps the directory.
 //
 // sandboxBinRel is the exact managed subpath, spelled out here so a change to
 // ManagedReclaimableArtifactSubpaths has to face these tests.
 const sandboxBinRel = "codex-home/.sandbox-bin"
+
+const codexTmpRel = "codex-home/.tmp"
 
 // chatGCMux serves a chat gc-check that reports the given status.
 func chatGCMux(chatID, status string) *http.ServeMux {
@@ -68,6 +69,7 @@ func TestManagedArtifact_IdleActiveChatReclaimsSandboxBin(t *testing.T) {
 	}
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "idle-chat", meta)
 	writeFile(t, filepath.Join(taskDir, sandboxBinRel, "codex"), 4096)
+	writeFile(t, filepath.Join(taskDir, codexTmpRel, "marketplaces", "plugin"), 2048)
 	// Everything below must survive: session data, the audit trail, and a
 	// user-owned directory that merely shares the managed basename.
 	writeFile(t, filepath.Join(taskDir, "logs/run.log"), 32)
@@ -83,6 +85,7 @@ func TestManagedArtifact_IdleActiveChatReclaimsSandboxBin(t *testing.T) {
 	d.applyGCAction(taskDir, action, stats)
 
 	assertGone(t, taskDir, sandboxBinRel)
+	assertGone(t, taskDir, codexTmpRel)
 	assertKept(t, taskDir,
 		"logs/run.log",
 		"output/result.md",
@@ -90,11 +93,14 @@ func TestManagedArtifact_IdleActiveChatReclaimsSandboxBin(t *testing.T) {
 		"workdir/repo/.sandbox-bin/user-owned",
 		".gc_meta.json",
 	)
-	if stats.artifactRemoved != 1 {
-		t.Fatalf("artifact_removed = %d, want 1", stats.artifactRemoved)
+	if stats.artifactRemoved != 2 {
+		t.Fatalf("artifact_removed = %d, want 2", stats.artifactRemoved)
 	}
 	if got := stats.byPattern[managedArtifactPatternPrefix+sandboxBinRel]; got != 1 {
 		t.Fatalf("managed pattern count = %d, want 1", got)
+	}
+	if got := stats.byPattern[managedArtifactPatternPrefix+codexTmpRel]; got != 1 {
+		t.Fatalf("temporary cache pattern count = %d, want 1", got)
 	}
 }
 
@@ -303,19 +309,19 @@ func TestManagedArtifact_SecondCycleIsANoOp(t *testing.T) {
 	}
 }
 
-// The direct-path removal replaced a tree walk that refused to descend through
-// symlinks and junctions. It has to refuse at every component, not just the
-// leaf — codex-home links the user's real ~/.codex content into itself.
+// Direct removal may unlink an exact managed leaf, but it must refuse a linked
+// parent. Neither case may follow the link into the user's real ~/.codex.
 func TestManagedArtifact_DirectRemovalDoesNotFollowLinks(t *testing.T) {
 	t.Parallel()
 	d := newGCTestDaemon(t, http.NewServeMux())
 
 	for _, tc := range []struct {
-		name     string
-		linkPath string
+		name        string
+		linkPath    string
+		wantRemoved int
 	}{
-		{name: "leaf", linkPath: sandboxBinRel},
-		{name: "parent", linkPath: "codex-home"},
+		{name: "leaf", linkPath: sandboxBinRel, wantRemoved: 1},
+		{name: "parent", linkPath: "codex-home", wantRemoved: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			taskDir := t.TempDir()
@@ -337,8 +343,8 @@ func TestManagedArtifact_DirectRemovalDoesNotFollowLinks(t *testing.T) {
 			}
 
 			removed, bytes, _ := d.cleanManagedTaskArtifacts(taskDir)
-			if removed != 0 || bytes != 0 {
-				t.Fatalf("removed=%d bytes=%d, want 0 through a link", removed, bytes)
+			if removed != tc.wantRemoved || bytes != 0 {
+				t.Fatalf("removed=%d bytes=%d, want %d/0", removed, bytes, tc.wantRemoved)
 			}
 			for _, keep := range []string{keepFile, userSandboxBin} {
 				if _, err := os.Stat(keep); err != nil {
@@ -346,6 +352,39 @@ func TestManagedArtifact_DirectRemovalDoesNotFollowLinks(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A new task's codex-home/.tmp is a link to the user's shared cache. GC must
+// remove only that task-local link, leaving every shared cache byte intact.
+func TestManagedArtifact_ReclaimsTaskTemporaryCacheLinkOnly(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := t.TempDir()
+	sharedTmp := t.TempDir()
+	sharedMarker := filepath.Join(sharedTmp, "marketplaces", "keep")
+	writeFile(t, sharedMarker, 4096)
+
+	linkPath := filepath.Join(taskDir, filepath.FromSlash(codexTmpRel))
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(sharedTmp, linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	removed, bytes, perPattern := d.cleanManagedTaskArtifacts(taskDir)
+	if removed != 1 || bytes != 0 {
+		t.Fatalf("removed=%d bytes=%d, want 1/0 for a cache link", removed, bytes)
+	}
+	if got := perPattern[managedArtifactPatternPrefix+codexTmpRel]; got != 1 {
+		t.Fatalf("temporary cache pattern count = %d, want 1", got)
+	}
+	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
+		t.Fatalf("task temporary cache link survived: %v", err)
+	}
+	if _, err := os.Stat(sharedMarker); err != nil {
+		t.Fatalf("shared temporary cache target was touched: %v", err)
 	}
 }
 

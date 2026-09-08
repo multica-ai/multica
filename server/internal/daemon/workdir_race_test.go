@@ -146,8 +146,15 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 	}
 
 	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
-	// The Run() failure is expected; we only assert the pre-Run ordering.
-	_, _ = d.runTask(context.Background(), task, "claude", 0, taskLog)
+	// The Run() failure is expected. Its result must still retain EnvRoot so
+	// handleTask can stamp GC completion metadata for the failed run.
+	result, runErr := d.runTask(context.Background(), task, "claude", 0, taskLog)
+	if runErr == nil {
+		t.Fatal("runTask unexpectedly succeeded with a missing agent binary")
+	}
+	if result.EnvRoot != expectedEnvRoot {
+		t.Fatalf("failed run EnvRoot = %q, want %q for GC", result.EnvRoot, expectedEnvRoot)
+	}
 
 	if !startCalled.Load() {
 		t.Fatal("runTask did not call /start — Fix A's StartTask placement is missing")
@@ -778,10 +785,11 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 // neither isActiveEnvRoot nor a .gc_meta.json file — falling through to
 // orphanByMTime, gated only by the 72h GCOrphanTTL.
 //
-// This test fakes the inner guard's lifecycle (mark + deferred unmark),
-// then asserts that at the moment /complete is hit (i.e. between runner.run
-// returning and WriteGCMeta running), isActiveEnvRoot(envRoot) is still
-// true thanks to the outer guard handleTask installs.
+// This test fakes the inner guard's lifecycle (mark + deferred unmark), then
+// asserts that at the moment /complete is hit, isActiveEnvRoot(envRoot) is
+// still true thanks to the outer guard handleTask installs. Completion metadata
+// is now stamped before this callback, but the root must remain reserved until
+// all terminal reporting is finished.
 func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 	t.Parallel()
 

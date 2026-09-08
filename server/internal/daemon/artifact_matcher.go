@@ -62,6 +62,26 @@ func (m artifactMatcher) matchDirectory(absRoot, path string, entry os.DirEntry)
 	return "", false
 }
 
+// matchExactPath reports only an exact daemon-managed path. It is used for a
+// linked leaf: basename patterns must never remove links, while an exact cache
+// link created by the daemon can be safely unlinked without touching its
+// target.
+func (m artifactMatcher) matchExactPath(absRoot, path, name string) (string, bool) {
+	if _, ok := m.exactLeafNames[name]; !ok {
+		return "", false
+	}
+	rel, err := filepath.Rel(absRoot, path)
+	if err != nil {
+		return "", false
+	}
+	rel, ok := safeRelativePath(rel)
+	if !ok {
+		return "", false
+	}
+	label, ok := m.exactPaths[rel]
+	return label, ok
+}
+
 func (m artifactMatcher) managedSubpaths() []string {
 	out := make([]string, 0, len(m.exactPaths))
 	for rel := range m.exactPaths {

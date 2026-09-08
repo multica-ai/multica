@@ -433,7 +433,8 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 // the parent record, and shouldCleanTaskDirForKind is what answers it. Whether
 // the daemon's *own regenerable cache* may be reclaimed is not a per-kind
 // question at all — codex-home/.sandbox-bin is a ~285 MiB copy of the Codex
-// binary that the next run re-provisions on demand, whoever the parent is.
+// binary and codex-home/.tmp may be a legacy per-task copy of plugin caches.
+// The next run re-provisions either on demand, whoever the parent is.
 // Wiring that reclaim into the issue path alone (#5654) left every other kind
 // holding the cache indefinitely; for chat that is genuinely unbounded, since a
 // session stays "active" with no time limit and Desktop's chat is the main
@@ -716,9 +717,11 @@ func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *exece
 		//
 		// This protects the session's own data, not the daemon's regenerable
 		// caches. shouldCleanTaskDir layers applyManagedArtifactFallback on top
-		// of this skip, so a session idle past GCArtifactTTL gives back
-		// codex-home/.sandbox-bin and the next message re-provisions it. That
-		// costs a ~285 MiB Codex bootstrap on resume and is the same trade-off
+		// of this skip, so a session idle past GCArtifactTTL gives back the
+		// task-local codex-home/.sandbox-bin and .tmp link. The next message
+		// re-provisions both; only .sandbox-bin incurs the ~285 MiB Codex
+		// bootstrap cost because .tmp resolves back to the shared cache. This is
+		// the same trade-off
 		// gcDecisionIssueResult already makes for a completed task whose issue
 		// is still open — without it an active session pins the cache forever
 		// (#6782).
@@ -917,9 +920,10 @@ const linkedDirModes = os.ModeSymlink | os.ModeIrregular
 //   - patterns are basename-only; entries with a path separator are dropped.
 //   - .git subtrees are never descended into, so the agent's git history stays
 //     intact even if a pattern would otherwise match.
-//   - linked directories are skipped entirely — neither the link nor its
-//     target is touched, so a malicious or stale link can't redirect the GC
-//     outside the workdir. See linkedDirModes for what counts as a link.
+//   - linked directories are never followed. An exact daemon-managed leaf may
+//     be unlinked directly; all linked parents and basename-only matches stay
+//     untouched, so a malicious link can't redirect the GC outside the workdir.
+//     See linkedDirModes for what counts as a link.
 //   - every removal target is verified to live inside taskDir, so a tampered
 //     .gc_meta.json can't trick the daemon into deleting outside its sandbox.
 func (d *Daemon) cleanTaskArtifacts(taskDir string, patterns []string) (removed int, bytes int64, perPattern map[string]int) {
@@ -955,7 +959,7 @@ func (d *Daemon) cleanManagedTaskArtifacts(taskDir string) (removed int, bytes i
 			continue
 		}
 		size := dirSize(target)
-		if rmErr := os.RemoveAll(target); rmErr != nil {
+		if rmErr := removeManagedArtifact(target); rmErr != nil {
 			d.logger.Warn("gc: artifact remove failed", "path", target, "error", rmErr)
 			continue
 		}
@@ -967,6 +971,21 @@ func (d *Daemon) cleanManagedTaskArtifacts(taskDir string) (removed int, bytes i
 	return
 }
 
+// removeManagedArtifact removes a regular managed directory recursively, but
+// unlinks a symlink or Windows junction leaf directly. The latter is how a new
+// task exposes the user's shared Codex .tmp cache; unlinking it must never
+// descend into or mutate the shared target.
+func removeManagedArtifact(target string) error {
+	info, err := os.Lstat(target)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&linkedDirModes != 0 {
+		return os.Remove(target)
+	}
+	return os.RemoveAll(target)
+}
+
 // managedArtifactTarget resolves one managed relative subpath under absRoot to
 // an absolute path that is safe to remove, reporting false when there is
 // nothing to reclaim.
@@ -975,15 +994,17 @@ func (d *Daemon) cleanManagedTaskArtifacts(taskDir string) (removed int, bytes i
 // junctions: the per-task codex-home links the user's real skills, Codex
 // session store and plugin cache into itself, so following one would put
 // RemoveAll inside the user's home. Addressing the path directly means every
-// component between absRoot and the leaf has to be re-checked, not just the
-// leaf. See linkedDirModes.
+// parent component has to be a real directory. The exact leaf may itself be a
+// link created by the daemon; callers unlink that leaf without following it.
+// See linkedDirModes.
 //
 // Containment needs no separate check: safeRelativePath has already rejected
 // absolute paths and anything that escapes upward, and filepath.Clean leaves no
 // interior "..", so joining the components one at a time cannot leave absRoot.
 func managedArtifactTarget(absRoot, rel string) (string, bool) {
 	current := absRoot
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	parts := strings.Split(rel, string(filepath.Separator))
+	for i, part := range parts {
 		current = filepath.Join(current, part)
 		info, err := os.Lstat(current)
 		if err != nil {
@@ -991,7 +1012,10 @@ func managedArtifactTarget(absRoot, rel string) (string, bool) {
 			// "nothing for this cycle to do".
 			return "", false
 		}
-		if info.Mode()&linkedDirModes != 0 || !info.IsDir() {
+		if info.Mode()&linkedDirModes != 0 {
+			return current, i == len(parts)-1
+		}
+		if !info.IsDir() {
 			return "", false
 		}
 	}
@@ -1037,21 +1061,35 @@ func (d *Daemon) cleanTaskArtifactsMatching(taskDir string, matcher artifactMatc
 		if path == absRoot {
 			return nil
 		}
+		// Refuse to follow linked directories. WalkDir reports them as type Dir
+		// on some platforms; lstat to be sure. An exact daemon-managed leaf is
+		// safe to unlink directly, but basename patterns never remove links and
+		// a linked parent is always left alone.
+		info, statErr := os.Lstat(path)
+		if statErr != nil {
+			return nil
+		}
+		if info.Mode()&linkedDirModes != 0 {
+			if pattern, ok := matcher.matchExactPath(absRoot, path, entry.Name()); ok {
+				if rmErr := os.Remove(path); rmErr != nil {
+					d.logger.Warn("gc: artifact link remove failed", "path", path, "error", rmErr)
+				} else {
+					removed++
+					perPattern[pattern]++
+					d.logger.Info("gc: artifact link removed", "path", path, "bytes", 0)
+				}
+			}
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if !entry.IsDir() {
 			return nil
 		}
 		// Never descend into .git — preserves agent commits even if a pattern
 		// like "objects" would otherwise match.
 		if entry.Name() == ".git" {
-			return filepath.SkipDir
-		}
-		// Refuse to follow linked directories. WalkDir reports them as type
-		// Dir on some platforms; lstat to be sure.
-		info, statErr := os.Lstat(path)
-		if statErr != nil {
-			return nil
-		}
-		if info.Mode()&linkedDirModes != 0 {
 			return filepath.SkipDir
 		}
 		pattern, ok := matcher.matchDirectory(absRoot, path, entry)

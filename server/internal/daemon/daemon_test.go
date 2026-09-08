@@ -4802,6 +4802,55 @@ func TestHandleTask_BareErrorReportsFailureWithCancelledParent(t *testing.T) {
 	}
 }
 
+func TestHandleTask_BareErrorWritesGCCompletionMetadata(t *testing.T) {
+	t.Parallel()
+
+	workspacesRoot := t.TempDir()
+	workspaceID := "ws-failed-gc-meta"
+	taskID := "task-failed-gc-meta"
+	envRoot := execenv.PredictRootDir(execenv.RootDirParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    workspaceID,
+		TaskID:         taskID,
+	})
+	if err := os.MkdirAll(envRoot, 0o755); err != nil {
+		t.Fatalf("create failed task env root: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "codex"}},
+		activeEnvRoots:     make(map[string]int),
+		cancelPollInterval: time.Hour,
+		cfg:                Config{WorkspacesRoot: workspacesRoot},
+	}
+	d.runner = taskRunnerFunc(func(context.Context, Task, string, int, *slog.Logger) (TaskResult, error) {
+		return TaskResult{EnvRoot: envRoot}, errors.New("agent process crashed")
+	})
+
+	d.handleTask(context.Background(), Task{
+		ID:          taskID,
+		WorkspaceID: workspaceID,
+		RuntimeID:   "rt-1",
+		IssueID:     "issue-failed-gc-meta",
+		Agent:       &AgentData{Name: "test-agent"},
+	}, 0)
+
+	meta, err := execenv.ReadGCMeta(envRoot)
+	if err != nil {
+		t.Fatalf("read failed-run GC metadata: %v", err)
+	}
+	if meta.IssueID != "issue-failed-gc-meta" || meta.CompletedAt.IsZero() {
+		t.Fatalf("failed-run GC metadata = %+v", meta)
+	}
+}
+
 // TestHandleTask_UntrackedRuntimeFailsBackForRetry covers the window between a
 // batch claim leaving with a runtime ID and the claimed task arriving here.
 //

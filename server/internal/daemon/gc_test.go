@@ -1528,11 +1528,12 @@ func TestCleanTaskArtifacts_ManagedPathDoesNotFollowSymlinks(t *testing.T) {
 	d := newGCTestDaemon(t, http.NewServeMux())
 
 	for _, tc := range []struct {
-		name     string
-		linkPath string
+		name        string
+		linkPath    string
+		wantRemoved int
 	}{
-		{name: "leaf", linkPath: "codex-home/.sandbox-bin"},
-		{name: "parent", linkPath: "codex-home"},
+		{name: "exact managed leaf is unlinked", linkPath: "codex-home/.sandbox-bin", wantRemoved: 1},
+		{name: "linked parent is preserved", linkPath: "codex-home", wantRemoved: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			taskDir := t.TempDir()
@@ -1548,8 +1549,8 @@ func TestCleanTaskArtifacts_ManagedPathDoesNotFollowSymlinks(t *testing.T) {
 			}
 
 			removed, _, _ := d.cleanTaskArtifacts(taskDir, nil)
-			if removed != 0 {
-				t.Fatalf("removed=%d, want 0 for symlinked managed path", removed)
+			if removed != tc.wantRemoved {
+				t.Fatalf("removed=%d, want %d for symlinked managed path", removed, tc.wantRemoved)
 			}
 			if _, err := os.Stat(keepFile); err != nil {
 				t.Fatalf("symlink target was touched: %v", err)
@@ -2383,7 +2384,8 @@ func TestShouldCleanTaskDir_ChatHardDeletedFreshMtime(t *testing.T) {
 //
 // #6782 narrowed this from "the GC does nothing" to "the GC never removes the
 // directory": a session idle past GCArtifactTTL now gives back the regenerable
-// codex-home/.sandbox-bin cache, which the next message re-provisions. The
+// codex-home/.sandbox-bin cache and shared-cache .tmp link, which the next
+// message re-provisions. The
 // acceptance criterion is unchanged — the session's own data survives — so
 // this asserts the surviving contents rather than the bare action value.
 // TestManagedArtifact_IdleActiveChatReclaimsSandboxBin covers the carve-out.

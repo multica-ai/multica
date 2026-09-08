@@ -86,3 +86,33 @@ func TestTaskSize_DoesNotCountDirectoryJunction(t *testing.T) {
 		t.Errorf("artifacts = %d, want 0", artifacts)
 	}
 }
+
+func TestManagedArtifact_RemovesTemporaryCacheJunctionOnly(t *testing.T) {
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := t.TempDir()
+	sharedTmp := t.TempDir()
+	keep := filepath.Join(sharedTmp, "marketplaces", "keep")
+	if err := os.MkdirAll(filepath.Dir(keep), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keep, []byte("shared content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	linkPath := filepath.Join(taskDir, "codex-home", ".tmp")
+	createJunction(t, sharedTmp, linkPath)
+
+	removed, bytes, perPattern := d.cleanManagedTaskArtifacts(taskDir)
+	if removed != 1 || bytes != 0 {
+		t.Fatalf("removed=%d bytes=%d, want 1/0", removed, bytes)
+	}
+	if got := perPattern[managedArtifactPatternPrefix+"codex-home/.tmp"]; got != 1 {
+		t.Fatalf("temporary cache pattern count = %d, want 1", got)
+	}
+	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
+		t.Fatalf("task temporary cache junction survived: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("shared temporary cache target was touched: %v", err)
+	}
+}
