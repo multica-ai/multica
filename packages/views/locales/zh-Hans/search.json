@@ -31,6 +31,11 @@
     "no_results": "未找到结果。",
     "type_to_search": "输入关键词搜索任务和项目"
   },
+  "error": {
+    "timeout": "搜索超时，结果可能不完整。",
+    "failure": "搜索失败，结果可能不完整。",
+    "retry": "重试"
+  },
   "trigger": {
     "label": "搜索..."
   }

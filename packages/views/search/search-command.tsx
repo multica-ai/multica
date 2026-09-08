@@ -3,6 +3,7 @@
 import { issueStatusCategory } from "@multica/core/issues";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertCircle,
   Check,
   Clock,
   Copy,
@@ -27,7 +28,7 @@ import type {
   SearchIssueResult,
   SearchProjectResult,
 } from "@multica/core/types";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import {
   openCreateIssueWithPreference,
@@ -298,7 +299,17 @@ interface SearchResults {
   projects: SearchProjectResult[];
 }
 
+interface SearchErrorState {
+  query: string;
+  kind: "timeout" | "failure";
+}
+
 const NO_RESULTS: SearchResults = { query: "", issues: [], projects: [] };
+
+function isSearchTimeout(error: unknown) {
+  // Both search endpoints reserve 503 for their database statement timeout.
+  return error instanceof ApiError && error.status === 503;
+}
 
 // One heading treatment for every group. Headings go through cmdk's `heading`
 // prop rather than a hand-rolled div: cmdk renders it into a
@@ -369,6 +380,7 @@ export function SearchCommand() {
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResults>(NO_RESULTS);
+  const [searchError, setSearchError] = useState<SearchErrorState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -567,6 +579,8 @@ export function SearchCommand() {
   // valid item whenever the input changes, so a live stale row turns the next
   // Enter into a jump to a result the user has already typed past.
   const resultsAreStale = results.query !== query.trim();
+  const visibleSearchError =
+    searchError?.query === query.trim() ? searchError : null;
 
   // Cross-type cancelled demotion (MUL-5824). The two searches are ranked
   // independently server-side, so the partition has to happen here, where they
@@ -610,6 +624,7 @@ export function SearchCommand() {
     if (!open) {
       setQuery("");
       setResults(NO_RESULTS);
+      setSearchError(null);
       setIsLoading(false);
     }
   }, [open]);
@@ -620,46 +635,55 @@ export function SearchCommand() {
 
     if (!q.trim()) {
       setResults(NO_RESULTS);
+      setSearchError(null);
       setIsLoading(false);
       return;
     }
 
+    setSearchError(null);
     setIsLoading(true);
     debounceRef.current = setTimeout(async () => {
       const controller = new AbortController();
       abortRef.current = controller;
-      try {
-        const [issueRes, projectRes] = await Promise.all([
-          api.searchIssues({
-            q: q.trim(),
-            limit: 20,
-            include_closed: true,
-            signal: controller.signal,
-          }),
-          api.searchProjects({
-            q: q.trim(),
-            limit: 10,
-            include_closed: true,
-            signal: controller.signal,
-          }),
-        ]);
-        if (!controller.signal.aborted) {
-          setResults({
-            query: q.trim(),
-            issues: issueRes.issues,
-            projects: projectRes.projects,
-          });
-          setIsLoading(false);
-        }
-      } catch {
-        if (!controller.signal.aborted) {
-          // Drop the previous query's rows rather than leaving them on screen
-          // permanently greyed out: the request that would have replaced them
-          // is never coming. The list falls through to the empty state.
-          setResults({ query: q.trim(), issues: [], projects: [] });
-          setIsLoading(false);
-        }
-      }
+      const trimmedQuery = q.trim();
+      const [issueResult, projectResult] = await Promise.allSettled([
+        api.searchIssues({
+          q: trimmedQuery,
+          limit: 20,
+          include_closed: true,
+          signal: controller.signal,
+        }),
+        api.searchProjects({
+          q: trimmedQuery,
+          limit: 10,
+          include_closed: true,
+          signal: controller.signal,
+        }),
+      ]);
+
+      if (controller.signal.aborted) return;
+
+      setResults({
+        query: trimmedQuery,
+        issues: issueResult.status === "fulfilled" ? issueResult.value.issues : [],
+        projects:
+          projectResult.status === "fulfilled" ? projectResult.value.projects : [],
+      });
+
+      const failures = [issueResult, projectResult].filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      setSearchError(
+        failures.length === 0
+          ? null
+          : {
+              query: trimmedQuery,
+              kind: failures.some((failure) => isSearchTimeout(failure.reason))
+                ? "timeout"
+                : "failure",
+            },
+      );
+      setIsLoading(false);
     }, 300);
   }, []);
 
@@ -845,8 +869,30 @@ export function SearchCommand() {
               </div>
             )}
 
+            {!isLoading && visibleSearchError && (
+              <div
+                role="alert"
+                className="mx-2 mt-2 flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-caption text-destructive"
+              >
+                <AlertCircle className="size-4 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  {visibleSearchError.kind === "timeout"
+                    ? t(($) => $.error.timeout)
+                    : t(($) => $.error.failure)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => search(query)}
+                  className="shrink-0 rounded px-1.5 py-1 font-medium underline underline-offset-2 outline-none hover:no-underline focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {t(($) => $.error.retry)}
+                </button>
+              </div>
+            )}
+
             {!isLoading &&
               query.trim() &&
+              !visibleSearchError &&
               !hasResults &&
               filteredPages.length === 0 &&
               filteredCommands.length === 0 && (

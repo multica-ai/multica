@@ -85,6 +85,7 @@ const {
   mockCommentExpandAll,
   mockResolvedCollapseAll,
   mockResolvedExpandAll,
+  MockApiError,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockSearchIssues: vi.fn(),
@@ -129,6 +130,14 @@ const {
   mockCommentExpandAll: vi.fn(),
   mockResolvedCollapseAll: vi.fn(),
   mockResolvedExpandAll: vi.fn(),
+  MockApiError: class MockApiError extends Error {
+    readonly status: number;
+
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  },
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -137,6 +146,7 @@ vi.mock("@multica/core/api", () => ({
     searchIssues: mockSearchIssues,
     searchProjects: mockSearchProjects,
   },
+  ApiError: MockApiError,
 }));
 
 vi.mock("../common/actor-avatar", () => ({
@@ -1214,6 +1224,113 @@ describe("SearchCommand", () => {
         { timeout: 2000 },
       );
       expect(renderedHeadings()).not.toContain("Cancelled");
+    });
+  });
+
+  describe("search request failures", () => {
+    it("shows a genuine empty response as no results", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "zzzzzz",
+      );
+
+      await waitFor(
+        () => {
+          expect(screen.getByText("No results found.")).toBeInTheDocument();
+        },
+        { timeout: 2000 },
+      );
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("reports a timeout, keeps the successful source, and retries both sources", async () => {
+      const user = userEvent.setup();
+      mockSearchIssues
+        .mockRejectedValueOnce(new MockApiError("search timed out", 503))
+        .mockResolvedValue({ issues: [], total: 0 });
+      mockSearchProjects.mockResolvedValue({
+        projects: [
+          {
+            id: "project-retained",
+            workspace_id: "ws-test",
+            title: "Retained project",
+            description: null,
+            icon: null,
+            status: "in_progress",
+            priority: "none",
+            lead_type: null,
+            lead_id: null,
+            start_date: null,
+            due_date: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            issue_count: 0,
+            match_source: "title",
+          },
+        ],
+        total: 1,
+      });
+
+      renderSearch();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "retentionprobe",
+      );
+
+      await waitFor(
+        () => {
+          expect(screen.getByRole("alert")).toHaveTextContent(
+            "Search timed out. Results may be incomplete.",
+          );
+          expect(
+            screen.getByText(
+              (_, element) =>
+                element?.tagName === "SPAN" &&
+                element.textContent === "Retained project",
+            ),
+          ).toBeInTheDocument();
+        },
+        { timeout: 2000 },
+      );
+      expect(screen.queryByText("No results found.")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Try again" }));
+
+      await waitFor(
+        () => {
+          expect(mockSearchIssues).toHaveBeenCalledTimes(2);
+          expect(mockSearchProjects).toHaveBeenCalledTimes(2);
+          expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+        },
+        { timeout: 2000 },
+      );
+    });
+
+    it("does not label a non-timeout failure as no results or a timeout", async () => {
+      const user = userEvent.setup();
+      mockSearchIssues.mockRejectedValue(new Error("network unavailable"));
+
+      renderSearch();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "failureprobe",
+      );
+
+      await waitFor(
+        () => {
+          expect(screen.getByRole("alert")).toHaveTextContent(
+            "Search failed. Results may be incomplete.",
+          );
+        },
+        { timeout: 2000 },
+      );
+      expect(screen.queryByText("No results found.")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Search timed out. Results may be incomplete."),
+      ).not.toBeInTheDocument();
     });
   });
 
