@@ -57,6 +57,7 @@
       "codex_semantic_inactivity": "에이전트가 응답하지 않아 완료 전에 중단되었습니다. 다시 시도해 주세요.",
       "runtime_offline": "에이전트가 현재 오프라인 상태여서 답변할 수 없습니다. 다시 온라인이 되면 시도해 주세요.",
       "runtime_recovery": "완료 전에 에이전트가 다시 시작되었습니다. 다시 시도해 주세요.",
+      "runtime_access_revoked": "런타임 접근이 취소되었습니다. 새 실행을 시작하기 전에 에이전트를 사용 가능한 런타임에 연결하세요.",
       "manual": "이 답변이 취소되었습니다.",
       "skill_bundle_unavailable": "에이전트의 skill을 내려받지 못해 답변을 시작하지 못했습니다. 대개 네트워크 연결 문제입니다. 다시 시도해 주세요.",
       "runtime_cli_timeout": "로컬 OpenClaw CLI가 제한 시간 안에 응답하지 않아 이번 실행이 시작되지 못했습니다. 네트워크 문제가 아니라 로컬 실행 지연입니다. CLI가 빨라지거나 제한 시간(MULTICA_OPENCLAW_CLI_TIMEOUT)을 늘리기 전에는 다시 시도해도 실패합니다.",

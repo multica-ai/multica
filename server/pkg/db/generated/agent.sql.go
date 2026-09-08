@@ -2310,7 +2310,12 @@ SELECT
     $21,
     $22,
     COALESCE($23::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, $3, $2)
+WHERE CASE WHEN lock_task_owner_rows($1, $3, $2) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = $1
+        AND bound_agent.runtime_id = $2
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision
 `
 
@@ -2340,6 +2345,11 @@ type CreateAgentTaskParams struct {
 	ID                   pgtype.UUID   `json:"id"`
 }
 
+// CASE is intentional: the workspace/owner fence MUST run before the binding
+// row lock. AND permits the planner to reorder those checks and can deadlock
+// against workspace deletion. The locked binding rechecks a delayed enqueue
+// after runtime-access revocation unbinds the agent. All enqueue variants below
+// use the same ordering, including automatic retries.
 // Fenced against workspace teardown: lock_task_owner_rows (migration 284)
 // locks the owners' workspace rows in the writer's own transaction and returns
 // false once they are gone, so this statement writes no row instead of stranding
@@ -2453,28 +2463,30 @@ INSERT INTO agent_task_queue (
     id
 )
 SELECT
-    $4, $5, $6, 'deferred', $7,
+    $1, $2, $3, 'deferred', $4,
+    $5,
+    $6,
+    COALESCE($7::boolean, FALSE),
     $8,
     $9,
-    COALESCE($10::boolean, FALSE),
+    $10,
     $11,
     $12,
     $13,
     $14,
     $15,
     $16,
-    $17,
-    $18,
-    $19,
-    COALESCE($20::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, $3, $2)
+    COALESCE($17::uuid, gen_random_uuid())
+WHERE CASE WHEN lock_task_owner_rows($1, $3, $2) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = $1
+        AND bound_agent.runtime_id = $2
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision
 `
 
 type CreateDeferredAgentTaskParams struct {
-	PAgentID             pgtype.UUID        `json:"p_agent_id"`
-	PRuntimeID           pgtype.UUID        `json:"p_runtime_id"`
-	PIssueID             pgtype.UUID        `json:"p_issue_id"`
 	AgentID              pgtype.UUID        `json:"agent_id"`
 	RuntimeID            pgtype.UUID        `json:"runtime_id"`
 	IssueID              pgtype.UUID        `json:"issue_id"`
@@ -2507,9 +2519,6 @@ type CreateDeferredAgentTaskParams struct {
 // (MUL-4302 §2).
 func (q *Queries) CreateDeferredAgentTask(ctx context.Context, arg CreateDeferredAgentTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createDeferredAgentTask,
-		arg.PAgentID,
-		arg.PRuntimeID,
-		arg.PIssueID,
 		arg.AgentID,
 		arg.RuntimeID,
 		arg.IssueID,
@@ -2621,7 +2630,12 @@ SELECT
     $22,
     $23,
     COALESCE($24::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, $3, $2)
+WHERE CASE WHEN lock_task_owner_rows($1, $3, $2) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = $1
+        AND bound_agent.runtime_id = $2
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision
 `
 
@@ -2766,7 +2780,12 @@ WHERE p.id = $5
   AND p.issue_id IS NULL
   AND p.chat_session_id IS NULL
   AND p.autopilot_run_id IS NULL
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+  AND CASE WHEN lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = p.agent_id
+        AND bound_agent.runtime_id = p.runtime_id
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision
 `
 
@@ -2872,7 +2891,12 @@ SELECT
     $10,
     $11,
     COALESCE($12::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, NULL, $2)
+WHERE CASE WHEN lock_task_owner_rows($1, NULL, $2) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = $1
+        AND bound_agent.runtime_id = $2
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision
 `
 
@@ -3011,7 +3035,12 @@ SELECT
     COALESCE($6::uuid, gen_random_uuid())
 FROM agent_task_queue p
 WHERE p.id = $1
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+  AND CASE WHEN lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = p.agent_id
+        AND bound_agent.runtime_id = p.runtime_id
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 ON CONFLICT (issue_id, agent_id) WHERE status IN ('queued', 'dispatched')
        OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
 DO NOTHING
@@ -5701,6 +5730,139 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 			&i.BranchName,
 			&i.DurableWorkDir,
 			&i.ChannelContextRevision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNonOwnerUserAgentsByRuntime = `-- name: ListNonOwnerUserAgentsByRuntime :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters FROM agent
+WHERE runtime_id = $1
+  AND kind = 'user'
+  AND owner_id IS DISTINCT FROM $2
+ORDER BY name ASC
+`
+
+type ListNonOwnerUserAgentsByRuntimeParams struct {
+	RuntimeID      pgtype.UUID `json:"runtime_id"`
+	RuntimeOwnerID pgtype.UUID `json:"runtime_owner_id"`
+}
+
+// Returns every user agent currently bound to a runtime whose owner differs
+// from the runtime owner. This is the dependency plan shown before a public
+// runtime is made private: owner-owned agents keep their binding, while every
+// teammate-owned agent loses machine access.
+func (q *Queries) ListNonOwnerUserAgentsByRuntime(ctx context.Context, arg ListNonOwnerUserAgentsByRuntimeParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listNonOwnerUserAgentsByRuntime, arg.RuntimeID, arg.RuntimeOwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.ConversationStarters,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNonOwnerUserAgentsByRuntimeForUpdate = `-- name: ListNonOwnerUserAgentsByRuntimeForUpdate :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters FROM agent
+WHERE runtime_id = $1
+  AND kind = 'user'
+  AND owner_id IS DISTINCT FROM $2
+ORDER BY id
+FOR UPDATE NOWAIT
+`
+
+type ListNonOwnerUserAgentsByRuntimeForUpdateParams struct {
+	RuntimeID      pgtype.UUID `json:"runtime_id"`
+	RuntimeOwnerID pgtype.UUID `json:"runtime_owner_id"`
+}
+
+// Runtime access-change locking serializes new bindings. NOWAIT avoids waiting
+// behind a writer that already holds an agent and needs the runtime row.
+func (q *Queries) ListNonOwnerUserAgentsByRuntimeForUpdate(ctx context.Context, arg ListNonOwnerUserAgentsByRuntimeForUpdateParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listNonOwnerUserAgentsByRuntimeForUpdate, arg.RuntimeID, arg.RuntimeOwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.ConversationStarters,
 		); err != nil {
 			return nil, err
 		}

@@ -978,6 +978,7 @@ function FailureBubble({
     timeout: t(($) => $.message_list.failure.timeout),
     codex_semantic_inactivity: t(($) => $.message_list.failure.codex_semantic_inactivity),
     runtime_offline: t(($) => $.message_list.failure.runtime_offline),
+    runtime_access_revoked: t(($) => $.message_list.failure.runtime_access_revoked),
     runtime_recovery: t(($) => $.message_list.failure.runtime_recovery),
     manual: t(($) => $.message_list.failure.manual),
     cancelled: t(($) => $.message_list.failure.manual),

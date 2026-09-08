@@ -13,6 +13,7 @@
  *                                  onto the assistant message
  *   - task:queued / dispatch    → seed / promote pendingTask
  *   - task:cancelled            → refresh pendingTask + messages
+ *   - chat:cancel_finalized     → refresh the durable cancellation outcome
  *   - task:completed            → no-op for messages (chat:done already
  *                                  wrote the assistant message); just
  *                                  refresh pendingTask
@@ -86,6 +87,13 @@ export function useChatSessionRealtime(
           if (!isMine(payload)) return;
           invalidatePendingTask(qc, sessionId);
           qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+        }),
+        // Revocation arms durable chat settlement in its transaction. The
+        // outcome may arrive after task:cancelled (including after an offline
+        // daemon's ack), so refresh again when the authoritative row is ready.
+        ws.on("chat:cancel_finalized", (payload) => {
+          if (!isMine(payload)) return;
+          invalidateMine();
         }),
         ws.on("task:completed", (payload) => {
           if (!isMine(payload)) return;

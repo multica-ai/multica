@@ -24,6 +24,20 @@ The chain is:
 
 ## CLI
 
+Making a public runtime private requires its owner's confirmation when other
+members have bound agents or active runs. Confirmation unbinds those agents,
+cancels their active runs (`runtime_access_revoked`), and pauses their active
+autopilots; the runtime owner's own work is unaffected. A changed dependency
+plan requires renewed confirmation. Treat a busy chat conflict as retryable,
+not as a successful visibility change. Rebind the affected agent to an
+accessible runtime before starting another run, and explicitly resume paused
+autopilots. Chat cancellation persists input/attachment recovery data; the
+existing recovery UI is available on web/desktop, not yet on mobile.
+Offline daemons cannot receive the stop request until reconnecting, so
+server-side revocation does not guarantee immediate termination of a local
+process. The existing CLI exposes rebind and cancellation status; it does not
+provide a runtime-visibility switch or bypass the confirmation flow.
+
 ```bash
 multica runtime list --output json
 multica runtime usage <runtime-id> --output json

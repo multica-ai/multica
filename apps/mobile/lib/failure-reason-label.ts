@@ -21,6 +21,7 @@ const LABELS: Record<string, string> = {
   // Platform / scheduler side.
   queued_expired: "Expired in queue",
   runtime_offline: "Daemon offline",
+  runtime_access_revoked: "Runtime access was revoked. Bind the agent to an accessible runtime before starting another run.",
   runtime_recovery: "Daemon restarted",
   timeout: "Task timed out",
   iteration_limit: "Hit the iteration limit",

@@ -813,6 +813,7 @@
       "runtime_offline": "데몬 오프라인",
       "runtime_reconnect_timeout": "데몬이 제시간에 다시 연결되지 않음",
       "runtime_recovery": "데몬 재시작됨",
+      "runtime_access_revoked": "런타임 접근이 취소됨",
       "timeout": "실행 시간 초과",
       "iteration_limit": "반복 횟수 제한에 도달함",
       "agent_blocked": "사용자 입력 대기 중",

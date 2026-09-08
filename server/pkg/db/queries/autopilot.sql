@@ -604,7 +604,12 @@ SELECT
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, NULL, $2)
+WHERE CASE WHEN lock_task_owner_rows($1, NULL, $2) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = $1
+        AND bound_agent.runtime_id = $2
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 RETURNING *;
 
 -- name: GetAutopilotTaskByRun :one

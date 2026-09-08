@@ -268,6 +268,27 @@ WHERE runtime_id = $1 AND kind = 'user'
 ORDER BY id
 FOR UPDATE;
 
+-- name: ListNonOwnerUserAgentsByRuntime :many
+-- Returns every user agent currently bound to a runtime whose owner differs
+-- from the runtime owner. This is the dependency plan shown before a public
+-- runtime is made private: owner-owned agents keep their binding, while every
+-- teammate-owned agent loses machine access.
+SELECT * FROM agent
+WHERE runtime_id = @runtime_id
+  AND kind = 'user'
+  AND owner_id IS DISTINCT FROM @runtime_owner_id
+ORDER BY name ASC;
+
+-- name: ListNonOwnerUserAgentsByRuntimeForUpdate :many
+-- Runtime access-change locking serializes new bindings. NOWAIT avoids waiting
+-- behind a writer that already holds an agent and needs the runtime row.
+SELECT * FROM agent
+WHERE runtime_id = @runtime_id
+  AND kind = 'user'
+  AND owner_id IS DISTINCT FROM @runtime_owner_id
+ORDER BY id
+FOR UPDATE NOWAIT;
+
 -- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1
@@ -279,6 +300,11 @@ WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
+-- CASE is intentional: the workspace/owner fence MUST run before the binding
+-- row lock. AND permits the planner to reorder those checks and can deadlock
+-- against workspace deletion. The locked binding rechecks a delayed enqueue
+-- after runtime-access revocation unbinds the agent. All enqueue variants below
+-- use the same ordering, including automatic retries.
 -- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
 -- locks the owners' workspace rows in the writer's own transaction and returns
 -- false once they are gone, so this statement writes no row instead of stranding
@@ -328,7 +354,12 @@ SELECT
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, $3, $2)
+WHERE CASE WHEN lock_task_owner_rows($1, $3, $2) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = $1
+        AND bound_agent.runtime_id = $2
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 RETURNING *;
 
 -- name: CreateDeferredChannelIssueTask :one
@@ -371,7 +402,12 @@ SELECT
     sqlc.narg(trigger_evidence_ref_id),
     @fire_at,
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, $3, $2)
+WHERE CASE WHEN lock_task_owner_rows($1, $3, $2) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = $1
+        AND bound_agent.runtime_id = $2
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 RETURNING *;
 
 -- name: PromoteDeferredChannelIssueTask :one
@@ -422,7 +458,12 @@ SELECT
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, NULL, $2)
+WHERE CASE WHEN lock_task_owner_rows($1, NULL, $2) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = $1
+        AND bound_agent.runtime_id = $2
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 RETURNING *;
 
 -- name: CreateDeferredAgentTask :one
@@ -459,7 +500,12 @@ SELECT
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, $3, $2)
+WHERE CASE WHEN lock_task_owner_rows(@agent_id, @issue_id, @runtime_id) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = @agent_id
+        AND bound_agent.runtime_id = @runtime_id
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 RETURNING *;
 
 -- name: LinkTaskToIssue :exec
@@ -585,7 +631,12 @@ SELECT
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p
 WHERE p.id = $1
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+  AND CASE WHEN lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = p.agent_id
+        AND bound_agent.runtime_id = p.runtime_id
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 ON CONFLICT (issue_id, agent_id) WHERE status IN ('queued', 'dispatched')
        OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
 DO NOTHING
@@ -620,7 +671,12 @@ WHERE p.id = sqlc.arg(source_task_id)
   AND p.issue_id IS NULL
   AND p.chat_session_id IS NULL
   AND p.autopilot_run_id IS NULL
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+  AND CASE WHEN lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id) THEN EXISTS (
+      SELECT 1 FROM agent AS bound_agent
+      WHERE bound_agent.id = p.agent_id
+        AND bound_agent.runtime_id = p.runtime_id
+      FOR KEY SHARE OF bound_agent
+  ) ELSE FALSE END
 RETURNING *;
 
 -- name: DeleteUnstartedQuickCreateRetryTask :execrows

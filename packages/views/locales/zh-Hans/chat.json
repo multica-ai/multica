@@ -57,6 +57,7 @@
       "codex_semantic_inactivity": "智能体长时间无响应，已停止。请重试。",
       "runtime_offline": "智能体当前离线，暂时无法回复。等它恢复在线后再试。",
       "runtime_recovery": "智能体在完成前重启了。请重试。",
+      "runtime_access_revoked": "运行时访问已撤销。请先将智能体绑定到可用的运行时，再开始新的运行。",
       "manual": "这次回复已取消。",
       "skill_bundle_unavailable": "没能下载到智能体的 skill，这次回复没有启动。通常是网络连接问题，请重试。",
       "runtime_cli_timeout": "本机 OpenClaw CLI 没能在超时时间内响应，这次运行没有启动。这是本地启动超时，不是网络问题——除非 CLI 变快或调大超时（MULTICA_OPENCLAW_CLI_TIMEOUT），否则重试也不会成功。",

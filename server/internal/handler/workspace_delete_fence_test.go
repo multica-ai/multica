@@ -302,16 +302,17 @@ VALUES ($1, $2, 'member', $3, $4) RETURNING id
 	errs := make([]error, 2*rounds)
 	for i := 0; i < rounds; i++ {
 		wg.Add(2)
-		// Owners drawn from both workspaces, in mirrored roles.
+		// Owners drawn from both workspaces, in mirrored roles. Keep each
+		// runtime matched to its agent: enqueue now rejects stale bindings.
 		go func(i int) {
 			defer wg.Done()
 			errs[2*i] = enqueueViaRealQuery(ctx, testHandler.Queries,
-				f.victimAgent, f.neighbourRuntime, neighbourIssues[i])
+				f.victimAgent, f.victimRuntime, neighbourIssues[i])
 		}(i)
 		go func(i int) {
 			defer wg.Done()
 			errs[2*i+1] = enqueueViaRealQuery(ctx, testHandler.Queries,
-				f.neighbourAgent, f.victimRuntime, victimIssues[i])
+				f.neighbourAgent, f.neighbourRuntime, victimIssues[i])
 		}(i)
 	}
 	wg.Wait()
@@ -330,7 +331,7 @@ VALUES ($1, $2, 'member', $3, $4) RETURNING id
 	if _, err := testPool.Exec(ctx, `
 DELETE FROM agent_task_queue
 WHERE (agent_id = $1 AND runtime_id = $2) OR (agent_id = $3 AND runtime_id = $4)
-`, f.victimAgent, f.neighbourRuntime, f.neighbourAgent, f.victimRuntime); err != nil {
+`, f.victimAgent, f.victimRuntime, f.neighbourAgent, f.neighbourRuntime); err != nil {
 		t.Fatalf("clean up: %v", err)
 	}
 }
