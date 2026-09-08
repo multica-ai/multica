@@ -222,18 +222,32 @@ func TestCancelCommentAssigneeFallbacksMigration(t *testing.T) {
 	})
 	pendingRetryID := dbfx.Task(t, agentID, testutil.Cols{
 		"issue_id": retryIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "deferred",
-		"fire_at": testutil.Raw("now() + interval '1 minute'"),
+		"fire_at":        testutil.Raw("now() + interval '1 minute'"),
 		"parent_task_id": startedRetryID, "retry_of_task_id": startedRetryID,
 	})
 	manualRerunID := dbfx.Task(t, agentID, testutil.Cols{
 		"issue_id": retryIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "queued",
 		"rerun_of_task_id": startedFallbackID,
 	})
+	mergedIssueID := dbfx.Issue(t, "fallback with merged comment")
+	mergedPrimaryID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": mergedIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "completed",
+	})
+	mergedOriginalCommentID := dbfx.Comment(t, mergedIssueID, "original fallback trigger")
+	mergedTriggerCommentID := dbfx.Comment(t, mergedIssueID, "explicit assignee mention")
+	mergedFallbackID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": mergedIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "queued",
+		"escalation_for_task_id": mergedPrimaryID, "trigger_comment_id": mergedTriggerCommentID,
+	})
+	dbfx.Exec(t, `UPDATE agent_task_queue SET coalesced_comment_ids = ARRAY[$2::uuid] WHERE id = $1`,
+		mergedFallbackID, mergedOriginalCommentID)
 	want[retryPrimaryID] = "completed"
 	want[startedFallbackID] = "failed"
 	want[startedRetryID] = "failed"
 	want[pendingRetryID] = "cancelled"
 	want[manualRerunID] = "queued"
+	want[mergedPrimaryID] = "completed"
+	want[mergedFallbackID] = "queued"
 	for _, tc := range []struct {
 		status   string
 		fallback bool

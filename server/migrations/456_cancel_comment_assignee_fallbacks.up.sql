@@ -40,6 +40,9 @@ WITH RECURSIVE fallback_lineage AS (
     FROM fallback_lineage
     WHERE task.id = fallback_lineage.task_id
       AND task.started_at IS NULL
+      -- An unstarted fallback may have absorbed newer comments while queued.
+      -- Preserve it so those merged instructions still receive their run.
+      AND cardinality(task.coalesced_comment_ids) = 0
       AND task.status IN ('deferred', 'queued', 'dispatched', 'waiting_local_directory')
     RETURNING task.id, task.agent_id
 ), desired AS (
