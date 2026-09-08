@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -3678,6 +3679,86 @@ func TestCodexExecuteSurfacesUnsupportedServerRequestOnInterruptedTurn(t *testin
 	}
 	if !strings.Contains(result.Error, "unsupported codex app-server request: item/tool/call") {
 		t.Fatalf("expected unsupported request error, got %q", result.Error)
+	}
+}
+
+func TestCodexExecuteCancelsWithNativeTurnInterruptBeforeProcessShutdown(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	interruptCapture := filepath.Join(t.TempDir(), "turn-interrupt.json")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+ // initialized notification
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-native-cancel"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-native-cancel"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-native-cancel","turn":{"id":"turn-native-cancel"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-native-cancel","turnId":"turn-native-cancel","item":{"type":"agentMessage","id":"msg-working","text":"working"}}}'`+"\n"+
+		`read line`+"\n"+
+		`printf '%s\n' "$line" > `+strconv.Quote(interruptCapture)+"\n"+
+		`echo '{"jsonrpc":"2.0","id":4,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-native-cancel","turn":{"id":"turn-native-cancel","status":"interrupted"}}}'`+"\n")
+
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		cancel()
+		t.Fatalf("execute: %v", err)
+	}
+	running := make(chan struct{})
+	var runningOnce sync.Once
+	go func() {
+		for msg := range session.Messages {
+			if msg.Type == MessageStatus && msg.Status == "running" {
+				runningOnce.Do(func() { close(running) })
+			}
+		}
+	}()
+	select {
+	case <-running:
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("fake Codex turn never started")
+	}
+	cancel()
+
+	select {
+	case result := <-session.Result:
+		if result.Status != "aborted" {
+			t.Fatalf("cancelled result status = %q, want aborted (error=%q)", result.Status, result.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled Codex session did not finish")
+	}
+
+	raw, err := os.ReadFile(interruptCapture)
+	if err != nil {
+		t.Fatalf("app-server never received turn/interrupt before shutdown: %v", err)
+	}
+	var request struct {
+		Method string `json:"method"`
+		Params struct {
+			ThreadID string `json:"threadId"`
+			TurnID   string `json:"turnId"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(raw, &request); err != nil {
+		t.Fatalf("decode captured interrupt request: %v", err)
+	}
+	if request.Method != "turn/interrupt" || request.Params.ThreadID != "thr-native-cancel" || request.Params.TurnID != "turn-native-cancel" {
+		t.Fatalf("native interrupt request = %+v, want current thread and turn", request)
 	}
 }
 
