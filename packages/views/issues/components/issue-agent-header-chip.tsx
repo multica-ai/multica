@@ -77,11 +77,15 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
     return { running, queued };
   }, [tasks]);
 
-  const [openedTranscriptTaskSnapshot, setOpenedTranscriptTaskSnapshot] =
-    useState<AgentTask | null>(null);
-  const openedTranscriptTask = openedTranscriptTaskSnapshot
-    ? tasks.find((task) => task.id === openedTranscriptTaskSnapshot.id) ??
-      openedTranscriptTaskSnapshot
+  // The row owns the trigger, this level owns the dialog — so the row's open
+  // signal has to carry how it was requested, or the dialog would never learn
+  // it and would always drop a keyboard reader's focus on close.
+  const [openedTranscript, setOpenedTranscript] = useState<
+    { task: AgentTask; fromKeyboard: boolean } | null
+  >(null);
+  const openedTranscriptTask = openedTranscript
+    ? tasks.find((task) => task.id === openedTranscript.task.id) ??
+      openedTranscript.task
     : null;
 
   // No active work → render nothing.
@@ -94,8 +98,8 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
           issueId={issueId}
           running={running}
           queued={queued}
-          onTranscriptOpenChange={(task, open) => {
-            setOpenedTranscriptTaskSnapshot(open ? task : null);
+          onTranscriptOpenChange={(task, open, fromKeyboard) => {
+            setOpenedTranscript(open ? { task, fromKeyboard } : null);
           }}
         />
       ) : null}
@@ -107,8 +111,9 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
           title={t(($) => $.execution_log.transcript_tooltip)}
           renderButton={false}
           open
+          finalFocus={openedTranscript?.fromKeyboard === true}
           onOpenChange={(open) => {
-            if (!open) setOpenedTranscriptTaskSnapshot(null);
+            if (!open) setOpenedTranscript(null);
           }}
         />
       ) : null}
@@ -120,7 +125,11 @@ interface ActiveChipProps {
   issueId: string;
   running: AgentTask[];
   queued: AgentTask[];
-  onTranscriptOpenChange: (task: AgentTask, open: boolean) => void;
+  onTranscriptOpenChange: (
+    task: AgentTask,
+    open: boolean,
+    fromKeyboard: boolean,
+  ) => void;
 }
 
 function ActiveChip({
@@ -216,8 +225,8 @@ function ActiveChip({
                 key={task.id}
                 task={task}
                 issueId={issueId}
-                onTranscriptOpenChange={(open) => {
-                  onTranscriptOpenChange(task, open);
+                onTranscriptOpenChange={(open, fromKeyboard) => {
+                  onTranscriptOpenChange(task, open, fromKeyboard === true);
                 }}
               />
             ))}
