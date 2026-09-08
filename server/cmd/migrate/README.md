@@ -1,14 +1,42 @@
 # Migration runner operations
 
-## Recover the comment content search index
+## Comment content search index retirement
 
-Migration 371 keeps exactly one comment-content search index per environment:
-`idx_comment_content_bigm` when `pg_bigm` is usable, otherwise the portable
-`idx_comment_content_trgm` fallback. A conditionally skipped migration is still
-recorded in `schema_migrations`, so rerunning `migrate up` does not recreate the
-fallback if the selected bigram index is later dropped or becomes invalid.
+Migrations 454 and 455 retire both historical comment-content search indexes:
+`idx_comment_content_bigm` on pg_bigm deployments and the portable
+`idx_comment_content_trgm` fallback. `SearchIssues` now scans comments through
+`idx_comment_workspace` and evaluates content matches during aggregation, so it
+no longer reads either global content GIN. Fresh installs also skip migration
+140's historical fallback build. Do not repair or recreate these indexes after
+applying migrations 454 and 455.
 
-First check whether either index is live, ready, and valid:
+The down migrations restore exactly one historical index with
+`CREATE INDEX CONCURRENTLY`: migration 454 restores the pg_bigm index where
+`gin_bigm_ops` is available, while migration 455 restores the pg_trgm fallback
+everywhere else.
+Both restore the original `LOWER(content)` expression and retry safely after an
+interrupted concurrent build.
+
+These migrations run during backend startup. A concurrent drop waits for old
+transactions, and the Helm startup probe allows ten minutes before restarting
+the pod. For the multi-gigabyte production index, prefer a low-traffic window:
+check for long-running transactions, then run each statement separately and
+outside a transaction before deploying:
+
+```sql
+DROP INDEX CONCURRENTLY IF EXISTS idx_comment_content_bigm;
+DROP INDEX CONCURRENTLY IF EXISTS idx_comment_content_trgm;
+```
+
+The subsequent migrations become fast no-ops. If startup performs the drop and
+is interrupted instead, `IF EXISTS` makes the next run retry safely; one index
+may remain until that retry completes. Dropping the large relation can also
+produce a short I/O spike as storage is reclaimed.
+
+An application rollback remains functionally correct without either index, but
+legacy search can be much slower. Database rollback must rebuild the selected
+GIN and is not immediate; verify the restored index is live, ready, and valid
+before relying on the old query's performance:
 
 ```sql
 SELECT indexrelid::regclass AS index_name, indisvalid, indisready, indislive
@@ -18,25 +46,6 @@ WHERE indexrelid IN (
     to_regclass('idx_comment_content_trgm')
 );
 ```
-
-If neither index is usable, restore the portable fallback before serving search
-traffic. Run each statement separately and outside a transaction so the
-concurrent index build is valid:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-DROP INDEX CONCURRENTLY IF EXISTS idx_comment_content_trgm;
-CREATE INDEX CONCURRENTLY idx_comment_content_trgm
-    ON comment USING gin (LOWER(content) gin_trgm_ops);
-```
-
-Verify that `idx_comment_content_trgm` reports all three flags as `true` before
-resuming traffic. If `idx_comment_content_bigm` is repaired later, keep the
-fallback until the bigram index also reports all three flags as `true` **and**
-has the exact migration 036 shape: a non-unique, non-partial GIN index on
-`LOWER(content)` using the `pg_bigm`-owned `gin_bigm_ops` operator class. Only
-then can the fallback be dropped with `DROP INDEX CONCURRENTLY` during a
-maintenance window.
 
 ## Build the issue properties bigram index after installing pg_bigm
 
