@@ -54,6 +54,7 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   quick_create_done: "Quick-create done",
   quick_create_failed: "Quick-create failed",
   quick_create_unconfirmed: "Quick-create needs a check",
+  workspace_idle: "Workspace idle",
   autopilot_paused: "Autopilot paused",
   autopilot_quota_exceeded: "Autopilot run limit reached",
 };

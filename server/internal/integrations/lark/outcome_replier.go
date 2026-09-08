@@ -52,7 +52,7 @@ type noopReplier struct {
 
 func (n *noopReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
-	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived, OutcomeFreshPending, OutcomeChatStarted, OutcomeIssueUsage:
+	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived, OutcomeFreshPending, OutcomeChatStarted, OutcomeIssueUsage, OutcomePushReply, OutcomePushReplyDenied:
 		n.log.Warn("lark outcome replier: outbound reply skipped (replier not wired)",
 			"outcome", string(res.Outcome),
 			"installation_id", uuidString(inst.ID),
@@ -220,6 +220,14 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 		}
 	case OutcomeDropped:
 		// OutcomeDropped is informational; no user-visible reply.
+	case OutcomePushReply, OutcomePushReplyDenied:
+		if err := r.sendChatNotice(ctx, inst, msg, res.PushReplyText); err != nil {
+			r.log.Warn("lark outcome replier: push reply ack failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"err", err.Error(),
+			)
+		}
 	}
 }
 

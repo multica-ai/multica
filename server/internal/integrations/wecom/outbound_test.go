@@ -1,18 +1,18 @@
 package wecom
 
-// outbound_test.go — the EventChatDone reply path and the inbox:new delivery
-// path, both driven through a fake outboundQueries (the interface Outbound
-// depends on) and a recording wsConn, so no database is required. These are
-// the paths that put an agent's words back in front of the WeCom user, and
-// the "deliver via bot only when bound" contract the inbox notification rests
-// on.
+// outbound_test.go — the EventChatDone reply path, driven through a fake
+// outboundQueries (the interface Outbound depends on) and a recording
+// wsConn, so no database is required. This is the path that puts an agent's
+// words back in front of the WeCom user.
+//
+// The inbox:new push path moved to notify_dm_test.go, exercised through
+// DeliverDM rather than through the deleted handleInboxNew/tryDeliverInbox.
 //
 // Original inbox-delivery design and review: seacen (PR #5833).
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"sync/atomic"
 	"testing"
@@ -28,17 +28,12 @@ import (
 
 // fakeOutboundQueries is an in-memory stand-in for the queries Outbound
 // uses. A nil error field returns the row; a non-nil one is returned as-is
-// (use pgx.ErrNoRows to exercise the "not a wecom session" / "no binding"
-// branches).
+// (use pgx.ErrNoRows to exercise the "not a wecom session" branch).
 type fakeOutboundQueries struct {
 	sessionBinding db.ChannelChatSessionBinding
 	sessionErr     error
 	installation   db.ChannelInstallation
 	installErr     error
-	memberBinding  db.ChannelUserBinding
-	memberErr      error
-	workspace      db.Workspace
-	workspaceErr   error
 	attachments    []db.Attachment
 	attachmentsErr error
 	// lookupGate holds every attachment lookup open until it is closed, which
@@ -97,12 +92,6 @@ func (f *fakeOutboundQueries) GetChannelTaskDelivery(context.Context, pgtype.UUI
 }
 func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
 	return f.installation, f.installErr
-}
-func (f *fakeOutboundQueries) FindChannelBindingForMember(context.Context, db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error) {
-	return f.memberBinding, f.memberErr
-}
-func (f *fakeOutboundQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
-	return f.workspace, f.workspaceErr
 }
 func (f *fakeOutboundQueries) ListAttachmentsByChatMessage(context.Context, db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error) {
 	if f.lookupGate != nil {
@@ -287,59 +276,13 @@ func TestProcessEvent_RevokedInstallationIsNoop(t *testing.T) {
 	}
 }
 
-func TestTryDeliverInbox_PushesToBoundMemberPrivately(t *testing.T) {
-	t.Parallel()
-	q := &fakeOutboundQueries{
-		memberBinding: db.ChannelUserBinding{ChannelUserID: "T_USER_1"},
-		workspace:     db.Workspace{Slug: "acme"},
-	}
-	o, instID, conn := newOutboundWithConn(t, q)
-	q.memberBinding.InstallationID = instID
-
-	item := map[string]any{
-		"recipient_type": "member",
-		"recipient_id":   "33333333-3333-3333-3333-333333333333",
-		"workspace_id":   "44444444-4444-4444-4444-444444444444",
-		"type":           "issue_assigned",
-		"title":          "New issue",
-	}
-	if !o.tryDeliverInbox(context.Background(), item, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
-		t.Fatal("tryDeliverInbox returned false; expected delivery to a bound member")
-	}
-	body := conn.sendBody(t, 0)
-	if body["chatid"] != "T_USER_1" {
-		t.Errorf("inbox push chatid = %v, want the member's bound userid", body["chatid"])
-	}
-	if body["chat_type"] != float64(chatTypeSingleInt) {
-		t.Errorf("inbox push chat_type = %v, want single (1)", body["chat_type"])
-	}
-}
-
-func TestTryDeliverInbox_NoBindingIsNoop(t *testing.T) {
-	t.Parallel()
-	q := &fakeOutboundQueries{memberErr: pgx.ErrNoRows}
-	o, _, conn := newOutboundWithConn(t, q)
-	if o.tryDeliverInbox(context.Background(), map[string]any{}, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
-		t.Error("expected false when the member has no wecom binding")
-	}
-	if len(conn.frames) != 0 {
-		t.Errorf("no binding should push nothing, got %d frames", len(conn.frames))
-	}
-}
-
-func TestHandleInboxNew_IgnoresNonMemberRecipient(t *testing.T) {
-	t.Parallel()
-	// memberErr set so that if it somehow reached the query it would no-op;
-	// the recipient_type guard should return before any query.
-	q := &fakeOutboundQueries{memberErr: errors.New("must not be called")}
-	o, _, conn := newOutboundWithConn(t, q)
-	o.handleInboxNew(events.Event{Payload: map[string]any{
-		"item": map[string]any{"recipient_type": "agent", "recipient_id": "x", "workspace_id": "y"},
-	}})
-	if len(conn.frames) != 0 {
-		t.Errorf("agent recipient should not be pushed to, got %d frames", len(conn.frames))
-	}
-}
+// The inbox-delivery matrix that used to live here — whether a notification
+// is pushed at all (recipient type, binding presence, whitelist) — is now the
+// notify package's decision (notify/notifier_test.go). What WeCom still owns
+// is HOW it addresses the chat once told to send, which notify_dm_test.go
+// covers against DeliverDM: TestDeliverDMReportsDeliveredWithoutAMessageID
+// (chatid/chat_type) and TestDeliverDMHandsOffWhenThisReplicaHasNoSocket
+// (cross-replica routing).
 
 func TestChatDoneContent(t *testing.T) {
 	t.Parallel()

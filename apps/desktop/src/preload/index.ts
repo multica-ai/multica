@@ -31,6 +31,7 @@ import {
   type MainRendererMessageChannel,
   type TabSelectionShortcutKey,
 } from "../shared/main-renderer-messages";
+import type { IssueDeepLink } from "../shared/issue-deep-link";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -147,6 +148,9 @@ const desktopAPI = {
   /** Listen for invitation IDs delivered via deep link */
   onInviteOpen: (callback: (invitationId: string) => void) =>
     subscribeToMainRendererChannel("invite:open", callback),
+  /** Listen for validated Issue destinations delivered via deep link. */
+  onIssueOpen: (callback: (destination: IssueDeepLink) => void) =>
+    subscribeToMainRendererChannel("issue:open", callback),
   /** Open a URL in the default browser */
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
   /** Download a file by URL through Electron's native download system.

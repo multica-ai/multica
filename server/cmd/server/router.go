@@ -28,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/notify"
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
@@ -239,9 +240,12 @@ type RouterOptions struct {
 	// WecomMetrics is the WeCom adapter's health sink. Nil discards every
 	// counter, which is what a deployment with /metrics turned off gets.
 	WecomMetrics *obsmetrics.WecomMetrics
-	DaemonHub    *daemonws.Hub
-	DaemonWakeup service.TaskWakeupNotifier
-	FeatureFlags *featureflag.Service
+	// ChannelPushMetrics is the inbox-push notifier's sink, nil-safe on the
+	// same terms.
+	ChannelPushMetrics *obsmetrics.ChannelPushMetrics
+	DaemonHub          *daemonws.Hub
+	DaemonWakeup       service.TaskWakeupNotifier
+	FeatureFlags       *featureflag.Service
 	// HeartbeatScheduler, when non-nil, replaces the default synchronous
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
@@ -521,12 +525,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// is the single shared inbound handler injected into every Channel.
 	channelRegistry := channel.NewRegistry()
 	channelRouter := engine.NewRouter(h.IssueService, h.TaskService, queries, engine.RouterConfig{
-		Logger: slog.Default(), Lifecycle: h,
+		Logger: slog.Default(), Lifecycle: h, PushReplies: h,
 	})
 	// Debounce the per-session run trigger so a burst of messages collapses
 	// into one agent run instead of one per message (MUL-2968).
 	channelRouter.EnableRunBatching(engine.DefaultChatRunBatchWindow)
 	h.ChannelRouter = channelRouter
+	// Inbox-push notifier (this design): forwards the narrow whitelist of
+	// inbox items that mean "a human is needed now" to the recipient's IM
+	// DM. Built unconditionally for the same reason channelRouter is —
+	// it is platform-agnostic, and adapters register into it below. With no
+	// adapters registered it does nothing.
+	pushNotifier := notify.New(queries, slog.Default(), opts.ChannelPushMetrics)
+	pushAdapters := map[string]notify.DMDeliverer{}
 	// Media intent-ledger reconciler: settles uploaded-but-unbound objects.
 	// Built ONLY when a storage backend exists — store is nil when S3 is not
 	// configured and the local upload dir failed to initialize, and a
@@ -673,6 +684,40 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					cs, feishuSession, auditLogger, resolverReplier, typingIndicator, mediaResolver,
 				))
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
+
+				// Push adapter: registers Lark into the shared inbox-push
+				// notifier so an in_review (etc.) inbox item DMs its
+				// recipient. Credentials are resolved the same way every
+				// other Lark outbound path does (see
+				// LarkOutcomeReplier.installationCredentials) — fetch the
+				// installation row by id alone (cs.GetLarkInstallation
+				// needs no workspace_id) and decrypt its app_secret — just
+				// inlined here because NewDMDeliverer's CredentialsFunc
+				// takes an id, not the pre-fetched Installation those other
+				// call sites already have in hand.
+				pushAdapters[string(channel.TypeFeishu)] = lark.NewDMDeliverer(
+					larkClient,
+					func(installationID pgtype.UUID) (lark.InstallationCredentials, error) {
+						inst, err := cs.GetLarkInstallation(context.Background(), installationID)
+						if err != nil {
+							return lark.InstallationCredentials{}, err
+						}
+						secret, err := installSvc.DecryptAppSecret(inst)
+						if err != nil {
+							return lark.InstallationCredentials{}, err
+						}
+						creds := lark.InstallationCredentials{
+							AppID:     inst.AppID,
+							AppSecret: secret,
+							Region:    lark.RegionOrDefault(inst.Region),
+						}
+						if inst.TenantKey.Valid {
+							creds.TenantKey = inst.TenantKey.String
+						}
+						return creds, nil
+					},
+					slog.Default(),
+				)
 
 				// One-shot union_id backfill for installations created
 				// before migration 112 added bot_union_id. Runs off the
@@ -1017,6 +1062,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				}
 				wecomOutbound := wecom.NewOutbound(queries, wecomSenders, slog.Default(), wecomOutboundOpts...)
 				wecomOutbound.Register(bus)
+				// Push adapter: wecomOutbound already satisfies
+				// notify.DMDeliverer (Task 4), so registering it here is all
+				// WeCom needs to receive inbox pushes through the shared
+				// notifier.
+				pushAdapters[string(wecom.TypeWecom)] = wecomOutbound
 				// The dispatcher has been consuming since before this router
 				// existed; this is where it learns who performs a delivery.
 				// Anything it read in the meantime is waiting in its queue.
@@ -1114,6 +1164,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	} else {
 		slog.Info("telegram integration disabled (MULTICA_TELEGRAM_SECRET_KEY not set)")
 	}
+
+	// Subscribe last: registration must be complete before the first
+	// EventInboxNew can be dispatched. The bus is synchronous, so an event
+	// arriving during startup would otherwise find an empty adapter map and
+	// silently drop the push.
+	pushNotifier.Register(pushAdapters)
+	pushNotifier.Subscribe(bus)
 
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the

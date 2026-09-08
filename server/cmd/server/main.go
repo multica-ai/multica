@@ -569,6 +569,7 @@ func main() {
 	registerSubscriberListeners(bus, pool)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	registerWorkspaceIdleListeners(bus, pool)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
@@ -577,6 +578,7 @@ func main() {
 	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
 	var channelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
 	var wecomMetrics *obsmetrics.WecomMetrics
+	var channelPushMetrics *obsmetrics.ChannelPushMetrics
 	var dbRoutingMetrics *obsmetrics.DBRoutingMetrics
 	if metricsConfig.Enabled() {
 		metricsRegistry := obsmetrics.NewRegistry(obsmetrics.RegistryOptions{
@@ -592,6 +594,7 @@ func main() {
 		channelMediaMetrics = metricsRegistry.ChannelMedia
 		channelLeaseMetrics = metricsRegistry.ChannelLease
 		wecomMetrics = metricsRegistry.Wecom
+		channelPushMetrics = metricsRegistry.ChannelPush
 		dbRoutingMetrics = metricsRegistry.DBRouting
 		// Forward inbound daemon WS frames into the per-kind counter so
 		// dashboards can split heartbeat / unknown / invalid traffic.
@@ -631,6 +634,7 @@ func main() {
 		ChannelLeaseMetrics: channelLeaseMetrics,
 		ChannelLeaseRedis:   channelLeaseRedis,
 		WecomMetrics:        wecomMetrics,
+		ChannelPushMetrics:  channelPushMetrics,
 		DaemonHub:           daemonHub,
 		DaemonWakeup:        daemonWakeup,
 		WecomSenders:        wecomSenders,
@@ -697,6 +701,9 @@ func main() {
 	// Source-context cleanup is object-store work, so it gets its own goroutine
 	// instead of a slot in the runtime sweep tick.
 	go runSourceContextSweeper(sweepCtx, taskSvc)
+	// Retention sweep for the reply-attribution ledger (channel_push_message).
+	// Hourly and cheap, so its own goroutine costs nothing extra.
+	go runChannelPushSweeper(sweepCtx, queries)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	if autopilotSvc.QuotaEnabled() {

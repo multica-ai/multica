@@ -163,6 +163,14 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 					"installation_id", util.UUIDToString(inst.ID), "error", err)
 			}
 		}
+	case engine.OutcomePushReply, engine.OutcomePushReplyDenied:
+		// DingTalk never populates InboundMessage.ReplyTo, so this outcome
+		// cannot fire today. Handled anyway so the capability matrix stays
+		// the one place that says "this platform is special", not this switch.
+		if err := r.post(ctx, inst, msg, res.PushReplyText); err != nil {
+			r.logger.WarnContext(ctx, "dingtalk replier: push reply ack failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	}
 }
 

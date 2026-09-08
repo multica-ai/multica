@@ -25,6 +25,7 @@ export type InboxItemType =
   // quick_create_failed because it must NOT be rendered with failure framing:
   // the issue may actually have been created.
   | "quick_create_unconfirmed"
+  | "workspace_idle"
   // System notifications are intentionally issue-less. Keep them in the
   // same Inbox model so read/archive/realtime behavior remains consistent.
   | "autopilot_paused"

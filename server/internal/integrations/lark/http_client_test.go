@@ -679,7 +679,6 @@ func TestHTTPClient_SendTextMessage_ReplyInThread(t *testing.T) {
 	c := newTestClient(fake, time.Now)
 	msgID, err := c.SendTextMessage(context.Background(), SendTextParams{
 		InstallationID: testCreds(),
-		ChatID:         ChatID("oc_chat_42"),
 		Text:           "threaded hi",
 		ReplyTarget:    ReplyTarget{MessageID: "om_trigger", InThread: true},
 	})
@@ -688,6 +687,57 @@ func TestHTTPClient_SendTextMessage_ReplyInThread(t *testing.T) {
 	}
 	if msgID != "om_reply_1" {
 		t.Errorf("message id: got %q want om_reply_1", msgID)
+	}
+}
+
+func TestHTTPClient_SendDirectMessage_InteractiveCard(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_direct_card", 7200)
+	fake.stubSend(
+		map[string]any{
+			"code": 0,
+			"msg":  "ok",
+			"data": map[string]string{"message_id": "om_direct_card"},
+		},
+		func(r *http.Request, body map[string]string) {
+			if got := r.URL.Query().Get("receive_id_type"); got != "open_id" {
+				t.Errorf("receive_id_type = %q, want open_id", got)
+			}
+			if body["receive_id"] != "ou_recipient" {
+				t.Errorf("receive_id = %q", body["receive_id"])
+			}
+			if body["msg_type"] != "interactive" {
+				t.Errorf("msg_type = %q, want interactive", body["msg_type"])
+			}
+			if body["content"] != `{"schema":"2.0"}` {
+				t.Errorf("content = %q", body["content"])
+			}
+		},
+	)
+
+	c := newTestClient(fake, time.Now)
+	messageID, err := c.SendDirectMessage(context.Background(), SendDirectParams{
+		InstallationID: testCreds(),
+		OpenID:         "ou_recipient",
+		CardJSON:       `{"schema":"2.0"}`,
+	})
+	if err != nil {
+		t.Fatalf("SendDirectMessage: %v", err)
+	}
+	if messageID != "om_direct_card" {
+		t.Errorf("message id = %q", messageID)
+	}
+}
+
+func TestHTTPClient_SendDirectMessageRequiresExactlyOneContentKind(t *testing.T) {
+	c := newTestClient(newLarkFake(t), time.Now)
+	for _, params := range []SendDirectParams{
+		{InstallationID: testCreds(), OpenID: "ou_recipient"},
+		{InstallationID: testCreds(), OpenID: "ou_recipient", Text: "text", CardJSON: `{}`},
+	} {
+		if _, err := c.SendDirectMessage(context.Background(), params); err == nil {
+			t.Errorf("SendDirectMessage(%+v) error = nil", params)
+		}
 	}
 }
 

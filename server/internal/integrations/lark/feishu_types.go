@@ -85,6 +85,12 @@ const (
 	OutcomeAgentOffline Outcome = "agent_offline"
 	// OutcomeAgentArchived — landed, but the agent is archived.
 	OutcomeAgentArchived Outcome = "agent_archived"
+	// OutcomePushReply — the message replied to an inbox push and was
+	// injected as an issue comment. Mirrors engine.OutcomePushReply.
+	OutcomePushReply Outcome = "push_reply"
+	// OutcomePushReplyDenied — the message replied to a known push but the
+	// sender was not the addressed recipient. Mirrors engine.OutcomePushReplyDenied.
+	OutcomePushReplyDenied Outcome = "push_reply_denied"
 )
 
 // DispatchResult is the Feishu-side verdict the OutcomeReplier consumes to
@@ -110,4 +116,7 @@ type DispatchResult struct {
 	// IssueUsageHadMedia asks the usage reply to tell the sender to include the
 	// current message's media again with the corrected command.
 	IssueUsageHadMedia bool
+	// PushReplyText is the message to echo back for the two push-reply
+	// outcomes, verbatim from engine.Result.
+	PushReplyText string
 }

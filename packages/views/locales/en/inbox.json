@@ -75,6 +75,7 @@
     "quick_create_done": "Created with agent",
     "quick_create_failed": "Create with agent failed",
     "quick_create_unconfirmed": "Create with agent unconfirmed",
+    "workspace_idle": "Workspace idle",
     "autopilot_paused": "Autopilot paused",
     "autopilot_quota_exceeded": "Autopilot run limit reached"
   },

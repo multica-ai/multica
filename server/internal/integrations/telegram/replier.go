@@ -145,6 +145,11 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 					"installation_id", util.UUIDToString(inst.ID), "error", err)
 			}
 		}
+	case engine.OutcomePushReply, engine.OutcomePushReplyDenied:
+		if err := r.post(ctx, inst, msg, res.PushReplyText); err != nil {
+			r.logger.WarnContext(ctx, "telegram replier: push reply ack failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	}
 }
 

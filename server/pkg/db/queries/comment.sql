@@ -346,6 +346,18 @@ WHERE issue_id = @issue_id
 ORDER BY created_at DESC
 LIMIT 1;
 
+-- name: GetLatestAgentCommentForIssueTask :one
+-- Actionable status notifications should carry the concrete question or
+-- delivery produced by the SAME run that changed the status. Matching on
+-- source_task_id avoids attaching an older comment from another run or agent.
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND author_type = 'agent'
+  AND source_task_id = @source_task_id
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
 -- name: ListReconcilableCommentsForIssueSince :many
 -- MUL-4195 / MUL-4304 completion reconciliation: every MEMBER- or AGENT-authored
 -- comment on an issue created strictly after @since (the completing run's

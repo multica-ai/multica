@@ -55,8 +55,6 @@ type outboundQueries interface {
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
-	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
-	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
 }
 
@@ -135,6 +133,10 @@ func NewOutbound(q outboundQueries, senders *sendersRegistry, logger *slog.Logge
 }
 
 // Register subscribes to the chat-done event on the bus.
+//
+// Inbox pushes are no longer subscribed here: the notify package owns that
+// subscription and the whitelist/rendering decision, and calls back into
+// this adapter's DeliverDM (notify_dm.go) only for the send.
 func (o *Outbound) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventChatDone, o.handleEvent)
 	// A failed run ends the turn just as a reply does, and it goes out on the
@@ -143,10 +145,6 @@ func (o *Outbound) Register(bus *events.Bus) {
 	// because no handler ran; DingTalk, Lark, Slack and Telegram all handle it.
 	bus.Subscribe(protocol.EventTaskFailed, o.handleEvent)
 	bus.Subscribe(protocol.EventTaskCancelled, o.handleTaskCancelled)
-	// Inbox notifications delivered through the smart bot: when the
-	// recipient member has a WeCom binding with a live connection, their
-	// inbox:new items are pushed to the aibot as a markdown card.
-	bus.Subscribe(protocol.EventInboxNew, o.handleInboxNew)
 }
 
 func (o *Outbound) handleEvent(e events.Event) {
@@ -385,120 +383,6 @@ func chatDoneContent(payload any) string {
 		}
 	}
 	return ""
-}
-
-// handleInboxNew is the inbox:new subscriber that delivers a member
-// notification via the smart bot. When the recipient member has a WeCom
-// binding with a live connection, the notification is pushed to the aibot.
-// On any miss — non-member recipient, no wecom binding, no live sender,
-// send failure — the handler is a no-op and the member simply receives the
-// notification through the in-app inbox as usual.
-func (o *Outbound) handleInboxNew(e events.Event) {
-	payload, ok := e.Payload.(map[string]any)
-	if !ok {
-		return
-	}
-	item, ok := payload["item"].(map[string]any)
-	if !ok {
-		return
-	}
-	// Only member recipients — agents receive nothing via chat channels.
-	if rt, _ := item["recipient_type"].(string); rt != "member" {
-		return
-	}
-	recipientIDStr, _ := item["recipient_id"].(string)
-	workspaceIDStr, _ := item["workspace_id"].(string)
-	if recipientIDStr == "" || workspaceIDStr == "" {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	o.tryDeliverInbox(ctx, item, recipientIDStr, workspaceIDStr)
-}
-
-// tryDeliverInbox is the delivery core. Returns true iff the bot pushed
-// the notification.
-func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, recipientIDStr, workspaceIDStr string) bool {
-	recipientID, err := util.ParseUUID(recipientIDStr)
-	if err != nil || !recipientID.Valid {
-		return false
-	}
-	workspaceID, err := util.ParseUUID(workspaceIDStr)
-	if err != nil || !workspaceID.Valid {
-		return false
-	}
-	binding, err := o.q.FindChannelBindingForMember(ctx, db.FindChannelBindingForMemberParams{
-		WorkspaceID:   workspaceID,
-		MulticaUserID: recipientID,
-		ChannelType:   channelTypeWecom,
-	})
-	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			o.logger.WarnContext(ctx, "wecom outbound: lookup member binding failed",
-				"error", err, "workspace_id", workspaceIDStr, "recipient_id", recipientIDStr)
-		}
-		return false // no binding → nothing to deliver via bot
-	}
-	if o.senders == nil {
-		return false
-	}
-	sender := o.senders.get(binding.InstallationID)
-
-	// Resolve slug for the link. Best-effort — a missing slug just falls
-	// back to the workspace UUID in the URL.
-	slug := ""
-	if ws, err := o.q.GetWorkspace(ctx, workspaceID); err == nil {
-		slug = ws.Slug
-	}
-	content := buildInboxMarkdown(item, workspaceIDStr, slug)
-	if content == "" {
-		return false
-	}
-	// Smart-bot inbox notifications are 1:1 pushes to the bound user. The
-	// binding row's channel_user_id is the bot-scoped T-* userid — WeCom
-	// treats that as the chatid for a single (chat_type=1) send.
-	if sender == nil {
-		// No socket here. Same shape as the reply path: hand it to the replica
-		// that holds one. An inbox push is as user-visible as an answer, and
-		// leaving it local was the reason the single-replica constraint had to
-		// stay even with replies routed.
-		if o.relay.publish(relayFrame{
-			Kind:           relayKindInbox,
-			InstallationID: util.UUIDToString(binding.InstallationID),
-			ChatID:         binding.ChannelUserID,
-			ChatType:       chatTypeSingleInt,
-			Content:        content,
-		}, relayInboxEventID(itemIDOf(item), recipientIDStr)) {
-			o.logger.DebugContext(ctx, "wecom outbound: routed an inbox push to the replica holding the socket",
-				"installation_id", uuidStringPub(binding.InstallationID))
-			return true
-		}
-		// Logged, not counted on the reply counters. Their documented unit is
-		// AGENT REPLIES, and an inbox notification recorded there would show up
-		// as a reply this adapter owed somebody and failed to deliver — the
-		// same unit error the relayed-inbox path in deliverRelayed already
-		// avoids, and the reason the delivered/dropped ratio can be read as an
-		// outcome at all. The member still receives this in the in-app inbox,
-		// which is what makes a missed bot push a degradation rather than a
-		// loss.
-		o.logger.WarnContext(ctx, "wecom outbound: inbox push not delivered and not routable",
-			"installation_id", uuidStringPub(binding.InstallationID),
-			"recipient_id", recipientIDStr)
-		return false // supervisor down or reconnecting — no live connection
-	}
-	if err := sender.sendTextCtx(ctx, binding.ChannelUserID, chatTypeSingleInt, content); err != nil {
-		o.logger.WarnContext(ctx, "wecom outbound: inbox push failed",
-			"error", err, "installation_id", uuidStringPub(binding.InstallationID),
-			"recipient_id", recipientIDStr)
-		return false // send failed → no bot delivery
-	}
-	o.logger.DebugContext(ctx, "wecom outbound: inbox delivered via bot",
-		"installation_id", uuidStringPub(binding.InstallationID),
-		"recipient_id", recipientIDStr,
-		"inbox_type", item["type"])
-	return true
 }
 
 // uuidStringPub renders a pgtype.UUID for a log line without depending on

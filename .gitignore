@@ -78,3 +78,6 @@ data/
 # Python (agent tooling)
 __pycache__/
 *.pyc
+
+# Subagent-driven-development scratch (ledgers, briefs, review packages)
+.superpowers/

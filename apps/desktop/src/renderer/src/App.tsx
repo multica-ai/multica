@@ -35,6 +35,7 @@ import {
   tearDownOnSessionExpiry,
   type SessionTeardown,
 } from "./platform/session-teardown";
+import { openIssueDeepLink } from "./platform/issue-deep-link";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
 // apps/web/app/layout.tsx HTML_LANG. index.html ships a static lang="en";
@@ -202,6 +203,16 @@ function AppContent() {
   });
   const wsCount = workspaces.length;
   const hasOnboarded = useHasOnboarded();
+
+  // Install this listener only once both authentication and the authoritative
+  // workspace list are ready. Main keeps earlier deep links queued until this
+  // point, which also lets a cold-start link survive the login screen.
+  useEffect(() => {
+    if (!user || !workspaceListReady) return undefined;
+    return window.desktopAPI.onIssueOpen((destination) => {
+      openIssueDeepLink(destination, workspaces);
+    });
+  }, [user, workspaceListReady, workspaces]);
 
   // Bridge local daemon IPC status into the runtimes cache so this user's
   // own daemon flips to offline/online sub-second instead of waiting on the

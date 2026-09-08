@@ -153,6 +153,14 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 					"duplicate", res.IssueDuplicate, "error", err)
 			}
 		}
+	case engine.OutcomePushReply, engine.OutcomePushReplyDenied:
+		// WeCom never populates InboundMessage.ReplyTo, so this outcome
+		// cannot fire today. Handled anyway so the capability matrix stays
+		// the one place that says "this platform is special", not this switch.
+		if err := r.post(ctx, inst, msg, res.PushReplyText); err != nil {
+			r.logger.WarnContext(ctx, "wecom replier: push reply ack failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	}
 }
 

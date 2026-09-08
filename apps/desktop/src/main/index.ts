@@ -61,6 +61,7 @@ import {
   NotificationGate,
   parseNativeNotificationPayload,
 } from "./notification-gate";
+import { parseIssueDeepLink } from "../shared/issue-deep-link";
 
 // Guards against registering the will-download handler more than once on the
 // same session. window.webContents.session is shared, and createWindow() can
@@ -186,6 +187,12 @@ function handleDeepLink(url: string): void {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== `${PROTOCOL}:`) return;
+
+    const issue = parseIssueDeepLink(url);
+    if (issue) {
+      dispatchToMainRenderer("issue:open", issue);
+      return;
+    }
 
     // multica://auth/callback?token=<jwt>
     if (parsed.hostname === "auth" && parsed.pathname === "/callback") {
@@ -755,6 +762,7 @@ if (!gotTheLock) {
         if (accountInvalidated) {
           authSessionGeneration += 1;
           mainRendererMessages.clear("inbox:open");
+          mainRendererMessages.clear("issue:open");
         }
         return;
       }

@@ -96,12 +96,15 @@ type fakeAPIClient struct {
 	sent           []SendCardParams
 	patched        []PatchCardParams
 	textSent       []SendTextParams
+	directSent     []SendDirectParams
 	mdCardSent     []SendMarkdownCardParams
 	sendReturn     string
 	sendErr        error
 	patchErr       error
 	textSendErr    error
 	textSendReturn string
+	directSendErr  error
+	directSendID   string
 	mdCardErr      error
 	mdCardReturn   string
 	bindingSent    []BindingPromptParams
@@ -147,6 +150,12 @@ func (f *fakeAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 		return "", f.threadReplyErr
 	}
 	return f.textSendReturn, f.textSendErr
+}
+func (f *fakeAPIClient) SendDirectMessage(ctx context.Context, p SendDirectParams) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.directSent = append(f.directSent, p)
+	return f.directSendID, f.directSendErr
 }
 func (f *fakeAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCardParams) (string, error) {
 	f.mu.Lock()

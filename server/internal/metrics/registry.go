@@ -26,6 +26,7 @@ type Registry struct {
 	Business     *BusinessMetrics
 	ChannelMedia *ChannelMediaReconcilerMetrics
 	ChannelLease *ChannelLeaseMetrics
+	ChannelPush  *ChannelPushMetrics
 	Wecom        *WecomMetrics
 	DBRouting    *DBRoutingMetrics
 }
@@ -54,6 +55,9 @@ func NewRegistry(opts RegistryOptions) *Registry {
 	channelLease := NewChannelLeaseMetrics()
 	reg.MustRegister(channelLease.Collectors()...)
 
+	channelPush := NewChannelPushMetrics()
+	reg.MustRegister(channelPush.Collectors()...)
+
 	wecomMetrics := NewWecomMetrics()
 	reg.MustRegister(wecomMetrics.Collectors()...)
 	dbRoutingMetrics := NewDBRoutingMetrics()
@@ -75,6 +79,7 @@ func NewRegistry(opts RegistryOptions) *Registry {
 		Business:     businessMetrics,
 		ChannelMedia: channelMedia,
 		ChannelLease: channelLease,
+		ChannelPush:  channelPush,
 		Wecom:        wecomMetrics,
 		DBRouting:    dbRoutingMetrics,
 	}

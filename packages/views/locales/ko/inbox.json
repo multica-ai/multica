@@ -73,6 +73,7 @@
     "quick_create_done": "에이전트로 생성됨",
     "quick_create_failed": "에이전트 생성 실패",
     "quick_create_unconfirmed": "에이전트 생성 결과 미확인",
+    "workspace_idle": "워크스페이스가 유휴 상태입니다",
     "autopilot_paused": "자동화 일시 중지됨",
     "autopilot_quota_exceeded": "자동화 실행 한도 도달"
   },

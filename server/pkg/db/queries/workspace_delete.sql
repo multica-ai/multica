@@ -350,6 +350,9 @@ deleted_activity AS (
 deleted_inbox AS (
     DELETE FROM inbox_item WHERE workspace_id = $1
 ),
+deleted_workspace_idle_state AS (
+    DELETE FROM workspace_idle_state WHERE workspace_id = $1
+),
 deleted_issue_dependencies AS (
     DELETE FROM issue_dependency
     WHERE issue_id IN (SELECT id FROM ws_issues)
@@ -467,6 +470,14 @@ deleted_channel_user_bindings AS (
 ),
 deleted_channel_binding_tokens AS (
     DELETE FROM channel_binding_token WHERE workspace_id = $1
+),
+-- The reply-attribution ledger (migration 450). Keyed by workspace_id
+-- directly rather than through ws_channel_installations: a push row outlives
+-- the installation that sent it (see channel_push_reply.go's re-check
+-- comment), so scoping to the installation set would leave rows behind if
+-- the installation were ever uninstalled before the workspace is deleted.
+deleted_channel_push_messages AS (
+    DELETE FROM channel_push_message WHERE workspace_id = $1
 ),
 deleted_lark_chat_bindings AS (
     DELETE FROM lark_chat_session_binding

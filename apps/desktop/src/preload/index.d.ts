@@ -17,6 +17,7 @@ import type {
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
 import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
+import type { IssueDeepLink } from "../shared/issue-deep-link";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -45,6 +46,8 @@ interface DesktopAPI {
   onAuthToken: (callback: (token: string) => void) => () => void;
   /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */
   onInviteOpen: (callback: (invitationId: string) => void) => () => void;
+  /** Listen for validated Issue destinations delivered via deep link. Returns an unsubscribe function. */
+  onIssueOpen: (callback: (destination: IssueDeepLink) => void) => () => void;
   /** Open a URL in the default browser. */
   openExternal: (url: string) => Promise<void>;
   /** Download a file by URL through Electron's native download system.

@@ -1078,18 +1078,3 @@ func provablyNotSent(err error) bool {
 }
 
 var _ relayHandler = (*Outbound)(nil)
-
-// itemIDOf is the inbox item's own id, which is what makes a routed push
-// idempotent: two replicas reading the same replayed frame key their claims on
-// the same notification rather than on the moment they read it.
-func itemIDOf(item map[string]any) string {
-	if s, _ := item["id"].(string); s != "" {
-		return s
-	}
-	// Older payloads carry no id. Falling back to the type plus the issue it
-	// belongs to is weaker than an id but still stable for one notification,
-	// which is what the claim needs.
-	t, _ := item["type"].(string)
-	ref, _ := item["issue_id"].(string)
-	return t + ":" + ref
-}

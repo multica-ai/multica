@@ -522,6 +522,51 @@ func (q *Queries) GetDelegatedFailureRecoveryExhaustionComment(ctx context.Conte
 	return i, err
 }
 
+const getLatestAgentCommentForIssueTask = `-- name: GetLatestAgentCommentForIssueTask :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at FROM comment
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND author_type = 'agent'
+  AND source_task_id = $3
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestAgentCommentForIssueTaskParams struct {
+	IssueID      pgtype.UUID `json:"issue_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
+}
+
+// Actionable status notifications should carry the concrete question or
+// delivery produced by the SAME run that changed the status. Matching on
+// source_task_id avoids attaching an older comment from another run or agent.
+func (q *Queries) GetLatestAgentCommentForIssueTask(ctx context.Context, arg GetLatestAgentCommentForIssueTaskParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, getLatestAgentCommentForIssueTask, arg.IssueID, arg.WorkspaceID, arg.SourceTaskID)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+		&i.QuickActionID,
+		&i.ViaPluginID,
+		&i.Revision,
+		&i.RecoverySettledAt,
+	)
+	return i, err
+}
+
 const getLatestMemberCommentForIssueSince = `-- name: GetLatestMemberCommentForIssueSince :one
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at FROM comment
 WHERE issue_id = $1

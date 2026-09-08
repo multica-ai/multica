@@ -330,6 +330,9 @@ deleted_activity AS (
 deleted_inbox AS (
     DELETE FROM inbox_item WHERE workspace_id = $1
 ),
+deleted_workspace_idle_state AS (
+    DELETE FROM workspace_idle_state WHERE workspace_id = $1
+),
 deleted_issue_dependencies AS (
     DELETE FROM issue_dependency
     WHERE issue_id IN (SELECT id FROM ws_issues)
@@ -448,6 +451,9 @@ deleted_channel_user_bindings AS (
 deleted_channel_binding_tokens AS (
     DELETE FROM channel_binding_token WHERE workspace_id = $1
 ),
+deleted_channel_push_messages AS (
+    DELETE FROM channel_push_message WHERE workspace_id = $1
+),
 deleted_lark_chat_bindings AS (
     DELETE FROM lark_chat_session_binding
     WHERE installation_id IN (SELECT id FROM ws_lark_installations)
@@ -491,6 +497,11 @@ WHERE channel_media_pending_object.workspace_id = $1
 // Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
 // than the session set because that column exists precisely so this statement
 // does not have to join through chat_session, which it deletes in this same CTE.
+// The reply-attribution ledger (migration 450). Keyed by workspace_id
+// directly rather than through ws_channel_installations: a push row outlives
+// the installation that sent it (see channel_push_reply.go's re-check
+// comment), so scoping to the installation set would leave rows behind if
+// the installation were ever uninstalled before the workspace is deleted.
 // Keep the two-system cleanup ledger until object storage has been settled.
 // Moving every row out of pending also prevents a concurrent media bind from
 // attaching an object after the workspace teardown commits. The reconciler

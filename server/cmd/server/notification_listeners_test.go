@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -313,6 +315,69 @@ func TestNotification_StatusChanged(t *testing.T) {
 	}
 	if sub2Items[0].Type != "status_changed" {
 		t.Fatalf("expected type 'status_changed', got %q", sub2Items[0].Type)
+	}
+}
+
+func TestNotification_ActionableStatusCarriesSameTaskComment(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+
+	fx := testutil.New(testPool, testWorkspaceID, testUserID)
+	runtimeID := fx.Runtime(t, "actionable notification runtime")
+	agentID := fx.Agent(t, "actionable notification agent", runtimeID)
+	taskID := fx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"issue_id":   issueID,
+		"status":     "running",
+		"started_at": testutil.Raw("now()"),
+	})
+	question := "请确认采用方案 A，详细设计见 [文档](https://docs.example.com/design)。"
+	commentID := fx.Comment(t, issueID, question, testutil.Cols{
+		"author_type":    "agent",
+		"author_id":      agentID,
+		"source_task_id": taskID,
+	})
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "actionable status issue",
+				Status:      "blocked",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+			},
+			"status_changed": true,
+			"prev_status":    "in_progress",
+			"source_task_id": taskID,
+		},
+	})
+
+	items := inboxItemsForRecipient(t, queries, testUserID)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 actionable inbox item, got %d", len(items))
+	}
+	if !items[0].Body.Valid || items[0].Body.String != question {
+		t.Fatalf("body = %#v, want %q", items[0].Body, question)
+	}
+	var details map[string]string
+	if err := json.Unmarshal(items[0].Details, &details); err != nil {
+		t.Fatalf("decode details: %v", err)
+	}
+	if details["comment_id"] != commentID {
+		t.Fatalf("comment_id = %q, want %q", details["comment_id"], commentID)
 	}
 }
 

@@ -115,6 +115,16 @@ describe("getInboxNavigationTarget", () => {
       pathname: "/[workspace]/inbox/[id]",
       params: { workspace: "acme", id: "inbox-1" },
     });
+    expect(
+      getInboxNavigationTarget(
+        item({ issue_id: null, type: "workspace_idle" }),
+        "acme",
+        "history-1",
+      ),
+    ).toEqual({
+      pathname: "/[workspace]/inbox/[id]",
+      params: { workspace: "acme", id: "inbox-1" },
+    });
   });
 });
 

@@ -382,7 +382,7 @@ func (c *httpAPIClient) SendInteractiveCard(ctx context.Context, p SendCardParam
 // content envelope Lark expects is a JSON-encoded `{"text": "..."}`
 // blob; we encode it here so callers pass raw text.
 func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (string, error) {
-	if p.ChatID == "" {
+	if p.ChatID == "" && !p.ReplyTarget.IsSet() {
 		return "", errors.New("lark http client: missing chat_id")
 	}
 	if p.Text == "" {
@@ -411,6 +411,56 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 			c.invalidateToken(p.InstallationID.AppID)
 		}
 		return "", &APIError{Op: "send text message", Code: resp.Code, Msg: resp.Msg}
+	}
+	return resp.Data.MessageID, nil
+}
+
+// SendDirectMessage posts a text message or interactive card straight to a
+// user's open_id. It always sets receive_id_type=open_id because an inbox
+// push starts a fresh 1:1 conversation root. Returns the message_id so the
+// caller can attribute a later reply back to the push that started it.
+func (c *httpAPIClient) SendDirectMessage(ctx context.Context, p SendDirectParams) (string, error) {
+	if p.OpenID == "" {
+		return "", errors.New("lark http client: missing open_id")
+	}
+	if (p.Text == "") == (p.CardJSON == "") {
+		return "", errors.New("lark http client: exactly one of text or card json is required")
+	}
+	msgType := "interactive"
+	content := p.CardJSON
+	if p.Text != "" {
+		msgType = "text"
+		// Same content envelope as SendTextMessage: content = JSON-encoded
+		// {"text": "..."}.
+		contentBytes, err := json.Marshal(map[string]string{"text": p.Text})
+		if err != nil {
+			return "", fmt.Errorf("lark http client: encode text content: %w", err)
+		}
+		content = string(contentBytes)
+	}
+	q := url.Values{}
+	q.Set("receive_id_type", "open_id")
+	body := map[string]string{
+		"receive_id": string(p.OpenID),
+		"msg_type":   msgType,
+		"content":    content,
+	}
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			MessageID string `json:"message_id"`
+		} `json:"data"`
+	}
+	path := "/open-apis/im/v1/messages?" + q.Encode()
+	if err := c.doAuthedJSON(ctx, p.InstallationID, http.MethodPost, path, body, &resp); err != nil {
+		return "", fmt.Errorf("lark http client: send direct message: %w", err)
+	}
+	if resp.Code != 0 || resp.Data.MessageID == "" {
+		if isTokenError(resp.Code) {
+			c.invalidateToken(p.InstallationID.AppID)
+		}
+		return "", &APIError{Op: "send direct message", Code: resp.Code, Msg: resp.Msg}
 	}
 	return resp.Data.MessageID, nil
 }

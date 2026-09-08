@@ -3008,11 +3008,14 @@ func TestRunIssueUpdateNoStartSendsSuppressRun(t *testing.T) {
 
 func TestRunIssueStatusNoStartSendsSuppressRun(t *testing.T) {
 	var body map[string]any
+	var gotAgentID, gotTaskID string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
 			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "backlog"})
 		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+			gotAgentID = r.Header.Get("X-Agent-ID")
+			gotTaskID = r.Header.Get("X-Task-ID")
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Errorf("decode body: %v", err)
 			}
@@ -3025,6 +3028,8 @@ func TestRunIssueStatusNoStartSendsSuppressRun(t *testing.T) {
 	setCLITestServerEnv(t, srv.URL)
 	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
 
 	cmd := newIssueStatusTestCmd()
 	_ = cmd.Flags().Set("no-start", "true")
@@ -3036,6 +3041,9 @@ func TestRunIssueStatusNoStartSendsSuppressRun(t *testing.T) {
 	}
 	if got := body["suppress_run"]; got != true {
 		t.Fatalf("suppress_run = %#v, want true", got)
+	}
+	if gotAgentID != "agent-test" || gotTaskID != "task-test" {
+		t.Fatalf("agent status headers = agent %q task %q, want agent-test/task-test", gotAgentID, gotTaskID)
 	}
 }
 

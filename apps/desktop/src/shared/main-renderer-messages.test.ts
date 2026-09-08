@@ -61,6 +61,9 @@ describe("parseMainRendererChannelState", () => {
       parseMainRendererChannelState({ channel: "auth:token", ready: true }),
     ).toEqual({ channel: "auth:token", ready: true });
     expect(
+      parseMainRendererChannelState({ channel: "issue:open", ready: true }),
+    ).toEqual({ channel: "issue:open", ready: true });
+    expect(
       parseMainRendererChannelState({ channel: "shell:openExternal", ready: true }),
     ).toBeNull();
     expect(

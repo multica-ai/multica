@@ -432,6 +432,17 @@ type ChannelOutboundMessage struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
+type ChannelPushMessage struct {
+	InstallationID   pgtype.UUID        `json:"installation_id"`
+	ChannelType      string             `json:"channel_type"`
+	ChannelMessageID string             `json:"channel_message_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	RecipientUserID  pgtype.UUID        `json:"recipient_user_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	InboxItemID      pgtype.UUID        `json:"inbox_item_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChannelTaskDelivery struct {
 	TaskID           pgtype.UUID        `json:"task_id"`
 	BindingID        pgtype.UUID        `json:"binding_id"`
@@ -1528,6 +1539,13 @@ type Workspace struct {
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	// When TRUE, an agent run that resolves to no precise accountable human (would be owner_fallback) is refused at enqueue instead of degrading to the agent owner (MUL-4302 §3.5). Default FALSE = owner_fallback. Never affects authorization (originator_user_id).
 	AttributionFailClosed bool `json:"attribution_fail_closed"`
+}
+
+type WorkspaceIdleState struct {
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	BusyGeneration         int64              `json:"busy_generation"`
+	IdleNotifiedGeneration int64              `json:"idle_notified_generation"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
 
 type WorkspaceInvitation struct {

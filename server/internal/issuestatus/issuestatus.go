@@ -80,10 +80,17 @@ var ErrUnknownStatus = errors.New("unknown issue status")
 // so `multica issue status <id> human_review` is unambiguous to type.
 var keyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,31}$`)
 
+// EntryReader is the single-method slice of Querier that catalog *readers* need.
+// Effective takes this rather than Querier so a caller that only resolves
+// statuses does not have to satisfy the catalog's write and list surface.
+type EntryReader interface {
+	GetIssueStatusEntryByKey(ctx context.Context, arg db.GetIssueStatusEntryByKeyParams) (db.IssueStatus, error)
+}
+
 // Querier is the slice of the generated query set this package needs. Taking an
 // interface keeps the resolver testable without a live database.
 type Querier interface {
-	GetIssueStatusEntryByKey(ctx context.Context, arg db.GetIssueStatusEntryByKeyParams) (db.IssueStatus, error)
+	EntryReader
 	ListIssueStatusEntries(ctx context.Context, arg db.ListIssueStatusEntriesParams) ([]db.IssueStatus, error)
 	SeedIssueStatusEntries(ctx context.Context, workspaceID pgtype.UUID) error
 	ListIssueStatusKeysByCategories(ctx context.Context, arg db.ListIssueStatusKeysByCategoriesParams) ([]string, error)
@@ -280,7 +287,7 @@ func Ensure(ctx context.Context, q Querier, workspaceID pgtype.UUID) error {
 // direction: an unrecognized status matches none of the canonical comparisons,
 // so the issue is left alone rather than being swept, auto-triggered, or having
 // its autopilot run finalized on a guess.
-func Effective(ctx context.Context, q Querier, workspaceID pgtype.UUID, status string) string {
+func Effective(ctx context.Context, q EntryReader, workspaceID pgtype.UUID, status string) string {
 	if IsBuiltIn(status) {
 		return status
 	}

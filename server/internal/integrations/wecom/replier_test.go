@@ -179,6 +179,25 @@ func TestReply_CommandOutcomes_PostGuidance(t *testing.T) {
 	}
 }
 
+// TestReply_PushReply_PostsPushReplyText covers a hypothetical future WeCom
+// ReplyTo support: engine.Router only reaches these outcomes when
+// InboundMessage.ReplyTo is set, which the WeCom adapter never populates
+// today, but the switch must still render res.PushReplyText verbatim.
+func TestReply_PushReply_PostsPushReplyText(t *testing.T) {
+	for _, outcome := range []engine.Outcome{engine.OutcomePushReply, engine.OutcomePushReplyDenied} {
+		t.Run(string(outcome), func(t *testing.T) {
+			r, inst, conn := newReplierWithConn(t)
+			msg := channel.InboundMessage{Source: channel.Source{ChatID: "USER_A", ChatType: channel.ChatTypeP2P, SenderID: "USER_A"}}
+			r.Reply(context.Background(), inst, msg, engine.Result{Outcome: outcome, PushReplyText: "已记录"})
+			body := conn.sendBody(t, 0)
+			markdown, _ := body["markdown"].(map[string]any)
+			if got, _ := markdown["content"].(string); got != "已记录" {
+				t.Fatalf("reply text = %q, want %q", got, "已记录")
+			}
+		})
+	}
+}
+
 // TestSendBindingPrompt_GroupNeverLeaksToken drives the REAL sendBindingPrompt
 // group branch — the single line the whole #1 fix rests on. It asserts the
 // token-bearing frame goes only to the sender at chat_type=1, the group gets a
@@ -352,8 +371,8 @@ func TestSendBindingPrompt_ThrottledSendsNoURL(t *testing.T) {
 
 // TestPost_HonoursTheCallersDeadline guards the budget the calling code
 // already believed it had. Bus delivery is synchronous, so the reply path runs
-// on the publishing goroutine; outbound.go and handleInboxNew each build a
-// bounded ctx precisely so a stalled WeCom round trip cannot hold it. Waiting
+// on the publishing goroutine; outbound.go and DeliverDM (notify_dm.go) each
+// build a bounded ctx precisely so a stalled WeCom round trip cannot hold it. Waiting
 // for the server's verdict on a hardcoded context.Background() made those
 // bounds decorative — a lost ack cost the full ackTimeout per subscriber, in
 // series, on an HTTP handler's goroutine.

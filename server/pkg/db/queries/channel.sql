@@ -1204,3 +1204,28 @@ SELECT EXISTS (
       AND workspace_id = @workspace_id
       AND url = @storage_url
 ) AS referenced;
+
+-- name: CreateChannelPushMessage :one
+-- IM review push: records that a platform message we just sent is a push
+-- for a specific inbox item, so a reply to it can be attributed back to an
+-- issue. Only written when the adapter returned a real platform message id
+-- — a push we cannot identify later is a push that cannot be replied to.
+INSERT INTO channel_push_message (
+    installation_id, channel_type, channel_message_id,
+    workspace_id, recipient_user_id, issue_id, inbox_item_id
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (installation_id, channel_message_id) DO NOTHING
+RETURNING *;
+
+-- name: FindChannelPushMessage :one
+-- The inbound attribution lookup: is this platform message id one of our
+-- pushes? Keyed on the unique index, so at most one row.
+SELECT * FROM channel_push_message
+WHERE installation_id = $1 AND channel_message_id = $2;
+
+-- name: DeleteExpiredChannelPushMessages :execrows
+-- Retention sweep. A push older than the cutoff is no longer a live
+-- decision prompt; keeping the row would only grow the table.
+DELETE FROM channel_push_message WHERE created_at < $1;

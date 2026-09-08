@@ -45,6 +45,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"channel_media_pending_object":       workspaceDeleteSettle,
 	"channel_outbound_card_message":      workspaceDelete,
 	"channel_outbound_message":           workspaceDelete,
+	"channel_push_message":               workspaceDelete,
 	"channel_task_delivery":              workspaceDelete,
 	"channel_user_binding":               workspaceDelete,
 	"chat_draft_restore":                 workspaceDelete,
@@ -129,6 +130,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"verification_code":                  workspaceDeleteKeep,
 	"webhook_delivery":                   workspaceDelete,
 	"workspace":                          workspaceDelete,
+	"workspace_idle_state":               workspaceDelete,
 	"workspace_invitation":               workspaceDelete,
 	"workspace_share_link":               workspaceDelete,
 }

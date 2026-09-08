@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -147,6 +149,7 @@ var notifTypeToGroup = map[string]string{
 	"task_failed":        "agent_activity",
 	"agent_blocked":      "agent_activity",
 	"agent_completed":    "agent_activity",
+	"workspace_idle":     "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -753,13 +756,22 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 
 		if statusChanged {
 			prevStatus, _ := payload["prev_status"].(string)
-			statusDetails, _ := json.Marshal(map[string]string{
+			detailsMap := map[string]string{
 				"from": prevStatus,
 				"to":   issue.Status,
-			})
+			}
+			body := ""
+			effectiveStatus := issuestatus.Effective(ctx, queries, parseUUID(e.WorkspaceID), issue.Status)
+			if effectiveStatus == "in_review" || effectiveStatus == "blocked" {
+				body, detailsMap["comment_id"] = actionableStatusContext(ctx, queries, e, issue.ID, payload)
+				if detailsMap["comment_id"] == "" {
+					delete(detailsMap, "comment_id")
+				}
+			}
+			statusDetails, _ := json.Marshal(detailsMap)
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "status_changed", "info",
-				issue.Title, "",
+				issue.Title, body,
 				statusDetails)
 
 			// When the issue progresses past the failure (in_review / done /
@@ -1019,6 +1031,47 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			issue.Title, "",
 			emptyDetails)
 	})
+}
+
+// actionableStatusContext returns the concrete question or delivery authored
+// by the same agent run that moved an issue to blocked/in_review. UpdateIssue
+// propagates the server-trusted X-Task-ID, which avoids accidentally quoting a
+// stale comment from another run or agent.
+func actionableStatusContext(
+	ctx context.Context,
+	queries *db.Queries,
+	e events.Event,
+	issueID string,
+	payload map[string]any,
+) (body, commentID string) {
+	if e.ActorType != "agent" {
+		return "", ""
+	}
+	taskID, _ := payload["source_task_id"].(string)
+	if taskID == "" {
+		return "", ""
+	}
+	taskUUID, err := util.ParseUUID(taskID)
+	if err != nil {
+		return "", ""
+	}
+	comment, err := queries.GetLatestAgentCommentForIssueTask(ctx, db.GetLatestAgentCommentForIssueTaskParams{
+		IssueID:      parseUUID(issueID),
+		WorkspaceID:  parseUUID(e.WorkspaceID),
+		SourceTaskID: taskUUID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ""
+	}
+	if err != nil {
+		slog.Error("status notification: load actionable comment failed",
+			"workspace_id", e.WorkspaceID,
+			"issue_id", issueID,
+			"task_id", taskID,
+			"error", err)
+		return "", ""
+	}
+	return comment.Content, util.UUIDToString(comment.ID)
 }
 
 // inboxItemToResponse converts a db.InboxItem into a map suitable for

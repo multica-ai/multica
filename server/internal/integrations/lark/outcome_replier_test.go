@@ -66,6 +66,10 @@ func (s *stubAPIClientWithRecorder) SendTextMessage(ctx context.Context, p SendT
 	return "lark-text-msg-id", nil
 }
 
+func (s *stubAPIClientWithRecorder) SendDirectMessage(ctx context.Context, p SendDirectParams) (string, error) {
+	return "", nil
+}
+
 func (s *stubAPIClientWithRecorder) SendMarkdownCard(ctx context.Context, p SendMarkdownCardParams) (string, error) {
 	return "lark-md-msg-id", nil
 }
@@ -264,6 +268,29 @@ func TestLarkOutcomeReplierCommandOutcomesSendGuidance(t *testing.T) {
 			}
 			if !contains(stub.interactiveOut[0].CardJSON, tc.want) {
 				t.Fatalf("guidance card %q does not contain %q", stub.interactiveOut[0].CardJSON, tc.want)
+			}
+		})
+	}
+}
+
+// TestLarkOutcomeReplierPushReplyRendersPushReplyText covers both push-reply
+// outcomes: they render identically (a notice card with res.PushReplyText),
+// but the metric distinguishes a working reply from a denial.
+func TestLarkOutcomeReplierPushReplyRendersPushReplyText(t *testing.T) {
+	for _, outcome := range []Outcome{OutcomePushReply, OutcomePushReplyDenied} {
+		t.Run(string(outcome), func(t *testing.T) {
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+			stub := &stubAPIClientWithRecorder{configured: true}
+			rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+				APIClient: stub, BindingSvc: &BindingTokenService{}, Credentials: stubCredentialsResolver{secret: "s"},
+				Queries: stubReplierQueries{}, AppURL: "https://multica.test", Logger: log,
+			})
+			rep.Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc_chat"}, DispatchResult{Outcome: outcome, PushReplyText: "已记录"})
+			if len(stub.interactiveOut) != 1 {
+				t.Fatalf("expected one ack card, got %d", len(stub.interactiveOut))
+			}
+			if !contains(stub.interactiveOut[0].CardJSON, "已记录") {
+				t.Fatalf("ack card %q does not contain %q", stub.interactiveOut[0].CardJSON, "已记录")
 			}
 		})
 	}

@@ -91,7 +91,14 @@ Your responsibilities, in order:
    ` + "`" + `squad activity` + "`" + ` call IS the record; a comment on top of
    it is noise. That prohibition holds only while the call succeeds — if
    it errors, responsibility 3 applies and the turn leaves one short
-   comment instead.`
+   comment instead.
+   When a delegated member asks a question or presents a decision that only a
+   human can answer, escalation is an action: preserve the concrete question,
+   recommendation/options, and every relevant document or PR link in your one
+   comment. If this squad owns the issue status, set the parent issue to
+   ` + "`" + `blocked` + "`" + ` after posting that comment; do not leave it in
+   ` + "`" + `in_progress` + "`" + `. The linked comment is what the human receives in the
+   actionable push and replies to.`
 
 // squadParentStatusOwned is responsibility 6 for the case where the issue this
 // leader was woken on is assigned to THIS squad. Only then does the leader own
@@ -115,7 +122,10 @@ const squadParentStatusOwned = `6. **Own the parent issue status.** This issue i
    changes). On the first assignment turn, move the parent to
    ` + "`" + `in_progress` + "`" + ` and keep it there while members work — a successful
    dispatch is not completion. On later turns, do not flip status for
-   routine progress updates. When you confirm the overall goal is met, run
+   routine progress updates. A question that requires a human answer is not
+   routine progress: follow responsibility 5 and move the parent to
+   ` + "`" + `blocked` + "`" + `. When the human reply lets work resume, return it to
+   ` + "`" + `in_progress` + "`" + `. When you confirm the overall goal is met, run
    ` + "`" + `multica issue status <issue-id> in_review` + "`" + ` — this responsibility is
    itself the standing instruction that authorizes that change, so do it even
    when no comment asked you to. Leave ` + "`" + `done` + "`" + ` to a human reviewer or

@@ -3,12 +3,14 @@ package engine
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -31,6 +33,13 @@ const (
 	OutcomeIssueUsage    Outcome = "issue_usage"
 	OutcomeAgentOffline  Outcome = "agent_offline"
 	OutcomeAgentArchived Outcome = "agent_archived"
+	// OutcomePushReply — the message replied to an inbox push and was
+	// injected as an issue comment. It never touched a chat session.
+	OutcomePushReply Outcome = "push_reply"
+	// OutcomePushReplyDenied — the message replied to a known push but the
+	// sender was not the person it was addressed to, or the push had no
+	// issue to reply into. Nothing was written; the sender is told why.
+	OutcomePushReplyDenied Outcome = "push_reply_denied"
 )
 
 // DropReason enumerates the drop-audit categories. Values match the legacy
@@ -71,6 +80,11 @@ type Result struct {
 	// message also carried downloadable media. Repliers use it to tell the
 	// sender to include that media again with the corrected command.
 	IssueUsageHadMedia bool
+	// PushReplyText is the message to echo back for the two push-reply
+	// outcomes. Carried on Result rather than derived from the Outcome
+	// because the reason for a denial is decided server-side, and every
+	// replier must render the same words.
+	PushReplyText string
 	// runScheduled reports whether this ingest scheduled a normal chat run.
 	// It is Router-internal state: repliers must continue to use Outcome.
 	runScheduled bool
@@ -183,6 +197,19 @@ type ChannelChatLifecycle interface {
 	ChannelChatStarted(event ChannelChatStartedEvent)
 	ChannelChatTitleInitialized(workspaceID, creatorID, sessionID pgtype.UUID, title string)
 	GenerateChannelChatTitle(workspaceID, creatorID, sessionID pgtype.UUID, currentTitle, sourceText string)
+}
+
+// PushReplyPoster resolves a reply-to-an-inbox-push and injects it as an
+// issue comment.
+//
+// Deliberately a sibling of ChannelChatLifecycle, not a fourth method on it:
+// that interface's three methods are all chat-session lifecycle, and an issue
+// comment is not part of a chat session's life. *Handler implements both.
+type PushReplyPoster interface {
+	// LookupPush finds the ledger row for a platform message id. A miss is
+	// (_, false, nil), not an error: most replies are ordinary chat.
+	LookupPush(ctx context.Context, installationID pgtype.UUID, channelMessageID string) (db.ChannelPushMessage, bool, error)
+	PostPushReplyComment(ctx context.Context, push db.ChannelPushMessage, senderUserID pgtype.UUID, content string) (PushReplyResult, error)
 }
 
 // ChannelChatStartedEvent contains enough committed metadata for clients to
@@ -423,6 +450,47 @@ type TaskEnqueuer interface {
 	PromoteChannelChatTasksIfMediaReady(ctx context.Context, sessionID pgtype.UUID) error
 	PromoteDeferredChannelIssueTask(ctx context.Context, taskID pgtype.UUID) error
 }
+
+// PushReplyResult is the verdict on a reply to an inbox push, produced by the
+// server side and echoed back to the sender in IM.
+//
+// A denial is a result, not an error: the sender is a real person who typed
+// something and is owed an answer. The error return is reserved for faults the
+// user cannot act on.
+type PushReplyResult struct {
+	Posted  bool
+	Message string
+}
+
+// PushReplyPrecondition is the half of the reply verdict that reads no rows:
+// normalising what the sender typed, and refusing a reply from anyone the push
+// was not addressed to. It returns the normalised content and ok=true when the
+// caller should go on to the database, or a denial and ok=false when it should
+// not.
+//
+// The sender check is the load-bearing one. A push is addressed to one person,
+// but an IM message can reach this code from someone else — a shared context, a
+// forward — and a comment posted here is authored under the recipient's name and
+// carries their authority to wake an agent. Both ids arrive as strings the
+// caller rendered, and util.UUIDToString renders an unparseable id as "", so an
+// empty sender is refused outright rather than allowed to pair with an equally
+// empty recipient.
+func PushReplyPrecondition(recipientUserID, senderUserID, content string) (string, PushReplyResult, bool) {
+	content = util.SanitizeTextForPostgres(strings.TrimSpace(content))
+	if content == "" {
+		return "", PushReplyResult{Message: "回复内容为空，未提交。"}, false
+	}
+	if senderUserID == "" || senderUserID != recipientUserID {
+		return "", PushReplyResult{Message: PushReplyDenied}, false
+	}
+	return content, PushReplyResult{}, true
+}
+
+// PushReplyDenied is the one answer every authorization miss gives back. The
+// sender learns their reply did not land, and nothing more: which of the checks
+// refused, and whether the issue behind the push exists at all, are not theirs
+// to learn from a message they may not be entitled to.
+const PushReplyDenied = "你没有权限回复这条推送。"
 
 // SessionReader reads the rows the debounced flush + /issue identifier need.
 // Shared across platforms; backed by *db.Queries (the channel-backed store).

@@ -37,10 +37,11 @@ type Router struct {
 	mu   sync.RWMutex
 	sets map[channel.Type]ResolverSet
 
-	issues    IssueCreator
-	tasks     TaskEnqueuer
-	reader    SessionReader
-	lifecycle ChannelChatLifecycle
+	issues      IssueCreator
+	tasks       TaskEnqueuer
+	reader      SessionReader
+	lifecycle   ChannelChatLifecycle
+	pushReplies PushReplyPoster
 
 	batcher *pendingBatcher
 
@@ -78,6 +79,9 @@ type RouterConfig struct {
 	MediaConcurrency int
 	Logger           *slog.Logger
 	Lifecycle        ChannelChatLifecycle
+	// PushReplies handles replies to inbox pushes. Nil disables the path
+	// entirely: every message takes the ordinary chat route.
+	PushReplies PushReplyPoster
 }
 
 // NewRouter builds a Router around the shared (platform-agnostic) services:
@@ -104,6 +108,7 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		tasks:        tasks,
 		reader:       reader,
 		lifecycle:    cfg.Lifecycle,
+		pushReplies:  cfg.PushReplies,
 		replyTimeout: cfg.ReplyTimeout,
 		mediaTimeout: cfg.MediaTimeout,
 		mediaCtx:     mediaCtx,
@@ -197,6 +202,17 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 	// first-title selection (chatTitleSource) while Text remains the
 	// agent-readable body.
 	//
+	// Gated to text messages: every adapter that emits a non-text message
+	// (image, file, audio, video, sticker) sets CommandText itself, and an
+	// empty value there means "no typed words", not "the adapter forgot".
+	// Backfilling from Text for those has no legitimate use — a media
+	// message is never a typed command — and actively erases that signal:
+	// Lark's enricher (and any adapter that quotes context into a reply)
+	// writes the quoted/enriched body into Text, not CommandText, precisely
+	// so a wordless reply can be told apart from one that echoes the quoted
+	// text. handlePushReply depends on that distinction to avoid answering
+	// a push with itself when the reply carried no words.
+	//
 	// INVARIANT: an adapter that enriches Text with content the member did not
 	// type — a quoted reply, recent group history — MUST set CommandText itself
 	// before its message reaches Router. This fallback assigns the ALREADY
@@ -206,7 +222,7 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 	// enriching adapters and both comply: lark maps the decoder's
 	// pre-enrichment CommandBody, telegram the cleaned instruction captured
 	// before enrichWithQuotedHumanMessage.
-	if msg.CommandText == "" {
+	if msg.CommandText == "" && msg.Type == channel.MsgTypeText {
 		msg.CommandText = msg.Text
 	}
 
@@ -368,6 +384,19 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			return r.drop(ctx, set, msg, inst.ID, DropReasonNonWorkspaceMember), finalizeMark, nil
 		default:
 			return Result{}, finalizeRelease, fmt.Errorf("resolve sender: %w", err)
+		}
+	}
+
+	// 4b. Inbox-push reply. A reply whose target is a push we sent is a
+	// decision on that push's issue, not chat. It short-circuits here —
+	// before session resolution — because its meaning is already fixed by
+	// the message it answers: it must not open or extend a chat_session,
+	// and ParseIssueCommand must never see it.
+	if r.pushReplies != nil && msg.ReplyTo != nil {
+		if res, handled, err := r.handlePushReply(ctx, inst, msg, identity); err != nil {
+			return Result{}, finalizeRelease, err
+		} else if handled {
+			return res, finalizeMark, nil
 		}
 	}
 
@@ -1063,6 +1092,97 @@ func (r *Router) applyFinalize(ctx context.Context, set ResolverSet, instID pgty
 func (r *Router) drop(ctx context.Context, set ResolverSet, msg channel.InboundMessage, instID pgtype.UUID, reason DropReason) Result {
 	_ = set.Audit.RecordDrop(ctx, instID, msg, reason)
 	return Result{Outcome: OutcomeDropped, DropReason: reason, InstallationID: instID}
+}
+
+// handlePushReply reports handled=false when the reply targets something that
+// is not one of our pushes, which is the common case.
+func (r *Router) handlePushReply(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, identity ResolvedIdentity) (Result, bool, error) {
+	push, ok, err := r.pushReplies.LookupPush(ctx, inst.ID, msg.ReplyTo.MessageID)
+	if err != nil {
+		return Result{}, false, fmt.Errorf("lookup push: %w", err)
+	}
+	if !ok && msg.ReplyTo.RootID != "" && msg.ReplyTo.RootID != msg.ReplyTo.MessageID {
+		// Slack reports only a thread-level ts on inbound, and a DM push
+		// starts its own thread, so the root is the push itself.
+		push, ok, err = r.pushReplies.LookupPush(ctx, inst.ID, msg.ReplyTo.RootID)
+		if err != nil {
+			return Result{}, false, fmt.Errorf("lookup push root: %w", err)
+		}
+	}
+	if !ok {
+		return Result{}, false, nil
+	}
+
+	// The lookup key is (installation, platform message id) — it says nothing
+	// about the workspace. Everything downstream reads push.WorkspaceID: the
+	// membership check that authorizes the sender, the issue lookup, the comment
+	// write. Two rows written by different code paths at different times have to
+	// agree before any of that runs, or a reply arriving through this
+	// installation could act inside a workspace it does not serve.
+	if push.WorkspaceID != inst.WorkspaceID {
+		return Result{}, false, fmt.Errorf(
+			"push %s belongs to workspace %s, installation %s serves %s",
+			msg.ReplyTo.MessageID, util.UUIDToString(push.WorkspaceID),
+			util.UUIDToString(inst.ID), util.UUIDToString(inst.WorkspaceID))
+	}
+
+	// msg.CommandText, not msg.Text: Text is the agent-readable body, and
+	// adapters are free to enrich it. Lark always does on this path — its
+	// enricher prepends the quoted parent whenever ParentID is set, and a push
+	// reply by construction has ParentID set — so Text is our own push with the
+	// sender's answer stapled underneath. CommandText is the pre-enrichment
+	// body every adapter carries for exactly this reason.
+	//
+	// Only for a text message, though. CommandText is the user's typed words
+	// only when there were words to type: Lark flattens every other kind to a
+	// bracketed placeholder and copies that into CommandText verbatim
+	// (lark/ws_frame_decoder.go), so without this gate an image reply posts
+	// "[Image]" into the issue thread as the member's verdict and wakes the
+	// agent on it. Nothing at this layer can tell a placeholder from a real
+	// caption — Telegram would hand over a genuine photo caption the same way —
+	// so a non-text reply is refused rather than guessed at. Refusing costs a
+	// user one retyped word; guessing writes a decision they did not make.
+	//
+	// A control directive still has to come off. Handle strips /new from
+	// CommandText but deliberately leaves /clear there for downstream
+	// classifiers, and Telegram hands it over unstripped either way. Neither
+	// controls anything on a path that never touches a session.
+	content := ""
+	if msg.Type == channel.MsgTypeText {
+		content = msg.CommandText
+		if control, ok := ParseControlCommand(content); ok {
+			content = control.Body
+		}
+	}
+
+	// content is empty for a wordless reply, and PostPushReplyComment's own
+	// no-words precondition is what denies it — the same answer an empty typed
+	// reply gets. The denial is deliberately the poster's to make: it owns
+	// every other reason a reply is refused, and its message is what reaches
+	// the sender.
+	reply, err := r.pushReplies.PostPushReplyComment(ctx, push, identity.UserID, content)
+	if err != nil {
+		return Result{}, false, fmt.Errorf("post push reply: %w", err)
+	}
+	if reply.Message == "" {
+		// Every branch of PostPushReplyComment sets one, so this is a bug in the
+		// poster, not a runtime condition. It is not an error return: that would
+		// leave Handle failed and the adapter would redeliver a message whose
+		// comment is already written. Log it and let the outcome stand.
+		r.logger.ErrorContext(ctx, "channel router: push reply carried no message",
+			"installation_id", util.UUIDToString(inst.ID), "posted", reply.Posted)
+	}
+	outcome := OutcomePushReplyDenied
+	if reply.Posted {
+		outcome = OutcomePushReply
+	}
+	return Result{
+		Outcome:        outcome,
+		InstallationID: inst.ID,
+		Sender:         msg.Source.SenderID,
+		IssueID:        push.IssueID,
+		PushReplyText:  reply.Message,
+	}, true, nil
 }
 
 func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, originType string, creatorUserID, sessionID pgtype.UUID, cmd IssueCommand, issuePrefix string, assignedRunFireAt time.Time) (service.IssueCreateResult, error) {

@@ -143,6 +143,19 @@ func TestReply_CommandOutcomes_PostGuidance(t *testing.T) {
 	}
 }
 
+func TestReply_PushReply_PostsPushReplyText(t *testing.T) {
+	for _, tc := range []engine.Outcome{engine.OutcomePushReply, engine.OutcomePushReplyDenied} {
+		sender := &fakeReplySender{}
+		r := newTestReplier(&fakeBindingMinter{}, sender)
+		r.Reply(context.Background(), testResolvedInstallation(t), testInboundForReply(), engine.Result{
+			Outcome: tc, PushReplyText: "已记录",
+		})
+		if sender.calls != 1 || sender.sent == nil || sender.sent.Text != "已记录" {
+			t.Errorf("outcome %s: got %d sends, text %q, want %q", tc, sender.calls, textOrEmpty(sender.sent), "已记录")
+		}
+	}
+}
+
 func TestReply_IngestedWithIssue_Confirms(t *testing.T) {
 	sender := &fakeReplySender{}
 	r := newTestReplier(&fakeBindingMinter{}, sender)

@@ -45,6 +45,16 @@ type APIClient interface {
 	// chrome the user doesn't want.
 	SendTextMessage(ctx context.Context, p SendTextParams) (string, error)
 
+	// SendDirectMessage posts text or an interactive card straight to a
+	// user's open_id and returns Lark's message_id.
+	//
+	// Distinct from SendTextMessage, which addresses a chat_id
+	// (outboundMessageRequest sets receive_id_type=chat_id). An inbox push
+	// targets the member's binding, whose channel_user_id is an open_id, and
+	// it needs the message_id back so a reply to the push can be attributed
+	// to the issue it was about.
+	SendDirectMessage(ctx context.Context, p SendDirectParams) (string, error)
+
 	// SendMarkdownCard posts the agent's reply as a Lark interactive
 	// card (schema 2.0) with a single `tag: "markdown"` body element.
 	// This is the path the chat-reply router takes when the body
@@ -298,6 +308,16 @@ type SendTextParams struct {
 	ReplyTarget ReplyTarget
 }
 
+// SendDirectParams is the input shape for a 1:1 push to a bound member.
+type SendDirectParams struct {
+	InstallationID InstallationCredentials
+	OpenID         OpenID
+	Text           string
+	// CardJSON is an alternative to Text for a Lark interactive card. Exactly
+	// one of Text and CardJSON must be set.
+	CardJSON string
+}
+
 // SendMarkdownCardParams is the input shape for posting an agent
 // reply as a Lark interactive card with a markdown body element.
 // Markdown is forwarded to Lark verbatim; the client builds the
@@ -412,6 +432,11 @@ func (s *stubAPIClient) PatchInteractiveCard(ctx context.Context, p PatchCardPar
 
 func (s *stubAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (string, error) {
 	s.log.Warn("lark stub client: SendTextMessage called", "chat_id", string(p.ChatID))
+	return "", ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) SendDirectMessage(ctx context.Context, p SendDirectParams) (string, error) {
+	s.log.Warn("lark stub client: SendDirectMessage called", "open_id", string(p.OpenID))
 	return "", ErrAPIClientNotConfigured
 }
 

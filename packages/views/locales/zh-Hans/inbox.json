@@ -73,6 +73,7 @@
     "quick_create_done": "通过智能体创建",
     "quick_create_failed": "通过智能体创建失败",
     "quick_create_unconfirmed": "通过智能体创建结果未确认",
+    "workspace_idle": "工作区空闲",
     "autopilot_paused": "自动化已暂停",
     "autopilot_quota_exceeded": "自动化执行次数已用完"
   },

@@ -692,6 +692,55 @@ func (q *Queries) CreateChannelOutboundCardMessage(ctx context.Context, arg Crea
 	return i, err
 }
 
+const createChannelPushMessage = `-- name: CreateChannelPushMessage :one
+INSERT INTO channel_push_message (
+    installation_id, channel_type, channel_message_id,
+    workspace_id, recipient_user_id, issue_id, inbox_item_id
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (installation_id, channel_message_id) DO NOTHING
+RETURNING installation_id, channel_type, channel_message_id, workspace_id, recipient_user_id, issue_id, inbox_item_id, created_at
+`
+
+type CreateChannelPushMessageParams struct {
+	InstallationID   pgtype.UUID `json:"installation_id"`
+	ChannelType      string      `json:"channel_type"`
+	ChannelMessageID string      `json:"channel_message_id"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	RecipientUserID  pgtype.UUID `json:"recipient_user_id"`
+	IssueID          pgtype.UUID `json:"issue_id"`
+	InboxItemID      pgtype.UUID `json:"inbox_item_id"`
+}
+
+// IM review push: records that a platform message we just sent is a push
+// for a specific inbox item, so a reply to it can be attributed back to an
+// issue. Only written when the adapter returned a real platform message id
+// — a push we cannot identify later is a push that cannot be replied to.
+func (q *Queries) CreateChannelPushMessage(ctx context.Context, arg CreateChannelPushMessageParams) (ChannelPushMessage, error) {
+	row := q.db.QueryRow(ctx, createChannelPushMessage,
+		arg.InstallationID,
+		arg.ChannelType,
+		arg.ChannelMessageID,
+		arg.WorkspaceID,
+		arg.RecipientUserID,
+		arg.IssueID,
+		arg.InboxItemID,
+	)
+	var i ChannelPushMessage
+	err := row.Scan(
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelMessageID,
+		&i.WorkspaceID,
+		&i.RecipientUserID,
+		&i.IssueID,
+		&i.InboxItemID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createChannelTaskDeliveryFromSession = `-- name: CreateChannelTaskDeliveryFromSession :one
 
 INSERT INTO channel_task_delivery (
@@ -1023,6 +1072,20 @@ func (q *Queries) DeleteChannelUserBindingsByWorkspaceMember(ctx context.Context
 	return err
 }
 
+const deleteExpiredChannelPushMessages = `-- name: DeleteExpiredChannelPushMessages :execrows
+DELETE FROM channel_push_message WHERE created_at < $1
+`
+
+// Retention sweep. A push older than the cutoff is no longer a live
+// decision prompt; keeping the row would only grow the table.
+func (q *Queries) DeleteExpiredChannelPushMessages(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredChannelPushMessages, createdAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const findChannelBindingForMember = `-- name: FindChannelBindingForMember :one
 SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
 JOIN channel_installation ci ON ci.id = b.installation_id
@@ -1061,6 +1124,34 @@ func (q *Queries) FindChannelBindingForMember(ctx context.Context, arg FindChann
 		&i.ChannelUserID,
 		&i.Config,
 		&i.BoundAt,
+	)
+	return i, err
+}
+
+const findChannelPushMessage = `-- name: FindChannelPushMessage :one
+SELECT installation_id, channel_type, channel_message_id, workspace_id, recipient_user_id, issue_id, inbox_item_id, created_at FROM channel_push_message
+WHERE installation_id = $1 AND channel_message_id = $2
+`
+
+type FindChannelPushMessageParams struct {
+	InstallationID   pgtype.UUID `json:"installation_id"`
+	ChannelMessageID string      `json:"channel_message_id"`
+}
+
+// The inbound attribution lookup: is this platform message id one of our
+// pushes? Keyed on the unique index, so at most one row.
+func (q *Queries) FindChannelPushMessage(ctx context.Context, arg FindChannelPushMessageParams) (ChannelPushMessage, error) {
+	row := q.db.QueryRow(ctx, findChannelPushMessage, arg.InstallationID, arg.ChannelMessageID)
+	var i ChannelPushMessage
+	err := row.Scan(
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelMessageID,
+		&i.WorkspaceID,
+		&i.RecipientUserID,
+		&i.IssueID,
+		&i.InboxItemID,
+		&i.CreatedAt,
 	)
 	return i, err
 }

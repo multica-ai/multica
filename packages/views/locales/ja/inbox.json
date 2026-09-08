@@ -73,6 +73,7 @@
     "quick_create_done": "エージェントで作成",
     "quick_create_failed": "エージェントでの作成に失敗",
     "quick_create_unconfirmed": "エージェントでの作成結果は未確認",
+    "workspace_idle": "ワークスペースはアイドル状態です",
     "autopilot_paused": "自動化を一時停止しました",
     "autopilot_quota_exceeded": "自動化の実行上限に達しました"
   },

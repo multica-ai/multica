@@ -83,6 +83,16 @@ func TestSquadAssignedLeaderCanWrapUpOnCommentTurn(t *testing.T) {
 	if !strings.Contains(combined, "multica issue status <issue-id> in_review") {
 		t.Error("combined instructions never tell the owning leader how to wrap up")
 	}
+	compact := strings.Join(strings.Fields(briefing), " ")
+	for _, want := range []string{
+		"preserve the concrete question, recommendation/options, and every relevant document or PR link",
+		"set the parent issue to `blocked` after posting that comment",
+		"When the human reply lets work resume, return it to `in_progress`",
+	} {
+		if !strings.Contains(compact, want) {
+			t.Errorf("owning leader briefing missing human-escalation rule %q\n--- briefing ---\n%s", want, briefing)
+		}
+	}
 }
 
 // TestGuestLeaderCannotChangeStatusOnCommentTurn is the other half of the
