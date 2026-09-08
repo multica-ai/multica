@@ -138,12 +138,23 @@ func Classify(rawError string) Reason {
 		):
 		return ReasonAgentProviderQuotaLimit
 
-	// 5. Capacity / rate limit. 429 / 529 / overloaded / rate limit.
+	// 5. Capacity / rate limit. 429 / 529 / overloaded / rate limit, plus
+	//    session / usage-window limits that recover after a provider-side
+	//    cooldown ("You've hit your session limit · resets 2pm"). The latter
+	//    is filed here rather than in the quota bucket (rule 4) precisely
+	//    because it is transient: waiting for the reset clears it, so it must
+	//    reach the retryable capacity bucket, whereas quota (402 / insufficient
+	//    balance / credits) is terminal and stays non-retryable. "session limit"
+	//    would otherwise slip past rule 4's "you've hit your limit" (the word
+	//    "session" splits that substring) and fall through to agent_error.unknown
+	//    — the MS-121 root cause. Mirror these substrings into the MUL-1949
+	//    offline backfill SQL.
 	case httpCapacityCodeRe.MatchString(lower),
 		containsAny(lower,
 			"rate limit",
 			"overloaded",
 			"no capacity available",
+			"session limit",
 		):
 		return ReasonAgentProviderCapacityOrRateLimit
 
