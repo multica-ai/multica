@@ -41,13 +41,14 @@ function setup(initialTask: AgentTask, hasReply = false) {
 }
 
 describe("InlineCommentRun", () => {
-  it.each(["completed", "queued"] as const)("retains keyboard focus when a %s disclosure replaces its trigger", async (status) => {
+  it.each(["completed", "queued"] as const)("keeps the same focused disclosure button for a %s run", async (status) => {
     vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
     setup(task({ status }));
     const before = screen.getByRole("button", { name: /View activity/ });
     before.focus();
     fireEvent.click(before, { detail: 0 });
     const expanded = screen.getByRole("button", { name: /View activity/ });
+    expect(expanded).toBe(before);
     expect(expanded).toHaveFocus();
     expect(expanded).toHaveAttribute("aria-expanded", "true");
     await screen.findByRole("button", { name: "Open full log" });
@@ -115,7 +116,7 @@ describe("InlineCommentRun", () => {
     setup(task({ status: "completed", result: { comment: "Review complete." } }));
     expect(screen.getByText("Review complete.")).toBeInTheDocument();
     expect(screen.getByText("Review complete.").closest('[data-slot="card"]')).toBeNull();
-    expect(screen.getByText("Completed").closest('[data-slot="card"]')).not.toBeNull();
+    expect(screen.getByText("Completed").closest('[data-slot="card"]')).toBeNull();
     expect(api.listTaskMessages).not.toHaveBeenCalled();
   });
 

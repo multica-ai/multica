@@ -862,8 +862,6 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
   entering?: boolean;
   commentProps?: CommentCardProps;
 }) {
-  const { getActorName } = useActorName();
-  const timeAgo = useTimeAgo();
   const viewState = useInlineCommentRunState();
   const reply = commentProps?.entry;
   const motionRef = useRunCommentMotion(entering, reply?.id, run.task.status);
@@ -879,16 +877,9 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
           isHighlighted={commentProps.highlightedCommentId === reply?.id}
           isResolution={!!reply?.resolved_at}
           runMetadata={<InlineCommentRun run={run} viewState={viewState} />} />
-      ) : <>
-        <StickyHeaderShell className="flex items-center gap-2.5 px-4 pt-1 pb-1.5 max-md:px-3">
-          <ActorAvatar actorType="agent" actorId={run.task.agent_id} size="md" enableHoverCard showStatusDot />
-          <span className="text-body font-medium">{getActorName("agent", run.task.agent_id)}</span>
-          <span className="text-caption text-muted-foreground">{timeAgo(run.task.created_at)}</span>
-        </StickyHeaderShell>
-        <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
-          <InlineCommentRun run={run} viewState={viewState} />
-        </div>
-      </>}
+      ) : <div className="px-4 max-md:px-3">
+        <InlineCommentRun run={run} viewState={viewState} showIdentity />
+      </div>}
     </div>
   );
 }

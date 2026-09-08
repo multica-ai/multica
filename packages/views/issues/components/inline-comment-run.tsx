@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { AlertCircle, Brain, ChevronRight, ExternalLink, Loader2, MessageSquare, RotateCcw, Square, Terminal } from "lucide-react";
 import { toast } from "sonner";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTaskMessages } from "@multica/core/chat/queries";
 import { useCancelIssueRun, useRetryIssueRun } from "@multica/core/issues/mutations";
 import { dispatchReasonCode } from "@multica/core/api";
-import { Card } from "@multica/ui/components/ui/card";
+import { ActorAvatar } from "../../common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
@@ -35,7 +35,12 @@ export function useInlineCommentRunState() {
 
 export type InlineCommentRunState = ReturnType<typeof useInlineCommentRunState>;
 
-export function InlineCommentRun({ run, className, viewState }: { run: CommentRun; className?: string; viewState?: InlineCommentRunState }) {
+export function InlineCommentRun({ run, className, viewState, showIdentity = false }: {
+  run: CommentRun;
+  className?: string;
+  viewState?: InlineCommentRunState;
+  showIdentity?: boolean;
+}) {
   const { task, hasReply } = run;
   const { t } = useT("issues");
   const { t: tAgents } = useT("agents");
@@ -45,12 +50,19 @@ export function InlineCommentRun({ run, className, viewState }: { run: CommentRu
   const active = isActiveCommentRun(task);
   const localViewState = useInlineCommentRunState();
   const state = viewState ?? localViewState;
-  const { expanded, setExpanded } = state;
+  const { expanded, setExpanded, fullLogOpen, setFullLogOpen } = state;
   const [confirmStop, setConfirmStop] = useState(false);
   const [now, setNow] = useState(Date.now);
+  const [visibleCount, setVisibleCount] = useState(12);
   const cancel = useCancelIssueRun(task.issue_id);
   const retry = useRetryIssueRun(task.issue_id);
   const regionId = useId();
+  // Keep one disclosure button mounted across queued, live, and historical states.
+  // Historical, collapsed runs still don't fetch transcripts.
+  const { data, isPending, isError, refetch } = useTaskMessages(task.id, active, task.status === "running" || expanded || fullLogOpen);
+  const items = useMemo(() => buildTimeline(data ?? []), [data]);
+  const steps = useMemo(() => buildSteps(items), [items]);
+  const rows = useMemo(() => groupSteps(steps), [steps]);
   useEffect(() => {
     if (!active) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -63,124 +75,84 @@ export function InlineCommentRun({ run, className, viewState }: { run: CommentRu
   const failure = task.status === "failed"
     ? failureReasonLabel(task.failure_reason, tAgents)
     : cancelReasonLabel(task, tAgents);
-  const compact = !active && !failure;
-  // Historical, collapsed runs don't fetch transcripts.
-  const showActivity = task.status === "running" || expanded;
   const output = !hasReply ? commentRunOutput(task) : null;
-  const header = (
-    <div className="flex min-w-0 flex-auto flex-wrap items-center gap-x-2.5 gap-y-1">
-      <span className="flex items-center gap-1.5 whitespace-nowrap text-caption text-muted-foreground" role="status" data-run-status>
-        {task.status === "running"
-          ? <span aria-hidden className="size-1.5 rounded-full bg-info" />
-          : <TaskStatusIcon status={task.status} />}
-        {status}
-      </span>
-      <span className="whitespace-nowrap text-caption tabular-nums text-muted-foreground">{elapsed}</span>
-    </div>
-  );
-  const controls = (
-    <>
-      {active && <Button size="sm" variant="ghost" disabled={cancel.isPending || cancel.isSuccess}
-        onClick={() => setConfirmStop(true)}>
-        {cancel.isPending || cancel.isSuccess ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
-        {cancel.isPending || cancel.isSuccess ? t(($) => $.inline_run.stopping) : t(($) => $.inline_run.stop)}
-      </Button>}
-      {!hasReply && (task.status === "failed" || task.status === "cancelled") && <Button
-        size="sm" variant="ghost" disabled={retry.isPending || retry.isSuccess}
-        onClick={() => retry.mutate(task.id, { onError: (error) => toast.error(
-          dispatchReasonCode(error) === "invocation_not_allowed" ? t(($) => $.execution_log.retry_blocked) : t(($) => $.execution_log.retry_failed),
-        ) })}>
-        <RotateCcw className="size-3.5" />{t(($) => $.execution_log.retry_task_tooltip)}
-      </Button>}
-    </>
-  );
+  const latest = steps.findLast((step) => step.kind !== "text" || step.item.content?.trim());
+  const pendingCall = steps.findLast((step) => isCallStep(step) && !step.result);
+  const current = pendingCall ?? latest;
+  // Keep the last activity visible after a tool returns, until new progress arrives.
+  const activitySummary = current && isCallStep(current)
+    ? redactSecrets(traceToolArgSummary(current.call?.input) || current.tool)
+    : current?.kind === "text" ? redactSecrets(current.item.content ?? "")
+    : current?.kind === "thinking" ? t(($) => $.inline_run.thinking)
+    : current?.kind === "error" ? t(($) => $.inline_run.error)
+    : t(($) => $.inline_run.waiting_response);
+  const summary = task.status === "queued" ? t(($) => $.inline_run.queued)
+    : task.status === "dispatched" ? t(($) => $.inline_run.starting)
+    : task.status === "waiting_local_directory" ? t(($) => $.inline_run.waiting_directory)
+    : activitySummary;
+  const showProgress = active && !hasReply;
+  const activityLabel = t(($) => $.inline_run.view_activity);
+  const stepLabel = steps.length > 0 ? t(($) => $.inline_run.steps, { count: steps.length }) : "";
+  const stopLabel = cancel.isPending || cancel.isSuccess ? t(($) => $.inline_run.stopping) : t(($) => $.inline_run.stop);
   return (
     <section aria-label={t(($) => $.inline_run.label, { name })}
-      className={cn("my-2.5 min-w-0", className)} data-run-id={task.id}>
-      {output && <div className="mb-3 text-body"><ReadonlyContent content={redactSecrets(output)} /></div>}
-      <Card className="gap-0 rounded-lg border-border/70 bg-card p-0 shadow-none">
-        {!hasReply && !compact && <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 pt-3 max-md:px-3">{header}<div className="ml-auto flex items-center">{controls}</div></div>}
-        {(failure || ["queued", "dispatched", "waiting_local_directory"].includes(task.status)) && (
-          <div className="space-y-2 px-4 py-3 max-md:px-3">
-            {failure && <p className="text-caption text-destructive">{failure}</p>}
-            {task.status === "queued" && <p className="text-body text-muted-foreground">{t(($) => $.inline_run.queued)}</p>}
-            {task.status === "dispatched" && <p className="text-body text-muted-foreground">{t(($) => $.inline_run.starting)}</p>}
-            {task.status === "waiting_local_directory" && <p className="text-body text-muted-foreground">{t(($) => $.inline_run.waiting_directory)}</p>}
-          </div>
-        )}
-        {showActivity ? (
-          <InlineRunActivity run={run} viewState={state} expanded={expanded} onExpandedChange={setExpanded}
-            regionId={regionId} name={name} statusLine={hasReply || compact ? header : undefined} controls={hasReply || compact ? controls : undefined} />
-        ) : (
-          <div className={cn("flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-muted/20 px-4 py-2.5 max-md:px-3", !hasReply && !compact && "border-t border-border/50")}>
-            {(hasReply || compact) && header}
-            <div className={cn("flex items-center gap-3", (hasReply || compact) && "ml-auto")}>
-              {(hasReply || compact) && controls}
-              <button type="button" className="flex items-center gap-1.5 rounded text-caption text-muted-foreground hover:text-foreground"
-                aria-expanded={false} onClick={(event) => { state.disclosure.onTrigger(event); setExpanded(true); }}>
-                <ChevronRight ref={state.disclosure.chevronRef} className="size-3.5" />{t(($) => $.inline_run.view_activity)}
-              </button>
-            </div>
-          </div>
-        )}
-      </Card>
+      className={cn("min-w-0 py-2", className)} data-run-id={task.id}>
+      <div className="flex min-h-7 min-w-0 items-center gap-2" data-run-summary-row>
+        {showIdentity && <>
+          <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard />
+          <span className="max-w-[30%] shrink-0 truncate text-body font-medium" title={name}>{name}</span>
+        </>}
+        <span className={cn("flex shrink-0 items-center gap-1.5 whitespace-nowrap text-caption text-muted-foreground", showProgress && "sr-only")}
+          role="status" data-run-status>
+          <TaskStatusIcon status={task.status} />{status}
+        </span>
+        <button type="button"
+          className={cn("flex min-w-0 items-center gap-1.5 rounded py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            showProgress ? "flex-1 text-body" : "order-last ml-auto shrink-0")}
+          aria-label={stepLabel ? `${activityLabel} · ${stepLabel}` : activityLabel}
+          aria-expanded={expanded} aria-controls={expanded ? regionId : undefined}
+          onClick={(event) => { state.disclosure.onTrigger(event); setExpanded(!expanded); }}>
+          {showProgress
+            ? <span data-run-summary className="min-w-0 flex-1 truncate" title={summary}>{summary}</span>
+            : <span className={cn(showIdentity && "max-sm:sr-only")}>{activityLabel}</span>}
+          {!showProgress && stepLabel && <span className="text-faint-foreground max-sm:hidden">· {stepLabel}</span>}
+          <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
+        </button>
+        <span className={cn("shrink-0 whitespace-nowrap text-caption tabular-nums text-muted-foreground", showIdentity && !active && "max-sm:hidden")}>{elapsed}</span>
+        {active && <Button size="icon-sm" variant="ghost" className="text-muted-foreground"
+          aria-label={stopLabel} title={stopLabel} disabled={cancel.isPending || cancel.isSuccess}
+          onClick={() => setConfirmStop(true)}>
+          {cancel.isPending || cancel.isSuccess ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
+        </Button>}
+        {!hasReply && (task.status === "failed" || task.status === "cancelled") && <Button
+          size="sm" variant="ghost" className={cn("text-muted-foreground", showIdentity && "max-sm:size-7 max-sm:p-0")} disabled={retry.isPending || retry.isSuccess}
+          onClick={() => retry.mutate(task.id, { onError: (error) => toast.error(
+            dispatchReasonCode(error) === "invocation_not_allowed" ? t(($) => $.execution_log.retry_blocked) : t(($) => $.execution_log.retry_failed),
+          ) })}>
+          <RotateCcw className="size-3.5" /><span className={cn(showIdentity && "max-sm:sr-only")}>{t(($) => $.execution_log.retry_task_tooltip)}</span>
+        </Button>}
+      </div>
+      <div className={cn(showIdentity && "pl-8")}>
+        {output && <div className="mt-2 text-body"><ReadonlyContent content={redactSecrets(output)} /></div>}
+        {failure && <p className="mt-1 text-caption text-destructive">{failure}</p>}
+        {expanded && <div ref={state.disclosure.contentRef} id={regionId} className="mt-2 min-w-0 space-y-1">
+          {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
+          {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}
+            <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button></div>}
+          {!isPending && !isError && rows.length === 0 && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.empty)}</p>}
+          {rows.length > visibleCount && <button type="button" className="py-1 text-caption text-muted-foreground hover:text-foreground"
+            onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
+          {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={active} />)}
+          <button type="button" className="flex items-center gap-1.5 rounded py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => setFullLogOpen(true)}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
+        </div>}
+      </div>
+      {fullLogOpen && <AgentTranscriptDialog open onOpenChange={setFullLogOpen} task={task} items={items} agentName={name} isLive={active} />}
       <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
         showRunningNote={task.status !== "queued"}
         onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />
     </section>
   );
-}
-
-function InlineRunActivity({ run, viewState, expanded, onExpandedChange, regionId, name, statusLine, controls }: {
-  run: CommentRun; viewState: InlineCommentRunState; expanded: boolean; onExpandedChange: (value: boolean) => void; regionId: string; name: string; statusLine?: ReactNode; controls?: ReactNode;
-}) {
-  const { t } = useT("issues");
-  const live = isActiveCommentRun(run.task);
-  const { data, isPending, isError, refetch } = useTaskMessages(run.task.id, live);
-  const items = useMemo(() => buildTimeline(data ?? []), [data]);
-  const steps = useMemo(() => buildSteps(items), [items]);
-  const rows = useMemo(() => groupSteps(steps), [steps]);
-  const { fullLogOpen, setFullLogOpen } = viewState;
-  const [visibleCount, setVisibleCount] = useState(12);
-  const latest = steps.findLast((step) => step.kind !== "text" || step.item.content?.trim());
-  const pendingCall = steps.findLast((step) => isCallStep(step) && !step.result);
-  const current = pendingCall ?? latest;
-  // Keep the last activity visible after a tool returns, until new progress arrives.
-  const summary = current && isCallStep(current)
-    ? redactSecrets(traceToolArgSummary(current.call?.input) || current.tool)
-    : current?.kind === "text" ? current.item.content
-    : current?.kind === "thinking" ? t(($) => $.inline_run.thinking)
-    : current?.kind === "error" ? t(($) => $.inline_run.error)
-    : t(($) => $.inline_run.waiting_response);
-  return <>
-    {run.task.status === "running" && !run.hasReply && <p className="mx-4 mb-3 mt-2 min-h-[1lh] truncate text-body text-foreground max-md:mx-3" title={summary}>{summary}</p>}
-    <div className={cn("bg-muted/20 px-4 py-2.5 max-md:px-3", !statusLine && "border-t border-border/50")}>
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        {statusLine}
-        <div className={cn("flex items-center gap-3", statusLine && "ml-auto")}>
-          {controls}
-          <button type="button" className="flex items-center gap-1.5 rounded text-caption text-muted-foreground hover:text-foreground"
-            aria-expanded={expanded} aria-controls={expanded ? regionId : undefined} onClick={(event) => { viewState.disclosure.onTrigger(event); onExpandedChange(!expanded); }}>
-            <ChevronRight ref={viewState.disclosure.chevronRef} className={cn("size-3.5", expanded && "rotate-90")} />
-            {t(($) => $.inline_run.view_activity)}
-            {steps.length > 0 && <span className="text-faint-foreground">· {t(($) => $.inline_run.steps, { count: steps.length })}</span>}
-          </button>
-        </div>
-      </div>
-      {expanded && <div ref={viewState.disclosure.contentRef} id={regionId} className="mt-3 min-w-0 space-y-1">
-        {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
-        {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}
-          <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button></div>}
-        {!isPending && !isError && rows.length === 0 && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.empty)}</p>}
-        {rows.length > visibleCount && <button type="button" className="py-1 text-caption text-muted-foreground hover:text-foreground"
-          onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
-        {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={live} />)}
-        <button type="button" className="flex items-center gap-1.5 py-2 text-caption text-muted-foreground hover:text-foreground"
-          onClick={() => setFullLogOpen(true)}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
-      </div>}
-    </div>
-    {fullLogOpen && <AgentTranscriptDialog open onOpenChange={setFullLogOpen} task={run.task} items={items} agentName={name} isLive={live} />}
-  </>;
 }
 
 function InlineStep({ row, live }: { row: TraceRow; live: boolean }) {

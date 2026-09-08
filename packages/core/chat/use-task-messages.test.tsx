@@ -13,6 +13,28 @@ const id = "4a2e8d1c-7f9b-4e2a-9c1d-123456789abc";
 const msg = (seq: number): TaskMessagePayload => ({ task_id: id, issue_id: "issue", type: "text", content: `part${seq}`, seq });
 
 describe("useTaskMessages", () => {
+  it("defers historical transcript requests and backfills cached data when opened", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(chatKeys.taskMessages(id), [msg(1)]);
+    vi.mocked(api.listTaskMessages).mockResolvedValue([msg(1), msg(2)]);
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    const { result, rerender } = renderHook(({ enabled }) => useTaskMessages(id, false, enabled), {
+      wrapper, initialProps: { enabled: false },
+    });
+    expect(api.listTaskMessages).not.toHaveBeenCalled();
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.data).toHaveLength(2));
+    expect(api.listTaskMessages).toHaveBeenCalledTimes(1);
+    rerender({ enabled: false });
+    await act(async () => { await client.invalidateQueries({ queryKey: chatKeys.taskMessagesAll() }); });
+    expect(api.listTaskMessages).toHaveBeenCalledTimes(1);
+    vi.mocked(api.listTaskMessages).mockResolvedValue([msg(1), msg(2), msg(3)]);
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.data).toHaveLength(3));
+    expect(api.listTaskMessages).toHaveBeenCalledTimes(2);
+    client.clear();
+  });
+
   it("backfills cached live data without dropping concurrent WS events and recovers the terminal tail", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryDefaults(chatKeys.taskMessages(id), { structuralSharing: taskMessagesOptions(id).structuralSharing });

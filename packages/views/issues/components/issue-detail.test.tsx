@@ -1253,15 +1253,15 @@ describe("IssueDetail (shared)", () => {
     const replyRow = container.querySelector("#comment-run-reply")!;
     await waitFor(() => expect(within(replyRow as HTMLElement).getByText("Completed")).toBeInTheDocument());
     const run = replyRow.querySelector(`[data-run-id="${taskId}"]`)!;
-    const metadata = run.querySelector('[data-slot="card"]')!;
+    expect(run.querySelector('[data-slot="card"]')).toBeNull();
     expect(container.querySelectorAll(`[data-run-id="${taskId}"]`)).toHaveLength(1);
-    expect(metadata.contains(body)).toBe(false);
+    expect(run.contains(body)).toBe(false);
     expect(replyRow.contains(body)).toBe(true);
     expect(container.querySelector(`[data-run-comment-id="${taskId}"]`)).toBeNull();
     expect(userBlock.querySelector("[data-run-id]")).toBeNull();
     expect(within(run as HTMLElement).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
     fireEvent.click(within(run as HTMLElement).getByRole("button", { name: /View activity/ }));
-    await waitFor(() => expect(within(metadata as HTMLElement).getByText("pnpm test")).toBeInTheDocument());
+    await waitFor(() => expect(within(run as HTMLElement).getByText("pnpm test")).toBeInTheDocument());
     expect(mockApiObj.listTaskMessages).toHaveBeenCalledWith(taskId);
   });
 

@@ -215,18 +215,22 @@ export function taskMessagesOptions(taskId: string) {
 }
 
 /** A visible run follows WS updates and backfills on mount and completion. */
-export function useTaskMessages(taskId: string, isLive: boolean) {
+export function useTaskMessages(taskId: string, isLive: boolean, enabled = true) {
   const query = useQuery({
     ...taskMessagesOptions(taskId),
+    enabled: enabled && isTaskMessageTaskId(taskId),
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
   });
-  const previousLive = useRef(isLive);
+  const previous = useRef({ isLive, enabled });
   const { refetch } = query;
   useEffect(() => {
-    if (previousLive.current && !isLive && isTaskMessageTaskId(taskId)) void refetch();
-    previousLive.current = isLive;
-  }, [taskId, isLive, refetch]);
+    if (enabled && isTaskMessageTaskId(taskId)
+      && (!previous.current.enabled || (previous.current.isLive && !isLive))) {
+      void refetch({ cancelRefetch: false });
+    }
+    previous.current = { isLive, enabled };
+  }, [taskId, isLive, enabled, refetch]);
   return query;
 }
 
