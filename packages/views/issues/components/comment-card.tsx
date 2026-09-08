@@ -4,7 +4,7 @@ import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNod
 import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -48,6 +48,9 @@ import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { InlineCommentRun, useInlineCommentRunState, type InlineCommentRunState } from "./inline-comment-run";
 import { EMPTY_COMMENT_RUNS, type CommentRun } from "./comment-runs";
 import { useRunCommentMotion } from "./use-run-comment-motion";
+
+const commentActionClassName =
+  "text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50";
 
 const highlightedCommentBackgroundClass =
   "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
@@ -687,7 +690,7 @@ function CommentRow({
             onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
             ariaLabel={t(($) => $.comment.add_reaction)}
             align="end"
-            className="h-7 w-7 hover:bg-transparent"
+            className={buttonVariants({ variant: "ghost", size: "icon-sm", className: commentActionClassName })}
           />}
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -695,7 +698,7 @@ function CommentRow({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="text-muted-foreground"
+                  className={commentActionClassName}
                   aria-label={t(($) => $.comment.more_actions)}
                 >
                   <MoreHorizontal className="h-4 w-4" aria-hidden />
@@ -1081,7 +1084,7 @@ function CommentCardImpl({
                   aria-expanded={open}
                   aria-controls={open ? `comment-body-${entry.id}` : undefined}
                   onClick={handleToggle}
-                  className="text-muted-foreground hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent"
+                  className={commentActionClassName}
                 >
                   <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
                 </Button>
@@ -1090,7 +1093,7 @@ function CommentCardImpl({
                     onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
                     ariaLabel={t(($) => $.comment.add_reaction)}
                     align="end"
-                    className="h-7 w-7 hover:bg-transparent"
+                    className={buttonVariants({ variant: "ghost", size: "icon-sm", className: commentActionClassName })}
                   />}
                   <DropdownMenu>
                     <DropdownMenuTrigger
@@ -1098,7 +1101,7 @@ function CommentCardImpl({
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          className="text-muted-foreground"
+                          className={commentActionClassName}
                           aria-label={t(($) => $.comment.more_actions)}
                         >
                           <MoreHorizontal className="h-4 w-4" aria-hidden />

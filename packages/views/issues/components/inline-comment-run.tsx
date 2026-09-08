@@ -110,7 +110,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     return <span className="inline-flex shrink-0" data-run-id={task.id}>
       <Tooltip>
         <TooltipTrigger render={<Button type="button" size="icon-sm" variant="ghost"
-          className="text-muted-foreground hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent"
+          className="text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
           aria-label={t(($) => $.inline_run.full_log)} aria-haspopup="dialog" aria-expanded={fullLogOpen}
           onClick={() => setFullLogOpen(true)}>
           <ScrollText aria-hidden className="size-3.5" />
