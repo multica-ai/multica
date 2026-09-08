@@ -1063,7 +1063,7 @@ function CommentCardImpl({
                   aria-expanded={open}
                   aria-controls={open ? `comment-body-${entry.id}` : undefined}
                   onClick={handleToggle}
-                  className="text-muted-foreground"
+                  className="text-muted-foreground hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent"
                 >
                   <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
                 </Button>
