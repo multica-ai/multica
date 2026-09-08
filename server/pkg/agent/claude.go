@@ -126,6 +126,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
+	liveness := &SessionLiveness{}
 
 	// procDone closes once cmd.Wait() returns, letting the cancellation handler
 	// skip a process that already exited and avoid signalling a dead/reused pid.
@@ -171,6 +172,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
+		var schedules claudeSchedules
+		waitingForWakeup := false
 		eventCount := 0
 		invalidEventCount := 0
 		assistantEventCount := 0
@@ -209,6 +212,24 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			_ = stdout.Close()
 		}()
 
+		beginScheduledTurn := func(scheduledCronFire bool) {
+			if !waitingForWakeup {
+				return
+			}
+			// Retain the completed result throughout the scheduled wait. Reset
+			// only once a new main-thread turn starts, so an incomplete subsequent
+			// turn cannot be masked by the previous checkpoint.
+			waitingForWakeup = false
+			liveness.ClearWaitingUntil()
+			schedules.beginTurn(time.Now(), scheduledCronFire)
+			sawResult = false
+			finalResultText = ""
+			lastAssistantText = ""
+			resultIsError = false
+			terminalReasonError = ""
+			trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
+		}
+
 		scanner := newAgentStreamScanner(stdout)
 
 		for scanner.Scan() {
@@ -226,6 +247,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			switch msg.Type {
 			case "assistant":
+				if msg.ParentToolUseID == "" {
+					beginScheduledTurn(false)
+				}
+				schedules.observe(msg, time.Now())
 				assistantEventCount++
 				turn := b.handleAssistant(msg, msgCh, usage)
 				toolUseCount += turn.toolUses
@@ -234,14 +259,28 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				lastAssistantText = turn.resolveFallback(lastAssistantText)
 			case "user":
+				schedules.observe(msg, time.Now())
 				if b.handleUser(msg, msgCh) {
 					sawAsyncLaunch = true
 				}
 			case "system":
+				if msg.ParentToolUseID == "" {
+					switch msg.Subtype {
+					case "scheduled_task_fire":
+						beginScheduledTurn(true)
+					case "init":
+						beginScheduledTurn(false)
+					}
+				}
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
 				}
-				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
+				status := Message{Type: MessageStatus, Status: "running", SessionID: sessionID}
+				if waitingForWakeup {
+					status.Status = "waiting"
+					status.WaitingUntil, _ = schedules.waitingUntil()
+				}
+				trySend(msgCh, status)
 			case "result":
 				sawResult = true
 				finalResultText = msg.ResultText
@@ -249,7 +288,15 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
 				sessionID = msg.SessionID
 				if resultUsage := claudeResultUsage(msg, opts.Model); len(resultUsage) > 0 {
+					// The terminal usage snapshot replaces assistant-event totals.
 					usage = resultUsage
+				}
+				if until, pending := schedules.waitingUntil(); pending && !resultIsError && terminalReasonError == "" && !sawAsyncLaunch {
+					waitingForWakeup = true
+					liveness.SetWaitingUntil(until)
+					b.cfg.Logger.Info("claude awaiting native scheduled wakeup", "session_id", sessionID, "waiting_until", until)
+					trySend(msgCh, Message{Type: MessageStatus, Status: "waiting", SessionID: sessionID, WaitingUntil: until})
+					continue
 				}
 				closeStdin()
 			case "log":
@@ -290,6 +337,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		completionGuardError := ""
 		if sawAsyncLaunch {
 			completionGuardError = "claude launched an async background task; Multica-managed runs require foreground execution"
+		} else if waitingForWakeup {
+			completionGuardError = "claude exited before the confirmed scheduled wakeup; the native loop can no longer continue"
 		}
 		finalStatus, finalOutput, finalError := finalizeStreamResult(
 			"claude",
@@ -360,7 +409,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	return &Session{Messages: msgCh, Result: resCh}, nil
+	return &Session{Messages: msgCh, Result: resCh, Liveness: liveness}, nil
 }
 
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage) assistantTurn {
@@ -537,11 +586,13 @@ func claudeMapHasAsyncLaunchStatus(value map[string]any) bool {
 // ── Claude SDK JSON types ──
 
 type claudeSDKMessage struct {
-	Type      string          `json:"type"`
-	Message   json.RawMessage `json:"message,omitempty"`
-	Subtype   string          `json:"subtype,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
-	Model     string          `json:"model,omitempty"`
+	ParentToolUseID string          `json:"parent_tool_use_id,omitempty"`
+	ToolUseResult   json.RawMessage `json:"tool_use_result,omitempty"`
+	Type            string          `json:"type"`
+	Message         json.RawMessage `json:"message,omitempty"`
+	Subtype         string          `json:"subtype,omitempty"`
+	SessionID       string          `json:"session_id,omitempty"`
+	Model           string          `json:"model,omitempty"`
 
 	// result fields
 	ResultText string `json:"result,omitempty"`
@@ -667,6 +718,7 @@ func claudeUsageHasTokens(input, output, cacheRead, cacheWrite int64) bool {
 }
 
 type claudeContentBlock struct {
+	IsError   bool            `json:"is_error,omitempty"`
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
 	ID        string          `json:"id,omitempty"`

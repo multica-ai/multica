@@ -3608,18 +3608,39 @@ func TestExecuteAndDrain_ContextCancelled_ReportsCancelled(t *testing.T) {
 // cap (opts.Timeout = 0) the drain loop imposes no deadline of its own, so the
 // idle watchdog is the only thing that ends this otherwise-forever-silent run.
 type idleWatchdogBackend struct {
-	emitOne bool // when true, emit one message before going silent; when false, never emit anything
+	emitOne           bool // when true, emit one message before going silent; when false, never emit anything
+	waitFor           time.Duration
+	resume            bool
+	dropRunningStatus bool
 }
 
 func (b idleWatchdogBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
-	msgCh := make(chan agent.Message, 1)
+	capacity := 3
+	if b.dropRunningStatus {
+		capacity = 2
+	}
+	msgCh := make(chan agent.Message, capacity)
 	resCh := make(chan agent.Result)
+	liveness := &agent.SessionLiveness{}
+	if b.waitFor > 0 {
+		waitingUntil := time.Now().Add(b.waitFor)
+		liveness.SetWaitingUntil(waitingUntil)
+		msgCh <- agent.Message{Type: agent.MessageStatus, Status: "waiting", WaitingUntil: waitingUntil}
+		msgCh <- agent.Message{Type: agent.MessageLog, Content: "still waiting"}
+		if b.resume {
+			liveness.ClearWaitingUntil()
+			select {
+			case msgCh <- agent.Message{Type: agent.MessageStatus, Status: "running"}:
+			default:
+			}
+		}
+	}
 	if b.emitOne {
 		msgCh <- agent.Message{Type: agent.MessageText, Content: "hello"}
 	}
 	// Deliberately do NOT close msgCh and never write to resCh — this models
 	// a backend whose subprocess is hung and will never naturally complete.
-	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+	return &agent.Session{Messages: msgCh, Result: resCh, Liveness: liveness}, nil
 }
 
 // TestIdleWatchdogTickInterval pins the ceiling, which is the reason the helper
@@ -5996,5 +6017,70 @@ func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
 	}
 	if strings.Join(strippedCustom, "\x00") != "--yolo" {
 		t.Errorf("custom = %v, want only the selector removed", strippedCustom)
+	}
+}
+
+// Confirmed scheduled silence gets a finite extension. Incidental log output
+// preserves it, while a running transition restores ordinary hang detection.
+func TestExecuteAndDrain_IdleWatchdog_NativeScheduledWait(t *testing.T) {
+	for _, resume := range []bool{false, true} {
+		t.Run(fmt.Sprintf("resume=%t", resume), func(t *testing.T) {
+			t.Parallel()
+			d := newTestDaemon(t)
+			d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			start := time.Now()
+			result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{waitFor: 300 * time.Millisecond, resume: resume}, "p", agent.ExecOptions{}, slog.Default(), "native-wait", "", new(atomic.Int32))
+			if err != nil || result.Status != "idle_watchdog" {
+				t.Fatalf("result=%+v error=%v", result, err)
+			}
+			elapsed := time.Since(start)
+			if !resume && elapsed < 300*time.Millisecond {
+				t.Fatalf("scheduled wait killed early after %s", elapsed)
+			}
+			if resume && elapsed > 250*time.Millisecond {
+				t.Fatalf("running turn retained scheduled idle exemption: %s", elapsed)
+			}
+		})
+	}
+}
+
+func TestExecuteAndDrain_IdleWatchdog_LivenessClearSurvivesDroppedRunningStatus(t *testing.T) {
+	t.Parallel()
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{
+		waitFor:           300 * time.Millisecond,
+		resume:            true,
+		dropRunningStatus: true,
+	}, "p", agent.ExecOptions{}, slog.Default(), "native-wait-dropped-running", "", new(atomic.Int32))
+	if err != nil || result.Status != "idle_watchdog" {
+		t.Fatalf("result=%+v error=%v", result, err)
+	}
+	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
+		t.Fatalf("dropped running display retained stale scheduled exemption: %s", elapsed)
+	}
+}
+
+func TestExecuteAndDrain_NativeScheduledWaitCanCancel(t *testing.T) {
+	t.Parallel()
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{waitFor: time.Hour}, "p", agent.ExecOptions{}, slog.Default(), "native-wait-cancel", "", new(atomic.Int32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status == "idle_watchdog" {
+		t.Fatalf("cancel was attributed to idle watchdog: %+v", result)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("native wait blocked context cancellation")
 	}
 }
