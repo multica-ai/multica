@@ -131,10 +131,30 @@ func (d *redisDedupe) Claim(ctx context.Context, key, token string, ttl time.Dur
 	return n == 1, err
 }
 
+// bookkeepingBudget bounds one claim-bookkeeping round trip.
+//
+// Cancellation is dropped on purpose: Release and Settle speak for a frame
+// whose delivery has already been decided, and the shutdown that interrupted
+// the work must not also erase the record of it.
+//
+// A DEADLINE is not dropped. A caller that sets one is bounding a whole
+// sequence of these calls — drainRemaining gives the entire drain a single
+// DrainBudget — so a round trip that helped itself to a fresh budget past that
+// point would spend time the shutdown already promised away. The deadline is
+// inherited and the store's own budget only ever makes the wait shorter.
+func (d *redisDedupe) bookkeepingBudget(ctx context.Context) (context.Context, context.CancelFunc) {
+	detached := context.WithoutCancel(ctx)
+	own := time.Now().Add(d.budget)
+	if deadline, ok := ctx.Deadline(); ok && deadline.Before(own) {
+		return context.WithDeadline(detached, deadline)
+	}
+	return context.WithDeadline(detached, own)
+}
+
 // Release is a compare-and-delete on the token. An error means the outcome is
 // unknown; the caller reads it as exactly that (RelayOutbound.perform).
 func (d *redisDedupe) Release(ctx context.Context, key, token string) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.budget)
+	ctx, cancel := d.bookkeepingBudget(ctx)
 	defer cancel()
 	n, err := redisRelease.Run(ctx, d.rdb, []string{key}, token).Int()
 	if err != nil {
@@ -146,7 +166,7 @@ func (d *redisDedupe) Release(ctx context.Context, key, token string) (bool, err
 }
 
 func (d *redisDedupe) Settle(ctx context.Context, key, token string) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.budget)
+	ctx, cancel := d.bookkeepingBudget(ctx)
 	defer cancel()
 	n, err := redisSettle.Run(ctx, d.rdb, []string{key}, token, claimSettledValue).Int()
 	return n == 1, err

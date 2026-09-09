@@ -941,7 +941,10 @@ func (r *RelayOutbound) settleRetryBackoff() time.Duration {
 // which case the claim is still held by this token and the publisher's own
 // Resolve is what will end it, once. Neither may be counted here.
 func (r *RelayOutbound) settleClaim(ctx context.Context, key, token string, f relayFrame) bool {
-	var lastErr error
+	var (
+		lastErr error
+		made    int
+	)
 	for attempt := 0; attempt < claimSettleAttempts; attempt++ {
 		if attempt > 0 {
 			timer := time.NewTimer(r.settleRetryBackoff())
@@ -954,7 +957,11 @@ func (r *RelayOutbound) settleClaim(ctx context.Context, key, token string, f re
 				// the attempt.
 				timer.Stop()
 			}
+			if settleBudgetSpent(ctx) {
+				break
+			}
 		}
+		made++
 		settled, err := r.dedupe.Settle(ctx, key, token)
 		switch {
 		case err != nil:
@@ -972,9 +979,22 @@ func (r *RelayOutbound) settleClaim(ctx context.Context, key, token string, f re
 	// Resolve turns into a record of its own. Counting here as well would be
 	// the double record this whole path exists to prevent.
 	r.logger.WarnContext(ctx, "wecom relay: delivered, but the claim could not be settled; the publisher's watch will end it",
-		"error", lastErr, "attempts", claimSettleAttempts, "kind", f.Kind,
+		"error", lastErr, "attempts", made, "kind", f.Kind,
 		"installation_id", f.InstallationID, "task_id", f.TaskID)
 	return false
+}
+
+// settleBudgetSpent reports whether a bounding DEADLINE on ctx has passed.
+//
+// A bare cancellation is not one. Shutdown interrupts the work, but the frame
+// is already in the user's chat and its claim still has to be settled — which
+// is why the store call drops cancellation (dedupe_redis.go). A deadline is
+// the opposite case: drainRemaining bounds the WHOLE drain with one, and a
+// retry chain that keeps opening attempts past it spends time the shutdown
+// already promised away. Attempts already made stand; no new one begins.
+func settleBudgetSpent(ctx context.Context) bool {
+	deadline, ok := ctx.Deadline()
+	return ok && !time.Now().Before(deadline)
 }
 
 // tokenFor is the owner token one claim is held under: this process, and the
