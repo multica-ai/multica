@@ -1871,6 +1871,7 @@ func fetchIssue(ctx context.Context, client *cli.APIClient, id string) (map[stri
 // column.
 func fetchIssueColumn(ctx context.Context, client *cli.APIClient, workspaceID, projectID, status string) ([]map[string]any, error) {
 	var all []map[string]any
+	seen := make(map[string]struct{})
 	offset := 0
 	for {
 		params := url.Values{}
@@ -1887,15 +1888,31 @@ func fetchIssueColumn(ctx context.Context, client *cli.APIClient, workspaceID, p
 		if err := client.GetJSON(ctx, "/api/issues?"+params.Encode(), &result); err != nil {
 			return nil, err
 		}
-		page, _ := result["issues"].([]any)
-		for _, raw := range page {
-			if m, ok := raw.(map[string]any); ok {
-				all = append(all, m)
-			}
+		page, ok := result["issues"].([]any)
+		if !ok {
+			return nil, fmt.Errorf("invalid issue column response: expected an issues array")
 		}
-		total, _ := result["total"].(float64)
+		for _, raw := range page {
+			m, ok := raw.(map[string]any)
+			if !ok || strVal(m, "id") == "" {
+				return nil, fmt.Errorf("invalid issue in column response")
+			}
+			id := strVal(m, "id")
+			if _, exists := seen[id]; exists {
+				return nil, fmt.Errorf("issue column returned duplicate issue %s; retry the reorder", id)
+			}
+			seen[id] = struct{}{}
+			all = append(all, m)
+		}
+		total, totalOK := result["total"].(float64)
 		offset += len(page)
-		if len(page) == 0 || offset >= int(total) {
+		// Older servers substitute the page length when COUNT fails. Such a
+		// total cannot prove the column is complete. Without a usable count,
+		// read through the empty page, including when the server uses smaller
+		// pages; a short page does not establish its applied limit. Duplicate
+		// IDs above reject a repeated page before any position is written.
+		totalTrusted := totalOK && total > float64(len(page))
+		if len(page) == 0 || (totalTrusted && float64(offset) >= total) {
 			break
 		}
 	}

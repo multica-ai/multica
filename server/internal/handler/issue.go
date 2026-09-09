@@ -1570,7 +1570,9 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 	countArgs := args[:len(args)-2]
 	var total int64
 	if err := h.DB.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
-		total = int64(len(issues))
+		slog.Warn("ListIssues count failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to count issues")
+		return
 	}
 
 	prefix := h.getIssuePrefix(ctx, wsUUID)
