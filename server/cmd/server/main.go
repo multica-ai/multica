@@ -49,6 +49,26 @@ func newNamedRedisClient(base *redis.Options, suffix string) *redis.Client {
 	return redis.NewClient(&opts)
 }
 
+// newClaimRedisClient is a named client that honours its callers' context
+// deadlines.
+//
+// go-redis discards them by default (Options.ContextTimeoutEnabled): a command
+// is bounded by the socket timeout instead, so a caller's deadline reaches the
+// wire only as a suggestion. That is the right default for the relay's own
+// publish traffic, where nobody is holding a stopwatch, and the wrong one for
+// the WeCom claim store, whose callers spend budgets they have promised to
+// keep — DedupeStore.ClaimBudget is what sizes the dispatcher's outcome grace,
+// and a shutdown drain gives its whole sequence of round trips one DrainBudget.
+//
+// Hence a dedicated client rather than the flag on the shared relay client:
+// setting it there would change the timeout behaviour of every publish that
+// runs through it, which is a far wider blast radius than this store needs.
+func newClaimRedisClient(base *redis.Options, suffix string) *redis.Client {
+	opts := *base
+	opts.ContextTimeoutEnabled = true
+	return newNamedRedisClient(&opts, suffix)
+}
+
 func redisClientName(existing, suffix string) string {
 	if suffix == "" {
 		return existing
@@ -417,6 +437,7 @@ func main() {
 	var storeRedis *redis.Client
 	var channelLeaseRedis *redis.Client
 	var relayWriteRedis *redis.Client
+	var wecomClaimRedis *redis.Client
 	var relayReadRedis *redis.Client
 	var shardedReadRedis *redis.Client
 	var legacyReadRedis *redis.Client
@@ -449,6 +470,7 @@ func main() {
 		closeRedisClient("realtime-read-legacy", legacyReadRedis)
 		closeRedisClient("realtime-read-sharded", shardedReadRedis)
 		closeRedisClient("realtime-read", relayReadRedis)
+		closeRedisClient("wecom-claim", wecomClaimRedis)
 		closeRedisClient("realtime-write", relayWriteRedis)
 		closeRedisClient("channel-lease", channelLeaseRedis)
 		closeRedisClient("store", storeRedis)
@@ -507,8 +529,9 @@ func main() {
 						"error", err)
 					leaseSettle = 0
 				}
+				wecomClaimRedis = newClaimRedisClient(opts, "wecom-claim")
 				wecomRelayOutbound = wecom.NewRelayOutbound(wecomRelay,
-					wecom.NewRedisDedupe(relayWriteRedis, 0, slog.Default()),
+					wecom.NewRedisDedupe(wecomClaimRedis, 0, slog.Default()),
 					wecom.RelayConfig{
 						ReplayGrace: relayConfig.ReplayGrace,
 						LeaseSettle: leaseSettle,

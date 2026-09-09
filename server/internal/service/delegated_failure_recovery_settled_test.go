@@ -227,7 +227,7 @@ func TestManualRerunSettlesDeliveredRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse actor id: %v", err)
 	}
-	if _, err := svc.RerunIssue(ctx, issueID, pgtype.UUID{}, pgtype.UUID{}, actorID, func(db.Agent) bool { return true }); err != nil {
+	if _, err := svc.RerunIssue(ctx, issueID, recoveryTaskID, pgtype.UUID{}, actorID, func(db.Agent) bool { return true }); err != nil {
 		t.Fatalf("RerunIssue: %v", err)
 	}
 

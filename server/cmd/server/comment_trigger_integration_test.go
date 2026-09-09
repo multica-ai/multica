@@ -671,9 +671,9 @@ func TestDeleteCommentCancelsTriggeredTasks(t *testing.T) {
 	})
 }
 
-// TestCommentTriggerCoalescing verifies that rapid-fire comments don't create
-// duplicate tasks (coalescing dedup).
-func TestCommentTriggerCoalescing(t *testing.T) {
+// TestCommentThreadsQueueSeparatelyFromAssignment verifies that each root
+// comment queues independently of other threads and the assignment task.
+func TestCommentThreadsQueueSeparatelyFromAssignment(t *testing.T) {
 	agentID := getAgentID(t)
 	issueID := createIssueAssignedToAgent(t, "Coalescing test", agentID)
 	t.Cleanup(func() {
@@ -682,12 +682,21 @@ func TestCommentTriggerCoalescing(t *testing.T) {
 		resp.Body.Close()
 	})
 
-	// Post two comments rapidly — only 1 task should be created (coalescing).
-	postComment(t, issueID, "First comment", nil)
-	postComment(t, issueID, "Second comment", nil)
+	// Distinct root comments must not merge with each other or the assignment.
+	first := postComment(t, issueID, "First comment", nil)
+	second := postComment(t, issueID, "Second comment", nil)
 
-	if n := countPendingTasks(t, issueID); n != 1 {
-		t.Errorf("expected 1 pending task (coalescing), got %d", n)
+	if n := countPendingTasks(t, issueID); n != 3 {
+		t.Fatalf("expected assignment plus two independent thread tasks, got %d", n)
+	}
+	for _, id := range []string{first, second} {
+		var count int
+		if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2 AND trigger_comment_id=$3 AND cardinality(coalesced_comment_ids)=0`, issueID, agentID, id).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Errorf("comment %s should own exactly one unmerged task, got %d", id, count)
+		}
 	}
 }
 

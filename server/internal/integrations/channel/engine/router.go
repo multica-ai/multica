@@ -576,8 +576,8 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			)
 		}
 		// One lookup feeds both the broadcast payload's identifier and the
-		// chat reply's.
-		prefix := r.issuePrefix(ctx, inst.WorkspaceID)
+		// chat reply's deep link.
+		prefix, workspaceSlug := r.issueWorkspaceIdentity(ctx, inst.WorkspaceID)
 		var assignedRunFireAt time.Time
 		if resolveMedia {
 			// The generic deferred-task sweeper is the crash fallback. Leave room
@@ -592,6 +592,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			res.IssueNumber = duplicate.Number
 			res.IssueTitle = duplicate.Title
 			res.IssueIdentifier = service.IssueIdentifier(prefix, duplicate.Number)
+			res.IssueWorkspaceSlug = workspaceSlug
 			res.IssueDuplicate = true
 			// A duplicate is a terminal product outcome, not an infrastructure
 			// failure and not a chat prompt. Finalize the durable chat message's
@@ -614,6 +615,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		// Same renderer the broadcast payload uses, so a degraded prefix can't
 		// show the chat "#42" while the realtime list shows "-42".
 		res.IssueIdentifier = service.IssueIdentifier(prefix, issueRes.Issue.Number)
+		res.IssueWorkspaceSlug = workspaceSlug
 		// IssueService.Create already enqueues the assigned agent's issue task.
 		// Scheduling the command as a chat run too makes the agent execute the
 		// same /issue input again. A synchronous issue command is terminal.
@@ -1102,17 +1104,17 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 	return r.issues.Create(ctx, params, opts)
 }
 
-// issuePrefix reads the workspace's issue key (the "MUL" in MUL-42). A read
-// failure is not worth failing issue creation over, so it degrades to empty
-// and only the rendered identifier suffers.
-func (r *Router) issuePrefix(ctx context.Context, workspaceID pgtype.UUID) string {
+// issueWorkspaceIdentity reads the workspace slug and issue key prefix. A read
+// failure is not worth failing issue creation over, so it degrades to empty and
+// only the rendered identifier/link suffers.
+func (r *Router) issueWorkspaceIdentity(ctx context.Context, workspaceID pgtype.UUID) (prefix, slug string) {
 	ws, err := r.reader.GetWorkspace(ctx, workspaceID)
 	if err != nil {
-		r.logger.Warn("channel engine: workspace lookup for issue prefix failed",
+		r.logger.Warn("channel engine: workspace lookup for issue identity failed",
 			"workspace_id", util.UUIDToString(workspaceID), "error", err)
-		return ""
+		return "", ""
 	}
-	return ws.IssuePrefix
+	return ws.IssuePrefix, ws.Slug
 }
 
 // ErrEmptyIssueTitle is a defensive invariant error. Router handles a

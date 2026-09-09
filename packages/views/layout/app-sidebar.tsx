@@ -168,6 +168,9 @@ const utilityNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "settings", labelKey: "settings" },
 ];
 
+const NAV_ITEM_CLASS_NAME =
+  "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground";
+
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => s.hasDraft());
   if (!hasDraft) return null;
@@ -771,7 +774,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        className={NAV_ITEM_CLASS_NAME}
                       >
                         <Icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
@@ -859,7 +862,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        className={NAV_ITEM_CLASS_NAME}
                       >
                         <Icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
@@ -884,7 +887,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        className={NAV_ITEM_CLASS_NAME}
                       >
                         <Icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
@@ -907,7 +910,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   <SidebarMenuButton
                     isActive={isNavActive(pathname, href)}
                     render={<AppLink href={href} />}
-                    className="text-caption text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                    className={NAV_ITEM_CLASS_NAME}
                   >
                     <Icon />
                     <span>{t(($) => $.nav[item.labelKey])}</span>

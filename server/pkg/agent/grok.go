@@ -330,9 +330,13 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				"mcpServers": mcpServers,
 			})
 			if err != nil {
-				finalStatus = "failed"
-				finalError = fmt.Sprintf("grok session/load failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				// A runtime that refuses the recorded id has to say so here:
+				// without ResumeRejected the daemon reads the bare failure as
+				// "checked, not a rejection", keeps the pointer and replays the
+				// same dead session on every later turn (GH #8116).
+				finalStatus, finalError, resumeRejected = classifyACPResumeFailure(
+					runCtx, "grok", "session/load", err, timeout, b.cfg.Logger)
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected}
 				return
 			}
 			var changed bool
@@ -371,8 +375,6 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		c.sessionID = sessionID
-		// Early session pin so a cancelled run still preserves resume pointer.
-		msgStream.send(Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 		b.cfg.Logger.Info("grok session created", "session_id", sessionID)
 
 		if opts.Model != "" {
@@ -383,7 +385,9 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				b.cfg.Logger.Warn("grok set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("grok could not switch to model %q: %v", opts.Model, err)
-				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+				if setupFailureWithholdsSessionID(opts) {
+					sessionID = ""
+				} else if isACPSessionNotFound(err) {
 					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
 						"backend", "grok",
 						"session_id", sessionID,
@@ -409,6 +413,16 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			// Multica runtime brief delivery when file injection is not enough.
 			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
 		}
+
+		// Session pin for the daemon (PinTaskSession keys off
+		// MessageStatus+SessionID), deliberately sent only once setup has
+		// succeeded and the prompt is about to go out. Pinning right after
+		// session creation used to publish the id before set_model could fail,
+		// and FailAgentTask merges session_id with COALESCE — so a setup failure
+		// could no longer take the id back and left a ghost pointer on the task
+		// row for the next turn to resume forever (GH #8116). A cancel between
+		// here and the prompt response is still covered: this send happens first.
+		msgStream.send(Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 
 		streamingCurrentTurn.Store(true)
 		_, err = c.request(runCtx, "session/prompt", map[string]any{

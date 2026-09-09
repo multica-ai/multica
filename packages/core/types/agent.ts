@@ -312,6 +312,8 @@ export interface AgentTask {
   // coarse values; `string & {}` admits the rest without collapsing the
   // hints.
   failure_reason?: TaskFailureReason | (string & {}) | "";
+  /** The input comment was edited or deleted, invalidating this run. */
+  cancelled_by_comment_change?: boolean;
   created_at: string;
   /** Non-empty when the task was spawned from a chat session. */
   chat_session_id?: string;
@@ -348,9 +350,9 @@ export interface AgentTask {
    */
   trigger_summary?: string;
   /**
-   * Server-computed source discriminator used by the activity row to label
-   * tasks that have no linked issue (so e.g. quick-create tasks render
-   * with a meaningful title instead of falling through to "Untracked").
+   * Server-computed source discriminator used by task surfaces. Quick-create
+   * remains quick_create after its result issue is linked, so consumers can
+   * distinguish creation work from later direct runs on that issue.
    */
   kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
   /**

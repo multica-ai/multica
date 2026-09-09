@@ -1,4 +1,26 @@
 {
+  "inline_run": {
+    "label": "{{name}} run",
+    "stop": "Stop",
+    "stopping": "Stopping...",
+    "queued": "Waiting for an available agent.",
+    "starting": "Preparing the agent session.",
+    "waiting_directory": "Waiting for another run to release the working directory.",
+    "thinking": "Thinking",
+    "waiting_response": "Waiting for the agent to respond.",
+    "view_activity": "View activity",
+    "steps_one": "{{count}} step",
+    "steps_other": "{{count}} steps",
+    "loading": "Loading activity...",
+    "load_failed": "Could not load activity.",
+    "try_again": "Try again",
+    "empty": "No activity recorded yet.",
+    "show_earlier": "Show {{count}} earlier steps",
+    "full_log": "Open full log",
+    "message": "Agent message",
+    "error": "Error",
+    "waiting_result": "Waiting for the tool result..."
+  },
   "status_catalog_error": {
     "title": "Couldn't load the status list",
     "hint": "Issues are hidden until it loads, because a status filter can't be applied without it.",
@@ -459,6 +481,9 @@
     "show_more_activities_other": "Show {{count}} more activities"
   },
   "comment": {
+    "add_reaction": "Add reaction",
+    "collapse_thread": "Collapse thread",
+    "expand_thread": "Expand thread",
     "delete_title": "Delete comment",
     "delete_desc": "This comment will be permanently deleted. This cannot be undone.",
     "delete_desc_with_replies": "This comment and all its replies will be permanently deleted. This cannot be undone.",

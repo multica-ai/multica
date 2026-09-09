@@ -234,11 +234,12 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 데몬 하나의 동시 실행 상한 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 단일 실행의 절대 시간 제한. `0`은 제한 없음 |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 출력과 도구 실행이 모두 없을 때의 무응답 상한. `0`이면 watchdog 전체가 비활성화됩니다 |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG`와 동일 | 단일 도구 호출이 계속 무응답인 시간 상한. 모델보다 도구에 더 여유를 주고 싶을 때만 따로 설정하며, `0`이면 도구 실행 중에는 강제 종료하지 않습니다 |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG`와 동일 | 단일 도구 호출이 계속 무응답인 시간 상한. 모델보다 도구에 더 여유를 주고 싶을 때만 따로 설정하며, `0`이면 도구 실행 중에는 강제 종료하지 않습니다. Cursor의 백그라운드 셸은 실행한 프로세스가 종료될 때까지 실행 중으로 간주됩니다. 이 상한에 도달하면 데몬이 해당 프로세스를 정리하고, Cursor가 최종 결과를 내도록 새 watchdog 예산을 부여합니다. 프로세스 소유권이나 정리를 검증할 수 없으면 일반적인 실행 취소 정책이 적용됩니다 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 전용 무응답 기준값 |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `MULTICA_AGENT_IDLE_WATCHDOG`와 동일 | Codex 의미 활동 없음 기준값. Codex 자체 타이머는 도구 실행 중인지 알 수 없으므로 별도의 짧은 상한 대신 idle / tool 예산 중 큰 값을 따릅니다 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Codex 첫 턴 무진행 상한의 명시적 재정의; `0` 은 기본값 유지. 실제 첫 턴 대기는 여전히 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 및 전체 실행 타임아웃으로 제한됨 — `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 을 이 값보다 엄격히 크게(여유를 두고) 설정해야 하며, 그렇지 않으면 대기가 그 값으로 잘리고 모델 카탈로그 시작 재시도가 건너뛰어짐. 값이 같으면 충분하지 않음: 의미 타이머가 먼저 시작되므로 값이 같을 때도 재시도가 손실될 수 있음 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`, `thread/start`·`thread/resume`: `60s` | Codex app-server 시작 handshake 상한. 명시적으로 설정한 값은 두 예산을 모두 일괄 재정의합니다 |
+| `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | 취소 후 Codex app-server가 `turn/interrupt`를 확인하고 `turn/completed`를 보낼 때까지의 유예 시간입니다. 프로세스를 강제 정리하기 전에 최종 토큰 사용량을 보존합니다. 특히 느린 호스트에서는 daemon 로그에 기록된 인터럽트 지연을 기준으로 조정할 수 있습니다 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`, 자체 호스팅 `false` | CLI 자동 확인 및 업데이트 여부 |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 업데이트 확인 간격 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 외부에서 교체된 `multica` 바이너리(`brew upgrade`, 재다운로드, 로컬 빌드)로 재시작할지 여부. `MULTICA_DAEMON_AUTO_UPDATE`와 독립적 |
@@ -254,6 +255,10 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
+
+Cursor의 검증된 백그라운드 정리에는 Linux 6.9 이상(프로세스 그룹 pidfd), 프로세스 신원 조회와 audit token 시그널링에 대한 macOS 커널 지원, 또는 Windows에서 성공적으로 할당된 중첩 Job Object가 필요합니다. macOS에서는 커널이 검증하는 PID version으로 각 프로세스에 시그널을 보내므로 같은 세션의 그룹에 합류할 필요가 없습니다. 이 macOS API들은 비공개이며 확보 시점에 확인합니다. 소유권을 확보하지 못한 실행은 원래의 도구 결과를 반환하고, 도구 watchdog이 `0`인 경우를 포함해 일반적인 idle watchdog을 따릅니다. 이미 확보한 작업은 정리를 확인할 수 없을 때 계속 실행 중으로 남습니다. 도구 watchdog을 `0`으로 두면 이러한 경계 자체가 없습니다. 확보한 백그라운드 작업이 살아 있는 동안 실행이 계속되며, 이때 실행은 기본값이 역시 `0`인 `MULTICA_AGENT_TIMEOUT`에만 제한됩니다.
+
+확보한 Cursor 백그라운드 프로세스는 실행이 정상적으로 완료될 때도 정리됩니다. 따라서 해당 실행이 시작한 백그라운드 서버가 의도적으로 종료 처리 이후까지 살아남지는 않습니다. macOS는 보존된 원래 부모 프로세스 신원을 통해 나중에 생성된 자식 프로세스를 인식할 수 있지만, 관찰 이전에 중간 프로세스가 사라진 연결 고리는 증명할 수 없습니다. 그러한 프로세스, 추적 중인 그룹을 벗어난 작업, 그리고 지속적인 소유권 또는 시그널링 오류는 백그라운드 작업을 남길 수 있습니다. 확인되지 않은 정리는 로그로 남으며 '정리 성공'에 따른 복구 창을 부여하지 않습니다. 숫자 PID나 프로세스 그룹만을 근거로 알 수 없는 프로세스를 종료하지 않습니다.
 
 우선순위는 명령줄 flag → 환경 변수 → `~/.multica/config.json` → 내장 기본값입니다. watchdog 동작은 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
 

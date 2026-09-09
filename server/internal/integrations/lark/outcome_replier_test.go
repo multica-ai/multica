@@ -338,10 +338,11 @@ func TestLarkOutcomeReplierUsesAppURLForWebLinks(t *testing.T) {
 		DispatchResult{Outcome: OutcomeNeedsBinding, SenderOpenID: "ou_user"})
 	rep.Reply(context.Background(), inst, InboundMessage{ChatID: "oc_chat", SenderOpenID: "ou_user"},
 		DispatchResult{
-			Outcome:         OutcomeIngested,
-			IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
-			IssueNumber:     42,
-			IssueIdentifier: "MUL-42",
+			Outcome:            OutcomeIngested,
+			IssueID:            mustUUID("22222222-2222-2222-2222-222222222222"),
+			IssueNumber:        42,
+			IssueIdentifier:    "MUL-42",
+			IssueWorkspaceSlug: "demo-web",
 		})
 
 	stub.mu.Lock()
@@ -355,8 +356,8 @@ func TestLarkOutcomeReplierUsesAppURLForWebLinks(t *testing.T) {
 	if len(stub.textOut) != 1 {
 		t.Fatalf("expected one issue-created text, got %d", len(stub.textOut))
 	}
-	if !strings.Contains(stub.textOut[0].Text, "https://app.multica.test/issues/MUL-42") {
-		t.Fatalf("issue-created text should use AppURL; got %q", stub.textOut[0].Text)
+	if !strings.Contains(stub.textOut[0].Text, "https://app.multica.test/demo-web/issues/MUL-42") {
+		t.Fatalf("issue-created text should use AppURL and workspace slug; got %q", stub.textOut[0].Text)
 	}
 }
 
@@ -607,11 +608,12 @@ func TestLarkOutcomeReplierIssueCreatedSendsConfirmation(t *testing.T) {
 	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
 	msg := InboundMessage{ChatID: "oc_chat_42", SenderOpenID: "ou_user"}
 	rep.Reply(context.Background(), inst, msg, DispatchResult{
-		Outcome:         OutcomeIngested,
-		IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
-		IssueNumber:     42,
-		IssueIdentifier: "MUL-42",
-		IssueTitle:      "fix login bug",
+		Outcome:            OutcomeIngested,
+		IssueID:            mustUUID("22222222-2222-2222-2222-222222222222"),
+		IssueNumber:        42,
+		IssueIdentifier:    "MUL-42",
+		IssueWorkspaceSlug: "demo-web",
+		IssueTitle:         "fix login bug",
 	})
 
 	stub.mu.Lock()
@@ -629,8 +631,8 @@ func TestLarkOutcomeReplierIssueCreatedSendsConfirmation(t *testing.T) {
 	if !strings.Contains(got.Text, "fix login bug") {
 		t.Errorf("text should embed the issue title; got %q", got.Text)
 	}
-	if !strings.Contains(got.Text, "https://multica.test/issues/MUL-42") {
-		t.Errorf("text should embed the deep link back to Multica; got %q", got.Text)
+	if !strings.Contains(got.Text, "https://multica.test/demo-web/issues/MUL-42") {
+		t.Errorf("text should embed the workspace issue deep link back to Multica; got %q", got.Text)
 	}
 	// No interactive card on this path — the confirmation must be
 	// plain text, matching how chat replies render.
@@ -655,12 +657,13 @@ func TestLarkOutcomeReplierIssueDuplicateSendsConflict(t *testing.T) {
 	inst := Installation{AppID: "cli_x"}
 	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
 	rep.Reply(context.Background(), inst, InboundMessage{ChatID: "oc_chat_42"}, DispatchResult{
-		Outcome:         OutcomeIngested,
-		IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
-		IssueNumber:     42,
-		IssueIdentifier: "MUL-42",
-		IssueTitle:      "fix login bug",
-		IssueDuplicate:  true,
+		Outcome:            OutcomeIngested,
+		IssueID:            mustUUID("22222222-2222-2222-2222-222222222222"),
+		IssueNumber:        42,
+		IssueIdentifier:    "MUL-42",
+		IssueWorkspaceSlug: "demo-web",
+		IssueTitle:         "fix login bug",
+		IssueDuplicate:     true,
 	})
 
 	stub.mu.Lock()
@@ -674,6 +677,51 @@ func TestLarkOutcomeReplierIssueDuplicateSendsConflict(t *testing.T) {
 	}
 	if strings.Contains(text, "Created MUL-42") {
 		t.Fatalf("duplicate reply falsely claimed creation: %q", text)
+	}
+	if !strings.Contains(text, "https://multica.test/demo-web/issues/MUL-42") {
+		t.Fatalf("duplicate reply should embed the workspace issue deep link; got %q", text)
+	}
+}
+
+// TestLarkOutcomeReplierIssueLinkOmittedOnDegradedWorkspaceRead pins the only
+// production path that leaves the slug empty: the workspace lookup behind
+// /issue failed, which zeroes the issue prefix and the slug together. The reply
+// must still confirm the issue with the degraded "#42" label, and must send no
+// link at all — neither the workspace-less path nor a URL built from "#42"
+// routes anywhere.
+func TestLarkOutcomeReplierIssueLinkOmittedOnDegradedWorkspaceRead(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{configured: true}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  &BindingTokenService{},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		AppURL:      "https://multica.test",
+		Logger:      log,
+	})
+
+	inst := Installation{AppID: "cli_x"}
+	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
+	rep.Reply(context.Background(), inst, InboundMessage{ChatID: "oc_chat_42"}, DispatchResult{
+		Outcome:     OutcomeIngested,
+		IssueID:     mustUUID("22222222-2222-2222-2222-222222222222"),
+		IssueNumber: 42,
+		IssueTitle:  "fix login bug",
+	})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.textOut) != 1 {
+		t.Fatalf("expected one reply, got %d", len(stub.textOut))
+	}
+	text := stub.textOut[0].Text
+	if !strings.Contains(text, "Created #42") {
+		t.Fatalf("degraded reply should still confirm with the #42 label; got %q", text)
+	}
+	if strings.Contains(text, "https://multica.test") {
+		t.Fatalf("degraded reply must omit the link entirely; got %q", text)
 	}
 }
 

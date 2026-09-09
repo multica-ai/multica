@@ -680,10 +680,10 @@ func TestFinalDelegatedFailureMergesIntoPendingCoordinatorTask(t *testing.T) {
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority,
 			originator_user_id, accountable_user_id, originator_source,
-			trigger_evidence_kind, trigger_evidence_ref_id
+			trigger_evidence_kind, trigger_evidence_ref_id, trigger_comment_id
 		)
-		VALUES ($1, $2, $3, 'queued', 0, $4, $4, 'direct_human', 'issue_assignment', $3)
-		RETURNING id`, f.coordinator, f.runtimeID, f.issueID, f.userID).Scan(&pendingID); err != nil {
+		VALUES ($1, $2, $3, 'queued', 0, $4, $4, 'direct_human', 'issue_assignment', $3, $5)
+		RETURNING id`, f.coordinator, f.runtimeID, f.issueID, f.userID, f.sourceTrigger).Scan(&pendingID); err != nil {
 		t.Fatalf("seed pending coordinator task: %v", err)
 	}
 
@@ -741,10 +741,10 @@ func TestDelegatedFailurePlannedBehindDispatchedCoordinatorGetsFollowUp(t *testi
 	if err := f.pool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority, dispatched_at,
-			originator_user_id, accountable_user_id, originator_source
+			originator_user_id, accountable_user_id, originator_source, trigger_comment_id
 		)
-		VALUES ($1, $2, $3, 'dispatched', 0, now(), $4, $4, 'direct_human')
-		RETURNING id`, f.coordinator, f.runtimeID, f.issueID, f.userID).Scan(&activeID); err != nil {
+		VALUES ($1, $2, $3, 'dispatched', 0, now(), $4, $4, 'direct_human', $5)
+		RETURNING id`, f.coordinator, f.runtimeID, f.issueID, f.userID, f.sourceTrigger).Scan(&activeID); err != nil {
 		t.Fatalf("seed active coordinator task: %v", err)
 	}
 

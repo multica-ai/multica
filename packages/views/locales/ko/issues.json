@@ -1,4 +1,25 @@
 {
+  "inline_run": {
+    "label": "{{name}} 실행",
+    "stop": "중지",
+    "stopping": "중지 중...",
+    "queued": "사용 가능한 에이전트를 기다리고 있습니다.",
+    "starting": "에이전트 세션을 준비하고 있습니다.",
+    "waiting_directory": "다른 실행이 작업 디렉터리를 해제할 때까지 기다리고 있습니다.",
+    "thinking": "생각 중",
+    "waiting_response": "에이전트의 응답을 기다리고 있습니다.",
+    "view_activity": "실행 과정 보기",
+    "steps_other": "{{count}}단계",
+    "loading": "실행 과정 불러오는 중...",
+    "load_failed": "실행 과정을 불러올 수 없습니다.",
+    "try_again": "다시 시도",
+    "empty": "아직 실행 기록이 없습니다.",
+    "show_earlier": "이전 {{count}}단계 보기",
+    "full_log": "전체 로그 열기",
+    "message": "에이전트 메시지",
+    "error": "오류",
+    "waiting_result": "도구 결과를 기다리고 있습니다..."
+  },
   "status_catalog_error": {
     "title": "상태 목록을 불러오지 못했습니다",
     "hint": "이것 없이는 상태 필터를 적용할 수 없어 태스크를 표시하지 않습니다.",
@@ -451,6 +472,9 @@
     "show_more_activities_other": "활동 {{count}}개 더 보기"
   },
   "comment": {
+    "add_reaction": "반응 추가",
+    "collapse_thread": "스레드 접기",
+    "expand_thread": "스레드 펼치기",
     "delete_title": "댓글 삭제",
     "delete_desc": "이 댓글이 영구 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
     "delete_desc_with_replies": "이 댓글과 모든 답글이 영구 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",

@@ -23,7 +23,7 @@ reference-only rule below: a key that appears **only** as a bare mention in the
 body is linked yet hidden from that list.
 
 ```text
-MUL-123: add the thing the issue asks for        # title prefix → links, shown
+MUL-123: add the thing the issue asks for        # key anywhere in title → links, shown
 agent/dana/mul-123-add-the-thing             # branch ref   → links, shown
 ```
 
@@ -40,8 +40,8 @@ Resolves MUL-123
 Fix login MUL-123                                 # links only — keyword not adjacent
 ```
 
-Consequence: a bare title prefix or a branch reference links the PR but does not
-close the issue on merge. A closing keyword immediately adjacent to the issue key
+Consequence: a bare key in the title or a branch reference links the PR but does
+not close the issue on merge. A closing keyword immediately adjacent to the issue key
 records close intent; on merge, that close intent can move the linked issue to
 `done`.
 
@@ -68,13 +68,15 @@ an unconditional command: if no code changed, say no PR is needed; if PR creatio
 is blocked by auth, failing tests, or missing remote state, report that blocker
 instead of pretending the run is complete.
 
-Use a routable issue key in the PR title, body, or branch so the webhook can link
-the PR back to the issue. If the PR should close the issue on merge, put the key
-immediately after a closing keyword in the title or body, for example:
+To make the PR show on the issue, put a routable issue key in the PR **title**
+(preferred) or the **branch**. A key that appears only as a bare mention in the
+body is reference-only and hidden from the issue PR list. Do not use a closing
+keyword (`Closes` / `Fixes` / `Resolves`) unless the issue should auto-advance
+to `done` on merge.
 
 ```text
-MUL-123: fix login redirect        # links only
-Closes MUL-123                     # links and records close intent
+MUL-123: fix login redirect        # key anywhere in title → links and shown
+Closes MUL-123                     # only when merge should mark the issue done
 ```
 
 In the final issue comment, include the PR URL when a PR exists. If the task did
@@ -142,9 +144,25 @@ workspace can see it, then writes the same link row webhook discovery would
 have written — the PR appears in `multica issue pull-requests` and the issue's
 UI exactly as an auto-discovered link would. Without `--close-on-merge` the
 link behaves like a bare title/branch reference (links, does not close on
-merge); with it, the link behaves like a `Closes MUL-123` keyword (the issue
-can auto-advance to `done` when the PR merges). Relinking the same issue/PR
+merge); with it, the link behaves like a close keyword (the issue can
+auto-advance to `done` when the PR merges). Relinking the same issue/PR
 pair updates `--close-on-merge` rather than creating a duplicate link.
+
+## Listing and ordering issues
+
+`issue list` reads one page at a time, with a server maximum of 100 issues.
+Advance `--offset` by the number of issues actually returned. If the server
+cannot count matching issues, it returns `failed to count issues` as an error;
+do not treat that failure as an empty or complete list. Older servers can
+substitute the page length for a failed count, so that value alone is not proof
+that all matching issues have been read.
+
+`issue reorder` reads the issue's project-scoped status column before writing
+its new position. When a legacy total is unavailable or no larger than its
+page, it reads through an empty page. A failed request, malformed page, or
+duplicate issue stops the operation before any position write. This protects
+against truncated or repeated pages, but does not promise a snapshot across
+concurrent edits. There is no CLI bulk-export or `--all` mode.
 
 ## Custom properties: typed workflow state
 
@@ -332,12 +350,12 @@ Creating every serial step as `todo` enqueues the whole chain at once.
 ### Stages: order sub-issues into barrier groups
 
 `--stage <N>` (N >= 1) groups sub-issues under the same parent into ordered
-stages. The parent assignee is woken **once, when a whole stage finishes** —
-i.e. every sub-issue in the lowest unfinished stage has reached a terminal
-status (`done`/`cancelled`). A completion that does not close a stage is silent
-(no comment, no wake). A sibling set with **no** stages is one implicit stage,
-so the parent is woken once when the *last* sub-issue finishes — not on every
-child.
+stages. The server **tries once to wake the parent assignee when a whole stage
+finishes** — i.e. every sub-issue in the lowest unfinished stage has reached a
+terminal status (`done`/`cancelled`); a notification that fails is not replayed.
+A completion that does not close a stage is silent (no comment, no wake). A
+sibling set with **no** stages is one implicit stage, so the parent is woken
+once when the *last* sub-issue finishes — not on every child.
 
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee, who then decides whether to promote the next stage's

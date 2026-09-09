@@ -579,6 +579,11 @@ describe("TimelineEntriesSchema", () => {
 });
 
 describe("AgentTaskListSchema", () => {
+  it.each([true, false, undefined, null, "true", 1])("safely parses comment cancellation metadata: %s", (value) => {
+    const parsed = AgentTaskListSchema.parse([{ id: "run", cancelled_by_comment_change: value }]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.cancelled_by_comment_change).toBe(typeof value === "boolean" ? value : undefined);
+  });
   const task = {
     id: "task-1",
     agent_id: "agent-1",

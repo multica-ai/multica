@@ -78,7 +78,10 @@ import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
-import { CommentCard } from "./comment-card";
+import { useNewRunIds } from "./use-run-comment-motion";
+import { AgentRunComment, CommentCard } from "./comment-card";
+import { EMPTY_COMMENT_RUNS, buildCommentRunView, type CommentRun } from "./comment-runs";
+import { issueTasksOptions } from "@multica/core/issues/queries";
 import { SourceContextBadge } from "./source-context-viewer";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { CommentInput } from "./comment-input";
@@ -454,6 +457,7 @@ function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
 // into one activity-group row) but project it into a discriminated union
 // the itemContent dispatcher can switch on.
 type TimelineItem =
+  | { kind: "run"; id: string; run: CommentRun; entry?: TimelineEntry }
   | { kind: "comment"; id: string; entry: TimelineEntry }
   | { kind: "resolved-bar"; id: string; entry: TimelineEntry }
   | { kind: "activity-group"; id: string; entries: TimelineEntry[] };
@@ -461,7 +465,7 @@ type TimelineItem =
 type RawTimelineGroup = {
   type: "comment" | "activities";
   entries: TimelineEntry[];
-};
+} | { type: "run"; run: CommentRun; entry?: TimelineEntry };
 
 function flattenGroups(
   groups: ReadonlyArray<RawTimelineGroup>,
@@ -469,7 +473,9 @@ function flattenGroups(
 ): TimelineItem[] {
   const out: TimelineItem[] = [];
   for (const group of groups) {
-    if (group.type === "comment") {
+    if (group.type === "run") {
+      out.push({ kind: "run", id: group.entry?.id ?? group.run.task.id, run: group.run, entry: group.entry });
+    } else if (group.type === "comment") {
       const entry = group.entries[0]!;
       const isResolved = !!entry.resolved_at;
       const isExpanded = expandedResolved.has(entry.id);
@@ -1424,6 +1430,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
 
+  const { data: commentTasks } = useQuery(issueTasksOptions(id));
+  const enteringRunIds = useNewRunIds(id, commentTasks);
+  const previousCommentRuns = useRef(new Map<string, CommentRun[]>());
+  const { runs: commentRuns, timeline: displayTimeline, standaloneRuns } = useMemo(() => {
+    const next = buildCommentRunView(commentTasks ?? [], timeline, previousCommentRuns.current);
+    previousCommentRuns.current = next.runs;
+    return next;
+  }, [commentTasks, timeline]);
+
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
   // expand Set is keyed only on commentId, not on resolution state). Without
@@ -1434,13 +1449,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       // Fold the thread back on any resolve change: clear the thread ROOT's
       // expand entry (expand state is keyed on root id, but a resolve target
       // can be a reply). Walk parent_id up to the root.
-      const byId = new Map(timeline.map((e) => [e.id, e]));
+      const byId = new Map(displayTimeline.map((e) => [e.id, e]));
       let cur = byId.get(commentId);
       while (cur?.parent_id && byId.get(cur.parent_id)) cur = byId.get(cur.parent_id)!;
       clearResolvedExpand(cur?.id ?? commentId);
       toggleResolveComment(commentId, resolved);
     },
-    [timeline, clearResolvedExpand, toggleResolveComment],
+    [displayTimeline, clearResolvedExpand, toggleResolveComment],
   );
 
   // Memoized timeline grouping. Each render rebuilds the per-parent map from
@@ -1458,11 +1473,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // bucketed under their parent's id and rendered nested inside CommentCard.
     // No orphan rescue needed: the timeline is fetched in full, so every
     // reply's parent is always in the same array.
-    const topLevel = timeline.filter(
+    const topLevel = displayTimeline.filter(
       (e) => e.type === "activity" || !e.parent_id,
     );
     const repliesByParent = new Map<string, TimelineEntry[]>();
-    for (const e of timeline) {
+    for (const e of displayTimeline) {
       if (e.type === "comment" && e.parent_id) {
         const list = repliesByParent.get(e.parent_id) ?? [];
         list.push(e);
@@ -1493,13 +1508,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const COALESCE_MS = 2 * 60 * 1000;
     const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
     const NEVER_COALESCE_ACTIONS = new Set(["squad_leader_evaluated"]);
-    const coalesced: TimelineEntry[] = [];
-    for (const entry of topLevel) {
+    // Unanchored runs separate activity groups at their actual start position.
+    const standaloneReplyIds = new Set(standaloneRuns.filter((run) => run.hasReply).map((run) => run.commentId));
+    const chronological = [...topLevel.filter((entry) => !standaloneReplyIds.has(entry.id)), ...standaloneRuns].sort((a, b) => {
+      const left = "task" in a ? a.task : a;
+      const right = "task" in b ? b.task : b;
+      return Date.parse(left.created_at) - Date.parse(right.created_at);
+    });
+    const coalesced: (TimelineEntry | CommentRun)[] = [];
+    for (const entry of chronological) {
+      if ("task" in entry) {
+        coalesced.push(entry);
+        continue;
+      }
       if (entry.type === "activity") {
         const prev = coalesced[coalesced.length - 1];
         if (
           !NEVER_COALESCE_ACTIONS.has(entry.action!) &&
-          prev?.type === "activity" &&
+          prev && !("task" in prev) && prev.type === "activity" &&
           prev.action === entry.action &&
           prev.actor_type === entry.actor_type &&
           prev.actor_id === entry.actor_id &&
@@ -1514,9 +1540,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
 
     // Group consecutive activities together so the connector line works
-    const groups: { type: "activities" | "comment"; entries: TimelineEntry[] }[] = [];
+    const groups: RawTimelineGroup[] = [];
     for (const entry of coalesced) {
-      if (entry.type === "activity") {
+      if ("task" in entry) {
+        groups.push({ type: "run", run: entry, entry: entry.hasReply ? displayTimeline.find((comment) => comment.id === entry.commentId) : undefined });
+      } else if (entry.type === "activity") {
         const last = groups[groups.length - 1];
         if (last?.type === "activities") {
           last.entries.push(entry);
@@ -1529,7 +1557,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
 
     return { threadReplies, groups };
-  }, [timeline]);
+  }, [displayTimeline, standaloneRuns]);
 
   // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
   // changes (timeline events) or expandedResolved flips (user toggles a
@@ -1601,7 +1629,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const minimapThreads = useMemo<ThreadMinimapThread[]>(
     () =>
       items.flatMap((it) => {
-        if (it.kind !== "comment" && it.kind !== "resolved-bar") return [];
+        if (it.kind === "activity-group" || !it.entry) return [];
         const replies = timelineView.threadReplies.get(it.id) ?? EMPTY_REPLIES;
         return [
           {
@@ -1872,14 +1900,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const rootId = replyToRoot.get(highlightCommentId);
     if (rootId && rootId !== highlightCommentId) {
       // Root resolved → the whole thread is a folded bar.
-      if (items[targetIdx]?.kind === "resolved-bar") {
+      const rootItem = items[targetIdx];
+      if (rootItem?.kind === "resolved-bar" || (rootItem?.kind === "run" && rootItem.entry?.resolved_at && !expandedResolved.has(rootId))) {
         toggleResolvedExpand(rootId, true);
         return;
       }
       // A reply is the resolution → the other replies fold behind the
       // "N comments" bar; expand if the target is one of those folded replies.
-      const rootItem = items[targetIdx];
-      if (rootItem?.kind === "comment" && !expandedResolved.has(rootId)) {
+      if ((rootItem?.kind === "comment" || rootItem?.kind === "run") && rootItem.entry && !expandedResolved.has(rootId)) {
         const resolution = deriveThreadResolution(
           rootItem.entry,
           timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES,
@@ -2005,7 +2033,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       { content: issue?.description, attachments: descEditorAttachments },
     ];
     for (const item of items) {
-      if (item.kind === "activity-group") continue;
+      if (item.kind === "activity-group" || !item.entry) continue;
       blocks.push({
         content: item.entry.content,
         attachments: item.entry.attachments,
@@ -2587,6 +2615,25 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // The wrapper `id="comment-..."` is the deep-link target — equivalent to
   // a native `<a href="#comment-...">` anchor.
   const renderItem = (_i: number, item: TimelineItem): React.ReactElement => {
+    if (item.kind === "run") {
+      const reply = item.entry;
+      return <div className="pb-3" id={reply ? `comment-${reply.id}` : undefined}>
+        {reply?.resolved_at && !expandedResolved.has(reply.id) ? <ResolvedThreadBar
+          entry={reply} replies={timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES}
+          onExpand={() => toggleResolvedExpand(reply.id, true)} /> : <AgentRunComment run={item.run} entering={enteringRunIds.has(item.run.task.id)} standalone
+          commentProps={reply ? {
+            issueId: id, entry: reply, replies: timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES,
+            currentUserId: user?.id, canModerate: canModerateComments, onReply: submitReply,
+            onReplyAccepted: scrollToTimelineBottom, onEdit: editComment, onDelete: deleteComment,
+            onToggleReaction: handleToggleReaction, onCreateSubIssue: openCommentSubIssue,
+            onResolveToggle: handleResolveToggle,
+            onCollapseResolved: reply.resolved_at ? () => toggleResolvedExpand(reply.id, false) : undefined,
+            expandedResolvedIds: expandedResolved, onResolvedExpandChange: toggleResolvedExpand,
+            highlightedCommentId: highlightedId,
+            runs: commentRuns.get(reply.id) ?? EMPTY_COMMENT_RUNS, enteringRunIds,
+          } : undefined} />}
+      </div>;
+    }
     if (item.kind === "resolved-bar") {
       return (
         <div className="pb-3" id={`comment-${item.id}`}>
@@ -2604,6 +2651,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <div className="pb-3" id={`comment-${item.id}`}>
           <CommentCard
             issueId={id}
+            runs={commentRuns.get(item.id) ?? EMPTY_COMMENT_RUNS}
+            enteringRunIds={enteringRunIds}
             entry={item.entry}
             replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
             currentUserId={user?.id}
@@ -3331,7 +3380,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       data={items}
                       initialScrollTop={restoredScrollTop}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
-                      computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
+                      computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
                       skipAnimationFrameInResizeObserver
                       // followOutput intentionally NOT set. Virtuoso treats
                       // it as a sticky "is at bottom" flag and resets
@@ -3344,7 +3393,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               ) : (
                 <div className="mt-4">
                   {items.map((item, i) => (
-                    <Fragment key={`${item.kind}:${item.id}`}>
+                    <Fragment key={`${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}>
                       {renderItem(i, item)}
                     </Fragment>
                   ))}

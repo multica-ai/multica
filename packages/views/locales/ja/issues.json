@@ -1,4 +1,25 @@
 {
+  "inline_run": {
+    "label": "{{name}} の実行",
+    "stop": "停止",
+    "stopping": "停止中...",
+    "queued": "利用可能なエージェントを待っています。",
+    "starting": "エージェントのセッションを準備しています。",
+    "waiting_directory": "別の実行が作業ディレクトリを解放するのを待っています。",
+    "thinking": "思考中",
+    "waiting_response": "エージェントの応答を待っています。",
+    "view_activity": "実行過程を表示",
+    "steps_other": "{{count}} ステップ",
+    "loading": "実行過程を読み込み中...",
+    "load_failed": "実行過程を読み込めませんでした。",
+    "try_again": "再試行",
+    "empty": "実行記録はまだありません。",
+    "show_earlier": "前の {{count}} ステップを表示",
+    "full_log": "完全なログを開く",
+    "message": "エージェントのメッセージ",
+    "error": "エラー",
+    "waiting_result": "ツールの結果を待っています..."
+  },
   "status_catalog_error": {
     "title": "ステータス一覧を読み込めませんでした",
     "hint": "これがないとステータスの絞り込みを適用できないため、タスクは表示されません。",
@@ -451,6 +472,9 @@
     "show_more_activities_other": "アクティビティをさらに {{count}} 件表示"
   },
   "comment": {
+    "add_reaction": "リアクションを追加",
+    "collapse_thread": "スレッドを折りたたむ",
+    "expand_thread": "スレッドを展開",
     "delete_title": "コメントを削除",
     "delete_desc": "このコメントは完全に削除されます。この操作は元に戻せません。",
     "delete_desc_with_replies": "このコメントとすべての返信が完全に削除されます。この操作は元に戻せません。",

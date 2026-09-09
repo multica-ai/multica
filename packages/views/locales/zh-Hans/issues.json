@@ -1,4 +1,25 @@
 {
+  "inline_run": {
+    "label": "{{name}} 的运行",
+    "stop": "停止",
+    "stopping": "正在停止...",
+    "queued": "等待可用的智能体。",
+    "starting": "正在准备智能体会话。",
+    "waiting_directory": "等待其他运行释放工作目录。",
+    "thinking": "思考中",
+    "waiting_response": "等待智能体响应。",
+    "view_activity": "查看执行过程",
+    "steps_other": "{{count}} 个步骤",
+    "loading": "正在加载执行过程...",
+    "load_failed": "无法加载执行过程。",
+    "try_again": "重试",
+    "empty": "暂无执行记录。",
+    "show_earlier": "显示前面的 {{count}} 个步骤",
+    "full_log": "打开完整日志",
+    "message": "智能体消息",
+    "error": "错误",
+    "waiting_result": "等待工具返回结果..."
+  },
   "status_catalog_error": {
     "title": "状态列表加载失败",
     "hint": "没有它就无法应用状态筛选，因此暂时不显示任务。",
@@ -451,6 +472,9 @@
     "show_more_activities_other": "展开更早 {{count}} 条动态"
   },
   "comment": {
+    "add_reaction": "添加表情回应",
+    "collapse_thread": "收起讨论",
+    "expand_thread": "展开讨论",
     "delete_title": "删除评论",
     "delete_desc": "这条评论会被永久删除，无法撤销。",
     "delete_desc_with_replies": "这条评论及其全部回复会被永久删除，无法撤销。",

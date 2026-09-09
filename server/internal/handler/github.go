@@ -1675,9 +1675,12 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// silently auto-closing the issue — if nothing carrying closing
 		// intent was ever delivered, the user should decide manually.
 		if state == "merged" || state == "closed" {
+			// All linked issues belong to this workspace. Resolve custom statuses
+			// once per delivery; built-in statuses still need no catalog read.
+			resolver := issuestatus.NewResolver(wsID)
 			for _, issue := range reevalIssues {
 				// A custom terminal status counts as terminal here. (MUL-6243)
-				if s := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status); s == "done" || s == "cancelled" {
+				if s := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status); s == "done" || s == "cancelled" {
 					continue
 				}
 				// Combined across providers: an issue may also carry a still-open

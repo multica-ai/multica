@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -346,6 +347,8 @@ type TaskIssueStatusData struct {
 }
 
 type AgentTaskResponse struct {
+	CancelledByCommentChange bool `json:"cancelled_by_comment_change,omitempty"`
+
 	ID                   string                 `json:"id"`
 	AgentID              string                 `json:"agent_id"`
 	RuntimeID            string                 `json:"runtime_id"`
@@ -506,7 +509,7 @@ type AgentTaskResponse struct {
 	InitiatorID    string `json:"initiator_id,omitempty"`    // user UUID (member) or agent UUID
 	InitiatorName  string `json:"initiator_name,omitempty"`  // display name of the initiator
 	InitiatorEmail string `json:"initiator_email,omitempty"` // member email; empty for agent initiators
-	Kind           string `json:"kind"`                      // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	Kind           string `json:"kind"`                      // source discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — quick-create remains stable after its result issue is linked
 	// Attribution is the resolved accountable-human provenance for this run
 	// (MUL-4302 §9): the source label + precise flag, the initiator (accountable)
 	// and originator refs, the evidence pointer, and lineage. Always present (the
@@ -745,6 +748,18 @@ type TaskAgentData struct {
 	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
 }
 
+// visibleTaskHistory omits unused assignee fallbacks created by older versions.
+// Dispatch only begins preparation, so a fallback cancelled before StartTask
+// is still unused. Keep started fallbacks and ordinary cancellations visible,
+// and retain the underlying scheduling records for audit.
+func visibleTaskHistory(tasks []db.AgentTaskQueue) []db.AgentTaskQueue {
+	return slices.DeleteFunc(tasks, func(task db.AgentTaskQueue) bool {
+		return task.EscalationForTaskID.Valid &&
+			!task.StartedAt.Valid &&
+			(task.Status == "deferred" || task.Status == "cancelled")
+	})
+}
+
 // taskToResponse maps a queue row to its wire shape. workspaceID is threaded
 // in because the row itself doesn't carry one (workspace lives on the agent
 // / issue / chat session) — we ask the caller to resolve it once and pass it
@@ -752,6 +767,10 @@ type TaskAgentData struct {
 // derivation; pass "" only on daemon-facing paths that genuinely don't have
 // it, in which case RelativeWorkDir falls back to the existing WorkDir.
 func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
+	var cancellation struct {
+		TaskID string `json:"comment_change_cancelled_task_id"`
+	}
+	_ = json.Unmarshal(t.Context, &cancellation)
 	var result any
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
@@ -777,6 +796,9 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		handoffNote = t.HandoffNote.String
 	}
 	return AgentTaskResponse{
+		// Task-scoped provenance must not transfer through copied retry context.
+		CancelledByCommentChange: t.Status == "cancelled" && cancellation.TaskID != "" && cancellation.TaskID == uuidToString(t.ID),
+
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),
 		RuntimeID:              uuidToString(t.RuntimeID),
@@ -805,9 +827,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		RelativeWorkDir:        relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 		DurableWorkDir:         durableWorkDir,
 		RelativeDurableWorkDir: relativeWorkDir(durableWorkDir, "", ""),
-		// Surface task source so the UI can distinguish issue-linked tasks
-		// from chat-spawned or autopilot-spawned ones; all three may arrive
-		// with issue_id = "" once a task has no linked issue.
+		// Surface the stable task source. A successful quick-create gains an
+		// issue link for navigation but retains its quick_create kind.
 		ChatSessionID:  uuidToString(t.ChatSessionID),
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
 		Kind:           computeTaskKind(t),
@@ -954,12 +975,10 @@ func basename(p string) string {
 	return p
 }
 
-// computeTaskKind picks the source-discriminator string the activity UI uses
-// to choose how to render a task row. Computed from the existing FK shape so
-// no extra DB lookup is needed: chat / autopilot / comment-on-issue (any
-// triggered task with both an issue_id and trigger_comment_id) / quick_create
-// (no linked source — the agent is creating the issue itself) / direct
-// (assignee-driven task on an existing issue).
+// computeTaskKind picks the stable source-discriminator string task UIs use.
+// Chat and autopilot have dedicated FKs; quick-create must inspect its context
+// because completion links the newly created issue back onto the task. The
+// remaining issue tasks split into comment-triggered and direct runs.
 func computeTaskKind(t db.AgentTaskQueue) string {
 	if uuidToString(t.ChatSessionID) != "" {
 		return "chat"
@@ -967,6 +986,14 @@ func computeTaskKind(t db.AgentTaskQueue) string {
 	if uuidToString(t.AutopilotRunID) != "" {
 		return "autopilot"
 	}
+	var contextKind struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(t.Context, &contextKind) == nil && contextKind.Type == service.QuickCreateContextType {
+		return "quick_create"
+	}
+	// Preserve the historical classification for issue-less rows from before
+	// quick-create stored a typed context.
 	if uuidToString(t.IssueID) == "" {
 		return "quick_create"
 	}
@@ -1001,6 +1028,10 @@ func (h *Handler) loadAgentRuntimeAvailability(ctx context.Context, agents []db.
 		return result, nil
 	}
 
+	// Read directly rather than through RuntimeLookup: this resolves rows for a
+	// list of agents instead of resolving a runtime a caller asked for, so it
+	// has no honest source label on multica_agent_runtime_lookup_total yet. See
+	// the exception noted on service.RuntimeLookup (MUL-6884).
 	runtimes, err := h.Queries.GetAgentRuntimes(ctx, runtimeIDs)
 	if err != nil {
 		return nil, err
@@ -2555,6 +2586,7 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tasks = visibleTaskHistory(tasks)
 	resp := make([]AgentTaskResponse, len(tasks))
 	var taskIDs []pgtype.UUID
 	if includeUsage {

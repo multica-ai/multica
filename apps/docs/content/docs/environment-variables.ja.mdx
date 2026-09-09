@@ -234,11 +234,12 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | デーモン 1 つあたりの同時実行上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 1 回の実行の絶対時間上限。`0` は上限なし |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 出力もツール実行もない状態の静穏上限。`0` で watchdog 全体を無効化 |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG` と同じ | 単一のツール呼び出しが静穏なままでいられる上限。モデルより長い余裕をツールに与えたい場合のみ設定し、`0` はツール実行中に強制停止しません |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG` と同じ | 単一のツール呼び出しが静穏なままでいられる上限。モデルより長い余裕をツールに与えたい場合のみ設定し、`0` はツール実行中に強制停止しません。Cursor のバックグラウンドシェルは、起動したプロセスが終了するまで実行中として扱われます。この上限に達すると、デーモンはそれらのプロセスを停止し、Cursor が最終結果を出すための新しい watchdog 予算を与えます。プロセスの所有権やクリーンアップを検証できない場合は、通常の実行キャンセル方針に従います |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 専用の静穏しきい値 |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `MULTICA_AGENT_IDLE_WATCHDOG` と同じ | Codex のセマンティック静穏しきい値。Codex 自身のタイマーはツール実行中かどうかを判別できないため、独自の短い上限を持たず idle / tool 予算の大きい方に追従します |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Codex 初回ターンの無進捗上限を明示的に上書き；`0` はデフォルトを維持。実効の初回ターン待機は依然として `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` と全体の実行タイムアウトに制限される——`MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` をこの値より厳密に大きく（余裕を持たせて）設定すること。さもないと待機はその値で打ち切られ、モデルカタログの起動リトライがスキップされる。同値では不十分：セマンティックタイマーが先に起動するため、同値の場合でもリトライが失われることがある |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`、`thread/start`・`thread/resume`：`60s` | Codex app-server 起動ハンドシェイクの上限。明示的な値は両方の予算を一括で上書きします |
+| `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | キャンセル後に Codex app-server が `turn/interrupt` を確認し `turn/completed` を送信するまでの猶予時間。プロセスを強制終了する前に最終トークン使用量を保持します。特に遅いホストでは daemon ログに記録された割り込み遅延を基に調整できます |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud は `true`、セルフホストは `false` | CLI の更新を自動でチェックして適用するか |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 更新チェックの間隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 帯域外で置き換えられた `multica` バイナリ（`brew upgrade`、再ダウンロード、ローカルビルド）へ再起動して追従するかどうか。`MULTICA_DAEMON_AUTO_UPDATE` とは独立 |
@@ -254,6 +255,10 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
+
+Cursor の検証済みバックグラウンドクリーンアップには、Linux 6.9 以降（プロセスグループ pidfd）、macOS カーネルによるプロセス識別子の照会と audit token を用いたシグナル送信のサポート、または Windows で正常に割り当てられた入れ子の Job Object が必要です。macOS では各プロセスへのシグナル送信にカーネルが検証する PID version を用いるため、同一セッションのグループに参加する必要はありません。これらの macOS API は非公開であり、プロセス捕捉時に確認されます。所有権を確保できなかったバックグラウンドプロセスは元のツール結果を返し、ツール watchdog が `0` の場合も含めて通常の idle watchdog に従います。すでに所有している作業は、クリーンアップを確認できない場合も実行中のままです。ツール watchdog を `0` にした場合はこの境界自体が存在せず、所有済みのバックグラウンド作業が生きている限り実行は継続します。その場合の実行は `MULTICA_AGENT_TIMEOUT` だけに制限され、これも既定値は `0` です。
+
+所有している Cursor のバックグラウンドプロセスは、実行が正常に完了したときにも停止されます。したがって、その実行が起動したバックグラウンドサーバーが意図的に終了処理後まで生き残ることはありません。macOS は保持された元の親プロセスの識別子によって後から生まれた子プロセスを認識できますが、観測前に中間プロセスが消えた連鎖は証明できません。そのようなプロセス、追跡対象のグループから外れた作業、および継続的な所有権や送信のエラーは、バックグラウンド作業を残す可能性があります。確認できなかったクリーンアップはログに記録され、「クリーンアップ成功」による回復ウィンドウを与えることはありません。数値の PID やプロセスグループだけを根拠に未知のプロセスを終了させることはありません。
 
 優先順位はコマンドラインフラグ → 環境変数 → `~/.multica/config.json` → 組み込みデフォルトです。watchdog の動作は[デーモンとランタイム](/daemon-runtimes)を参照してください。
 

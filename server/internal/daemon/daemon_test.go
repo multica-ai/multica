@@ -2548,7 +2548,9 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	t.Parallel()
 
 	d := newTestDaemon(t)
-	ctx := context.Background()
+	capture := newTaskPhaseCaptureHandler()
+	recorder := newTaskPhaseRecorder(slog.New(capture), time.Now)
+	ctx := withTaskPhaseRecorder(context.Background(), recorder)
 	taskLog := slog.Default()
 
 	fb := &fakeBackend{
@@ -2571,6 +2573,9 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	}
 	if result.Status != "failed" || result.SessionID != "" {
 		t.Fatalf("expected failed result with empty SessionID, got %+v", result)
+	}
+	if slices.Contains(capture.phasesSnapshot(), taskPhaseTurnCompleted) {
+		t.Fatal("turn_completed was recorded for the discarded resume attempt")
 	}
 
 	// Mirrors the retry in runTask, gated on the same production predicate.
@@ -2598,6 +2603,13 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	// Second call should NOT have ResumeSessionID.
 	if fb.calls[1].ResumeSessionID != "" {
 		t.Fatal("retry should not have ResumeSessionID")
+	}
+	if slices.Contains(capture.phasesSnapshot(), taskPhaseTurnCompleted) {
+		t.Fatal("executeAndDrain recorded turn_completed before runTask reconciled the final attempt")
+	}
+	recorder.Mark(taskPhaseTurnCompleted) // Mirrors runTask after fresh-retry reconciliation.
+	if got, want := capture.phasesSnapshot(), []taskPhase{taskPhaseRuntimeStarted, taskPhaseTurnCompleted}; !slices.Equal(got, want) {
+		t.Fatalf("task phases = %v, want %v", got, want)
 	}
 }
 
@@ -2937,6 +2949,36 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			result:         agent.Result{Status: "failed", Error: "no conversation found", ResumeRejected: true},
 			priorSessionID: "stale-id",
 			want:           true,
+		},
+		{
+			// GH #8116 end to end. A qoder chat pinned to a session the CLI
+			// never persisted used to reach this gate with ResumeRejected
+			// false, because the adapter returned a bare failed Result from
+			// session/resume — so the gate read "checked, not a rejection",
+			// declined to retry, and the conversation replayed the same dead
+			// id on every later message. The adapters now flag it, and this is
+			// what that flag has to buy.
+			name: "ghost session rejected at session/resume retries",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          `qoder session/resume failed: session/resume: Invalid session identifier "27d8031c-9fea-4bda-9d42-37c36fa9aebf". (code=-32602)`,
+				ResumeRejected: true,
+			},
+			priorSessionID: "27d8031c-9fea-4bda-9d42-37c36fa9aebf",
+			provider:       "qoder",
+			want:           true,
+		},
+		{
+			// The other half of the same contract: an unrecognised resume
+			// failure must NOT retry. The adapters answer "not a rejection" by
+			// leaving the flag false, and a capable backend's false is an
+			// answer, not an absence — retrying here would fork a healthy
+			// conversation over a transient MCP or network fault.
+			name:           "unflagged resume failure does not retry",
+			result:         agent.Result{Status: "failed", Error: "qoder session/resume failed: session/resume: Invalid params: mcpServers[0] transport unreachable (code=-32602)"},
+			priorSessionID: "27d8031c-9fea-4bda-9d42-37c36fa9aebf",
+			provider:       "qoder",
+			want:           false,
 		},
 		{
 			name:           "temporarily busy resume retries without declaring the session dead",

@@ -260,9 +260,11 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	}
 
 	if ev.State == "merged" || ev.State == "closed" {
+		// Keep the catalog local to this delivery and connection's workspace.
+		resolver := issuestatus.NewResolver(conn.WorkspaceID)
 		for _, issue := range reevalIssues {
 			// A custom terminal status counts as terminal here. (MUL-6243)
-			if s := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status); s == "done" || s == "cancelled" {
+			if s := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status); s == "done" || s == "cancelled" {
 				continue
 			}
 			counts, err := h.Queries.GetIssueCombinedPullRequestCloseAggregate(ctx, issue.ID)

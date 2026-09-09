@@ -222,6 +222,12 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 		// auth rejection.
 		{"missing api key beats 401", "missing api_key for openai (401 returned downstream)", ReasonAgentMissingConfig},
 
+		// Some Anthropic-compatible providers return 403 for a transient
+		// concurrency rejection. The semantic witness must beat generic auth and
+		// token/context matching even when the CLI prefixes both misleadingly.
+		{"403 concurrent request limit beats auth", "Failed to authenticate. API Error: 403 You've reached your concurrent request limit. Please wait for your ongoing requests to finish and try again.", ReasonAgentProviderCapacityOrRateLimit},
+		{"access token concurrent request limit beats context", "Failed to refresh access token. API Error: 403 You've reached your concurrent request limit.", ReasonAgentProviderCapacityOrRateLimit},
+
 		// Both "429" and "rate limit" present — should still land in
 		// the capacity bucket, not the quota bucket.
 		{"429 rate limit", "API Error: 429 rate limit reached", ReasonAgentProviderCapacityOrRateLimit},
@@ -238,6 +244,30 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 				t.Errorf("Classify(%q) = %q, want %q", c.in, got, c.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeDaemonReasonUpgradesConcurrentRequestLimit(t *testing.T) {
+	t.Parallel()
+
+	const raw = "Failed to refresh access token. API Error: 403 You've reached your concurrent request limit."
+
+	for _, reason := range []string{
+		string(ReasonAgentContextOverflow),
+		string(ReasonAgentProviderAuthOrAccess),
+		string(ReasonAgentUnknown),
+		"agent_error",
+	} {
+		if got := NormalizeDaemonReason(reason, raw); got != ReasonAgentProviderCapacityOrRateLimit {
+			t.Errorf("NormalizeDaemonReason(%q, concurrent request rejection) = %q, want %q", reason, got, ReasonAgentProviderCapacityOrRateLimit)
+		}
+	}
+
+	if got := NormalizeDaemonReason(string(ReasonAgentProviderAuthOrAccess), "API Error: 403 Forbidden"); got != ReasonAgentProviderAuthOrAccess {
+		t.Errorf("plain 403 auth rejection changed to %q", got)
+	}
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), "you exceeded the token limit"); got != ReasonAgentContextOverflow {
+		t.Errorf("ordinary token overflow changed to %q", got)
 	}
 }
 

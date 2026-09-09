@@ -5399,6 +5399,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// a millisecond timestamp that only advances every ~65s, so concurrent
 	// tasks routinely share one (#7326).
 	taskLog := d.logger.With("task", task.ID)
+	phaseRecorder := newTaskPhaseRecorder(taskLog.With("task_id", task.ID, "runtime_id", task.RuntimeID), time.Now)
+	ctx = withTaskPhaseRecorder(ctx, phaseRecorder)
+	phaseRecorder.Mark(taskPhaseClaimed)
+	defer phaseRecorder.Mark(taskPhaseFinished)
 	agentName := "agent"
 	if task.Agent != nil {
 		agentName = task.Agent.Name
@@ -7243,6 +7247,8 @@ func qualifyTaskModel(
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (taskResult TaskResult, returnErr error) {
+	phaseRecorder := taskPhaseRecorderFromContext(ctx)
+	phaseRecorder.Mark(taskPhasePrepareStarted)
 	// A claim carries the task-row agent id both at the top level and inside
 	// the expanded agent configuration. The top-level id is authoritative
 	// because it is also bound into the task-scoped token. Never prepare or
@@ -7337,6 +7343,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err := d.ensureTaskSkillBundles(prepareCtx, &task); err != nil {
 		return TaskResult{}, err
 	}
+	phaseRecorder.Mark(taskPhaseSkillsReady)
 
 	agentName := "agent"
 	var skills []SkillData
@@ -7814,6 +7821,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 	}
+	phaseRecorder.Mark(taskPhaseEnvironmentReady)
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
 	// future changes diverge from ResolveRootDir.
 	if env.RootDir != resolvedRoot && env.RootDir != "" {
@@ -8240,6 +8248,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
 		IdleWatchdogTimeout:        idleWatchdogTimeout,
 		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
+		TurnInterruptTimeout:       d.cfg.CodexTurnInterruptTimeout,
 		ThreadHandshakeTimeout:     d.cfg.CodexThreadHandshakeTimeout,
 		ResumeSessionID:            task.PriorSessionID,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
@@ -8408,6 +8417,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// than being relabeled resumable by a benign-looking second error.
 		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
 	}
+	phaseRecorder.Mark(taskPhaseTurnCompleted)
 
 	elapsed := time.Since(taskStart).Round(time.Second)
 	taskLog.Info("agent finished",
@@ -8846,6 +8856,7 @@ func freshSessionMayHelp(errText string) bool {
 // sequence instead of restarting at 1 — the server orders the transcript by
 // seq alone, and duplicate seqs would interleave the two attempts' rows.
 func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID, codexHome string, msgSeq *atomic.Int32) (agent.Result, int32, error) {
+	phaseRecorder := taskPhaseRecorderFromContext(ctx)
 	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
 	// the agent subprocess (via the ctx passed to backend.Execute) AND the
 	// drain loop with a single cancel. Without this layer the backend would
@@ -8868,6 +8879,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	// boundary, not at the earlier server-side StartTask transition.
 	d.runningTasks.Add(1)
 	defer d.runningTasks.Add(-1)
+	phaseRecorder.Mark(taskPhaseRuntimeStarted)
 	taskLog.Debug("backend started, draining messages")
 
 	// Bound the drain loop only when there is a wall-clock cap. With a positive
@@ -8915,8 +8927,36 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	}
 	var idleWatchdogThreshold atomic.Int64
 	idleWatchdogThreshold.Store(int64(idleWindow))
+	watchdogToolCount := inFlightTools.Load
+	if session.ToolActivity != nil {
+		watchdogToolCount = func() int32 {
+			count, at := session.ToolActivity()
+			for {
+				previous := lastActivityAt.Load()
+				if at.UnixNano() <= previous || lastActivityAt.CompareAndSwap(previous, at.UnixNano()) {
+					break
+				}
+			}
+			return count
+		}
+	}
+	// A backend that can prove its outcome is already decided outranks every
+	// liveness policy below: a run whose terminal result has been read is not a
+	// hang, no matter how long its cleanup then takes.
+	// Nil is meaningful and kept distinguishable: a backend that offers no
+	// terminal boundary is one whose result cannot outrank a force stop, so it
+	// must not be given a hand-off window it can never use. Every such backend
+	// keeps the previous behaviour, including a wedged one, which is force
+	// stopped and classified without waiting for anything.
+	handsOverTerminal := session.TerminalObserved != nil
+	terminalObserved := session.TerminalObserved
+	if terminalObserved == nil {
+		terminalObserved = func() bool { return false }
+	}
+	watchdogCtx, stopWatchdog := context.WithCancel(agentCtx)
+	defer stopWatchdog()
 	if idleWindow > 0 {
-		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog)
+		go d.runIdleWatchdog(watchdogCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
 	}
 
 	// drainFinished closes after the drain goroutine has flushed the last
@@ -8989,6 +9029,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			case msg, ok := <-session.Messages:
 				if !ok {
 					goto drainDone
+				}
+				if isTaskOutputReceived(msg) {
+					phaseRecorder.Mark(taskPhaseFirstOutputReceived)
+				}
+				if isTaskToolUse(msg) {
+					phaseRecorder.Mark(taskPhaseFirstToolUse)
 				}
 				// Stamp activity as soon as a message lands. The idle
 				// watchdog reads this to decide whether the backend has
@@ -9073,10 +9119,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						}
 					}
 					s := msgSeq.Add(1)
-					output := msg.Output
-					if len(output) > 8192 {
-						output = output[:8192]
-					}
+					output := toolOutputPreview(msg.Output)
 					toolName := msg.Tool
 					if toolName == "" && msg.CallID != "" {
 						mu.Lock()
@@ -9154,8 +9197,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	select {
 	case result := <-session.Result:
+		stopWatchdog()
 		waitForDrain()
-		if idleWatchdogFired.Load() {
+		// terminalObserved outranks a watchdog that fired anyway: if the backend
+		// had already read its authoritative result, this is the real outcome and
+		// re-tagging it would report a completed run as a hang.
+		if idleWatchdogFired.Load() && !terminalObserved() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
 			// Re-tag it as "idle_watchdog" so runTask routes the
@@ -9178,6 +9225,51 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		// classifiers so a watchdog-induced stop isn't misreported as
 		// "task cancelled by server".
 		if idleWatchdogFired.Load() {
+			// For a backend that publishes a terminal boundary, enter the
+			// hand-off without asking terminalObserved first. Reading a flag and
+			// then acting on it is exactly the window this branch kept losing:
+			// the backend can publish between the read and the classifier below.
+			// Waiting for the result instead makes its delivery the
+			// linearization point, and the backend contract — publish the
+			// observation before sending Result — is what makes the check after
+			// delivery reliable rather than lucky.
+			//
+			// Such a backend always closes Result, so a wedged one still ends
+			// this wait promptly through the closed channel rather than the
+			// budget.
+			if handsOverTerminal {
+				taskLog.Info("idle watchdog fired; waiting for the backend to hand over its result",
+					"budget", terminalResultHandoffBudget.String())
+				select {
+				case result, ok := <-session.Result:
+					if ok && terminalObserved() {
+						// The backend had already read its authoritative
+						// result, so this is the real outcome, not a hang.
+						return result, toolCount.Load(), nil
+					}
+					if ok {
+						// The backend's wait goroutine (e.g. claude.go)
+						// translates the SIGKILL we delivered via agentCancel
+						// into Status="aborted". Re-tag it as "idle_watchdog"
+						// so runTask routes the disposition through a dedicated
+						// failure_reason, not the generic "agent_error" bucket
+						// the aborted path falls into.
+						result.Status = "idle_watchdog"
+						if result.Error == "" {
+							result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
+						}
+						return result, toolCount.Load(), nil
+					}
+					// Closed with no value: the backend gave up without an
+					// outcome, so the liveness verdict is the only one left.
+				case <-time.After(terminalResultHandoffBudget):
+					// A backend that neither delivers nor closes is itself the
+					// hang. Linearizing here keeps the branch bounded whatever
+					// a backend does.
+					taskLog.Warn("backend did not hand over a result within the budget; classifying by liveness",
+						"budget", terminalResultHandoffBudget.String())
+				}
+			}
 			return agent.Result{
 				Status: "idle_watchdog",
 				Error:  idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load())),
@@ -9200,6 +9292,25 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		}, toolCount.Load(), nil
 	}
 }
+
+// terminalResultHandoffBudget is how long executeAndDrain waits, after force-
+// stopping a run, for the backend to hand over whatever result it has. It only
+// decides how long we believe a backend before falling back to the liveness
+// verdict; the backend caps its own finalization, so in practice the wait ends
+// far sooner.
+//
+// The value is derived from the slowest finalization this daemon drives today,
+// Cursor's, rather than picked: a concurrent background-cleanup pass we may have
+// to wait behind (cursorCloseBudget, 10s), the closing pass itself (another
+// 10s), one already-started process termination per pass overshooting its
+// budget by that termination's own bound (~1s each), and the process WaitDelay
+// after cancellation (0.5s) — about 22.5s. 30s leaves margin without letting a
+// wedged backend hold a runtime slot indefinitely.
+//
+// Deliberately not a term: the background reaper's tick. Closing its stop
+// channel wakes it immediately rather than at the next tick, so it adds
+// nothing to this ceiling.
+const terminalResultHandoffBudget = 30 * time.Second
 
 // idleWatchdogReason formats the human-facing explanation surfaced on
 // idle_watchdog dispositions. Centralised so the result-arrival branch and the
@@ -9253,8 +9364,12 @@ func idleWatchdogTickInterval(window time.Duration) time.Duration {
 //
 // Polling rate comes from idleWatchdogTickInterval, so a run is force-stopped
 // somewhere between its budget and budget + tick, never earlier.
-func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger) {
-	ticker := time.NewTicker(idleWatchdogTickInterval(window))
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, taskLog *slog.Logger) {
+	tickWindow := window
+	if toolWindow > 0 && toolWindow < tickWindow {
+		tickWindow = toolWindow
+	}
+	ticker := time.NewTicker(idleWatchdogTickInterval(tickWindow))
 	defer ticker.Stop()
 	for {
 		select {
@@ -9266,7 +9381,7 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 			// tool_use and tool_result), so it gets the larger toolWindow;
 			// toolWindow <= 0 disables the in-flight bound entirely.
 			threshold := window
-			toolInFlight := inFlightTools.Load() > 0
+			toolInFlight := inFlightTools() > 0
 			if toolInFlight {
 				if toolWindow <= 0 {
 					continue
@@ -9283,6 +9398,41 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 			// killing a backend that is still producing output.
 			if len(messages) > 0 {
 				continue
+			}
+			// Cursor can stop its owned background tools without aborting the
+			// agent. The same watchdog owns both the budget and this recovery,
+			// so no competing timer can cancel Cursor while it reports a result.
+			if agentCtx.Err() != nil {
+				return
+			}
+			if terminalObserved != nil && terminalObserved() {
+				return
+			}
+			if toolInFlight && interruptBackground != nil && interruptBackground() {
+				lastActivityAt.Store(time.Now().UnixNano())
+				taskLog.Info("tool watchdog stopped background tools; waiting for agent result")
+				continue
+			}
+			// A natural tool completion may race the callback or the tick.
+			if agentCtx.Err() != nil {
+				return
+			}
+			// Refresh native tool activity BEFORE reading its timestamp. The
+			// callback may publish newer activity without changing the count.
+			currentToolInFlight := inFlightTools() > 0
+			currentActivity := lastActivityAt.Load()
+			if currentActivity != last.UnixNano() ||
+				currentToolInFlight != toolInFlight || len(messages) > 0 {
+				continue
+			}
+			if agentCtx.Err() != nil {
+				return
+			}
+			// Last gate before force-stopping. The terminal result can land while
+			// this tick is deciding — including while it is blocked inside the
+			// interrupt callback above — and a decided outcome is never a hang.
+			if terminalObserved != nil && terminalObserved() {
+				return
 			}
 			// No "task" field here: taskLog already carries the full id.
 			taskLog.Warn("idle watchdog firing: no agent activity, force-stopping run",
