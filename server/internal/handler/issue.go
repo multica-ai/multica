@@ -665,22 +665,37 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	// flags and sort fields needed to choose a page. Do not force this CTE to be
 	// MATERIALIZED: production EXPLAIN showed 28-68% lower execution time after
 	// removing that fence. Full issue rows are hydrated after LIMIT/OFFSET below.
+	const (
+		loweredIssueTitle       = "lowered_issue_title.lowered"
+		loweredIssueDescription = "lowered_issue_description.lowered"
+	)
+	titlePhrasePredicate := fmt.Sprintf("%s LIKE %s", loweredIssueTitle, phraseContainsParam)
+	titleTermPredicates := make([]string, 0, len(termContainsParams))
+	for _, termParam := range termContainsParams {
+		titleTermPredicates = append(titleTermPredicates, fmt.Sprintf("%s LIKE %s", loweredIssueTitle, termParam))
+	}
+	titleMatchParts := []string{titlePhrasePredicate}
+	if len(titleTermPredicates) > 1 {
+		titleMatchParts = append(titleMatchParts, "("+strings.Join(titleTermPredicates, " AND ")+")")
+	}
+	titleMatchExpr := "(" + strings.Join(titleMatchParts, " OR ") + ")"
+
 	issueFlagColumns := []string{
 		"i.id AS issue_id",
 		"i.status",
 		"i.updated_at",
-		fmt.Sprintf("LOWER(i.title) = %s AS title_exact", phraseParam),
-		fmt.Sprintf("LOWER(i.title) LIKE %s AS title_starts_with", phraseStartsWithParam),
-		fmt.Sprintf("LOWER(i.title) LIKE %s AS title_phrase", phraseContainsParam),
-		fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE %s AS description_phrase", phraseContainsParam),
+		fmt.Sprintf("%s = %s AS title_exact", loweredIssueTitle, phraseParam),
+		fmt.Sprintf("%s LIKE %s AS title_starts_with", loweredIssueTitle, phraseStartsWithParam),
+		fmt.Sprintf("%s AS title_phrase", titlePhrasePredicate),
+		fmt.Sprintf("COALESCE(%s LIKE %s, FALSE) AS description_phrase", loweredIssueDescription, phraseContainsParam),
 	}
 	if hasNum {
 		issueFlagColumns = append(issueFlagColumns, fmt.Sprintf("i.number = %s AS number_exact", numParam))
 	}
 	for index, termParam := range termContainsParams {
 		issueFlagColumns = append(issueFlagColumns,
-			fmt.Sprintf("LOWER(i.title) LIKE %s AS title_term_%d", termParam, index),
-			fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE %s AS description_term_%d", termParam, index),
+			fmt.Sprintf("%s AS title_term_%d", titleTermPredicates[index], index),
+			fmt.Sprintf("COALESCE(%s LIKE %s, FALSE) AS description_term_%d", loweredIssueDescription, termParam, index),
 		)
 	}
 
@@ -688,11 +703,28 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	if terminalStatusesParam != "" {
 		issueWhere += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
 	}
+	// PostgreSQL otherwise inlines scalar LATERAL subqueries and recomputes the
+	// LOWER expressions for every flag. The OFFSET 0 fences cache the normalized
+	// title and description per issue row without materializing the whole CTE.
+	// Once the title contains the phrase or every search term, it has already won
+	// both eligibility and match-source precedence, so the LEFT JOIN can skip
+	// normalizing the description and its flags safely fall back to FALSE. Future
+	// indexable text predicates must stay outside these projection-only fences so
+	// expression indexes can still match them.
 	issueMatchesCTE := fmt.Sprintf(`issue_matches AS (
 		SELECT %s
 		FROM issue i
+		CROSS JOIN LATERAL (
+			SELECT LOWER(i.title) AS lowered
+			OFFSET 0
+		) lowered_issue_title
+		LEFT JOIN LATERAL (
+			SELECT LOWER(COALESCE(i.description, '')) AS lowered
+			WHERE NOT %s
+			OFFSET 0
+		) lowered_issue_description ON TRUE
 		WHERE %s
-	)`, strings.Join(issueFlagColumns, ",\n\t\t\t"), issueWhere)
+	)`, strings.Join(issueFlagColumns, ",\n\t\t\t"), titleMatchExpr, issueWhere)
 
 	// Comments are also scanned once, workspace-first. This intentionally avoids
 	// the legacy planner choice between global content GIN postings and repeated
