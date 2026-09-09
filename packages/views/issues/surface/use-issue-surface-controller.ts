@@ -224,6 +224,7 @@ export function useIssueSurfaceController({
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
+  const projectStatusFilters = useViewStore((s) => s.projectStatusFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
@@ -401,6 +402,7 @@ export function useIssueSurfaceController({
     creatorFilters.length > 0 ||
     viewProjectFilters.length > 0 ||
     viewIncludeNoProject ||
+    projectStatusFilters.length > 0 ||
     labelFilters.length > 0 ||
     Object.keys(effectivePropertyFilters).length > 0 ||
     dateFilter != null ||
@@ -479,6 +481,9 @@ export function useIssueSurfaceController({
           ? { project_ids: viewProjectFilters }
           : {}),
         ...(viewIncludeNoProject ? { include_no_project: true } : {}),
+        ...(projectStatusFilters.length > 0
+          ? { project_statuses: projectStatusFilters }
+          : {}),
         ...(labelFilters.length > 0 ? { label_ids: labelFilters } : {}),
         ...(Object.keys(effectivePropertyFilters).length > 0
           ? { properties: effectivePropertyFilters }
@@ -505,6 +510,7 @@ export function useIssueSurfaceController({
     includeNoAssignee,
     labelFilters,
     priorityFilters,
+    projectStatusFilters,
     scope,
     showSubIssues,
     sort.sort_by,
@@ -736,11 +742,16 @@ export function useIssueSurfaceController({
     creatorFilters,
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,
+    projectStatusFilters,
     labelFilters,
     propertyFilters: effectivePropertyFilters,
     workingIssueIDs,
     showSubIssues,
     loadProjects:
+      // The client-side project-status predicate (Gantt / swimlane extras)
+      // cannot be evaluated without the catalog, so the filter itself has to
+      // pull it in.
+      projectStatusFilters.length > 0 ||
       cardProperties.project ||
       (usesTable && tableColumns.some((column) => column.key === "project")) ||
       // Project group headers resolve their title through the projects query,

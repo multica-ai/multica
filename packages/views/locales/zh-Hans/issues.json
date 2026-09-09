@@ -146,6 +146,14 @@
     "chip_op_before": "早于 {{value}}",
     "chip_op_after": "晚于 {{value}}",
     "section_project": "项目",
+    "section_project_status": "项目状态",
+    "project_status": {
+      "planned": "计划中",
+      "in_progress": "进行中",
+      "paused": "已暂停",
+      "completed": "已完成",
+      "cancelled": "已取消"
+    },
     "section_label": "标签",
     "section_date": "日期",
     "date_field": "字段",

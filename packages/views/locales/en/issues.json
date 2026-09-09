@@ -148,6 +148,14 @@
     "chip_op_before": "before {{value}}",
     "chip_op_after": "after {{value}}",
     "section_project": "Project",
+    "section_project_status": "Project status",
+    "project_status": {
+      "planned": "Planned",
+      "in_progress": "In Progress",
+      "paused": "Paused",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
     "section_label": "Label",
     "section_date": "Date",
     "date_field": "Field",

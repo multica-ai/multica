@@ -6,6 +6,7 @@ import { NO_PROPERTY_VALUE } from "../utils/filter";
 import { useMemo, type ReactNode } from "react";
 import {
   CalendarDays,
+  CircleDashed,
   CircleDot,
   FolderKanban,
   SignalHigh,
@@ -19,6 +20,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import { labelListOptions } from "@multica/core/labels/queries";
 import { propertyListOptions } from "@multica/core/properties";
 import { isActorPropertyType, isScalarPropertyType, parseActorRef, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, type PropertyFilterValue } from "@multica/core/types";
@@ -191,6 +193,7 @@ function useFilterChips(
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
+  const projectStatusFilters = useViewStore((s) => s.projectStatusFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const store = useViewStoreApi();
@@ -203,6 +206,7 @@ function useFilterChips(
     creatorFilters.length > 0 ||
     projectFilters.length > 0 ||
     includeNoProject ||
+    projectStatusFilters.length > 0 ||
     labelFilters.length > 0 ||
     Object.values(propertyFilters).some((selected) => selected.length > 0);
   const showDateChip = !!onDateFilterChange && !!dateFilter;
@@ -264,6 +268,7 @@ function useFilterChips(
       creatorFilters: s.creatorFilters,
       projectFilters: s.projectFilters,
       includeNoProject: s.includeNoProject,
+      projectStatusFilters: s.projectStatusFilters,
       labelFilters: s.labelFilters,
       propertyFilters: s.propertyFilters,
     };
@@ -289,6 +294,12 @@ function useFilterChips(
           ...current,
           projectFilters: raw.projectFilters,
           includeNoProject: raw.includeNoProject,
+        });
+        break;
+      case "projectStatus":
+        s.resetFiltersTo({
+          ...current,
+          projectStatusFilters: raw.projectStatusFilters,
         });
         break;
       case "label":
@@ -327,6 +338,9 @@ function useFilterChips(
   const deltaNoProject = baseline
     ? includeNoProject && !baseline.includeNoProject
     : includeNoProject;
+  const deltaProjectStatuses = baseline
+    ? projectStatusFilters.filter((s) => !baseline.projectStatus.has(s))
+    : projectStatusFilters;
   const deltaLabels = baseline
     ? labelFilters.filter((id) => !baseline.label.has(id))
     : labelFilters;
@@ -430,6 +444,29 @@ function useFilterChips(
         ) : undefined,
       value: summarize(names),
       onRemove: () => clearDimension("project"),
+    });
+  }
+  if (deltaProjectStatuses.length > 0) {
+    chips.push({
+      key: "projectStatus",
+      icon: <CircleDashed className={CHIP_ICON_CLASS} />,
+      label: t(($) => $.filters.section_project_status),
+      valueIcons: (
+        // PROJECT_STATUS_CONFIG carries Tailwind classes, not CSS colors, so
+        // DotStack (inline styles) does not apply here.
+        <IconStack>
+          {deltaProjectStatuses.slice(0, 3).map((status) => (
+            <span
+              key={status}
+              className={`size-2.5 rounded-full ${PROJECT_STATUS_CONFIG[status].dotColor}`}
+            />
+          ))}
+        </IconStack>
+      ),
+      value: summarize(
+        deltaProjectStatuses.map((status) => t(($) => $.filters.project_status[status])),
+      ),
+      onRemove: () => clearDimension("projectStatus"),
     });
   }
   if (deltaLabels.length > 0) {

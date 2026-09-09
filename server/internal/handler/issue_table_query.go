@@ -81,21 +81,24 @@ type issueTableDateFilterRequest struct {
 }
 
 type issueTableFiltersRequest struct {
-	Statuses          []string                     `json:"statuses,omitempty"`
-	Priorities        []string                     `json:"priorities,omitempty"`
-	Assignees         []issueTableActorRef         `json:"assignees,omitempty"`
-	IncludeNoAssignee bool                         `json:"include_no_assignee,omitempty"`
-	Creators          []issueTableActorRef         `json:"creators,omitempty"`
-	ProjectIDs        []string                     `json:"project_ids,omitempty"`
-	IncludeNoProject  bool                         `json:"include_no_project,omitempty"`
-	LabelIDs          []string                     `json:"label_ids,omitempty"`
+	Statuses          []string             `json:"statuses,omitempty"`
+	Priorities        []string             `json:"priorities,omitempty"`
+	Assignees         []issueTableActorRef `json:"assignees,omitempty"`
+	IncludeNoAssignee bool                 `json:"include_no_assignee,omitempty"`
+	Creators          []issueTableActorRef `json:"creators,omitempty"`
+	ProjectIDs        []string             `json:"project_ids,omitempty"`
+	IncludeNoProject  bool                 `json:"include_no_project,omitempty"`
+	// ProjectStatuses filters on the parent project's lifecycle status
+	// (`validProjectStatuses`), independently of ProjectIDs.
+	ProjectStatuses []string `json:"project_statuses,omitempty"`
+	LabelIDs        []string `json:"label_ids,omitempty"`
 	// Members are raw JSON so operator objects ({op, value}) and plain
 	// strings both survive the round-trip into parsePropertiesFilterParam.
-	Properties        map[string][]json.RawMessage `json:"properties,omitempty"`
-	Date              *issueTableDateFilterRequest `json:"date,omitempty"`
-	WorkingOnly       bool                         `json:"working_only,omitempty"`
-	WorkingIssueIDs   []string                     `json:"working_issue_ids,omitempty"`
-	IncludeSubIssues  *bool                        `json:"include_sub_issues,omitempty"`
+	Properties       map[string][]json.RawMessage `json:"properties,omitempty"`
+	Date             *issueTableDateFilterRequest `json:"date,omitempty"`
+	WorkingOnly      bool                         `json:"working_only,omitempty"`
+	WorkingIssueIDs  []string                     `json:"working_issue_ids,omitempty"`
+	IncludeSubIssues *bool                        `json:"include_sub_issues,omitempty"`
 }
 
 type issueTableSortRequest struct {
@@ -256,6 +259,7 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 	normalized.Filters.Statuses = sortedUniqueStrings(normalized.Filters.Statuses)
 	normalized.Filters.Priorities = sortedUniqueStrings(normalized.Filters.Priorities)
 	normalized.Filters.ProjectIDs = sortedUniqueStrings(normalized.Filters.ProjectIDs)
+	normalized.Filters.ProjectStatuses = sortedUniqueStrings(normalized.Filters.ProjectStatuses)
 	normalized.Filters.LabelIDs = sortedUniqueStrings(normalized.Filters.LabelIDs)
 	normalized.Filters.Assignees = sortedUniqueActors(normalized.Filters.Assignees)
 	normalized.Filters.WorkingIssueIDs = sortedUniqueStrings(normalized.Filters.WorkingIssueIDs)
@@ -597,6 +601,20 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			ors = append(ors, "i.project_id IS NULL")
 		}
 		where = append(where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	if len(spec.Filters.ProjectStatuses) > 0 {
+		for _, status := range spec.Filters.ProjectStatuses {
+			if !validateProjectEnum(w, "filters.project_statuses", status, validProjectStatuses) {
+				return issueTableSQL{}, false
+			}
+		}
+		// A projectless issue has no row to match, so EXISTS is false and the
+		// issue drops out — "no project" is deliberately not a project status.
+		where = append(where, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM project p WHERE p.id = i.project_id AND p.status = ANY(%s::text[]))",
+			addArg(spec.Filters.ProjectStatuses),
+		))
 	}
 
 	labelIDs, ok := parseIssueTableUUIDList(w, spec.Filters.LabelIDs, "filters.label_ids")
