@@ -42,6 +42,19 @@ func NewRedisDedupe(rdb *redis.Client, budget time.Duration, log *slog.Logger) D
 	if budget <= 0 {
 		budget = defaultClaimBudget
 	}
+	// The budgets below are only real if the client applies them to the wire.
+	// go-redis does not by default: without ContextTimeoutEnabled a command
+	// ignores its context's deadline and waits out the socket timeout instead
+	// (baseClient.context), so ClaimBudget would be a number this package
+	// states and nothing enforces — and a shutdown drain would overrun the
+	// exit budget it promised by however far the socket timeout reaches.
+	// Production passes a client built for this (cmd/server: newClaimRedisClient);
+	// anything else is a wiring mistake, and a silent one, so it is named here.
+	if !rdb.Options().ContextTimeoutEnabled {
+		log.Warn("wecom relay: claim store client ignores context deadlines; " +
+			"claim budgets and the shutdown drain budget will not be honoured " +
+			"(set redis.Options.ContextTimeoutEnabled)")
+	}
 	return &redisDedupe{rdb: rdb, log: log, budget: budget}
 }
 
@@ -142,6 +155,9 @@ func (d *redisDedupe) Claim(ctx context.Context, key, token string, ttl time.Dur
 // DrainBudget — so a round trip that helped itself to a fresh budget past that
 // point would spend time the shutdown already promised away. The deadline is
 // inherited and the store's own budget only ever makes the wait shorter.
+//
+// Both halves reach the wire only because the client is built to let them:
+// see the ContextTimeoutEnabled note in NewRedisDedupe.
 func (d *redisDedupe) bookkeepingBudget(ctx context.Context) (context.Context, context.CancelFunc) {
 	detached := context.WithoutCancel(ctx)
 	own := time.Now().Add(d.budget)

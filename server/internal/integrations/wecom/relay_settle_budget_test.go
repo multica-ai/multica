@@ -16,10 +16,14 @@ package wecom
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
+	"net"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // The claim-bookkeeping calls drop CANCELLATION on purpose — a settle for a
@@ -65,6 +69,68 @@ func TestRedisDedupe_BookkeepingKeepsABoundingDeadline(t *testing.T) {
 	deadline, ok := own.Deadline()
 	if !ok || time.Until(deadline) <= time.Second {
 		t.Fatalf("deadline = %v (ok=%v), want the store's own budget out", deadline, ok)
+	}
+}
+
+// A deadline the caller sets has to reach the WIRE, not just the context.
+//
+// go-redis discards context deadlines unless ContextTimeoutEnabled is set
+// (baseClient.context returns context.Background() otherwise), so a store
+// built on a default client bounds its commands by the socket timeout and
+// nothing else. Choosing the earlier deadline in bookkeepingBudget would then
+// be bookkeeping about bookkeeping: the drain still overruns its budget by
+// however far ReadTimeout reaches, which in production is 3s.
+//
+// So this drives a REAL redis.Client over a connection that swallows the
+// request and never answers, and asserts which of the two bounds wins.
+//
+// REVERSE VERIFICATION: it is built in — the same store on a default client is
+// the second case, and it waits out the socket timeout instead.
+func TestRedisDedupe_ACallersDeadlineReachesTheWire(t *testing.T) {
+	t.Parallel()
+	const (
+		callerDeadline = 40 * time.Millisecond
+		socketTimeout  = 400 * time.Millisecond
+	)
+	// A store on a client built the way cmd/server builds this one, and the
+	// same store on go-redis's defaults.
+	newStore := func(t *testing.T, honoursDeadlines bool) *redisDedupe {
+		t.Helper()
+		srv, cli := net.Pipe()
+		go func() { _, _ = io.Copy(io.Discard, srv) }()
+		t.Cleanup(func() { _ = srv.Close() })
+		rdb := redis.NewClient(&redis.Options{
+			Dialer:                func(context.Context, string, string) (net.Conn, error) { return cli, nil },
+			ReadTimeout:           socketTimeout,
+			WriteTimeout:          socketTimeout,
+			ContextTimeoutEnabled: honoursDeadlines,
+			// One attempt: this measures which bound applies, not how many
+			// times go-redis is willing to apply it.
+			MaxRetries: -1,
+		})
+		t.Cleanup(func() { _ = rdb.Close() })
+		return &redisDedupe{rdb: rdb, log: slog.Default(), budget: 2 * time.Second}
+	}
+	settle := func(t *testing.T, d *redisDedupe) time.Duration {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), callerDeadline)
+		defer cancel()
+		start := time.Now()
+		if _, err := d.Settle(ctx, "wecom:outbound:claim:test", "owner/ev"); err == nil {
+			t.Fatal("Settle against a connection that never answers returned no error")
+		}
+		return time.Since(start)
+	}
+
+	// The production wiring: the caller's deadline is what ends the wait.
+	if took := settle(t, newStore(t, true)); took >= socketTimeout {
+		t.Fatalf("Settle took %v with a %v caller deadline: the deadline never reached the wire, "+
+			"so a drain cannot hold the budget it promised", took, callerDeadline)
+	}
+	// The default client, kept as the contrast that makes the flag load-bearing.
+	if took := settle(t, newStore(t, false)); took < socketTimeout {
+		t.Fatalf("a default client bounded Settle at %v, so this test no longer demonstrates why "+
+			"the claim store needs its own client", took)
 	}
 }
 
