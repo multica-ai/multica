@@ -837,6 +837,36 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("Hidden columns")).toBeInTheDocument();
     expect(screen.getByText("Blocked")).toBeInTheDocument();
   });
+  it("calls onMoveIssue when card is dropped on a hidden status column", () => {
+    const mockOnMoveIssue = vi.fn();
+    renderWithI18n(
+      <SwimLaneView
+        issues={mockIssues}
+        visibleStatuses={["backlog", "todo", "in_progress", "in_review", "done"]}
+        hiddenStatuses={["blocked"]}
+        onMoveIssue={mockOnMoveIssue}
+      />,
+    );
+
+    act(() => {
+      lastOnDragEnd({
+        active: { id: "orphan-1" },
+        over: { id: "status:blocked" },
+      });
+    });
+
+    expect(mockOnMoveIssue).toHaveBeenCalledWith(
+      "orphan-1",
+      {
+        status: "blocked",
+        position: 300,
+        before_id: null,
+        after_id: null,
+      },
+      expect.any(Function),
+    );
+  });
+
 
   it("calls onMoveIssue on drag-and-drop end", () => {
     const mockOnMoveIssue = vi.fn();

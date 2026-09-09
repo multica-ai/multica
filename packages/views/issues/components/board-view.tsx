@@ -569,11 +569,53 @@ function BoardViewImpl({
       const cols = columnsRef.current;
       const activeCol = findColumn(cols, activeId, groupIds);
       const overCol = findColumn(cols, overId, groupIds);
+      // Dropping onto a hidden status column
+      const targetHiddenStatus =
+        grouping === "status"
+          ? hiddenStatuses.find((s) => statusGroupId(s) === overId)
+          : undefined;
+
+      if (targetHiddenStatus) {
+        const map = issueMapRef.current;
+        const currentIssue = map.get(activeId);
+        if (!currentIssue) {
+          resetColumns();
+          return;
+        }
+
+        const staysInStatus =
+          currentIssue.status === targetHiddenStatus ||
+          currentIssue.status_category === targetHiddenStatus;
+
+        if (staysInStatus) {
+          resetColumns();
+          return;
+        }
+
+        if (activeCol) {
+          setColumns((prev) => ({
+            ...prev,
+            [activeCol]: (prev[activeCol] ?? []).filter((id) => id !== activeId),
+          }));
+        }
+
+        onMoveIssue(
+          activeId,
+          {
+            status: targetHiddenStatus,
+            position: currentIssue.position,
+            before_id: null,
+            after_id: null,
+          },
+          beginSettle(),
+        );
+        return;
+      }
+
       if (!activeCol || !overCol) {
         resetColumns();
         return;
       }
-
       // Same-column reorder (manual sort only)
       let finalColumns = cols;
       if (activeCol === overCol && sortBy === "position") {
@@ -665,7 +707,7 @@ function BoardViewImpl({
       );
       applyPropertyGroupValue(finalGroup, activeId);
     },
-    [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue],
+    [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue, hiddenStatuses],
   );
 
   // An aborted drag (pointercancel, window resize, tab hide, Escape) fires

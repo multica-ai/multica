@@ -33,7 +33,7 @@ import type {
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useViewBaseline } from "../surface/view-baseline-context";
 import { filterIssues, type IssueFilters } from "../utils/filter";
-import { getMoveAnchors } from "../utils/drag-utils";
+import { getMoveAnchors, statusGroupId } from "../utils/drag-utils";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -1198,6 +1198,60 @@ function SwimLaneViewImpl({
 
       const cols = localCellsRef.current;
 
+      const targetHiddenStatus = hiddenStatuses.find(
+        (s) => statusGroupId(s) === overId,
+      );
+
+      if (targetHiddenStatus) {
+        const currentIssue = issueMapRef.current.get(activeId);
+        if (!currentIssue) {
+          reset();
+          return;
+        }
+
+        const staysInStatus =
+          currentIssue.status === targetHiddenStatus ||
+          currentIssue.status_category === targetHiddenStatus;
+
+        if (staysInStatus) {
+          reset();
+          return;
+        }
+
+        const activeCell = findCellIn(cols, cellSet, activeId);
+        if (activeCell) {
+          setLocalCells((prev) => {
+            const lane = prev[activeCell.laneKey];
+            if (!lane) return prev;
+            return {
+              ...prev,
+              [activeCell.laneKey]: {
+                ...lane,
+                [activeCell.status]: (lane[activeCell.status] ?? []).filter(
+                  (id) => id !== activeId,
+                ),
+              },
+            };
+          });
+        }
+
+        isSettlingRef.current = true;
+        onMoveIssue(
+          activeId,
+          {
+            status: targetHiddenStatus as IssueStatus,
+            position: currentIssue.position,
+            before_id: null,
+            after_id: null,
+          },
+          () => {
+            isSettlingRef.current = false;
+            setSettleVersion((v) => v + 1);
+          },
+        );
+        return;
+      }
+
       const activeCell = findCellIn(cols, cellSet, activeId);
       const overCell = findCellIn(cols, cellSet, overId);
       if (!activeCell || !overCell) {
@@ -1303,7 +1357,7 @@ function SwimLaneViewImpl({
         },
       );
     },
-    [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi],
+    [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi, hiddenStatuses],
   );
 
   // Grid template: one column per status, fixed width COLUMN_WIDTH, gap COLUMN_GAP.
