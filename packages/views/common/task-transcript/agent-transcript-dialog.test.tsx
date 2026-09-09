@@ -942,19 +942,19 @@ describe("tool output completeness", () => {
   it("marks the end of an output the record lost", () => {
     openStep(run(true));
 
-    expect(screen.getByText(/the rest was not saved to this record/i)).toBeInTheDocument();
+    expect(screen.getByText(/only the beginning was kept/i)).toBeInTheDocument();
   });
 
   it("marks an output nobody measured as unconfirmed", () => {
     openStep(run(undefined));
 
-    expect(screen.getByText(/whether it ends here cannot be confirmed/i)).toBeInTheDocument();
+    expect(screen.getByText(/whether it is complete cannot be confirmed/i)).toBeInTheDocument();
   });
 
   it("says nothing about an output the daemon measured as complete", () => {
     openStep(run(false));
 
-    expect(screen.queryByText(/not saved to this record|cannot be confirmed/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/only the beginning was kept|cannot be confirmed/i)).not.toBeInTheDocument();
   });
 
   // Regression guard for the shape this replaced: a warning badge next to the
@@ -965,7 +965,7 @@ describe("tool output completeness", () => {
     // The header row is the one carrying the copy control.
     const header = screen.getByRole("button", { name: "Copy this step" }).closest("div");
     expect(header).toHaveTextContent("exec_command");
-    expect(header).not.toHaveTextContent(/not saved to this record/i);
+    expect(header).not.toHaveTextContent(/only the beginning was kept/i);
   });
 
   // A stored tool result is capped at 8192 bytes upstream, so the render clip
@@ -977,7 +977,7 @@ describe("tool output completeness", () => {
       { seq: 2, type: "tool_result", tool: "exec_command", output: "x".repeat(8192), output_truncated: true },
     ]);
 
-    expect(screen.getByText(/the rest was not saved to this record/i)).toBeInTheDocument();
+    expect(screen.getByText(/only the beginning was kept/i)).toBeInTheDocument();
     expect(screen.queryByText(/only the start is displayed/i)).not.toBeInTheDocument();
   });
 
