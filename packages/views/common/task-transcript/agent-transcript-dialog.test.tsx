@@ -922,75 +922,69 @@ describe("readable issue references", () => {
   });
 });
 
-// The completeness indicator, #8182 / #8183. Two separate claims: a per-step
-// badge for output the record provably lost, and one run-level caveat for
-// output whose completeness nobody ever measured. The matrix for the
-// unknown-detection rule lives in build-timeline.test.ts.
+// The completeness indicator, #8182 / #8183. It lives at the end of the output
+// the reader is already looking at, not in the header: the question it answers
+// ("was that all of it?") is one you only have once you reach the bottom. The
+// state matrix lives in build-timeline.test.ts.
 describe("tool output completeness", () => {
-  const truncatedRun: TimelineItem[] = [
-    { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
-    { seq: 2, type: "tool_result", tool: "exec_command", output: "line one", output_truncated: true },
-  ];
-  const completeRun: TimelineItem[] = [
-    { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
-    { seq: 2, type: "tool_result", tool: "exec_command", output: "line one", output_truncated: false },
-  ];
+  function run(output_truncated?: boolean): TimelineItem[] {
+    return [
+      { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
+      { seq: 2, type: "tool_result", tool: "exec_command", output: "line one", output_truncated },
+    ];
+  }
 
-  it("marks a step whose output the record lost", () => {
-    renderDialog(truncatedRun);
+  function openStep(items: TimelineItem[]) {
+    renderDialog(items);
     fireEvent.click(screen.getByRole("button", { name: /cat big\.log/ }));
+  }
 
-    expect(screen.getByText("Truncated")).toBeInTheDocument();
-    expect(screen.getByTitle(/never uploaded and cannot be recovered/i)).toBeInTheDocument();
+  it("marks the end of an output the record lost", () => {
+    openStep(run(true));
+
+    expect(screen.getByText(/the rest was not saved to this record/i)).toBeInTheDocument();
   });
 
-  it("says nothing about a step the daemon measured as complete", () => {
-    renderDialog(completeRun);
-    fireEvent.click(screen.getByRole("button", { name: /cat big\.log/ }));
+  it("marks an output nobody measured as unconfirmed", () => {
+    openStep(run(undefined));
 
-    expect(screen.queryByText("Truncated")).not.toBeInTheDocument();
+    expect(screen.getByText(/whether it ends here cannot be confirmed/i)).toBeInTheDocument();
   });
 
-  // Regression guard for the shape this replaced: the notice lived inside the
-  // per-message view, so a run of historical turns rendered one disclaimer per
-  // turn. It is a property of the run, so it is stated once.
-  it("states the unknown-completeness caveat once for a run of unmeasured turns", () => {
-    renderDialog([
-      { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat a.log" } },
-      { seq: 2, type: "tool_result", tool: "exec_command", output: "a" },
-      { seq: 3, type: "tool_use", tool: "exec_command", input: { command: "cat b.log" } },
-      { seq: 4, type: "tool_result", tool: "exec_command", output: "b" },
-      { seq: 5, type: "tool_use", tool: "exec_command", input: { command: "cat c.log" } },
-      { seq: 6, type: "tool_result", tool: "exec_command", output: "c" },
-    ]);
+  it("says nothing about an output the daemon measured as complete", () => {
+    openStep(run(false));
 
-    expect(screen.getAllByText(/whether they are complete cannot be confirmed/i)).toHaveLength(1);
+    expect(screen.queryByText(/not saved to this record|cannot be confirmed/i)).not.toBeInTheDocument();
   });
 
-  it("drops the caveat once every output in the run has been measured", () => {
-    renderDialog(completeRun);
+  // Regression guard for the shape this replaced: a warning badge next to the
+  // tool name announced the caveat before the reader had asked the question.
+  it("keeps the caveat out of the step header", () => {
+    openStep(run(true));
 
-    expect(screen.queryByText(/whether they are complete cannot be confirmed/i)).not.toBeInTheDocument();
-  });
-
-  // A record that lost bytes is still a measured record: the badge says so,
-  // and the run-level "we don't know" caveat would contradict it.
-  it("does not call a known-truncated run unknown", () => {
-    renderDialog(truncatedRun);
-
-    expect(screen.queryByText(/whether they are complete cannot be confirmed/i)).not.toBeInTheDocument();
+    // The header row is the one carrying the copy control.
+    const header = screen.getByRole("button", { name: "Copy this step" }).closest("div");
+    expect(header).toHaveTextContent("exec_command");
+    expect(header).not.toHaveTextContent(/not saved to this record/i);
   });
 
   // Display clipping is reversible — copy still yields the stored text — so it
   // must not borrow the wording that means "these bytes are gone".
   it("distinguishes a display clip from output the record lost", () => {
-    renderDialog([
+    openStep([
       { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
       { seq: 2, type: "tool_result", tool: "exec_command", output: "x".repeat(9000), output_truncated: false },
     ]);
-    fireEvent.click(screen.getByRole("button", { name: /cat big\.log/ }));
 
     expect(screen.getByText(/copy to get the whole record/i)).toBeInTheDocument();
-    expect(screen.queryByText("Truncated")).not.toBeInTheDocument();
+    expect(screen.queryByText(/not saved to this record/i)).not.toBeInTheDocument();
+  });
+
+  // The run-level banner this replaced sat above the list and spoke for steps
+  // the reader had not opened.
+  it("does not annotate the run before a step is opened", () => {
+    renderDialog(run(undefined));
+
+    expect(screen.queryByText(/cannot be confirmed/i)).not.toBeInTheDocument();
   });
 });

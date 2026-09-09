@@ -56,23 +56,18 @@ function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
 }
 
 /**
- * Whether this transcript contains a tool output whose completeness nobody
- * recorded — messages stored before the daemon reported the flag, or produced
- * by an older installed daemon. The viewer explains this once for the whole
- * run rather than per turn: on the day the flag ships, every historical turn
- * qualifies, and a per-turn disclaimer would bury the transcript it annotates.
+ * What this record can say about its stored output being the whole output.
  *
- * An empty output is excluded. Truncation keeps the first 8 KiB, so a preview
- * that dropped bytes is never empty — for those rows completeness is not
- * unknown, it is knowable, and claiming otherwise is noise.
+ * Only tool results carry the measurement, and an empty output has nothing to
+ * be missing — truncation keeps the first 8 KiB, so a preview that dropped
+ * bytes is never empty. `false` is a measurement and needs no remark; the two
+ * cases worth a word are "bytes are known to be gone" and "nobody measured".
  */
-export function hasUnknownOutputCompleteness(items: TimelineItem[]): boolean {
-  return items.some(
-    (item) =>
-      item.type === "tool_result" &&
-      (item.output?.length ?? 0) > 0 &&
-      item.output_truncated === undefined,
-  );
+export function outputCompleteness(item: TimelineItem): "truncated" | "unknown" | null {
+  if (item.type !== "tool_result" || (item.output?.length ?? 0) === 0) return null;
+  if (item.output_truncated === true) return "truncated";
+  if (item.output_truncated === undefined) return "unknown";
+  return null;
 }
 
 /** Build a chronologically ordered timeline from raw task messages. */

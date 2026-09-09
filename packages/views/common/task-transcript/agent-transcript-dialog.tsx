@@ -28,7 +28,6 @@ import {
   Info,
   Coins,
   GitBranch,
-  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -63,7 +62,7 @@ import {
   FOLLOW_EDGE_THRESHOLD,
   LINE_SCROLL_PX,
 } from "./transcript-follow";
-import { hasUnknownOutputCompleteness, type TimelineItem } from "./build-timeline";
+import { outputCompleteness, type TimelineItem } from "./build-timeline";
 import {
   buildLanes,
   buildSteps,
@@ -470,9 +469,6 @@ export function AgentTranscriptDialog({
   // One step per tool call, with its result folded in — see build-steps.ts for
   // why the pairing is positional.
   const steps = useMemo(() => buildSteps(items), [items]);
-
-  // Explained once for the run, not once per step — see the helper for why.
-  const completenessUnknown = useMemo(() => hasUnknownOutputCompleteness(items), [items]);
 
   // A facet reads as what its rows look like: the glyph the rows carry, and the
   // name the rows print. The first step of a kind stands in for the glyph. The
@@ -1213,14 +1209,6 @@ export function AgentTranscriptDialog({
           </DropdownMenu>
         </div>
 
-        {/* ── Completeness caveat: once for the run, never per step ──── */}
-        {completenessUnknown && (
-          <div className="flex shrink-0 items-start gap-1.5 border-b bg-muted/20 px-4 py-1.5 text-micro text-muted-foreground">
-            <Info aria-hidden className="mt-px h-3 w-3 shrink-0" />
-            <span className="min-w-0">{t(($) => $.transcript.completeness_unknown)}</span>
-          </div>
-        )}
-
         {/* ── Steps, and the inspector when one is selected ───────────── */}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
@@ -1699,17 +1687,6 @@ function StepInspector({
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <StepIcon step={step} className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="shrink-0 text-label font-semibold">{title}</span>
-        {/* Source truncation: the rest was never uploaded. Distinct from the
-            display clip below, which `show all` and copy still recover. */}
-        {call?.result?.output_truncated === true && (
-          <span
-            className="inline-flex shrink-0 items-center gap-0.5 rounded bg-warning/10 px-1 py-0.5 text-micro font-medium text-warning"
-            title={t(($) => $.transcript.output_truncated_hint)}
-          >
-            <AlertTriangle aria-hidden className="h-2.5 w-2.5" />
-            {t(($) => $.transcript.output_truncated)}
-          </span>
-        )}
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-micro text-muted-foreground">
           {offset && <span className="font-mono tabular-nums">{offset}</span>}
           {call?.durationMs !== undefined && (
@@ -1779,10 +1756,30 @@ export function StepBody({ item }: { item: TimelineItem }) {
   const { t } = useT("agents");
   const detail = useMemo(() => traceEventDetail(item), [item]);
   const image = useMemo(() => readImageResult(item.output), [item.output]);
+  // Stated where the output actually ends, in the reader's own words when they
+  // reach the bottom and wonder whether that was all of it. A header badge said
+  // the same thing louder, before anyone had asked the question.
+  const completeness = outputCompleteness(item);
+  const footer = completeness ? (
+    <p className="px-3 pb-2 text-micro text-faint-foreground">
+      {completeness === "truncated"
+        ? t(($) => $.transcript.output_truncated_note)
+        : t(($) => $.transcript.output_completeness_unknown_note)}
+    </p>
+  ) : null;
+  const withFooter = (body: React.ReactNode) =>
+    footer ? (
+      <>
+        {body}
+        {footer}
+      </>
+    ) : (
+      body
+    );
 
   // A screenshot is a picture, not a 200KB base64 string in a <pre>.
   if (image) {
-    return (
+    return withFooter(
       <figure className="px-2 py-1">
         <img
           src={`data:${image.mediaType};base64,${image.base64}`}
@@ -1792,18 +1789,18 @@ export function StepBody({ item }: { item: TimelineItem }) {
         <figcaption className="pt-1 text-micro text-faint-foreground">
           {t(($) => $.transcript.image_result)} · {formatBytes(base64ByteLength(image.base64))}
         </figcaption>
-      </figure>
+      </figure>,
     );
   }
 
   switch (detail.kind) {
     case "diff":
-      return <DiffDetailSurface lines={detail.lines} path={detail.path} />;
+      return withFooter(<DiffDetailSurface lines={detail.lines} path={detail.path} />);
     case "patch":
-      return <PatchDetailSurface files={detail.files} truncated={detail.truncated} />;
+      return withFooter(<PatchDetailSurface files={detail.files} truncated={detail.truncated} />);
     case "file":
-      return (
-        <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />
+      return withFooter(
+        <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />,
       );
     default: {
       const text = detail.text;
@@ -1814,7 +1811,9 @@ export function StepBody({ item }: { item: TimelineItem }) {
           ? `${redactSecrets(text.slice(0, 8000))}\n${t(($) => $.transcript.display_clipped)}`
           : redactSecrets(text);
       const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
-      return <ToolDetailSurface text={clipped} language={path ? languageForPath(path) : undefined} />;
+      return withFooter(
+        <ToolDetailSurface text={clipped} language={path ? languageForPath(path) : undefined} />,
+      );
     }
   }
 }

@@ -5,7 +5,7 @@ import {
   appendTimelineItem,
   buildTimeline,
   coalesceTimelineItems,
-  hasUnknownOutputCompleteness,
+  outputCompleteness,
   type TimelineItem,
 } from "./build-timeline";
 
@@ -125,36 +125,26 @@ describe("tool output completeness", () => {
     expect(items.map((i) => i.output_truncated)).toEqual([true, false, undefined]);
   });
 
-  it("reports unknown completeness when a tool output carries no flag", () => {
-    expect(hasUnknownOutputCompleteness([result("who knows")])).toBe(true);
-  });
-
-  it("stays quiet once every tool output has been measured", () => {
-    expect(hasUnknownOutputCompleteness([result("all of it", false), result("cut", true)])).toBe(false);
+  // false is a measurement, undefined is the absence of one. Collapsing them
+  // would let a historical row pass as one the daemon confirmed complete.
+  it("separates measured-truncated, measured-complete, and never-measured", () => {
+    expect(outputCompleteness(result("x", true))).toBe("truncated");
+    expect(outputCompleteness(result("x", false))).toBeNull();
+    expect(outputCompleteness(result("x"))).toBe("unknown");
   });
 
   // A truncated preview keeps the first 8 KiB, so an empty output cannot be
-  // one. Flagging these would put the caveat on runs that never lost a byte.
-  it("does not call an empty output unknown", () => {
-    expect(hasUnknownOutputCompleteness([result(""), result(undefined)])).toBe(false);
+  // one. Remarking on these would annotate records that never lost a byte.
+  it("says nothing about an empty output", () => {
+    expect(outputCompleteness(result(""))).toBeNull();
+    expect(outputCompleteness(result(undefined))).toBeNull();
   });
 
   // The flag only describes tool output; prose and thinking have no preview
   // budget to overflow.
   it("ignores message types that have no tool output", () => {
-    expect(
-      hasUnknownOutputCompleteness([
-        { seq: 1, type: "text", content: "hello" },
-        { seq: 2, type: "thinking", content: "hmm" },
-        { seq: 3, type: "error", content: "boom" },
-      ]),
-    ).toBe(false);
-  });
-
-  // false is a measurement, undefined is the absence of one. Collapsing them
-  // would let a historical row claim it is complete.
-  it("separates measured-complete from never-measured", () => {
-    expect(hasUnknownOutputCompleteness([result("x", false)])).toBe(false);
-    expect(hasUnknownOutputCompleteness([result("x")])).toBe(true);
+    expect(outputCompleteness({ seq: 1, type: "text", content: "hello" })).toBeNull();
+    expect(outputCompleteness({ seq: 2, type: "thinking", content: "hmm" })).toBeNull();
+    expect(outputCompleteness({ seq: 3, type: "error", content: "boom" })).toBeNull();
   });
 });
