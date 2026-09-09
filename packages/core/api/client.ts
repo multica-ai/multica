@@ -381,6 +381,7 @@ import {
   EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
   LabelSchema,
   ListLabelsResponseSchema,
+  LoginResponseSchema,
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
   IssuePropertySchema,
@@ -488,6 +489,13 @@ export interface LoginResponse {
   token: string;
   user: User;
 }
+
+// Deliberately an empty token: callers treat "" as "not logged in", so a
+// drifted response degrades to a failed login instead of a broken session.
+export const EMPTY_LOGIN_RESPONSE: LoginResponse = {
+  token: "",
+  user: EMPTY_USER,
+};
 
 export class ApiError extends Error {
   readonly status: number;
@@ -807,6 +815,38 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ code, redirect_uri: redirectUri }),
     });
+  }
+
+  /**
+   * Log in with a corporate directory (LDAP) username and password.
+   *
+   * Unlike the two older login methods, this one validates its response
+   * before returning it. A rejected credential is not a validation failure:
+   * `fetch` already raises ApiError for a non-2xx status, so 401/502/503
+   * reach the caller's existing error handling unchanged.
+   */
+  async loginWithLdap(username: string, password: string): Promise<LoginResponse> {
+    const raw = await this.fetch<unknown>("/auth/ldap/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    const parsed = parseWithFallback(raw, LoginResponseSchema, EMPTY_LOGIN_RESPONSE, {
+      endpoint: "POST /auth/ldap/login",
+    });
+    // parseWithFallback degrades to its fallback rather than throwing, which is
+    // right for a list that can render empty. It is wrong here: an empty token
+    // would be persisted as a session and every later request would 401, with
+    // nothing to tell the user their sign-in never completed. Treat the
+    // fallback as the failure it describes.
+    if (!parsed.token) {
+      throw new ApiError(
+        "Directory login returned an invalid response",
+        502,
+        "Bad Gateway",
+        raw,
+      );
+    }
+    return parsed;
   }
 
   async logout(): Promise<void> {

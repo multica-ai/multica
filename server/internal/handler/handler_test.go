@@ -64,7 +64,7 @@ func TestMain(m *testing.M) {
 	go hub.Run()
 	bus := events.New()
 	emailSvc := service.NewEmailService()
-	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, analytics.NoopClient{}, Config{AllowSignup: true})
+	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, nil, analytics.NoopClient{}, Config{AllowSignup: true})
 	// httptest.NewRequest defaults RemoteAddr to 192.0.2.1, so every webhook
 	// test in the suite shares one IP bucket. With the production default
 	// (30/min) the budget runs out partway through the suite and unrelated

@@ -46,6 +46,13 @@ type AppConfig struct {
 	// defaults absent to false (hidden).
 	VCSIntegrationAvailable bool `json:"vcs_integration_available,omitempty"`
 
+	// LdapEnabled mirrors whether this deployment configured a corporate
+	// directory, so the login screen can offer the account/password tab at all.
+	// Omitted when false for the same reason as vcs_integration_available: the
+	// managed cloud and every older client keep the previous response shape, and
+	// the UI reads an absent field as "not available" rather than guessing.
+	LdapEnabled bool `json:"ldap_enabled,omitempty"`
+
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
 	// into the frontend bundle via NEXT_PUBLIC_*) means self-hosted
@@ -109,6 +116,9 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
+	// The authenticator, not the config struct, is the authority: it is only
+	// constructed when LDAP_ENABLED was truly set at boot.
+	config.LdapEnabled = h.LDAPAuth != nil
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
 	// Only surface the build version on self-hosted deployments. The managed
 	// cloud is continuously deployed and its users can't choose the build, so

@@ -20,6 +20,11 @@ interface ConfigState {
   // section is hidden. Defaults to false so unknown / older servers and the
   // managed cloud (which omits the field) keep it hidden.
   vcsIntegrationAvailable: boolean;
+  // Whether the connected server offers corporate-directory (LDAP) login, so
+  // the sign-in screen can show its account/password tab. Defaults to false:
+  // an older or cloud server that omits the field must not gain a tab whose
+  // endpoint answers 503.
+  ldapEnabled: boolean;
   featureFlags: Record<string, boolean>;
   // The running API build version, surfaced in the Help popover so
   // self-hosted operators can confirm what's deployed. Empty for dev builds
@@ -42,6 +47,7 @@ interface ConfigState {
     googleClientId?: string;
     workspaceCreationDisabled?: boolean;
     vcsIntegrationAvailable?: boolean;
+    ldapEnabled?: boolean;
   }) => void;
   setDaemonConfig: (config: {
     daemonServerUrl?: string;
@@ -62,6 +68,7 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
   vcsIntegrationAvailable: false,
+  ldapEnabled: false,
   featureFlags: {},
   serverVersion: "",
   localWorktreeSupported: false,
@@ -72,7 +79,15 @@ export const configStore = createStore<ConfigState>((set) => ({
     googleClientId = "",
     workspaceCreationDisabled = false,
     vcsIntegrationAvailable = false,
-  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable }),
+    ldapEnabled = false,
+  }) =>
+    set({
+      allowSignup,
+      googleClientId,
+      workspaceCreationDisabled,
+      vcsIntegrationAvailable,
+      ldapEnabled,
+    }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),
