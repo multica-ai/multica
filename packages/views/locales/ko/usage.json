@@ -12,12 +12,19 @@
   },
   "kpi": {
     "cost_label": "비용 · {{days}}일",
+    "cost_partial_hint": "가격이 설정된 사용량만 포함",
+    "cost_unknown_hint": "모델 가격 설정 후 계산 가능",
     "tokens_label": "토큰 · {{days}}일",
     "tokens_hint": "입력 {{input}} · 출력 {{output}}",
     "run_time_label": "실행 시간 · {{days}}일",
     "run_time_hint": "실행 {{tasks}}개 기준",
     "tasks_label": "실행 · {{days}}일",
     "tasks_hint": "실패 {{failed}}개"
+  },
+  "cost_notice": {
+    "partial": "일부 사용량에 모델 가격이 없습니다. 비용에는 가격이 설정된 사용량만 포함됩니다.",
+    "unknown": "토큰 사용량은 기록되었지만 아직 비용을 계산할 수 없습니다.",
+    "configure": "사용자 지정 가격 설정"
   },
   "dim": {
     "label": "단위",
@@ -34,6 +41,8 @@
     "metric_tokens": "토큰",
     "metric_time": "시간",
     "metric_tasks": "실행",
+    "cost_partial": "이 차트에는 가격이 설정된 사용량만 포함되며 실제 비용은 더 높습니다.",
+    "cost_unknown": "사용량은 있지만 모델 가격을 설정해야 비용을 표시할 수 있습니다.",
     "no_data": "이 기간에는 사용량이 없습니다.",
     "metric_label": "지표"
   },
@@ -92,6 +101,8 @@
     "header_agent": "에이전트",
     "header_tokens": "토큰",
     "header_cost": "비용",
+    "cost_incomplete": "가격이 설정되지 않은 모델의 사용량은 포함되지 않습니다.",
+    "cost_sort_incomplete": "비용이 불완전한 에이전트는 토큰 사용량순으로 먼저 표시하고, 가격이 설정된 에이전트는 비용순으로 표시합니다.",
     "header_time": "시간",
     "header_tasks": "실행",
     "show_all": "전체 보기",

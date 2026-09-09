@@ -22,6 +22,7 @@ import {
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
   formatDuration,
+  type CostEstimate,
 } from "../utils";
 import { Segmented, type Dim } from "./dashboard-shared";
 import { DimSegmented } from "./dim-segmented";
@@ -47,6 +48,8 @@ export function UsageTrendCard({
   weeklyTokens,
   weeklyTime,
   weeklyTasks,
+  dailyCostEstimate,
+  weeklyCostEstimate,
   lessThanMinuteLabel,
 }: {
   allowedDims: readonly Dim[];
@@ -58,6 +61,8 @@ export function UsageTrendCard({
   weeklyTokens: ReturnType<typeof aggregateByWeek>["weeklyTokens"];
   weeklyTime: ReturnType<typeof aggregateWeeklyTime>;
   weeklyTasks: ReturnType<typeof aggregateWeeklyTasks>;
+  dailyCostEstimate: CostEstimate;
+  weeklyCostEstimate: CostEstimate;
   lessThanMinuteLabel: string;
 }) {
   const { t } = useT("usage");
@@ -73,12 +78,11 @@ export function UsageTrendCard({
   // Empty-state is per-metric so each toggle option independently decides
   // whether it has data — e.g. tokens recorded but no terminal runs yet
   // should show Tokens normally while Time / Tasks fall through to empty.
-  const costData = weekly ? weeklyCost : dailyCost;
   const tokensData = weekly ? weeklyTokens : dailyTokens;
   const timeData = weekly ? weeklyTime : dailyTime;
   const tasksData = weekly ? weeklyTasks : dailyTasks;
+  const costEstimate = weekly ? weeklyCostEstimate : dailyCostEstimate;
 
-  const totalCost = costData.reduce((sum, d) => sum + d.total, 0);
   const totalTokens = tokensData.reduce(
     (sum, d) => sum + d.input + d.output + d.cacheRead + d.cacheWrite,
     0,
@@ -87,7 +91,7 @@ export function UsageTrendCard({
   const totalTasks = tasksData.reduce((sum, d) => sum + d.completed + d.failed, 0);
   const isEmpty =
     metric === "cost"
-      ? totalCost === 0
+      ? totalTokens === 0
       : metric === "tokens"
         ? totalTokens === 0
         : metric === "time"
@@ -129,6 +133,13 @@ export function UsageTrendCard({
           <DimSegmented allowedDims={allowedDims} value={effectiveDim} onChange={setDim} />
         </div>
       </div>
+      {metric === "cost" && costEstimate.completeness !== "exact" ? (
+        <p className="mb-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-caption text-foreground">
+          {costEstimate.completeness === "partial"
+            ? t(($) => $.daily.cost_partial)
+            : t(($) => $.daily.cost_unknown)}
+        </p>
+      ) : null}
       <div className="min-h-[240px]">
         {isEmpty ? (
           <div className="flex aspect-[3/1] flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-muted/20 p-6 text-center">

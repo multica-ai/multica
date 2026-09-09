@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, RefreshCw } from "lucide-react";
+import { AlertCircle, BarChart3, RefreshCw } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -29,10 +29,12 @@ import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { CollectionPageHeader } from "../../layout/collection-page";
 import { KpiCard } from "../../runtimes/components/shared";
+import { CustomPricingDialog } from "../../runtimes/components/custom-pricing-dialog";
 import { useNavigation } from "../../navigation";
 import {
   addDaysIso,
   aggregateByWeek,
+  collectUnmappedModels,
   formatTokens,
   todayIso,
 } from "../../runtimes/utils";
@@ -56,6 +58,8 @@ import {
   computeFailureTotals,
   isSyntheticAgentRow,
   mergeAgentDashboardRows,
+  summarizeCost,
+  type CostEstimate,
 } from "../utils";
 import {
   ALL_PROJECTS,
@@ -173,7 +177,7 @@ export function DashboardPage() {
 
   // The user can save model prices from the runtimes page; re-render when
   // they do so the dashboard reflects the new rates.
-  useCustomPricingStore((s) => s.pricings);
+  const pricings = useCustomPricingStore((s) => s.pricings);
 
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const agentsQuery = useQuery(agentListOptions(wsId));
@@ -308,14 +312,16 @@ export function DashboardPage() {
     runTimeDailyRows.length === 0;
 
   // Cost / token math — re-derived when usage, days, or pricings change.
-  const totals = useMemo(
-    () => computeDailyTotals(dailyUsageInWindow),
-    [dailyUsageInWindow],
-  );
-  const dailyCost = useMemo(
-    () => aggregateDailyCost(dailyUsageInWindow),
-    [dailyUsageInWindow],
-  );
+  const totals = useMemo(() => {
+    // The pricing helpers read the store through getState(); this explicit
+    // snapshot read keeps React's memo tied to the subscribed store value.
+    void pricings;
+    return computeDailyTotals(dailyUsageInWindow);
+  }, [dailyUsageInWindow, pricings]);
+  const dailyCost = useMemo(() => {
+    void pricings;
+    return aggregateDailyCost(dailyUsageInWindow);
+  }, [dailyUsageInWindow, pricings]);
   const dailyTokens = useMemo(
     () => aggregateDailyTokens(dailyUsageInWindow),
     [dailyUsageInWindow],
@@ -385,12 +391,21 @@ export function DashboardPage() {
   // pre-zeroed inside the helpers, so sparse weeks render as empty bars
   // instead of being dropped (MUL-2382 weekly window scoping). Week
   // boundaries follow the viewer's timezone.
-  const weekly = useMemo(
-    () => aggregateByWeek(dailyUsage, viewTZ, weekCount),
-    [dailyUsage, viewTZ, weekCount],
-  );
+  const weekly = useMemo(() => {
+    void pricings;
+    return aggregateByWeek(dailyUsage, viewTZ, weekCount);
+  }, [dailyUsage, viewTZ, weekCount, pricings]);
   const weeklyCost = weekly.weeklyCostStack;
   const weeklyTokens = weekly.weeklyTokens;
+  const weeklyCostEstimate = useMemo(() => {
+    void pricings;
+    const first = weeklyCost.at(0)?.weekStart;
+    const last = weeklyCost.at(-1)?.weekEnd;
+    if (!first || !last) return summarizeCost([]);
+    return summarizeCost(
+      dailyUsage.filter((row) => row.date >= first && row.date <= last),
+    );
+  }, [dailyUsage, weeklyCost, pricings]);
   const weeklyTime = useMemo(
     () => aggregateWeeklyTime(runTimeDailyRows, viewTZ, weekCount),
     [runTimeDailyRows, viewTZ, weekCount],
@@ -403,10 +418,15 @@ export function DashboardPage() {
     () => aggregateWeeklyErrors(failureDailyRows, viewTZ, weekCount),
     [failureDailyRows, viewTZ, weekCount],
   );
-  const agentTokenRows = useMemo(
-    () => aggregateAgentTokens(byAgentUsage),
-    [byAgentUsage],
-  );
+  const agentTokenRows = useMemo(() => {
+    void pricings;
+    return aggregateAgentTokens(byAgentUsage);
+  }, [byAgentUsage, pricings]);
+
+  const unmappedModels = useMemo(() => {
+    void pricings;
+    return collectUnmappedModels([...dailyUsageInWindow, ...byAgentUsage]);
+  }, [dailyUsageInWindow, byAgentUsage, pricings]);
 
   // Run-time totals — taskCount + failedCount summed for the KPI row.
   const runTimeTotals = useMemo(() => {
@@ -533,12 +553,38 @@ export function DashboardPage() {
               <DashboardEmpty />
             ) : (
               <>
+                <DashboardCostNotice
+                  estimate={totals.costEstimate}
+                  unmappedModels={unmappedModels}
+                />
+
                 {/* KPI row — same 3-divide-x card grid the runtime usage
                     section uses, expanded to four tiles. */}
                 <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
                   <KpiCard
                     label={t(($) => $.kpi.cost_label, { days })}
-                    value={<CurrencyNumberFlow value={totals.cost} locales={locales} />}
+                    value={
+                      totals.costEstimate.completeness === "unknown" ? (
+                        "—"
+                      ) : (
+                        <>
+                          <CurrencyNumberFlow
+                            value={totals.costEstimate.knownCost}
+                            locales={locales}
+                          />
+                          {totals.costEstimate.completeness === "partial"
+                            ? "+"
+                            : null}
+                        </>
+                      )
+                    }
+                    hint={
+                      totals.costEstimate.completeness === "partial"
+                        ? t(($) => $.kpi.cost_partial_hint)
+                        : totals.costEstimate.completeness === "unknown"
+                          ? t(($) => $.kpi.cost_unknown_hint)
+                          : undefined
+                    }
                   />
                   <KpiCard
                     label={t(($) => $.kpi.tokens_label, { days })}
@@ -603,6 +649,8 @@ export function DashboardPage() {
                   weeklyTokens={weeklyTokens}
                   weeklyTime={weeklyTime}
                   weeklyTasks={weeklyTasks}
+                  dailyCostEstimate={totals.costEstimate}
+                  weeklyCostEstimate={weeklyCostEstimate}
                   lessThanMinuteLabel={lessThanMinuteLabel}
                 />
 
@@ -646,6 +694,46 @@ function DashboardSkeleton() {
       <Skeleton className="h-28 rounded-lg" />
       <Skeleton className="h-56 rounded-lg" />
       <Skeleton className="h-48 rounded-lg" />
+    </div>
+  );
+}
+
+function DashboardCostNotice({
+  estimate,
+  unmappedModels,
+}: {
+  estimate: CostEstimate;
+  unmappedModels: readonly string[];
+}) {
+  const { t } = useT("usage");
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  if (estimate.completeness === "exact") return null;
+
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-caption"
+    >
+      <AlertCircle className="h-4 w-4 shrink-0 text-warning" />
+      <p className="min-w-0 flex-1 text-foreground">
+        {estimate.completeness === "partial"
+          ? t(($) => $.cost_notice.partial)
+          : t(($) => $.cost_notice.unknown)}
+      </p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setDialogOpen(true)}
+      >
+        {t(($) => $.cost_notice.configure)}
+      </Button>
+      <CustomPricingDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        unmappedModels={unmappedModels}
+      />
     </div>
   );
 }

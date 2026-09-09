@@ -12,12 +12,19 @@
   },
   "kpi": {
     "cost_label": "コスト · {{days}}日",
+    "cost_partial_hint": "価格設定済みの使用量のみ",
+    "cost_unknown_hint": "モデル価格の設定後に計算可能",
     "tokens_label": "トークン · {{days}}日",
     "tokens_hint": "入力 {{input}} · 出力 {{output}}",
     "run_time_label": "実行時間 · {{days}}日",
     "run_time_hint": "{{tasks}} 件の実行全体",
     "tasks_label": "実行 · {{days}}日",
     "tasks_hint": "{{failed}} 件失敗"
+  },
+  "cost_notice": {
+    "partial": "一部の使用量にモデル価格がありません。コストには価格設定済みの使用量のみが含まれます。",
+    "unknown": "トークン使用量は記録されていますが、まだコストを計算できません。",
+    "configure": "カスタム価格を設定"
   },
   "dim": {
     "label": "単位",
@@ -34,6 +41,8 @@
     "metric_tokens": "トークン",
     "metric_time": "時間",
     "metric_tasks": "実行",
+    "cost_partial": "このグラフには価格設定済みの使用量のみが含まれ、実際のコストはさらに高くなります。",
+    "cost_unknown": "使用量はありますが、モデル価格を設定するまでコストを表示できません。",
     "no_data": "この期間に使用量はありません。",
     "metric_label": "指標"
   },
@@ -92,6 +101,8 @@
     "header_agent": "エージェント",
     "header_tokens": "トークン",
     "header_cost": "コスト",
+    "cost_incomplete": "料金が未設定のモデルの使用量は含まれていません。",
+    "cost_sort_incomplete": "コストが不完全なエージェントをトークン使用量順に先に表示し、価格設定済みのエージェントをコスト順に表示します。",
     "header_time": "時間",
     "header_tasks": "実行",
     "show_all": "すべて表示",

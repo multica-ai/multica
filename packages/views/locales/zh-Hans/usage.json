@@ -12,12 +12,19 @@
   },
   "kpi": {
     "cost_label": "费用 · {{days}}天",
+    "cost_partial_hint": "仅包含已定价用量",
+    "cost_unknown_hint": "设置模型价格后才可计算",
     "tokens_label": "Token · {{days}}天",
     "tokens_hint": "输入 {{input}} · 输出 {{output}}",
     "run_time_label": "耗时 · {{days}}天",
     "run_time_hint": "共 {{tasks}} 次运行",
     "tasks_label": "运行数 · {{days}}天",
     "tasks_hint": "失败 {{failed}} 个"
+  },
+  "cost_notice": {
+    "partial": "部分用量缺少模型价格，当前费用仅包含已定价用量。",
+    "unknown": "已记录 Token 用量，但目前没有任何用量可计算费用。",
+    "configure": "设置自定义价格"
   },
   "dim": {
     "label": "维度",
@@ -34,6 +41,8 @@
     "metric_tokens": "Token",
     "metric_time": "耗时",
     "metric_tasks": "运行数",
+    "cost_partial": "此图仅包含已定价用量，实际费用会更高。",
+    "cost_unknown": "已有用量，但设置模型价格后才能绘制费用图。",
     "no_data": "所选时间范围内暂无消耗。",
     "metric_label": "指标"
   },
@@ -92,6 +101,8 @@
     "header_agent": "智能体",
     "header_tokens": "Token",
     "header_cost": "费用",
+    "cost_incomplete": "费用未包含缺少价格的模型用量。",
+    "cost_sort_incomplete": "费用不完整的 Agent 会先按 Token 用量排列；费用完整的 Agent 再按费用排列。",
     "header_time": "耗时",
     "header_tasks": "运行数",
     "show_all": "展开全部",

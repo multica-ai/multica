@@ -77,6 +77,21 @@ export function Leaderboard({
   // upstream `mergeAgentDashboardRows`'s tiebreaker (run time desc) still
   // applies inside an equal-bucket.
   const sortedRows = useMemo(() => {
+    if (sortBy === "cost") {
+      return rows.toSorted((a, b) => {
+        // Unknown and partial costs cannot participate in a strict dollar
+        // ranking. Keep that cohort visible ahead of the Top 10 cutoff and
+        // order it by the complete quantity we do have: token usage.
+        if (a.hasUnpricedUsage !== b.hasUnpricedUsage) {
+          return a.hasUnpricedUsage ? -1 : 1;
+        }
+        if (a.hasUnpricedUsage) {
+          if (b.tokens !== a.tokens) return b.tokens - a.tokens;
+          return b.cost - a.cost;
+        }
+        return b.cost - a.cost;
+      });
+    }
     const metric = SORT_METRIC[sortBy];
     return rows.toSorted((a, b) => metric(b) - metric(a));
   }, [rows, sortBy]);
@@ -85,9 +100,18 @@ export function Leaderboard({
   // means the same thing collapsed and expanded — the leader always fills the
   // track and nothing re-scales when the tail comes into view.
   const maxValue = useMemo(() => {
+    if (sortBy === "cost") {
+      return sortedRows.reduce(
+        (maximum, row) =>
+          row.hasUnpricedUsage ? maximum : Math.max(maximum, row.cost),
+        0,
+      );
+    }
     const metric = SORT_METRIC[sortBy];
     return sortedRows.reduce((m, r) => Math.max(m, metric(r)), 0);
   }, [sortedRows, sortBy]);
+
+  const hasIncompleteCost = rows.some((row) => row.hasUnpricedUsage);
 
   const visibleRows = showAll
     ? sortedRows
@@ -142,6 +166,11 @@ export function Leaderboard({
           ) : null}
         </div>
       </div>
+      {sortBy === "cost" && hasIncompleteCost ? (
+        <p className="border-b bg-warning/10 px-4 py-2 text-caption text-foreground">
+          {t(($) => $.leaderboard.cost_sort_incomplete)}
+        </p>
+      ) : null}
       {sortedRows.length === 0 ? (
         <p className="px-4 py-8 text-center text-caption text-muted-foreground">
           {t(($) => $.leaderboard.no_data)}
@@ -199,7 +228,21 @@ export function Leaderboard({
                 const isBucket = isDeletedBucket || isRestrictedBucket;
                 const agent = agents.find((a) => a.id === row.agentId);
                 const value = SORT_METRIC[sortBy](row);
-                const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
+                // An incomplete dollar amount has no comparable position on
+                // the priced-row scale. Leave its bar empty rather than
+                // drawing a made-up cost ratio; the visible note explains
+                // that this cohort is ordered by tokens.
+                const pct =
+                  sortBy === "cost" && row.hasUnpricedUsage
+                    ? 0
+                    : maxValue > 0
+                      ? (value / maxValue) * 100
+                      : 0;
+                const costLabel = row.hasUnpricedUsage
+                  ? row.cost > 0
+                    ? `$${row.cost.toFixed(2)}+`
+                    : "—"
+                  : `$${row.cost.toFixed(2)}`;
                 return (
                   <li
                     key={row.agentId}
@@ -249,8 +292,13 @@ export function Leaderboard({
                     </div>
                     <div
                       className={`text-right tabular-nums ${sortBy === "cost" ? "text-body font-medium" : "text-caption text-muted-foreground"}`}
+                      title={
+                        row.hasUnpricedUsage
+                          ? t(($) => $.leaderboard.cost_incomplete)
+                          : undefined
+                      }
                     >
-                      ${row.cost.toFixed(2)}
+                      {costLabel}
                     </div>
                     <div
                       className={`text-right text-caption tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}

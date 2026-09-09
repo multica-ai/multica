@@ -12,12 +12,19 @@
   },
   "kpi": {
     "cost_label": "Cost · {{days}}D",
+    "cost_partial_hint": "Known priced usage only",
+    "cost_unknown_hint": "Unavailable until model pricing is set",
     "tokens_label": "Tokens · {{days}}D",
     "tokens_hint": "Input {{input}} · Output {{output}}",
     "run_time_label": "Run time · {{days}}D",
     "run_time_hint": "Across {{tasks}} runs",
     "tasks_label": "Runs · {{days}}D",
     "tasks_hint": "{{failed}} failed"
+  },
+  "cost_notice": {
+    "partial": "Some usage has no model price. Cost shows known priced usage only.",
+    "unknown": "Token usage was recorded, but none of it can be priced yet.",
+    "configure": "Set custom pricing"
   },
   "dim": {
     "label": "Dimension",
@@ -34,6 +41,8 @@
     "metric_tokens": "Tokens",
     "metric_time": "Time",
     "metric_tasks": "Runs",
+    "cost_partial": "This chart includes known priced usage only; the actual cost is higher.",
+    "cost_unknown": "Usage exists, but cost cannot be charted until model pricing is set.",
     "no_data": "No usage in this window.",
     "metric_label": "Metric"
   },
@@ -92,6 +101,8 @@
     "header_agent": "Agent",
     "header_tokens": "Tokens",
     "header_cost": "Cost",
+    "cost_incomplete": "Cost excludes usage from models without pricing.",
+    "cost_sort_incomplete": "Agents with incomplete cost are listed first by token usage; fully priced agents follow by cost.",
     "header_time": "Time",
     "header_tasks": "Runs",
     "show_all": "Show all",
