@@ -7,9 +7,9 @@ import { useAuthStore } from "@multica/core/auth";
 import { useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import {
+  AntigravityLogo,
   ClaudeCodeLogo,
   CodexLogo,
-  GeminiCliLogo,
   OpenClawLogo,
   OpenCodeLogo,
   heroButtonClassName,
@@ -78,8 +78,8 @@ export function LandingHero() {
                 <span className="text-body-lg font-medium">Codex</span>
               </div>
               <div className="flex items-center gap-2.5 text-white/80">
-                <GeminiCliLogo className="size-5" />
-                <span className="text-body-lg font-medium">Gemini CLI</span>
+                <AntigravityLogo className="size-5" />
+                <span className="text-body-lg font-medium">Antigravity</span>
               </div>
               <div className="flex items-center gap-2.5 text-white/80">
                 <OpenClawLogo className="size-5" />
