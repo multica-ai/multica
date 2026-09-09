@@ -1464,6 +1464,12 @@ type CreateCommentRequest struct {
 	ParentID         *string  `json:"parent_id"`
 	AttachmentIDs    []string `json:"attachment_ids"`
 	SuppressAgentIDs []string `json:"suppress_agent_ids"`
+	// ClientRequestID is an optional idempotency key, unique per issue. A
+	// retry carrying the same key gets the already-created comment back (200)
+	// instead of posting a duplicate. Agents retry far more than humans, and
+	// a re-run `multica issue comment add` with a stable key is exactly the
+	// non-idempotent replay this closes.
+	ClientRequestID string `json:"client_request_id"`
 }
 
 type CommentTriggerPreviewRequest struct {
@@ -1702,6 +1708,26 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.ClientRequestID = strings.TrimSpace(req.ClientRequestID)
+	if len(req.ClientRequestID) > maxClientRequestIDLength {
+		writeError(w, http.StatusBadRequest, "client_request_id must be at most 128 bytes")
+		return
+	}
+	// Idempotent replay: a comment with this key already exists on this
+	// issue, so return it instead of creating a duplicate. Side effects
+	// (triggers, unresolve, attachment linking) ran when the original
+	// request created it.
+	if req.ClientRequestID != "" {
+		if existing, err := h.Queries.GetCommentByClientRequestID(r.Context(), db.GetCommentByClientRequestIDParams{
+			WorkspaceID:     issue.WorkspaceID,
+			IssueID:         issue.ID,
+			ClientRequestID: pgtype.Text{String: req.ClientRequestID, Valid: true},
+		}); err == nil {
+			h.writeCommentIdempotentReplay(w, r, issue, existing)
+			return
+		}
+	}
+
 	var parentID pgtype.UUID
 	var parentComment *db.Comment
 	if req.ParentID != nil {
@@ -1832,18 +1858,35 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var clientRequestID pgtype.Text
+	if req.ClientRequestID != "" {
+		clientRequestID = pgtype.Text{String: req.ClientRequestID, Valid: true}
+	}
 	created, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
-		ID:           dbid.NewV7(),
-		IssueID:      issue.ID,
-		WorkspaceID:  issue.WorkspaceID,
-		AuthorType:   authorType,
-		AuthorID:     parseUUID(authorID),
-		Content:      req.Content,
-		Type:         req.Type,
-		ParentID:     parentID,
-		SourceTaskID: sourceTaskID,
+		ID:              dbid.NewV7(),
+		IssueID:         issue.ID,
+		WorkspaceID:     issue.WorkspaceID,
+		AuthorType:      authorType,
+		AuthorID:        parseUUID(authorID),
+		Content:         req.Content,
+		Type:            req.Type,
+		ParentID:        parentID,
+		SourceTaskID:    sourceTaskID,
+		ClientRequestID: clientRequestID,
 	})
 	if err != nil {
+		// Concurrent duplicate: another request with the same key won the
+		// insert between our replay pre-check and here. Return its comment.
+		if clientRequestID.Valid && isUniqueViolation(err) {
+			if existing, lookupErr := h.Queries.GetCommentByClientRequestID(r.Context(), db.GetCommentByClientRequestIDParams{
+				WorkspaceID:     issue.WorkspaceID,
+				IssueID:         issue.ID,
+				ClientRequestID: clientRequestID,
+			}); lookupErr == nil {
+				h.writeCommentIdempotentReplay(w, r, issue, existing)
+				return
+			}
+		}
 		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())
 		return
@@ -1882,6 +1925,25 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs)
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// maxClientRequestIDLength bounds the idempotency key: it lands in an indexed
+// TEXT column, and any sane caller-generated key (UUID, task-id:step) is far
+// below this.
+const maxClientRequestIDLength = 128
+
+// writeCommentIdempotentReplay answers a CreateComment retry whose
+// client_request_id already produced a comment: 200 with the existing comment,
+// so the caller can treat the retry exactly like a success. StatusOK (not
+// Created) is deliberate — nothing was created by THIS request.
+func (h *Handler) writeCommentIdempotentReplay(w http.ResponseWriter, r *http.Request, issue db.Issue, existing db.Comment) {
+	groupedAtt := h.groupAttachments(r, []pgtype.UUID{existing.ID})
+	resp := commentToResponse(existing, nil, groupedAtt[uuidToString(existing.ID)])
+	resp.IssueRevision = issue.Revision
+	slog.Info("comment create replayed idempotently", append(logger.RequestAttrs(r),
+		"comment_id", uuidToString(existing.ID),
+		"issue_id", uuidToString(issue.ID))...)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // clientAuthorableCommentTypes is what POST /comments accepts. `status_change`

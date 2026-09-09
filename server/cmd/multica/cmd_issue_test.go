@@ -361,8 +361,60 @@ func newIssueCommentAddTestCmd() *cobra.Command {
 	cmd.Flags().Bool("allow-external-file", false, "")
 	cmd.Flags().StringSlice("attachment", nil, "")
 	cmd.Flags().String("parent", "", "")
+	cmd.Flags().String("idempotency-key", "", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+// TestRunIssueCommentAddSendsIdempotencyKey proves --idempotency-key reaches
+// the server as client_request_id, and that omitting the flag omits the field
+// entirely (old servers must not see an unknown key with an empty value).
+func TestRunIssueCommentAddSendsIdempotencyKey(t *testing.T) {
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "TST-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/comments":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode comment body: %v", err)
+			}
+			bodies = append(bodies, body)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-1"})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Chdir(t.TempDir())
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "hello")
+	_ = cmd.Flags().Set("idempotency-key", "task-42:final")
+	if err := runIssueCommentAdd(cmd, []string{issueID}); err != nil {
+		t.Fatalf("comment add with key: %v", err)
+	}
+
+	cmd = newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "hello")
+	if err := runIssueCommentAdd(cmd, []string{issueID}); err != nil {
+		t.Fatalf("comment add without key: %v", err)
+	}
+
+	if len(bodies) != 2 {
+		t.Fatalf("expected 2 comment posts, got %d", len(bodies))
+	}
+	if got := bodies[0]["client_request_id"]; got != "task-42:final" {
+		t.Errorf("keyed request: client_request_id = %v, want task-42:final", got)
+	}
+	if _, present := bodies[1]["client_request_id"]; present {
+		t.Errorf("unkeyed request must omit client_request_id, body: %v", bodies[1])
+	}
 }
 
 // TestRunIssueCommentAddRejectsExternalAttachmentWithZeroUploads is the MUL-4252

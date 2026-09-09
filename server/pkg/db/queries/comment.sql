@@ -405,6 +405,12 @@ WHERE id = $1;
 SELECT * FROM comment
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetCommentByClientRequestID :one
+-- Idempotency replay lookup: the comment a previous request with this key
+-- already created on this issue, if any.
+SELECT * FROM comment
+WHERE workspace_id = $1 AND issue_id = $2 AND client_request_id = $3;
+
 -- name: GetThreadRoot :one
 -- Returns the thread-root comment for @comment_id by walking parent_id up to
 -- the row whose parent_id IS NULL. For a root comment it returns that comment
@@ -447,8 +453,8 @@ WITH touched_issue AS (
     WHERE issue.id = sqlc.arg(issue_id) AND issue.workspace_id = sqlc.arg(workspace_id)
     RETURNING issue.id, issue.workspace_id, issue.revision
 ), inserted_comment AS (
-    INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id, via_plugin_id, id)
-    SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id), sqlc.narg(source_task_id), sqlc.narg(quick_action_id), sqlc.narg(via_plugin_id), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id, via_plugin_id, client_request_id, id)
+    SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id), sqlc.narg(source_task_id), sqlc.narg(quick_action_id), sqlc.narg(via_plugin_id), sqlc.narg(client_request_id), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
     FROM touched_issue ti
     RETURNING *
 )
