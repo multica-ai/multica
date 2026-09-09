@@ -28,6 +28,7 @@ import {
   Info,
   Coins,
   GitBranch,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -62,7 +63,7 @@ import {
   FOLLOW_EDGE_THRESHOLD,
   LINE_SCROLL_PX,
 } from "./transcript-follow";
-import type { TimelineItem } from "./build-timeline";
+import { hasUnknownOutputCompleteness, type TimelineItem } from "./build-timeline";
 import {
   buildLanes,
   buildSteps,
@@ -469,6 +470,9 @@ export function AgentTranscriptDialog({
   // One step per tool call, with its result folded in — see build-steps.ts for
   // why the pairing is positional.
   const steps = useMemo(() => buildSteps(items), [items]);
+
+  // Explained once for the run, not once per step — see the helper for why.
+  const completenessUnknown = useMemo(() => hasUnknownOutputCompleteness(items), [items]);
 
   // A facet reads as what its rows look like: the glyph the rows carry, and the
   // name the rows print. The first step of a kind stands in for the glyph. The
@@ -1209,6 +1213,14 @@ export function AgentTranscriptDialog({
           </DropdownMenu>
         </div>
 
+        {/* ── Completeness caveat: once for the run, never per step ──── */}
+        {completenessUnknown && (
+          <div className="flex shrink-0 items-start gap-1.5 border-b bg-muted/20 px-4 py-1.5 text-micro text-muted-foreground">
+            <Info aria-hidden className="mt-px h-3 w-3 shrink-0" />
+            <span className="min-w-0">{t(($) => $.transcript.completeness_unknown)}</span>
+          </div>
+        )}
+
         {/* ── Steps, and the inspector when one is selected ───────────── */}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
@@ -1687,6 +1699,17 @@ function StepInspector({
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <StepIcon step={step} className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="shrink-0 text-label font-semibold">{title}</span>
+        {/* Source truncation: the rest was never uploaded. Distinct from the
+            display clip below, which `show all` and copy still recover. */}
+        {call?.result?.output_truncated === true && (
+          <span
+            className="inline-flex shrink-0 items-center gap-0.5 rounded bg-warning/10 px-1 py-0.5 text-micro font-medium text-warning"
+            title={t(($) => $.transcript.output_truncated_hint)}
+          >
+            <AlertTriangle aria-hidden className="h-2.5 w-2.5" />
+            {t(($) => $.transcript.output_truncated)}
+          </span>
+        )}
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-micro text-muted-foreground">
           {offset && <span className="font-mono tabular-nums">{offset}</span>}
           {call?.durationMs !== undefined && (
@@ -1784,8 +1807,12 @@ export function StepBody({ item }: { item: TimelineItem }) {
       );
     default: {
       const text = detail.text;
+      // Display-only clip: the whole stored text is still one copy away, so
+      // this must not read as the source truncation the header badge reports.
       const clipped =
-        text.length > 8000 ? `${redactSecrets(text.slice(0, 8000))}\n... (truncated)` : redactSecrets(text);
+        text.length > 8000
+          ? `${redactSecrets(text.slice(0, 8000))}\n${t(($) => $.transcript.display_clipped)}`
+          : redactSecrets(text);
       const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
       return <ToolDetailSurface text={clipped} language={path ? languageForPath(path) : undefined} />;
     }

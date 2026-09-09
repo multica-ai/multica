@@ -349,6 +349,9 @@ export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z.object(
   content: z.string().optional(),
   input: z.record(z.string(), z.unknown()).optional(),
   output: z.string().optional(),
+  // Optional with no default: absent means no daemon measured this record's
+  // completeness, which is not the same as measured-and-complete.
+  output_truncated: z.boolean().optional(),
   created_at: z.string().optional(),
 }).loose();
 

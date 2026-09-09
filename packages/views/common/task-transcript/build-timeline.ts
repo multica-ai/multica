@@ -9,6 +9,12 @@ export interface TimelineItem {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+  /**
+   * Whether the stored `output` dropped bytes at the source (`tool_result`
+   * only). `undefined` means unknown — the record predates the flag or came
+   * from an older daemon — and must never be rendered as "complete".
+   */
+  output_truncated?: boolean;
   created_at?: string;
 }
 
@@ -49,6 +55,26 @@ function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
   }));
 }
 
+/**
+ * Whether this transcript contains a tool output whose completeness nobody
+ * recorded — messages stored before the daemon reported the flag, or produced
+ * by an older installed daemon. The viewer explains this once for the whole
+ * run rather than per turn: on the day the flag ships, every historical turn
+ * qualifies, and a per-turn disclaimer would bury the transcript it annotates.
+ *
+ * An empty output is excluded. Truncation keeps the first 8 KiB, so a preview
+ * that dropped bytes is never empty — for those rows completeness is not
+ * unknown, it is knowable, and claiming otherwise is noise.
+ */
+export function hasUnknownOutputCompleteness(items: TimelineItem[]): boolean {
+  return items.some(
+    (item) =>
+      item.type === "tool_result" &&
+      (item.output?.length ?? 0) > 0 &&
+      item.output_truncated === undefined,
+  );
+}
+
 /** Build a chronologically ordered timeline from raw task messages. */
 export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
   const items: TimelineItem[] = [];
@@ -60,6 +86,7 @@ export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
       content: msg.content,
       input: msg.input,
       output: msg.output,
+      output_truncated: msg.output_truncated,
       created_at: msg.created_at,
     });
   }

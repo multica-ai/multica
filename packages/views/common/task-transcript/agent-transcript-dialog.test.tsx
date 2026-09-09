@@ -921,3 +921,76 @@ describe("readable issue references", () => {
     expect(screen.getByText("multica issue get DEV-17 --output json")).toBeInTheDocument();
   });
 });
+
+// The completeness indicator, #8182 / #8183. Two separate claims: a per-step
+// badge for output the record provably lost, and one run-level caveat for
+// output whose completeness nobody ever measured. The matrix for the
+// unknown-detection rule lives in build-timeline.test.ts.
+describe("tool output completeness", () => {
+  const truncatedRun: TimelineItem[] = [
+    { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
+    { seq: 2, type: "tool_result", tool: "exec_command", output: "line one", output_truncated: true },
+  ];
+  const completeRun: TimelineItem[] = [
+    { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
+    { seq: 2, type: "tool_result", tool: "exec_command", output: "line one", output_truncated: false },
+  ];
+
+  it("marks a step whose output the record lost", () => {
+    renderDialog(truncatedRun);
+    fireEvent.click(screen.getByRole("button", { name: /cat big\.log/ }));
+
+    expect(screen.getByText("Truncated")).toBeInTheDocument();
+    expect(screen.getByTitle(/never uploaded and cannot be recovered/i)).toBeInTheDocument();
+  });
+
+  it("says nothing about a step the daemon measured as complete", () => {
+    renderDialog(completeRun);
+    fireEvent.click(screen.getByRole("button", { name: /cat big\.log/ }));
+
+    expect(screen.queryByText("Truncated")).not.toBeInTheDocument();
+  });
+
+  // Regression guard for the shape this replaced: the notice lived inside the
+  // per-message view, so a run of historical turns rendered one disclaimer per
+  // turn. It is a property of the run, so it is stated once.
+  it("states the unknown-completeness caveat once for a run of unmeasured turns", () => {
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat a.log" } },
+      { seq: 2, type: "tool_result", tool: "exec_command", output: "a" },
+      { seq: 3, type: "tool_use", tool: "exec_command", input: { command: "cat b.log" } },
+      { seq: 4, type: "tool_result", tool: "exec_command", output: "b" },
+      { seq: 5, type: "tool_use", tool: "exec_command", input: { command: "cat c.log" } },
+      { seq: 6, type: "tool_result", tool: "exec_command", output: "c" },
+    ]);
+
+    expect(screen.getAllByText(/whether they are complete cannot be confirmed/i)).toHaveLength(1);
+  });
+
+  it("drops the caveat once every output in the run has been measured", () => {
+    renderDialog(completeRun);
+
+    expect(screen.queryByText(/whether they are complete cannot be confirmed/i)).not.toBeInTheDocument();
+  });
+
+  // A record that lost bytes is still a measured record: the badge says so,
+  // and the run-level "we don't know" caveat would contradict it.
+  it("does not call a known-truncated run unknown", () => {
+    renderDialog(truncatedRun);
+
+    expect(screen.queryByText(/whether they are complete cannot be confirmed/i)).not.toBeInTheDocument();
+  });
+
+  // Display clipping is reversible — copy still yields the stored text — so it
+  // must not borrow the wording that means "these bytes are gone".
+  it("distinguishes a display clip from output the record lost", () => {
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
+      { seq: 2, type: "tool_result", tool: "exec_command", output: "x".repeat(9000), output_truncated: false },
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: /cat big\.log/ }));
+
+    expect(screen.getByText(/copy to get the whole record/i)).toBeInTheDocument();
+    expect(screen.queryByText("Truncated")).not.toBeInTheDocument();
+  });
+});

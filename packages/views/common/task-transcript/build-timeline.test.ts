@@ -1,7 +1,13 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { TaskMessagePayload } from "@multica/core/types/events";
-import { appendTimelineItem, buildTimeline, coalesceTimelineItems, type TimelineItem } from "./build-timeline";
+import {
+  appendTimelineItem,
+  buildTimeline,
+  coalesceTimelineItems,
+  hasUnknownOutputCompleteness,
+  type TimelineItem,
+} from "./build-timeline";
 
 function message(seq: number, type: TaskMessagePayload["type"], content?: string): TaskMessagePayload {
   return {
@@ -101,5 +107,54 @@ describe("task transcript timeline", () => {
     ]);
 
     expect(items[0]?.created_at).toBe("2026-06-09T09:00:00.000Z");
+  });
+});
+
+describe("tool output completeness", () => {
+  function result(output: string | undefined, output_truncated?: boolean): TimelineItem {
+    return { seq: 1, type: "tool_result", tool: "bash", output, output_truncated };
+  }
+
+  it("carries the server's truncation flag onto the timeline", () => {
+    const items = buildTimeline([
+      { ...message(1, "tool_result"), output: "cut here", output_truncated: true },
+      { ...message(2, "tool_result"), output: "all of it", output_truncated: false },
+      { ...message(3, "tool_result"), output: "who knows" },
+    ]);
+
+    expect(items.map((i) => i.output_truncated)).toEqual([true, false, undefined]);
+  });
+
+  it("reports unknown completeness when a tool output carries no flag", () => {
+    expect(hasUnknownOutputCompleteness([result("who knows")])).toBe(true);
+  });
+
+  it("stays quiet once every tool output has been measured", () => {
+    expect(hasUnknownOutputCompleteness([result("all of it", false), result("cut", true)])).toBe(false);
+  });
+
+  // A truncated preview keeps the first 8 KiB, so an empty output cannot be
+  // one. Flagging these would put the caveat on runs that never lost a byte.
+  it("does not call an empty output unknown", () => {
+    expect(hasUnknownOutputCompleteness([result(""), result(undefined)])).toBe(false);
+  });
+
+  // The flag only describes tool output; prose and thinking have no preview
+  // budget to overflow.
+  it("ignores message types that have no tool output", () => {
+    expect(
+      hasUnknownOutputCompleteness([
+        { seq: 1, type: "text", content: "hello" },
+        { seq: 2, type: "thinking", content: "hmm" },
+        { seq: 3, type: "error", content: "boom" },
+      ]),
+    ).toBe(false);
+  });
+
+  // false is a measurement, undefined is the absence of one. Collapsing them
+  // would let a historical row claim it is complete.
+  it("separates measured-complete from never-measured", () => {
+    expect(hasUnknownOutputCompleteness([result("x", false)])).toBe(false);
+    expect(hasUnknownOutputCompleteness([result("x")])).toBe(true);
   });
 });
