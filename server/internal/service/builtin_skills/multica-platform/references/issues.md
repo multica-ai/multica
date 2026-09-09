@@ -281,14 +281,6 @@ multica issue runs <issue-id> --active --output json     # in-flight runs on thi
 multica issue runs <issue-id> --siblings --output json   # ...and across the sub-issue family
 ```
 
-Comment replies stay with the directly replied-to agent or the thread owner;
-they never schedule a delayed run for the issue assignee. Waiting for an offline
-or busy agent does not change the recipient. Explicitly @-mention another agent to
-involve it. New top-level comments without a target still route to the assignee.
-Issue and agent run history omit unused assignee fallbacks from older versions;
-cancelled fallbacks are hidden even if dispatched, provided execution never
-started. Ordinary cancellations and fallbacks that started remain visible.
-
 `--active` drops the execution history and returns only `queued` / `dispatched`
 / `running` / `waiting_local_directory` runs. `--siblings` widens the same read
 to the issue's family — its parent (or itself, when it has no parent) plus every
@@ -334,18 +326,12 @@ Creating every serial step as `todo` enqueues the whole chain at once.
 ### Stages: order sub-issues into barrier groups
 
 `--stage <N>` (N >= 1) groups sub-issues under the same parent into ordered
-stages. The parent assignee is woken **once, when a whole stage finishes** —
-i.e. every sub-issue in the lowest unfinished stage has reached a terminal
-status (`done`/`cancelled`). A completion that does not close a stage is silent
-(no comment, no wake). A sibling set with **no** stages is one implicit stage,
-so the parent is woken once when the *last* sub-issue finishes — not on every
-child.
-
-Completion notifications are best-effort. If the status catalog cannot be read,
-or a custom status needed for the checks cannot be resolved (including a status
-created after the notification pass's catalog snapshot), the server skips that
-parent's notification and wake. The child's committed status change remains
-saved; there is no automatic replay of the skipped notification.
+stages. The server **tries once to wake the parent assignee when a whole stage
+finishes** — i.e. every sub-issue in the lowest unfinished stage has reached a
+terminal status (`done`/`cancelled`); a notification that fails is not replayed.
+A completion that does not close a stage is silent (no comment, no wake). A
+sibling set with **no** stages is one implicit stage, so the parent is woken
+once when the *last* sub-issue finishes — not on every child.
 
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee, who then decides whether to promote the next stage's
