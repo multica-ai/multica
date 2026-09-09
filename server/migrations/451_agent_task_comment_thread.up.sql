@@ -30,6 +30,5 @@ CREATE TRIGGER agent_task_comment_thread
 BEFORE INSERT OR UPDATE OF trigger_comment_id ON agent_task_queue
 FOR EACH ROW EXECUTE FUNCTION set_agent_task_comment_thread();
 
-UPDATE agent_task_queue
-SET comment_thread_id = comment_thread_root_id(trigger_comment_id)
-WHERE trigger_comment_id IS NOT NULL;
+-- Existing rows intentionally retain a NULL thread scope. Pre-migration tasks
+-- drain under the issue/agent claim fence without rewriting historical data.
