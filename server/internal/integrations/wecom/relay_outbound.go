@@ -935,11 +935,21 @@ func (r *RelayOutbound) settleRetryBackoff() time.Duration {
 // settleClaim marks a delivered frame's claim as settled and reports whether
 // its holder may record the outcome.
 //
-// False has two meanings, and both are "somebody else has this covered":
-// the publisher already resolved the reply as lost — its record stands, and a
-// second one here would double it — or every attempt came back unknown, in
-// which case the claim is still held by this token and the publisher's own
-// Resolve is what will end it, once. Neither may be counted here.
+// False has two meanings, and only one of them is covered elsewhere.
+//
+// Covered: the publisher already resolved the reply as lost. Its record
+// stands, and a second one here would double it.
+//
+// NOT always covered: every attempt came back unknown. The holder cannot tell
+// which state the store is in. If the settles never landed the claim is still
+// held by this token, and the publisher's Resolve ends the reply once — the
+// common case, and the reason not to count here. But if a settle DID land and
+// only its response was lost, the key already reads settled, so that Resolve
+// stays quiet too and the reply ends with NO record at all. Recording here
+// instead would turn the common case into the double count this whole path
+// exists to prevent, so the miss is the side deliberately taken: a monitoring
+// gap under a store that keeps failing, not a reply the user did not get. The
+// warning below is what makes it visible.
 func (r *RelayOutbound) settleClaim(ctx context.Context, key, token string, f relayFrame) bool {
 	var (
 		lastErr error
@@ -974,13 +984,17 @@ func (r *RelayOutbound) settleClaim(ctx context.Context, key, token string, f re
 			return false
 		}
 	}
-	// Still unknown after every attempt. The claim, if the settles never
-	// landed, is held by this token — which is the one state the publisher's
-	// Resolve turns into a record of its own. Counting here as well would be
-	// the double record this whole path exists to prevent.
-	r.logger.WarnContext(ctx, "wecom relay: delivered, but the claim could not be settled; the publisher's watch will end it",
+	// Still unknown after every attempt this was allowed to make. See the
+	// doc comment: the publisher ends the reply when the settles never
+	// landed, and nothing ends it when one landed and only its answer was
+	// lost. Which of the two happened is exactly what is not knowable here,
+	// so the outcome is left unrecorded rather than double-recorded.
+	r.logger.WarnContext(ctx, "wecom relay: delivered, but the claim could not be settled; this reply's outcome may go unrecorded",
 		"error", lastErr, "attempts", made, "kind", f.Kind,
-		"installation_id", f.InstallationID, "task_id", f.TaskID)
+		"installation_id", f.InstallationID, "task_id", f.TaskID,
+		"detail", "the delivery itself reached the chat; if the settle landed and only its "+
+			"response was lost, the publisher's Resolve reads the claim as settled and stays "+
+			"quiet as well, so no delivered/dropped/unconfirmed is counted for this reply")
 	return false
 }
 

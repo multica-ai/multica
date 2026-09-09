@@ -337,6 +337,40 @@ func TestRelayedReply_AReleaseThatLandedButErroredIsTakenFreshByTheNextOffer(t *
 	}
 }
 
+// The boundary the settle retry deliberately stops at, pinned so it can only
+// move on purpose.
+//
+// Every attempt here executes the settle and loses its answer, so the store
+// ends up settled while the holder never learns it did. The holder cannot tell
+// that from a settle that never ran, and the two want opposite records — so it
+// makes none. What the user got is unaffected: the reply reached the chat
+// once, and an unconfirmed settle never re-sends it.
+//
+// This is the accepted cost of not double-counting the far more common case
+// where the settles never landed and the publisher ends the reply itself
+// (TestTwoReplicas_ASettleNobodyCanCompleteIsEndedOnceByThePublisher covers
+// that side, publisher included). A store failing this way this long is a
+// monitoring gap, not a lost answer, and settleClaim logs a warning naming it.
+func TestRelayedReply_ASettleThatNeverConfirmsLeavesTheOutcomeUnrecorded(t *testing.T) {
+	t.Parallel()
+	dedupe := newSharedDedupe()
+	dedupe.settleErrAfterWrite = claimSettleAttempts
+	rig := newRelaySendRigWithDedupe(t, nil, dedupe)
+
+	rig.route(t, "the agent reply")
+	waitFor(t, "the settled state the holder never gets to hear about", func() bool {
+		return dedupe.valueOf(dedupeKey(rig.lastEventID())) == claimSettledValue
+	})
+	time.Sleep(rig.router.outcomeGrace())
+
+	if got := rig.conn.writeAttempts(); got != 1 {
+		t.Fatalf("%d offers, want 1: the reply reached the chat, and an unconfirmed settle must not re-send it", got)
+	}
+	if got := rig.mx.get("outbound_delivered") + rig.mx.get("outbound_dropped"); got != 0 {
+		t.Fatalf("the holder recorded %d outcome(s), want 0: it cannot know whether its settle landed", got)
+	}
+}
+
 // A settle whose request never reached the store is retried, and the retry
 // settles it. The holder records once — no reliance on the publisher, which
 // would have counted this delivered reply as a drop.
