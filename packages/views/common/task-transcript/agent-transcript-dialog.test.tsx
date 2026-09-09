@@ -969,14 +969,18 @@ describe("tool output completeness", () => {
   });
 
   // Display clipping is reversible — copy still yields the stored text — so it
-  // must not borrow the wording that means "these bytes are gone".
+  // must not borrow the wording that means "these bytes are gone". It also may
+  // not promise the whole output: copy returns the stored record, which the
+  // daemon already cut at 8 KiB, and reading it as "the full output is in the
+  // database" is the misunderstanding this wording caused once already.
   it("distinguishes a display clip from output the record lost", () => {
     openStep([
       { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
       { seq: 2, type: "tool_result", tool: "exec_command", output: "x".repeat(9000), output_truncated: false },
     ]);
 
-    expect(screen.getByText(/copy to get the whole record/i)).toBeInTheDocument();
+    expect(screen.getByText(/copy to get everything that was saved/i)).toBeInTheDocument();
+    expect(screen.queryByText(/whole (record|output)|full output/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/not saved to this record/i)).not.toBeInTheDocument();
   });
 

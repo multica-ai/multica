@@ -841,7 +841,7 @@
     "show_all": "显示全部",
     "patch_truncated": "...（已截断）",
     "patch_body_truncated": "...（内容已截断）",
-    "display_clipped": "...（内容过长，此处仅显示开头；复制可获得完整记录）",
+    "display_clipped": "...（内容过长，此处仅显示开头；复制可获得已保存的全部内容）",
     "output_truncated_note": "输出到此为止，剩余内容未保存到本记录。",
     "output_completeness_unknown_note": "这段输出早于完整性记录，无法确认是否到此为止。",
     "patch_no_content": "（未记录内容）",
