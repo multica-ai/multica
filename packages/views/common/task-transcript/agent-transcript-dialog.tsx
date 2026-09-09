@@ -1752,6 +1752,14 @@ function InspectorSection({ label, children }: { label: string; children: React.
 }
 
 /** One payload, rendered as what it is. */
+/**
+ * Ceiling for a body rendered into one <pre>. Deliberately above the daemon's
+ * 8192-byte tool-result preview budget: a stored result must never be clipped
+ * here, so its only remark is the completeness note. What this actually guards
+ * is tool input, which is persisted whole and can be megabytes.
+ */
+const RENDER_CLIP_CHARS = 20000;
+
 export function StepBody({ item }: { item: TimelineItem }) {
   const { t } = useT("agents");
   const detail = useMemo(() => traceEventDetail(item), [item]);
@@ -1804,11 +1812,15 @@ export function StepBody({ item }: { item: TimelineItem }) {
       );
     default: {
       const text = detail.text;
-      // Display-only clip: the whole stored text is still one copy away, so
-      // this must not read as the source truncation the header badge reports.
+      // Bound only what the daemon does not already bound. A stored tool result
+      // is at most 8192 BYTES, so at most 8192 characters, and clipping it here
+      // stacked a second grey line under the completeness note to report a
+      // couple of hundred more characters that were already covered by "the
+      // rest was not saved". Tool INPUT has no server-side budget, so the clip
+      // stays for it — above the source budget, where a result cannot reach it.
       const clipped =
-        text.length > 8000
-          ? `${redactSecrets(text.slice(0, 8000))}\n${t(($) => $.transcript.display_clipped)}`
+        text.length > RENDER_CLIP_CHARS
+          ? `${redactSecrets(text.slice(0, RENDER_CLIP_CHARS))}\n${t(($) => $.transcript.display_clipped)}`
           : redactSecrets(text);
       const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
       return withFooter(

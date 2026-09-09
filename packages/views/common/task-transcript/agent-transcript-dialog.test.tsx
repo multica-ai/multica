@@ -968,20 +968,38 @@ describe("tool output completeness", () => {
     expect(header).not.toHaveTextContent(/not saved to this record/i);
   });
 
-  // Display clipping is reversible — copy still yields the stored text — so it
-  // must not borrow the wording that means "these bytes are gone". It also may
-  // not promise the whole output: copy returns the stored record, which the
-  // daemon already cut at 8 KiB, and reading it as "the full output is in the
-  // database" is the misunderstanding this wording caused once already.
-  it("distinguishes a display clip from output the record lost", () => {
+  // A stored tool result is capped at 8192 bytes upstream, so the render clip
+  // must never reach it: an output the record already lost gets one remark, not
+  // a second grey line reporting a further couple of hundred characters.
+  it("leaves a stored tool result with exactly one remark", () => {
     openStep([
       { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
-      { seq: 2, type: "tool_result", tool: "exec_command", output: "x".repeat(9000), output_truncated: false },
+      { seq: 2, type: "tool_result", tool: "exec_command", output: "x".repeat(8192), output_truncated: true },
     ]);
 
-    expect(screen.getByText(/copy to get everything that was saved/i)).toBeInTheDocument();
-    expect(screen.queryByText(/whole (record|output)|full output/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/not saved to this record/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/the rest was not saved to this record/i)).toBeInTheDocument();
+    expect(screen.queryByText(/only the start is displayed/i)).not.toBeInTheDocument();
+  });
+
+  // Tool input has no server-side budget, so it is the one body that still
+  // needs a render clip — and it never carries a completeness note, so this
+  // stays a single remark too.
+  it("still clips a tool input too large to render", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "exec_command",
+        input: { command: "echo", payload: "y".repeat(40000) },
+      },
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: /exec_command/ }));
+
+    // The marker describes the clip and nothing else: an earlier version
+    // promised copy would return the whole record, which read as "the full
+    // output is in the database" and is not true of a tool result.
+    const body = screen.getByText(/only the start is displayed/i);
+    expect(body.textContent).not.toMatch(/copy|whole record|everything that was saved/i);
   });
 
   // The run-level banner this replaced sat above the list and spoke for steps
