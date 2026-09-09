@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
@@ -465,8 +466,14 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The credential no longer identifies an existing user. Return the
+		// same terminal status as an expired token so clients can sign in again.
+		writeError(w, http.StatusUnauthorized, "user not found")
+		return
+	}
 	if err != nil {
-		writeError(w, http.StatusNotFound, "user not found")
+		writeError(w, http.StatusInternalServerError, "failed to load user")
 		return
 	}
 

@@ -7,7 +7,39 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/multica-ai/multica/server/internal/dbreader"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type emptyRows struct{}
+
+func (*emptyRows) Close()                                       {}
+func (*emptyRows) Err() error                                   { return nil }
+func (*emptyRows) CommandTag() pgconn.CommandTag                { return pgconn.NewCommandTag("") }
+func (*emptyRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (*emptyRows) Next() bool                                   { return false }
+func (*emptyRows) Scan(...any) error                            { return nil }
+func (*emptyRows) Values() ([]any, error)                       { return nil, nil }
+func (*emptyRows) RawValues() [][]byte                          { return nil }
+func (*emptyRows) Conn() *pgx.Conn                              { return nil }
+
+type queryCountingDB struct {
+	queries int
+}
+
+func (*queryCountingDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.NewCommandTag(""), nil
+}
+
+func (d *queryCountingDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	d.queries++
+	return &emptyRows{}, nil
+}
+
+func (*queryCountingDB) QueryRow(context.Context, string, ...any) pgx.Row { return nil }
 
 func enabledClient(t *testing.T) *Client {
 	t.Helper()
@@ -16,6 +48,31 @@ func enabledClient(t *testing.T) *Client {
 		t.Fatal(err)
 	}
 	return &Client{appID: "1", privateKey: key, tokens: map[int64]cachedToken{}, now: time.Now}
+}
+
+func TestListGitHubPRRowsByAddressUsesConfiguredReplica(t *testing.T) {
+	primaryDB := &queryCountingDB{}
+	replicaDB := &queryCountingDB{}
+	primaryQueries := db.New(primaryDB)
+	replicaQueries := db.New(replicaDB)
+	m := NewManager(nil, primaryQueries, nil, nil)
+	m.SetReadSelector(dbreader.New(primaryQueries, replicaQueries, nil))
+
+	rows, err := m.listGitHubPRRowsByAddress(context.Background(), db.ListGitHubPRRowsByAddressParams{
+		InstallationID: 1,
+		RepoOwner:      "owner",
+		RepoName:       "repo",
+		PrNumber:       2,
+	})
+	if err != nil {
+		t.Fatalf("list rows: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows = %#v, want empty result", rows)
+	}
+	if primaryDB.queries != 0 || replicaDB.queries != 1 {
+		t.Fatalf("query calls: primary=%d replica=%d, want primary=0 replica=1", primaryDB.queries, replicaDB.queries)
+	}
 }
 
 // TestManagerDisabledNoOps is the clean-degradation guarantee (acceptance

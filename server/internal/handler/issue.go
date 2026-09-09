@@ -702,22 +702,23 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	// final page is known. Per-term BOOL_OR flags keep the legacy eligibility rule
 	// where terms may be spread across comments, while comment_all_terms keeps
 	// ranking/snippet tied to one comment.
+	const loweredCommentContent = "lowered_comment.lowered"
 	commentFlagColumns := []string{
 		"c.issue_id",
-		fmt.Sprintf("BOOL_OR(LOWER(c.content) LIKE %s) AS comment_phrase", phraseContainsParam),
+		fmt.Sprintf("BOOL_OR(%s LIKE %s) AS comment_phrase", loweredCommentContent, phraseContainsParam),
 	}
 	commentCandidateFlags := []string{"aggregated_comments.comment_phrase"}
 	commentTerms := make([]string, 0, len(termContainsParams))
 	for index, termParam := range termContainsParams {
 		alias := fmt.Sprintf("comment_term_%d", index)
 		commentFlagColumns = append(commentFlagColumns,
-			fmt.Sprintf("BOOL_OR(LOWER(c.content) LIKE %s) AS %s", termParam, alias),
+			fmt.Sprintf("BOOL_OR(%s LIKE %s) AS %s", loweredCommentContent, termParam, alias),
 		)
 		commentCandidateFlags = append(commentCandidateFlags, "aggregated_comments."+alias)
-		commentTerms = append(commentTerms, fmt.Sprintf("LOWER(c.content) LIKE %s", termParam))
+		commentTerms = append(commentTerms, fmt.Sprintf("%s LIKE %s", loweredCommentContent, termParam))
 	}
 
-	commentSnippetPredicate := fmt.Sprintf("LOWER(c.content) LIKE %s", phraseContainsParam)
+	commentSnippetPredicate := fmt.Sprintf("%s LIKE %s", loweredCommentContent, phraseContainsParam)
 	if len(commentTerms) > 1 {
 		commentAllTerms := "(" + strings.Join(commentTerms, " AND ") + ")"
 		commentFlagColumns = append(commentFlagColumns,
@@ -735,11 +736,20 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		commentSnippetPredicate,
 	))
 
+	// PostgreSQL otherwise inlines this scalar LATERAL subquery and recomputes
+	// LOWER(c.content) for every flag. OFFSET 0 is the intentional planner fence
+	// that keeps the long comment body lowercased once per row. Future indexable
+	// text predicates must stay outside this projection-only fence so an index on
+	// LOWER(c.content) can still match them.
 	commentMatchesCTE := fmt.Sprintf(`comment_matches AS MATERIALIZED (
 		SELECT *
 		FROM (
 			SELECT %s
 			FROM comment c
+			CROSS JOIN LATERAL (
+				SELECT LOWER(c.content) AS lowered
+				OFFSET 0
+			) lowered_comment
 			WHERE c.workspace_id = %s
 			GROUP BY c.issue_id
 		) aggregated_comments
@@ -2959,13 +2969,13 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		// so resolveOriginatorForIssueTask can inherit its originator — the
 		// same trick CreateComment uses with comment.source_task_id (MUL-4015).
 		//
-		// The task id is taken from the SERVER-trusted X-Task-ID: resolveActor
-		// only returns creatorType=="agent" when either X-Actor-Source=task_token
-		// (the auth middleware bound X-Agent-ID/X-Task-ID from the mat_ token and
-		// stripped any client value) or the X-Agent-ID/X-Task-ID pair was
-		// validated against the DB. A member-forged X-Task-ID never reaches here
-		// because it would have resolved to creatorType=="member". We still
-		// re-check the task belongs to the acting agent before trusting it.
+		// The task id is taken from the SERVER-trusted X-Task-ID: the auth
+		// middleware deletes whatever the client sent and re-stamps
+		// X-Agent-ID / X-Task-ID only from a validated mat_ token (MUL-3428), so
+		// a member-forged pair never reaches here — it is gone before
+		// resolveActor runs, and the request resolves to creatorType=="member".
+		// We still re-check the task belongs to the acting agent before trusting
+		// it.
 		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
 			if taskUUID, perr := util.ParseUUID(taskIDHeader); perr == nil {
 				if task, terr := h.Queries.GetAgentTask(r.Context(), taskUUID); terr == nil && uuidToString(task.AgentID) == actualCreatorID {

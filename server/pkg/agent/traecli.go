@@ -272,9 +272,13 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				"mcpServers": mcpServers,
 			})
 			if err != nil {
-				finalStatus = "failed"
-				finalError = fmt.Sprintf("traecli session/load failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				// A runtime that refuses the recorded id has to say so here:
+				// without ResumeRejected the daemon reads the bare failure as
+				// "checked, not a rejection", keeps the pointer and replays the
+				// same dead session on every later turn (GH #8116).
+				finalStatus, finalError, resumeRejected = classifyACPResumeFailure(
+					runCtx, "traecli", "session/load", err, timeout, b.cfg.Logger)
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected}
 				return
 			}
 			var changed bool
@@ -323,7 +327,9 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				b.cfg.Logger.Warn("traecli set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("traecli could not switch to model %q: %v", opts.Model, err)
-				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+				if setupFailureWithholdsSessionID(opts) {
+					sessionID = ""
+				} else if isACPSessionNotFound(err) {
 					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
 						"backend", "traecli",
 						"session_id", sessionID,

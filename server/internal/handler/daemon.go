@@ -948,11 +948,30 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	// Track affected workspaces for WS notifications.
 	affectedWorkspaces := make(map[string]bool)
 
+	// Batch the runtime lookups instead of one GetAgentRuntime per id (N+1),
+	// while keeping the MUL-6884 per-source attribution: getAgentRuntimes
+	// records one multica_agent_runtime_lookup_total result per requested id.
+	// A read error is NOT "the rows don't exist": fail closed with 500 (like
+	// ListRuntimesForClaim) so a transient blip can't report a successful
+	// deregister while every runtime silently stays online until the liveness
+	// sweep reaps it. GetMany keys rows by canonical UUID string so a
+	// differently-cased request id still matches; a genuinely missing id is
+	// simply absent from the map and falls through to the "runtime not found"
+	// skip below, preserving the per-runtime verify / setOffline semantics.
+	runtimesByID, err := h.getAgentRuntimes(r.Context(), obsmetrics.RuntimeLookupSourceDaemonAPI, runtimeUUIDs)
+	if err != nil {
+		slog.Error("deregister: batch runtime lookup failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load runtimes")
+		return
+	}
+
 	for i, rid := range req.RuntimeIDs {
-		// Look up the runtime and verify ownership.
-		rt, err := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceDaemonAPI, runtimeUUIDs[i])
-		if err != nil {
-			slog.Warn("deregister: runtime not found", "runtime_id", rid, "error", err)
+		// Look up the runtime and verify ownership. Key by the parsed UUID's
+		// canonical form (runtimeUUIDs[i]) so a differently-cased request id
+		// still matches the row; rid is kept for OfflineReasons and logging.
+		rt, ok := runtimesByID[uuidToString(runtimeUUIDs[i])]
+		if !ok {
+			slog.Warn("deregister: runtime not found", "runtime_id", rid)
 			continue
 		}
 
@@ -1731,14 +1750,37 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 	// Resolve all requested runtimes in one query (instead of a point lookup
 	// per runtime), then authorize each; skip (don't fail) unknown/unauthorized
 	// ids so a single stale runtime can't sink the whole batch.
-	runtimes, err := h.Queries.GetAgentRuntimes(r.Context(), ids)
+	//
+	// This read goes through RuntimeLookup like every other agent_runtime read
+	// by id (MUL-6884), so the claim path is attributed on
+	// multica_agent_runtime_lookup_total instead of being invisible on it. That
+	// matters more here than on any other caller: both /tasks/claim and /claim
+	// route to this handler and the WebSocket claim RPC replays through it, so
+	// an unattributed read here would make the busiest reader in the system
+	// look idle next to once-per-shutdown deregisters.
+	foundByID, err := h.getAgentRuntimes(r.Context(), obsmetrics.RuntimeLookupSourceDaemonAPI, ids)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load runtimes")
 		return
 	}
-	runtimeByID := make(map[string]db.AgentRuntime, len(runtimes))
-	authorized := make([]pgtype.UUID, 0, len(runtimes))
-	for _, rt := range runtimes {
+	// Iterate ids rather than ranging the returned map: authorized[] is passed
+	// to ClaimTasksForRuntimes, where maxTasks can cut the set off partway, so
+	// map iteration order would decide which runtimes get the remaining slots.
+	// (ids is itself built from a map above, so this pins the order to one
+	// source rather than making it fully deterministic — worth tightening, but
+	// not in this change.)
+	//
+	// runtimeByID must end up holding ONLY authorized rows: the post-claim loop
+	// below treats a miss in it as a stray cross-daemon claim and drops the
+	// task. GetMany returns every row it found, so the authorized subset is
+	// collected separately rather than reusing its map.
+	runtimeByID := make(map[string]db.AgentRuntime, len(foundByID))
+	authorized := make([]pgtype.UUID, 0, len(foundByID))
+	for _, id := range ids {
+		rt, ok := foundByID[uuidToString(id)]
+		if !ok {
+			continue
+		}
 		if !h.verifyDaemonWorkspaceAccess(r, uuidToString(rt.WorkspaceID)) {
 			continue
 		}
@@ -2560,7 +2602,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				resp.TriggerCommentContent = comment.Content
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
-					resp.TriggerThreadID = uuidToString(comment.ParentID)
+					if root, err := h.Queries.GetCommentThreadRootID(r.Context(), comment.ID); err == nil {
+						resp.TriggerThreadID = uuidToString(root)
+					}
 				}
 				resp.TriggerAuthorType = comment.AuthorType
 				// The triggering comment's author is the task initiator — the
@@ -2903,21 +2947,54 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 
 		parts := make([]string, 0, len(unanswered))
+		// Batch attachment lookups instead of one query per unanswered message
+		// (N+1). The batch orders globally by created_at, so grouping by
+		// chat_message_id keeps each message's attachments in created_at order,
+		// and iterating unanswered below in its original order reproduces the
+		// exact append order of the previous per-message loop.
+		messageIDs := make([]pgtype.UUID, 0, len(unanswered))
+		for _, m := range unanswered {
+			messageIDs = append(messageIDs, m.ID)
+		}
+		attsByMessage := make(map[string][]db.Attachment, len(unanswered))
+		if len(messageIDs) > 0 {
+			atts, attErr := h.Queries.ListAttachmentsByChatMessageIDs(r.Context(), db.ListAttachmentsByChatMessageIDsParams{
+				Column1:     messageIDs,
+				WorkspaceID: parseUUID(resp.WorkspaceID),
+			})
+			// A read failure must NOT masquerade as "no attachments". Attachment
+			// IDs are the agent's only handle for downloading user files, and
+			// batching widened the blast radius from one message's attachments to
+			// the whole turn's. Fail closed exactly like the chat-input load above
+			// (MUL-6788 review): preserve the just-dispatched task so the
+			// stale-dispatched reclaim redelivers it, rather than starting the run
+			// with files silently missing.
+			if attErr != nil {
+				slog.Error("chat claim: load chat attachments failed; preserving task for redelivery",
+					"task_id", uuidToString(task.ID),
+					"chat_session_id", uuidToString(cs.ID),
+					"error", attErr)
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+					outcome: "error_chat_attachment_load",
+					status:  http.StatusInternalServerError,
+					message: "failed to load chat attachments",
+				}
+			}
+			for _, a := range atts {
+				mid := uuidToString(a.ChatMessageID)
+				attsByMessage[mid] = append(attsByMessage[mid], a)
+			}
+		}
 		for _, m := range unanswered {
 			if strings.TrimSpace(m.Content) != "" {
 				parts = append(parts, m.Content)
 			}
-			if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
-				ChatMessageID: m.ID,
-				WorkspaceID:   parseUUID(resp.WorkspaceID),
-			}); attErr == nil && len(atts) > 0 {
-				for _, a := range atts {
-					resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
-						ID:          uuidToString(a.ID),
-						Filename:    a.Filename,
-						ContentType: a.ContentType,
-					})
-				}
+			for _, a := range attsByMessage[uuidToString(m.ID)] {
+				resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
+					ID:          uuidToString(a.ID),
+					Filename:    a.Filename,
+					ContentType: a.ContentType,
+				})
 			}
 		}
 		resp.ChatMessage = strings.Join(parts, "\n\n")
@@ -4016,6 +4093,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		plannedCommentIDs = append(plannedCommentIDs, task.TriggerCommentID)
 	}
 	comments, err := h.Queries.ListReconcilableCommentsForIssueSince(ctx, db.ListReconcilableCommentsForIssueSinceParams{
+		CommentThreadID:   task.CommentThreadID,
 		IssueID:           task.IssueID,
 		Since:             task.CreatedAt,
 		PlannedCommentIds: plannedCommentIDs,
@@ -4223,7 +4301,11 @@ func (h *Handler) buildCoalescedCommentData(ctx context.Context, workspaceID pgt
 			CreatedAt:  timestampToString(comment.CreatedAt),
 		}
 		if comment.ParentID.Valid {
-			data.ThreadID = uuidToString(comment.ParentID)
+			root, err := h.Queries.GetCommentThreadRootID(ctx, comment.ID)
+			if err != nil {
+				continue
+			}
+			data.ThreadID = uuidToString(root)
 		}
 		if comment.AuthorID.Valid {
 			switch comment.AuthorType {
@@ -5115,6 +5197,7 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tasks = visibleTaskHistory(tasks)
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
@@ -5154,23 +5237,72 @@ func (h *Handler) hydrateTaskUsage(ctx context.Context, issueID pgtype.UUID, res
 
 	byTask := make(map[string][]TaskUsageData, len(resp))
 	for _, row := range rows {
-		var cost *int64
-		if row.CostUsdTicks.Valid {
-			v := row.CostUsdTicks.Int64
-			cost = &v
-		}
-		taskID := uuidToString(row.TaskID)
-		byTask[taskID] = append(byTask[taskID], TaskUsageData{
-			Provider:         row.Provider,
-			Model:            row.Model,
-			InputTokens:      row.InputTokens,
-			OutputTokens:     row.OutputTokens,
-			CacheReadTokens:  row.CacheReadTokens,
-			CacheWriteTokens: row.CacheWriteTokens,
-			CostUsdTicks:     cost,
-		})
+		appendTaskUsage(byTask, row.TaskID, row.Provider, row.Model,
+			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
+			row.CacheWriteTokens, row.CostUsdTicks)
+	}
+	attachTaskUsage(resp, byTask)
+}
+
+// hydrateAgentTaskUsage attaches the same per-run accounting shape used by the
+// issue execution log to an agent's user-facing task history. One agent-scoped
+// query covers exactly the returned task IDs, avoiding unrelated history and an
+// N+1 query per task.
+func (h *Handler) hydrateAgentTaskUsage(ctx context.Context, agentID pgtype.UUID, taskIDs []pgtype.UUID, resp []AgentTaskResponse) error {
+	if len(resp) == 0 {
+		return nil
 	}
 
+	rows, err := h.Queries.ListAgentTaskUsage(ctx, db.ListAgentTaskUsageParams{
+		AgentID: agentID,
+		TaskIds: taskIDs,
+	})
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	byTask := make(map[string][]TaskUsageData, len(resp))
+	for _, row := range rows {
+		appendTaskUsage(byTask, row.TaskID, row.Provider, row.Model,
+			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
+			row.CacheWriteTokens, row.CostUsdTicks)
+	}
+	attachTaskUsage(resp, byTask)
+	return nil
+}
+
+func appendTaskUsage(
+	byTask map[string][]TaskUsageData,
+	taskID pgtype.UUID,
+	provider string,
+	model string,
+	inputTokens int64,
+	outputTokens int64,
+	cacheReadTokens int64,
+	cacheWriteTokens int64,
+	costUsdTicks pgtype.Int8,
+) {
+	var cost *int64
+	if costUsdTicks.Valid {
+		value := costUsdTicks.Int64
+		cost = &value
+	}
+	id := uuidToString(taskID)
+	byTask[id] = append(byTask[id], TaskUsageData{
+		Provider:         provider,
+		Model:            model,
+		InputTokens:      inputTokens,
+		OutputTokens:     outputTokens,
+		CacheReadTokens:  cacheReadTokens,
+		CacheWriteTokens: cacheWriteTokens,
+		CostUsdTicks:     cost,
+	})
+}
+
+func attachTaskUsage(resp []AgentTaskResponse, byTask map[string][]TaskUsageData) {
 	for i := range resp {
 		if usage, ok := byTask[resp[i].ID]; ok {
 			resp[i].Usage = usage

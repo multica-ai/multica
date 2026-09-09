@@ -36,7 +36,7 @@ func TestClassifyTask(t *testing.T) {
 }
 
 // TestTaskKindHasIssueContext pins the predicate that gates Project
-// Context / Issue Metadata / Sub-issue Creation in the slim dispatcher.
+// Context / Sub-issue Creation in the slim dispatcher.
 func TestTaskKindHasIssueContext(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -143,7 +143,6 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		{"## Repositories", map[taskKind]bool{
 			kindIssue: true, kindAutopilotRunOnly: true, kindChat: true,
 		}},
-		{"## Issue Metadata", issueKinds},
 		{"## Instruction Precedence", issueKinds},
 		{"## Sub-issue Creation", issueKinds},
 		// Quick-create included: it used to be skipped here and carry its own
@@ -297,9 +296,6 @@ func TestSlimQuickCreateAvailableCommands(t *testing.T) {
 		"multica issue update <id>",
 		"multica issue status <id> <status>",
 		"multica issue comment add <issue-id>",
-		"multica issue metadata list <issue-id>",
-		"multica issue metadata set <issue-id>",
-		"multica issue metadata delete <issue-id>",
 		"multica issue children <id>",
 		"multica repo checkout <url>",
 		"### Squad maintenance",

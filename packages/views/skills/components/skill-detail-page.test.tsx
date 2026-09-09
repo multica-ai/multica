@@ -12,6 +12,19 @@ import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 
 const TEST_RESOURCES = { en: { common: enCommon, skills: enSkills } };
 
+// MUL-7107: every band of a detail page reads the shared rail. The read-only
+// capability banner was the one left behind, so a viewer without edit rights
+// saw a near-full-width card above centred content on a wide window. The
+// constants are overridden with sentinels because their real values are
+// ordinary Tailwind classes a hand-written element could match by accident.
+const RAIL_SENTINEL = "rail-sentinel";
+const GUTTER_SENTINEL = "gutter-sentinel";
+vi.mock("../../layout/page-header", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../layout/page-header")>()),
+  PAGE_RAIL: "rail-sentinel",
+  PAGE_GUTTER: "gutter-sentinel",
+}));
+
 const skillRef = vi.hoisted(() => ({ current: null as unknown }));
 const agentsRef = vi.hoisted(() => ({ current: [] as unknown[] }));
 const membersRef = vi.hoisted(() => ({ current: [] as unknown[] }));
@@ -463,5 +476,30 @@ describe("SkillDetailPage origin link", () => {
     expect(
       screen.queryByRole("link", { name: "Imported · GitHub" }),
     ).toBeNull();
+  });
+});
+
+
+describe("SkillDetailPage rail", () => {
+  it("keeps the read-only capability banner on the shared rail", async () => {
+    canEditRef.current = false;
+    renderPage();
+    await screen.findAllByRole("tab", { name: /Overview|Files/ });
+
+    const banner = document.body.querySelector(
+      `.${RAIL_SENTINEL}.${GUTTER_SENTINEL}.pt-3`,
+    );
+    expect(banner).toBeTruthy();
+  });
+
+  it("puts the identity strip and the tab row on that same rail", async () => {
+    renderPage();
+    await screen.findAllByRole("tab", { name: /Overview|Files/ });
+
+    const railed = document.body.querySelectorAll(
+      `.${RAIL_SENTINEL}.${GUTTER_SENTINEL}`,
+    );
+    // Identity strip, tab row and the Overview panel at minimum.
+    expect(railed.length).toBeGreaterThanOrEqual(3);
   });
 });

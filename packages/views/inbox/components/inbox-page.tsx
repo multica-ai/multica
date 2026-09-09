@@ -698,7 +698,9 @@ export function InboxPage() {
         layoutId="multica_inbox_issue_detail_layout"
         highlightCommentId={detailItem.details?.comment_id ?? undefined}
         highlightRequestToken={highlightRequestToken}
-        leadingAction={compactBackAction}
+        // The split layout already has a nav trigger in the list header.
+        // Explicit false suppresses the detail header's fallback trigger.
+        leadingAction={compactBackAction ?? false}
         onDelete={() => {
           // Issue deletion CASCADE-deletes the inbox item server-side, and the
           // issue:deleted WS event prunes it from the inbox cache. Just clear

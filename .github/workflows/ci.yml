@@ -11,6 +11,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  cursor-background-lifecycle:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: server/go.sum
+      - name: Verify Cursor background lifecycle and watchdog races
+        shell: bash
+        working-directory: server
+        # Explicit, verbose selection prevents the Unix regression from silently
+        # disappearing behind a build tag or the ordinary Windows test subset.
+        run: |
+          go test -race ./pkg/agent -v -run 'TestCursorBackground|TestCaptureCursorBackground' -count=1
+          go test -race ./internal/daemon -v -run 'Test.*Background.*Watchdog|Test.*IdleWatchdog' -count=1
+      - name: Repeat macOS finalization and verify cgo-free ownership
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: server
+        run: |
+          go test ./pkg/agent -run '^TestCursorBackgroundLifecycle/finish$' -count=5
+          go test -race ./pkg/agent -run '^TestCursorBackgroundLifecycle/finish$' -count=5
+          CGO_ENABLED=0 go test ./pkg/agent -run '^TestCaptureCursorBackground(KernelRejectsStaleIdentity|DetachedSession|LateDescendant)$' -count=1
+
   # Decides whether the heavy frontend validation jobs, the backend Go jobs
   # and sqlc verification have anything to do.
   # The frontend jobs validate the web/desktop apps, the shared packages,
