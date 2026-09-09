@@ -13,6 +13,7 @@ import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 describe("KeyboardShortcutsTab", () => {
   beforeEach(() => {
     configureShortcutPlatform("windows");
+    configureShortcutRuntime("web");
     useShortcutStore.getState().resetAll();
   });
 
@@ -49,6 +50,49 @@ describe("KeyboardShortcutsTab", () => {
       screen.getByRole("img", { name: "Ctrl+1–8" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Ctrl+9" })).toBeInTheDocument();
+  });
+
+  it("shows only Control+Tab shortcuts on Windows and Linux desktop", () => {
+    configureShortcutRuntime("desktop");
+    renderWithI18n(<KeyboardShortcutsTab />);
+
+    expect(screen.getByText("Previous tab")).toBeInTheDocument();
+    expect(screen.getByText("Next tab")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Ctrl+Shift+Tab" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Ctrl+Tab" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Ctrl+Shift+[" })).not.toBeInTheDocument();
+
+    cleanup();
+    configureShortcutPlatform("linux");
+    renderWithI18n(<KeyboardShortcutsTab />);
+
+    expect(screen.getByRole("img", { name: "Ctrl+Shift+Tab" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Super+Shift+[" })).not.toBeInTheDocument();
+  });
+
+  it("shows macOS Control+Tab shortcuts with Command+Shift bracket aliases", () => {
+    configureShortcutPlatform("macos");
+    configureShortcutRuntime("desktop");
+    renderWithI18n(<KeyboardShortcutsTab />);
+
+    expect(screen.getByRole("img", { name: "⌃⇧Tab" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "⌃Tab" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "⌘⇧[" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "⌘⇧]" })).toBeInTheDocument();
+    const separators = screen
+      .getAllByText("/")
+      .filter((element) => element.tagName === "SPAN");
+    expect(separators).toHaveLength(2);
+    separators.forEach((separator) => {
+      expect(separator).toHaveAttribute("aria-hidden", "true");
+    });
+  });
+
+  it("omits tab cycling shortcuts on web", () => {
+    renderWithI18n(<KeyboardShortcutsTab />);
+
+    expect(screen.queryByText("Previous tab")).not.toBeInTheDocument();
+    expect(screen.queryByText("Next tab")).not.toBeInTheDocument();
   });
 
   it("records a shortcut and applies it immediately", () => {
