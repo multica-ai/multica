@@ -51,6 +51,7 @@ export class TestApiClient {
   private workspaceId: string | null = null;
   private email: string | null = null;
   private createdIssueIds: string[] = [];
+  private createdProjectIds: string[] = [];
   private seededIssueIds: string[] = [];
 
   async login(email: string, name: string) {
@@ -182,6 +183,24 @@ export class TestApiClient {
     } finally {
       await client.end();
     }
+  }
+
+  /** Create a project and register it for cleanup. */
+  async createProject(title: string, opts?: Record<string, unknown>) {
+    const res = await this.authedFetch("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ title, ...opts }),
+    });
+    if (!res.ok) {
+      throw new Error(`create project failed: ${res.status} ${await res.text()}`);
+    }
+    const project = await res.json();
+    this.createdProjectIds.push(project.id);
+    return project as { id: string; title: string; status: string };
+  }
+
+  async deleteProject(id: string) {
+    await this.authedFetch(`/api/projects/${id}`, { method: "DELETE" });
   }
 
   async createIssue(title: string, opts?: Record<string, unknown>) {
@@ -339,6 +358,16 @@ export class TestApiClient {
       }
     }
     this.createdIssueIds = [];
+    // Projects last: an issue delete leaves no project reference behind, and
+    // dropping the project first would strand the issues in the list.
+    for (const id of this.createdProjectIds) {
+      try {
+        await this.deleteProject(id);
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdProjectIds = [];
   }
 
   getToken() {
