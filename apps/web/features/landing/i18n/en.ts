@@ -294,14 +294,14 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
-        version: "0.5.0",
+        version: "0.4.42",
         date: "2026-09-09",
-        title: "Agent runs inside comment threads, Issue thread navigation, steadier cross-channel replies, and sturdier search",
+        title: "Agent runs inside comment threads, an Issue thread outline, more reliable channel replies, and steadier search in large workspaces",
         changes: [],
         features: [
           "An agent's queue position, run status, steps, and logs now show up inside the comment thread.",
           "Add more instructions in the same thread and they join the run already going.",
-          "Separate comment threads queue on their own, without waiting for each other.",
+          "Separate comment threads queue on their own, so instructions never land in another thread's run.",
           "The outline on the right lists every thread in an Issue, who is in it, and what is done.",
         ],
         improvements: [

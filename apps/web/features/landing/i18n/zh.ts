@@ -294,14 +294,14 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
-        version: "0.5.0",
+        version: "0.4.42",
         date: "2026-09-09",
-        title: "评论线程内的智能体执行、Issue 线程导航、跨渠道回复更可靠、搜索更稳",
+        title: "评论线程内的智能体运行、Issue 线程大纲、渠道回复更可靠、大工作区搜索更稳",
         changes: [],
         features: [
           "智能体的排队、运行状态、步骤和日志，现在直接显示在对应的评论线程里。",
           "在同一个线程里追加指令，会并入正在进行的那次运行。",
-          "不同的评论线程各自排队，互不等待。",
+          "不同的评论线程各自排队，指令不会被并到别的线程里。",
           "右侧大纲列出 Issue 里的全部线程、参与者和完成情况。",
         ],
         improvements: [
