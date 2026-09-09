@@ -180,14 +180,14 @@ func TestBuildSearchQuery_CandidateFirstParity(t *testing.T) {
 	// created_at. Candidate-first makes that case deterministic by choosing the
 	// greater UUID, matching the timeline's established (created_at, id) order.
 	tiedSnippetIssueID := dbfx.Issue(t, "tied snippet source", testutil.Cols{
-		"updated_at": baseTime.Add(17 * time.Minute),
+		"updated_at": baseTime.Add(19 * time.Minute),
 	})
 	firstCommentID, secondCommentID := uuid.NewString(), uuid.NewString()
 	lowCommentID, highCommentID := firstCommentID, secondCommentID
 	if lowCommentID > highCommentID {
 		lowCommentID, highCommentID = highCommentID, lowCommentID
 	}
-	tiedCommentTime := baseTime.Add(17 * time.Minute)
+	tiedCommentTime := baseTime.Add(20 * time.Minute)
 	dbfx.Comment(t, tiedSnippetIssueID, token+" tied snippet low", testutil.Cols{
 		"id":         lowCommentID,
 		"created_at": tiedCommentTime,

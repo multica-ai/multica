@@ -675,7 +675,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		titleTermPredicates = append(titleTermPredicates, fmt.Sprintf("%s LIKE %s", loweredIssueTitle, termParam))
 	}
 	titleMatchParts := []string{titlePhrasePredicate}
-	if len(titleTermPredicates) > 0 {
+	if len(termContainsParams) > 1 {
 		titleMatchParts = append(titleMatchParts, "("+strings.Join(titleTermPredicates, " AND ")+")")
 	}
 	titleMatchExpr := "(" + strings.Join(titleMatchParts, " OR ") + ")"
