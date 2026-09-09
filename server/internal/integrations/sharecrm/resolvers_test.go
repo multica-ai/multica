@@ -3,12 +3,15 @@ package sharecrm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 type captureChatSession struct {
@@ -42,6 +45,82 @@ func (f *captureChatSession) AppendUserMessage(_ context.Context, in engine.Appe
 func (f *captureChatSession) BindMediaRefs(_ context.Context, in engine.BindMediaInput) error {
 	f.mediaIn = in
 	return nil
+}
+
+type fakeIdentityQueries struct {
+	binding   db.ChannelUserBinding
+	bindErr   error
+	agent     db.Agent
+	agentErr  error
+	user      db.User
+	userErr   error
+	memberErr error
+}
+
+func (f *fakeIdentityQueries) GetChannelUserBindingByUserID(context.Context, db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error) {
+	return f.binding, f.bindErr
+}
+
+func (f *fakeIdentityQueries) GetAgent(context.Context, pgtype.UUID) (db.Agent, error) {
+	return f.agent, f.agentErr
+}
+
+func (f *fakeIdentityQueries) GetUserByEmail(context.Context, string) (db.User, error) {
+	return f.user, f.userErr
+}
+
+func (f *fakeIdentityQueries) GetMemberByUserAndWorkspace(context.Context, db.GetMemberByUserAndWorkspaceParams) (db.Member, error) {
+	return db.Member{}, f.memberErr
+}
+
+func TestShareCRMIdentityResolver_UsesConfiguredProxyUser(t *testing.T) {
+	proxyID := pgtype.UUID{Bytes: [16]byte{9}, Valid: true}
+	inst := engine.ResolvedInstallation{
+		ID:          pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+		WorkspaceID: pgtype.UUID{Bytes: [16]byte{2}, Valid: true},
+		AgentID:     pgtype.UUID{Bytes: [16]byte{3}, Valid: true},
+	}
+	agentEnv, _ := json.Marshal(map[string]string{shareCRMProxyEmailEnvKey: " proxy@example.com "})
+	for _, chatType := range []channel.ChatType{channel.ChatTypeP2P, channel.ChatTypeGroup} {
+		t.Run(string(chatType), func(t *testing.T) {
+			f := &fakeIdentityQueries{
+				bindErr: pgx.ErrNoRows,
+				agent:   db.Agent{CustomEnv: agentEnv},
+				user:    db.User{ID: proxyID},
+			}
+			msg := channel.InboundMessage{Source: channel.Source{SenderID: "external", ChatType: chatType}}
+
+			got, err := (&identityResolver{q: f}).ResolveSender(context.Background(), inst, msg)
+			if err != nil {
+				t.Fatalf("ResolveSender: %v", err)
+			}
+			if got.UserID != proxyID {
+				t.Fatalf("UserID = %v, want %v", got.UserID, proxyID)
+			}
+		})
+	}
+}
+
+func TestShareCRMIdentityResolver_ProxyFallbackRequiresValidMember(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		env       map[string]string
+		userErr   error
+		memberErr error
+	}{
+		{name: "missing email"},
+		{name: "missing user", env: map[string]string{shareCRMProxyEmailEnvKey: "proxy@example.com"}, userErr: pgx.ErrNoRows},
+		{name: "not member", env: map[string]string{shareCRMProxyEmailEnvKey: "proxy@example.com"}, memberErr: pgx.ErrNoRows},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, _ := json.Marshal(tc.env)
+			f := &fakeIdentityQueries{bindErr: pgx.ErrNoRows, agent: db.Agent{CustomEnv: env}, user: db.User{ID: pgtype.UUID{Valid: true}}, userErr: tc.userErr, memberErr: tc.memberErr}
+			_, err := (&identityResolver{q: f}).ResolveSender(context.Background(), engine.ResolvedInstallation{AgentID: pgtype.UUID{Valid: true}}, channel.InboundMessage{})
+			if !errors.Is(err, engine.ErrSenderUnbound) {
+				t.Fatalf("err = %v, want ErrSenderUnbound", err)
+			}
+		})
+	}
 }
 
 func TestExternalSessionIDFromBindingConfig(t *testing.T) {

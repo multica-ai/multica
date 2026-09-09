@@ -16,7 +16,10 @@ import (
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
-const originShareCRMChat = "sharecrm_chat"
+const (
+	originShareCRMChat      = "sharecrm_chat"
+	shareCRMProxyEmailEnvKey = "SHARECRM_PROXY_USER_EMAIL"
+)
 
 // NewShareCRMResolverSet assembles the ResolverSet over generic channel_* queries.
 func NewShareCRMResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, ack *ackNotifier, media engine.MediaResolver) engine.ResolverSet {
@@ -125,7 +128,14 @@ func (r *installationResolver) ResolveInstallation(ctx context.Context, msg chan
 	}, nil
 }
 
-type identityResolver struct{ q *db.Queries }
+type identityQueries interface {
+	GetChannelUserBindingByUserID(ctx context.Context, arg db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error)
+	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
+	GetUserByEmail(ctx context.Context, email string) (db.User, error)
+	GetMemberByUserAndWorkspace(ctx context.Context, arg db.GetMemberByUserAndWorkspaceParams) (db.Member, error)
+}
+
+type identityResolver struct{ q identityQueries }
 
 func (r *identityResolver) ResolveSender(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage) (engine.ResolvedIdentity, error) {
 	binding, err := r.q.GetChannelUserBindingByUserID(ctx, db.GetChannelUserBindingByUserIDParams{
@@ -134,7 +144,7 @@ func (r *identityResolver) ResolveSender(ctx context.Context, inst engine.Resolv
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
+			return r.resolveProxyUser(ctx, inst)
 		}
 		return engine.ResolvedIdentity{}, err
 	}
@@ -148,6 +158,43 @@ func (r *identityResolver) ResolveSender(ctx context.Context, inst engine.Resolv
 		return engine.ResolvedIdentity{}, err
 	}
 	return engine.ResolvedIdentity{UserID: binding.MulticaUserID}, nil
+}
+
+func (r *identityResolver) resolveProxyUser(ctx context.Context, inst engine.ResolvedInstallation) (engine.ResolvedIdentity, error) {
+	agent, err := r.q.GetAgent(ctx, inst.AgentID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
+		}
+		return engine.ResolvedIdentity{}, err
+	}
+
+	var customEnv map[string]string
+	if len(agent.CustomEnv) == 0 || json.Unmarshal(agent.CustomEnv, &customEnv) != nil {
+		return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
+	}
+	email := strings.TrimSpace(customEnv[shareCRMProxyEmailEnvKey])
+	if email == "" {
+		return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
+	}
+
+	proxyUser, err := r.q.GetUserByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
+		}
+		return engine.ResolvedIdentity{}, err
+	}
+	if _, err := r.q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      proxyUser.ID,
+		WorkspaceID: inst.WorkspaceID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
+		}
+		return engine.ResolvedIdentity{}, err
+	}
+	return engine.ResolvedIdentity{UserID: proxyUser.ID}, nil
 }
 
 type deduper struct{ q *db.Queries }
