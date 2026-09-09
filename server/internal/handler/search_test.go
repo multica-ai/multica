@@ -131,6 +131,7 @@ func TestBuildSearchQuery_LowersCommentContentOnce(t *testing.T) {
 
 func TestBuildSearchQuery_LowersIssueTextOnceAndSkipsDescriptionForTitleMatches(t *testing.T) {
 	query, _ := buildSearchQuery("Foo Bar Baz", []string{"Foo", "Bar", "Baz"}, 0, false, false, []string{"done", "cancelled"})
+	normalizedQuery := strings.Join(strings.Fields(query), " ")
 
 	if count := strings.Count(query, "LOWER(i.title)"); count != 1 {
 		t.Fatalf("query lowers issue title %d times, want exactly once:\n%s", count, query)
@@ -138,17 +139,10 @@ func TestBuildSearchQuery_LowersIssueTextOnceAndSkipsDescriptionForTitleMatches(
 	if count := strings.Count(query, "LOWER(COALESCE(i.description, ''))"); count != 1 {
 		t.Fatalf("query lowers issue description %d times, want exactly once:\n%s", count, query)
 	}
-	if !strings.Contains(query, `CROSS JOIN LATERAL (
-			SELECT LOWER(i.title) AS lowered
-			OFFSET 0
-		) lowered_issue_title`) {
+	if !strings.Contains(normalizedQuery, "CROSS JOIN LATERAL ( SELECT LOWER(i.title) AS lowered OFFSET 0 ) lowered_issue_title") {
 		t.Fatalf("query does not retain the title planner fence:\n%s", query)
 	}
-	if !strings.Contains(query, `LEFT JOIN LATERAL (
-			SELECT LOWER(COALESCE(i.description, '')) AS lowered
-			WHERE NOT (lowered_issue_title.lowered LIKE $2 OR (lowered_issue_title.lowered LIKE $5 AND lowered_issue_title.lowered LIKE $6 AND lowered_issue_title.lowered LIKE $7))
-			OFFSET 0
-		) lowered_issue_description ON TRUE`) {
+	if !strings.Contains(normalizedQuery, "LEFT JOIN LATERAL ( SELECT LOWER(COALESCE(i.description, '')) AS lowered WHERE NOT (lowered_issue_title.lowered LIKE $2 OR (lowered_issue_title.lowered LIKE $5 AND lowered_issue_title.lowered LIKE $6 AND lowered_issue_title.lowered LIKE $7)) OFFSET 0 ) lowered_issue_description ON TRUE") {
 		t.Fatalf("query does not condition description lowercasing on a complete title match:\n%s", query)
 	}
 	if strings.Contains(query, "LOWER(i.title) LIKE") || strings.Contains(query, "LOWER(COALESCE(i.description, '')) LIKE") {
@@ -156,6 +150,34 @@ func TestBuildSearchQuery_LowersIssueTextOnceAndSkipsDescriptionForTitleMatches(
 	}
 	if !strings.Contains(query, "COALESCE(lowered_issue_description.lowered LIKE $2, FALSE) AS description_phrase") {
 		t.Fatalf("skipped description matches do not fall back to FALSE:\n%s", query)
+	}
+
+	// Conditional description skipping is equivalent only while every complete
+	// title match outranks and takes match-source precedence over description.
+	assertSQLBefore(t, query,
+		"WHEN im.title_phrase THEN 3",
+		"WHEN im.description_phrase THEN 5",
+	)
+	assertSQLBefore(t, query,
+		"WHEN (im.title_term_0 AND im.title_term_1 AND im.title_term_2) THEN 4",
+		"WHEN im.description_phrase THEN 5",
+	)
+	assertSQLBefore(t, query,
+		"WHEN im.title_phrase THEN 'title'",
+		"WHEN im.description_phrase THEN 'description'",
+	)
+	assertSQLBefore(t, query,
+		"WHEN (im.title_term_0 AND im.title_term_1 AND im.title_term_2) THEN 'title'",
+		"WHEN im.description_phrase THEN 'description'",
+	)
+}
+
+func assertSQLBefore(t *testing.T, query, earlier, later string) {
+	t.Helper()
+	earlierAt := strings.Index(query, earlier)
+	laterAt := strings.Index(query, later)
+	if earlierAt == -1 || laterAt == -1 || earlierAt > laterAt {
+		t.Fatalf("query must keep %q before %q:\n%s", earlier, later, query)
 	}
 }
 

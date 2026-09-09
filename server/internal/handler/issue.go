@@ -675,7 +675,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		titleTermPredicates = append(titleTermPredicates, fmt.Sprintf("%s LIKE %s", loweredIssueTitle, termParam))
 	}
 	titleMatchParts := []string{titlePhrasePredicate}
-	if len(titleTermPredicates) > 1 {
+	if len(titleTermPredicates) > 0 {
 		titleMatchParts = append(titleMatchParts, "("+strings.Join(titleTermPredicates, " AND ")+")")
 	}
 	titleMatchExpr := "(" + strings.Join(titleMatchParts, " OR ") + ")"
@@ -706,11 +706,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	// PostgreSQL otherwise inlines scalar LATERAL subqueries and recomputes the
 	// LOWER expressions for every flag. The OFFSET 0 fences cache the normalized
 	// title and description per issue row without materializing the whole CTE.
-	// Once the title contains the phrase or every search term, it has already won
-	// both eligibility and match-source precedence, so the LEFT JOIN can skip
-	// normalizing the description and its flags safely fall back to FALSE. Future
-	// indexable text predicates must stay outside these projection-only fences so
-	// expression indexes can still match them.
+	// Once the title contains the phrase or every search term, it has already
+	// satisfied eligibility and won both relevance-rank and match-source
+	// precedence, so the LEFT JOIN can skip normalizing the description and its
+	// flags safely fall back to FALSE. Correctness requires every title rank and
+	// match-source branch below to remain ahead of its description counterpart.
+	// Future indexable text predicates must stay outside these projection-only
+	// fences so expression indexes can still match them.
 	issueMatchesCTE := fmt.Sprintf(`issue_matches AS (
 		SELECT %s
 		FROM issue i
