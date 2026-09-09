@@ -138,6 +138,28 @@
     "toast_local_mode_update_failed": "Could not update the execution mode",
     "mode_badge_in_place": "Direct"
   },
+  "notes": {
+    "section_header": "Notes",
+    "empty": "No notes yet.",
+    "add_button": "New note",
+    "title_placeholder": "Note title",
+    "create_submit": "Create",
+    "cancel": "Cancel",
+    "save": "Save",
+    "body_placeholder": "Write markdown here...",
+    "remove_tooltip": "Delete note",
+    "delete_confirm_title": "Delete this note?",
+    "delete_confirm_body": "The note and its contents will be permanently removed.",
+    "delete_confirm_action": "Delete",
+    "agent_hint": "Notes are not injected into agent context. Agents read them on demand.",
+    "toast_created": "Note created",
+    "toast_create_failed": "Failed to create note",
+    "toast_saved": "Note saved",
+    "toast_save_failed": "Failed to save note",
+    "toast_removed": "Note deleted",
+    "toast_remove_failed": "Failed to delete note",
+    "title_required": "A title is required"
+  },
   "delete_dialog": {
     "title": "Delete project",
     "description": "This will delete the project. Issues will not be deleted but will be unlinked.",

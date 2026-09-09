@@ -137,6 +137,28 @@
     "toast_local_mode_update_failed": "実行モードを更新できませんでした",
     "mode_badge_in_place": "直接"
   },
+  "notes": {
+    "section_header": "ノート",
+    "empty": "ノートはまだありません。",
+    "add_button": "ノートを作成",
+    "title_placeholder": "ノートのタイトル",
+    "create_submit": "作成",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "body_placeholder": "ここに Markdown を入力...",
+    "remove_tooltip": "ノートを削除",
+    "delete_confirm_title": "このノートを削除しますか？",
+    "delete_confirm_body": "ノートとその内容は完全に削除されます。",
+    "delete_confirm_action": "削除",
+    "agent_hint": "ノートはエージェントのコンテキストに挿入されません。必要に応じて読み取られます。",
+    "toast_created": "ノートを作成しました",
+    "toast_create_failed": "ノートの作成に失敗しました",
+    "toast_saved": "ノートを保存しました",
+    "toast_save_failed": "ノートの保存に失敗しました",
+    "toast_removed": "ノートを削除しました",
+    "toast_remove_failed": "ノートの削除に失敗しました",
+    "title_required": "タイトルを入力してください"
+  },
   "delete_dialog": {
     "title": "プロジェクトを削除",
     "description": "プロジェクトが削除されます。タスクは削除されませんが、リンクが解除されます。",

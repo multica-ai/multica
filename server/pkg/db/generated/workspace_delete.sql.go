@@ -388,6 +388,9 @@ deleted_squad_members AS (
 deleted_project_resources AS (
     DELETE FROM project_resource WHERE workspace_id = $1
 ),
+deleted_project_notes AS (
+    DELETE FROM project_note WHERE workspace_id = $1
+),
 deleted_autopilot_collaborators AS (
     DELETE FROM autopilot_collaborator
     WHERE autopilot_id IN (SELECT id FROM ws_autopilots)
@@ -491,6 +494,9 @@ WHERE channel_media_pending_object.workspace_id = $1
 // Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
 // than the session set because that column exists precisely so this statement
 // does not have to join through chat_session, which it deletes in this same CTE.
+// project_note has no FK to project or workspace, so workspace teardown must
+// delete it explicitly. Without this, deleting a workspace leaves its notepad
+// rows behind forever: nothing else references them and no later sweep runs.
 // Keep the two-system cleanup ledger until object storage has been settled.
 // Moving every row out of pending also prevents a concurrent media bind from
 // attaching an object after the workspace teardown commits. The reconciler

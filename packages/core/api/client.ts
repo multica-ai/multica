@@ -103,6 +103,11 @@ import type {
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
+  ProjectNote,
+  CreateProjectNoteRequest,
+  UpdateProjectNoteRequest,
+  AppendProjectNoteRequest,
+  ListProjectNotesResponse,
   Label,
   IssueProperty,
   IssuePropertyValue,
@@ -412,6 +417,10 @@ import {
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  ListProjectNotesResponseSchema,
+  EMPTY_LIST_PROJECT_NOTES_RESPONSE,
+  ProjectNoteSchema,
+  EMPTY_PROJECT_NOTE,
   SkillSchema,
   EMPTY_SKILL,
   SkillImportResultSchema,
@@ -3612,6 +3621,80 @@ export class ApiClient {
     resourceId: string,
   ): Promise<void> {
     await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Project notes
+  async listProjectNotes(
+    projectId: string,
+  ): Promise<ListProjectNotesResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/notes`);
+    return parseWithFallback(
+      raw,
+      ListProjectNotesResponseSchema,
+      EMPTY_LIST_PROJECT_NOTES_RESPONSE,
+      { endpoint: `GET /api/projects/${projectId}/notes` },
+    );
+  }
+
+  async getProjectNote(
+    projectId: string,
+    noteId: string,
+  ): Promise<ProjectNote> {
+    const raw = await this.fetch<unknown>(
+      `/api/projects/${projectId}/notes/${noteId}`,
+    );
+    return parseWithFallback(raw, ProjectNoteSchema, EMPTY_PROJECT_NOTE, {
+      endpoint: `GET /api/projects/${projectId}/notes/${noteId}`,
+    });
+  }
+
+  async createProjectNote(
+    projectId: string,
+    data: CreateProjectNoteRequest,
+  ): Promise<ProjectNote> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/notes`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ProjectNoteSchema, EMPTY_PROJECT_NOTE, {
+      endpoint: `POST /api/projects/${projectId}/notes`,
+    });
+  }
+
+  async updateProjectNote(
+    projectId: string,
+    noteId: string,
+    data: UpdateProjectNoteRequest,
+  ): Promise<ProjectNote> {
+    const raw = await this.fetch<unknown>(
+      `/api/projects/${projectId}/notes/${noteId}`,
+      { method: "PATCH", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(raw, ProjectNoteSchema, EMPTY_PROJECT_NOTE, {
+      endpoint: `PATCH /api/projects/${projectId}/notes/${noteId}`,
+    });
+  }
+
+  // Append concatenates server-side in SQL, so a human editing the note in the
+  // UI while an agent appends does not lose either write.
+  async appendProjectNote(
+    projectId: string,
+    noteId: string,
+    data: AppendProjectNoteRequest,
+  ): Promise<ProjectNote> {
+    const raw = await this.fetch<unknown>(
+      `/api/projects/${projectId}/notes/${noteId}/append`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(raw, ProjectNoteSchema, EMPTY_PROJECT_NOTE, {
+      endpoint: `POST /api/projects/${projectId}/notes/${noteId}/append`,
+    });
+  }
+
+  async deleteProjectNote(projectId: string, noteId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/notes/${noteId}`, {
       method: "DELETE",
     });
   }

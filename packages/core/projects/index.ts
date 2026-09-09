@@ -19,3 +19,13 @@ export {
   useUpdateProjectResource,
   useDeleteProjectResource,
 } from "./resource-queries";
+export {
+  projectNoteKeys,
+  projectNotesOptions,
+  projectNoteOptions,
+  utf8ByteLength,
+  useCreateProjectNote,
+  useUpdateProjectNote,
+  useAppendProjectNote,
+  useDeleteProjectNote,
+} from "./note-queries";

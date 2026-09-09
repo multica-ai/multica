@@ -137,6 +137,28 @@
     "toast_local_mode_update_failed": "실행 모드를 업데이트하지 못했습니다",
     "mode_badge_in_place": "직접"
   },
+  "notes": {
+    "section_header": "노트",
+    "empty": "노트가 없습니다.",
+    "add_button": "노트 만들기",
+    "title_placeholder": "노트 제목",
+    "create_submit": "만들기",
+    "cancel": "취소",
+    "save": "저장",
+    "body_placeholder": "여기에 마크다운을 작성하세요...",
+    "remove_tooltip": "노트 삭제",
+    "delete_confirm_title": "이 노트를 삭제할까요?",
+    "delete_confirm_body": "노트와 내용이 영구적으로 삭제됩니다.",
+    "delete_confirm_action": "삭제",
+    "agent_hint": "노트는 에이전트 컨텍스트에 삽입되지 않으며 필요할 때 읽습니다.",
+    "toast_created": "노트를 만들었습니다",
+    "toast_create_failed": "노트 만들기에 실패했습니다",
+    "toast_saved": "노트를 저장했습니다",
+    "toast_save_failed": "노트 저장에 실패했습니다",
+    "toast_removed": "노트를 삭제했습니다",
+    "toast_remove_failed": "노트 삭제에 실패했습니다",
+    "title_required": "제목을 입력하세요"
+  },
   "delete_dialog": {
     "title": "프로젝트 삭제",
     "description": "프로젝트가 삭제됩니다. 태스크는 삭제되지 않지만 프로젝트 연결은 해제됩니다.",

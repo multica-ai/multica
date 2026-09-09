@@ -440,6 +440,21 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 	} else {
 		b.WriteString("This project has no resources attached yet.\n\n")
 	}
+	// Notes get a fixed-size pointer, never their contents. The project may hold
+	// any number of notepads and the brief has no length ceiling, so listing
+	// titles here would let the section grow without bound; naming the commands
+	// costs a constant few lines and is what makes the notepads discoverable at
+	// all. Gated on ProjectID because notes are project-scoped — a task carrying
+	// only resources has no project to read notes from.
+	if ctx.ProjectID != "" {
+		b.WriteString("This project may have markdown notepads — a running journal, conclusions, working notes. ")
+		b.WriteString("Their contents are deliberately NOT in this brief. ")
+		fmt.Fprintf(b, "Run `multica project note list %s` to see what exists (titles and sizes only, cheap to call), ", ctx.ProjectID)
+		fmt.Fprintf(b, "then `multica project note get %s <note-id>` to read one. ", ctx.ProjectID)
+		b.WriteString("Check them when the task depends on earlier context in this project. ")
+		b.WriteString("To record something durable, `note append` adds to a notepad without disturbing what is already there; ")
+		b.WriteString("`note create` starts a new one. Prefer `append` over `update`, which replaces the whole body.\n\n")
+	}
 }
 
 // writeInstructionPrecedence emits the "Agent Identity wins over the issue

@@ -410,6 +410,33 @@ func resolveLabelID(ctx context.Context, client *cli.APIClient, input string) (r
 	return resolveIDByPrefix(ctx, client, "label", input, fetchLabelCandidates)
 }
 
+// resolveProjectNoteID accepts a full UUID or the truncated id that
+// `project note list` prints, mirroring resolveProjectResourceID. Without this,
+// the ids shown by `list` could not be fed back into get/append/update/delete.
+func resolveProjectNoteID(ctx context.Context, client *cli.APIClient, projectID, input string) (resolvedID, error) {
+	fetch := func(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
+		var result map[string]any
+		if err := client.GetJSON(ctx, "/api/projects/"+url.PathEscape(projectID)+"/notes", &result); err != nil {
+			return nil, err
+		}
+		notesRaw, _ := result["notes"].([]any)
+		candidates := make([]idCandidate, 0, len(notesRaw))
+		for _, raw := range notesRaw {
+			n, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			candidates = append(candidates, idCandidate{
+				ID:      strVal(n, "id"),
+				Display: strVal(n, "title"),
+				Detail:  noteSizeCell(n["body_size"]),
+			})
+		}
+		return candidates, nil
+	}
+	return resolveIDByPrefix(ctx, client, "project note", input, fetch)
+}
+
 func fetchLabelCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
 	if client.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required to resolve label id prefixes")
