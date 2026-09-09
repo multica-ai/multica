@@ -40,11 +40,11 @@ describe("groupCommentRuns", () => {
     expect(before.standaloneRuns).toEqual([]);
     expect(before.runs.size).toBe(0);
     const after = buildCommentRunView([original, retry], [old, next]);
-    expect(after.runs.get(old.id)?.map((run) => run.anchorCommentId)).toEqual([old.id, old.id]);
+    expect(after.runs.get(old.id)?.map((run) => run.anchorCommentId)).toEqual([next.id, next.id]);
     expect(after.standaloneRuns).toEqual([]);
   });
 
-  it("keeps a queued run in place as its thread receives more instructions and its answer", () => {
+  it("moves a queued run after the latest instruction and keeps the answer there", () => {
     const root = comment("root");
     const first = comment("first", { parent_id: root.id });
     const other = comment("other-thread");
@@ -55,11 +55,64 @@ describe("groupCommentRuns", () => {
     const awaitingComment = buildCommentRunView([merged], [root, first, other], before.runs);
     expect(awaitingComment.runs.get(root.id)?.[0]?.anchorCommentId).toBe(first.id);
     const after = buildCommentRunView([merged], [root, first, other, second], before.runs);
-    expect(after.runs.get(root.id)?.[0]?.anchorCommentId).toBe(first.id);
+    expect(after.runs.get(root.id)?.[0]?.anchorCommentId).toBe(second.id);
     expect(after.runs.has(other.id)).toBe(false);
     const answer = comment("answer", { actor_type: "agent", source_task_id: run.id });
     const complete = buildCommentRunView([{ ...merged, status: "completed", delivered_comment_ids: [first.id, second.id] }], [root, first, other, second, answer]);
-    expect(complete.runs.get(root.id)?.[0]).toMatchObject({ anchorCommentId: first.id, commentId: answer.id, hasReply: true });
+    expect(complete.runs.get(root.id)?.[0]).toMatchObject({ anchorCommentId: second.id, commentId: answer.id, hasReply: true });
+  });
+
+  it.each([
+    { status: "queued" as const, deliveredCommentIds: [] },
+    { status: "running" as const, deliveredCommentIds: ["first", "latest"] },
+  ])("falls back to the latest remaining input when a $status batch anchor is deleted", ({ status, deliveredCommentIds }) => {
+    const first = comment("first");
+    const latest = comment("latest", { parent_id: first.id, created_at: "2026-09-07T00:01:00Z" });
+    const run = task("run", {
+      status,
+      trigger_comment_id: latest.id,
+      coalesced_comment_ids: [first.id],
+      delivered_comment_ids: deliveredCommentIds,
+    });
+    const beforeDelete = buildCommentRunView([run], [first, latest]);
+    expect(beforeDelete.runs.get(first.id)?.[0]?.anchorCommentId).toBe(latest.id);
+
+    const afterDelete = buildCommentRunView([run], [first], beforeDelete.runs);
+    expect(afterDelete.runs.get(first.id)?.[0])
+      .toMatchObject({ anchorCommentId: first.id, commentId: first.id });
+    expect(afterDelete.standaloneRuns).toEqual([]);
+  });
+
+  it("projects a run reply onto the latest remaining input when its deleted anchor disappears", () => {
+    const first = comment("first");
+    const latest = comment("latest", { parent_id: first.id, created_at: "2026-09-07T00:01:00Z" });
+    const run = task("run", {
+      trigger_comment_id: latest.id,
+      coalesced_comment_ids: [first.id],
+      delivered_comment_ids: [first.id, latest.id],
+    });
+    const beforeDelete = buildCommentRunView([run], [first, latest]);
+    const answer = comment("answer", { actor_type: "agent", source_task_id: run.id });
+
+    const afterDelete = buildCommentRunView([run], [first, answer], beforeDelete.runs);
+    expect(afterDelete.runs.get(first.id)?.[0])
+      .toMatchObject({ anchorCommentId: first.id, commentId: answer.id, hasReply: true });
+    expect(afterDelete.timeline.find((entry) => entry.id === answer.id)?.parent_id).toBe(first.id);
+  });
+
+  it("uses timeline order to break ties between same-time inputs", () => {
+    const root = comment("root");
+    const first = comment("first", { parent_id: root.id });
+    const latest = comment("latest", { parent_id: root.id });
+    const run = task("run", {
+      status: "queued",
+      trigger_comment_id: latest.id,
+      coalesced_comment_ids: [first.id],
+      delivered_comment_ids: [],
+    });
+
+    expect(buildCommentRunView([run], [root, first, latest]).runs.get(root.id)?.[0]?.anchorCommentId)
+      .toBe(latest.id);
   });
 
   it("projects chained answers and assignment subtrees before finding run roots", () => {
@@ -121,10 +174,27 @@ describe("groupCommentRuns", () => {
     expect(buildCommentRunView([run], [reply]).standaloneRuns).toHaveLength(1);
     expect(buildCommentRunView([run], []).standaloneRuns).toEqual([]);
   });
-  it("keeps merged runs at their earliest input, including nested replies", () => {
+  it("keeps merged runs after their latest delivered input, including nested replies", () => {
     const timeline = [comment("root"), comment("reply", { parent_id: "root" }), comment("nested", { parent_id: "reply" })];
     const run = task("run", { trigger_comment_id: "nested", coalesced_comment_ids: ["root", "reply"], delivered_comment_ids: ["root", "reply", "nested"] });
-    expect([...groupCommentRuns([run], timeline)]).toEqual([["root", [{ task: run, commentId: "root", anchorCommentId: "root", hasReply: false }]]]);
+    expect([...groupCommentRuns([run], timeline)]).toEqual([["root", [{ task: run, commentId: "nested", anchorCommentId: "nested", hasReply: false }]]]);
+  });
+
+  it("freezes a claimed run after the latest comment in its delivery receipt", () => {
+    const timeline = [
+      comment("root"),
+      comment("first", { parent_id: "root", created_at: "2026-09-07T00:01:00Z" }),
+      comment("second", { parent_id: "root", created_at: "2026-09-07T00:02:00Z" }),
+      comment("next-run", { parent_id: "root", created_at: "2026-09-07T00:03:00Z" }),
+    ];
+    const run = task("run", {
+      status: "running",
+      trigger_comment_id: "next-run",
+      coalesced_comment_ids: ["first", "second"],
+      delivered_comment_ids: ["first", "second"],
+    });
+    expect(groupCommentRuns([run], timeline).get("root")?.[0])
+      .toMatchObject({ anchorCommentId: "second", commentId: "second" });
   });
 
   it.each([{ receipt: [] }, { receipt: ["old"] }])("uses planned comment coverage while queued, even with a delivery receipt of $receipt", ({ receipt }) => {

@@ -3,7 +3,7 @@ import type { AgentTask, TimelineEntry } from "@multica/core/types";
 export interface CommentRun {
   task: AgentTask;
   commentId?: string;
-  /** Stable trigger location; absent for issue-level runs such as assignment. */
+  /** Last input this run covers; absent for issue-level runs such as assignment. */
   anchorCommentId?: string;
   /** The comment already contains this run's reply; only append its activity. */
   hasReply: boolean;
@@ -33,7 +33,7 @@ function isObsoleteCommentRun(task: AgentTask): boolean {
     && !task.dispatched_at && !task.started_at && !task.delivered_comment_ids?.length;
 }
 
-/** Keep each run at its trigger; associate replies by task identity, never arrival order. */
+/** Place each run after its latest covered input; associate replies by task identity. */
 export function buildCommentRunView(
   tasks: readonly AgentTask[],
   timeline: readonly TimelineEntry[],
@@ -44,6 +44,7 @@ export function buildCommentRunView(
   // in Execution history, but it must not become an unanchored Activity block.
   const inlineTasks = tasks.filter((task) => task.kind !== "quick_create");
   const comments = new Map(timeline.filter((entry) => entry.type === "comment").map((entry) => [entry.id, entry]));
+  const timelineOrder = new Map(timeline.map((entry, index) => [entry.id, index]));
   const threadRoot = (id: string): string | undefined => {
     const seen = new Set<string>();
     let entry = comments.get(id);
@@ -84,24 +85,31 @@ export function buildCommentRunView(
         ? source.delivered_comment_ids
         : [source.trigger_comment_id, ...(source.coalesced_comment_ids ?? [])];
       const candidates = ids.flatMap((id) => id && comments.has(id) ? [comments.get(id)!] : []);
+      const latestCandidateId = () => [...candidates].sort((a, b) => b.created_at.localeCompare(a.created_at)
+        || (timelineOrder.get(b.id) ?? -1) - (timelineOrder.get(a.id) ?? -1))[0]?.id;
       // Task events can arrive before their comments. Preserve the intended
       // anchor even when it cannot be rendered yet; it is not an assignment.
       anchorId = source.trigger_comment_id && ids.includes(source.trigger_comment_id)
         ? source.trigger_comment_id
-        : candidates.sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.id
-          ?? ids.find((id) => !!id);
-      // Same-thread batches retain their first input's slot as newer replies
-      // coalesce. Wait for missing comments instead of guessing their thread;
-      // historical batches spanning several threads retain their trigger.
+        : latestCandidateId() ?? ids.find((id) => !!id);
+      // A same-thread batch belongs after its latest covered input, so the
+      // timeline reads "these comments → this run". Before claim, a newly
+      // coalesced trigger moves the queued block down. After claim, `ids` comes
+      // from delivered_comment_ids and freezes the running block at the actual
+      // delivery boundary. Wait for missing comments instead of guessing their
+      // thread; historical batches spanning several threads retain their trigger.
       const root = candidates[0] && threadRoot(candidates[0].id);
       if (root && candidates.length === ids.filter(Boolean).length
         && candidates.every((entry) => threadRoot(entry.id) === root)) {
-        anchorId = candidates.sort((a, b) => a.created_at.localeCompare(b.created_at)
-          || timeline.indexOf(a) - timeline.indexOf(b))[0]?.id;
+        anchorId = latestCandidateId();
       }
       const priorAnchor = priorAnchors.get(source.id);
       if (priorAnchor && ids.includes(priorAnchor) && candidates.length < ids.filter(Boolean).length) {
-        anchorId = priorAnchor;
+        // Realtime task metadata can arrive before a new trigger comment; keep
+        // the existing visible slot in that window. If the prior slot itself
+        // disappeared, the comment was deleted, so fall back to the latest
+        // remaining covered input instead of hiding the run and its reply.
+        anchorId = comments.has(priorAnchor) ? priorAnchor : latestCandidateId() ?? priorAnchor;
       }
       source = source.parent_task_id ? byTask.get(source.parent_task_id) : undefined;
     }

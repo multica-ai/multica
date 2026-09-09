@@ -1282,6 +1282,76 @@ describe("IssueDetail (shared)", () => {
     expect(mockApiObj.listTaskMessages).toHaveBeenCalledWith(taskId);
   });
 
+  it("places one coalesced queued block after the batch's latest reply", async () => {
+    const root = mockTimeline[0]!;
+    const first = { ...mockTimeline[1]!, id: "queued-first", parent_id: root.id,
+      content: "First queued instruction", created_at: "2026-01-16T00:00:01Z" };
+    const latest = { ...first, id: "queued-latest", content: "Latest queued instruction",
+      created_at: "2026-01-16T00:00:02Z" };
+    const task: AgentTask = {
+      id: "4a2e8d1c-7f9b-4e2a-9c1d-123456789abd", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+      status: "queued", priority: 0, created_at: root.created_at,
+      started_at: null, dispatched_at: null, completed_at: null, result: null, error: null,
+      trigger_comment_id: latest.id, coalesced_comment_ids: [first.id], delivered_comment_ids: [],
+    };
+    mockApiObj.listTimeline.mockResolvedValue([root, first, latest]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+    const { container } = renderIssueDetail();
+
+    await screen.findByText("Waiting for an available agent.");
+    const run = container.querySelector(`[data-run-comment-id="${task.id}"]`)!;
+    expect(run).not.toBeNull();
+    const latestComment = container.querySelector(`#comment-${latest.id}`);
+    const firstComment = container.querySelector(`#comment-${first.id}`);
+    expect(latestComment).not.toBeNull();
+    expect(firstComment).not.toBeNull();
+    expect(latestComment!.nextElementSibling).toBe(run);
+    expect(firstComment!.nextElementSibling).not.toBe(run);
+  });
+
+  it("keeps the running block after its delivered comment and one queued block after later replies", async () => {
+    const root = mockTimeline[0]!;
+    const first = { ...mockTimeline[1]!, id: "successor-first", parent_id: root.id,
+      content: "First successor instruction", created_at: "2026-01-16T00:00:01Z" };
+    const latest = { ...first, id: "successor-latest", content: "Latest successor instruction",
+      created_at: "2026-01-16T00:00:02Z" };
+    const running: AgentTask = {
+      id: "4a2e8d1c-7f9b-4e2a-9c1d-123456789ab0", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+      status: "running", priority: 0, created_at: root.created_at,
+      started_at: root.created_at, dispatched_at: root.created_at, completed_at: null, result: null, error: null,
+      trigger_comment_id: root.id, delivered_comment_ids: [root.id],
+    };
+    const queued: AgentTask = {
+      ...running,
+      id: "4a2e8d1c-7f9b-4e2a-9c1d-123456789ab1",
+      status: "queued", started_at: null, dispatched_at: null,
+      trigger_comment_id: latest.id, coalesced_comment_ids: [first.id], delivered_comment_ids: [],
+    };
+    mockApiObj.listTimeline.mockResolvedValue([root, first, latest]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([running, queued]);
+    const { container } = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(container.querySelector(`[data-run-comment-id="${running.id}"]`)).not.toBeNull();
+      expect(container.querySelector(`[data-run-comment-id="${queued.id}"]`)).not.toBeNull();
+    });
+    const rootContent = container.querySelector(`[data-comment-content="${root.id}"]`);
+    const runningBlock = container.querySelector(`[data-run-comment-id="${running.id}"]`);
+    const firstComment = container.querySelector(`#comment-${first.id}`);
+    const latestComment = container.querySelector(`#comment-${latest.id}`);
+    const queuedBlock = container.querySelector(`[data-run-comment-id="${queued.id}"]`);
+    expect(rootContent).not.toBeNull();
+    expect(runningBlock).not.toBeNull();
+    expect(firstComment).not.toBeNull();
+    expect(latestComment).not.toBeNull();
+    expect(queuedBlock).not.toBeNull();
+    expect(rootContent!.compareDocumentPosition(runningBlock!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(runningBlock!.compareDocumentPosition(firstComment!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(firstComment!.compareDocumentPosition(latestComment!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(latestComment!.nextElementSibling).toBe(queuedBlock);
+    expect(container.querySelectorAll(`[data-run-comment-id="${queued.id}"]`)).toHaveLength(1);
+  });
+
   it.each([null, "comment-1"])("shows an assignment reply once in its run slot when posted under %s", async (parentId) => {
     const task: AgentTask = {
       id: "ba2e8d1c-7f9b-4e2a-9c1d-123456789abc", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
