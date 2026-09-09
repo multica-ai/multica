@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -175,11 +174,7 @@ type DashboardUsageDailyResponse struct {
 
 // GetDashboardUsageDaily returns per-(date, model) token rows for the
 // workspace, optionally scoped to a project. Backed by task_usage_hourly,
-// sliced into calendar days under the viewer's tz. The rollup is materialized
-// every five minutes and clients poll it on the same cadence, so the aggregate
-// read is eventual-consistency safe; workspace authorization above remains on
-// the primary, and replica lag can only delay a chart refresh until a later
-// poll.
+// sliced into calendar days under the viewer's tz.
 func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
@@ -207,20 +202,12 @@ func (h *Handler) listDashboardUsageDaily(
 	since pgtype.Timestamptz,
 	projectID pgtype.UUID,
 ) ([]DashboardUsageDailyResponse, error) {
-	rows, err := dbreader.Read(
-		ctx,
-		h.ReadSelector,
-		dbreader.BusinessDashboard,
-		dbreader.EventualConsistency,
-		func(ctx context.Context, q *db.Queries) ([]db.ListDashboardUsageDailyRow, error) {
-			return q.ListDashboardUsageDaily(ctx, db.ListDashboardUsageDailyParams{
-				WorkspaceID: workspaceID,
-				Tz:          tz,
-				Since:       since,
-				ProjectID:   projectID,
-			})
-		},
-	)
+	rows, err := h.Queries.ListDashboardUsageDaily(ctx, db.ListDashboardUsageDailyParams{
+		WorkspaceID: workspaceID,
+		Tz:          tz,
+		Since:       since,
+		ProjectID:   projectID,
+	})
 	if err != nil {
 		return nil, err
 	}

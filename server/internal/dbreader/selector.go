@@ -29,6 +29,7 @@ type Business struct {
 
 var (
 	BusinessDashboard        = Business{label: "dashboard"}
+	BusinessAgentList        = Business{label: "agent_list"}
 	BusinessDaemonWorkspaces = Business{label: "daemon_workspaces"}
 	BusinessGitHubPRRefresh  = Business{label: "github_pr_refresh"}
 	businessUnknown          = Business{label: "unknown"}

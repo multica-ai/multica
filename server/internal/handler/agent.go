@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -1059,6 +1060,24 @@ func deriveAgentRuntimeAvailability(runtime db.AgentRuntime, now time.Time) stri
 	return deriveRuntimeAvailability(status, runtime.LastSeenAt, now)
 }
 
+// listAgentSkillsByWorkspace serves response decoration for GET /api/agents,
+// which mounted clients re-poll every 30 seconds while an agent runtime is
+// online or unstable. Agent rows and invocation targets still come from the
+// primary and decide visibility before any skill metadata reaches the wire, so
+// this read is eventual-consistency safe: replica lag can only leave an
+// already-visible agent's displayed skill list briefly stale.
+func (h *Handler) listAgentSkillsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListAgentSkillsByWorkspaceRow, error) {
+	return dbreader.Read(
+		ctx,
+		h.ReadSelector,
+		dbreader.BusinessAgentList,
+		dbreader.EventualConsistency,
+		func(ctx context.Context, q *db.Queries) ([]db.ListAgentSkillsByWorkspaceRow, error) {
+			return q.ListAgentSkillsByWorkspace(ctx, workspaceID)
+		},
+	)
+}
+
 func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	member, ok := h.workspaceMember(w, r, workspaceID)
@@ -1085,7 +1104,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Batch-load skills for all agents to avoid N+1.
-	skillRows, err := h.Queries.ListAgentSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
+	skillRows, err := h.listAgentSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
