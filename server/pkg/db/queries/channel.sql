@@ -857,6 +857,10 @@ WHERE binding.installation_id = sqlc.arg('installation_id')
 -- (slackSessionRouting), so the binding cursor there names the latest thread,
 -- not this run's. Taking it from the generation is correct for both shapes.
 --
+-- The one exception is the CASE below: when a generation recorded no trigger
+-- at all, a thread-isolated binding can still say which thread the session
+-- lives in, and must, or the answer surfaces in the parent channel.
+--
 -- A NULL trigger means "we cannot attribute this run": callers reply without a
 -- quote or mention rather than inventing one. INNER JOIN on the generation: a
 -- task whose generation row is missing entirely has no context to deliver
@@ -868,7 +872,29 @@ INSERT INTO channel_task_delivery (
 SELECT
     @task_id, binding.id, binding.installation_id, binding.channel_type,
     binding.channel_chat_id, binding.chat_type,
-    generation.last_message_id, generation.last_thread_id, generation.last_sender_id,
+    generation.last_message_id,
+    CASE
+        -- This generation recorded a trigger, so its thread is authoritative —
+        -- including when it is legitimately empty, which is how a Slack DM
+        -- answered at top level is distinguished from one answered inside a
+        -- thread.
+        WHEN generation.last_message_id IS NOT NULL THEN generation.last_thread_id
+        -- No trigger: pre-migration, or a generation whose only messages were
+        -- channel commands. Recover the thread ONLY for a thread-isolated
+        -- binding, where it is a stable property of the session rather than a
+        -- moving cursor. Such a binding is exactly the one whose key is the
+        -- composite "chat:thread", which is why it carries the real chat id in
+        -- its config — the marker every adapter writes (larkSessionRouting,
+        -- slackSessionRouting, telegramSessionRouting). Without this, a
+        -- recovered pre-migration run in a Slack channel thread or a Telegram
+        -- forum topic would answer in the parent conversation.
+        WHEN COALESCE(binding.config ->> 'chat_id', binding.config ->> 'channel_id', '')
+             NOT IN ('', binding.channel_chat_id) THEN binding.last_thread_id
+        -- A non-isolated binding's cursor names whichever thread spoke last,
+        -- which is not this run's. Nothing we can justify.
+        ELSE NULL
+    END,
+    generation.last_sender_id,
     binding.route_revision, binding.config
 FROM channel_chat_session_binding AS binding
 JOIN channel_chat_context_generation AS generation

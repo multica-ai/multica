@@ -57,13 +57,24 @@ ALTER TABLE channel_task_delivery
 -- Nothing needs one. The trigger is recorded during AppendUserMessage, which
 -- commits before the debounced flush that enqueues the task and creates its
 -- delivery row, so the first inbound turn after deploy already supplies a
--- correct value for that generation. Only a generation that is enqueued with
--- NO post-deploy append could read NULL here — the recovered-run path for an
--- older unowned generation — and that is exactly the case a backfill cannot
--- serve: the binding cursor it would have to copy from has already advanced
--- past that generation, so seeding would supply a confidently wrong message
--- and sender rather than no answer.
+-- correct value for that generation. Only a generation enqueued with NO
+-- post-deploy append can read NULL here — the recovered-run path — and that is
+-- exactly the case a backfill cannot serve: the binding cursor it would copy
+-- from has already advanced past that generation, so seeding would supply a
+-- confidently wrong message and sender rather than no answer.
 --
--- A NULL degrades to the chat-level send with no mention, which for those runs
--- is strictly better than what they got before this change: the session's
--- newest trigger, i.e. some other member's message.
+-- What a NULL trigger costs depends on where the answer is going, and
+-- CreateChannelTaskDeliveryFromSession is written around that:
+--
+--   * Ordinary chat, p2p, Slack DM — a chat-level send lands in the very
+--     conversation the session belongs to. No quote, no mention, right place.
+--
+--   * Thread-isolated session (Lark topic, Slack channel thread, Telegram
+--     forum topic) — the thread is recovered from the binding, which for these
+--     bindings is a stable property of the session rather than a cursor. The
+--     answer still reaches its thread.
+--
+--   * Lark topic specifically — Lark can only enter a topic by replying to a
+--     message inside it, so a recovered thread is not enough. The Patcher
+--     declines to send rather than posting into the parent group; see
+--     topicSendWithoutTrigger.
