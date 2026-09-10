@@ -2212,6 +2212,94 @@ func TestAgentUpdateSendsConversationStarters(t *testing.T) {
 	}
 }
 
+func TestAgentAvatarEmojiRequests(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_DAEMON_PORT", "")
+	for _, operation := range []struct {
+		name, method, path string
+		registered         *cobra.Command
+		run                func(*cobra.Command, []string) error
+	}{
+		{"create", http.MethodPost, "/api/agents", agentCreateCmd, runAgentCreate},
+		{"update", http.MethodPut, "/api/agents/agent-123", agentUpdateCmd, runAgentUpdate},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			flag := operation.registered.Flags().Lookup("avatar-emoji")
+			if flag == nil {
+				t.Fatal("--avatar-emoji is not registered")
+			}
+			if strings.Contains(flag.Usage, "emoji:") {
+				t.Fatal("help must not expose the internal emoji: marker")
+			}
+			for _, tc := range []struct {
+				name, value, wantBody string
+				supplied              bool
+				wantErr               bool
+			}{
+				{"emoji", "🦊", "emoji:🦊", true, false},
+				{"empty", "", "", true, true},
+				{"whitespace", "   ", "", true, true},
+				{"omitted", "", "", false, false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					var got map[string]any
+					requested := false
+					srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						requested = true
+						if r.Method != operation.method || r.URL.Path != operation.path {
+							t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+						}
+						if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+							t.Error(err)
+						}
+						if err := json.NewEncoder(w).Encode(map[string]any{"id": "agent-123"}); err != nil {
+							t.Error(err)
+						}
+					}))
+					defer srv.Close()
+					setCLITestServerEnv(t, srv.URL)
+					cmd := &cobra.Command{Use: operation.name}
+					cmd.Flags().String("avatar-emoji", flag.DefValue, flag.Usage)
+					cmd.Flags().String("name", "TestAgent", "")
+					cmd.Flags().String("runtime-id", "runtime-1", "")
+					cmd.Flags().String("output", "json", "")
+					if tc.supplied {
+						if err := cmd.ParseFlags([]string{"--avatar-emoji", tc.value}); err != nil {
+							t.Fatal(err)
+						}
+					} else if operation.name == "update" {
+						if err := cmd.Flags().Set("name", "Renamed"); err != nil {
+							t.Fatal(err)
+						}
+					}
+					_, err := captureStdout(t, func() error { return operation.run(cmd, []string{"agent-123"}) })
+					if tc.wantErr {
+						if err == nil {
+							t.Fatal("expected error for empty/whitespace-only --avatar-emoji, got nil")
+						}
+						if !strings.Contains(err.Error(), "--avatar-emoji must not be empty or whitespace-only") {
+							t.Fatalf("error = %v, want a message about --avatar-emoji must not be empty or whitespace-only", err)
+						}
+						if requested {
+							t.Fatal("empty/whitespace-only --avatar-emoji must be rejected before any HTTP request")
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					value, present := got["avatar_url"]
+					if present != tc.supplied || (present && value != tc.wantBody) {
+						t.Fatalf("avatar_url = %#v (present %v), want %q (present %v)", value, present, tc.wantBody, tc.supplied)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestAgentCreateAndUpdateExposeConversationStartersFlag(t *testing.T) {
 	if agentCreateCmd.Flag("conversation-starters") == nil {
 		t.Error("agent create must expose --conversation-starters")
