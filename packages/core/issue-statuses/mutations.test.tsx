@@ -87,6 +87,20 @@ function realtimeRefetchLands(qc: QueryClient, response: ListIssueStatusesRespon
 }
 
 describe("issue status catalog mutations", () => {
+  it("optimistically reorders built-ins and opts into the complete category", async () => {
+    const qc = createClient();
+    const qa = entry({ id: "qa", key: "qa", position: 1 });
+    qc.setQueryData(issueStatusKeys.list("ws-1"), catalog([builtInReview, qa]));
+    const request = vi.fn(async () => catalog([qa, builtInReview]));
+    setApiInstance({ reorderIssueStatuses: request } as unknown as ApiClient);
+    const { result } = renderHook(() => useReorderIssueStatuses(), { wrapper: wrapper(qc) });
+    act(() => result.current.mutate({ category: "started", ordered: [qa, builtInReview] }));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(request).toHaveBeenCalledWith("started", ["qa", builtInReview.id], true);
+    expect(cached(qc)?.statuses.map((s) => [s.id, s.position])).toEqual([
+      ["qa", 1], [builtInReview.id, 2],
+    ]);
+  });
   afterEach(() => vi.restoreAllMocks());
 
   // The realtime `issue_status:changed` event refreshes this catalog in every

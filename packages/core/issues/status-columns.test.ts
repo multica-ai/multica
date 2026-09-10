@@ -10,6 +10,17 @@ const catalog = buildIssueStatusCatalog([
 ] as IssueStatusEntry[]);
 
 describe("concrete status columns", () => {
+  it("uses saved positions for built-in and custom columns alike", () => {
+    const ordered = buildIssueStatusCatalog([
+      { key: "in_review", category: "started", position: 1, is_system: true },
+      { key: "qa", category: "started", position: 2, is_system: false },
+      { key: "blocked", category: "started", position: 3, is_system: true },
+      { key: "in_progress", category: "started", position: 4, is_system: true },
+    ] as IssueStatusEntry[]);
+    expect(statusColumnKeys(ordered)).toEqual([
+      "backlog", "todo", "in_review", "qa", "blocked", "in_progress", "done", "cancelled",
+    ]);
+  });
   it("keeps every built-in and custom key independent, including archived work", () => {
     expect(statusColumnKeys(catalog)).toEqual([
       "backlog", "todo", "in_progress", "in_review", "blocked",

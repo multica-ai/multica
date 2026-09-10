@@ -130,7 +130,7 @@ const BUILT_IN_RANK = new Map<string, number>(
 
 /**
  * The server's catalog ordering, mirrored for client-side re-sorts.
- * Category rank, then intra-category position, then key as a stable tiebreak —
+ * Category rank, then intra-category position, then built-in rank/key to break ties —
  * see `ListIssueStatusEntries` in `issue_status.sql`. An optimistic reorder has
  * to re-sort with this or the new positions land in the cache while the list
  * still renders in the old order.
@@ -140,6 +140,7 @@ export function compareIssueStatusEntries(a: IssueStatusEntry, b: IssueStatusEnt
     (CATEGORY_RANK.get(normalizeIssueStatusCategory(a.category) ?? "") ?? STATUS_ORDER.length) -
     (CATEGORY_RANK.get(normalizeIssueStatusCategory(b.category) ?? "") ?? STATUS_ORDER.length);
   if (rank !== 0) return rank;
+  if (a.position !== b.position) return a.position - b.position;
   if (a.is_system !== b.is_system) return a.is_system ? -1 : 1;
   if (a.is_system && b.is_system) {
     const builtInRank =
@@ -147,7 +148,6 @@ export function compareIssueStatusEntries(a: IssueStatusEntry, b: IssueStatusEnt
       (BUILT_IN_RANK.get(b.key) ?? BUILT_IN_STATUS_ORDER.length);
     if (builtInRank !== 0) return builtInRank;
   }
-  if (a.position !== b.position) return a.position - b.position;
   return a.key.localeCompare(b.key);
 }
 

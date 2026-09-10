@@ -4,8 +4,8 @@
 -- name: SeedIssueStatusEntries :exec
 -- Idempotent seed of the 7 built-ins. Safe to call concurrently from multiple
 -- pods during a rolling deploy: the unique (workspace_id, key) index makes a
--- losing racer a no-op rather than an error. Positions are intra-category, and
--- each built-in is the only member of its category at seed time, so all 0.
+-- losing racer a no-op rather than an error. Initial positions are 0; the list's
+-- built-in tiebreak preserves the seed order until an admin reorders the group.
 INSERT INTO issue_status (workspace_id, key, name, description, category, color, is_system, position)
 VALUES
     (sqlc.arg('workspace_id')::uuid, 'backlog', 'Backlog', 'Parked. Assigning an issue here never starts an agent run.', 'unstarted', '#6b7280', TRUE, 0),
@@ -18,13 +18,14 @@ VALUES
 ON CONFLICT DO NOTHING;
 
 -- name: ListIssueStatusEntries :many
--- Ordered by the four lifecycle groups, then built-ins before custom
--- rows, then stable concrete-status order / custom position.
+-- Position orders both built-in and custom rows inside each lifecycle group.
+-- Built-in order is only a tiebreak for the original seeded positions.
 SELECT * FROM issue_status
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND (sqlc.arg('include_archived')::bool OR archived_at IS NULL)
 ORDER BY
     CASE category WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
+    position,
 	CASE WHEN is_system THEN 0 ELSE 1 END,
 	CASE key
 		WHEN 'backlog' THEN 0
@@ -36,7 +37,6 @@ ORDER BY
 		WHEN 'cancelled' THEN 6
 		ELSE 7
 	END,
-    position,
     key;
 
 -- name: GetIssueStatusEntryByKey :one
@@ -159,15 +159,14 @@ ORDER BY position, key;
 -- order untouched instead of the partially-applied prefix a per-row PATCH loop
 -- produces.
 --
--- Positions start at 1 because the category's built-in is seeded at 0 and can
--- never move (is_system rows are excluded here, as they are in every write).
--- Archived rows are excluded too: they are frozen, and letting one into the
--- write sequence is exactly what made a drag past an archived row half-commit.
+-- Full-catalog callers may reorder built-ins, without changing their semantics.
+-- Legacy custom-only callers preserve the positions occupied by custom rows.
+-- Archived rows remain frozen.
 UPDATE issue_status s
-SET position = v.ordinality::int,
+SET position = (sqlc.arg('positions')::float8[])[v.ordinality],
     updated_at = now()
 FROM unnest(sqlc.arg('ids')::uuid[]) WITH ORDINALITY AS v(id, ordinality)
 WHERE s.id = v.id
   AND s.workspace_id = sqlc.arg('workspace_id')::uuid
-  AND s.is_system = FALSE
+  AND (sqlc.arg('include_system')::bool OR s.is_system = FALSE)
   AND s.archived_at IS NULL;

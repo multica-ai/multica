@@ -9,10 +9,18 @@
     "archived_hint": "新規の割り当てには使えません。すでにこのステータスのタスクはそのままです。",
     "reorder_failed": "並び順を保存できませんでした。",
     "actions": {
+      "move_up": "上に移動",
+      "move_down": "下に移動",
       "open": "{{name}} の操作",
       "edit": "編集",
       "archive": "アーカイブ",
       "reorder": "{{name}} を並べ替え"
+    },
+    "reorder_hint": "カテゴリー内でステータスをドラッグすると、ボード、リスト、ステータスメニューの順序を変更できます。",
+    "built_in_dialog": {
+      "title": "組み込みステータスは変更できません",
+      "description": "組み込みステータスは Multica のシステム動作に使われるため、編集やアーカイブはできません。カテゴリー内の順序は変更できます。",
+      "confirm": "確認"
     },
     "editor": {
       "create_title": "新しいステータス",

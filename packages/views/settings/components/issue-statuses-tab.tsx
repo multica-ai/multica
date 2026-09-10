@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
+  ArrowDown,
+  ArrowUp,
   GripVertical,
   MoreHorizontal,
   Pencil,
@@ -32,6 +34,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
   issueStatusColor,
+  compareIssueStatusEntries,
   issueStatusListOptions,
   normalizeIssueStatusCategory,
 } from "@multica/core/issue-statuses/queries";
@@ -73,6 +76,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
@@ -101,8 +105,8 @@ import { SettingsTab } from "./settings-layout";
  * their distinct automation behavior inside those groups: In Progress, In
  * Review, and Blocked all appear under Started without becoming one status.
  *
- * Built-ins are shown but locked, while custom statuses can be added and
- * ordered within any group.
+ * Every active status can be ordered within its category. Built-in definitions
+ * remain locked; moving their display position does not change automation.
  *
  * The chrome is deliberately thin (MUL-6422): one bordered workflow list,
  * muted group headers, and row-level actions revealed only where available.
@@ -130,6 +134,7 @@ export function IssueStatusesTab() {
   const [createCategory, setCreateCategory] = useState<IssueStatusCategory | null>(null);
   const [editing, setEditing] = useState<IssueStatusEntry | null>(null);
   const [pendingArchive, setPendingArchive] = useState<IssueStatusEntry | null>(null);
+  const [showBuiltInNotice, setShowBuiltInNotice] = useState(false);
 
   const { data: statuses = [], isLoading } = useQuery(issueStatusListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -148,12 +153,10 @@ export function IssueStatusesTab() {
         );
         return {
           category,
-          system: inCategory.filter((status) => status.is_system),
           // Archived rows are hidden behind a toggle rather than dropped: an
           // admin needs to see what a lingering status on an old issue is.
-          custom: inCategory.filter(
-            (s) => !s.is_system && (showArchived || !s.archived_at),
-          ),
+          entries: inCategory.filter((s) => showArchived || !s.archived_at)
+            .sort(compareIssueStatusEntries),
         };
       }),
     [statuses, showArchived],
@@ -167,6 +170,9 @@ export function IssueStatusesTab() {
       description={t(($) => $.issue_statuses.description)}
     >
       <div className="space-y-4">
+        {isAdmin && (
+          <p className="text-caption text-muted-foreground">{t(($) => $.issue_statuses.reorder_hint)}</p>
+        )}
         {/* Offered only once the workspace has something archived. A permanently
             disabled "Show archived (0)" is a control that can never do
             anything. */}
@@ -188,14 +194,13 @@ export function IssueStatusesTab() {
           <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
             {groups.map((group) => (
               <CategorySection
-                key={group.category}
+                key={`${wsId}:${group.category}`}
                 category={group.category}
-                system={group.system}
-                custom={group.custom}
+                entries={group.entries}
                 canManage={isAdmin}
                 onCreate={() => setCreateCategory(group.category)}
-                onEdit={setEditing}
-                onArchive={setPendingArchive}
+                onEdit={(entry) => entry.is_system ? setShowBuiltInNotice(true) : setEditing(entry)}
+                onArchive={(entry) => entry.is_system ? setShowBuiltInNotice(true) : setPendingArchive(entry)}
               />
             ))}
           </div>
@@ -216,22 +221,31 @@ export function IssueStatusesTab() {
         status={editing}
       />
       <ArchiveStatusDialog status={pendingArchive} onClose={() => setPendingArchive(null)} />
+      <AlertDialog open={showBuiltInNotice} onOpenChange={setShowBuiltInNotice}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.issue_statuses.built_in_dialog.title)}</AlertDialogTitle>
+            <AlertDialogDescription>{t(($) => $.issue_statuses.built_in_dialog.description)}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>{t(($) => $.issue_statuses.built_in_dialog.confirm)}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SettingsTab>
   );
 }
 
 function CategorySection({
   category,
-  system,
-  custom,
+  entries,
   canManage,
   onCreate,
   onEdit,
   onArchive,
 }: {
   category: IssueStatusCategory;
-  system: IssueStatusEntry[];
-  custom: IssueStatusEntry[];
+  entries: IssueStatusEntry[];
   canManage: boolean;
   onCreate: () => void;
   onEdit: (status: IssueStatusEntry) => void;
@@ -241,24 +255,23 @@ function CategorySection({
   const wsId = useWorkspaceId();
   const labelOf = useStatusLabel(wsId);
   const reorder = useReorderIssueStatuses();
+  const saving = useRef(false);
 
   // Local order so the drag reads as instant even before the optimistic cache
   // write settles; resynced whenever the server list changes.
-  const [order, setOrder] = useState(custom);
-  useEffect(() => setOrder(custom), [custom]);
+  const [order, setOrder] = useState(entries);
+  useEffect(() => setOrder(entries), [entries]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const from = order.findIndex((s) => s.id === active.id);
-    const to = order.findIndex((s) => s.id === over.id);
-    if (from < 0 || to < 0) return;
+  const move = (from: number, to: number) => {
+    if (!canManage || saving.current || from < 0 || to < 0 || from === to ||
+      !order[from] || !order[to] || order[from].archived_at || order[to].archived_at) return;
     const next = arrayMove(order, from, to);
+    saving.current = true;
     setOrder(next);
     // ACTIVE rows only. With "show archived" on, `order` also holds archived
     // rows; sending those made the server reject the request, and before the
@@ -269,16 +282,21 @@ function CategorySection({
       { category, ordered: next.filter((entry) => !entry.archived_at) },
       {
         onError: (error) => {
-          setOrder(custom);
+          setOrder(entries);
           toast.error(
             error instanceof Error ? error.message : t(($) => $.issue_statuses.reorder_failed),
           );
         },
+        onSettled: () => { saving.current = false; },
       },
     );
   };
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over) return;
+    move(order.findIndex((s) => s.id === active.id), order.findIndex((s) => s.id === over.id));
+  };
 
-  // Only rows that can actually move are draggable. A single custom status has
+  // Only rows that can actually move are draggable. A single active status has
   // nothing to swap with, and archived rows are frozen.
   const sortableIds = order.filter((s) => !s.archived_at).map((s) => s.id);
   const canReorder = canManage && sortableIds.length > 1;
@@ -286,6 +304,7 @@ function CategorySection({
   return (
     <section
       aria-labelledby={`issue-status-category-${category}`}
+      aria-busy={reorder.isPending}
       className="border-b border-surface-border last:border-b-0"
     >
       {/* Label plus the one action the header owns. The category glyph is the
@@ -318,28 +337,33 @@ function CategorySection({
       </div>
 
       <div className="divide-y divide-surface-border">
-        {system.map((entry) => (
-          <BuiltInRow
-            key={entry.id}
-            entry={entry}
-            label={labelOf(entry.key)}
-            description={t(($) =>
-              $.issue_statuses.built_in_descriptions[entry.key as BuiltInIssueStatus],
-            )}
-          />
-        ))}
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-            {order.map((entry) => (
-              <CustomStatusRow
-                key={entry.id}
-                entry={entry}
-                canManage={canManage}
-                canReorder={canReorder && !entry.archived_at}
-                onEdit={() => onEdit(entry)}
-                onArchive={() => onArchive(entry)}
-              />
-            ))}
+            {order.map((entry, index) => {
+              const activeIndex = sortableIds.indexOf(entry.id);
+              const canMove = canReorder && !reorder.isPending && activeIndex >= 0;
+              return (
+                <StatusRow
+                  key={entry.id}
+                  entry={entry}
+                  label={entry.is_system ? labelOf(entry.key) : entry.name}
+                  description={entry.is_system
+                    ? t(($) => $.issue_statuses.built_in_descriptions[entry.key as BuiltInIssueStatus])
+                    : entry.description}
+                  canManage={canManage}
+                  canReorder={canReorder && !entry.archived_at}
+                  isReordering={reorder.isPending}
+                  onEdit={() => onEdit(entry)}
+                  onArchive={() => onArchive(entry)}
+                  onMoveUp={canMove && activeIndex > 0
+                    ? () => move(index, order.findIndex((s) => s.id === sortableIds[activeIndex - 1]))
+                    : undefined}
+                  onMoveDown={canMove && activeIndex < sortableIds.length - 1
+                    ? () => move(index, order.findIndex((s) => s.id === sortableIds[activeIndex + 1]))
+                    : undefined}
+                />
+              );
+            })}
           </SortableContext>
         </DndContext>
       </div>
@@ -347,47 +371,33 @@ function CategorySection({
   );
 }
 
-function BuiltInRow({
+function StatusRow({
   entry,
   label,
   description,
+  canManage,
+  canReorder,
+  isReordering,
+  onEdit,
+  onArchive,
+  onMoveUp,
+  onMoveDown,
 }: {
   entry: IssueStatusEntry;
   label: string;
   description: string;
-}) {
-  return (
-    <div className="flex min-h-12 items-center gap-3 px-4 py-2">
-      <StatusIcon
-        status={entry.key}
-        category={normalizeIssueStatusCategory(entry.category) ?? "unstarted"}
-        className="size-4"
-      />
-      <div className="min-w-0">
-        <p className="truncate text-body font-medium">{label}</p>
-        <p className="truncate text-caption text-muted-foreground">{description}</p>
-      </div>
-    </div>
-  );
-}
-
-function CustomStatusRow({
-  entry,
-  canManage,
-  canReorder,
-  onEdit,
-  onArchive,
-}: {
-  entry: IssueStatusEntry;
   canManage: boolean;
   canReorder: boolean;
+  isReordering: boolean;
   onEdit: () => void;
   onArchive: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }) {
   const { t } = useT("settings");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: entry.id,
-    disabled: !canReorder,
+    disabled: !canReorder || isReordering,
   });
 
   const archived = Boolean(entry.archived_at);
@@ -396,23 +406,20 @@ function CustomStatusRow({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`group/row relative flex min-h-12 items-center gap-3 bg-card px-4 py-2 ${isDragging ? "z-10 shadow-[var(--surface-shadow)]" : ""} ${archived ? "opacity-60" : ""}`}
+      className={`group/row relative flex min-h-12 items-center gap-2 bg-card px-2 py-2 motion-reduce:transition-none! ${isDragging ? "z-10 shadow-[var(--surface-shadow)]" : ""} ${archived ? "opacity-60" : ""}`}
     >
-      {/* The handle rides inside the row's own left padding instead of taking a
-          column of its own. A reserved gutter indents every status away from
-          the card edge — including the built-in rows, which can never be
-          dragged — and that indent is what the list reads as. (MUL-6422) */}
-      {canReorder && (
+      {canReorder ? (
         <button
           type="button"
-          aria-label={t(($) => $.issue_statuses.actions.reorder, { name: entry.name })}
-          className="absolute left-0 top-1/2 flex w-4 -translate-y-1/2 cursor-grab justify-center text-faint-foreground opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 active:cursor-grabbing"
+          disabled={isReordering}
+          aria-label={t(($) => $.issue_statuses.actions.reorder, { name: label })}
+          className="flex size-6 shrink-0 touch-none items-center justify-center rounded cursor-grab text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring active:cursor-grabbing [@media(pointer:coarse)]:size-11"
           {...attributes}
           {...listeners}
         >
           <GripVertical className="size-4" />
         </button>
-      )}
+      ) : <span className="size-6 shrink-0 [@media(pointer:coarse)]:size-11" />}
       <StatusIcon
         status={entry.key}
         category={normalizeIssueStatusCategory(entry.category) ?? "unstarted"}
@@ -424,7 +431,7 @@ function CustomStatusRow({
           every status nobody had described. */}
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-body font-medium">{entry.name}</span>
+          <span className="truncate text-body font-medium">{label}</span>
           {archived && (
             <Tooltip>
               <TooltipTrigger
@@ -438,8 +445,8 @@ function CustomStatusRow({
             </Tooltip>
           )}
         </div>
-        {entry.description && (
-          <p className="truncate text-caption text-muted-foreground">{entry.description}</p>
+        {description && (
+          <p className="truncate text-caption text-muted-foreground">{description}</p>
         )}
       </div>
       {canManage && !archived && (
@@ -449,13 +456,23 @@ function CustomStatusRow({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={t(($) => $.issue_statuses.actions.open, { name: entry.name })}
+                aria-label={t(($) => $.issue_statuses.actions.open, { name: label })}
+                className="shrink-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 data-popup-open:opacity-100 [@media(hover:hover)]:opacity-0 [@media(pointer:coarse)]:size-11 [@media(pointer:coarse)]:opacity-100"
               >
                 <MoreHorizontal className="size-4" />
               </Button>
             }
           />
           <DropdownMenuContent align="end">
+            <DropdownMenuItem disabled={!onMoveUp} onClick={onMoveUp}>
+              <ArrowUp className="size-4" />
+              {t(($) => $.issue_statuses.actions.move_up)}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!onMoveDown} onClick={onMoveDown}>
+              <ArrowDown className="size-4" />
+              {t(($) => $.issue_statuses.actions.move_down)}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onEdit}>
               <Pencil className="size-4" />
               {t(($) => $.issue_statuses.actions.edit)}

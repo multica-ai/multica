@@ -468,23 +468,19 @@ func (h *Handler) publishIssueStatusChanged(workspaceID string, actor db.Member,
 	})
 }
 
-// ReorderIssueStatusesRequest carries one category's custom statuses in their
-// new order. Reordering is scoped to a category because position is
-// intra-category: a status can only move relative to its own column.
-//
-// `ids` must name EVERY active custom status in the category. A partial order
-// is rejected rather than applied, because positions are assigned from the
-// array index: reordering a subset would write positions that collide with the
-// rows left out of it.
+// ReorderIssueStatusesRequest orders a category's active statuses. IncludeSystem
+// opts into the complete set; omitted/false preserves the custom-only API used
+// by installed clients. Partial sets are rejected in either mode.
 type ReorderIssueStatusesRequest struct {
-	Category string   `json:"category"`
-	IDs      []string `json:"ids"`
+	Category      string   `json:"category"`
+	IDs           []string `json:"ids"`
+	IncludeSystem bool     `json:"include_system"`
 }
 
-// ReorderIssueStatuses rewrites the intra-category order of a category's custom
+// ReorderIssueStatuses rewrites the intra-category order of a category's
 // statuses, atomically.
 //
-// Everything happens inside ONE transaction holding the catalog's SHARED lock,
+// Everything happens inside ONE transaction holding the catalog's EXCLUSIVE lock,
 // which is the archive path's counterpart. That is not decoration:
 //
 //   - Validating outside the transaction leaves a window. "Validate A and B →
@@ -544,27 +540,30 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
-	// SHARED side of the catalog lock: it does not block other reorders or
-	// issue writes, only the EXCLUSIVE archive path. That is what closes the
-	// validate-then-write window.
-	if err := qtx.LockIssueStatusCatalogShared(r.Context(), wsUUID); err != nil {
+	// Serialize reorders as well as create/archive, including legacy requests
+	// that reuse custom rows' existing slots among movable built-ins.
+	if err := qtx.LockIssueStatusCatalog(r.Context(), wsUUID); err != nil {
 		slog.Warn("ReorderIssueStatuses lock failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to reorder issue statuses")
 		return
 	}
 
-	// The authoritative set, read under the lock. Comparing the payload against
-	// it covers every rejection case at once: a built-in, an archived status,
-	// another category's status, another workspace's row, and — the case a
-	// per-id check misses — an active status the payload simply left out.
-	active, err := qtx.ListActiveCustomIssueStatusEntries(r.Context(), db.ListActiveCustomIssueStatusEntriesParams{
-		WorkspaceID: wsUUID,
-		Category:    category,
+	// Read the authoritative set under the lock, including built-ins only when
+	// the caller opts in. No schema or response change is needed.
+	catalog, err := qtx.ListIssueStatusEntries(r.Context(), db.ListIssueStatusEntriesParams{
+		WorkspaceID:     wsUUID,
+		IncludeArchived: false,
 	})
 	if err != nil {
 		slog.Warn("ReorderIssueStatuses list failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to reorder issue statuses")
 		return
+	}
+	active := make([]db.IssueStatus, 0, len(catalog))
+	for _, entry := range catalog {
+		if entry.Category == category && (req.IncludeSystem || !entry.IsSystem) {
+			active = append(active, entry)
+		}
 	}
 	activeIDs := make(map[string]struct{}, len(active))
 	for _, entry := range active {
@@ -588,8 +587,8 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 		case err != nil:
 			slog.Warn("load issue status for reorder failed", append(logger.RequestAttrs(r), "error", err)...)
 			writeError(w, http.StatusInternalServerError, "failed to reorder issue statuses")
-		case entry.IsSystem:
-			writeError(w, http.StatusForbidden, "built-in statuses cannot be reordered")
+		case entry.IsSystem && !req.IncludeSystem:
+			writeError(w, http.StatusForbidden, "include_system is required to reorder built-in statuses")
 		case entry.ArchivedAt.Valid:
 			writeError(w, http.StatusConflict, "archived statuses cannot be reordered")
 		case entry.Category != category:
@@ -603,13 +602,25 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 	// Applying it would assign positions from the array index and collide with
 	// the omitted row, so the whole request is refused.
 	if len(active) != len(ids) {
-		writeError(w, http.StatusConflict, "ids must name every active custom status in the category")
+		writeError(w, http.StatusConflict, "ids must name every active status in the requested reorder scope")
 		return
 	}
 
+	positions := make([]float64, len(ids))
+	for i := range ids {
+		if req.IncludeSystem {
+			positions[i] = float64(i + 1)
+		} else {
+			// Old clients reorder only the custom slots, without moving built-ins
+			// or colliding with their newly configurable positions.
+			positions[i] = active[i].Position
+		}
+	}
 	affected, err := qtx.ReorderIssueStatusEntries(r.Context(), db.ReorderIssueStatusEntriesParams{
-		Ids:         ids,
-		WorkspaceID: wsUUID,
+		Ids:           ids,
+		WorkspaceID:   wsUUID,
+		Positions:     positions,
+		IncludeSystem: req.IncludeSystem,
 	})
 	if err != nil {
 		slog.Warn("ReorderIssueStatuses failed", append(logger.RequestAttrs(r), "error", err)...)

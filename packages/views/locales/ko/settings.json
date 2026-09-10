@@ -9,10 +9,18 @@
     "archived_hint": "새로 지정할 수 없습니다. 이미 이 상태인 태스크는 그대로 유지됩니다.",
     "reorder_failed": "새 순서를 저장하지 못했습니다.",
     "actions": {
+      "move_up": "위로 이동",
+      "move_down": "아래로 이동",
       "open": "{{name}} 작업",
       "edit": "편집",
       "archive": "보관",
       "reorder": "{{name}} 순서 변경"
+    },
+    "reorder_hint": "카테고리 내에서 상태를 드래그하여 보드, 목록, 상태 메뉴의 순서를 변경하세요.",
+    "built_in_dialog": {
+      "title": "기본 상태는 변경할 수 없습니다",
+      "description": "기본 상태는 Multica 시스템 동작에 사용되므로 편집하거나 보관할 수 없습니다. 카테고리 내 순서는 변경할 수 있습니다.",
+      "confirm": "확인"
     },
     "editor": {
       "create_title": "새 상태",

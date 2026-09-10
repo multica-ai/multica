@@ -152,13 +152,17 @@ describe("compareIssueStatusEntries", () => {
     expect(sorted.map((e) => e.key)).toEqual(["alpha", "zeta"]);
   });
 
-  // The built-in is seeded at position 0 and cannot be PATCHed, so it is
-  // permanently the head of its category. Reorder writes start at 1 for that
-  // reason; if the comparator ever let a custom status sort ahead of it, the
-  // picker would open on a status the workspace never chose as its default.
-  it("keeps the built-in ahead of custom statuses in its category", () => {
+  it("preserves the initial seeded order", () => {
     const builtIn = { ...at("in_review", "in_review", 0), is_system: true };
     const sorted = [at("qa", "in_review", 1), builtIn].sort(compareIssueStatusEntries);
     expect(sorted.map((e) => e.key)).toEqual(["in_review", "qa"]);
+  });
+  it("honors saved positions before built-in rank", () => {
+    const sorted = [
+      { ...at("in_progress", "started", 3), is_system: true },
+      { ...at("in_review", "started", 1), is_system: true },
+      at("qa", "started", 2),
+    ].sort(compareIssueStatusEntries);
+    expect(sorted.map((e) => e.key)).toEqual(["in_review", "qa", "in_progress"]);
   });
 });

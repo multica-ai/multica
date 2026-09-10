@@ -9,10 +9,18 @@
     "archived_hint": "Retired from new assignments. Issues already on it keep it.",
     "reorder_failed": "Could not save the new order.",
     "actions": {
+      "move_up": "Move up",
+      "move_down": "Move down",
       "open": "Actions for {{name}}",
       "edit": "Edit",
       "archive": "Archive",
       "reorder": "Reorder {{name}}"
+    },
+    "reorder_hint": "Drag statuses within a category to set their order in boards, lists, and status menus.",
+    "built_in_dialog": {
+      "title": "Built-in status cannot be changed",
+      "description": "Built-in statuses are used by Multica and cannot be edited or archived. You can still change their order within the category.",
+      "confirm": "Got it"
     },
     "editor": {
       "create_title": "New status",

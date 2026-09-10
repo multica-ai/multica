@@ -259,6 +259,7 @@ WHERE workspace_id = $1::uuid
   AND ($2::bool OR archived_at IS NULL)
 ORDER BY
     CASE category WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
+    position,
 	CASE WHEN is_system THEN 0 ELSE 1 END,
 	CASE key
 		WHEN 'backlog' THEN 0
@@ -270,7 +271,6 @@ ORDER BY
 		WHEN 'cancelled' THEN 6
 		ELSE 7
 	END,
-    position,
     key
 `
 
@@ -279,8 +279,8 @@ type ListIssueStatusEntriesParams struct {
 	IncludeArchived bool        `json:"include_archived"`
 }
 
-// Ordered by the four lifecycle groups, then built-ins before custom
-// rows, then stable concrete-status order / custom position.
+// Position orders both built-in and custom rows inside each lifecycle group.
+// Built-in order is only a tiebreak for the original seeded positions.
 func (q *Queries) ListIssueStatusEntries(ctx context.Context, arg ListIssueStatusEntriesParams) ([]IssueStatus, error) {
 	rows, err := q.db.Query(ctx, listIssueStatusEntries, arg.WorkspaceID, arg.IncludeArchived)
 	if err != nil {
@@ -384,30 +384,36 @@ func (q *Queries) LockIssueStatusCatalogShared(ctx context.Context, workspaceID 
 
 const reorderIssueStatusEntries = `-- name: ReorderIssueStatusEntries :execrows
 UPDATE issue_status s
-SET position = v.ordinality::int,
+SET position = ($1::float8[])[v.ordinality],
     updated_at = now()
-FROM unnest($2::uuid[]) WITH ORDINALITY AS v(id, ordinality)
+FROM unnest($4::uuid[]) WITH ORDINALITY AS v(id, ordinality)
 WHERE s.id = v.id
-  AND s.workspace_id = $1::uuid
-  AND s.is_system = FALSE
+  AND s.workspace_id = $2::uuid
+  AND ($3::bool OR s.is_system = FALSE)
   AND s.archived_at IS NULL
 `
 
 type ReorderIssueStatusEntriesParams struct {
-	WorkspaceID pgtype.UUID   `json:"workspace_id"`
-	Ids         []pgtype.UUID `json:"ids"`
+	Positions     []float64     `json:"positions"`
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	IncludeSystem bool          `json:"include_system"`
+	Ids           []pgtype.UUID `json:"ids"`
 }
 
 // Atomic intra-category reorder. One statement, so a failure leaves the whole
 // order untouched instead of the partially-applied prefix a per-row PATCH loop
 // produces.
 //
-// Positions start at 1 because the category's built-in is seeded at 0 and can
-// never move (is_system rows are excluded here, as they are in every write).
-// Archived rows are excluded too: they are frozen, and letting one into the
-// write sequence is exactly what made a drag past an archived row half-commit.
+// Full-catalog callers may reorder built-ins, without changing their semantics.
+// Legacy custom-only callers preserve the positions occupied by custom rows.
+// Archived rows remain frozen.
 func (q *Queries) ReorderIssueStatusEntries(ctx context.Context, arg ReorderIssueStatusEntriesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, reorderIssueStatusEntries, arg.WorkspaceID, arg.Ids)
+	result, err := q.db.Exec(ctx, reorderIssueStatusEntries,
+		arg.Positions,
+		arg.WorkspaceID,
+		arg.IncludeSystem,
+		arg.Ids,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -432,8 +438,8 @@ ON CONFLICT DO NOTHING
 // statuses plus custom ones, all stored in four lifecycle categories.
 // Idempotent seed of the 7 built-ins. Safe to call concurrently from multiple
 // pods during a rolling deploy: the unique (workspace_id, key) index makes a
-// losing racer a no-op rather than an error. Positions are intra-category, and
-// each built-in is the only member of its category at seed time, so all 0.
+// losing racer a no-op rather than an error. Initial positions are 0; the list's
+// built-in tiebreak preserves the seed order until an admin reorders the group.
 func (q *Queries) SeedIssueStatusEntries(ctx context.Context, workspaceID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, seedIssueStatusEntries, workspaceID)
 	return err

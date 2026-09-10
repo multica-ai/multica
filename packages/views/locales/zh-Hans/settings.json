@@ -9,10 +9,18 @@
     "archived_hint": "已停止用于新的指派，已经在该状态上的任务保持不变。",
     "reorder_failed": "排序保存失败。",
     "actions": {
+      "move_up": "上移",
+      "move_down": "下移",
       "open": "{{name}} 的操作",
       "edit": "编辑",
       "archive": "归档",
       "reorder": "拖动排序 {{name}}"
+    },
+    "reorder_hint": "拖动分类内的状态，调整看板、列表和状态菜单中的顺序。",
+    "built_in_dialog": {
+      "title": "无法修改内置状态",
+      "description": "内置状态用于 Multica 的系统行为，不能编辑或归档。你仍可调整它们在分类内的顺序。",
+      "confirm": "知道了"
     },
     "editor": {
       "create_title": "新建状态",

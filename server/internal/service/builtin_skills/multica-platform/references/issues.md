@@ -241,6 +241,11 @@ unstarted, in_progress means started, done means done, cancelled means closed
 for custom statuses. This encoding does not grant the corresponding built-in
 behavior. Built-in keys themselves are unchanged.
 
+Workspace admins can reorder active built-in and custom statuses within each
+category in Settings. Display order is shared by boards, lists and status
+menus; it never changes automation or a status's category. Built-in definitions
+still cannot be edited or archived.
+
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
   the assigned agent then.

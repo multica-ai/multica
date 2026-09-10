@@ -131,10 +131,13 @@ export function statusColumnKeys(
   catalog: Pick<IssueStatusCatalog, "statuses">,
 ): IssueStatus[] {
   const entries = [...catalog.statuses].sort(compareIssueStatusEntries);
+  const knownKeys = new Set(entries.map((entry) => entry.key));
   return ALL_STATUSES.flatMap((category) => [
-    ...BUILT_IN_STATUS_ORDER.filter((key) => BUILT_IN_STATUS_CATEGORY[key] === category),
+    // Preserve cold-load/missing-entry fallbacks, but never pin loaded built-ins.
+    ...BUILT_IN_STATUS_ORDER.filter((key) =>
+      BUILT_IN_STATUS_CATEGORY[key] === category && !knownKeys.has(key),
+    ),
     ...entries.filter((entry) =>
-      !isBuiltInIssueStatus(entry.key) &&
       normalizeIssueStatusCategory(entry.category) === category,
     ).map((entry) => entry.key),
   ]);

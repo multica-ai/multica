@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { IssueStatusEntry } from "@multica/core/types";
 import en from "../../locales/en/settings.json";
 import { IssueStatusesTab } from "./issue-statuses-tab";
@@ -169,15 +169,15 @@ describe("IssueStatusesTab", () => {
     expect(screen.queryByRole("switch")).toBeNull();
   });
 
-  it("does not offer reorder when a category holds a single custom status", () => {
+  it("allows a single custom status to move relative to built-ins", () => {
     catalog = [BUILT_IN_IN_REVIEW, entry({ key: "qa", name: "QA" })];
     render(<IssueStatusesTab />);
 
     expect(
-      screen.queryByLabelText(
+      screen.getByLabelText(
         en.issue_statuses.actions.reorder.replace("{{name}}", "QA"),
       ),
-    ).toBeNull();
+    ).toBeInTheDocument();
   });
 
   it("offers reorder once a category holds two", () => {
@@ -191,5 +191,54 @@ describe("IssueStatusesTab", () => {
     expect(
       screen.getByLabelText(en.issue_statuses.actions.reorder.replace("{{name}}", "QA")),
     ).toBeInTheDocument();
+  });
+
+  it("saves the full active order, including built-ins, from the menu", async () => {
+    catalog = [BUILT_IN_IN_REVIEW, entry({ key: "qa", name: "QA" })];
+    render(<IssueStatusesTab />);
+    fireEvent.click(screen.getByLabelText(en.issue_statuses.actions.open.replace("{{name}}", "QA")));
+    fireEvent.click(await screen.findByRole("menuitem", { name: en.issue_statuses.actions.move_up }));
+    expect(reorderMutate).toHaveBeenCalledWith(
+      { category: "started", ordered: [catalog[1], catalog[0]] },
+      expect.any(Object),
+    );
+  });
+
+  it("excludes archived rows from reorder and restores the order after failure", async () => {
+    catalog = [
+      BUILT_IN_IN_REVIEW,
+      entry({ key: "old", name: "Old", archived_at: "2026-01-01", position: 1 }),
+      entry({ key: "qa", name: "QA", position: 2 }),
+    ];
+    render(<IssueStatusesTab />);
+    fireEvent.click(screen.getByRole("switch"));
+    expect(screen.getByText("Old")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(en.issue_statuses.actions.open.replace("{{name}}", "QA")));
+    fireEvent.click(await screen.findByRole("menuitem", { name: en.issue_statuses.actions.move_up }));
+    expect(reorderMutate.mock.calls[0]![0].ordered.map((s: IssueStatusEntry) => s.key)).toEqual(["qa", "in_review"]);
+    const callbacks = reorderMutate.mock.calls[0]![1];
+    act(() => {
+      callbacks.onError(new Error("Could not save order"));
+      callbacks.onSettled();
+    });
+    const section = screen.getByRole("region", { name: en.issue_statuses.category_labels.started });
+    expect(within(section).getAllByRole("button", { name: /^Reorder / }).map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Reorder in_review", "Reorder QA",
+    ]);
+  });
+
+  it.each(["edit", "archive"] as const)("explains the built-in restriction on %s", async (action) => {
+    catalog = [BUILT_IN_IN_REVIEW];
+    render(<IssueStatusesTab />);
+    const trigger = screen.getByLabelText(
+      en.issue_statuses.actions.open.replace("{{name}}", "in_review"),
+    );
+    expect(trigger.className).toContain("group-focus-within/row:opacity-100");
+    expect(trigger.className).toContain("data-popup-open:opacity-100");
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("menuitem", { name: en.issue_statuses.actions[action] }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(en.issue_statuses.built_in_dialog.description)).toBeInTheDocument();
+    expect(screen.queryByLabelText(en.issue_statuses.editor.name)).toBeNull();
   });
 });
