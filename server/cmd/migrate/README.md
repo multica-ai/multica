@@ -2,12 +2,12 @@
 
 ## Issue description search index retirement
 
-Migrations 461 and 462 retire the two historical issue-description search
+Migrations 463 and 464 retire the two historical issue-description search
 indexes: `idx_issue_description_bigm` and `idx_issue_description_trgm`.
 `SearchIssues` now scans the selected workspace's issue candidates and evaluates
 description matches during projection, so neither global description GIN is
 read. Fresh installs also skip migration 139's historical trigram build. Do not
-repair or recreate these indexes after applying migrations 461 and 462.
+repair or recreate these indexes after applying migrations 463 and 464.
 
 The down migrations restore the trigram index everywhere and also restore the
 CJK-friendly bigram index where `gin_bigm_ops` is available. Both use
