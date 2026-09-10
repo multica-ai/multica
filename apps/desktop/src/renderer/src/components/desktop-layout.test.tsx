@@ -22,6 +22,7 @@ vi.mock("@/hooks/use-tab-history", () => ({
     canGoForward: false,
     historyEntries: [],
     historyIndex: 0,
+    browsingHistory: [],
     goBack: vi.fn(),
     goForward: vi.fn(),
     goToHistoryIndex: vi.fn(),

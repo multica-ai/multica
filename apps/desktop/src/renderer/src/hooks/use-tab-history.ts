@@ -1,5 +1,9 @@
 import { useCallback, useEffect } from "react";
-import { useTabStore, useActiveTabHistory } from "@/stores/tab-store";
+import {
+  useTabStore,
+  useActiveBrowsingHistory,
+  useActiveTabHistory,
+} from "@/stores/tab-store";
 
 /**
  * Shell back/forward for the active tab (MUL-4741 session architecture).
@@ -12,6 +16,7 @@ import { useTabStore, useActiveTabHistory } from "@/stores/tab-store";
  */
 export function useTabHistory() {
   const { historyIndex, historyLength, historyEntries } = useActiveTabHistory();
+  const browsingHistory = useActiveBrowsingHistory();
 
   const canGoBack = historyIndex > 0;
   const canGoForward = historyIndex < historyLength - 1;
@@ -33,6 +38,7 @@ export function useTabHistory() {
     canGoForward,
     historyEntries,
     historyIndex,
+    browsingHistory,
     goBack,
     goForward,
     goToHistoryIndex,

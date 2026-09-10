@@ -19,7 +19,9 @@ import {
   ResourceLeadingVisual,
   useTabPresentation,
 } from "@multica/views/layout";
+import { useNavigation } from "@multica/views/navigation";
 import { useTabHistory } from "@/hooks/use-tab-history";
+import { resourceKeyForUrl } from "@/stores/tab-store";
 
 export const WINDOW_TOOLBAR_CLEARANCE = 208;
 const LONG_PRESS_DURATION_MS = 500;
@@ -112,7 +114,7 @@ function useLongPress(
 }
 
 export function historyIndicesForMenu(
-  mode: HistoryMenuMode,
+  mode: Exclude<HistoryMenuMode, "all">,
   currentIndex: number,
   historyLength: number,
 ): number[] {
@@ -122,40 +124,42 @@ export function historyIndicesForMenu(
       (_, offset) => currentIndex - offset - 1,
     );
   }
-  if (mode === "forward") {
-    return Array.from(
-      {
-        length: Math.min(
-          Math.max(0, historyLength - currentIndex - 1),
-          MAX_HISTORY_MENU_ITEMS,
-        ),
-      },
-      (_, offset) => currentIndex + offset + 1,
-    );
-  }
   return Array.from(
-    { length: historyLength },
-    (_, index) => historyLength - index - 1,
-  )
-    .filter((index) => index !== currentIndex)
+    {
+      length: Math.min(
+        Math.max(0, historyLength - currentIndex - 1),
+        MAX_HISTORY_MENU_ITEMS,
+      ),
+    },
+    (_, offset) => currentIndex + offset + 1,
+  );
+}
+
+export function browsingHistoryForMenu(
+  browsingHistory: string[],
+  currentUrl: string | undefined,
+): string[] {
+  const currentResource = currentUrl
+    ? resourceKeyForUrl(currentUrl)
+    : undefined;
+  return browsingHistory
+    .filter((url) => resourceKeyForUrl(url) !== currentResource)
     .slice(0, MAX_HISTORY_MENU_ITEMS);
 }
 
 function HistoryMenuItem({
-  index,
   url,
   onSelect,
 }: {
-  index: number;
   url: string;
-  onSelect: (index: number) => void;
+  onSelect: () => void;
 }) {
   const { visual, title } = useTabPresentation(url);
 
   return (
     <DropdownMenuItem
       className="h-8 min-w-0 gap-2 px-2"
-      onClick={() => onSelect(index)}
+      onClick={onSelect}
     >
       <ResourceLeadingVisual visual={visual} />
       <span className="min-w-0 flex-1 truncate">{title}</span>
@@ -169,10 +173,12 @@ export function WindowToolbar() {
     canGoForward,
     historyEntries,
     historyIndex,
+    browsingHistory,
     goBack,
     goForward,
     goToHistoryIndex,
   } = useTabHistory();
+  const { push } = useNavigation();
   const [menu, setMenu] = useState<OpenHistoryMenu | null>(null);
 
   const openMenu = useCallback((mode: HistoryMenuMode, anchor: HTMLElement) => {
@@ -191,10 +197,18 @@ export function WindowToolbar() {
 
   const menuIndices = useMemo(
     () =>
-      menu
+      menu && menu.mode !== "all"
         ? historyIndicesForMenu(menu.mode, historyIndex, historyEntries.length)
         : [],
     [historyEntries.length, historyIndex, menu],
+  );
+  const browsingMenuEntries = useMemo(
+    () =>
+      browsingHistoryForMenu(
+        browsingHistory,
+        historyEntries[historyIndex],
+      ),
+    [browsingHistory, historyEntries, historyIndex],
   );
   const menuLabel =
     menu?.mode === "back"
@@ -212,6 +226,13 @@ export function WindowToolbar() {
     },
     [goToHistoryIndex],
   );
+  const selectBrowsingHistory = useCallback(
+    (url: string) => {
+      push(url);
+      setMenu(null);
+    },
+    [push],
+  );
 
   return (
     <div
@@ -228,7 +249,7 @@ export function WindowToolbar() {
         />
         <button
           type="button"
-          disabled={historyEntries.length <= 1}
+          disabled={browsingMenuEntries.length === 0}
           aria-label="History"
           aria-haspopup="menu"
           aria-expanded={menu?.mode === "all"}
@@ -317,14 +338,21 @@ export function WindowToolbar() {
         >
           <DropdownMenuGroup>
             <DropdownMenuLabel>{menuLabel}</DropdownMenuLabel>
-            {menuIndices.map((index) => (
-              <HistoryMenuItem
-                key={`${index}:${historyEntries[index]}`}
-                index={index}
-                url={historyEntries[index]}
-                onSelect={selectHistoryIndex}
-              />
-            ))}
+            {menu?.mode === "all"
+              ? browsingMenuEntries.map((url) => (
+                  <HistoryMenuItem
+                    key={url}
+                    url={url}
+                    onSelect={() => selectBrowsingHistory(url)}
+                  />
+                ))
+              : menuIndices.map((index) => (
+                  <HistoryMenuItem
+                    key={`${index}:${historyEntries[index]}`}
+                    url={historyEntries[index]}
+                    onSelect={() => selectHistoryIndex(index)}
+                  />
+                ))}
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
