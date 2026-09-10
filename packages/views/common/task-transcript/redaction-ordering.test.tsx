@@ -97,4 +97,40 @@ describe("redaction runs before every clip", () => {
     expect(view.container.querySelector(".hljs")).not.toBeNull();
     expect(view.container.textContent).not.toContain(fakeKey);
   });
+
+  it("hides a secret in a tool argument past the 120-character summary cut", async () => {
+    // Tool input reaches the screen as the row summary and, for an edit, as the
+    // diff body. Nothing upstream redacts it, so the record itself has to.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "exec_command",
+        // Positioned so the 120-character cut lands inside the key: clipping
+        // first leaves its head on screen with nothing left to match against.
+        input: { command: "deploy --key " + "x".repeat(96) + " " + fakeKey } },
+    ]);
+    const view = renderWithI18n(<QueryClientProvider client={client}>
+      <InlineCommentRun run={{ task, commentId: "comment", hasReply: false }} />
+    </QueryClientProvider>);
+
+    await screen.findByText(/deploy --key/);
+    expect(view.container.textContent).not.toContain("AKIA123456");
+    expect(view.container.querySelector("[title]")?.getAttribute("title")).not.toContain("AKIA123456");
+    client.clear();
+  });
+
+  it("hides a PEM spanning several lines of an edit diff", () => {
+    // The PEM rule needs BEGIN and END together, so redacting the diff line by
+    // line can never match it. Redacting the argument before it is split into
+    // lines can.
+    const material = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=";
+    const view = renderWithI18n(<StepBody item={item([
+      { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "Edit", input: {
+        file_path: "config.ts",
+        old_string: "const key = '';",
+        new_string: `const key = \`-----BEGIN PRIVATE KEY-----\n${material}\n-----END PRIVATE KEY-----\`;`,
+      } },
+    ])} />);
+
+    expect(view.container.textContent).not.toContain(material);
+  });
 });

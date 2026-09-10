@@ -119,10 +119,11 @@ describe("useRealtimeSync — ws instance change", () => {
 
     // Should have called invalidateQueries for all workspace-scoped keys
     // (16 workspace-scoped [incl. property definitions] + 6 per-issue
-    // prefixes + the workspace working-agents projection + 5 per-chat
+    // prefixes + the workspace working-agents projection + 4 per-chat
     // prefixes + 1 workspaceKeys.list() + 1 cross-workspace inbox unread
-    // summary = 31 calls)
-    expect(invalidateSpy).toHaveBeenCalledTimes(31);
+    // summary = 30 calls). `task-messages` is not among them; the connect
+    // handler owns that one — see the per-chat-session test below.
+    expect(invalidateSpy).toHaveBeenCalledTimes(30);
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -230,7 +231,14 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(["chat", "messages"]);
     expect(calls).toContainEqual(["chat", "messages-page"]);
     expect(calls).toContainEqual(["chat", "pending-task"]);
-    expect(calls).toContainEqual(["task-messages"]);
+    // Not `task-messages`. Its repair has a single owner — the connect handler,
+    // which fires for the new instance's handshake and for every reconnect.
+    // Invalidating it here too made a reconnect issue the same unpaginated
+    // transcript request twice in a row (MUL-7227), and invalidation cannot do
+    // the job anyway when the read it distrusts is still in flight; the connect
+    // handler cancels first. Covered by
+    // use-realtime-sync-connect-backfill.test.tsx.
+    expect(calls).not.toContainEqual(["task-messages"]);
   });
 
   it("invalidates per-chat-session caches after an established ws reconnects", () => {

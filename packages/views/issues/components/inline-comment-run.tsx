@@ -257,7 +257,10 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
       {grouped ? <>
         {row.steps.length > limit && <button type="button" className="py-1 text-muted-foreground" onClick={() => setLimit((value) => value + 12)}>
           {t(($) => $.inline_run.show_earlier, { count: row.steps.length - limit })}</button>}
-        {row.steps.slice(-limit).map((step) => <InlineStep key={step.seq} row={step} live={live} formatText={formatText} />)}
+        {/* Redacted here rather than with the group row: a fold can hold any
+            number of calls and shows none of their bodies until it is opened,
+            so this slice is the first bounded set (MUL-7227). */}
+        {row.steps.slice(-limit).map((step) => <InlineStep key={step.seq} row={redactTraceStep(step)} live={live} formatText={formatText} />)}
       </> : call ? <>
         {row.call && <StepBody item={row.call} />}
         {row.result && <StepBody item={row.result} />}

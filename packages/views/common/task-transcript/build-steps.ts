@@ -193,21 +193,28 @@ export function groupSteps(steps: TraceStep[]): TraceRow[] {
 }
 
 /**
- * Redact every body this row can put on screen.
+ * Redact every value this row can put on screen by itself.
  *
  * Applied to the rows actually being rendered rather than to the whole
  * transcript: scanning every message on each live flush is what made the
  * client stall (MUL-7227), and the rows on screen are a bounded slice of it.
  * What must not change is the order — a row is redacted whole, before its
- * summary is cut to 200 characters and before `StepBody` reaches its display
- * clip, because a secret straddling either cut cannot be matched afterwards.
+ * summary is cut to 120 characters and before `StepBody` reaches its display
+ * clip, because a value straddling either cut cannot be matched afterwards.
+ *
+ * A group is deliberately left alone. It folds an unbounded number of calls
+ * behind one line that shows only the tool name and a count, so redacting its
+ * members here would put the whole fold back on the hot path and undo the
+ * bound this function exists to keep — a thousand folded reads is one visible
+ * row. Members are redacted where they are revealed, against the slice that is
+ * actually rendered.
  */
 export function redactTraceRow(row: TraceRow): TraceRow {
-  if (isGroupRow(row)) return { ...row, steps: row.steps.map(redactCallStep) };
+  if (isGroupRow(row)) return row;
   return redactTraceStep(row);
 }
 
-/** `redactTraceRow` for a single step. */
+/** `redactTraceRow` for a single step — including a revealed group member. */
 export function redactTraceStep(step: TraceStep): TraceStep {
   if (step.kind === "call") return redactCallStep(step);
   return { ...step, item: redactTimelineItem(step.item) };

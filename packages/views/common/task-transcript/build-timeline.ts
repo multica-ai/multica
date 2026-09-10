@@ -62,21 +62,61 @@ export function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
 }
 
 /**
- * Redact one record's bodies.
+ * Redact everything one record can put on screen.
  *
- * Whole bodies, before anything downstream clips or summarizes them. Every
- * consumer of a body cuts first and redacts second — `StepBody` at its display
- * clip, the step summaries at 200 characters — so a pattern that spans the cut
- * loses the tail it needs to match and the head renders. Redacting the record
- * first is what made that ordering harmless, and it stays harmless as long as
- * a raw record never reaches a renderer.
+ * Whole values, before anything downstream clips, summarizes, splits or
+ * highlights them. Every consumer cuts first and redacts second — `StepBody`
+ * at its display clip, the argument summary at 120 characters, the diff
+ * surface line by line — and a pattern only matches while both of its ends are
+ * present. Redacting the record first is what makes all of that harmless, and
+ * it only stays harmless while no raw record reaches a renderer.
+ *
+ * `input` is included, and it is not decoration: a tool's arguments are
+ * displayed as prominently as its output — as the row summary, and as the diff
+ * body for an edit, which is built by splitting `old_string` / `new_string`
+ * into lines. Redacting after that split can never match a rule spanning lines,
+ * such as a PEM block; redacting the source before it is split does.
  */
 export function redactTimelineItem(item: TimelineItem): TimelineItem {
   return {
     ...item,
     content: item.content ? redactSecrets(item.content) : item.content,
     output: item.output ? redactSecrets(item.output) : item.output,
+    input: item.input ? (redactUnknown(item.input) as Record<string, unknown>) : item.input,
   };
+}
+
+/**
+ * Redact the strings inside an arbitrary tool-argument value.
+ *
+ * Tool inputs are whatever JSON the agent sent, so the shape is not ours to
+ * assume: `patch_apply` nests per-file bodies, `Edit` keeps them flat. Only
+ * strings are rewritten, and objects are rebuilt only when something in them
+ * changed, so an unaffected input keeps its identity and the memos downstream
+ * keep their hits.
+ */
+function redactUnknown(value: unknown): unknown {
+  if (typeof value === "string") return redactSecrets(value);
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((entry) => {
+      const redacted = redactUnknown(entry);
+      if (redacted !== entry) changed = true;
+      return redacted;
+    });
+    return changed ? next : value;
+  }
+  if (value && typeof value === "object") {
+    let changed = false;
+    const next: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      const redacted = redactUnknown(entry);
+      if (redacted !== entry) changed = true;
+      next[key] = redacted;
+    }
+    return changed ? next : value;
+  }
+  return value;
 }
 
 /**

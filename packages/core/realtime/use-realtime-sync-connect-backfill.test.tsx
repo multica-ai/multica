@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
 import { WSClient } from "../api/ws-client";
-import { useTaskMessages } from "../chat/queries";
+import { chatKeys, useTaskMessages } from "../chat/queries";
 import type { TaskMessagePayload } from "../types/events";
 import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
 
@@ -64,6 +64,68 @@ describe("timeline repair on connect", () => {
     });
 
     await waitFor(() => expect(result.current.data?.map((m) => m.seq)).toEqual([1, 2, 3]));
+    unmount(); ws.disconnect(); qc.clear();
+  });
+
+  it("recovers when the transcript read is still in flight at the handshake", async () => {
+    // The other order, and the harder one: the GET started before the socket
+    // was live, so its answer cannot be trusted however late it arrives.
+    // Invalidating cannot express that — against a fetch already in flight it
+    // does nothing at all — so the read is cancelled and reissued.
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const ws = new WSClient("ws://example.test/ws", { cookieAuth: true });
+    ws.connect();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+
+    let resolveFirst!: (rows: TaskMessagePayload[]) => void;
+    vi.mocked(api.listTaskMessages)
+      .mockImplementationOnce(() => new Promise((done) => { resolveFirst = done; }))
+      .mockResolvedValue([msg(1), msg(2), msg(3)]);
+
+    const { unmount } = renderHook(
+      () => { useRealtimeSync(ws, stores); return useTaskMessages(id, true); },
+      { wrapper },
+    );
+    await waitFor(() => expect(api.listTaskMessages).toHaveBeenCalledTimes(1));
+
+    act(() => { FakeWebSocket.last.onopen?.(); });
+    // The stale snapshot lands after the handshake; it must not be what is kept.
+    await act(async () => { resolveFirst([msg(1)]); await Promise.resolve(); });
+
+    await waitFor(() => expect(
+      (qc.getQueryData(chatKeys.taskMessages(id)) as TaskMessagePayload[] | undefined)?.map((m) => m.seq),
+    ).toEqual([1, 2, 3]));
+    unmount(); ws.disconnect(); qc.clear();
+  });
+
+  it("reads once when an established connection comes back", async () => {
+    // Reconnect runs the workspace-wide recovery as well as this repair, so
+    // `task-messages` had two owners and issued the same unpaginated request
+    // twice, one after the other — sequential, so nothing deduped them.
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const ws = new WSClient("ws://example.test/ws", { cookieAuth: true });
+    ws.connect();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+
+    vi.mocked(api.listTaskMessages).mockResolvedValue([msg(1)]);
+    const { unmount } = renderHook(
+      () => { useRealtimeSync(ws, stores); return useTaskMessages(id, true); },
+      { wrapper },
+    );
+    await waitFor(() => expect(api.listTaskMessages).toHaveBeenCalledTimes(1));
+
+    // First handshake, then a drop and a second one.
+    await act(async () => { FakeWebSocket.last.onopen?.(); await Promise.resolve(); });
+    await waitFor(() => expect(api.listTaskMessages).toHaveBeenCalledTimes(2));
+    vi.mocked(api.listTaskMessages).mockClear();
+
+    await act(async () => { FakeWebSocket.last.onclose?.(); await Promise.resolve(); });
+    await act(async () => { FakeWebSocket.last.onopen?.(); await Promise.resolve(); });
+    await new Promise((done) => setTimeout(done, 50));
+
+    expect(api.listTaskMessages).toHaveBeenCalledTimes(1);
     unmount(); ws.disconnect(); qc.clear();
   });
 });
