@@ -43,6 +43,7 @@ vi.mock("@multica/core/paths", () => ({
 const viewState = vi.hoisted(() => ({
   viewMode: "board",
   grouping: "status",
+  swimlaneGrouping: "assignee",
   cardProperties: {
     priority: false,
     description: false,
@@ -178,5 +179,42 @@ describe("BoardCardContent assignee picker", () => {
 
     expect(container.querySelector('[data-slot="avatar"]')).toBeNull();
     viewState.grouping = "status";
+  });
+
+  it("does not repeat the assignee inside an assignee-grouped swimlane", () => {
+    viewState.viewMode = "swimlane";
+    const issue = makeIssue("member");
+    const { container } = render(
+      <NavigationProvider value={navigation}>
+        <IssueSurfaceActionsProvider actions={actions}>
+          <BoardCardContent issue={issue} editable />
+        </IssueSurfaceActionsProvider>
+      </NavigationProvider>,
+    );
+
+    expect(container.querySelector('[data-slot="avatar"]')).toBeNull();
+    viewState.viewMode = "board";
+  });
+
+  it("keeps empty priority and assignee fields visually silent", () => {
+    viewState.cardProperties.priority = true;
+    const issue = {
+      ...makeIssue("member"),
+      assignee_type: null,
+      assignee_id: null,
+      start_date: null,
+      due_date: null,
+    };
+    const { container } = render(
+      <NavigationProvider value={navigation}>
+        <IssueSurfaceActionsProvider actions={actions}>
+          <BoardCardContent issue={issue} editable />
+        </IssueSurfaceActionsProvider>
+      </NavigationProvider>,
+    );
+
+    expect(container.querySelector("svg")).toBeNull();
+    expect(screen.queryByText("Translated")).not.toBeInTheDocument();
+    viewState.cardProperties.priority = false;
   });
 });

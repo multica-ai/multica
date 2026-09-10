@@ -184,6 +184,16 @@
     "card_properties_section": "Card properties",
     "ascending_title": "Ascending",
     "descending_title": "Descending",
+    "newest_first": "Newest first",
+    "oldest_first": "Oldest first",
+    "highest_priority_first": "Highest priority first",
+    "lowest_priority_first": "Lowest priority first",
+    "earliest_first": "Earliest first",
+    "latest_first": "Latest first",
+    "workflow_order": "Workflow order",
+    "reverse_workflow_order": "Reverse workflow order",
+    "alphabetical_order": "A to Z",
+    "reverse_alphabetical_order": "Z to A",
     "group_status": "Status",
     "group_assignee": "Assignee",
     "group_parent": "Parent issue",
@@ -338,7 +348,8 @@
     "empty_column": "No issues",
     "empty_grouping": "No matching issues",
     "no_value": "No value",
-    "ordered_by": "Board ordered by {{field}}"
+    "ordered_by": "Board ordered by {{field}}",
+    "manual_reorder_hint": "Switch to Manual ordering to rearrange issues within a column."
   },
   "detail": {
     "not_found": "This issue does not exist or has been deleted in this workspace.",

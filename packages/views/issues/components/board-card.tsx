@@ -65,9 +65,15 @@ export const BoardCardContent = memo(function BoardCardContent({
   const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
   const viewMode = useViewStore((s) => s.viewMode);
   const grouping = useViewStore((s) => s.grouping);
-  const boardGrouping = viewMode === "board" ? grouping : null;
-  const groupedPropertyId = boardGrouping
-    ? propertyIdFromViewKey(boardGrouping)
+  const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
+  const cardGrouping =
+    viewMode === "board"
+      ? grouping
+      : viewMode === "swimlane"
+        ? swimlaneGrouping
+        : null;
+  const groupedPropertyId = cardGrouping
+    ? propertyIdFromViewKey(cardGrouping)
     : null;
   const cardWsId = useWorkspaceId();
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(cardWsId));
@@ -90,15 +96,15 @@ export const BoardCardContent = memo(function BoardCardContent({
   );
   const canEdit = editable && !!surfaceActions;
 
-  const showPriority = storeProperties.priority;
+  const hasAssignee = !!issue.assignee_type && !!issue.assignee_id;
+  const showPriority = storeProperties.priority && issue.priority !== "none";
   const showDescription = storeProperties.description && issue.description;
   const showAssigneeSection =
-    storeProperties.assignee && boardGrouping !== "assignee";
-  const hasAssignee = !!issue.assignee_type && !!issue.assignee_id;
+    storeProperties.assignee && cardGrouping !== "assignee" && hasAssignee;
   const showStartDate = storeProperties.startDate && issue.start_date;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showProject =
-    storeProperties.project && boardGrouping !== "project" && project;
+    storeProperties.project && cardGrouping !== "project" && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showLabels = storeProperties.labels && labels.length > 0;
   // Keeps the chip row from rendering an empty flex container when the status

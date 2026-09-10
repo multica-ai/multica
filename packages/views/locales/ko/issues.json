@@ -180,6 +180,16 @@
     "card_properties_section": "카드 속성",
     "ascending_title": "오름차순",
     "descending_title": "내림차순",
+    "newest_first": "최신순",
+    "oldest_first": "오래된순",
+    "highest_priority_first": "높은 우선순위부터",
+    "lowest_priority_first": "낮은 우선순위부터",
+    "earliest_first": "빠른 날짜부터",
+    "latest_first": "늦은 날짜부터",
+    "workflow_order": "워크플로 순서",
+    "reverse_workflow_order": "워크플로 역순",
+    "alphabetical_order": "A에서 Z",
+    "reverse_alphabetical_order": "Z에서 A",
     "group_status": "상태",
     "group_assignee": "담당자",
     "group_parent": "상위 태스크",
@@ -334,7 +344,8 @@
     "empty_column": "태스크 없음",
     "empty_grouping": "일치하는 태스크가 없습니다",
     "no_value": "값 없음",
-    "ordered_by": "{{field}} 기준으로 정렬된 보드"
+    "ordered_by": "{{field}} 기준으로 정렬된 보드",
+    "manual_reorder_hint": "열 안의 순서를 바꾸려면 정렬을 '수동'으로 전환하세요."
   },
   "detail": {
     "not_found": "이 워크스페이스에 해당 태스크가 없거나 삭제되었습니다.",

@@ -180,6 +180,16 @@
     "card_properties_section": "卡片属性",
     "ascending_title": "升序",
     "descending_title": "降序",
+    "newest_first": "最新优先",
+    "oldest_first": "最早优先",
+    "highest_priority_first": "最高优先级优先",
+    "lowest_priority_first": "最低优先级优先",
+    "earliest_first": "最早日期优先",
+    "latest_first": "最晚日期优先",
+    "workflow_order": "按工作流顺序",
+    "reverse_workflow_order": "按工作流倒序",
+    "alphabetical_order": "A 到 Z",
+    "reverse_alphabetical_order": "Z 到 A",
     "group_status": "状态",
     "group_assignee": "负责人",
     "group_parent": "父级任务",
@@ -334,7 +344,8 @@
     "empty_column": "无任务",
     "empty_grouping": "没有匹配的任务",
     "no_value": "未设置",
-    "ordered_by": "按{{field}}排序"
+    "ordered_by": "按{{field}}排序",
+    "manual_reorder_hint": "切换到“手动”排序后，才能调整同一列内的顺序。"
   },
   "detail": {
     "not_found": "这个任务不存在或已在该工作区被删除。",

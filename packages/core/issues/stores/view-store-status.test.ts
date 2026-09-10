@@ -63,11 +63,12 @@ describe("column visibility vs status filter", () => {
     expect(store.getState().statusFilters).toEqual(["qa"]);
   });
 
-  it("reset restores the default hidden Cancelled column", () => {
+  it("clearing filters preserves column visibility", () => {
     store.getState().hideStatus("backlog");
+    store.getState().showStatus("cancelled");
     store.getState().clearFilters();
 
-    expect(store.getState().hiddenStatusCategories).toEqual(["cancelled"]);
+    expect(store.getState().hiddenStatusCategories).toEqual(["backlog"]);
   });
 });
 
@@ -101,10 +102,30 @@ describe("issue view defaults", () => {
     expect(store.getState().sortDirection).toBe("asc");
   });
 
+  it("remembers an explicit direction for each sort field", () => {
+    store.getState().setSortBy("priority");
+    store.getState().setSortDirection("desc");
+    store.getState().setSortBy("created_at");
+    store.getState().setSortBy("priority");
+
+    expect(store.getState().sortDirection).toBe("desc");
+  });
+
   it("leaves manual order when the board stops grouping by status", () => {
     store.getState().setSortBy("position");
     store.getState().setGrouping("assignee");
 
+    expect(store.getState().sortBy).toBe("created_at");
+    expect(store.getState().sortDirection).toBe("desc");
+  });
+
+  it("cannot restore manual order through a list-view round trip", () => {
+    store.getState().setGrouping("assignee");
+    store.getState().setViewMode("list");
+    store.getState().setSortBy("position");
+    store.getState().setViewMode("board");
+
+    expect(store.getState().grouping).toBe("assignee");
     expect(store.getState().sortBy).toBe("created_at");
     expect(store.getState().sortDirection).toBe("desc");
   });
@@ -116,6 +137,9 @@ describe("issue view defaults", () => {
     expect(cardPropertyOptionsForView("gantt")).toEqual([]);
     expect(
       sortOptionsForView("board", "assignee").map((option) => option.value),
+    ).not.toContain("position");
+    expect(
+      sortOptionsForView("list", "assignee").map((option) => option.value),
     ).not.toContain("position");
   });
 });

@@ -122,8 +122,24 @@ var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
 var validIssueStatuses = issuestatus.Canonical()
 
 // Status sort follows the board's category order and resolves custom keys to
-// their effective category. Custom keys used to fall through after Cancelled.
-const issueStatusSortExpression = "CASE issue_effective_status(i.workspace_id, i.status) WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'blocked' THEN 4 WHEN 'done' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+// their effective category with one catalog read plus a parameterized CASE.
+// Keeping the indexed column bare avoids the per-row issue_effective_status()
+// call that would otherwise turn a bounded page into a workspace scan.
+func (h *Handler) issueStatusSortExpression(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	addArg func(any) string,
+) (string, error) {
+	customKeys, err := issuestatus.CustomKeyCategories(
+		ctx,
+		h.issueStatusCatalog(),
+		workspaceID,
+	)
+	if err != nil {
+		return "", err
+	}
+	return statusOrderExpression(statusCategoryExpr(customKeys, addArg)), nil
+}
 
 // resolveIssueStatusKey checks a status against the workspace's catalog and
 // returns the CANONICAL key to store. This is the application-layer replacement
@@ -1294,6 +1310,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	sortCol := "position"
 	sortIsExpr := false
 	sortIsProperty := false
+	sortByStatus := false
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
 		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
@@ -1301,8 +1318,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		case "last_activity":
 			sortCol = "last_activity_at"
 		case "status":
-			sortCol = issueStatusSortExpression
+			sortCol = "status"
 			sortIsExpr = true
+			sortByStatus = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
 			sortIsExpr = true
@@ -1355,6 +1373,15 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	addArg := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
+	}
+	if sortByStatus {
+		var err error
+		sortCol, err = h.issueStatusSortExpression(r.Context(), wsUUID, addArg)
+		if err != nil {
+			slog.Warn("resolve status sort failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to resolve sort")
+			return
+		}
 	}
 
 	if len(statusCategoriesFilter) > 0 {
@@ -2069,7 +2096,13 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		case "last_activity":
 			sortCol = "last_activity_at"
 		case "status":
-			sortCol = issueStatusSortExpression
+			var err error
+			sortCol, err = h.issueStatusSortExpression(r.Context(), wsUUID, addArg)
+			if err != nil {
+				slog.Warn("resolve grouped status sort failed", append(logger.RequestAttrs(r), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to resolve sort")
+				return
+			}
 			sortIsExpr = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"

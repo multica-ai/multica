@@ -207,13 +207,30 @@ export function cardPropertyOptionsForView(viewMode: ViewMode) {
 }
 
 export function sortOptionsForView(
-  viewMode: ViewMode,
+  _viewMode: ViewMode,
   grouping: IssueGrouping,
 ) {
-  if (viewMode === "board" && grouping !== "status") {
+  if (grouping !== "status") {
     return SORT_OPTIONS.filter((option) => option.value !== "position");
   }
   return SORT_OPTIONS;
+}
+
+/**
+ * Manual order is one shared `issue.position` sequence per status column. It
+ * has no honest meaning while another grouping is active: reordering an
+ * assignee/project column would otherwise rewrite the status board behind the
+ * user's back. Keep this invariant at every store boundary (actions and
+ * persisted-state hydration), not only in the display menu.
+ */
+export function normalizeSortForGrouping(
+  grouping: IssueGrouping,
+  sortBy: SortField,
+  sortDirection: SortDirection,
+): Pick<IssueViewState, "sortBy" | "sortDirection"> {
+  return grouping !== "status" && sortBy === "position"
+    ? { sortBy: "created_at", sortDirection: "desc" }
+    : { sortBy, sortDirection };
 }
 
 export interface IssueViewState {
@@ -245,6 +262,8 @@ export interface IssueViewState {
   agentRunningFilter: boolean;
   sortBy: SortField;
   sortDirection: SortDirection;
+  /** Last explicit direction per field, so switching fields is reversible. */
+  sortDirections: Partial<Record<SortField, SortDirection>>;
   cardProperties: CardProperties;
   /** Custom property definition ids whose values render on board/list cards. */
   cardPropertyIds: string[];
@@ -347,6 +366,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   agentRunningFilter: false,
   sortBy: "created_at",
   sortDirection: "desc",
+  sortDirections: { created_at: "desc" },
   cardProperties: { ...DEFAULT_CARD_PROPERTIES },
   cardPropertyIds: [],
   showSubIssues: true,
@@ -364,16 +384,27 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   tableHierarchy: true,
   tableCalculation: "none",
 
-  setViewMode: (mode) => set({ viewMode: mode }),
+  setViewMode: (mode) =>
+    set((state) => ({
+      viewMode: mode,
+      ...normalizeSortForGrouping(
+        state.grouping,
+        state.sortBy,
+        state.sortDirection,
+      ),
+    })),
   setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
   toggleGanttShowCompleted: () =>
     set((state) => ({ ganttShowCompleted: !state.ganttShowCompleted })),
   setGrouping: (grouping) =>
-    set((state) =>
-      grouping !== "status" && state.sortBy === "position"
-        ? { grouping, sortBy: "created_at", sortDirection: "desc" }
-        : { grouping },
-    ),
+    set((state) => ({
+      grouping,
+      ...normalizeSortForGrouping(
+        grouping,
+        state.sortBy,
+        state.sortDirection,
+      ),
+    })),
   toggleStatusFilter: (status) =>
     set((state) => ({
       statusFilters: state.statusFilters.includes(status)
@@ -472,7 +503,6 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       propertyFilters: {},
       dateFilter: null,
       agentRunningFilter: false,
-      hiddenStatusCategories: [...DEFAULT_HIDDEN_STATUS_CATEGORIES],
     }),
   resetFiltersTo: (snapshot) => set({ ...snapshot }),
   clearFilterDimension: (dimension) =>
@@ -500,8 +530,25 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       }
     }),
   setSortBy: (field) =>
-    set({ sortBy: field, sortDirection: defaultSortDirection(field) }),
-  setSortDirection: (dir) => set({ sortDirection: dir }),
+    set((state) => {
+      const next = normalizeSortForGrouping(
+        state.grouping,
+        field,
+        state.sortDirections[field] ?? defaultSortDirection(field),
+      );
+      return {
+        ...next,
+        sortDirections: {
+          ...state.sortDirections,
+          [next.sortBy]: next.sortDirection,
+        },
+      };
+    }),
+  setSortDirection: (dir) =>
+    set((state) => ({
+      sortDirection: dir,
+      sortDirections: { ...state.sortDirections, [state.sortBy]: dir },
+    })),
   toggleCardProperty: (key) =>
     set((state) => ({
       cardProperties: {
@@ -610,6 +657,7 @@ export const viewStorePersistOptions = (name: string) => ({
     propertyFilters: state.propertyFilters,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
+    sortDirections: state.sortDirections,
     cardProperties: state.cardProperties,
     cardPropertyIds: state.cardPropertyIds,
     showSubIssues: state.showSubIssues,
@@ -652,6 +700,14 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   // persisted value isn't a plain object.
   const isRecord = (v: unknown): v is Record<string, unknown> =>
     v !== null && typeof v === "object" && !Array.isArray(v);
+  const persistedSortDirections = isRecord(p.sortDirections)
+    ? Object.fromEntries(
+        Object.entries(p.sortDirections).filter(
+          (entry): entry is [string, SortDirection] =>
+            entry[1] === "asc" || entry[1] === "desc",
+        ),
+      )
+    : {};
   const persistedTableColumns = Array.isArray(p.tableColumns)
     ? p.tableColumns.filter(
         (column): column is TableColumnConfig =>
@@ -673,6 +729,10 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
       ...current.cardProperties,
       ...(p.cardProperties ?? {}),
     },
+    sortDirections: {
+      ...current.sortDirections,
+      ...persistedSortDirections,
+    },
     swimlaneOrders: isRecord(p.swimlaneOrders)
       ? { ...current.swimlaneOrders, ...p.swimlaneOrders }
       : current.swimlaneOrders,
@@ -690,11 +750,14 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
       ? p.tableCollapsedParents
       : current.tableCollapsedParents,
   };
-  return merged.viewMode === "board" &&
-    merged.grouping !== "status" &&
-    merged.sortBy === "position"
-    ? { ...merged, sortBy: "created_at", sortDirection: "desc" }
-    : merged;
+  return {
+    ...merged,
+    ...normalizeSortForGrouping(
+      merged.grouping,
+      merged.sortBy,
+      merged.sortDirection,
+    ),
+  };
 }
 
 /** Factory: creates a vanilla StoreApi for use with React Context. */

@@ -44,10 +44,10 @@ describe("DraftDefinitionFields ordering", () => {
     const store = renderFields("created_at");
 
     await user.click(screen.getByRole("button", { name: /Default display/ }));
-    await user.click(screen.getByRole("button", { name: "Ascending" }));
+    await user.click(screen.getByRole("button", { name: "Oldest first" }));
 
     expect(store.getState().sortDirection).toBe("desc");
-    expect(screen.getByRole("button", { name: "Descending" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Newest first" })).toBeInTheDocument();
   });
 
   it("hides direction for manual ordering, where direction has no effect", async () => {
@@ -56,7 +56,9 @@ describe("DraftDefinitionFields ordering", () => {
 
     await user.click(screen.getByRole("button", { name: /Default display/ }));
 
-    expect(screen.queryByRole("button", { name: "Ascending" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Descending" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Workflow order" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Reverse workflow order" }),
+    ).not.toBeInTheDocument();
   });
 });

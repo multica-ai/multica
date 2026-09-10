@@ -180,6 +180,16 @@
     "card_properties_section": "カードのプロパティ",
     "ascending_title": "昇順",
     "descending_title": "降順",
+    "newest_first": "新しい順",
+    "oldest_first": "古い順",
+    "highest_priority_first": "優先度の高い順",
+    "lowest_priority_first": "優先度の低い順",
+    "earliest_first": "日付の早い順",
+    "latest_first": "日付の遅い順",
+    "workflow_order": "ワークフロー順",
+    "reverse_workflow_order": "ワークフローの逆順",
+    "alphabetical_order": "A から Z",
+    "reverse_alphabetical_order": "Z から A",
     "group_status": "ステータス",
     "group_assignee": "担当者",
     "group_parent": "親タスク",
@@ -334,7 +344,8 @@
     "empty_column": "タスクなし",
     "empty_grouping": "一致するタスクがありません",
     "no_value": "値なし",
-    "ordered_by": "{{field}} 順に並べたボード"
+    "ordered_by": "{{field}} 順に並べたボード",
+    "manual_reorder_hint": "列内の順序を変更するには、並び順を「手動」に切り替えてください。"
   },
   "detail": {
     "not_found": "このタスクはこのワークスペースに存在しないか、削除されています。",

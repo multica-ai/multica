@@ -135,6 +135,27 @@ export function statusFilterColumns(
 }
 
 /**
+ * Resolve the category columns a surface may display. An explicit status
+ * filter wins over hidden-column preferences so selecting a hidden status
+ * always provides a recovery path. Pending/error custom-status resolution is
+ * handled by the caller's loading/error state, so it does not narrow here.
+ */
+export function visibleStatusCategories(
+  statusFilters: readonly string[],
+  hiddenCategories: readonly IssueStatusCategory[],
+  catalog: Pick<IssueStatusCatalog, "entryOf" | "isLoaded" | "isPending" | "isError">,
+): IssueStatusCategory[] {
+  const resolved =
+    statusFilters.length > 0 ? statusFilterColumns(statusFilters, catalog) : null;
+  const selected = resolved?.state === "resolved" ? resolved.columns : null;
+  return ALL_STATUSES.filter((category) =>
+    selected !== null
+      ? selected.has(category)
+      : !hiddenCategories.includes(category),
+  );
+}
+
+/**
  * Whether an issue BEHAVES as a given category (MUL-6243).
  *
  * The one question every status-coupled product rule actually asks. Comparing

@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ChevronRight, Plus } from "lucide-react";
+import { ChevronRight, Plus } from "lucide-react";
+import { sortDirectionLabelKey } from "../utils/sort-direction";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -160,6 +161,7 @@ export function DraftDefinitionFields() {
   const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
   const act = useViewStoreApi().getState();
   const availableSortOptions = sortOptionsForView(viewMode, grouping);
+  const availableCardPropertyOptions = cardPropertyOptionsForView(viewMode);
 
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const groupableProperties = useMemo(
@@ -190,9 +192,7 @@ export function DraftDefinitionFields() {
   const sortDirectionLabel =
     sortBy === "position"
       ? null
-      : sortDirection === "asc"
-        ? t(($) => $.display.ascending_title)
-        : t(($) => $.display.descending_title);
+      : t(($) => $.display[sortDirectionLabelKey(sortBy, sortDirection)]);
   const displaySummary = [
     layoutLabel,
     groupingLabel,
@@ -388,7 +388,7 @@ export function DraftDefinitionFields() {
                   <Button
                     type="button"
                     variant="outline"
-                    size="icon-sm"
+                    size="sm"
                     onClick={() =>
                       act.setSortDirection(
                         sortDirection === "asc" ? "desc" : "asc",
@@ -397,22 +397,18 @@ export function DraftDefinitionFields() {
                     aria-label={sortDirectionLabel ?? undefined}
                     title={sortDirectionLabel ?? undefined}
                   >
-                    {sortDirection === "asc" ? (
-                      <ArrowUp className="size-3.5" />
-                    ) : (
-                      <ArrowDown className="size-3.5" />
-                    )}
+                    {sortDirectionLabel}
                   </Button>
                 )}
               </div>
             </div>
-            {cardPropertyOptionsForView(viewMode).length > 0 && (
+            {availableCardPropertyOptions.length > 0 && (
               <div className="flex items-start gap-3">
                 <Label className={`${ROW_LABEL} pt-1`}>
                   {t(($) => $.display.card_properties_section)}
                 </Label>
                 <div className="flex min-w-0 flex-1 flex-wrap gap-1">
-                  {cardPropertyOptionsForView(viewMode).map((opt) => (
+                  {availableCardPropertyOptions.map((opt) => (
                     <Toggle
                       key={opt.key}
                       size="sm"

@@ -2,8 +2,6 @@
 
 import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
   CalendarDays,
   ChartGantt,
   ChevronDown,
@@ -79,6 +77,7 @@ import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isScalar
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
+import { sortDirectionLabelKey } from "../utils/sort-direction";
 import { LabelChip } from "../../labels/label-chip";
 import {
   SORT_OPTIONS,
@@ -1962,6 +1961,9 @@ export function IssueDisplayControls({
   const sortLabel = sortPropertyId
     ? propertyById.get(sortPropertyId)?.name ?? t(($) => $.display.sort_manual)
     : t(($) => $.display[SORT_LABEL_KEY[sortBy as keyof typeof SORT_LABEL_KEY]]);
+  const sortDirectionLabel = t(
+    ($) => $.display[sortDirectionLabelKey(sortBy, sortDirection)],
+  );
   const groupingLabel = groupingPropertyId
     ? propertyById.get(groupingPropertyId)?.name ?? t(($) => $.display.group_status)
     : t(($) => $.display[GROUPING_LABEL_KEY[grouping as keyof typeof GROUPING_LABEL_KEY]]);
@@ -2247,17 +2249,14 @@ export function IssueDisplayControls({
                   {sortBy !== "position" && (
                     <Button
                       variant="outline"
-                      size="icon-sm"
+                      size="sm"
                       onClick={() =>
                         act.setSortDirection(sortDirection === "asc" ? "desc" : "asc")
                       }
-                      title={sortDirection === "asc" ? t(($) => $.display.ascending_title) : t(($) => $.display.descending_title)}
+                      aria-label={sortDirectionLabel}
+                      title={sortDirectionLabel}
                     >
-                      {sortDirection === "asc" ? (
-                        <ArrowUp className="size-3.5" />
-                      ) : (
-                        <ArrowDown className="size-3.5" />
-                      )}
+                      {sortDirectionLabel}
                     </Button>
                   )}
                 </div>
