@@ -51,7 +51,7 @@ describe("groupIssuesByCategory", () => {
       issue("b", "backlog"),
       issue("c", "in_progress"),
     ]);
-    expect(sections.map((s) => s.category)).toEqual(["backlog", "started", "completed"]);
+    expect(sections.map((s) => s.category)).toEqual(["unstarted", "started", "done"]);
   });
 
   it("groups concrete built-ins into their lifecycle sections", () => {
@@ -66,8 +66,8 @@ describe("groupIssuesByCategory", () => {
     ]);
   });
 
-  // Canceled has no section on mobile. Legacy category values normalize to it.
-  it("omits the canceled category, built-in or custom", () => {
+  // Closed has no section on mobile. Legacy category values normalize to it.
+  it("omits the closed category, built-in or custom", () => {
     expect(groupIssuesByCategory([issue("a", "cancelled")])).toEqual([]);
     expect(groupIssuesByCategory([issue("a", "wont_do", "cancelled")])).toEqual([]);
   });
