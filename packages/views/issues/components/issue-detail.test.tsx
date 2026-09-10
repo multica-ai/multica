@@ -2888,6 +2888,40 @@ describe("IssueDetail (shared)", () => {
       );
     });
   });
+
+  // MUL-7211 regression: a standalone run's published reply belongs at the
+  // reply's own time. It used to render in the run's ENQUEUE slot while the
+  // card showed the reply time, pushing it above every comment written while
+  // the run worked. Ordering matrix lives in comment-runs.test.ts.
+  it("renders an assignment run's reply after the comments it followed", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "comment", id: "midway", actor_type: "member", actor_id: "user-1",
+        content: "Remember the E2E pass", parent_id: null,
+        created_at: "2026-01-17T00:00:00Z", updated_at: "2026-01-17T00:00:00Z", comment_type: "comment",
+      },
+      {
+        type: "comment", id: "run-reply", actor_type: "agent", actor_id: "agent-1",
+        content: "step1 done", parent_id: null, source_task_id: "task-early",
+        created_at: "2026-01-18T00:00:00Z", updated_at: "2026-01-18T00:00:00Z", comment_type: "comment",
+      },
+    ]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([{
+      id: "task-early", agent_id: "agent-1", runtime_id: "rt-1", issue_id: "issue-1",
+      kind: "issue", status: "completed", priority: 0,
+      dispatched_at: "2026-01-16T00:00:00Z", started_at: "2026-01-16T00:00:00Z",
+      completed_at: "2026-01-18T00:00:00Z", result: { comment: "step1 done" }, error: null,
+      created_at: "2026-01-16T00:00:00Z", delivered_comment_ids: [],
+    }]);
+
+    const { container } = renderIssueDetail();
+    await screen.findByText("Remember the E2E pass");
+    await screen.findByText("step1 done");
+
+    const rendered = Array.from(container.querySelectorAll("[id^='comment-']")).map((el) => el.id);
+    expect(rendered.indexOf("comment-midway")).toBeLessThan(rendered.indexOf("comment-run-reply"));
+  });
+
 });
 
 describe("groupSubIssuesByStage", () => {
