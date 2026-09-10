@@ -58,7 +58,7 @@ func TestBuildCommandCodeArgsKeepsProtocolManaged(t *testing.T) {
 	if strings.Contains(joined, "-p ") || strings.HasPrefix(joined, "-p") {
 		t.Fatalf("-p must not appear in argv, prompt is delivered on stdin: %v", args)
 	}
-	wantPrefix := []string{"--output-format", "json", "--no-auto-update", "--model", "meituan/longcat-2.0:free", "--resume", "session-1"}
+	wantPrefix := []string{"--output-format", "json", "--no-auto-update", "--print", "--model", "meituan/longcat-2.0:free", "--resume", "session-1"}
 	if len(args) < len(wantPrefix) {
 		t.Fatalf("args too short: %v", args)
 	}

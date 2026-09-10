@@ -66,8 +66,14 @@ var commandcodeBlockedArgs = map[string]blockedArgMode{
 // quotes — the same class of failure cursor-agent hit before it moved its
 // prompt to stdin (#5649). This is that fix's CommandCode equivalent (#6082).
 // Only fixed, content-free flags remain in argv; the prompt goes on stdin.
+//
+// --print (since CommandCode 1.52.0) is what selects non-interactive mode when
+// the prompt arrives on stdin. Before 1.52.0 stdin alone was enough; from
+// 1.52.0 the CLI aborts with "Interactive mode requires a TTY terminal" unless
+// a prompting flag is present. It is argv-only and carries no value, so it
+// keeps the Windows argument-serialisation guarantee above intact.
 func buildCommandCodeArgs(opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{"--output-format", "json", "--no-auto-update"}
+	args := []string{"--output-format", "json", "--no-auto-update", "--print"}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
