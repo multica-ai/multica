@@ -106,25 +106,33 @@ describe("status grouping with custom statuses", () => {
   const custom = {
     ...mk("custom", 1),
     status: "awaiting_response",
-    status_category: "in_review",
+    status_category: "started",
   } as Issue;
   const builtIn = { ...mk("built-in", 2), status: "in_review" } as Issue;
   const inReviewColumn: BoardColumnGroup = {
-    id: "status:in_review",
-    title: "In Review",
-    status: "in_review",
+    id: "status:started",
+    title: "Started",
+    status: "started",
   };
-  const todoColumn: BoardColumnGroup = { id: "status:todo", title: "Todo", status: "todo" };
-  const doneColumn: BoardColumnGroup = { id: "status:done", title: "Done", status: "done" };
+  const todoColumn: BoardColumnGroup = {
+    id: "status:unstarted",
+    title: "Unstarted",
+    status: "unstarted",
+  };
+  const doneColumn: BoardColumnGroup = {
+    id: "status:completed",
+    title: "Completed",
+    status: "completed",
+  };
 
   it("buckets a custom status into its category's column", () => {
-    expect(getIssueGroupId(custom, "status")).toBe("status:in_review");
-    expect(getIssueGroupId(builtIn, "status")).toBe("status:in_review");
+    expect(getIssueGroupId(custom, "status")).toBe("status:started");
+    expect(getIssueGroupId(builtIn, "status")).toBe("status:started");
   });
 
   it("renders the card in that column instead of dropping it", () => {
     const columns = buildColumns([custom, builtIn], [inReviewColumn], "status");
-    expect(columns["status:in_review"]).toEqual(["custom", "built-in"]);
+    expect(columns["status:started"]).toEqual(["custom", "built-in"]);
   });
 
   it("treats the card as already in the column it is drawn in", () => {
@@ -143,16 +151,13 @@ describe("status grouping with custom statuses", () => {
   });
 
   it("sets the status when the caller has no issue to compare", () => {
-    expect(getMoveUpdates(inReviewColumn, 5)).toEqual({ status: "in_review", position: 5 });
+    expect(getMoveUpdates(inReviewColumn, 5)).toEqual({ status: "in_progress", position: 5 });
   });
 
   // A built-in card in its own column keeps carrying the (unchanged) key, so a
   // workspace without custom statuses sends exactly the payload it always did.
   it("keeps the status in the payload for a built-in card", () => {
-    expect(getMoveUpdates(inReviewColumn, 5, builtIn)).toEqual({
-      status: "in_review",
-      position: 5,
-    });
+    expect(getMoveUpdates(inReviewColumn, 5, builtIn)).toEqual({ position: 5 });
   });
 });
 

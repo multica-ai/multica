@@ -1,9 +1,12 @@
 "use client";
 
 import { useCallback } from "react";
-import { isIssueStatusCategory } from "@multica/core/issue-statuses";
+import {
+  isBuiltInIssueStatus,
+  isIssueStatusCategory,
+} from "@multica/core/issue-statuses";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import type { IssueStatusCategory } from "@multica/core/types";
+import type { BuiltInIssueStatus, IssueStatusCategory } from "@multica/core/types";
 import { useT } from "../../i18n";
 
 /**
@@ -25,8 +28,11 @@ export function useStatusLabel(wsId: string) {
 
   return useCallback(
     (statusKey: string): string => {
+      if (isBuiltInIssueStatus(statusKey)) {
+        return t(($) => $.status[statusKey as BuiltInIssueStatus]);
+      }
       if (isIssueStatusCategory(statusKey)) {
-        return t(($) => $.status[statusKey as IssueStatusCategory]);
+        return t(($) => $.status_category[statusKey as IssueStatusCategory]);
       }
       return entryOf(statusKey)?.name ?? statusKey;
     },

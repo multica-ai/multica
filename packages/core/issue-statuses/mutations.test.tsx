@@ -22,12 +22,10 @@ vi.mock("../hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
 const CATEGORIES = [
   "backlog",
-  "todo",
-  "in_progress",
-  "in_review",
-  "done",
-  "cancelled",
-  "blocked",
+  "unstarted",
+  "started",
+  "completed",
+  "canceled",
 ] as const;
 
 function entry(overrides: Partial<IssueStatusEntry> & { id: string }): IssueStatusEntry {
@@ -36,7 +34,7 @@ function entry(overrides: Partial<IssueStatusEntry> & { id: string }): IssueStat
     key: overrides.id,
     name: overrides.id,
     description: "",
-    category: "in_review",
+    category: "started",
     color: "#6366f1",
     is_system: false,
     position: 1,
@@ -105,7 +103,7 @@ describe("issue status catalog mutations", () => {
     } as unknown as ApiClient);
 
     const { result } = renderHook(() => useCreateIssueStatus(), { wrapper: wrapper(qc) });
-    act(() => result.current.mutate({ name: "QA", category: "in_review", color: "#6366f1" }));
+    act(() => result.current.mutate({ name: "QA", category: "started", color: "#6366f1" }));
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     const catalogInvalidations = invalidate.mock.calls.filter(
@@ -125,7 +123,7 @@ describe("issue status catalog mutations", () => {
     } as unknown as ApiClient);
 
     const { result } = renderHook(() => useCreateIssueStatus(), { wrapper: wrapper(qc) });
-    act(() => result.current.mutate({ name: "QA", category: "in_review", color: "#6366f1" }));
+    act(() => result.current.mutate({ name: "QA", category: "started", color: "#6366f1" }));
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: issueStatusKeys.all("ws-1") });
@@ -136,14 +134,14 @@ describe("issue status catalog mutations", () => {
   // realtime refetch lands, which is exactly the window the user is looking at.
   it("sorts a created status into its category instead of appending it", async () => {
     const qc = createClient();
-    const done = entry({ id: "builtin-done", key: "done", category: "done", is_system: true, position: 0 });
+    const done = entry({ id: "builtin-done", key: "done", category: "completed", is_system: true, position: 0 });
     qc.setQueryData(issueStatusKeys.list("ws-1"), catalog([builtInReview, done]));
     setApiInstance({
       createIssueStatus: vi.fn(async () => entry({ id: "qa", key: "qa", name: "QA" })),
     } as unknown as ApiClient);
 
     const { result } = renderHook(() => useCreateIssueStatus(), { wrapper: wrapper(qc) });
-    act(() => result.current.mutate({ name: "QA", category: "in_review", color: "#6366f1" }));
+    act(() => result.current.mutate({ name: "QA", category: "started", color: "#6366f1" }));
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(cached(qc)?.statuses.map((s) => s.id)).toEqual(["builtin-in-review", "qa", "builtin-done"]);
@@ -160,7 +158,7 @@ describe("issue status catalog mutations", () => {
     } as unknown as ApiClient);
 
     const { result } = renderHook(() => useCreateIssueStatus(), { wrapper: wrapper(qc) });
-    act(() => result.current.mutate({ name: "QA", category: "in_review", color: "#6366f1" }));
+    act(() => result.current.mutate({ name: "QA", category: "started", color: "#6366f1" }));
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(cached(qc)?.statuses).toEqual([builtInReview]);
@@ -258,7 +256,7 @@ describe("issue status catalog mutations", () => {
     } as unknown as ApiClient);
 
     const { result } = renderHook(() => useReorderIssueStatuses(), { wrapper: wrapper(qc) });
-    act(() => result.current.mutate({ category: "in_review", ordered: [second, first] }));
+    act(() => result.current.mutate({ category: "started", ordered: [second, first] }));
     // The drag shows immediately, without waiting for the round trip.
     await waitFor(() =>
       expect(cached(qc)?.statuses.map((s) => s.id)).toEqual(["builtin-in-review", "sec", "qa"]),
@@ -295,7 +293,7 @@ describe("issue status catalog mutations", () => {
     } as unknown as ApiClient);
 
     const { result } = renderHook(() => useReorderIssueStatuses(), { wrapper: wrapper(qc) });
-    act(() => result.current.mutate({ category: "in_review", ordered: [second, first] }));
+    act(() => result.current.mutate({ category: "started", ordered: [second, first] }));
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(cached(qc)?.statuses.map((s) => s.id)).toEqual(["builtin-in-review", "qa", "sec"]);
@@ -358,7 +356,7 @@ describe("issue status catalog mutations", () => {
     } as unknown as ApiClient);
 
     const { result } = renderHook(() => useCreateIssueStatus(), { wrapper: wrapper(qc) });
-    act(() => result.current.mutate({ name: "QA", category: "in_review", color: "#6366f1" }));
+    act(() => result.current.mutate({ name: "QA", category: "started", color: "#6366f1" }));
 
     realtimeRefetchLands(qc, catalog([builtInReview, { ...created, name: "QA (renamed)" }]));
 

@@ -156,7 +156,7 @@ export function partitionAggregatedSearchResults({
     issues,
     // By CATEGORY: a custom status in the cancelled category is cancelled
     // work and has to sink the same way. (MUL-6243)
-    (issue) => issueBehavesAs(issue, "cancelled") && !isIssueDirectHit(issue, query),
+    (issue) => issueBehavesAs(issue, "canceled") && !isIssueDirectHit(issue, query),
   );
   const projectParts = partitionStable(
     projects,

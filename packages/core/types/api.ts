@@ -130,9 +130,9 @@ export interface ListIssuesParams {
   /** Multi-value table facet. OR within the field. */
   statuses?: IssueStatus[];
   /**
-   * Filter by status CATEGORY rather than by exact key, so one bucket holds a
-   * category's canonical status plus every custom status that inherits it.
-   * This is what keeps the board's fan-out fixed at 7 requests however many
+   * Filter by lifecycle category rather than by exact key, so one bucket holds
+   * all concrete and custom statuses in that phase. This keeps the board's
+   * fan-out fixed at 5 requests however many
    * custom statuses a workspace defines. (MUL-6243)
    */
   status_category?: IssueStatusCategory;
@@ -340,10 +340,10 @@ export type IssueTableGroupSpec =
    *
    * Board columns, list sections and swimlane cells are categories, so a custom
    * status folds into the column it behaves as instead of getting one of its
-   * own — which is what keeps the surface's fan-out pinned at 7 no matter how
+   * own — which is what keeps the surface's fan-out pinned at 5 no matter how
    * many statuses a workspace defines. The descriptor still reports
-   * `value.kind === "status"` because a category's value IS its canonical
-   * status key; the group KEY is what distinguishes the two contracts.
+   * `value.kind === "status"` for response compatibility; the group KEY is
+   * what distinguishes lifecycle categories from concrete statuses.
    * (MUL-6243)
    */
   | { kind: "status_category" }

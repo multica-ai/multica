@@ -1,7 +1,7 @@
 {
   "issue_statuses": {
     "title": "任务状态",
-    "description": "定义任务流转的工作流。每个状态的行为由它所属的分类决定。",
+    "description": "用五个生命周期分类组织任务状态。",
     "loading": "正在加载状态…",
     "add": "添加状态",
     "show_archived": "显示已归档（{{count}}）",
@@ -17,13 +17,13 @@
     "editor": {
       "create_title": "新建状态",
       "edit_title": "编辑状态",
-      "behavior_hint": "该状态的行为与「{{category}}」完全一致。",
+      "behavior_hint": "该状态将显示在「{{category}}」中。",
       "name": "名称",
       "name_placeholder": "例如：Code Review",
       "key_hint": "API 和 CLI 中通过 {{key}} 引用。",
       "created": "状态已创建。API 和 CLI 中通过 {{key}} 引用。",
       "category": "分类",
-      "category_locked": "分类不可修改 —— 已经处于该状态的任务依赖它。",
+      "category_locked": "状态创建后不能修改分类。",
       "description": "描述",
       "description_placeholder": "这个状态对团队意味着什么",
       "color": "颜色",
@@ -39,13 +39,27 @@
       "confirm": "归档",
       "failed": "归档失败。"
     },
+    "category_labels": {
+      "backlog": "待规划",
+      "unstarted": "未开始",
+      "started": "已开始",
+      "completed": "已完成",
+      "canceled": "已取消"
+    },
     "categories": {
+      "backlog": "当前不在计划中的工作。",
+      "unstarted": "已规划但尚未开始的工作。",
+      "started": "正在进行、审核中或已阻塞的工作。",
+      "completed": "已经完成的工作。",
+      "canceled": "不再继续的工作。"
+    },
+    "built_in_descriptions": {
       "backlog": "搁置。把任务移到这里不会启动智能体。",
       "todo": "排队中。把任务移到这里会启动指派的智能体。",
       "in_progress": "正在进行。",
       "in_review": "已交付，等待人工审核。会结束自动化运行。",
-      "done": "已完成。",
       "blocked": "被外部依赖阻塞。",
+      "done": "已完成。",
       "cancelled": "决定不做。"
     }
   },

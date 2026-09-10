@@ -102,11 +102,11 @@ func TestIssueTableStatusCategoryGroupsFoldCustomStatuses(t *testing.T) {
 			t.Fatalf("group %q is not a category column: %#v", group.Key, group.Value)
 		}
 	}
-	if got := counts[statusCategoryGroupKey("in_review")]; got != 3 {
-		t.Fatalf("in_review category count = %d, want 3 (2 custom + 1 built-in): %#v", got, counts)
+	if got := counts[statusCategoryGroupKey("started")]; got != 3 {
+		t.Fatalf("started category count = %d, want 3 (2 custom + 1 built-in): %#v", got, counts)
 	}
-	if got := counts[statusCategoryGroupKey("todo")]; got != 1 {
-		t.Fatalf("todo category count = %d, want 1: %#v", got, counts)
+	if got := counts[statusCategoryGroupKey("unstarted")]; got != 1 {
+		t.Fatalf("unstarted category count = %d, want 1: %#v", got, counts)
 	}
 	if groups.Total != 4 {
 		t.Fatalf("total = %d, want 4", groups.Total)
@@ -116,7 +116,7 @@ func TestIssueTableStatusCategoryGroupsFoldCustomStatuses(t *testing.T) {
 func TestIssueTableStatusCategoryRowsReturnCustomStatusIssues(t *testing.T) {
 	projectID, customKey := seedStatusCategoryFixture(t)
 
-	groupKey := statusCategoryGroupKey("in_review")
+	groupKey := statusCategoryGroupKey("started")
 	w := httptest.NewRecorder()
 	testHandler.ListIssueTableRows(w, newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
 		Query:    statusCategoryQuery(projectID),
@@ -150,8 +150,8 @@ func TestIssueTableStatusCategoryRowsReturnCustomStatusIssues(t *testing.T) {
 	// Every row carries its category, so the client can render the column
 	// without a second catalog round-trip.
 	for _, row := range rows.Rows {
-		if row.Issue.StatusCategory != "in_review" {
-			t.Fatalf("row %q status_category = %q, want in_review", row.Issue.Title, row.Issue.StatusCategory)
+		if row.Issue.StatusCategory != "started" {
+			t.Fatalf("row %q status_category = %q, want started", row.Issue.Title, row.Issue.StatusCategory)
 		}
 	}
 }
@@ -186,15 +186,15 @@ func TestIssueTableCompoundStatusCategoryCellsFoldCustomStatuses(t *testing.T) {
 	}
 	// Swimlane cells are categories too: 2 QA + 1 In Review in one cell, and no
 	// cell keyed by the custom status.
-	if cells["in_review"] != 3 {
-		t.Fatalf("in_review cell = %d, want 3: %#v", cells["in_review"], cells)
+	if cells["started"] != 3 {
+		t.Fatalf("started cell = %d, want 3: %#v", cells["started"], cells)
 	}
 	if _, exists := cells[customKey]; exists {
 		t.Fatalf("custom status got its own swimlane cell: %#v", cells)
 	}
 
 	// And the cell's own group_key has to page back the same three rows.
-	cellKey := compoundCellGroupKey(groups.Groups[0].Key, "in_review", true)
+	cellKey := compoundCellGroupKey(groups.Groups[0].Key, "started", true)
 	rowsRecorder := httptest.NewRecorder()
 	testHandler.ListIssueTableRows(rowsRecorder, newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
 		Query: statusCategoryQuery(projectID),
@@ -218,9 +218,9 @@ func TestIssueTableCompoundStatusCategoryCellsFoldCustomStatuses(t *testing.T) {
 	}
 }
 
-// A workspace with no custom statuses must produce byte-identical grouping to
-// the plain status contract — that is what makes this safe to ship default-on.
-func TestIssueTableStatusCategoryMatchesStatusWithoutCustomStatuses(t *testing.T) {
+// A workspace with no custom statuses still folds concrete built-ins into the
+// five public lifecycle categories.
+func TestIssueTableStatusCategoryFoldsBuiltInsWithoutCustomStatuses(t *testing.T) {
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()
 	var projectID string
@@ -272,14 +272,14 @@ func TestIssueTableStatusCategoryMatchesStatusWithoutCustomStatuses(t *testing.T
 		return out
 	}
 
-	byStatus := collect("status")
 	byCategory := collect("status_category")
-	if len(byStatus) != len(byCategory) {
-		t.Fatalf("group counts differ: status=%#v category=%#v", byStatus, byCategory)
+	want := map[string]int64{"unstarted": 1, "completed": 1}
+	if len(byCategory) != len(want) {
+		t.Fatalf("category groups = %#v, want %#v", byCategory, want)
 	}
-	for status, count := range byStatus {
-		if byCategory[status] != count {
-			t.Fatalf("group %q: status=%d category=%d", status, count, byCategory[status])
+	for category, count := range want {
+		if byCategory[category] != count {
+			t.Fatalf("category %q = %d, want %d", category, byCategory[category], count)
 		}
 	}
 }
@@ -330,8 +330,8 @@ func withCountingCatalog(t *testing.T) *countingCatalogQuerier {
 	return counter
 }
 
-// A board loads seven column branches as seven separate HTTP requests, so a
-// catalog read that looks cheap per request is multiplied by seven. The first
+// A board loads five column branches as separate HTTP requests, so a catalog
+// read that looks cheap per request is multiplied by five. The first
 // cut ran ExpandCategories AND CustomKeyCategories per resolve — two reads
 // where one suffices, i.e. 14 catalog reads behind one board load instead of 7.
 func TestIssueTableStatusCategoryReadsCatalogOncePerRequest(t *testing.T) {
@@ -488,7 +488,7 @@ func TestIssueTableFiltersAcceptCustomStatusKeys(t *testing.T) {
 		t.Fatalf("total = %d, want 2 (only the QA rows)", groups.Total)
 	}
 
-	groupKey := statusCategoryGroupKey("in_review")
+	groupKey := statusCategoryGroupKey("started")
 	rowsRecorder := httptest.NewRecorder()
 	testHandler.ListIssueTableRows(rowsRecorder, newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
 		Query:    query,
@@ -503,7 +503,7 @@ func TestIssueTableFiltersAcceptCustomStatusKeys(t *testing.T) {
 	if err := json.NewDecoder(rowsRecorder.Body).Decode(&rows); err != nil {
 		t.Fatalf("decode rows: %v", err)
 	}
-	// The in_review column holds 3 issues, but only the 2 on `qa` match the filter.
+	// The Started column holds 3 issues, but only the 2 on `qa` match the filter.
 	if len(rows.Rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows.Rows))
 	}

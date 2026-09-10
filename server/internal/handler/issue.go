@@ -42,11 +42,9 @@ type IssueResponse struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	Status      string  `json:"status"`
-	// StatusCategory is the canonical status whose platform behavior Status
-	// carries — identical to Status for the 7 built-ins, and the inherited
-	// category for a custom status. Omitted when the endpoint does not resolve
-	// it, so consumers must fall back to Status rather than assume a blank
-	// value means "no category". (MUL-6243)
+	// StatusCategory is the five-value lifecycle category for Status. It is
+	// omitted when an endpoint cannot resolve a custom status, so consumers must
+	// fall back to their catalog rather than treat a blank as "no category".
 	StatusCategory string `json:"status_category,omitempty"`
 	// StatusName is a CUSTOM status's display name, carried beside the key so a
 	// consumer that only ever sees `status` is not left holding a bare handle.
@@ -120,6 +118,7 @@ var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
 // driven); it is scoped out here so this change cannot alter the table view for
 // workspaces that have no custom statuses.
 var validIssueStatuses = issuestatus.Canonical()
+var validIssueStatusCategories = issuestatus.Categories()
 
 // resolveIssueStatusKey checks a status against the workspace's catalog and
 // returns the CANONICAL key to store. This is the application-layer replacement
@@ -251,8 +250,8 @@ func validateIssueEnum(w http.ResponseWriter, field, value string, allowed []str
 }
 
 // fillStatusCategories resolves status_category for responses whose status is
-// CUSTOM. The pure builders below fill it for built-in keys — where key IS the
-// category — and leave it empty otherwise, so this is the step that makes the
+// CUSTOM. The pure builders below map built-ins directly and leave custom
+// statuses empty, so this is the step that makes the
 // field authoritative on every payload a client caches or buckets by.
 //
 // Uses one Resolver for the whole slice: built-in statuses cost no query, and a
@@ -277,7 +276,7 @@ func (h *Handler) newStatusCategoryFiller(ctx context.Context, wsID pgtype.UUID)
 		if resp == nil || resp.StatusCategory != "" {
 			return
 		}
-		resp.StatusCategory = resolver.Effective(ctx, h.Queries, resp.Status)
+		resp.StatusCategory = resolver.Category(ctx, h.Queries, resp.Status)
 		// Same Resolver, same single catalog read, so the name rides along for
 		// free. Built-ins return "" and stay omitted. (MUL-6749)
 		resp.StatusName = resolver.Name(ctx, h.Queries, resp.Status)
@@ -292,13 +291,11 @@ func (h *Handler) fillStatusCategory(ctx context.Context, wsID pgtype.UUID, resp
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
-	// A built-in status IS its own category, so this costs no catalog lookup and
-	// every response carries it. A CUSTOM status is left empty here and filled
-	// in by endpoints that resolve the catalog (see the children endpoints'
-	// Resolver); consumers fall back on the same rule. (MUL-6243)
+	// Built-ins map to public categories without a catalog lookup. A custom
+	// status is filled by endpoints that resolve the workspace catalog.
 	statusCategory := ""
 	if issuestatus.IsBuiltIn(i.Status) {
-		statusCategory = i.Status
+		statusCategory, _ = issuestatus.CategoryForBehavior(i.Status)
 	}
 	return IssueResponse{
 		ID:             uuidToString(i.ID),
@@ -334,7 +331,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 	// Same pure built-in resolution as issueToResponse. (MUL-6243)
 	statusCategory := ""
 	if issuestatus.IsBuiltIn(i.Status) {
-		statusCategory = i.Status
+		statusCategory, _ = issuestatus.CategoryForBehavior(i.Status)
 	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
@@ -403,7 +400,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 	// Same pure built-in resolution as issueToResponse. (MUL-6243)
 	statusCategory := ""
 	if issuestatus.IsBuiltIn(i.Status) {
-		statusCategory = i.Status
+		statusCategory, _ = issuestatus.CategoryForBehavior(i.Status)
 	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
@@ -1250,10 +1247,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if len(statusesFilter) == 0 {
 		statusesFilter = splitCommaParam(r.URL.Query().Get("status"))
 	}
-	// status_category filters by BEHAVIOR rather than by exact key, so one
-	// board column can hold a category's canonical status plus every custom
-	// status that inherits it. Without this the board would need one column —
-	// and one request — per status. (MUL-6243)
+	// status_category filters by lifecycle phase rather than by exact key, so
+	// one board column can hold all concrete and custom statuses in that phase.
+	// Without this the board would need one column — and one request — per
+	// status. (MUL-6243, MUL-7240)
 	statusCategoriesFilter := splitCommaParam(r.URL.Query().Get("status_categories"))
 	if len(statusCategoriesFilter) == 0 {
 		statusCategoriesFilter = splitCommaParam(r.URL.Query().Get("status_category"))
@@ -2323,14 +2320,14 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	labelsMap := h.labelsByIssue(r.Context(), issue.WorkspaceID, ids)
 	// Sub-issue progress is computed from these rows (the CLI's `issue children`
 	// stage counts, among others), so they carry the resolved category — a
-	// custom done status must count as done. One Resolver for the whole list:
+	// custom completed status must count as completed. One Resolver for the whole list:
 	// built-in statuses still cost no query, and a list full of custom ones
 	// costs one catalog read rather than one per row.
 	statusResolver := issuestatus.NewResolver(issue.WorkspaceID)
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
-		resp[i].StatusCategory = statusResolver.Effective(r.Context(), h.Queries, child.Status)
+		resp[i].StatusCategory = statusResolver.Category(r.Context(), h.Queries, child.Status)
 		labels := labelsMap[resp[i].ID]
 		if labels == nil {
 			labels = []LabelResponse{}
@@ -2409,14 +2406,14 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 	labelsMap := h.labelsByIssue(r.Context(), wsUUID, ids)
 	// Sub-issue progress is computed from these rows (the CLI's `issue children`
 	// stage counts, among others), so they carry the resolved category — a
-	// custom done status must count as done. One Resolver for the whole list:
+	// custom completed status must count as completed. One Resolver for the whole list:
 	// built-in statuses still cost no query, and a list full of custom ones
 	// costs one catalog read rather than one per row.
 	statusResolver := issuestatus.NewResolver(wsUUID)
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
-		resp[i].StatusCategory = statusResolver.Effective(r.Context(), h.Queries, child.Status)
+		resp[i].StatusCategory = statusResolver.Category(r.Context(), h.Queries, child.Status)
 		labels := labelsMap[resp[i].ID]
 		if labels == nil {
 			labels = []LabelResponse{}

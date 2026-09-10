@@ -60,7 +60,7 @@ function entry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
     key: "custom",
     name: "Custom",
     description: "",
-    category: "in_review",
+    category: "started",
     color: "#ff0000",
     is_system: false,
     position: 1,
@@ -93,7 +93,9 @@ describe("IssueStatusesTab", () => {
     catalog = [BUILT_IN_IN_REVIEW];
     render(<IssueStatusesTab />);
 
-    expect(screen.getAllByLabelText(en.issue_statuses.add).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByLabelText(new RegExp(`^${en.issue_statuses.add}:`)).length,
+    ).toBeGreaterThan(0);
   });
 
   it("hides creation and row actions from a non-admin member", () => {
@@ -101,7 +103,7 @@ describe("IssueStatusesTab", () => {
     role = "member";
     render(<IssueStatusesTab />);
 
-    expect(screen.queryByLabelText(en.issue_statuses.add)).toBeNull();
+    expect(screen.queryByLabelText(new RegExp(`^${en.issue_statuses.add}:`))).toBeNull();
     expect(screen.getByText("QA")).toBeInTheDocument();
     expect(
       screen.queryByLabelText(
@@ -131,7 +133,9 @@ describe("IssueStatusesTab", () => {
     catalog = [BUILT_IN_IN_REVIEW];
     render(<IssueStatusesTab />);
 
-    expect(screen.getAllByText(en.issue_statuses.categories.in_review)).toHaveLength(1);
+    expect(
+      screen.getAllByText(en.issue_statuses.built_in_descriptions.in_review),
+    ).toHaveLength(1);
   });
 
   // A toggle that can only ever reveal nothing is not worth a row of chrome.

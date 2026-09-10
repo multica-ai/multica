@@ -1,7 +1,7 @@
 {
   "issue_statuses": {
     "title": "태스크 상태",
-    "description": "태스크가 거치는 워크플로를 정의합니다. 각 상태의 동작은 속한 카테고리가 결정합니다.",
+    "description": "태스크 상태를 다섯 가지 수명 주기 카테고리로 구성합니다.",
     "loading": "상태를 불러오는 중…",
     "add": "상태 추가",
     "show_archived": "보관됨 표시 ({{count}})",
@@ -17,13 +17,13 @@
     "editor": {
       "create_title": "새 상태",
       "edit_title": "상태 편집",
-      "behavior_hint": "이 상태는 \"{{category}}\"와 정확히 같게 동작합니다.",
+      "behavior_hint": "이 상태는 \"{{category}}\"에 표시됩니다.",
       "name": "이름",
       "name_placeholder": "예: Code Review",
       "key_hint": "API와 CLI에서는 {{key}}로 참조합니다.",
       "created": "상태를 만들었습니다. API와 CLI에서는 {{key}}로 참조합니다.",
       "category": "카테고리",
-      "category_locked": "카테고리는 변경할 수 없습니다. 이미 이 상태인 태스크가 이에 의존합니다.",
+      "category_locked": "상태를 만든 뒤에는 카테고리를 변경할 수 없습니다.",
       "description": "설명",
       "description_placeholder": "팀에게 이 상태가 의미하는 것",
       "color": "색상",
@@ -39,13 +39,27 @@
       "confirm": "보관",
       "failed": "보관하지 못했습니다."
     },
+    "category_labels": {
+      "backlog": "백로그",
+      "unstarted": "시작 전",
+      "started": "시작됨",
+      "completed": "완료",
+      "canceled": "취소"
+    },
     "categories": {
+      "backlog": "현재 계획되지 않은 작업입니다.",
+      "unstarted": "계획되었지만 아직 시작하지 않은 작업입니다.",
+      "started": "진행 중이거나 리뷰 또는 차단 상태인 작업입니다.",
+      "completed": "완료된 작업입니다.",
+      "canceled": "완료하지 않기로 한 작업입니다."
+    },
+    "built_in_descriptions": {
       "backlog": "보류. 여기로 옮겨도 에이전트가 시작되지 않습니다.",
       "todo": "대기 중. 여기로 옮기면 담당 에이전트가 시작됩니다.",
       "in_progress": "진행 중.",
       "in_review": "전달 완료, 리뷰 대기. 오토파일럿 실행을 마무리합니다.",
-      "done": "완료.",
       "blocked": "외부 의존성으로 중단됨.",
+      "done": "완료.",
       "cancelled": "진행하지 않기로 함."
     }
   },

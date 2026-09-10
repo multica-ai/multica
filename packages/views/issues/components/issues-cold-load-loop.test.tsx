@@ -72,10 +72,33 @@ vi.mock("../../navigation", () => ({
 }));
 
 vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+  ALL_STATUSES: ["backlog", "unstarted", "started", "completed", "canceled"],
+  STATUS_ORDER: ["backlog", "unstarted", "started", "completed", "canceled"],
+  BUILT_IN_STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"],
+  BUILT_IN_STATUS_CATEGORY: {
+    backlog: "backlog",
+    todo: "unstarted",
+    in_progress: "started",
+    in_review: "started",
+    blocked: "started",
+    done: "completed",
+    cancelled: "canceled",
+  },
+  BUILT_IN_STATUS_LABEL: {
+    backlog: "Backlog",
+    todo: "Todo",
+    in_progress: "In Progress",
+    in_review: "In Review",
+    blocked: "Blocked",
+    done: "Done",
+    cancelled: "Cancelled",
+  },
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+    unstarted: { label: "Unstarted", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+    started: { label: "Started", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
+    completed: { label: "Completed", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
+    canceled: { label: "Canceled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
     in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
@@ -249,7 +272,7 @@ describe("Issues cold-load render loop (MUL-4985)", () => {
     renderWithProviders(
       <BoardView
         issues={issues}
-        visibleStatuses={["todo", "in_progress", "done"]}
+        visibleStatuses={["unstarted", "started", "completed"]}
         hiddenStatuses={[]}
         onMoveIssue={vi.fn()}
       />,
@@ -258,7 +281,7 @@ describe("Issues cold-load render loop (MUL-4985)", () => {
     // Reaching a stable paint (column header visible) proves the render settled
     // instead of looping.
     await waitFor(() => {
-      expect(screen.getByText("Todo")).toBeInTheDocument();
+      expect(screen.getByText("Unstarted")).toBeInTheDocument();
     });
     expect(screen.getByText("Board Card 0")).toBeInTheDocument();
   });

@@ -1,6 +1,6 @@
 import type { Issue, IssueStatusCategory, UpdateIssueRequest } from "@multica/core/types";
 import { issueStatusCategory } from "@multica/core/issues";
-import { isIssueStatusCategory, type IssueStatusCatalog } from "@multica/core/issue-statuses";
+import { normalizeIssueStatusCategory, type IssueStatusCatalog } from "@multica/core/issue-statuses";
 
 /** The issue fields the gate reads. */
 export type GateIssue = Pick<
@@ -28,13 +28,13 @@ export type RunConfirmIntent =
  * The category a status KEY belongs to — or `null` when nothing can answer.
  *
  * Three states, not two. `catalog.categoryOf` collapses "unknown custom key"
- * into `todo`, which is indistinguishable from a real `todo` and is exactly
+ * into `unstarted`, which is indistinguishable from a real lifecycle category and is exactly
  * the guess this gate must not make: it decides whether a write may start an
  * agent, so an unresolvable key has to stay unresolved and let the caller fail
  * safe. (MUL-6463)
  *
  * Resolution order mirrors the server (`issuestatus.Effective`): a category the
- * payload already carries wins, a BUILT-IN key is its own category, and only a
+ * payload already carries wins, a BUILT-IN key maps to its lifecycle category, and only a
  * custom key needs the workspace catalog.
  */
 export function resolveStatusCategory(
@@ -45,11 +45,11 @@ export function resolveStatusCategory(
   const carried = issueStatusCategory({ status: statusKey, status_category: carriedCategory });
   if (carried) return carried;
   const category = catalog.entryOf(statusKey)?.category;
-  return category && isIssueStatusCategory(category) ? category : null;
+  return category ? normalizeIssueStatusCategory(category) : null;
 }
 
 /** Categories a promotion can land in without starting a run. */
-const NEVER_STARTS = ["backlog", "done", "cancelled"];
+const NEVER_STARTS: IssueStatusCategory[] = ["backlog", "completed", "canceled"];
 
 /**
  * Which confirmation, if any, an issue write needs before it is applied.

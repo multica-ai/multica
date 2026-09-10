@@ -63,14 +63,14 @@ func TestReorderIssueStatusesWritesIntraCategoryPositionsFromOne(t *testing.T) {
 	first := insertCustomStatus(t, fmt.Sprintf("qa_a_%d", suffix), "in_review", 1, false)
 	second := insertCustomStatus(t, fmt.Sprintf("qa_b_%d", suffix), "in_review", 2, false)
 
-	rec := reorderVia(t, "in_review", []string{second, first})
+	rec := reorderVia(t, "started", []string{second, first})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reorder status = %d: %s", rec.Code, rec.Body.String())
 	}
 
 	positions := positionsByID(t, first, second)
-	// Positions start at 1: the category's built-in is seeded at 0 and never
-	// moves, so it stays at the head of its column.
+	// Positions start at 1: the category's built-ins are seeded at 0 and never
+	// move, so they stay at the head of the group.
 	if positions[second] != 1 || positions[first] != 2 {
 		t.Fatalf("positions = %#v, want second=1 first=2", positions)
 	}
@@ -98,7 +98,7 @@ func TestReorderIssueStatusesRejectsArchivedWithoutPartialWrite(t *testing.T) {
 
 	before := positionsByID(t, first, second, archived)
 
-	rec := reorderVia(t, "in_review", []string{second, archived, first})
+	rec := reorderVia(t, "started", []string{second, archived, first})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("reorder status = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
@@ -134,11 +134,11 @@ func TestReorderIssueStatusesRejectsForeignInputs(t *testing.T) {
 		ids      []string
 		want     int
 	}{
-		{"a built-in cannot be reordered", "in_review", []string{builtInID}, http.StatusForbidden},
-		{"ids must belong to the named category", "in_review", []string{inReview, inTodo}, http.StatusBadRequest},
-		{"duplicate ids are rejected", "in_review", []string{inReview, inReview}, http.StatusBadRequest},
-		{"an empty order is rejected", "in_review", nil, http.StatusBadRequest},
-		{"the category must be one of the seven", "nope", []string{inReview}, http.StatusBadRequest},
+		{"a built-in cannot be reordered", "started", []string{builtInID}, http.StatusForbidden},
+		{"ids must belong to the named category", "started", []string{inReview, inTodo}, http.StatusBadRequest},
+		{"duplicate ids are rejected", "started", []string{inReview, inReview}, http.StatusBadRequest},
+		{"an empty order is rejected", "started", nil, http.StatusBadRequest},
+		{"the category must be one of the five", "nope", []string{inReview}, http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -183,7 +183,7 @@ func TestReorderIssueStatusesSerializesAgainstConcurrentArchive(t *testing.T) {
 	}
 
 	done := make(chan int, 1)
-	go func() { done <- reorderVia(t, "in_review", []string{second, first}).Code }()
+	go func() { done <- reorderVia(t, "started", []string{second, first}).Code }()
 
 	select {
 	case code := <-done:
@@ -231,7 +231,7 @@ func TestReorderIssueStatusesRejectsAPartialSet(t *testing.T) {
 
 	before := positionsByID(t, first, second)
 
-	rec := reorderVia(t, "in_review", []string{second})
+	rec := reorderVia(t, "started", []string{second})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("reorder status = %d, want 409: %s", rec.Code, rec.Body.String())
 	}

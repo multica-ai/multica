@@ -1,6 +1,11 @@
 "use client";
 
-import { issueColumnCategory, issueStatusCategory, statusCategoryOfKey } from "@multica/core/issues";
+import {
+  defaultStatusForCategory,
+  issueColumnCategory,
+  issueStatusCategory,
+  statusCategoryOfKey,
+} from "@multica/core/issues";
 import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   DndContext,
@@ -164,7 +169,7 @@ function findCellIn(
   return null;
 }
 
-function cellId(laneKey: string, status: IssueStatus): string {
+function cellId(laneKey: string, status: IssueStatusCategory): string {
   return `swim:${laneKey}:${status}`;
 }
 
@@ -244,8 +249,8 @@ interface LaneGroup {
   /** Exact server count; legacy builders leave this undefined and use the
    * loaded cell window as before. */
   total?: number;
-  /** Opaque compound row keys by status. */
-  serverCellKeys?: Partial<Record<IssueStatus, string>>;
+  /** Opaque compound row keys by lifecycle category. */
+  serverCellKeys?: Partial<Record<IssueStatusCategory, string>>;
 }
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
@@ -473,7 +478,7 @@ function buildAssigneeLanes(
 function buildServerLanes(
   descriptors: readonly IssueTableGroupDescriptor[],
   grouping: SwimlaneGrouping,
-  visibleStatuses: readonly IssueStatus[],
+  visibleStatuses: readonly IssueStatusCategory[],
   projects: ReadonlyMap<string, Project> | undefined,
   getActorName: (type: string, id: string) => string,
   storedOrder: string[],
@@ -490,7 +495,7 @@ function buildServerLanes(
       (descriptor.secondary_groups ?? []).every(
         (secondary) =>
           secondary.value.kind !== "status" ||
-          !visibleStatusSet.has(secondary.value.status as IssueStatus) ||
+          !visibleStatusSet.has(secondary.value.status as IssueStatusCategory) ||
           secondary.count === 0,
       )
     ) {
@@ -502,7 +507,7 @@ function buildServerLanes(
           ? [[secondary.value.status, secondary.key]]
           : [],
       ),
-    ) as Partial<Record<IssueStatus, string>>;
+    ) as Partial<Record<IssueStatusCategory, string>>;
     const value = descriptor.value;
     if (grouping === "assignee" && value.kind === "assignee") {
       const actorRef = value.actor;
@@ -686,8 +691,7 @@ function SwimLaneViewImpl({
   const laneSourceIssues = unfilteredIssues ?? issues;
 
   // Re-impose canonical status order (ALL_STATUSES) on whatever the controller
-  // marked visible, so columns — including `cancelled`, ordered last — render
-  // in lifecycle order.
+  // marked visible, so all five lifecycle columns render in canonical order.
   const sortedStatuses = useMemo(
     () => ALL_STATUSES.filter((s) => visibleStatuses.includes(s)),
     [visibleStatuses],
@@ -940,7 +944,7 @@ function SwimLaneViewImpl({
       for (const lane of groupBranches.descriptors) {
         for (const cell of lane.secondary_groups ?? []) {
           if (cell.value.kind !== "status") continue;
-          const category = categoryOf(cell.value.status as IssueStatus);
+          const category = cell.value.status as IssueStatusCategory;
           totals.set(category, (totals.get(category) ?? 0) + cell.count);
         }
       }
@@ -953,7 +957,7 @@ function SwimLaneViewImpl({
       totals.set(category, (totals.get(category) ?? 0) + 1);
     }
     return totals;
-  }, [groupBranches, laneSourceIssues, headerIssueIds]);
+  }, [categoryOf, groupBranches, laneSourceIssues, headerIssueIds]);
 
   // Collapsed swimlanes — persisted per-grouping via the view store. The
   // store keys are raw lane ids (or sentinel `NONE_LANE_ID` / `ORPHAN_LANE_ID`
@@ -1293,7 +1297,13 @@ function SwimLaneViewImpl({
         activeId,
         {
           ...targetLane.moveUpdates,
-          ...(keepsStatus ? {} : { status: finalOverCell.status as IssueStatus }),
+          ...(keepsStatus
+            ? {}
+            : {
+                status: defaultStatusForCategory(
+                  finalOverCell.status as IssueStatusCategory,
+                ),
+              }),
           position: newPosition,
           ...getMoveAnchors(finalIds, activeId),
         },
@@ -1573,7 +1583,7 @@ function DraggableSwimLane({
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   localCells: Record<string, Record<string, string[]>>;
-  sortedStatuses: IssueStatus[];
+  sortedStatuses: IssueStatusCategory[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
@@ -1721,7 +1731,7 @@ function SwimLaneCell({
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
-  status: IssueStatus;
+  status: IssueStatusCategory;
   lane: LaneGroup;
   projectId?: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
@@ -1755,7 +1765,10 @@ function SwimLaneCell({
   );
 
   const handleAdd = useCallback(() => {
-    const data: IssueCreateDefaults = { status, ...lane.moveUpdates };
+    const data: IssueCreateDefaults = {
+      status: defaultStatusForCategory(status as IssueStatusCategory),
+      ...lane.moveUpdates,
+    };
     // Per-page project override takes precedence (e.g. Project Detail
     // pre-fills its own project id regardless of grouping).
     if (projectId) data.project_id = projectId;

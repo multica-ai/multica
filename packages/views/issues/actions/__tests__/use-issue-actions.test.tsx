@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
+import { statusCategoryOfKey } from "@multica/core/issues";
 import type { Issue, IssueStatusEntry } from "@multica/core/types";
 
 vi.mock("@multica/core/hooks", () => ({
@@ -54,10 +55,18 @@ vi.mock("@multica/core/issues/mutations", () => ({
 // `status === "backlog"` / `=== "todo"` comparison gets wrong (MUL-6463).
 const catalogEntries: IssueStatusEntry[] = [
   ...(["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const).map(
-    (key, i) => statusEntry({ id: key, key, name: key, category: key, is_system: true, position: i }),
+    (key, i) =>
+      statusEntry({
+        id: key,
+        key,
+        name: key,
+        category: statusCategoryOfKey(key),
+        is_system: true,
+        position: i,
+      }),
   ),
   statusEntry({ id: "later", key: "later", name: "Later", category: "backlog", position: 7 }),
-  statusEntry({ id: "rework", key: "rework", name: "Rework", category: "todo", position: 8 }),
+  statusEntry({ id: "rework", key: "rework", name: "Rework", category: "unstarted", position: 8 }),
 ];
 function statusEntry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
   return {
@@ -66,7 +75,7 @@ function statusEntry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
     key: "custom",
     name: "Custom",
     description: "",
-    category: "todo",
+    category: "unstarted",
     color: "#22c55e",
     is_system: false,
     position: 0,

@@ -17,7 +17,7 @@ describe("column visibility vs status filter", () => {
 
   // The regression: hiding one column wrote the OTHER six built-in keys into
   // statusFilters, so the query then excluded every custom status too — hiding
-  // Backlog silently dropped a QA card sitting in the In Review column.
+  // Backlog silently dropped a QA card sitting in the Started column.
   it("hiding a column does not touch the status filter", () => {
     store.getState().hideStatus("backlog");
 
@@ -27,10 +27,10 @@ describe("column visibility vs status filter", () => {
 
   it("showing a column restores it without inventing a filter", () => {
     store.getState().hideStatus("backlog");
-    store.getState().hideStatus("done");
+    store.getState().hideStatus("completed");
     store.getState().showStatus("backlog");
 
-    expect(store.getState().hiddenStatusCategories).toEqual(["done"]);
+    expect(store.getState().hiddenStatusCategories).toEqual(["completed"]);
     expect(store.getState().statusFilters).toEqual([]);
   });
 

@@ -11,16 +11,19 @@
  * import the web component. SVG ops are written with react-native-svg
  * primitives instead of HTML <svg>.
  *
- * The glyph set is per CATEGORY, not per status key: a workspace's custom
- * status renders with its category's icon, which is what makes it read as "the
- * same kind of thing" (MUL-6243). Callers that hold the workspace catalog pass
- * `category` and `color`; callers that only hold a key get the built-in
- * resolution, which is exact for the 7 built-ins.
+ * Custom statuses use their category glyph, while concrete built-ins retain
+ * their more specific progress/review/blocked glyphs inside the category.
+ * Callers that hold the workspace catalog pass `category` and `color`; callers
+ * that only hold a key get the exact built-in resolution.
  */
 import * as React from "react";
 import Svg, { Circle, G, Line, Path } from "react-native-svg";
-import type { IssueStatus, IssueStatusCategory } from "@multica/core/types";
-import { statusCategoryOfKey } from "@/lib/issue-status";
+import type {
+  BuiltInIssueStatus,
+  IssueStatus,
+  IssueStatusCategory,
+} from "@multica/core/types";
+import { isBuiltInIssueStatus, statusCategoryOfKey } from "@/lib/issue-status";
 
 const CX = 7;
 const CY = 7;
@@ -33,12 +36,28 @@ const FILL_R = 3.5;
 // colour of its own.
 const CATEGORY_COLOR: Record<IssueStatusCategory, string> = {
   backlog: "#71717a", // muted-foreground
+  unstarted: "#71717a",
+  started: "#eab308", // warning
+  completed: "#3b82f6", // info
+  canceled: "#71717a",
+};
+
+const BUILT_IN_COLOR: Record<BuiltInIssueStatus, string> = {
+  backlog: "#71717a",
   todo: "#71717a",
-  in_progress: "#eab308", // warning
+  in_progress: "#eab308",
   in_review: "#22c55e", // success
   done: "#3b82f6", // info
   blocked: "#dc2626", // destructive
   cancelled: "#71717a",
+};
+
+const CATEGORY_RENDERER: Record<IssueStatusCategory, BuiltInIssueStatus> = {
+  backlog: "backlog",
+  unstarted: "todo",
+  started: "in_progress",
+  completed: "done",
+  canceled: "cancelled",
 };
 
 function piePath(progress: number): string {
@@ -145,7 +164,7 @@ export function StatusIcon({
   status: IssueStatus;
   /**
    * Resolved category, for callers that hold the workspace catalog. Without it
-   * the key resolves on its own — exact for the 7 built-ins, `todo` for a
+   * the key resolves on its own — exact for the 7 built-ins, `unstarted` for a
    * custom key this render has no catalog for.
    */
   category?: IssueStatusCategory;
@@ -154,22 +173,24 @@ export function StatusIcon({
   size?: number;
 }) {
   const category = categoryProp ?? statusCategoryOfKey(status);
-  const color = colorProp ?? CATEGORY_COLOR[category];
+  const builtIn = isBuiltInIssueStatus(status) ? status : null;
+  const iconStatus = builtIn ?? CATEGORY_RENDERER[category];
+  const color = colorProp ?? (builtIn ? BUILT_IN_COLOR[builtIn] : CATEGORY_COLOR[category]);
   return (
     <Svg width={size} height={size} viewBox="0 0 14 14">
-      {category === "backlog" ? (
+      {iconStatus === "backlog" ? (
         <BacklogIcon color={color} />
-      ) : category === "todo" ? (
+      ) : iconStatus === "todo" ? (
         <ProgressCircle progress={0} color={color} />
-      ) : category === "in_progress" ? (
+      ) : iconStatus === "in_progress" ? (
         <ProgressCircle progress={0.5} color={color} />
-      ) : category === "in_review" ? (
+      ) : iconStatus === "in_review" ? (
         <ProgressCircle progress={0.75} color={color} />
-      ) : category === "done" ? (
+      ) : iconStatus === "done" ? (
         <ProgressCircle progress={1} color={color}>
           <DoneCheck />
         </ProgressCircle>
-      ) : category === "blocked" ? (
+      ) : iconStatus === "blocked" ? (
         <ProgressCircle progress={0} color={color}>
           <BlockedSlash color={color} />
         </ProgressCircle>

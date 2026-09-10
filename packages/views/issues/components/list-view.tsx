@@ -18,6 +18,7 @@ import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-ki
 import { Virtuoso } from "react-virtuoso";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatusCategory, Project } from "@multica/core/types";
+import { defaultStatusForCategory } from "@multica/core/issues";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
@@ -62,7 +63,7 @@ function buildListGroups(visibleStatuses: IssueStatusCategory[]): BoardColumnGro
     id: statusGroupId(status),
     title: status,
     status,
-    createData: { status },
+    createData: { status: defaultStatusForCategory(status) },
   }));
 }
 
@@ -586,7 +587,7 @@ function StatusAccordionItem({
                   className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
                   onClick={() => {
                     const defaults = {
-                      status,
+                      status: defaultStatusForCategory(status),
                       ...(projectId ? { project_id: projectId } : {}),
                     };
                     onCreateIssue(defaults);

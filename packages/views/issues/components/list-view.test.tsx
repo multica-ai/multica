@@ -186,13 +186,13 @@ const emptyPage = {
 };
 
 const PAGINATION = {
-  todo: { ...emptyPage, total: 2 },
-  in_review: { ...emptyPage, total: 1 },
+  unstarted: { ...emptyPage, total: 2 },
+  started: { ...emptyPage, total: 1 },
 } as unknown as IssueStatusPagination;
 
 function renderListView(
   issues: Issue[] = ISSUES,
-  visibleStatuses: IssueStatusCategory[] = ["todo"],
+  visibleStatuses: IssueStatusCategory[] = ["unstarted"],
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -229,7 +229,7 @@ describe("ListView status header collapse", () => {
     const trigger = screen.getByRole("button", { expanded: true });
     await user.click(trigger);
 
-    expect(mockViewState.listCollapsedStatuses).toEqual(["todo"]);
+    expect(mockViewState.listCollapsedStatuses).toEqual(["unstarted"]);
   });
 
   it("still collapses after a drag is cancelled instead of dropped", async () => {
@@ -251,7 +251,7 @@ describe("ListView status header collapse", () => {
     const trigger = screen.getByRole("button", { expanded: true });
     await user.click(trigger);
 
-    expect(mockViewState.listCollapsedStatuses).toEqual(["todo"]);
+    expect(mockViewState.listCollapsedStatuses).toEqual(["unstarted"]);
   });
 });
 
@@ -268,10 +268,10 @@ describe("ListView custom statuses", () => {
       identifier: "MUL-3",
       title: "Waiting on the reporter",
       status: "awaiting_response",
-      status_category: "in_review",
+      status_category: "started",
     } as Issue;
 
-    renderListView([custom], ["in_review"]);
+    renderListView([custom], ["started"]);
 
     expect(screen.getByText("Waiting on the reporter")).toBeInTheDocument();
   });

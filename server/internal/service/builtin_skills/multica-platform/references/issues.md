@@ -354,7 +354,7 @@ multica issue status <stage-2-child-id> todo   # promote when its deps are met
 ```
 
 `issue children --output json` reports per-stage `done` counts. A custom status
-counts as done here when its category is `done` or `cancelled`, which is what
+counts as done here when its category is `completed` or `canceled`, which is what
 `status_category` on each child carries. Read `status_category` rather than
 matching `status` against the built-in names.
 

@@ -6,7 +6,7 @@ import {
 import type { Issue, IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
-import { issueColumnCategory } from "@multica/core/issues";
+import { defaultStatusForCategory, issueColumnCategory } from "@multica/core/issues";
 import type { BoardColumnGroup } from "../components/board-column";
 
 export type DragMoveTargetUpdates = Pick<
@@ -185,7 +185,7 @@ export function getMoveUpdates(
       issue.status !== group.status &&
       issueColumnCategory(issue) === group.status;
     if (keepsStatus) return { position };
-    return { status: group.status, position };
+    return { status: defaultStatusForCategory(group.status), position };
   }
   // Property columns: the value change is not part of UpdateIssueRequest —
   // the board applies it through useSetIssueProperty after the position move.

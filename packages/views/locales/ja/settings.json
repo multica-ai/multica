@@ -1,7 +1,7 @@
 {
   "issue_statuses": {
     "title": "タスクステータス",
-    "description": "タスクが辿るワークフローを定義します。各ステータスの挙動は所属するカテゴリが決めます。",
+    "description": "タスクのステータスを5つのライフサイクルカテゴリに整理します。",
     "loading": "ステータスを読み込み中…",
     "add": "ステータスを追加",
     "show_archived": "アーカイブ済みを表示（{{count}}）",
@@ -17,13 +17,13 @@
     "editor": {
       "create_title": "新しいステータス",
       "edit_title": "ステータスを編集",
-      "behavior_hint": "このステータスは「{{category}}」とまったく同じ挙動になります。",
+      "behavior_hint": "このステータスは「{{category}}」に表示されます。",
       "name": "名前",
       "name_placeholder": "例: Code Review",
       "key_hint": "API と CLI では {{key}} として参照されます。",
       "created": "ステータスを作成しました。API と CLI では {{key}} として参照されます。",
       "category": "カテゴリ",
-      "category_locked": "カテゴリは変更できません。すでにこのステータスのタスクが依存しています。",
+      "category_locked": "ステータスの作成後はカテゴリを変更できません。",
       "description": "説明",
       "description_placeholder": "チームにとってこのステータスが意味すること",
       "color": "色",
@@ -39,13 +39,27 @@
       "confirm": "アーカイブ",
       "failed": "アーカイブできませんでした。"
     },
+    "category_labels": {
+      "backlog": "バックログ",
+      "unstarted": "未着手",
+      "started": "開始済み",
+      "completed": "完了",
+      "canceled": "キャンセル"
+    },
     "categories": {
+      "backlog": "現在計画されていない作業。",
+      "unstarted": "計画済みでまだ始まっていない作業。",
+      "started": "進行中、レビュー中、またはブロック中の作業。",
+      "completed": "完了した作業。",
+      "canceled": "完了しないことになった作業。"
+    },
+    "built_in_descriptions": {
       "backlog": "保留。ここに移動してもエージェントは起動しません。",
       "todo": "待機中。ここに移動すると担当エージェントが起動します。",
       "in_progress": "作業中。",
       "in_review": "納品済み、レビュー待ち。オートパイロットの実行を完了します。",
-      "done": "完了。",
       "blocked": "外部依存でブロック中。",
+      "done": "完了。",
       "cancelled": "見送り。"
     }
   },

@@ -66,7 +66,7 @@ describe("IssueChip", () => {
               identifier: "MUL-6956",
               title: "Custom status color in Chat",
               status: "awaiting_response",
-              status_category: "in_review",
+              status_category: "started",
             },
           ],
         } as ReturnType<typeof useQuery>;
@@ -96,7 +96,7 @@ describe("IssueChip", () => {
     );
     expect(screen.getByTestId("status-icon")).toHaveAttribute(
       "data-category",
-      "in_review",
+      "started",
     );
     expect(screen.getByTestId("status-icon")).toHaveAttribute(
       "data-color",

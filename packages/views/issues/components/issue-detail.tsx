@@ -4,7 +4,6 @@ import {
   issueBehavesAs,
   issueBehavesAsAny,
   issueStatusCategory,
-  statusCategoryOfKey,
 } from "@multica/core/issues";
 import { useStatusLabel } from "../utils/status-label";
 import { priorityLabel } from "../utils/priority-label";
@@ -63,7 +62,7 @@ import { PropRow } from "../../common/prop-row";
 import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
+import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
@@ -280,8 +279,8 @@ function statusLabel(
   resolveLabel?: (statusKey: string) => string,
 ): string {
   if (resolveLabel) return resolveLabel(status);
-  if (status in STATUS_CONFIG) {
-    return t(($) => $.status[statusCategoryOfKey(status)]);
+  if (isBuiltInIssueStatus(status)) {
+    return t(($) => $.status[status]);
   }
   return status;
 }
@@ -705,7 +704,7 @@ function SubIssueRow({
   const toggleSelected = useIssueSelectionStore((s) => s.toggle);
   // Category, not key: a custom status in the done/cancelled categories is
   // finished work and has to strike through like any other. (MUL-6243)
-  const isDone = issueBehavesAsAny(child, ["done", "cancelled"]);
+  const isDone = issueBehavesAsAny(child, ["completed", "canceled"]);
   const labels = rowProps.labels ? (child.labels ?? []) : [];
   const customPropsWithValue = customProperties.filter(
     (p) => child.properties?.[p.id] !== undefined,
@@ -2760,7 +2759,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 it never overlaps the title (which truncates to make room).
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} />
-            {onDone && !issueBehavesAsAny(issue, ["done", "cancelled"]) && (
+            {onDone && !issueBehavesAsAny(issue, ["completed", "canceled"]) && (
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -2777,7 +2776,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <TooltipContent side="bottom">{t(($) => $.detail.mark_done_tooltip)}</TooltipContent>
               </Tooltip>
             )}
-            {onDone && issueBehavesAs(issue, "done") && (
+            {onDone && issueBehavesAs(issue, "completed") && (
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -2979,7 +2978,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 {parentIssue.title}
               </span>
               {parentChildIssues.length > 0 && (() => {
-                const done = parentChildIssues.filter((c) => issueBehavesAs(c, "done")).length;
+                const done = parentChildIssues.filter((c) => issueBehavesAs(c, "completed")).length;
                 return (
                   <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
                     <ProgressRing done={done} total={parentChildIssues.length} size={11} />
@@ -2998,7 +2997,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               parentIssue={parentIssue}
               parentProgress={parentChildIssues.length > 0
                 ? {
-                    done: parentChildIssues.filter((child) => issueBehavesAs(child, "done")).length,
+                    done: parentChildIssues.filter((child) => issueBehavesAs(child, "completed")).length,
                     total: parentChildIssues.length,
                   }
                 : undefined}
@@ -3095,7 +3094,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
           )}
           {childIssues.length > 0 && (() => {
-            const doneCount = childIssues.filter((c) => issueBehavesAs(c, "done")).length;
+            const doneCount = childIssues.filter((c) => issueBehavesAs(c, "completed")).length;
             return (
               // Provider hosts the shared right-click actions menu the rows
               // delegate to (one singleton menu, not one per row).

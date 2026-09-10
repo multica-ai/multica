@@ -442,7 +442,7 @@ func (h *Handler) childStatusResolver(ctx context.Context) func(db.Issue) (strin
 		if err := resolver.Err(); err != nil {
 			return "", err
 		}
-		if !issuestatus.IsCategory(status) {
+		if !issuestatus.IsBuiltIn(status) {
 			return "", fmt.Errorf("unresolved status %q in workspace %s", c.Status, uuidToString(c.WorkspaceID))
 		}
 		return status, nil

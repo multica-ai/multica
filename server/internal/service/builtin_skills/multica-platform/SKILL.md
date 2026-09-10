@@ -66,10 +66,12 @@ normally enqueue a run. When the work is already underway and the write merely
 records ownership or progress, pass `--no-start` on EVERY command in that flow —
 suppressing the assignment alone does not suppress a later status update.
 
-**Status is a category, not a literal.** A workspace may define custom statuses
-beyond the built-ins; each inherits its category's platform behavior in full,
-and the runtime brief lists this workspace's catalog. Read `status_category`
-rather than matching `status` against built-in names.
+**Status is a category, not a literal.** More precisely, `status` is a key and
+`status_category` is lifecycle. A workspace may define
+custom statuses beyond the built-ins. Read `status_category` for broad
+lifecycle decisions (`backlog`, `unstarted`, `started`, `completed`,
+`canceled`) rather than matching `status` against built-in names. Use the
+concrete catalog entry when exact status behavior matters.
 
 **Comment reads stay bounded.** Scan the threads cheaply
 (`--roots-only --summary --compact`), then expand only what matters

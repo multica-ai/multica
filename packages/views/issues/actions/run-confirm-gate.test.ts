@@ -23,12 +23,12 @@ function entry(key: string, category: string): IssueStatusEntry {
   };
 }
 
-// `later` parks like Backlog, `rework` starts work like Todo, `qa` sits in
-// in_review — the three custom shapes a raw key comparison gets wrong.
+// `later` parks like Backlog, while `rework` and `qa` start work — the custom
+// shapes a raw key comparison gets wrong.
 const CATALOG = buildIssueStatusCatalog([
   entry("later", "backlog"),
-  entry("rework", "todo"),
-  entry("qa", "in_review"),
+  entry("rework", "unstarted"),
+  entry("qa", "started"),
 ]);
 // A catalog that has not loaded: every custom key is unresolvable.
 const COLD = buildIssueStatusCatalog(undefined);
@@ -45,7 +45,7 @@ function issue(overrides: Partial<GateIssue> = {}): GateIssue {
 
 describe("resolveStatusCategory", () => {
   it("prefers the category the payload carries", () => {
-    expect(resolveStatusCategory("qa", "in_review", COLD)).toBe("in_review");
+    expect(resolveStatusCategory("qa", "started", COLD)).toBe("started");
   });
 
   it("resolves a built-in key without a catalog", () => {
@@ -57,9 +57,9 @@ describe("resolveStatusCategory", () => {
   });
 
   it("answers null — never a guess — for a custom key nothing can resolve", () => {
-    // catalog.categoryOf would say `todo` here, which is the guess this gate
+    // catalog.categoryOf would say `unstarted` here, which is the guess this gate
     // exists to avoid: it decides whether a write may start an agent.
-    expect(CATALOG.categoryOf("unknown")).toBe("todo");
+    expect(CATALOG.categoryOf("unknown")).toBe("unstarted");
     expect(resolveStatusCategory("unknown", undefined, CATALOG)).toBeNull();
     expect(resolveStatusCategory("later", undefined, COLD)).toBeNull();
   });

@@ -25,15 +25,19 @@ describe("buildIssueStatusCatalog", () => {
   it("resolves every built-in with no catalog loaded", () => {
     const c = buildIssueStatusCatalog(undefined);
     expect(c.isLoaded).toBe(false);
-    for (const key of ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"]) {
-      expect(c.categoryOf(key)).toBe(key);
-    }
+    expect(c.categoryOf("backlog")).toBe("backlog");
+    expect(c.categoryOf("todo")).toBe("unstarted");
+    expect(c.categoryOf("in_progress")).toBe("started");
+    expect(c.categoryOf("in_review")).toBe("started");
+    expect(c.categoryOf("blocked")).toBe("started");
+    expect(c.categoryOf("done")).toBe("completed");
+    expect(c.categoryOf("cancelled")).toBe("canceled");
     expect(c.labelOf("in_review")).toBe("In Review");
   });
 
   it("maps a custom status to its category and name", () => {
     const c = buildIssueStatusCatalog([entry("human_review", "in_review", "Human Review")]);
-    expect(c.categoryOf("human_review")).toBe("in_review");
+    expect(c.categoryOf("human_review")).toBe("started");
     expect(c.labelOf("human_review")).toBe("Human Review");
     expect(c.entryOf("human_review")?.key).toBe("human_review");
   });
@@ -42,14 +46,14 @@ describe("buildIssueStatusCatalog", () => {
   // back to a renderable category beats dropping the issue.
   it("falls back for a status the catalog does not know", () => {
     const c = buildIssueStatusCatalog([]);
-    expect(c.categoryOf("ghost")).toBe("todo");
+    expect(c.categoryOf("ghost")).toBe("unstarted");
     expect(c.labelOf("ghost")).toBe("ghost");
     expect(c.entryOf("ghost")).toBeUndefined();
   });
 
   it("ignores a corrupt category rather than trusting it", () => {
-    const c = buildIssueStatusCatalog([entry("weird", "started")]);
-    expect(c.categoryOf("weird")).toBe("todo");
+    const c = buildIssueStatusCatalog([entry("weird", "not_a_category")]);
+    expect(c.categoryOf("weird")).toBe("unstarted");
   });
 
   // The 7 built-ins carry a seeded hex the server refuses to let anyone edit,
@@ -80,12 +84,13 @@ describe("buildIssueStatusCatalog", () => {
       entry("human_review", "in_review"),
       entry("gate_approved", "done"),
     ]);
-    expect(c.inCategory("in_review").map((e) => e.key)).toEqual(["human_review"]);
+    expect(c.inCategory("started").map((e) => e.key)).toEqual(["human_review"]);
     expect(c.inCategory("backlog")).toEqual([]);
   });
 
-  it("isIssueStatusCategory accepts exactly the 7", () => {
-    expect(isIssueStatusCategory("in_review")).toBe(true);
+  it("isIssueStatusCategory accepts exactly the 5", () => {
+    expect(isIssueStatusCategory("started")).toBe(true);
+    expect(isIssueStatusCategory("in_review")).toBe(false);
     expect(isIssueStatusCategory("human_review")).toBe(false);
   });
 });
@@ -101,7 +106,7 @@ describe("archived statuses stay resolvable", () => {
 
   it("keeps name and category for an issue left on an archived status", () => {
     expect(c.labelOf("gate_approved")).toBe("Gate Approved");
-    expect(c.categoryOf("gate_approved")).toBe("done");
+    expect(c.categoryOf("gate_approved")).toBe("completed");
     expect(c.entryOf("gate_approved")?.color).toBe("#123456");
   });
 
@@ -111,8 +116,8 @@ describe("archived statuses stay resolvable", () => {
   });
 
   it("excludes archived from a category's pickable list", () => {
-    expect(c.inCategory("done")).toEqual([]);
-    expect(c.inCategory("in_review").map((e) => e.key)).toEqual(["human_review"]);
+    expect(c.inCategory("completed")).toEqual([]);
+    expect(c.inCategory("started").map((e) => e.key)).toEqual(["human_review"]);
   });
 });
 

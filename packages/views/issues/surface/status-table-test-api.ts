@@ -1,4 +1,8 @@
-import { ALL_STATUSES } from "@multica/core/issues/config";
+import {
+  ALL_STATUSES,
+  BUILT_IN_STATUS_ORDER,
+} from "@multica/core/issues/config";
+import { issueColumnCategory } from "@multica/core/issues";
 import type {
   Issue,
   IssueTableGroupDescriptor,
@@ -37,9 +41,8 @@ export interface WorkingAgentsFixture {
 /**
  * Group-key axis for a status grouping. Board / list / swimlane surfaces page by
  * CATEGORY (`status_category:<category>`); the table still groups by concrete
- * status key. This fixture holds only built-in statuses, where a key IS its own
- * category, so the two axes select the same rows — only the key shape differs.
- * (MUL-6243)
+ * status key. This fixture holds built-in statuses and folds them through the
+ * same five-category mapping as production. (MUL-6243)
  */
 function statusAxis(group: { kind: string }): string {
   return group.kind === "status_category" ? "status_category" : "status";
@@ -103,12 +106,8 @@ async function allRows(
   query: IssueTableQuerySpec,
 ) {
   const rows = await Promise.all(
-    ALL_STATUSES.map((status) =>
-      rowsForStatus(
-        listIssues,
-        { ...query, filters: { ...query.filters, statuses: undefined } },
-        status,
-      ),
+    BUILT_IN_STATUS_ORDER.map((status) =>
+      rowsForStatus(listIssues, query, status),
     ),
   );
   return rows.flat();
@@ -204,6 +203,8 @@ export function statusTableMethodsFromLegacy(
   return {
     listIssueTableGroups: async (request: IssueTableGroupsRequest) => {
       if (request.group.kind === "compound") {
+        const byCategory = request.group.secondary === "status_category";
+        const axis = secondaryAxis(request.group);
         const issues = await allRows(listIssues, request.query);
         const issueById = new Map(issues.map((issue) => [issue.id, issue]));
         const grouped = new Map<
@@ -232,11 +233,18 @@ export function statusTableMethodsFromLegacy(
           groups: Array.from(grouped.values(), ({ descriptor, issues }) => ({
             ...descriptor,
             count: issues.length,
-            secondary_groups: ALL_STATUSES.flatMap((status) => {
-              const count = issues.filter((issue) => issue.status === status).length;
+            secondary_groups: (byCategory
+              ? ALL_STATUSES
+              : BUILT_IN_STATUS_ORDER
+            ).flatMap((status) => {
+              const count = issues.filter((issue) =>
+                byCategory
+                  ? issueColumnCategory(issue) === status
+                  : issue.status === status,
+              ).length;
               return count
                 ? [{
-                    key: `compound:${descriptor.key}:${secondaryAxis(request.group)}:${status}`,
+                    key: `compound:${descriptor.key}:${axis}:${status}`,
                     value: { kind: "status" as const, status },
                     count,
                   }]
@@ -246,13 +254,23 @@ export function statusTableMethodsFromLegacy(
           next_cursor: null,
         };
       }
-      const groups = await Promise.all(
-        ALL_STATUSES.map(async (status) => ({
-          status,
-          issues: await rowsForStatus(listIssues, request.query, status),
-        })),
-      );
-      const nonEmpty = groups.filter(({ issues }) => issues.length > 0);
+      const groups = request.group.kind === "status_category"
+        ? (() => {
+            return allRows(listIssues, request.query).then((issues) =>
+              ALL_STATUSES.map((status) => ({
+                status,
+                issues: issues.filter((issue) => issueColumnCategory(issue) === status),
+              })),
+            );
+          })()
+        : Promise.all(
+            BUILT_IN_STATUS_ORDER.map(async (status) => ({
+              status,
+              issues: await rowsForStatus(listIssues, request.query, status),
+            })),
+          );
+      const resolvedGroups = await groups;
+      const nonEmpty = resolvedGroups.filter(({ issues }) => issues.length > 0);
       return {
         query_fingerprint: "test",
         total: nonEmpty.reduce((sum, group) => sum + group.issues.length, 0),
@@ -267,6 +285,7 @@ export function statusTableMethodsFromLegacy(
     listIssueTableRows: async (request: IssueTableRowsRequest) => {
       if (request.group.kind === "compound") {
         const primary = request.group.primary;
+        const byCategory = request.group.secondary === "status_category";
         const axis = `:${secondaryAxis(request.group)}:`;
         const marker = request.group_key?.lastIndexOf(axis) ?? -1;
         const status =
@@ -283,7 +302,12 @@ export function statusTableMethodsFromLegacy(
             primary,
             issueById,
           );
-          return descriptor.key === primaryKey && issue.status === status;
+          return (
+            descriptor.key === primaryKey &&
+            (byCategory
+              ? issueColumnCategory(issue) === status
+              : issue.status === status)
+          );
         });
         return {
           query_fingerprint: "test",
@@ -299,10 +323,15 @@ export function statusTableMethodsFromLegacy(
         };
       }
       const rawStatus = request.group_key?.replace(/^status(_category)?:/, "");
-      const status = ALL_STATUSES.find((value) => value === rawStatus);
-      const issues = status
-        ? await rowsForStatus(listIssues, request.query, status)
-        : [];
+      const category = ALL_STATUSES.find((value) => value === rawStatus);
+      const builtIn = BUILT_IN_STATUS_ORDER.find((value) => value === rawStatus);
+      const issues = request.group.kind === "status_category" && category
+        ? (await allRows(listIssues, request.query)).filter(
+            (issue) => issueColumnCategory(issue) === category,
+          )
+        : builtIn
+          ? await rowsForStatus(listIssues, request.query, builtIn)
+          : [];
       return {
         query_fingerprint: "test",
         group_key: request.group_key,
@@ -322,7 +351,7 @@ export function statusTableMethodsFromLegacy(
       // endpoint is never called.
       const groups = request.facets.some((facet) => facet.kind === "status")
         ? await Promise.all(
-            ALL_STATUSES.map(async (status) => ({
+            BUILT_IN_STATUS_ORDER.map(async (status) => ({
               status,
               issues: await rowsForStatus(
                 listIssues,

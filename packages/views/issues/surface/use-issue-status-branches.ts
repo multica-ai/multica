@@ -13,7 +13,11 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { ALL_STATUSES } from "@multica/core/issues/config";
-import { issueColumnCategory } from "@multica/core/issues";
+import { issueColumnCategory, statusCategoryOfKey } from "@multica/core/issues";
+import {
+  isBuiltInIssueStatus,
+  normalizeIssueStatusCategory,
+} from "@multica/core/issue-statuses";
 import type { IssueStatusCatalog } from "@multica/core/issue-statuses";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import {
@@ -71,21 +75,19 @@ interface StatusBranchData {
 // Every "status" in this hook is a board COLUMN, and columns are categories:
 // a workspace's custom statuses live inside their category's column rather than
 // adding one of their own. (MUL-6243)
-function statusGroupKey(status: IssueStatusCategory, byCategory: boolean) {
-  return byCategory ? `status_category:${status}` : `status:${status}`;
+function statusGroupKey(status: IssueStatusCategory) {
+  return `status_category:${status}`;
 }
 
 /**
  * The grouping contract this hook pages with.
  *
- * `status_category` is a server contract this feature introduced, so it is only
- * sent once the workspace is KNOWN to have custom statuses — see
- * `IssueStatusCatalog.hasCustomStatuses` for why that is both the
- * rolling-deploy guard and the cold-load guard. Everyone else keeps the exact
- * request they made before. (MUL-6243)
+ * Five lifecycle columns cannot be represented by one exact status key: the
+ * Started branch includes In Progress, In Review, Blocked, and matching custom
+ * statuses. Always use the category contract so every workspace gets the same
+ * complete branch semantics.
  */
 const CATEGORY_GROUP = { kind: "status_category" } as const;
-const STATUS_GROUP = { kind: "status" } as const;
 
 function initialCursorState(
   identity: string,
@@ -124,7 +126,7 @@ function rebaseCursorState(
  * dropping them made a column's total disagree with the cards it rendered.
  *
  * A key the LOADED catalog does not know is dropped rather than guessed into
- * `todo`: `categoryOf` cannot distinguish "custom status created seconds ago
+ * `unstarted`: `categoryOf` cannot distinguish "custom status created seconds ago
  * elsewhere" from "not a status at all", and inflating an arbitrary column's
  * header is worse than a total that is briefly one card short. Before the
  * catalog loads there is nothing to fold, so only built-ins are counted — which
@@ -134,7 +136,7 @@ function rebaseCursorState(
  * filter dropped, so the filter menu can show what each option would select.
  * A column header is the opposite question, so an active filter narrows the
  * fold to the keys it selected. Without that, filtering by one custom status
- * headed the In Review column with every in_review issue (220) above the 5
+ * headed the Started column with every in_review issue (220) above the 5
  * cards that actually matched. (MUL-6409)
  */
 function statusCountsFromFacets(
@@ -150,8 +152,14 @@ function statusCountsFromFacets(
   const statusFacet = facets?.facets.find((facet) => facet.kind === "status");
   for (const value of statusFacet?.values ?? []) {
     if (selected && !selected.has(value.key)) continue;
-    const builtIn = ALL_STATUSES.find((category) => category === value.key);
-    const category = builtIn ?? (catalog.isLoaded ? catalog.entryOf(value.key)?.category : undefined);
+    const rawCategory = isBuiltInIssueStatus(value.key)
+      ? statusCategoryOfKey(value.key)
+      : catalog.isLoaded
+        ? catalog.entryOf(value.key)?.category
+        : undefined;
+    const category = rawCategory
+      ? normalizeIssueStatusCategory(rawCategory)
+      : null;
     if (!category || !ALL_STATUSES.includes(category)) continue;
     counts.set(category, (counts.get(category) ?? 0) + value.count);
   }
@@ -193,13 +201,7 @@ export function useIssueStatusBranches({
 }): IssueStatusBranches {
   const queryClient = useQueryClient();
   const catalog = useIssueStatuses(wsId);
-  const { hasCustomStatuses } = catalog;
-  const group = hasCustomStatuses ? CATEGORY_GROUP : STATUS_GROUP;
-  // The grouping contract is part of the cursor identity, not just the query:
-  // it flips from `status` to `status_category` the moment the catalog lands,
-  // and a cursor minted against the old contract is meaningless to the new one.
-  // Without this, catalog arrival carried stale `status:` cursors into
-  // `status_category:` requests. (MUL-6243)
+  const group = CATEGORY_GROUP;
   const identity = useMemo(
     () => JSON.stringify({ query, group: group.kind }),
     [group.kind, query],
@@ -243,7 +245,7 @@ export function useIssueStatusBranches({
           ...issueTableRowPageOptions(wsId, {
             query,
             group,
-            group_key: statusGroupKey(status, hasCustomStatuses),
+            group_key: statusGroupKey(status),
             hierarchy: { enabled: false },
             parent_id: null,
             page: { limit: 50, cursor },
@@ -256,7 +258,7 @@ export function useIssueStatusBranches({
           enabled,
         };
       }),
-    [enabled, group, hasCustomStatuses, pageTargets, query, wsId],
+    [enabled, group, pageTargets, query, wsId],
   );
   const pageResults = useQueries({ queries: pageQueries }) as Array<
     UseQueryResult<IssueTableRowsResponse, Error>
@@ -424,7 +426,7 @@ export function useIssueStatusBranches({
           wsId,
           query,
           group,
-          statusGroupKey(status, hasCustomStatuses),
+          statusGroupKey(status),
           false,
           null,
         ),
@@ -432,7 +434,7 @@ export function useIssueStatusBranches({
         type: "active",
       });
     },
-    [group, hasCustomStatuses, query, queryClient, wsId],
+    [group, query, queryClient, wsId],
   );
 
   const pagination = useMemo<IssueStatusPagination>(() => {

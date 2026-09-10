@@ -12,7 +12,7 @@
  */
 import type { IssuePriority, TimelineEntry } from "@multica/core/types";
 import { formatDateOnly } from "@multica/core/issues/date";
-import { STATUS_LABEL, isIssueStatusCategory } from "@/lib/issue-status";
+import { STATUS_LABEL, isBuiltInIssueStatus } from "@/lib/issue-status";
 
 const PRIORITY_LABEL: Record<IssuePriority, string> = {
   urgent: "Urgent",
@@ -36,7 +36,7 @@ function statusName(
 ): string {
   if (!s) return "?";
   if (resolveLabel) return resolveLabel(s);
-  return isIssueStatusCategory(s) ? STATUS_LABEL[s] : s;
+  return isBuiltInIssueStatus(s) ? STATUS_LABEL[s] : s;
 }
 
 function priorityName(p: string | undefined): string {
@@ -126,4 +126,3 @@ export function formatActivity(
       return entry.action ?? "";
   }
 }
-

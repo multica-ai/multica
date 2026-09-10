@@ -117,27 +117,42 @@ const mockListIssueTableRows = vi.hoisted(() =>
         next_cursor: null,
       };
     }
-    // Board / list surfaces page by CATEGORY since MUL-6243. This fixture
-    // holds only built-in statuses, where a key IS its own category.
-    const status = request.group_key?.replace(/^status(_category)?:/, "");
-    const response = await mockListIssues({
-      status,
-      limit: 50,
-      offset: 0,
-      ...(request.query.scope.assignee_types
-        ? { assignee_types: request.query.scope.assignee_types }
-        : {}),
-    });
+    // Board / list surfaces page by five-value lifecycle category. This
+    // adapter fans a category back into concrete keys for the legacy fixture.
+    const value = request.group_key?.replace(/^status(_category)?:/, "");
+    const statusesByCategory: Record<string, string[]> = {
+      backlog: ["backlog"],
+      unstarted: ["todo"],
+      started: ["in_progress", "in_review", "blocked"],
+      completed: ["done"],
+      canceled: ["cancelled"],
+    };
+    const statuses = request.group.kind === "status_category"
+      ? statusesByCategory[value] ?? []
+      : [value];
+    const responses = await Promise.all(
+      statuses.map((status) =>
+        mockListIssues({
+          status,
+          limit: 50,
+          offset: 0,
+          ...(request.query.scope.assignee_types
+            ? { assignee_types: request.query.scope.assignee_types }
+            : {}),
+        }),
+      ),
+    );
+    const issues = responses.flatMap((response) => response.issues);
     return {
       query_fingerprint: "test",
       group_key: request.group_key,
       parent_id: null,
       total: 0,
-      rows: response.issues.map((issue: Issue) => ({
+      rows: issues.map((issue: Issue) => ({
         issue,
         direct_child_count: 0,
       })),
-      branch_total: response.issues.length,
+      branch_total: issues.length,
       next_cursor: null,
     };
   }),
@@ -272,10 +287,33 @@ vi.mock("@multica/core/api", () => ({
 
 // Mock issue config
 vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+  ALL_STATUSES: ["backlog", "unstarted", "started", "completed", "canceled"],
+  STATUS_ORDER: ["backlog", "unstarted", "started", "completed", "canceled"],
+  BUILT_IN_STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"],
+  BUILT_IN_STATUS_CATEGORY: {
+    backlog: "backlog",
+    todo: "unstarted",
+    in_progress: "started",
+    in_review: "started",
+    blocked: "started",
+    done: "completed",
+    cancelled: "canceled",
+  },
+  BUILT_IN_STATUS_LABEL: {
+    backlog: "Backlog",
+    todo: "Todo",
+    in_progress: "In Progress",
+    in_review: "In Review",
+    blocked: "Blocked",
+    done: "Done",
+    cancelled: "Cancelled",
+  },
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+    unstarted: { label: "Unstarted", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+    started: { label: "Started", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
+    completed: { label: "Completed", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
+    canceled: { label: "Canceled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
     in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
@@ -726,8 +764,8 @@ describe("IssuesPage (shared)", () => {
     renderWithQuery(<IssuesPage />);
 
     await screen.findByText("Backlog");
-    expect(screen.getAllByText("Todo").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("In Progress").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Unstarted").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Started").length).toBeGreaterThanOrEqual(1);
   });
 
   it("groups board columns by assignee", async () => {

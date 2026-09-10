@@ -1,9 +1,16 @@
 "use client";
 
 import { useMemo } from "react";
-import { ALL_STATUSES } from "@multica/core/issues/config";
+import {
+  ALL_STATUSES,
+  BUILT_IN_STATUS_CATEGORY,
+  BUILT_IN_STATUS_ORDER,
+} from "@multica/core/issues/config";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { issueStatusColor } from "@multica/core/issue-statuses/queries";
+import {
+  issueStatusColor,
+  normalizeIssueStatusCategory,
+} from "@multica/core/issue-statuses/queries";
 import type { IssueStatus, IssueStatusCategory } from "@multica/core/types";
 import { useStatusLabel } from "./status-label";
 
@@ -48,21 +55,21 @@ export function useStatusOptions(
       return ALL_STATUSES.flatMap((category) => {
         const entries = statuses.filter(
           (entry) =>
-            entry.category === category &&
+            normalizeIssueStatusCategory(entry.category) === category &&
             (!entry.archived_at || includedArchived.has(entry.key)),
         );
         // No catalog row for this category: the fetch is still in flight, or
-        // this workspace predates the seed. Offer the built-in, whose key IS
-        // the category, so a lifecycle step is never missing.
+        // this workspace predates the seed. Offer every built-in in the
+        // category so the seven concrete status choices remain available.
         if (entries.length === 0) {
-          return [
-            {
-              key: category as IssueStatus,
-              category,
-              label: labelOf(category),
-              color: null,
-            },
-          ];
+          return BUILT_IN_STATUS_ORDER.filter(
+            (key) => BUILT_IN_STATUS_CATEGORY[key] === category,
+          ).map((key) => ({
+            key,
+            category,
+            label: labelOf(key),
+            color: null,
+          }));
         }
         return entries.map((e) => ({
           key: e.key as IssueStatus,

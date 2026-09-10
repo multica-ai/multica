@@ -86,7 +86,23 @@ VALUES (
     COALESCE(
         (SELECT MAX(position) + 1 FROM issue_status
          WHERE workspace_id = $1::uuid
-           AND category = $5::text),
+		   AND CASE category
+			   WHEN 'backlog' THEN 'backlog'
+			   WHEN 'todo' THEN 'unstarted'
+			   WHEN 'in_progress' THEN 'started'
+			   WHEN 'in_review' THEN 'started'
+			   WHEN 'blocked' THEN 'started'
+			   WHEN 'done' THEN 'completed'
+			   WHEN 'cancelled' THEN 'canceled'
+		   END = CASE $5::text
+			   WHEN 'backlog' THEN 'backlog'
+			   WHEN 'todo' THEN 'unstarted'
+			   WHEN 'in_progress' THEN 'started'
+			   WHEN 'in_review' THEN 'started'
+			   WHEN 'blocked' THEN 'started'
+			   WHEN 'done' THEN 'completed'
+			   WHEN 'cancelled' THEN 'canceled'
+		   END),
         0
     )
 )
@@ -206,7 +222,15 @@ func (q *Queries) GetIssueStatusEntryByKey(ctx context.Context, arg GetIssueStat
 const listActiveCustomIssueStatusEntries = `-- name: ListActiveCustomIssueStatusEntries :many
 SELECT id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at FROM issue_status
 WHERE workspace_id = $1::uuid
-  AND category = $2::text
+  AND CASE category
+      WHEN 'backlog' THEN 'backlog'
+      WHEN 'todo' THEN 'unstarted'
+      WHEN 'in_progress' THEN 'started'
+      WHEN 'in_review' THEN 'started'
+      WHEN 'blocked' THEN 'started'
+      WHEN 'done' THEN 'completed'
+      WHEN 'cancelled' THEN 'canceled'
+  END = $2::text
   AND is_system = FALSE
   AND archived_at IS NULL
 ORDER BY position, key
@@ -262,12 +286,23 @@ ORDER BY
         WHEN 'backlog' THEN 0
         WHEN 'todo' THEN 1
         WHEN 'in_progress' THEN 2
-        WHEN 'in_review' THEN 3
-        WHEN 'done' THEN 4
-        WHEN 'blocked' THEN 5
-        WHEN 'cancelled' THEN 6
-        ELSE 7
+        WHEN 'in_review' THEN 2
+        WHEN 'blocked' THEN 2
+        WHEN 'done' THEN 3
+        WHEN 'cancelled' THEN 4
+        ELSE 5
     END,
+	CASE WHEN is_system THEN 0 ELSE 1 END,
+	CASE key
+		WHEN 'backlog' THEN 0
+		WHEN 'todo' THEN 1
+		WHEN 'in_progress' THEN 2
+		WHEN 'in_review' THEN 3
+		WHEN 'blocked' THEN 4
+		WHEN 'done' THEN 5
+		WHEN 'cancelled' THEN 6
+		ELSE 7
+	END,
     position,
     key
 `
@@ -277,9 +312,8 @@ type ListIssueStatusEntriesParams struct {
 	IncludeArchived bool        `json:"include_archived"`
 }
 
-// Ordered by category rank (the historical STATUS_ORDER, so the default board
-// and picker stay pixel-identical for a workspace with no custom statuses),
-// then intra-category position, then key as a stable tiebreak.
+// Ordered by the five public lifecycle groups, then built-ins before custom
+// rows, then stable concrete-status order / custom position.
 func (q *Queries) ListIssueStatusEntries(ctx context.Context, arg ListIssueStatusEntriesParams) ([]IssueStatus, error) {
 	rows, err := q.db.Query(ctx, listIssueStatusEntries, arg.WorkspaceID, arg.IncludeArchived)
 	if err != nil {
@@ -428,9 +462,8 @@ ON CONFLICT DO NOTHING
 `
 
 // Issue status catalog (MUL-6243). Each workspace holds the 7 built-in
-// statuses plus any custom ones. A category's value IS its canonical built-in
-// key, so resolving a custom status to its platform behavior is a plain column
-// read — no mapping table, no second concept.
+// statuses plus any custom ones. The stored category is the legacy exact
+// behavior projection; API boundaries collapse it into five lifecycle groups.
 // Idempotent seed of the 7 built-ins. Safe to call concurrently from multiple
 // pods during a rolling deploy: the unique (workspace_id, key) index makes a
 // losing racer a no-op rather than an error. Positions are intra-category, and

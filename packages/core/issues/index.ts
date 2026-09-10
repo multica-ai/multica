@@ -12,6 +12,7 @@ export {
   issueBehavesAsAny,
   issueColumnCategory,
   issueStatusCategory,
+  defaultStatusForCategory,
   statusCategoryOfKey,
   statusFilterColumns,
   type StatusFilterColumnsResult,

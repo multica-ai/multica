@@ -21,6 +21,7 @@ import type {
   Project,
   IssueProperty,
 } from "@multica/core/types";
+import { defaultStatusForCategory } from "@multica/core/issues";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions, useSetIssueProperty, useUnsetIssueProperty } from "@multica/core/properties";
@@ -147,7 +148,7 @@ function buildGroups(
       id: statusGroupId(status),
       title: status,
       status,
-      createData: { status },
+      createData: { status: defaultStatusForCategory(status) },
     }));
   }
 

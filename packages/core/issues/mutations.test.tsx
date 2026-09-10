@@ -102,7 +102,7 @@ describe("useCreateCommentSubIssue", () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const listKey = issueKeys.list(WS_ID);
     qc.setQueryData<ListIssuesCache>(listKey, {
-      byStatus: { todo: { issues: [], total: 0 } },
+      byStatus: { unstarted: { issues: [], total: 0 } },
     });
     const child = makeIssue(2, { parent_issue_id: "issue-1" });
     const createCommentSubIssue = vi.fn().mockResolvedValue(child);
@@ -128,7 +128,7 @@ describe("useCreateCommentSubIssue", () => {
       issue: { title: "Child" },
     });
     expect(
-      qc.getQueryData<ListIssuesCache>(listKey)?.byStatus.todo?.issues,
+      qc.getQueryData<ListIssuesCache>(listKey)?.byStatus.unstarted?.issues,
     ).toContainEqual(child);
     expect(qc.getQueryState(listKey)?.isInvalidated).toBe(true);
     qc.clear();
@@ -155,15 +155,15 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
   function makeBucketed(): ListIssuesCache {
     return {
       byStatus: {
-        todo: { issues: [makeIssue(1)], total: 1 },
-        in_progress: { issues: [], total: 0 },
+        unstarted: { issues: [makeIssue(1)], total: 1 },
+        started: { issues: [], total: 0 },
       },
     };
   }
 
   function bucketIds(
     key: readonly unknown[],
-    status: "todo" | "in_progress",
+    status: "unstarted" | "started",
   ): string[] {
     const c = qc.getQueryData<ListIssuesCache>(key);
     return (c?.byStatus[status]?.issues ?? []).map((i) => i.id);
@@ -212,8 +212,8 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
     // Optimistic state — the regression: myList must move too, not just ws.
     for (const key of [wsKey, myKey, projectKey]) {
-      expect(bucketIds(key, "todo")).toEqual([]);
-      expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "unstarted")).toEqual([]);
+      expect(bucketIds(key, "started")).toEqual(["issue-1"]);
     }
 
     await act(async () => {
@@ -222,7 +222,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
     // Authoritative settle keeps the card in place in both caches.
     for (const key of [wsKey, myKey, projectKey]) {
-      expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual(["issue-1"]);
     }
   });
 
@@ -374,7 +374,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     expect(
       qc
         .getQueryData<ListIssuesCache>(wsKey)
-        ?.byStatus.in_progress?.issues[0]?.position,
+        ?.byStatus.started?.issues[0]?.position,
     ).toBe(15);
   });
 
@@ -420,8 +420,8 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     });
 
     for (const key of [wsKey, myKey, projectKey]) {
-      expect(bucketIds(key, "todo")).toEqual(["issue-1"]);
-      expect(bucketIds(key, "in_progress")).toEqual([]);
+      expect(bucketIds(key, "unstarted")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual([]);
     }
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidatedKeys).toContainEqual(issueKeys.detail(WS_ID, "issue-1"));
@@ -490,15 +490,15 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
     // Optimistic: gone from the old project's list immediately; the
     // workspace board and the assignee-filtered list keep the card.
-    expect(bucketIds(projectKey, "todo")).toEqual([]);
-    expect(bucketIds(wsKey, "todo")).toEqual(["issue-1"]);
-    expect(bucketIds(myKey, "todo")).toEqual(["issue-1"]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual([]);
+    expect(bucketIds(wsKey, "unstarted")).toEqual(["issue-1"]);
+    expect(bucketIds(myKey, "unstarted")).toEqual(["issue-1"]);
 
     await act(async () => {
       resolve(makeIssue(1, { project_id: "project-9" }));
     });
 
-    expect(bucketIds(projectKey, "todo")).toEqual([]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual([]);
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
   });
@@ -516,7 +516,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
         .catch(() => {});
     });
 
-    expect(bucketIds(projectKey, "todo")).toEqual(["issue-1"]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual(["issue-1"]);
   });
 });
 
@@ -626,13 +626,13 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
   function makeBucketed(): ListIssuesCache {
     return {
       byStatus: {
-        todo: { issues: [makeIssue(1)], total: 1 },
-        in_progress: { issues: [], total: 0 },
+        unstarted: { issues: [makeIssue(1)], total: 1 },
+        started: { issues: [], total: 0 },
       },
     };
   }
 
-  function bucketIds(key: readonly unknown[], status: "todo" | "in_progress"): string[] {
+  function bucketIds(key: readonly unknown[], status: "unstarted" | "started"): string[] {
     const c = qc.getQueryData<ListIssuesCache>(key);
     return (c?.byStatus[status]?.issues ?? []).map((i) => i.id);
   }
@@ -671,8 +671,8 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     // so the optimistic patch lands a microtask later — wait for it.
     await waitFor(() => {
       for (const key of [wsKey, myKey]) {
-        expect(bucketIds(key, "todo")).toEqual([]);
-        expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+        expect(bucketIds(key, "unstarted")).toEqual([]);
+        expect(bucketIds(key, "started")).toEqual(["issue-1"]);
       }
     });
 
@@ -681,7 +681,7 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     });
 
     for (const key of [wsKey, myKey]) {
-      expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual(["issue-1"]);
     }
   });
 
@@ -741,8 +741,8 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     });
 
     for (const key of [wsKey, myKey]) {
-      expect(bucketIds(key, "todo")).toEqual(["issue-1"]);
-      expect(bucketIds(key, "in_progress")).toEqual([]);
+      expect(bucketIds(key, "unstarted")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual([]);
     }
   });
 
@@ -784,9 +784,9 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
       });
     });
 
-    expect(bucketIds(projectKey, "todo")).toEqual([]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual([]);
     // The assignee-filtered list is untouched by a project move.
-    expect(bucketIds(myKey, "todo")).toEqual(["issue-1"]);
+    expect(bucketIds(myKey, "unstarted")).toEqual(["issue-1"]);
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
   });
@@ -804,7 +804,7 @@ describe("comment mutations — owner revision and last activity", () => {
   function seed(qc: QueryClient) {
     const issue = makeIssue(1, { revision: 1 });
     const board: ListIssuesCache = {
-      byStatus: { todo: { issues: [issue], total: 1 } },
+      byStatus: { unstarted: { issues: [issue], total: 1 } },
     };
     qc.setQueryData<Issue>(detailKey, issue);
     qc.setQueryData<ListIssuesCache>(lastActivityKey, board);

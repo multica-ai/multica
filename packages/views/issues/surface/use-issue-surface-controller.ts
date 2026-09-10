@@ -237,7 +237,6 @@ export function useIssueSurfaceController({
   const listCollapsedStatuses = useViewStore((s) => s.listCollapsedStatuses);
   const hiddenStatusCategories = useViewStore((s) => s.hiddenStatusCategories);
   const catalog = useIssueStatuses(wsId);
-  const { hasCustomStatuses } = catalog;
   const [tableSearch, setTableSearch] = useState("");
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
@@ -632,12 +631,7 @@ export function useIssueSurfaceController({
       return {
         kind: "compound",
         primary: swimlaneGrouping,
-        // Same rollout switch as the board/list branches: `status_category` is
-        // a contract this feature introduced, so it is only sent once the
-        // catalog confirms this workspace HAS a custom status — which can only
-        // be true if the fleet already serves this version. Otherwise the
-        // swimlane keeps the exact request it made before. (MUL-6243)
-        secondary: hasCustomStatuses ? "status_category" : "status",
+        secondary: "status_category",
         secondary_values: serverStatuses,
       };
     }
@@ -654,7 +648,6 @@ export function useIssueSurfaceController({
   }, [
     effectiveGrouping,
     effectiveViewMode,
-    hasCustomStatuses,
     serverStatuses,
     swimlaneGrouping,
   ]);

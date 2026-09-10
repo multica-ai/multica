@@ -48,7 +48,7 @@ function ganttCanvasRows(issues: Issue[], showCompleted: boolean): Issue[] {
   if (showCompleted) return dated;
   // By CATEGORY: a custom status in done/cancelled is completed work, and
   // "show completed" has to hide it too. (MUL-6243)
-  return dated.filter((i) => !issueBehavesAsAny(i, ["done", "cancelled"]));
+  return dated.filter((i) => !issueBehavesAsAny(i, ["completed", "canceled"]));
 }
 
 export interface IssueSurfaceData {
@@ -341,7 +341,7 @@ export function useIssueSurfaceData({
     // must never add a column. Two independent things narrow them: hidden
     // columns (display state) and the status filter, which is expressed in
     // concrete KEYS and so has to be mapped back to the columns those keys land
-    // in. Default view shows every category, `cancelled` last (its canonical
+    // in. Default view shows every category, `canceled` last (its canonical
     // position in ALL_STATUSES). (MUL-6243)
     const resolved =
       statusFilters.length > 0 ? statusFilterColumns(statusFilters, catalog) : null;
@@ -357,7 +357,7 @@ export function useIssueSurfaceData({
   }, [statusFilters, hiddenStatusCategories, catalog]);
 
   // Hidden columns are the lifecycle statuses not currently visible, so
-  // `cancelled` participates in the board show/hide controls exactly like the
+  // `canceled` participates in the board show/hide controls exactly like the
   // rest of the statuses.
   const hiddenStatuses = useMemo<IssueStatusCategory[]>(
     () => ALL_STATUSES.filter((s) => !visibleStatuses.includes(s)),

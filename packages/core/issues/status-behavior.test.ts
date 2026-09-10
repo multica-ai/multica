@@ -6,6 +6,7 @@ import {
   issueBehavesAs,
   issueBehavesAsAny,
   issueColumnCategory,
+  statusCategoryOfKey,
   statusFilterColumns,
 } from "./status-category";
 
@@ -36,16 +37,16 @@ function entry(key: string, category: string, isSystem = false): IssueStatusEntr
  */
 describe("issueBehavesAs", () => {
   it("answers for a built-in with no catalog and no server hint", () => {
-    expect(issueBehavesAs(issue("done"), "done")).toBe(true);
-    expect(issueBehavesAs(issue("todo"), "done")).toBe(false);
+    expect(issueBehavesAs(issue("done"), "completed")).toBe(true);
+    expect(issueBehavesAs(issue("todo"), "completed")).toBe(false);
   });
 
   // The regression: a custom status in the done category is finished work.
   // Code comparing `status === "done"` kept it visible under "hide completed",
   // left it out of sub-issue progress, and ranked it as live in search.
   it("answers for a custom status from the payload's category", () => {
-    expect(issueBehavesAs(issue("shipped", "done"), "done")).toBe(true);
-    expect(issueBehavesAs(issue("shipped", "done"), "in_review")).toBe(false);
+    expect(issueBehavesAs(issue("shipped", "done"), "completed")).toBe(true);
+    expect(issueBehavesAs(issue("shipped", "done"), "started")).toBe(false);
   });
 
   it("treats a custom backlog status as backlog", () => {
@@ -55,13 +56,13 @@ describe("issueBehavesAs", () => {
   // Fails toward showing more / asking more, never toward hiding work or
   // starting an agent without confirmation.
   it("answers false for a custom key this response did not resolve", () => {
-    expect(issueBehavesAs(issue("shipped"), "done")).toBe(false);
+    expect(issueBehavesAs(issue("shipped"), "completed")).toBe(false);
     expect(issueBehavesAs(issue("someday"), "backlog")).toBe(false);
   });
 
   it("matches any of several categories", () => {
-    expect(issueBehavesAsAny(issue("qa", "cancelled"), ["done", "cancelled"])).toBe(true);
-    expect(issueBehavesAsAny(issue("qa", "in_review"), ["done", "cancelled"])).toBe(false);
+    expect(issueBehavesAsAny(issue("qa", "cancelled"), ["completed", "canceled"])).toBe(true);
+    expect(issueBehavesAsAny(issue("qa", "in_review"), ["completed", "canceled"])).toBe(false);
   });
 });
 
@@ -72,22 +73,30 @@ describe("issueBehavesAs", () => {
  */
 describe("issueColumnCategory", () => {
   it("answers a built-in key with no server hint", () => {
-    expect(issueColumnCategory(issue("in_review"))).toBe("in_review");
+    expect(issueColumnCategory(issue("in_review"))).toBe("started");
   });
 
   it("puts a custom status in the column of the category it behaves as", () => {
-    expect(issueColumnCategory(issue("awaiting_response", "in_review"))).toBe("in_review");
+    expect(issueColumnCategory(issue("awaiting_response", "in_review"))).toBe("started");
   });
 
   // Never null: a card in a possibly-wrong column is recoverable, a card in no
   // column is invisible. The server sends a category on every issue payload, so
   // this is the unreachable-in-practice floor.
-  it("falls back to todo for a custom key the payload did not resolve", () => {
-    expect(issueColumnCategory(issue("awaiting_response"))).toBe("todo");
+  it("falls back to unstarted for a custom key the payload did not resolve", () => {
+    expect(issueColumnCategory(issue("awaiting_response"))).toBe("unstarted");
   });
 
   it("ignores a status_category the client does not recognise", () => {
-    expect(issueColumnCategory(issue("done", "shipped"))).toBe("done");
+    expect(issueColumnCategory(issue("done", "shipped"))).toBe("completed");
+  });
+});
+
+describe("statusCategoryOfKey", () => {
+  it("accepts both concrete built-ins and lifecycle category keys", () => {
+    expect(statusCategoryOfKey("in_review")).toBe("started");
+    expect(statusCategoryOfKey("started")).toBe("started");
+    expect(statusCategoryOfKey("completed")).toBe("completed");
   });
 });
 
@@ -102,11 +111,11 @@ describe("statusFilterColumns", () => {
   }
 
   it("resolves built-ins without waiting for the catalog", () => {
-    expect(columns(statusFilterColumns(["todo", "done"], pending))).toEqual(["todo", "done"]);
+    expect(columns(statusFilterColumns(["todo", "done"], pending))).toEqual(["unstarted", "completed"]);
   });
 
   it("maps a custom key to its category once the catalog is loaded", () => {
-    expect(columns(statusFilterColumns(["qa"], loaded))).toEqual(["in_review"]);
+    expect(columns(statusFilterColumns(["qa"], loaded))).toEqual(["started"]);
   });
 
   // The regression: `categoryOf` answers `todo` for anything it has not loaded,
@@ -135,7 +144,7 @@ describe("statusFilterColumns", () => {
     );
 
     expect(stale.isError).toBe(false);
-    expect(columns(statusFilterColumns(["qa"], stale))).toEqual(["in_review"]);
+    expect(columns(statusFilterColumns(["qa"], stale))).toEqual(["started"]);
   });
 
   // A LOADED catalog that does not know the key is authoritative: the status was

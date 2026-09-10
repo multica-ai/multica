@@ -203,7 +203,7 @@ function mergeMentionItems(
  */
 function isDemotedCancelled(item: MentionItem, query: string): boolean {
   if (isPinnedAboveTruncation(item, query)) return false;
-  if (item.type === "issue") return item.statusCategory === "cancelled";
+  if (item.type === "issue") return item.statusCategory === "canceled";
   if (item.type === "project") return item.projectStatus === "cancelled";
   return false;
 }
@@ -541,7 +541,7 @@ function MentionRow({
     // Visually dim closed issues (done/cancelled) so they're distinguishable
     // from active ones in the suggestion list — they're still selectable.
     const isClosed =
-      item.statusCategory === "done" || item.statusCategory === "cancelled";
+      item.statusCategory === "completed" || item.statusCategory === "canceled";
     return (
       <button
         type="button"

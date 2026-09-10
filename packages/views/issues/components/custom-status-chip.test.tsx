@@ -21,7 +21,7 @@ function entry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
     key: "custom",
     name: "Custom",
     description: "",
-    category: "in_review",
+    category: "started",
     color: "#ff0000",
     is_system: false,
     position: 1,
@@ -36,7 +36,7 @@ const IN_REVIEW_BUILT_IN = entry({
   id: "in_review",
   key: "in_review",
   name: "In Review",
-  category: "in_review",
+  category: "started",
   is_system: true,
   position: 0,
 });

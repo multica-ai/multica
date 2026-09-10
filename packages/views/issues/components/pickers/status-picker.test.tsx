@@ -28,7 +28,7 @@ function entry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
     key: "custom",
     name: "Custom",
     description: "",
-    category: "in_review",
+    category: "started",
     // Seeded per status by the server — including for the built-ins, which
     // are not recolorable and must ignore it.
     color: "#22c55e",

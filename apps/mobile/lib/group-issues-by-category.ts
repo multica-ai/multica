@@ -26,9 +26,9 @@ export interface IssueSection {
 }
 
 /**
- * Non-empty sections in canonical category order. `cancelled` has no section on
+ * Non-empty sections in canonical category order. `canceled` has no section on
  * mobile, so an issue in that category is omitted here exactly as the built-in
- * Cancelled always was — a custom status inherits its category's behavior.
+ * Cancelled always was.
  */
 export function groupIssuesByCategory(issues: Issue[]): IssueSection[] {
   if (issues.length === 0) return [];

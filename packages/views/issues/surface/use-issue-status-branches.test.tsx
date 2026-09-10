@@ -113,7 +113,7 @@ describe("useIssueStatusBranches", () => {
           enabled: true,
         }),
       {
-        initialProps: { statuses: ["todo"] },
+        initialProps: { statuses: ["unstarted"] },
         wrapper: wrapper(queryClient),
       },
     );
@@ -123,12 +123,12 @@ describe("useIssueStatusBranches", () => {
         "issue-1",
       ]),
     );
-    expect(result.current.pagination.todo.total).toBe(2);
-    expect(result.current.pagination.todo.hasMore).toBe(true);
+    expect(result.current.pagination.unstarted.total).toBe(2);
+    expect(result.current.pagination.unstarted.hasMore).toBe(true);
     expect(result.current.total).toBe(2);
     expect(result.current.isTotalKnown).toBe(true);
 
-    act(() => result.current.pagination.todo.loadMore());
+    act(() => result.current.pagination.unstarted.loadMore());
     await waitFor(() =>
       expect(result.current.issues.map((issue) => issue.id)).toEqual([
         "issue-1",
@@ -138,10 +138,7 @@ describe("useIssueStatusBranches", () => {
     expect(listIssueTableRows).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        // No custom statuses in this fixture, so the hook keeps the
-        // pre-feature contract. See use-issue-status-branches.category.test.tsx
-        // for the category contract. (MUL-6243)
-        group_key: "status:todo",
+        group_key: "status_category:unstarted",
         page: { limit: 50, cursor: "cursor-2" },
       }),
     );
@@ -150,7 +147,7 @@ describe("useIssueStatusBranches", () => {
     // reuses the settled cursor pages instead of restarting another chain.
     rerender({ statuses: [] });
     expect(result.current.issues).toEqual([]);
-    rerender({ statuses: ["todo"] });
+    rerender({ statuses: ["unstarted"] });
     await waitFor(() => expect(result.current.issues).toHaveLength(2));
     expect(listIssueTableRows).toHaveBeenCalledTimes(2);
 

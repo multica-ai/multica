@@ -35,12 +35,13 @@ function isCustomStatus(catalog: IssueStatusCatalog, status: IssueStatus): boole
  * (MUL-6243).
  *
  * Board columns and list sections are categories, so two issues sitting in the
- * same "In Review" column can be on different statuses — "Code Review" and "QA"
+ * same "Started" column can be on different statuses — "Code Review" and "QA"
  * — with nothing on the card to tell them apart. This chip is that missing
  * signal.
  *
  * It renders NOTHING for a status that already is its category's built-in: the
- * column header says "In Review" and a chip repeating it is pure noise. So a
+ * column header already names the lifecycle phase and a chip repeating a
+ * built-in status is pure noise. So a
  * workspace that never defined a custom status sees no visual change at all.
  */
 export function CustomStatusChip({
@@ -65,7 +66,7 @@ export function CustomStatusChip({
     >
       <StatusIcon
         status={status}
-        category={entry.category}
+        category={catalog.categoryOf(status)}
         color={entry.color}
         className="size-3"
       />

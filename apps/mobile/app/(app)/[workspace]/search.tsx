@@ -127,14 +127,10 @@ function issueIconColor(category: IssueStatusCategory): string {
   // text tint matches the leading status icon visually. Keyed on CATEGORY: a
   // custom status inherits its category's tint, exactly as its glyph does.
   switch (category) {
-    case "in_progress":
+    case "started":
       return "text-warning";
-    case "in_review":
-      return "text-success";
-    case "done":
+    case "completed":
       return "text-info";
-    case "blocked":
-      return "text-destructive";
     default:
       return "text-muted-foreground";
   }

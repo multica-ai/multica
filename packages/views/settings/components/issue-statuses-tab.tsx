@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import {
   DndContext,
+  KeyboardSensor,
   PointerSensor,
   closestCenter,
   useSensor,
@@ -21,6 +22,7 @@ import {
 import {
   SortableContext,
   arrayMove,
+  sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
@@ -28,7 +30,11 @@ import { CSS } from "@dnd-kit/utilities";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
-import { issueStatusColor, issueStatusListOptions } from "@multica/core/issue-statuses/queries";
+import {
+  issueStatusColor,
+  issueStatusListOptions,
+  normalizeIssueStatusCategory,
+} from "@multica/core/issue-statuses/queries";
 import {
   useArchiveIssueStatus,
   useCreateIssueStatus,
@@ -36,7 +42,11 @@ import {
   useUpdateIssueStatus,
 } from "@multica/core/issue-statuses/mutations";
 import { ALL_STATUSES } from "@multica/core/issues/config";
-import type { IssueStatusCategory, IssueStatusEntry } from "@multica/core/types";
+import type {
+  BuiltInIssueStatus,
+  IssueStatusCategory,
+  IssueStatusEntry,
+} from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -88,21 +98,15 @@ import { SettingsTab } from "./settings-layout";
  * Workspace issue status catalog management (MUL-6243).
  *
  * The page is organised by CATEGORY rather than as one flat list, because a
- * category is not decoration here — it is the behavior a status inherits. A
- * status in `todo` starts the assigned agent; one in `in_review` finalizes an
- * autopilot run. Grouping is what makes that consequence visible at the moment
- * the admin picks a category, which is also the only moment they can: category
- * is immutable after creation, since changing it would silently rewrite the
- * machine semantics of every issue already on the status.
+ * category is the stable lifecycle group users scan. Concrete built-ins keep
+ * their distinct automation behavior inside those groups: In Progress, In
+ * Review, and Blocked all appear under Started without becoming one status.
  *
- * Built-ins are shown but locked. Each one is its category's canonical
- * definition, and the default workspace has to look identical for every user
- * who never opens this page.
+ * Built-ins are shown but locked, while custom statuses can be added and
+ * ordered within any group.
  *
- * The chrome is deliberately thin (MUL-6422). A category and its built-in row
- * are the same concept seen twice, so anything the row already carries — the
- * glyph, the behavior sentence — is noise on the header above it. What is left
- * on a header is the label and the one action it owns.
+ * The chrome is deliberately thin (MUL-6422): one bordered workflow list,
+ * muted group headers, and row-level actions revealed only where available.
  */
 
 interface StatusDraft {
@@ -115,7 +119,7 @@ interface StatusDraft {
 const EMPTY_DRAFT: StatusDraft = {
   name: "",
   description: "",
-  category: "todo",
+  category: "unstarted",
   color: COLOR_PICKER_PRESETS[6]!,
 };
 
@@ -140,10 +144,12 @@ export function IssueStatusesTab() {
   const groups = useMemo(
     () =>
       ALL_STATUSES.map((category) => {
-        const inCategory = statuses.filter((s) => s.category === category);
+        const inCategory = statuses.filter(
+          (status) => normalizeIssueStatusCategory(status.category) === category,
+        );
         return {
           category,
-          builtIn: inCategory.find((s) => s.is_system),
+          system: inCategory.filter((status) => status.is_system),
           // Archived rows are hidden behind a toggle rather than dropped: an
           // admin needs to see what a lingering status on an old issue is.
           custom: inCategory.filter(
@@ -177,15 +183,15 @@ export function IssueStatusesTab() {
             {t(($) => $.issue_statuses.loading)}
           </div>
         ) : (
-          // One list, not seven cards: the categories are sections of a single
-          // workflow, and seven separate borders made them read as seven
-          // unrelated settings.
+          // One list, not five cards: the categories are sections of a single
+          // workflow, and separate borders made them read as unrelated
+          // settings.
           <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
             {groups.map((group) => (
               <CategorySection
                 key={group.category}
                 category={group.category}
-                builtIn={group.builtIn}
+                system={group.system}
                 custom={group.custom}
                 canManage={isAdmin}
                 onCreate={() => setCreateCategory(group.category)}
@@ -205,7 +211,9 @@ export function IssueStatusesTab() {
       <StatusEditorDialog
         open={Boolean(editing)}
         onOpenChange={(open) => !open && setEditing(null)}
-        category={editing?.category ?? null}
+        category={
+          editing ? normalizeIssueStatusCategory(editing.category) : null
+        }
         status={editing}
       />
       <ArchiveStatusDialog status={pendingArchive} onClose={() => setPendingArchive(null)} />
@@ -215,7 +223,7 @@ export function IssueStatusesTab() {
 
 function CategorySection({
   category,
-  builtIn,
+  system,
   custom,
   canManage,
   onCreate,
@@ -223,7 +231,7 @@ function CategorySection({
   onArchive,
 }: {
   category: IssueStatusCategory;
-  builtIn: IssueStatusEntry | undefined;
+  system: IssueStatusEntry[];
   custom: IssueStatusEntry[];
   canManage: boolean;
   onCreate: () => void;
@@ -242,6 +250,7 @@ function CategorySection({
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -276,14 +285,20 @@ function CategorySection({
   const canReorder = canManage && sortableIds.length > 1;
 
   return (
-    <section className="border-b border-surface-border last:border-b-0">
+    <section
+      aria-labelledby={`issue-status-category-${category}`}
+      className="border-b border-surface-border last:border-b-0"
+    >
       {/* Label plus the one action the header owns. The category glyph is the
           same glyph the built-in row renders directly below it, so it said
           nothing the eye had not already read. */}
       <div className="flex items-center justify-between gap-2 bg-muted/20 px-4 py-1.5">
-        <span className="text-caption font-medium text-muted-foreground">
-          {labelOf(category)}
-        </span>
+        <h3
+          id={`issue-status-category-${category}`}
+          className="text-caption font-medium text-muted-foreground"
+        >
+          {t(($) => $.issue_statuses.category_labels[category])}
+        </h3>
         {canManage && (
           <Tooltip>
             <TooltipTrigger
@@ -291,7 +306,7 @@ function CategorySection({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={t(($) => $.issue_statuses.add)}
+                  aria-label={`${t(($) => $.issue_statuses.add)}: ${t(($) => $.issue_statuses.category_labels[category])}`}
                   onClick={onCreate}
                 >
                   <Plus className="size-4" />
@@ -304,13 +319,16 @@ function CategorySection({
       </div>
 
       <div className="divide-y divide-surface-border">
-        {builtIn && (
+        {system.map((entry) => (
           <BuiltInRow
-            entry={builtIn}
-            label={labelOf(builtIn.key)}
-            behavior={t(($) => $.issue_statuses.categories[category])}
+            key={entry.id}
+            entry={entry}
+            label={labelOf(entry.key)}
+            description={t(($) =>
+              $.issue_statuses.built_in_descriptions[entry.key as BuiltInIssueStatus],
+            )}
           />
-        )}
+        ))}
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
             {order.map((entry) => (
@@ -333,23 +351,22 @@ function CategorySection({
 function BuiltInRow({
   entry,
   label,
-  behavior,
+  description,
 }: {
   entry: IssueStatusEntry;
   label: string;
-  behavior: string;
+  description: string;
 }) {
   return (
     <div className="flex min-h-12 items-center gap-3 px-4 py-2">
-      <StatusIcon status={entry.key} category={entry.category} className="size-4" />
+      <StatusIcon
+        status={entry.key}
+        category={normalizeIssueStatusCategory(entry.category) ?? "unstarted"}
+        className="size-4"
+      />
       <div className="min-w-0">
         <p className="truncate text-body font-medium">{label}</p>
-        {/* The catalog's own description is seeded in English by the server;
-            the category sentence is the translated form of the same fact, so
-            it is the one that ships. No lock icon rides along — a built-in is
-            the row with no actions menu, and seven padlocks said that seven
-            times. */}
-        <p className="truncate text-caption text-muted-foreground">{behavior}</p>
+        <p className="truncate text-caption text-muted-foreground">{description}</p>
       </div>
     </div>
   );
@@ -399,7 +416,7 @@ function CustomStatusRow({
       )}
       <StatusIcon
         status={entry.key}
-        category={entry.category}
+        category={normalizeIssueStatusCategory(entry.category) ?? "unstarted"}
         color={issueStatusColor(entry)}
         className="size-4"
       />
@@ -467,8 +484,6 @@ function StatusEditorDialog({
   status?: IssueStatusEntry | null;
 }) {
   const { t } = useT("settings");
-  const wsId = useWorkspaceId();
-  const labelOf = useStatusLabel(wsId);
   const create = useCreateIssueStatus();
   const update = useUpdateIssueStatus();
   const [draft, setDraft] = useState<StatusDraft>(EMPTY_DRAFT);
@@ -478,7 +493,7 @@ function StatusEditorDialog({
     label: (
       <span className="flex items-center gap-2">
         <StatusIcon status={c} category={c} className="size-3.5" />
-        {labelOf(c)}
+        {t(($) => $.issue_statuses.category_labels[c])}
       </span>
     ),
   }));
@@ -490,16 +505,16 @@ function StatusEditorDialog({
         ? {
             name: status.name,
             description: status.description ?? "",
-            category: status.category,
+            category: normalizeIssueStatusCategory(status.category) ?? "unstarted",
             color: status.color,
           }
-        : { ...EMPTY_DRAFT, category: category ?? "todo" },
+        : { ...EMPTY_DRAFT, category: category ?? "unstarted" },
     );
   }, [status, category, open]);
 
   const submit = () => {
     const name = draft.name.trim();
-    if (!name) return;
+    if (!name || create.isPending || update.isPending) return;
     const onError = (error: unknown) =>
       toast.error(
         error instanceof Error ? error.message : t(($) => $.issue_statuses.editor.save_failed),
@@ -530,7 +545,7 @@ function StatusEditorDialog({
           // The key is derived server-side and is the only handle the API and
           // the CLI accept, so creation has to say what it minted. A name with
           // no ASCII to slug gets one that cannot be guessed back from the name
-          // — "客户确认" becomes `in_review_2` (MUL-6749) — so staying silent
+          // — "客户确认" becomes `started_2` (MUL-6749) — so staying silent
           // would leave the admin no way to learn it short of reopening the
           // row. The dialog is already closing; a toast is the one surface
           // still visible.
@@ -546,122 +561,135 @@ function StatusEditorDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {status
-              ? t(($) => $.issue_statuses.editor.edit_title)
-              : t(($) => $.issue_statuses.editor.create_title)}
-          </DialogTitle>
-          <DialogDescription>
-            {t(($) => $.issue_statuses.editor.behavior_hint, {
-              category: labelOf(draft.category),
-            })}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-5 py-2">
-          <div className="space-y-2">
-            <FieldLabel htmlFor="status-name">
-              {t(($) => $.issue_statuses.editor.name)}
-            </FieldLabel>
-            <Input
-              id="status-name"
-              autoFocus
-              maxLength={64}
-              value={draft.name}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, name: event.target.value }))
-              }
-              placeholder={t(($) => $.issue_statuses.editor.name_placeholder)}
-            />
-            {/* The key is the string the API and the CLI take, and renaming a
-                status does not move it — so it has to be readable somewhere.
-                Here, not as a chip on every row: the list is for scanning
-                names, and a slug beside each one is what turned it into a
-                table of internals. (MUL-6422) */}
-            {status && (
-              <p className="text-caption text-muted-foreground">
-                {t(($) => $.issue_statuses.editor.key_hint, { key: status.key })}
-              </p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <FieldLabel>{t(($) => $.issue_statuses.editor.category)}</FieldLabel>
-            {/* Immutable after creation: changing it would silently rewrite the
-                platform behavior of every issue already on this status. */}
-            <Select
-              items={categoryItems}
-              value={draft.category}
-              onValueChange={(value) =>
-                value &&
-                setDraft((current) => ({ ...current, category: value as IssueStatusCategory }))
-              }
-              disabled={Boolean(status)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {categoryItems.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-caption text-muted-foreground">
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>
               {status
-                ? t(($) => $.issue_statuses.editor.category_locked)
-                : t(($) => $.issue_statuses.categories[draft.category])}
-            </p>
+                ? t(($) => $.issue_statuses.editor.edit_title)
+                : t(($) => $.issue_statuses.editor.create_title)}
+            </DialogTitle>
+            <DialogDescription>
+              {t(($) => $.issue_statuses.editor.behavior_hint, {
+                category: t(($) => $.issue_statuses.category_labels[draft.category]),
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5 py-2">
+            <div className="space-y-2">
+              <FieldLabel htmlFor="status-name">
+                {t(($) => $.issue_statuses.editor.name)}
+              </FieldLabel>
+              <Input
+                id="status-name"
+                autoFocus
+                maxLength={64}
+                value={draft.name}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, name: event.target.value }))
+                }
+                placeholder={t(($) => $.issue_statuses.editor.name_placeholder)}
+              />
+              {/* The key is the string the API and the CLI take, and renaming a
+                  status does not move it — so it has to be readable somewhere.
+                  Here, not as a chip on every row: the list is for scanning
+                  names, and a slug beside each one is what turned it into a
+                  table of internals. (MUL-6422) */}
+              {status && (
+                <p className="text-caption text-muted-foreground">
+                  {t(($) => $.issue_statuses.editor.key_hint, { key: status.key })}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <FieldLabel>{t(($) => $.issue_statuses.editor.category)}</FieldLabel>
+              {/* Immutable after creation: changing it would silently regroup
+                  every issue already on this status. */}
+              <Select
+                items={categoryItems}
+                value={draft.category}
+                onValueChange={(value) =>
+                  value &&
+                  setDraft((current) => ({ ...current, category: value as IssueStatusCategory }))
+                }
+                disabled={Boolean(status)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {categoryItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-caption text-muted-foreground">
+                {status
+                  ? t(($) => $.issue_statuses.editor.category_locked)
+                  : t(($) => $.issue_statuses.categories[draft.category])}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <FieldLabel htmlFor="status-description">
+                {t(($) => $.issue_statuses.editor.description)}
+              </FieldLabel>
+              <Textarea
+                id="status-description"
+                rows={3}
+                maxLength={256}
+                value={draft.description}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, description: event.target.value }))
+                }
+                onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                    event.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                placeholder={t(($) => $.issue_statuses.editor.description_placeholder)}
+              />
+            </div>
+            <div className="space-y-2">
+              <FieldLabel>{t(($) => $.issue_statuses.editor.color)}</FieldLabel>
+              <ColorPicker
+                value={draft.color}
+                onChange={(color) => setDraft((current) => ({ ...current, color }))}
+                trigger={
+                  <button
+                    type="button"
+                    aria-label={t(($) => $.issue_statuses.editor.color)}
+                    className="flex h-9 items-center gap-2.5 rounded-md border border-surface-border px-2.5 transition-colors hover:bg-surface-hover"
+                  >
+                    <span className="size-5 rounded-full" style={{ backgroundColor: draft.color }} />
+                    <span className="font-mono text-caption uppercase text-muted-foreground">
+                      {draft.color}
+                    </span>
+                  </button>
+                }
+              />
+            </div>
           </div>
-          <div className="space-y-2">
-            <FieldLabel htmlFor="status-description">
-              {t(($) => $.issue_statuses.editor.description)}
-            </FieldLabel>
-            <Textarea
-              id="status-description"
-              rows={3}
-              maxLength={256}
-              value={draft.description}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, description: event.target.value }))
-              }
-              placeholder={t(($) => $.issue_statuses.editor.description_placeholder)}
-            />
-          </div>
-          <div className="space-y-2">
-            <FieldLabel>{t(($) => $.issue_statuses.editor.color)}</FieldLabel>
-            <ColorPicker
-              value={draft.color}
-              onChange={(color) => setDraft((current) => ({ ...current, color }))}
-              trigger={
-                <button
-                  type="button"
-                  aria-label={t(($) => $.issue_statuses.editor.color)}
-                  className="flex h-9 items-center gap-2.5 rounded-md border border-surface-border px-2.5 transition-colors hover:bg-surface-hover"
-                >
-                  <span className="size-5 rounded-full" style={{ backgroundColor: draft.color }} />
-                  <span className="font-mono text-caption uppercase text-muted-foreground">
-                    {draft.color}
-                  </span>
-                </button>
-              }
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            {t(($) => $.issue_statuses.editor.cancel)}
-          </Button>
-          <Button
-            onClick={submit}
-            disabled={!draft.name.trim() || create.isPending || update.isPending}
-          >
-            {create.isPending || update.isPending
-              ? t(($) => $.issue_statuses.editor.saving)
-              : t(($) => $.issue_statuses.editor.save)}
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+              {t(($) => $.issue_statuses.editor.cancel)}
+            </Button>
+            <Button
+              type="submit"
+              disabled={!draft.name.trim() || create.isPending || update.isPending}
+            >
+              {create.isPending || update.isPending
+                ? t(($) => $.issue_statuses.editor.saving)
+                : t(($) => $.issue_statuses.editor.save)}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

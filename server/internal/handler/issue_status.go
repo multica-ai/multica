@@ -45,19 +45,23 @@ type IssueStatusResponse struct {
 // predicates instead of resolving the category once per issue row.
 func (h *Handler) terminalIssueStatusKeys(ctx context.Context, workspaceID pgtype.UUID) ([]string, error) {
 	return issuestatus.ExpandCategories(ctx, h.Queries, workspaceID, []string{
-		issuestatus.Done,
-		issuestatus.Cancelled,
+		issuestatus.CategoryCompleted,
+		issuestatus.CategoryCanceled,
 	})
 }
 
 func issueStatusToResponse(s db.IssueStatus) IssueStatusResponse {
+	category, ok := issuestatus.CategoryForBehavior(s.Category)
+	if !ok {
+		category = s.Category
+	}
 	return IssueStatusResponse{
 		ID:          uuidToString(s.ID),
 		WorkspaceID: uuidToString(s.WorkspaceID),
 		Key:         s.Key,
 		Name:        s.Name,
 		Description: s.Description,
-		Category:    s.Category,
+		Category:    category,
 		Color:       s.Color,
 		IsSystem:    s.IsSystem,
 		Position:    s.Position,
@@ -124,7 +128,7 @@ func (h *Handler) ListIssueStatuses(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"statuses":   resp,
-		"categories": issuestatus.Canonical(),
+		"categories": issuestatus.Categories(),
 		"total":      len(resp),
 	})
 }
@@ -157,9 +161,10 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !issuestatus.IsCategory(req.Category) {
-		writeError(w, http.StatusBadRequest, "category must be one of: "+strings.Join(issuestatus.Canonical(), ", "))
+		writeError(w, http.StatusBadRequest, "category must be one of: "+strings.Join(issuestatus.Categories(), ", "))
 		return
 	}
+	behavior, _ := issuestatus.DefaultBehaviorForCategory(req.Category)
 	color, err := normalizeColor(req.Color)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -179,12 +184,12 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	entry, badRequest, err := h.createIssueStatusEntry(r.Context(), wsUUID, db.CreateIssueStatusEntryParams{
+	entry, badRequest, err := h.createIssueStatusEntry(r.Context(), wsUUID, req.Category, db.CreateIssueStatusEntryParams{
 		WorkspaceID: wsUUID,
 		Key:         explicitKey,
 		Name:        name,
 		Description: req.Description,
-		Category:    req.Category,
+		Category:    behavior,
 		Color:       strings.ToLower(color),
 	})
 	if badRequest != "" {
@@ -209,21 +214,21 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 //
 // Derivation READS the catalog to choose a key nothing already owns, so the
 // read and the insert have to be a single atomic step: two admins creating a
-// Chinese-named in_review status at the same instant would otherwise both
-// compute `in_review_2`, and the loser would be told a key they never typed was
+// Chinese-named Started status at the same instant would otherwise both
+// compute `started_2`, and the loser would be told a key they never typed was
 // already taken. The EXCLUSIVE catalog lock — the same one archive takes —
 // serializes them.
 //
 // EVERY create takes that lock, including one that supplies its own key.
 // Excluding those would leave the race half-closed: an explicit-key insert of
-// `in_review_2` could still land between a derive's catalog read and its
+// `started_2` could still land between a derive's catalog read and its
 // insert, and the derive — a UI request with no key field to blame — would come
 // back 409. The lock is only contended by catalog writes, which are rare admin
 // actions, so serializing them costs nothing worth keeping the hole for.
 //
 // A non-empty second return is a caller error the handler reports as 400,
 // distinct from a nil-error success and from an infrastructure failure.
-func (h *Handler) createIssueStatusEntry(ctx context.Context, workspaceID pgtype.UUID, arg db.CreateIssueStatusEntryParams) (db.IssueStatus, string, error) {
+func (h *Handler) createIssueStatusEntry(ctx context.Context, workspaceID pgtype.UUID, publicCategory string, arg db.CreateIssueStatusEntryParams) (db.IssueStatus, string, error) {
 	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
 		return db.IssueStatus{}, "", err
@@ -250,7 +255,7 @@ func (h *Handler) createIssueStatusEntry(ctx context.Context, workspaceID pgtype
 		for _, e := range entries {
 			taken[e.Key] = true
 		}
-		key, err := issuestatus.DeriveKey(arg.Name, arg.Category, taken)
+		key, err := issuestatus.DeriveKey(arg.Name, publicCategory, taken)
 		if err != nil {
 			return db.IssueStatus{}, err.Error(), nil
 		}
@@ -508,7 +513,7 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !issuestatus.IsCategory(req.Category) {
-		writeError(w, http.StatusBadRequest, "category must be one of: "+strings.Join(issuestatus.Canonical(), ", "))
+		writeError(w, http.StatusBadRequest, "category must be one of: "+strings.Join(issuestatus.Categories(), ", "))
 		return
 	}
 	if len(req.IDs) == 0 {
@@ -588,7 +593,10 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "built-in statuses cannot be reordered")
 		case entry.ArchivedAt.Valid:
 			writeError(w, http.StatusConflict, "archived statuses cannot be reordered")
-		case entry.Category != req.Category:
+		case func() bool {
+			category, ok := issuestatus.CategoryForBehavior(entry.Category)
+			return !ok || category != req.Category
+		}():
 			writeError(w, http.StatusBadRequest, "ids must all belong to the requested category")
 		default:
 			writeError(w, http.StatusConflict, "issue status catalog changed during reorder")
@@ -643,7 +651,7 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"statuses":   resp,
-		"categories": issuestatus.Canonical(),
+		"categories": issuestatus.Categories(),
 		"total":      len(resp),
 	})
 }

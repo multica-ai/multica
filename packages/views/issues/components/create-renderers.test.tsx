@@ -119,7 +119,12 @@ describe("issue renderer create entrypoints", () => {
 
     render(
       <BoardColumn
-        group={{ id: "todo", title: "todo", status: "todo", createData: { status: "todo" } }}
+        group={{
+          id: "unstarted",
+          title: "unstarted",
+          status: "unstarted",
+          createData: { status: "todo" },
+        }}
         issueIds={[]}
         issueMap={new Map()}
         projectId="project-1"
@@ -143,7 +148,7 @@ describe("issue renderer create entrypoints", () => {
     render(
       <ListView
         issues={[]}
-        visibleStatuses={["todo"]}
+        visibleStatuses={["unstarted"]}
         statusPagination={emptyStatusPagination()}
         projectId="project-1"
         onCreateIssue={onCreateIssue}

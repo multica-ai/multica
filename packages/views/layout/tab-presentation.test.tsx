@@ -111,7 +111,7 @@ describe("useTabPresentation — live from cache", () => {
     expect(presentationOf("/acme/issues/i1")).toEqual({
       // `category` travels with the visual so the tab strip never resolves a
       // custom status key itself. (MUL-6243)
-      visual: { kind: "issue-status", status: "in_progress", category: "in_progress" },
+      visual: { kind: "issue-status", status: "in_progress", category: "started" },
       title: "MUL-1: Fix login",
     });
   });

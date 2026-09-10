@@ -14,7 +14,7 @@
  *     categories, same 6 visible groups as web — only the layout
  *     differs. UI may diverge when semantics agree.
  *
- * Groups are status CATEGORIES (`BOARD_CATEGORIES`, cancelled excluded) to
+ * Groups are status CATEGORIES (`BOARD_CATEGORIES`, canceled excluded) to
  * match web `packages/views/projects/components/project-detail.tsx`, NOT status
  * keys: a workspace's custom statuses live inside their category's group rather
  * than adding one of their own, and grouping by key dropped them from the list
@@ -36,7 +36,7 @@ import { projectIssuesOptions } from "@/data/queries/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import {
   BOARD_CATEGORIES,
-  STATUS_LABEL,
+  CATEGORY_LABEL,
   issueColumnCategory,
 } from "@/lib/issue-status";
 
@@ -120,10 +120,10 @@ function SectionHeader({
 }) {
   return (
     <View className="flex-row items-center gap-2 px-4 py-2 bg-background">
-      {/* A category IS a built-in status key, so it resolves to its own glyph. */}
+      {/* Category keys resolve to their canonical lifecycle glyph. */}
       <StatusIcon status={category} size={14} />
       <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-        {STATUS_LABEL[category]}
+        {CATEGORY_LABEL[category]}
       </Text>
       <Text className="text-xs text-muted-foreground/60">{count}</Text>
     </View>

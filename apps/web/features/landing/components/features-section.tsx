@@ -23,9 +23,9 @@ import { ImageIcon } from "./shared";
 import { useLocale } from "../i18n";
 import type { LandingDict } from "../i18n";
 import { StatusIcon, PriorityIcon } from "@multica/views/issues/components";
-import { STATUS_CONFIG } from "@multica/core/issues/config/status";
+import { BUILT_IN_STATUS_LABEL } from "@multica/core/issues/config/status";
 import { PRIORITY_CONFIG } from "@multica/core/issues/config/priority";
-import type { IssueStatusCategory, IssuePriority } from "@multica/core/types";
+import type { BuiltInIssueStatus, IssuePriority } from "@multica/core/types";
 
 /* ------------------------------------------------------------------ */
 /*  Mock ActorAvatar — mirrors the real ActorAvatar styling exactly     */
@@ -137,11 +137,19 @@ const allAssignees: Assignee[] = [
   { type: "agent", id: "tina", name: "Tina-dev" },
 ];
 
-const statusCycle: IssueStatusCategory[] = ["backlog", "todo", "in_progress", "in_review", "done"];
+const statusCycle: BuiltInIssueStatus[] = [
+  "backlog",
+  "todo",
+  "in_progress",
+  "in_review",
+  "blocked",
+  "done",
+  "cancelled",
+];
 const priorityCycle: IssuePriority[] = ["none", "low", "medium", "high", "urgent"];
 
 function TeammatesVisual() {
-  const [status, setStatus] = useState<IssueStatusCategory>("in_progress");
+  const [status, setStatus] = useState<BuiltInIssueStatus>("in_progress");
   const [priority, setPriority] = useState<IssuePriority>("medium");
   const [assignee, setAssignee] = useState<Assignee>(allAssignees[3]!); // Claude
   const [pickerOpen, setPickerOpen] = useState(true);
@@ -243,7 +251,7 @@ function TeammatesVisual() {
                       onClick={() => { setStatusOpen(!statusOpen); setPriorityOpen(false); }}
                     >
                       <StatusIcon status={status} className="h-3.5 w-3.5 shrink-0" />
-                      <span>{STATUS_CONFIG[status].label}</span>
+                      <span>{BUILT_IN_STATUS_LABEL[status]}</span>
                     </button>
                   </PropRow>
                   {statusOpen && (
@@ -259,7 +267,7 @@ function TeammatesVisual() {
                           onClick={() => { setStatus(s); setStatusOpen(false); }}
                         >
                           <StatusIcon status={s} className="h-3.5 w-3.5 shrink-0" />
-                          {STATUS_CONFIG[s].label}
+                          {BUILT_IN_STATUS_LABEL[s]}
                           {s === status && <Check className="ml-auto h-3.5 w-3.5" />}
                         </button>
                       ))}

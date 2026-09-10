@@ -3,6 +3,8 @@ export {
   issueStatusListOptions,
   buildIssueStatusCatalog,
   isIssueStatusCategory,
+  isBuiltInIssueStatus,
+  normalizeIssueStatusCategory,
   issueStatusColor,
   type IssueStatusCatalog,
 } from "./queries";
