@@ -243,10 +243,15 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_REASONIX_PATH", "reasonix", "MULTICA_REASONIX_MODEL"); ok {
 		agents["reasonix"] = e
 	}
-	// DSH is registered only when its Multica runtime profile is installed.
-	// A bare dsh binary is not enough: without the bundle it has no --stdio
-	// protocol and every task would fail after being advertised as healthy.
-	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok && probeDshMulticaProfile(e.Path) {
+	// DSH resolves here like any other CLI. Whether it is *usable* is decided
+	// one layer up: the Multica runtime profile is what gives it the --stdio
+	// protocol, so a bare `dsh` prints a version and still cannot run a task.
+	// That check lives in probeBuiltinRuntime, where a failure produces a
+	// verdict the user can actually see — /health reports it as a skipped
+	// agent carrying the repair command, and the daemon logs it. Gating here
+	// instead made the drop invisible: the provider vanished from the
+	// availability set with nothing anywhere saying why.
+	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok {
 		agents["dsh"] = e
 	}
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {

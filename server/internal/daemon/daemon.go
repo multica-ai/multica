@@ -391,6 +391,20 @@ type Daemon struct {
 	reloading          sync.Mutex         // prevents concurrent workspace syncs
 	runtimeSet         *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
+	// dshProvisionOnce makes the automatic DSH runtime-profile install
+	// once-per-daemon: it is a network install that writes into the user's DSH
+	// home, so a failing registry must not be retried every discovery round.
+	// See startDshProfileProvision.
+	dshProvisionOnce sync.Once
+
+	// agentDiscoveryKick asks agentDiscoveryLoop for an immediate convergence
+	// round. Buffered and written non-blockingly (kickAgentDiscovery), so a
+	// producer never waits on the loop and a burst collapses into one round.
+	// Needed because the loop's scheduled retry can be
+	// agentConvergeMaxBackoff away, which is far too long to wait after a
+	// local state change that makes a provider registrable again.
+	agentDiscoveryKick chan struct{}
+
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
@@ -650,6 +664,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		runtimeIndex:              make(map[string]Runtime),
 		profileLaunchSpecs:        make(map[string]profileLaunchSpec),
 		runtimeSet:                newRuntimeSetWatcher(),
+		agentDiscoveryKick:        make(chan struct{}, 1),
 		agentVersions:             make(map[string]string),
 		skippedAgents:             make(map[string]string),
 		resolvedPaths:             make(map[string]healedAgent),
@@ -2248,7 +2263,25 @@ const (
 	// sense as below-minimum: the same bytes will be refused every time until
 	// someone reinstalls, so retrying is not what fixes it.
 	builtinProbeNotExecutable
+	// builtinProbeMissingProfile: the CLI resolved and runs, but the runtime
+	// profile its backend speaks through is not installed for it. DSH is the
+	// case in the field: the Multica profile is what gives `dsh` its --stdio
+	// protocol, so a bare binary answers `--version` and `--probe` refuses.
+	// Deterministic like the two above — the same binary keeps refusing until
+	// someone installs the profile — and the reason carries that repair.
+	builtinProbeMissingProfile
 )
+
+// dshMissingProfileReason is the user-facing explanation for a
+// builtinProbeMissingProfile drop. It names the repair because nothing else in
+// the daemon's output would: the CLI itself is installed, resolvable and
+// answers `--version`, so "not installed" is true only of the profile.
+const dshMissingProfileReason = "the Multica runtime profile is not installed; run `dsh plugin --profile multica add <bundle>`"
+
+// dshProfileInstallStartedReason replaces it when the operator configured a
+// bundle for the daemon to install (MULTICA_DSH_PROFILE_BUNDLE), so /health
+// separates "wait for the install" from "nothing is going to happen".
+const dshProfileInstallStartedReason = "the Multica runtime profile is not installed; installing the configured bundle now and re-probing when it finishes"
 
 // runtimeVerdict is one provider's confirmed verdict: the human reason that
 // goes to /health and the daemon log, plus — when the cause is one the user has
@@ -2290,7 +2323,9 @@ func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string) run
 // tells the caller how to treat a drop: builtinProbeUnavailable means the
 // version could not be read (or not understood) — transient, leave whatever is
 // registered alone — while builtinProbeBelowMinimum is a confirmed too-old
-// verdict the caller may demote on. See builtinProbeVerdict.
+// verdict the caller may demote on. builtinProbeMissingProfile is confirmed in
+// the same way, for a CLI that runs but whose backend has no runtime profile
+// installed. See builtinProbeVerdict.
 //
 // The second return value is a short human-readable reason when the verdict is
 // not OK. It is surfaced on /health as skipped_agents so a user can tell "CLI
@@ -2351,6 +2386,30 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 			d.logger.Warn("skip registering runtime: re-resolved version too old",
 				"name", name, "version", heal.rejected.Detected, "error", heal.rejected.Error())
 			return heal.rejected.Detected, heal.rejected.Error(), builtinProbeBelowMinimum
+		}
+		// DSH is the one built-in whose binary being present does not make it
+		// usable: the Multica runtime profile supplies the --stdio protocol the
+		// backend drives, so a bare `dsh` resolves, answers `--version`, and
+		// still cannot run a single task. Checked here rather than in
+		// probeAgentCLIs so the drop produces a verdict: without it the
+		// provider disappeared from the availability set silently, which is
+		// indistinguishable to a user from "Multica cannot see my dsh at all".
+		//
+		// The executable check comes first because probeDshMulticaProfile
+		// cannot tell "the profile refused" from "there was nothing to run": a
+		// path that vanished under us — DSH Desktop replaced in place, a pinned
+		// MULTICA_DSH_PATH deleted — would otherwise be reported as a missing
+		// profile, sending the user to install a bundle that is not the
+		// problem. Without it the round falls through to version detection,
+		// whose failure names the real path.
+		if name == "dsh" && agentExecutablePresent(resolved.Path) && !probeDshMulticaProfile(resolved.Path) {
+			d.logger.Warn("skip registering runtime: DSH Multica runtime profile is not installed",
+				"name", name, "path", resolved.Path)
+			reason := dshMissingProfileReason
+			if d.startDshProfileProvision(resolved.Path) {
+				reason = dshProfileInstallStartedReason
+			}
+			return "", reason, builtinProbeMissingProfile
 		}
 		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path})
 		if err != nil {
@@ -2493,7 +2552,12 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 				// run. Demote only once the verdict has survived a second probe
 				// a confirmation window later; until then it is treated as
 				// transient, which costs one more round and nothing else.
+				//
+				// A missing runtime profile needs no such window: it is a fact
+				// about the CLI's environment, not about the bytes mid-write,
+				// and no other process is racing to install it.
 				demote := verdict == builtinProbeBelowMinimum ||
+					verdict == builtinProbeMissingProfile ||
 					(verdict == builtinProbeNotExecutable && d.confirmNotExecutable(name, time.Now()))
 				mu.Lock()
 				skipped[name] = reason

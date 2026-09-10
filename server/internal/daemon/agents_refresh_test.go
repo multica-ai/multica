@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -13,6 +15,46 @@ import (
 
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
+
+// The loop backs off whenever a round cannot shrink the missing-runtime set,
+// and dsh sits in that set for as long as its runtime profile is absent. force
+// is what lets the automatic DSH install bypass that wait once it finishes:
+// without it the next scheduled attempt can be agentConvergeMaxBackoff (30m)
+// away, which is what made a finished install look like it had done nothing
+// until a manual daemon restart.
+func TestConvergeAgentRuntimes_ForceIgnoresThePendingBackoff(t *testing.T) {
+	t.Setenv(dshProfileBundleEnv, "")
+	stubAgentProbe(t, map[string]AgentEntry{"dsh": {Path: "/nonexistent/dsh"}})
+
+	newDaemon := func() *Daemon {
+		d := &Daemon{
+			logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+			workspaces:    map[string]*workspaceState{"ws-1": {}},
+			runtimeIndex:  map[string]Runtime{},
+			agentVersions: map[string]string{},
+		}
+		d.cfg.Agents = map[string]AgentEntry{"dsh": {Path: "/nonexistent/dsh"}}
+		return d
+	}
+	now := time.Now()
+	pending := now.Add(30 * time.Minute)
+
+	// A pending backoff holds the scheduled round back...
+	d := newDaemon()
+	backoff, nextRetry := time.Duration(0), pending
+	d.convergeAgentRuntimes(context.Background(), &backoff, &nextRetry, now, false)
+	if !nextRetry.Equal(pending) {
+		t.Fatalf("nextRetry = %v, want the pending backoff %v to be honored", nextRetry, pending)
+	}
+
+	// ...and a forced round runs anyway.
+	d = newDaemon()
+	backoff, nextRetry = time.Duration(0), pending
+	d.convergeAgentRuntimes(context.Background(), &backoff, &nextRetry, now, true)
+	if nextRetry.Equal(pending) {
+		t.Fatal("force did not bypass the pending backoff, so a finished DSH install would wait for it")
+	}
+}
 
 // stubAgentProbe replaces CLI discovery for the duration of a test. The returned
 // setter swaps in the next probe result, simulating the user installing or

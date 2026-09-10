@@ -77,26 +77,65 @@ func (d *Daemon) agentDiscoveryLoop(ctx context.Context) {
 		case <-versionTicker.C:
 			d.refreshAgentVersions(ctx)
 		case now := <-ticker.C:
-			gained := d.refreshAgentAvailability()
-			missing := d.providersMissingRuntimes()
-			if len(missing) == 0 {
-				backoff = 0
-				continue
-			}
-			// A newly discovered provider always gets an immediate attempt;
-			// otherwise honor the backoff earned by previous failures.
-			if len(gained) == 0 && now.Before(nextRetry) {
-				continue
-			}
-			before := len(missing)
-			d.convergeRuntimeRegistrations(ctx)
-			if len(d.providersMissingRuntimes()) < before {
-				backoff = 0
-			} else {
-				backoff = nextConvergeBackoff(backoff)
-			}
-			nextRetry = now.Add(backoff)
+			d.convergeAgentRuntimes(ctx, &backoff, &nextRetry, now, false)
+		case <-d.agentDiscoveryKick:
+			// A local state change (the DSH runtime profile appearing) makes a
+			// provider registrable right now. Wait for nothing: the scheduled
+			// attempt this replaces can be agentConvergeMaxBackoff away.
+			d.convergeAgentRuntimes(ctx, &backoff, &nextRetry, time.Now(), true)
 		}
+	}
+}
+
+// convergeAgentRuntimes runs the expensive half of a discovery round: publish
+// anything the cheap probe gained, then version-probe and register whatever is
+// still missing a runtime.
+//
+// force ignores the backoff earned by previous failures, for a caller that
+// knows the reason a provider could not register has just gone away. backoff
+// and nextRetry are the loop's scheduling state, threaded through rather than
+// owned here so the ticker and the kick share one backoff.
+func (d *Daemon) convergeAgentRuntimes(
+	ctx context.Context,
+	backoff *time.Duration,
+	nextRetry *time.Time,
+	now time.Time,
+	force bool,
+) {
+	gained := d.refreshAgentAvailability()
+	missing := d.providersMissingRuntimes()
+	if len(missing) == 0 {
+		*backoff = 0
+		return
+	}
+	// A newly discovered provider always gets an immediate attempt; otherwise
+	// honor the backoff earned by previous failures unless the caller knows
+	// the blocker is gone.
+	if len(gained) == 0 && !force && now.Before(*nextRetry) {
+		return
+	}
+	before := len(missing)
+	d.convergeRuntimeRegistrations(ctx)
+	after := len(d.providersMissingRuntimes())
+	if after < before {
+		*backoff = 0
+	} else {
+		*backoff = nextConvergeBackoff(*backoff)
+	}
+	*nextRetry = now.Add(*backoff)
+}
+
+// kickAgentDiscovery asks the discovery loop for an immediate convergence
+// round. Safe on a zero-value Daemon and from any goroutine: the send is
+// non-blocking, so a burst of producers collapses into one round and none of
+// them waits on the loop.
+func (d *Daemon) kickAgentDiscovery() {
+	if d.agentDiscoveryKick == nil {
+		return
+	}
+	select {
+	case d.agentDiscoveryKick <- struct{}{}:
+	default:
 	}
 }
 
