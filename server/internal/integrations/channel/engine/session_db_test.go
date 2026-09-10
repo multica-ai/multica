@@ -1265,55 +1265,84 @@ func TestChannelTaskDeliveryFreezesTriggerPerGeneration(t *testing.T) {
 	}
 }
 
-// TestChannelTaskDeliveryKeepsRouteWhenTriggerIsMissing pins the route/trigger
-// split for the case migration 457 leaves behind: a generation with no
-// recorded trigger (pre-migration, recovered after deploy).
+// TestChannelTaskDeliveryFreezesThreadPerGeneration is the Slack-DM shape,
+// and the reason the reply thread is trigger data rather than route data.
 //
-// The trigger is legitimately NULL there — we cannot say which message the run
-// answers. The ROUTE is not: the binding is isolated to one thread/topic, so
-// its thread id names that thread for every generation of it. Sourcing the
-// thread from the generation instead would hand these runs an empty thread and
-// silently relocate their answers to the parent chat, which is a visibility
-// change rather than a degradation. Slack (thread_ts) and Telegram
-// (message_thread_id) can still place the message correctly from the thread
-// alone; Lark, whose only route into a topic is replying to a message in it,
-// declines to send (see topicRouteWithoutTrigger).
-func TestChannelTaskDeliveryKeepsRouteWhenTriggerIsMissing(t *testing.T) {
+// It is tempting to call the thread "route" and read it from the binding: for
+// a thread-ISOLATED session (Lark topic, Slack channel thread) there is one
+// binding per thread, so the two coincide. Slack DMs break that. Per
+// slackSessionRouting, a DM keeps ONE binding for the whole channel while
+// replying into whichever thread the member used, so the binding cursor names
+// the thread that spoke LAST — not the one this run answers.
+//
+// Here revision 1 is asked inside thread T1 and revision 2 at top level, both
+// appended before either delivery exists. Each delivery must keep its own
+// thread; the binding cursor at that point holds revision 2's.
+func TestChannelTaskDeliveryFreezesThreadPerGeneration(t *testing.T) {
 	pool := sessionPersistenceTestDB(t)
 	f := seedSessionPersistenceFixture(t, pool)
 	ctx := context.Background()
 	q := db.New(pool)
 
-	// A thread-isolated binding: the cursor carries the thread, and the
-	// generation predates the migration so it has no trigger.
-	if err := q.UpdateChannelChatSessionBindingReplyTarget(ctx, db.UpdateChannelChatSessionBindingReplyTargetParams{
-		ReplyChatSessionID: f.sessionID,
-		LastMessageID:      pgtype.Text{String: "om_older_turn", Valid: true},
-		LastThreadID:       pgtype.Text{String: "omt_topic", Valid: true},
-	}); err != nil {
-		t.Fatalf("seed binding route: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO channel_chat_context_generation (chat_session_id, revision)
-		VALUES ($1, 1) ON CONFLICT DO NOTHING
-	`, f.sessionID); err != nil {
-		t.Fatalf("create generation: %v", err)
+	record := func(revision int64, messageID, threadID, senderID string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO channel_chat_context_generation (chat_session_id, revision)
+			VALUES ($1, $2) ON CONFLICT DO NOTHING
+		`, f.sessionID, revision); err != nil {
+			t.Fatalf("create generation %d: %v", revision, err)
+		}
+		if err := q.SetChannelChatContextReplyTarget(ctx, db.SetChannelChatContextReplyTargetParams{
+			ChatSessionID: f.sessionID, Revision: revision,
+			LastMessageID: pgtype.Text{String: messageID, Valid: true},
+			LastThreadID:  pgtype.Text{String: threadID, Valid: threadID != ""},
+			LastSenderID:  pgtype.Text{String: senderID, Valid: true},
+		}); err != nil {
+			t.Fatalf("snapshot generation %d: %v", revision, err)
+		}
+		if err := q.UpdateChannelChatSessionBindingReplyTarget(ctx, db.UpdateChannelChatSessionBindingReplyTargetParams{
+			ReplyChatSessionID: f.sessionID,
+			LastMessageID:      pgtype.Text{String: messageID, Valid: true},
+			LastThreadID:       pgtype.Text{String: threadID, Valid: threadID != ""},
+		}); err != nil {
+			t.Fatalf("advance session cursor for %d: %v", revision, err)
+		}
 	}
 
-	taskID := newDeliveryTaskID(t, pool)
-	delivery, err := q.CreateChannelTaskDeliveryFromSession(ctx, db.CreateChannelTaskDeliveryFromSessionParams{
-		TaskID: taskID, ChatSessionID: f.sessionID, ContextRevision: 1,
+	recordGeneration := record
+	recordGeneration(1, "om_in_thread", "thread_T1", "U_alice")
+	recordGeneration(2, "om_top_level", "", "U_bob")
+
+	// The wrong answer is reachable: the binding cursor no longer has T1.
+	binding, err := q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
+		ChatSessionID: f.sessionID, ChannelType: "lark",
 	})
 	if err != nil {
-		t.Fatalf("create delivery: %v", err)
+		t.Fatalf("read binding cursor: %v", err)
 	}
-	if delivery.ChannelThreadID.String != "omt_topic" {
-		t.Errorf("thread = %q, want omt_topic — the route must survive a missing trigger",
-			delivery.ChannelThreadID.String)
+	if binding.LastThreadID.Valid {
+		t.Fatalf("precondition: session cursor thread = %+v, want cleared by revision 2", binding.LastThreadID)
 	}
-	if delivery.ChannelMessageID.Valid || delivery.ChannelSenderID.Valid {
-		t.Errorf("trigger = message %+v sender %+v, want both NULL — an unattributable run must not borrow the session cursor",
-			delivery.ChannelMessageID, delivery.ChannelSenderID)
+
+	for _, tc := range []struct {
+		name       string
+		revision   int64
+		wantThread string
+	}{
+		{"revision 1, asked inside T1", 1, "thread_T1"},
+		{"revision 2, asked at top level", 2, ""},
+	} {
+		taskID := newDeliveryTaskID(t, pool)
+		delivery, err := q.CreateChannelTaskDeliveryFromSession(ctx, db.CreateChannelTaskDeliveryFromSessionParams{
+			TaskID: taskID, ChatSessionID: f.sessionID, ContextRevision: tc.revision,
+		})
+		if err != nil {
+			t.Fatalf("%s: create delivery: %v", tc.name, err)
+		}
+		if delivery.ChannelThreadID.String != tc.wantThread {
+			t.Errorf("%s: thread = %q, want %q — the reply thread belongs to the generation, not the session cursor",
+				tc.name, delivery.ChannelThreadID.String, tc.wantThread)
+		}
 	}
 }
 

@@ -77,9 +77,9 @@ WITH closed AS (
            NOT $4::boolean,
            TRUE
     FROM advanced
-    RETURNING chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_sender_id
+    RETURNING chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_thread_id, last_sender_id
 )
-SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_sender_id FROM opened
+SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_thread_id, last_sender_id FROM opened
 `
 
 type AdvanceChannelChatContextGenerationParams struct {
@@ -99,6 +99,7 @@ type AdvanceChannelChatContextGenerationRow struct {
 	InitiatorUserID        pgtype.UUID        `json:"initiator_user_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	LastMessageID          pgtype.Text        `json:"last_message_id"`
+	LastThreadID           pgtype.Text        `json:"last_thread_id"`
 	LastSenderID           pgtype.Text        `json:"last_sender_id"`
 }
 
@@ -123,6 +124,7 @@ func (q *Queries) AdvanceChannelChatContextGeneration(ctx context.Context, arg A
 		&i.InitiatorUserID,
 		&i.CreatedAt,
 		&i.LastMessageID,
+		&i.LastThreadID,
 		&i.LastSenderID,
 	)
 	return i, err
@@ -705,7 +707,7 @@ INSERT INTO channel_task_delivery (
 SELECT
     $1, binding.id, binding.installation_id, binding.channel_type,
     binding.channel_chat_id, binding.chat_type,
-    generation.last_message_id, binding.last_thread_id, generation.last_sender_id,
+    generation.last_message_id, generation.last_thread_id, generation.last_sender_id,
     binding.route_revision, binding.config
 FROM channel_chat_session_binding AS binding
 JOIN channel_chat_context_generation AS generation
@@ -726,21 +728,25 @@ type CreateChannelTaskDeliveryFromSessionParams struct {
 // =====================
 // Freezes one task's outbound delivery, from two different sources on purpose.
 //
-// ROUTE — chat, type, config, thread, revision — comes from the session
-// binding. A thread/topic-isolated session has one binding per topic, so its
-// last_thread_id names that topic for every generation of it. Reading the
-// route from a generation instead would leave pre-migration generations with
-// no topic and quietly relocate their answers to the parent chat, which is a
-// visibility change, not a degradation.
+// ROUTE — chat, type, config, revision — comes from the session binding. It is
+// a property of the session and does not vary by generation.
 //
-// TRIGGER — the message an answer quotes and the account it @-mentions —
-// comes from the generation this task answers, NOT from the binding's
-// latest-trigger cursor, which a newer generation may already have advanced
-// past. A NULL trigger means "we cannot attribute this run": callers reply
-// without a quote or mention rather than inventing one.
+// TRIGGER — the message an answer quotes, the thread it replies into, and the
+// account it @-mentions — comes from the generation this task answers, NOT
+// from the binding's latest-trigger cursor, which a newer generation may
+// already have advanced past.
 //
-// INNER JOIN on the generation: a task whose generation row is missing
-// entirely has no context to deliver against at all.
+// The thread sits with the trigger rather than the route deliberately. For a
+// thread-isolated session (Lark topic, Slack channel thread) the two coincide,
+// so it is easy to mistake the thread for route data — but Slack DMs keep ONE
+// binding per channel while replying into whichever thread the member used
+// (slackSessionRouting), so the binding cursor there names the latest thread,
+// not this run's. Taking it from the generation is correct for both shapes.
+//
+// A NULL trigger means "we cannot attribute this run": callers reply without a
+// quote or mention rather than inventing one. INNER JOIN on the generation: a
+// task whose generation row is missing entirely has no context to deliver
+// against at all.
 func (q *Queries) CreateChannelTaskDeliveryFromSession(ctx context.Context, arg CreateChannelTaskDeliveryFromSessionParams) (ChannelTaskDelivery, error) {
 	row := q.db.QueryRow(ctx, createChannelTaskDeliveryFromSession, arg.TaskID, arg.ContextRevision, arg.ChatSessionID)
 	var i ChannelTaskDelivery
@@ -1206,7 +1212,7 @@ func (q *Queries) FindReusableChannelUserBinding(ctx context.Context, arg FindRe
 }
 
 const getChannelChatContextGeneration = `-- name: GetChannelChatContextGeneration :one
-SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_sender_id FROM channel_chat_context_generation
+SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_thread_id, last_sender_id FROM channel_chat_context_generation
 WHERE chat_session_id = $1
   AND revision = $2
 `
@@ -1229,6 +1235,7 @@ func (q *Queries) GetChannelChatContextGeneration(ctx context.Context, arg GetCh
 		&i.InitiatorUserID,
 		&i.CreatedAt,
 		&i.LastMessageID,
+		&i.LastThreadID,
 		&i.LastSenderID,
 	)
 	return i, err
@@ -1933,7 +1940,7 @@ func (q *Queries) ListChannelOutboundMessagesByIDs(ctx context.Context, arg List
 }
 
 const lockChannelChatContextGenerationByRevision = `-- name: LockChannelChatContextGenerationByRevision :one
-SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_sender_id FROM channel_chat_context_generation
+SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_thread_id, last_sender_id FROM channel_chat_context_generation
 WHERE chat_session_id = $1
   AND revision = $2
 FOR UPDATE
@@ -1957,6 +1964,7 @@ func (q *Queries) LockChannelChatContextGenerationByRevision(ctx context.Context
 		&i.InitiatorUserID,
 		&i.CreatedAt,
 		&i.LastMessageID,
+		&i.LastThreadID,
 		&i.LastSenderID,
 	)
 	return i, err
@@ -2619,13 +2627,15 @@ func (q *Queries) SetChannelChatContextInitiator(ctx context.Context, arg SetCha
 const setChannelChatContextReplyTarget = `-- name: SetChannelChatContextReplyTarget :exec
 UPDATE channel_chat_context_generation
 SET last_message_id = $1,
-    last_sender_id  = $2
-WHERE chat_session_id = $3
-  AND revision = $4
+    last_thread_id  = $2,
+    last_sender_id  = $3
+WHERE chat_session_id = $4
+  AND revision = $5
 `
 
 type SetChannelChatContextReplyTargetParams struct {
 	LastMessageID pgtype.Text `json:"last_message_id"`
+	LastThreadID  pgtype.Text `json:"last_thread_id"`
 	LastSenderID  pgtype.Text `json:"last_sender_id"`
 	ChatSessionID pgtype.UUID `json:"chat_session_id"`
 	Revision      int64       `json:"revision"`
@@ -2638,13 +2648,13 @@ type SetChannelChatContextReplyTargetParams struct {
 // no longer be the session's newest, so reading the trigger from the session
 // would answer one member's question quoting and @-mentioning another's.
 //
-// Both columns move together in one statement: a sender that described a
-// different message than the reply targets is precisely the cross-mention this
-// exists to prevent. The thread is NOT here — it is route, not trigger; see
-// CreateChannelTaskDeliveryFromSession.
+// All three move together in one statement: a sender or thread that described
+// a different message than the reply targets is precisely the cross-attribution
+// this exists to prevent.
 func (q *Queries) SetChannelChatContextReplyTarget(ctx context.Context, arg SetChannelChatContextReplyTargetParams) error {
 	_, err := q.db.Exec(ctx, setChannelChatContextReplyTarget,
 		arg.LastMessageID,
+		arg.LastThreadID,
 		arg.LastSenderID,
 		arg.ChatSessionID,
 		arg.Revision,

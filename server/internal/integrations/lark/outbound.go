@@ -471,7 +471,7 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 	if content == "" {
 		return nil
 	}
-	if topicRouteWithoutTrigger(binding) {
+	if topicSendWithoutTrigger(binding) {
 		p.cfg.Logger.Warn("lark: no trigger for a topic-isolated session; skipping reply rather than posting it to the parent group",
 			"chat_session_id", uuidString(binding.ChatSessionID),
 			"channel_chat_id", binding.ChannelChatID)
@@ -534,30 +534,48 @@ func outboundChatID(b ChatSessionBinding) ChatID {
 //     for a quote to resolve, so quoting every DM turn would be chrome
 //     without a reader.
 //
-// topicRouteWithoutTrigger reports that this binding is isolated to a Lark
-// topic (话题) but the task carries no trigger message to reply to.
+// isTopicIsolated reports whether this binding is one Lark topic (话题) rather
+// than a whole chat. larkSessionRouting writes a config only for topic
+// sessions — key "chat:thread", config {"chat_id": real} — so a decoded
+// chat_id IS the isolation marker. Pre-topic rows carry "{}" and plain chats
+// carry no config, both of which read as not isolated.
+func isTopicIsolated(b ChatSessionBinding) bool {
+	if len(b.Config) == 0 {
+		return false
+	}
+	var cfg larkBindingConfig
+	if err := json.Unmarshal(b.Config, &cfg); err != nil {
+		return false
+	}
+	return cfg.ChatID != "" && cfg.ChatID != b.ChannelChatID
+}
+
+// topicSendWithoutTrigger reports that this task belongs to a topic-isolated
+// session but carries no trigger message to reply to.
 //
 // It is the one combination Lark cannot serve. Slack and Telegram can place a
 // message in a thread from the thread id alone (thread_ts,
 // message_thread_id); Lark's only route into a topic is replying to a message
-// inside it, so with no trigger message the send would fall through to
-// outboundChatID — which resolves the composite "chat:thread" key to the
-// PARENT group. That is not a degradation, it is a visibility change: an
-// answer meant for a topic appears in front of the whole group.
+// inside it, so with no trigger the send would fall through to
+// outboundChatID, which resolves the composite key to the whole chat. The
+// answer to a question asked in one topic would then appear in the main group
+// — not a confidentiality break (group members can open the topic either way)
+// but the wrong place, and the session isolation that topic routing exists to
+// provide would be silently undone.
 //
-// So we decline to send. Silence is recoverable (the member asks again) and
-// the answer is still in Multica; a leak is not recoverable. Distinct from
-// sendWithReplyFallback's chat-level retry, which fires only when Lark says
-// the topic itself cannot receive the reply — there the topic is unusable and
-// delivering beats losing the reply.
+// So we decline to send. The member can ask again, the answer is still in
+// Multica, and this is a one-time window: it is reachable only for
+// generations predating migration 460 that are recovered after deploy without
+// a new inbound turn, since every turn after deploy records a trigger before
+// its task is enqueued.
 //
-// Reachable only for generations that predate migration 457 and are recovered
-// after deploy without a new inbound turn; every turn after deploy records a
-// trigger before its task is enqueued.
-func topicRouteWithoutTrigger(b ChatSessionBinding) bool {
-	hasTopic := b.LastThreadID.Valid && b.LastThreadID.String != ""
+// Deliberately narrower than sendWithReplyFallback's chat-level retry, which
+// fires only when Lark reports the topic itself cannot receive the reply. The
+// topic is unusable there, so delivering beats losing the reply; here the
+// topic is fine and only our own bookkeeping is missing.
+func topicSendWithoutTrigger(b ChatSessionBinding) bool {
 	hasTrigger := b.LastMessageID.Valid && b.LastMessageID.String != ""
-	return hasTopic && !hasTrigger
+	return isTopicIsolated(b) && !hasTrigger
 }
 
 func threadReplyTarget(binding ChatSessionBinding) ReplyTarget {
@@ -638,7 +656,7 @@ func (p *Patcher) installationCredentials(inst Installation) (InstallationCreden
 // time we'd just send a second card, which is fine — failure is
 // usually a single terminal event.
 func (p *Patcher) fail(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, taskID pgtype.UUID, agentName string, payload any) error {
-	if topicRouteWithoutTrigger(binding) {
+	if topicSendWithoutTrigger(binding) {
 		p.cfg.Logger.Warn("lark: no trigger for a topic-isolated session; skipping error card rather than posting it to the parent group",
 			"chat_session_id", uuidString(binding.ChatSessionID),
 			"channel_chat_id", binding.ChannelChatID)

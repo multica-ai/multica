@@ -1195,8 +1195,10 @@ func TestPatcherSkipsTopicReplyWithoutTrigger(t *testing.T) {
 	q.binding.ChatType = string(ChatTypeGroup)
 	q.binding.ChannelChatID = "oc_test_chat:omt_topic1"
 	q.binding.Config = []byte(`{"chat_id":"oc_test_chat"}`)
-	q.binding.LastThreadID = pgtype.Text{String: "omt_topic1", Valid: true}
-	q.binding.LastMessageID = pgtype.Text{} // pre-migration generation: no trigger
+	// Pre-migration generation: the trigger snapshot is empty, so there is no
+	// message to reply into the topic with.
+	q.binding.LastMessageID = pgtype.Text{}
+	q.binding.LastThreadID = pgtype.Text{}
 	taskID := uuidFromString(t, "eeccdddd-eecc-eecc-eecc-eeeeeeeeeeee")
 
 	p.handleEvent(events.Event{
@@ -1222,8 +1224,8 @@ func TestPatcherSkipsTopicErrorCardWithoutTrigger(t *testing.T) {
 	q.binding.ChatType = string(ChatTypeGroup)
 	q.binding.ChannelChatID = "oc_test_chat:omt_topic1"
 	q.binding.Config = []byte(`{"chat_id":"oc_test_chat"}`)
-	q.binding.LastThreadID = pgtype.Text{String: "omt_topic1", Valid: true}
 	q.binding.LastMessageID = pgtype.Text{}
+	q.binding.LastThreadID = pgtype.Text{}
 	taskID := uuidFromString(t, "eecceeee-eecc-eecc-eecc-eeeeeeeeeeee")
 
 	p.handleEvent(events.Event{

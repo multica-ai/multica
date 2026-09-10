@@ -562,6 +562,7 @@ func (s *ChatSession) StartSession(ctx context.Context, in StartSessionInput) (S
 			ChatSessionID: session.ID,
 			Revision:      1,
 			LastMessageID: textOrNull(in.MessageID),
+			LastThreadID:  textOrNull(in.ThreadID),
 			LastSenderID:  textOrNull(in.SenderChannelID),
 		}); err != nil {
 			return StartSessionResult{}, fmt.Errorf("snapshot started chat reply target: %w", err)
@@ -735,6 +736,7 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 				ChatSessionID: in.SessionID,
 				Revision:      contextRevision,
 				LastMessageID: textOrNull(in.MessageID),
+				LastThreadID:  textOrNull(in.ThreadID),
 				LastSenderID:  textOrNull(in.SenderChannelID),
 			}); err != nil {
 				return AppendResult{}, fmt.Errorf("snapshot channel context reply target: %w", err)

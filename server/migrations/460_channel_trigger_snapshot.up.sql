@@ -24,23 +24,27 @@
 -- crash recovery. The trigger belongs beside it. channel_task_delivery then
 -- freezes the generation's values per task.
 --
--- Only the TRIGGER moves here. The ROUTE stays on the binding, and the split
--- matters: last_thread_id is the topic/thread a session is isolated to, which
--- is a property of the binding (one binding per topic), so it is correct for
--- every generation and must keep coming from there. Sourcing the route from a
--- generation would leave pre-migration generations with no topic and silently
--- relocate their answers to the parent chat.
+-- The thread belongs here too, with the message and sender. It is tempting to
+-- call the thread "route" and read it from the binding, but that only holds
+-- for thread-ISOLATED sessions. Slack DMs are the counterexample the repo
+-- already encodes: slackSessionRouting keeps one binding per DM channel while
+-- carrying a per-message reply thread, so the binding's cursor names whichever
+-- thread spoke last. Reading it there would hand a debounced revision-1 run
+-- the thread of a later revision — the same cross-generation hazard this
+-- snapshot exists to close for the message and sender.
 --
--- The binding also keeps last_message_id for the history-boundary bookkeeping
--- (history_start_message_id, history_end_message_id). That cursor is
--- deliberately NOT interchangeable with the trigger here: it advances for
--- channel commands (/issue) too, whereas the trigger is written only for
--- messages that are actually agent input.
+-- The binding keeps its own last_message_id / last_thread_id for the
+-- history-boundary bookkeeping (history_start_message_id,
+-- history_end_message_id). That cursor is deliberately NOT interchangeable
+-- with the trigger here: it advances for channel commands (/issue) too,
+-- whereas the trigger is written only for messages that are actually agent
+-- input.
 --
 -- No index: every read here goes through an existing key (chat_session_id +
 -- revision, or task_id).
 ALTER TABLE channel_chat_context_generation
     ADD COLUMN IF NOT EXISTS last_message_id TEXT,
+    ADD COLUMN IF NOT EXISTS last_thread_id  TEXT,
     ADD COLUMN IF NOT EXISTS last_sender_id  TEXT;
 
 ALTER TABLE channel_task_delivery
