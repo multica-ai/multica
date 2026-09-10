@@ -5413,7 +5413,13 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		"uncosted_output_tokens":      row.UncostedOutputTokens,
 		"uncosted_cache_read_tokens":  row.UncostedCacheReadTokens,
 		"uncosted_cache_write_tokens": row.UncostedCacheWriteTokens,
-		"task_count":                  row.TaskCount,
+		// task_count is the legacy count of tasks with usage. Keep it stable for
+		// installed clients while the explicit coverage fields distinguish runs
+		// from metered runs.
+		"task_count":            row.TaskCount,
+		"terminal_task_count":   row.TerminalTaskCount,
+		"metered_task_count":    row.MeteredTaskCount,
+		"unreported_task_count": row.UnreportedTaskCount,
 	})
 }
 
