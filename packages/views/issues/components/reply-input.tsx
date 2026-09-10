@@ -39,9 +39,8 @@ interface ReplyInputProps {
    *  Required for replies inside virtualized timeline threads, where the
    *  enclosing CommentCard may unmount on scroll-out. */
   draftKey?: CommentDraftKey;
-  targetName?: string;
   targetMissing?: boolean;
-  onViewAnnotationSource?: (sourceCommentId: string) => void;
+  onEditAnnotation?: (id: string) => boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,8 +57,7 @@ function ReplyInput({
   onAccepted,
   size = "default",
   draftKey,
-  onViewAnnotationSource,
-  targetName,
+  onEditAnnotation,
   targetMissing = false,
 }: ReplyInputProps) {
   const { t } = useT("issues");
@@ -250,11 +248,9 @@ function ReplyInput({
         )}
       >
         {draftKey && annotations.length > 0 && <>
-          {targetName && <p className="mb-2 text-caption text-muted-foreground">{t(($) => $.reply.annotations.replying_to, { name: targetName })}</p>}
           {targetMissing && <p role="alert" className="mb-2 text-caption text-destructive">{t(($) => $.reply.annotations.target_deleted)}</p>}
-          <ReplyAnnotations draftKey={draftKey} annotations={annotations} content={composedContent}
-            disabled={submitting} onSubmit={submit} onViewSource={onViewAnnotationSource} />
-          {!canSend && !targetMissing && <p className="mb-2 text-caption text-muted-foreground">{t(($) => $.reply.annotations.intent_hint)}</p>}
+          <ReplyAnnotations draftKey={draftKey} annotations={annotations}
+            disabled={submitting} onEditAnnotation={onEditAnnotation} />
         </>}
         {/* Lock the editor while the reply is in flight — see CommentInput. */}
         {lazy.active && (
@@ -334,6 +330,8 @@ function ReplyInput({
             busy={gate.uploading}
             tooltip={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
+              : !canSend && annotations.length > 0 && !targetMissing
+                ? t(($) => $.reply.annotations.intent_hint)
               : sendShortcut
                 ? `${t(($) => $.comment.send_tooltip)} · ${formatShortcut(sendShortcut)}`
                 : t(($) => $.comment.send_tooltip)}

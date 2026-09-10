@@ -1142,7 +1142,8 @@ describe("annotated replies", () => {
     renderReplyInput({ draftKey, onSubmit });
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /1 annotation/ }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: "New note" } });
+    expect(screen.queryByRole("textbox", { name: "Comment (optional)" })).not.toBeInTheDocument();
+    act(() => useCommentDraftStore.getState().updateAnnotation(draftKey, annotation.id, "New note"));
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(useCommentDraftStore.getState().getAnnotations(draftKey)[0]?.note).toBe("New note");

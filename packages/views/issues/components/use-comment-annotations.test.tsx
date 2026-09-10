@@ -8,13 +8,13 @@ import { useCommentAnnotations } from "./use-comment-annotations";
 const entry: TimelineEntry = { type: "comment", id: "root", actor_type: "agent", actor_id: "emacs", content: "Selected text", created_at: "2026-09-10T00:00:00Z" };
 const key = "reply:issue:root" as const;
 
-function Fixture({ actorType = "agent" }: { actorType?: string }) {
+function Fixture({ actorType = "agent", sourceKey = "initial" }: { actorType?: string; sourceKey?: string }) {
   const annotation = useCommentAnnotations({
     draftKey: key, entry: { ...entry, actor_type: actorType }, replies: [], enabled: true, getActorName: () => "Emacs",
   });
   return <div ref={annotation.cardRef} {...annotation.captureProps}>
     {annotation.popup}
-    <div data-comment-content="root" tabIndex={0}>Selected text</div>
+    <div key={sourceKey} data-comment-content="root" tabIndex={0}>Selected text</div>
   </div>;
 }
 
@@ -45,11 +45,24 @@ function selectText(container: HTMLElement, input: "mouse" | "keyboard" = "mouse
 
 beforeEach(() => {
   useCommentDraftStore.setState({ drafts: {} });
+  // jsdom has no layout; give Floating UI a viewport for its real hide middleware.
+  Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 1024 });
+  Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 768 });
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 10, 600, 400));
   Range.prototype.getBoundingClientRect = vi.fn(() => new DOMRect(10, 10, 120, 20));
   Range.prototype.getClientRects = vi.fn(() => [] as unknown as DOMRectList);
 });
 
 describe("selection to reply", () => {
+  it("keeps the source note usable when expanding the thread remounts its body", async () => {
+    const view = renderWithI18n(<Fixture />);
+    selectText(view.container);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Keep this note" } });
+    view.rerender(<Fixture sourceKey="expanded" />);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toBeVisible());
+    expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Keep this note");
+  });
   it("saves before typing, autosaves the note, and reopens duplicates without erasing it", async () => {
     const { container } = renderWithI18n(<Fixture />);
     selectText(container);
@@ -57,7 +70,8 @@ describe("selection to reply", () => {
     const note = await screen.findByRole("textbox", { name: "Comment (optional)" });
     expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(1);
     fireEvent.change(note, { target: { value: "Please explain" } });
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
+    fireEvent.pointerDown(document.body);
     await waitFor(() => expect(screen.queryByRole("textbox")).not.toBeInTheDocument());
     selectText(container);
     fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
@@ -66,6 +80,8 @@ describe("selection to reply", () => {
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("textbox")).not.toBeInTheDocument());
     expect(useCommentDraftStore.getState().getAnnotations(key)[0]?.note).toBe("Please explain");
+    fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
+    expect(await screen.findByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Please explain");
   });
 
   it("does not offer annotations on member comments", () => {

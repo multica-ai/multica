@@ -945,6 +945,7 @@ function CommentCardImpl({
   const annotation = useCommentAnnotations({
     draftKey: `reply:${issueId}:${entry.id}`, entry, replies,
     enabled: !!currentUserId, getActorName,
+    onAdded: () => { if (replyFolded) onResolvedExpandChange?.(entry.id, true); },
   });
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
@@ -1387,16 +1388,13 @@ function CommentCardImpl({
                 <ReplyInput
                   issueId={issueId}
                   parentId={replyTargetId}
-                  targetName={replyTarget?.actorName}
                   targetMissing={replyTargetMissing}
                   placeholder={t(($) => $.reply.placeholder)}
                   size="sm"
                   avatarType="member"
                   avatarId={currentUserId ?? ""}
                   draftKey={`reply:${issueId}:${entry.id}`}
-                  onViewAnnotationSource={() => {
-                    if (replyFolded) onResolvedExpandChange?.(entry.id, true);
-                  }}
+                  onEditAnnotation={(id) => annotation.editAnnotation(id, true)}
                   onSubmit={(content, attachmentIds, suppressAgentIds) => replyTargetMissing ? Promise.resolve(false) : onReply(replyTargetId, content, attachmentIds, suppressAgentIds)}
                   onAccepted={onReplyAccepted}
                 />

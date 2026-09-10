@@ -1,88 +1,119 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
-import { Popover } from "@base-ui/react/popover";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { MessageSquarePlus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
-import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { MAX_ANNOTATION_QUOTE_LENGTH, MAX_REPLY_ANNOTATIONS } from "@multica/core/drafts/reply-annotation";
 import type { TimelineEntry } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { annotationRange, captureCommentSelection, findAnnotationSource } from "./comment-annotation-selection";
+import { CommentSelectionBubble } from "./comment-selection-bubble";
 
 type CapturedSelection = NonNullable<ReturnType<typeof captureCommentSelection>>;
+type SourceAnchor = { id: string; range: Range; root: HTMLElement };
 
-export function useCommentAnnotations({ draftKey, entry, replies, enabled, getActorName }: {
+export function useCommentAnnotations({ draftKey, entry, replies, enabled, getActorName, onAdded }: {
   draftKey: CommentDraftKey;
   entry: TimelineEntry;
   replies: TimelineEntry[];
   enabled: boolean;
   getActorName: (type: string, id: string) => string;
+  onAdded?: () => void;
 }) {
   const { t } = useT("issues");
   const cardRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const actionRef = useRef<HTMLButtonElement>(null);
   const [selection, setSelection] = useState<CapturedSelection | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState(false);
-  const selectionGestureRef = useRef(false);
+  const [anchors, setAnchors] = useState<SourceAnchor[]>([]);
+  const markerRanges = useMemo(() => {
+    const groups = new Map<HTMLElement, Range[]>();
+    for (const anchor of anchors) {
+      const group = groups.get(anchor.root) ?? [];
+      group.push(anchor.range); groups.set(anchor.root, group);
+    }
+    return groups;
+  }, [anchors]);
   const annotations = useCommentDraftStore((s) => s.getAnnotations(draftKey));
-  const anchorsRef = useRef(annotations);
-  anchorsRef.current = annotations;
+  const annotationsRef = useRef(annotations);
+  annotationsRef.current = annotations;
   const anchorKey = annotations.map((a) => a.id).join(",");
   const editing = annotations.find((a) => a.id === editingId);
   const highlightName = `reply-annotation-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`;
 
   const close = (restoreFocus = false) => {
-    selectionGestureRef.current = false;
     if (restoreFocus && selection?.root.isConnected) selection.root.focus({ preventScroll: true });
     setSelection(null); setEditingId(null); setError(false);
   };
-  const capture = (fromPointer = false) => {
+  const capture = () => {
     if (!enabled || !cardRef.current) return;
     const captured = captureCommentSelection(cardRef.current, window.getSelection());
     const source = captured && [entry, ...replies].find((e) => e.id === captured.sourceCommentId);
     if (!captured || source?.actor_type !== "agent" || source.type !== "comment" ||
       (source.comment_type && source.comment_type !== "comment")) return;
-    selectionGestureRef.current = fromPointer;
-    setSelection(captured);
-    setEditingId(null);
-    setError(false);
+    setSelection(captured); setEditingId(null); setError(false);
   };
-  const actionRef = useRef<HTMLButtonElement>(null);
 
+  // Dismiss on the next press, never on the click completing the opening drag.
   useEffect(() => {
     if (!selection) return;
-    // Only the click finishing the selection gesture belongs to the opening
-    // interaction. A new press must retain normal outside-dismiss behavior.
-    const reset = () => { selectionGestureRef.current = false; };
-    document.addEventListener("pointerdown", reset, true);
-    document.addEventListener("keydown", reset, true);
-    return () => {
-      document.removeEventListener("pointerdown", reset, true);
-      document.removeEventListener("keydown", reset, true);
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Element &&
+        event.target.closest("[data-reply-annotation-overlay]")?.getAttribute("data-reply-annotation-overlay") === draftKey) return;
+      setSelection(null); setEditingId(null); setError(false);
     };
-  }, [selection]);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (selection.root.isConnected) selection.root.focus({ preventScroll: true });
+      setSelection(null); setEditingId(null); setError(false);
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      if (!(event.target instanceof Element) || selection.root.contains(event.target) ||
+        event.target.closest("[data-reply-annotation-overlay]")?.getAttribute("data-reply-annotation-overlay") === draftKey) return;
+      setSelection(null); setEditingId(null); setError(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("focusin", onFocusIn);
+    };
+  }, [selection, draftKey]);
 
   useEffect(() => {
-    if (editingId && window.matchMedia("(pointer: fine)").matches) textareaRef.current?.focus();
-  }, [editingId]); // Only on opening; typing must not reset the caret.
+    if (editingId && window.matchMedia("(pointer: fine)").matches) inputRef.current?.focus({ preventScroll: true });
+  }, [editingId]);
 
   useEffect(() => {
-    if (!cardRef.current || typeof Highlight === "undefined" || !CSS.highlights) return;
+    if (!cardRef.current) return;
     const card = cardRef.current;
+    const canHighlight = typeof Highlight !== "undefined" && typeof CSS !== "undefined" && !!CSS.highlights;
     const update = () => {
-      const ranges = anchorsRef.current.flatMap((a) => {
-        const source = findAnnotationSource(card, a.sourceCommentId);
-        const range = source && annotationRange(source, a);
-        return range ? [range] : [];
+      const next = annotationsRef.current.flatMap((a) => {
+        const root = findAnnotationSource(card, a.sourceCommentId);
+        const range = root && annotationRange(root, a);
+        return root && range ? [{ id: a.id, range, root }] : [];
       });
-      CSS.highlights.set(highlightName, new Highlight(...ranges));
+      setAnchors(next);
+      // Expanding a resolved thread may remount the selected comment's body.
+      // Keep the note editor attached to its saved quote, never a detached Range.
+      setSelection((current) => {
+        if (!current || current.root.isConnected) return current;
+        const saved = annotationsRef.current.find((a) => a.sourceCommentId === current.sourceCommentId &&
+          a.start === current.start && a.quote === current.quote);
+        const anchor = saved && next.find((a) => a.id === saved.id);
+        return anchor ? { ...current, root: anchor.root, range: anchor.range } : null;
+      });
+      if (canHighlight) CSS.highlights.set(highlightName, new Highlight(...next.map((a) => a.range)));
     };
     update();
     const observer = new MutationObserver((records) => {
-      // Typing in the reply editor must not re-index a long source comment.
+      // Reply typing must not re-index a long source comment.
       if (records.some((record) => {
         const target = record.target instanceof Element ? record.target : record.target.parentElement;
         return target?.closest("[data-comment-content]") ||
@@ -91,11 +122,27 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
       })) update();
     });
     observer.observe(card, { childList: true, subtree: true, characterData: true });
-    return () => { observer.disconnect(); CSS.highlights.delete(highlightName); };
+    return () => { observer.disconnect(); if (canHighlight) CSS.highlights.delete(highlightName); };
   }, [anchorKey, highlightName]);
 
+  useEffect(() => {
+    if (editingId && !editing) { setSelection(null); setEditingId(null); }
+  }, [editingId, editing]);
+
+  const editAnnotation = (id: string, scrollToSource = false): boolean => {
+    const annotation = annotationsRef.current.find((a) => a.id === id);
+    const root = cardRef.current && annotation && findAnnotationSource(cardRef.current, annotation.sourceCommentId);
+    const range = root && annotation && annotationRange(root, annotation);
+    if (!root || !range || !annotation) return false;
+    if (scrollToSource) {
+      const element = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+      element?.scrollIntoView({ block: "center", behavior: "instant" });
+    }
+    setSelection({ ...annotation, range, root }); setEditingId(id); setError(false);
+    return true;
+  };
+
   const add = () => {
-    selectionGestureRef.current = false;
     if (!selection) return;
     const source = [entry, ...replies].find((e) => e.id === selection.sourceCommentId);
     if (!source) { close(); return; }
@@ -108,15 +155,17 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
     if (!id) { setError(true); return; }
     setEditingId(id);
     window.getSelection()?.removeAllRanges();
+    onAdded?.();
   };
 
   return {
     cardRef,
+    editAnnotation,
     captureProps: {
       "data-annotation-thread": entry.id,
       onPointerUp: (event: React.PointerEvent) => {
         if (event.target instanceof Element && event.target.closest("[data-comment-content]") &&
-          !event.target.closest("button, [contenteditable=true]")) capture(true);
+          !event.target.closest("button, [contenteditable=true]")) capture();
       },
       onKeyUp: (event: React.KeyboardEvent) => {
         if (event.shiftKey && event.key.startsWith("Arrow")) capture();
@@ -124,61 +173,44 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
       onKeyDown: (event: React.KeyboardEvent) => {
         if (event.key === "Tab" && !event.shiftKey && selection && !editingId &&
           event.target instanceof Element && event.target.closest("[data-comment-content]")) {
-          event.preventDefault();
-          actionRef.current?.focus();
+          event.preventDefault(); actionRef.current?.focus();
         }
       },
     },
     popup: <>
       {annotations.length > 0 && <style>{`::highlight(${highlightName}) { background: color-mix(in srgb, var(--brand) 20%, transparent); }`}</style>}
-      <Popover.Root open={!!selection} onOpenChange={(open, details) => {
-        if (open) return;
-        // A virtual anchor is not a Popover.Trigger, so Base UI otherwise
-        // treats the click immediately after pointerup as an outside press.
-        if (details.reason === "outside-press" && details.event.type === "click" &&
-          selectionGestureRef.current && details.event.target instanceof Node &&
-          selection?.root.contains(details.event.target)) {
-          selectionGestureRef.current = false;
-          details.cancel();
-          return;
-        }
-        close();
-      }}>
-        <Popover.Portal>
-          <Popover.Positioner
-            anchor={selection ? { getBoundingClientRect: () => selection.range.getBoundingClientRect(), contextElement: selection.root } : undefined}
-            side="bottom" align="start" sideOffset={6} className="z-50"
-          >
-            <Popover.Popup initialFocus={false} finalFocus={false}
-              aria-label={editing ? t(($) => $.reply.annotations.added) : t(($) => $.reply.annotations.add)}
-              onKeyDown={(event) => { if (event.key === "Escape") close(true); }}
-              className="max-w-[calc(100vw-24px)] rounded-lg bg-surface-raised p-2.5 text-body text-popover-foreground shadow-[var(--menu-shadow)] ring-1 ring-surface-border outline-hidden">
-              {editing ? <div className="flex w-80 max-w-full flex-col gap-2.5">
-                <Popover.Title className="font-medium">{t(($) => $.reply.annotations.added)}</Popover.Title>
-                <blockquote className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words border-l-2 border-brand/50 pl-2.5 text-muted-foreground">{editing.quote}</blockquote>
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-label text-muted-foreground">{t(($) => $.reply.annotations.note_label)}</span>
-                  <Textarea ref={textareaRef} value={editing.note}
-                    onChange={(event) => useCommentDraftStore.getState().updateAnnotation(draftKey, editing.id, event.target.value)} />
-                </label>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-caption text-muted-foreground" role="status">{t(($) => $.reply.annotations.saved)}</span>
-                  <Button size="sm" onClick={() => close(true)}>{t(($) => $.reply.annotations.done)}</Button>
-                </div>
-              </div> : <>
-                <Button ref={actionRef} variant="ghost" size="sm" onClick={add}>
-                  <MessageSquarePlus />{t(($) => $.reply.annotations.add)}
-                </Button>
-                {error && <p role="alert" className="max-w-72 pt-2 text-caption text-destructive">
-                  {selection && selection.quote.length > MAX_ANNOTATION_QUOTE_LENGTH
-                    ? t(($) => $.reply.annotations.quote_limit, { count: MAX_ANNOTATION_QUOTE_LENGTH })
-                    : t(($) => $.reply.annotations.count_limit, { count: MAX_REPLY_ANNOTATIONS })}
-                </p>}
-              </>}
-            </Popover.Popup>
-          </Popover.Positioner>
-        </Popover.Portal>
-      </Popover.Root>
+      {enabled && anchors.map((anchor) => {
+        const index = annotations.findIndex((a) => a.id === anchor.id);
+        if (index < 0) return null;
+        return <CommentSelectionBubble key={anchor.id} range={anchor.range} source={anchor.root} owner={draftKey}
+          markerRanges={markerRanges.get(anchor.root)}>
+          <Button variant="brandSubtle" size="icon-sm" className="size-6 rounded-full text-caption"
+            aria-label={t(($) => $.reply.annotations.edit, { number: index + 1 })}
+            onClick={() => editAnnotation(anchor.id)}>{index + 1}</Button>
+        </CommentSelectionBubble>;
+      })}
+      {enabled && selection && <CommentSelectionBubble range={selection.range} source={selection.root} owner={draftKey}>
+        <div className="bubble-menu max-w-[calc(100vw-16px)]">
+          {editing ? <textarea ref={inputRef} value={editing.note} rows={Math.min(4, Math.max(1, editing.note.split("\n").length))}
+            aria-label={t(($) => $.reply.annotations.note_label)}
+            placeholder={t(($) => $.reply.annotations.note_placeholder)}
+            className="min-h-8 w-72 min-w-0 resize-none rounded-sm bg-transparent px-2 py-1 text-body outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+            onChange={(event) => useCommentDraftStore.getState().updateAnnotation(draftKey, editing.id, event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.nativeEvent.isComposing && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+                event.preventDefault(); close(true);
+              }
+            }} /> : <Button ref={actionRef} variant="ghost" size="sm"
+              onMouseDown={(event) => event.preventDefault()} onClick={add}>
+              <MessageSquarePlus />{t(($) => $.reply.annotations.add)}
+            </Button>}
+        </div>
+        {error && <p role="alert" className="mt-1 max-w-72 rounded-lg bg-popover p-2 text-caption text-destructive shadow-[var(--menu-shadow)]">
+          {selection.quote.length > MAX_ANNOTATION_QUOTE_LENGTH
+            ? t(($) => $.reply.annotations.quote_limit, { count: MAX_ANNOTATION_QUOTE_LENGTH })
+            : t(($) => $.reply.annotations.count_limit, { count: MAX_REPLY_ANNOTATIONS })}
+        </p>}
+      </CommentSelectionBubble>}
     </>,
   };
 }
