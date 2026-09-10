@@ -1,0 +1,45 @@
+{
+  "page": {
+    "breadcrumb": "Minhas Issues",
+    "workspace_fallback": "Workspace",
+    "empty_title": "Nenhuma issue atribuída a você",
+    "empty_description": "Issues que você criar ou às quais for atribuído aparecerão aqui."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Todas",
+      "all_description": "Atribuídas a mim, criadas por mim, ou envolvendo meus agents e squads",
+      "assigned_label": "Atribuídas",
+      "assigned_description": "Issues atribuídas a mim",
+      "created_label": "Criadas",
+      "created_description": "Issues que criei",
+      "agents_label": "Meus Agents e Squads",
+      "agents_description": "Issues atribuídas aos meus agents"
+    },
+    "filter_button": "Filtro",
+    "filter_status": "Status",
+    "filter_priority": "Prioridade",
+    "issue_count_one": "{{count}} issue",
+    "issue_count_other": "{{count}} issues",
+    "reset_filters": "Redefinir todos os filtros",
+    "display_settings": "Configurações de exibição",
+    "grouping": "Agrupamento",
+    "group_status": "Status",
+    "group_assignee": "Responsável",
+    "ordering": "Ordenação",
+    "ascending": "Crescente",
+    "descending": "Decrescente",
+    "card_properties": "Propriedades do cartão",
+    "view_board": "Visualização em quadro",
+    "view_list": "Visualização em lista",
+    "view_swimlane": "Visualização em raias",
+    "view_label": "Visualização",
+    "view_board_short": "Quadro",
+    "view_list_short": "Lista",
+    "view_swimlane_short": "Raias",
+    "sort_manual": "Manual"
+  },
+  "errors": {
+    "move_failed": "Falha ao mover issue"
+  }
+}

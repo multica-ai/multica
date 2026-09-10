@@ -1,0 +1,10 @@
+{
+  "remove_label": "Remover etiqueta {{name}}",
+  "resource_picker": {
+    "empty": "Nenhuma etiqueta",
+    "add": "Adicionar etiquetas",
+    "search": "Buscar etiquetas...",
+    "no_labels": "Crie etiquetas em Configurações primeiro",
+    "no_results": "Nenhuma etiqueta encontrada"
+  }
+}

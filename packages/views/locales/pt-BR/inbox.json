@@ -1,0 +1,86 @@
+{
+  "page": {
+    "title": "Caixa de entrada",
+    "back": "Caixa de entrada"
+  },
+  "menu": {
+    "mark_all_read": "Marcar tudo como lido",
+    "archive_all": "Arquivar tudo",
+    "archive_all_read": "Arquivar tudo o que foi lido",
+    "archive_completed": "Arquivar concluídos"
+  },
+  "context_menu": {
+    "mark_read": "Marcar como lido",
+    "mark_unread": "Marcar como não lido",
+    "archive": "Arquivar",
+    "unarchive": "Desarquivar"
+  },
+  "list": {
+    "empty": "Nenhuma notificação",
+    "mark_done_tooltip": "Marcar como concluído",
+    "archive_tooltip": "Arquivar",
+    "time": {
+      "just_now": "agora mesmo",
+      "minutes": "{{count}}min",
+      "hours": "{{count}}h",
+      "days": "{{count}}d"
+    },
+    "archived_title": "Arquivado",
+    "archived_empty": "Nenhuma notificação arquivada",
+    "unarchive_tooltip": "Desarquivar"
+  },
+  "detail": {
+    "select_prompt": "Selecione uma notificação para ver os detalhes",
+    "empty": "Sua caixa de entrada está vazia",
+    "original_input": "Entrada original",
+    "edit_advanced": "Editar como formulário avançado",
+    "archive": "Arquivar",
+    "unarchive": "Desarquivar"
+  },
+  "types": {
+    "issue_assigned": "Atribuída",
+    "issue_subscribed": "Inscrito",
+    "unassigned": "Sem responsável",
+    "assignee_changed": "Responsável alterado",
+    "status_changed": "Status alterado",
+    "priority_changed": "Prioridade alterada",
+    "start_date_changed": "Data de início alterada",
+    "due_date_changed": "Data de entrega alterada",
+    "new_comment": "Novo comentário",
+    "mentioned": "Mencionado",
+    "review_requested": "Revisão solicitada",
+    "task_completed": "Task concluída",
+    "task_failed": "Task falhou",
+    "agent_blocked": "Agent bloqueado",
+    "agent_completed": "Agent concluiu",
+    "reaction_added": "Reagiu",
+    "quick_create_done": "Criada com agent",
+    "quick_create_failed": "Falha ao criar com agent",
+    "quick_create_unconfirmed": "Criação com agent não confirmada"
+  },
+  "labels": {
+    "set_status_to": "Definir status como",
+    "set_priority_to": "Definir prioridade como",
+    "assigned_to": "Atribuída a {{name}}",
+    "removed_assignee": "Responsável removido",
+    "set_start_date_to": "Definir data de início como {{date}}",
+    "removed_start_date": "Data de início removida",
+    "set_due_date_to": "Definir data de entrega como {{date}}",
+    "removed_due_date": "Data de entrega removida",
+    "reacted_to_comment": "Reagiu com {{emoji}} ao seu comentário",
+    "created_with_agent": "Criada com agent: {{identifier}}",
+    "failed_with_detail": "Falhou: {{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "Falha ao marcar como lido",
+    "mark_unread_failed": "Falha ao marcar como não lido",
+    "archive_failed": "Falha ao arquivar",
+    "mark_done_failed": "Falha ao marcar como concluído",
+    "mark_all_read_failed": "Falha ao marcar tudo como lido",
+    "archive_all_failed": "Falha ao arquivar tudo",
+    "archive_all_read_failed": "Falha ao arquivar itens lidos",
+    "archive_completed_failed": "Falha ao arquivar concluídos",
+    "unarchive_failed": "Falha ao desarquivar",
+    "archived_load_failed": "Falha ao carregar notificações arquivadas"
+  }
+}
