@@ -7004,27 +7004,73 @@ func (s *TaskService) broadcastTaskFailedEvent(ctx context.Context, task db.Agen
 	s.publishTaskFailedEvent(workspaceID, task, errMsg, failureReason, retryPending)
 }
 
-// ResolveTaskWorkspaceID determines the workspace ID for a task.
-// For issue tasks, it comes from the issue. For chat tasks, from the chat session.
-// For autopilot tasks, from the autopilot via its run.
-// Returns "" when none of the links resolve — callers treat that as "not found".
+// ResolveTaskWorkspaceID determines the workspace ID for a task, best-effort.
+// Returns "" when the workspace could not be determined, whether because the
+// link target is genuinely gone or because a lookup failed.
+//
+// Use this only where "" is an acceptable answer — event broadcasts skip
+// themselves rather than fabricating a workspace. Anything that turns the
+// result into an HTTP status MUST use ResolveTaskWorkspaceIDChecked instead:
+// collapsing both cases to "" is what let a transient DB error be reported to
+// the daemon as `404 task not found`, which it acts on by killing a healthy
+// run (MUL-7259 / GH #8272).
 func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentTaskQueue) string {
-	if task.IssueID.Valid {
-		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
-			return util.UUIDToString(issue.WorkspaceID)
+	workspaceID, _ := s.ResolveTaskWorkspaceIDChecked(ctx, task)
+	return workspaceID
+}
+
+// ResolveTaskWorkspaceIDChecked resolves a task's workspace and keeps the two
+// failure modes apart:
+//
+//   - ("", nil)  — every link this task carries was looked up successfully and
+//     the target is genuinely absent. The task is unreachable; a 404 is honest.
+//   - ("", err)  — a lookup could not be completed (DB timeout, pool exhaustion,
+//     …). We do not know whether the task is reachable, and the caller must NOT
+//     report absence. This is a 5xx.
+//
+// For issue tasks the workspace comes from the issue, for chat tasks from the
+// chat session, for autopilot tasks from the autopilot via its run, and for
+// quick-create tasks from the context JSONB (they carry no link at all).
+//
+// A failed lookup is reported even when a later link resolves: the returned
+// workspace is still trustworthy, so the error is only surfaced when nothing
+// resolved. That keeps a task carrying several links working during a partial
+// outage while still refusing to call an unknown state "not found".
+func (s *TaskService) ResolveTaskWorkspaceIDChecked(ctx context.Context, task db.AgentTaskQueue) (string, error) {
+	// isNotFound is the "genuinely absent" signal; every other error means the
+	// lookup itself did not complete. pgx.ErrNoRows is the only error the
+	// queries below use to say "this row does not exist".
+	var lookupErr error
+	note := func(err error) {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) && lookupErr == nil {
+			lookupErr = err
 		}
+	}
+
+	if task.IssueID.Valid {
+		issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+		if err == nil {
+			return util.UUIDToString(issue.WorkspaceID), nil
+		}
+		note(err)
 	}
 	if task.ChatSessionID.Valid {
-		if cs, err := s.Queries.GetChatSession(ctx, task.ChatSessionID); err == nil {
-			return util.UUIDToString(cs.WorkspaceID)
+		cs, err := s.Queries.GetChatSession(ctx, task.ChatSessionID)
+		if err == nil {
+			return util.UUIDToString(cs.WorkspaceID), nil
 		}
+		note(err)
 	}
 	if task.AutopilotRunID.Valid {
-		if run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID); err == nil {
-			if ap, err := s.Queries.GetAutopilot(ctx, run.AutopilotID); err == nil {
-				return util.UUIDToString(ap.WorkspaceID)
+		run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
+		if err == nil {
+			ap, apErr := s.Queries.GetAutopilot(ctx, run.AutopilotID)
+			if apErr == nil {
+				return util.UUIDToString(ap.WorkspaceID), nil
 			}
+			note(apErr)
 		}
+		note(err)
 	}
 	// Quick-create tasks have no issue / chat / autopilot link — workspace
 	// lives in the context JSONB. Returning "" here is what blocked
@@ -7032,9 +7078,12 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	// for the daemon) and silently dropped task:dispatch / task:completed
 	// broadcasts, which is why quick-create tasks appeared stuck queued.
 	if qc, ok := s.parseQuickCreateContext(task); ok {
-		return qc.WorkspaceID
+		return qc.WorkspaceID, nil
 	}
-	return ""
+	if lookupErr != nil {
+		return "", fmt.Errorf("resolve task workspace: %w", lookupErr)
+	}
+	return "", nil
 }
 
 func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQueue, msg *db.ChatMessage, quickActionsPending bool) {

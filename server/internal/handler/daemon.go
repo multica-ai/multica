@@ -140,7 +140,18 @@ func (h *Handler) requireDaemonTaskAccessWithWorkspace(w http.ResponseWriter, r 
 		return db.AgentTaskQueue{}, "", false
 	}
 
-	wsID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
+	// Same rule as the GetAgentTask branch above, one link further out: the
+	// daemon kills a running agent on this 404, so only a lookup that actually
+	// completed and found nothing may produce it. A DB timeout resolving the
+	// issue / chat session / autopilot leaves us unable to tell whether the
+	// task is reachable, and "I don't know" must not be reported as "deleted"
+	// (MUL-7259 / GH #8272 — the branch #2127 hardened above, missed here).
+	wsID, err := h.TaskService.ResolveTaskWorkspaceIDChecked(r.Context(), task)
+	if err != nil {
+		slog.Warn("resolve task workspace failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load task")
+		return db.AgentTaskQueue{}, "", false
+	}
 	if wsID == "" {
 		writeError(w, http.StatusNotFound, "task not found")
 		return db.AgentTaskQueue{}, "", false
@@ -5391,12 +5402,27 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 
 	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 	if err != nil {
+		if !isNotFound(err) {
+			slog.Warn("get agent task failed", "task_id", taskID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to load task")
+			return
+		}
 		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}
 
-	// Verify the task belongs to the caller's workspace.
-	wsID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
+	// Verify the task belongs to the caller's workspace. A failed lookup is a
+	// 5xx here too: this endpoint does not drive the daemon's interrupt, but
+	// telling a reader "this task does not exist" because the DB blinked is
+	// the same lie, and it trains clients to give up on a retryable error.
+	wsID, err := h.TaskService.ResolveTaskWorkspaceIDChecked(r.Context(), task)
+	if err != nil {
+		slog.Warn("resolve task workspace failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load task")
+		return
+	}
+	// Mismatch stays a 404 rather than a 403: a task in another workspace must
+	// be indistinguishable from one that does not exist.
 	if wsID == "" || wsID != middleware.WorkspaceIDFromContext(r.Context()) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
