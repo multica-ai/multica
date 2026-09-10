@@ -1,7 +1,9 @@
 package selfhosttelemetry
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +30,32 @@ func TestConfigFromDoNotTrack(t *testing.T) {
 			t.Parallel()
 			if got := ConfigFromDoNotTrack(tt.raw).Enabled; got != tt.enabled {
 				t.Fatalf("Enabled = %v, want %v", got, tt.enabled)
+			}
+		})
+	}
+}
+
+func TestLogStartupStatus(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  Config
+		message string
+	}{
+		{name: "enabled", config: Config{Enabled: true}, message: "self-host telemetry enabled"},
+		{name: "disabled", config: Config{Enabled: false}, message: "self-host telemetry disabled via DO_NOT_TRACK"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&output, nil))
+
+			LogStartupStatus(logger, tt.config)
+
+			if got := strings.Count(output.String(), "\n"); got != 1 {
+				t.Fatalf("startup log lines = %d, want 1: %q", got, output.String())
+			}
+			if !strings.Contains(output.String(), "msg=\""+tt.message+"\"") {
+				t.Fatalf("startup log = %q, want message %q", output.String(), tt.message)
 			}
 		})
 	}

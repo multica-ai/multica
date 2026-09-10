@@ -136,7 +136,6 @@ func TestTelemetryMigrationsUpAndDown(t *testing.T) {
 		"467_instance_telemetry_state.up.sql",
 		"468_instance_telemetry_state_singleton_index.up.sql",
 		"469_instance_telemetry_state_primary_key.up.sql",
-		"470_agent_runtime_telemetry_last_seen_index.up.sql",
 		"471_agent_task_queue_telemetry_started_index.up.sql",
 	}
 	for _, name := range up {
@@ -167,7 +166,6 @@ func TestTelemetryMigrationsUpAndDown(t *testing.T) {
 
 	down := []string{
 		"471_agent_task_queue_telemetry_started_index.down.sql",
-		"470_agent_runtime_telemetry_last_seen_index.down.sql",
 		"469_instance_telemetry_state_primary_key.down.sql",
 		"468_instance_telemetry_state_singleton_index.down.sql",
 		"467_instance_telemetry_state.down.sql",
@@ -305,8 +303,6 @@ func TestSQLCollectorUsesOneBoundaryAndWindowIndexes(t *testing.T) {
 		CREATE TABLE agent (archived_at timestamptz);
 		CREATE TABLE agent_runtime (daemon_id text, last_seen_at timestamptz);
 		CREATE TABLE agent_task_queue (status text, started_at timestamptz, completed_at timestamptz);
-		CREATE INDEX idx_agent_runtime_telemetry_last_seen
-			ON agent_runtime (last_seen_at, daemon_id) WHERE daemon_id IS NOT NULL;
 		CREATE INDEX idx_agent_task_queue_telemetry_started
 			ON agent_task_queue (started_at) WHERE started_at IS NOT NULL;
 		CREATE INDEX idx_agent_task_queue_terminal_completed_at_v2
@@ -344,8 +340,10 @@ func TestSQLCollectorUsesOneBoundaryAndWindowIndexes(t *testing.T) {
 	}
 	// Keep almost all rows outside the reporting window so this exercises the
 	// production shape: lifetime tables are large while one UTC day's slice is
-	// small. The planner should choose the three time-window indexes naturally,
-	// without the test disabling sequential scans.
+	// small. The runtime query deliberately accepts a sequential scan because a
+	// last_seen_at index would be rewritten by every online-runtime heartbeat.
+	// The planner should choose both task time-window indexes naturally, without
+	// the test disabling sequential scans.
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO agent_runtime (daemon_id, last_seen_at)
 		SELECT 'historical-daemon-' || n, $1::timestamptz - interval '30 days'
@@ -409,7 +407,6 @@ func TestSQLCollectorUsesOneBoundaryAndWindowIndexes(t *testing.T) {
 	}
 	plan := strings.Join(planLines, "\n")
 	for _, index := range []string{
-		"idx_agent_runtime_telemetry_last_seen",
 		"idx_agent_task_queue_telemetry_started",
 		"idx_agent_task_queue_terminal_completed_at_v2",
 	} {
