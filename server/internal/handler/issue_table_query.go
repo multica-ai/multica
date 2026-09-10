@@ -611,8 +611,12 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		}
 		// A projectless issue has no row to match, so EXISTS is false and the
 		// issue drops out — "no project" is deliberately not a project status.
+		// `p.workspace_id = i.workspace_id` is not redundant: the schema has no
+		// foreign keys by design, so a stale or corrupt `issue.project_id` can
+		// name a project in another workspace. Without the bound, that
+		// tenant's project status would decide this row's membership.
 		where = append(where, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM project p WHERE p.id = i.project_id AND p.status = ANY(%s::text[]))",
+			"EXISTS (SELECT 1 FROM project p WHERE p.id = i.project_id AND p.workspace_id = i.workspace_id AND p.status = ANY(%s::text[]))",
 			addArg(spec.Filters.ProjectStatuses),
 		))
 	}

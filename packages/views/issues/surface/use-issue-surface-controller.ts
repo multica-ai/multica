@@ -865,7 +865,12 @@ export function useIssueSurfaceController({
       !data.isRefreshing &&
       !(usesTable && (tableSearch.trim() || debouncedActiveSearch)),
     isStatusCatalogError: data.isStatusCatalogError,
-    retryStatusCatalog: catalog.retry,
+    // Either catalog can be the one that failed, and the error state offers a
+    // single retry — refresh both rather than guess which.
+    retryStatusCatalog: () => {
+      catalog.retry();
+      data.retryProjectCatalog();
+    },
     sort,
     actions,
     selection,

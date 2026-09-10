@@ -22,6 +22,11 @@ export function useCreateProject() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      // Deleting a project removes its status from the workspace, so a table
+      // window filtered on that status still holds its issues. The realtime
+      // event invalidates too, but a delivery gap must not leave the window
+      // wrong forever — the global staleTime is Infinity.
+      qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
     },
   });
 }

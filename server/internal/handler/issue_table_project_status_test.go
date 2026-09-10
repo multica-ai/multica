@@ -104,6 +104,41 @@ func TestIssueTableRowsFilterByProjectStatus(t *testing.T) {
 		activeIssue)
 }
 
+// The schema carries no foreign keys, so `issue.project_id` can name a
+// project in another workspace. That tenant's status must not decide this
+// workspace's query membership.
+func TestIssueTableRowsProjectStatusStaysInsideTheWorkspace(t *testing.T) {
+	suffix := time.Now().UnixNano()
+	otherWorkspace := dbfx.Workspace(t,
+		fmt.Sprintf("pstatus other %d", suffix),
+		fmt.Sprintf("pstatus-other-%d", suffix))
+	otherFixture := testutil.New(testPool, otherWorkspace, testUserID)
+	foreignProject := otherFixture.Project(t, "pstatus foreign",
+		testutil.Cols{"status": "in_progress"})
+
+	strayIssue := dbfx.Issue(t, fmt.Sprintf("pstatus stray %d", suffix),
+		testutil.Cols{"project_id": foreignProject})
+
+	var response issueTableRowsResponse
+	testutil.Call(t, testHandler.ListIssueTableRows,
+		newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
+			Query: issueTableQuerySpec{
+				Scope:   issueTableScope{Kind: "workspace"},
+				Filters: issueTableFiltersRequest{ProjectStatuses: []string{"in_progress"}},
+				Sort:    issueTableSortRequest{Field: "title", Direction: "asc"},
+			},
+			Group: issueTableGroupSpec{Kind: "none"},
+			Page:  issueTablePageRequest{Limit: 100},
+		}),
+	).Want(http.StatusOK).JSON(&response)
+
+	for _, row := range response.Rows {
+		if row.Issue.ID == strayIssue {
+			t.Fatalf("issue pointing at another workspace's in_progress project matched the filter")
+		}
+	}
+}
+
 func TestIssueTableRowsRejectsUnknownProjectStatus(t *testing.T) {
 	testutil.Call(t, testHandler.ListIssueTableRows,
 		newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
