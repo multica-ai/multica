@@ -303,11 +303,16 @@ multica config show
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
+| `DO_NOT_TRACK` | 비어 있음(텔레메트리 활성화) | `1` 또는 `true`(대소문자 구분 없음)로 설정하면 자사 익명 셀프 호스트 텔레메트리 수집과 전송 중지 |
 | `ANALYTICS_DISABLED` | `false` | `true`로 설정하면 PostHog 전송 비활성화 |
 | `POSTHOG_API_KEY` | 비어 있음 | 설정하지 않으면 통계 전송 비활성화. 자체 PostHog 프로젝트 연결 시 입력 |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog 주소 |
 | `METRICS_ADDR` | 비어 있음 | Prometheus metrics listen 주소. 비어 있으면 시작하지 않음 |
 | `REALTIME_METRICS_TOKEN` | 비어 있음 | `/health/realtime`을 보호하는 bearer token |
+
+자사 셀프 호스트 텔레메트리는 UTC 기준 하루에 한 번 배포 단위 스냅샷을 고정되어 설정할 수 없는 `https://telemetry.multica.ai/v1/telemetry/events` 주소로 전송합니다. 정식 릴리스 버전, 작업 공간 수·중복을 제거한 멤버 수·활성 에이전트 수·지난 24시간 활성 데몬 수의 버킷, 그리고 지난 24시간 시작·완료·실패·취소된 실행의 집계만 포함합니다. 이름, 이메일 주소나 도메인, IP, 업무 ID, 호스트나 기기 정보, 저장소, 모델이나 plugin, prompt/output, 댓글이나 채팅, 파일 경로, token/비용, 자격 증명, 오류, stack, 로그는 전송하지 않습니다. 이 데이터는 셀프 호스트 버전 사용 현황, 배포 규모, 집계 사용량을 파악하는 데만 쓰며 결제, 라이선스, 인증, 보안 판단에는 사용하지 않습니다.
+
+`DO_NOT_TRACK`과 `ANALYTICS_DISABLED`는 서로 독립적입니다. 전자는 이 익명 스냅샷을, 후자는 선택 사항인 PostHog 연동을 제어합니다.
 
 ## 다음 단계
 

@@ -303,11 +303,16 @@ A few value rules:
 
 | Variable | Default | Description |
 |---|---|---|
+| `DO_NOT_TRACK` | empty (telemetry enabled) | Set `1` or `true` (case-insensitive) to stop first-party anonymous self-host telemetry collection and delivery |
 | `ANALYTICS_DISABLED` | `false` | Set `true` to turn off PostHog reporting |
 | `POSTHOG_API_KEY` | empty | Reporting is off when unset; set it to use your own PostHog project |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog host |
 | `METRICS_ADDR` | empty | Prometheus metrics listen address; empty means not started |
 | `REALTIME_METRICS_TOKEN` | empty | Bearer token protecting `/health/realtime` |
+
+First-party self-host telemetry sends one deployment-level snapshot per UTC day to the fixed, non-configurable `https://telemetry.multica.ai/v1/telemetry/events` endpoint. It contains the formal release version; bucketed workspace, distinct-human-member, active-agent, and 24-hour active-daemon counts; and aggregate run counts for the previous 24 hours. It never includes names, email addresses or domains, IP addresses, business identifiers, host/device details, repositories, models/plugins, prompts/output, comments/chats, paths, token/cost data, credentials, errors, stacks, or logs. It is used only to understand self-hosted version adoption, deployment-size ranges, and aggregate usage—not for billing, licensing, authentication, or security decisions.
+
+`DO_NOT_TRACK` and `ANALYTICS_DISABLED` are independent. The former controls this first-party anonymous snapshot; the latter controls the optional PostHog integration.
 
 ## Next steps
 
