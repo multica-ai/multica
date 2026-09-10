@@ -47,12 +47,12 @@ func TestBotCallbackRepliedContentDoesNotRenderSummaryWhenRichTextMalformed(t *t
 
 func TestDingTalkReplyOptionalContextBoundaries(t *testing.T) {
 	msg := channel.InboundMessage{Text: "current", CommandText: "current"}
-	raw := dingtalkRawEvent{}
+	raw := dingtalkRawEvent{CurrentText: "current"}
 	data := &botCallbackData{}
 	applyDingTalkReplyContext(nil, &msg, &raw)
 	applyDingTalkReplyContext(data, nil, &raw)
 	applyDingTalkReplyContext(data, &msg, nil)
-	if msg.Text != "current" || msg.ReplyTo != nil {
+	if msg.Text != "current" || msg.ReplyTo != nil || raw.CurrentText != "current" {
 		t.Fatalf("missing context mutated current turn: %+v / %+v", msg, raw)
 	}
 	data.Text.IsReplyMsg = true

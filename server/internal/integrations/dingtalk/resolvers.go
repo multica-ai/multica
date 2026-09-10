@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -47,7 +48,7 @@ func NewDingTalkResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.O
 			Group:    "DingTalk group",
 			Direct:   "DingTalk direct message",
 			Fallback: "DingTalk chat",
-		}), groupPresence: groupPresence},
+		}), groupPresence: groupPresence, replies: replyClient(ack)},
 		Audit:      &auditor{q: q},
 		Replier:    replier,
 		OriginType: originDingTalkChat,
@@ -98,6 +99,28 @@ func dingtalkSessionRouting(msg channel.InboundMessage) (bindingKey string, conf
 	}
 	raw, _ := json.Marshal(cfg)
 	return chatID, raw
+}
+
+// dingtalkVisibleQuoteText returns only the current user-authored turn for the
+// Markdown quote shown in a group reply. The adapter's raw CurrentText keeps
+// media placeholders in order without the quoted history.
+// CommandText remains the fallback for older/internal callers.
+func dingtalkVisibleQuoteText(msg channel.InboundMessage) string {
+	if raw, err := decodeDingTalkRaw(msg); err == nil {
+		if quote := strings.TrimSpace(raw.CurrentText); quote != "" {
+			return quote
+		}
+	}
+	quote := strings.TrimSpace(msg.CommandText)
+	if quote == "" {
+		// Older/internal callers may not populate CommandText. Falling back is
+		// safe only when Text has not been reply-enriched and is not media.
+		if msg.ReplyTo != nil || msg.Type == channel.MsgTypeImage {
+			return ""
+		}
+		quote = strings.TrimSpace(msg.Text)
+	}
+	return quote
 }
 
 // outboundTarget recovers the send target from a chat binding's config, falling
@@ -349,6 +372,7 @@ func (r *sessionBinder) StartSession(ctx context.Context, p engine.StartSessionP
 		)
 	}
 	if p.PersistMessage {
+		r.replies.rememberReplySource(p.Installation.ID, result.Append.MessageID, p.Message)
 		if err := r.groupPresence.RecordActivity(ctx, p.Installation.ID, p.Message); err != nil {
 			logger := slog.Default()
 			if r.groupPresence != nil && r.groupPresence.logger != nil {
@@ -368,6 +392,7 @@ func (r *sessionBinder) StartSession(ctx context.Context, p engine.StartSessionP
 }
 
 type sessionBinder struct {
+	replies       *Client
 	session       chatSession
 	groupPresence *groupPresenceObserver
 }
@@ -440,6 +465,7 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 			"error", err,
 		)
 	}
+	r.replies.rememberReplySource(p.InstallationID, result.MessageID, p.Message)
 	return result, nil
 }
 
@@ -478,4 +504,12 @@ func (r *auditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channe
 		ChannelEventID:   nullText(msg.EventID),
 		ChannelMessageID: nullText(msg.MessageID),
 	})
+}
+
+// replyClient keeps notifier attribution local to the DingTalk adapter.
+func replyClient(ack *ackNotifier) *Client {
+	if ack == nil {
+		return nil
+	}
+	return ack.client
 }

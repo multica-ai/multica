@@ -6,17 +6,31 @@ import (
 	"unicode/utf8"
 )
 
-func TestMarkdownTitle(t *testing.T) {
-	cases := map[string]string{
-		"# Heading one\nbody":   "Heading one",
-		"\n\n## Second\nmore":   "Second",
-		"no heading here":       defaultMarkdownTitle,
-		"plain line\n# late":    defaultMarkdownTitle, // first non-empty line is not a heading
-		"###   spaced   \nbody": "spaced",
+// Title is selected context on a later DingTalk native quote. It must retain
+// source syntax and destinations, including bytes beyond the display preview.
+
+func TestQuotePreview_ByteBudget(t *testing.T) {
+	for _, unit := range []string{"x", "界", "🚀"} {
+		for _, length := range []int{63, 64, 65, 252, 253, 256, 257, 512, 16001} {
+			body := strings.Repeat(unit, length)
+			want := body
+			if len(body) > 256 {
+				want = strings.Repeat(unit, 252/len(unit)) + "\n..."
+			}
+			if got := quotePreview(body); got != want || !utf8.ValidString(got) {
+				t.Errorf("preview for %d runes = %q, want %q", length, got, want)
+			}
+		}
 	}
-	for body, want := range cases {
-		if got := markdownTitle(body); got != want {
-			t.Errorf("markdownTitle(%q) = %q, want %q", body, got, want)
+	// A byte cutoff can land inside a rune when the text mixes ASCII and
+	// multibyte characters; repeating a single rune alone misses this boundary.
+	for _, prefix := range []string{"a", "ab", "abc"} {
+		for _, unit := range []string{"界", "🚀"} {
+			body := prefix + strings.Repeat(unit, 300)
+			want := prefix + strings.Repeat(unit, (252-len(prefix))/len(unit)) + "\n..."
+			if got := quotePreview(body); got != want || len(got) > 256 || !utf8.ValidString(got) {
+				t.Errorf("mixed preview for %q + %q = %q, want %q", prefix, unit, got, want)
+			}
 		}
 	}
 }
@@ -125,7 +139,7 @@ func TestChunkMarkdown_LongFenceInfoCannotExhaustPieceBudget(t *testing.T) {
 	// following code line through hardSplit. Before the continuation fence was
 	// bounded, this made pieceBudget negative and panicked.
 	fence := "```" + strings.Repeat("x", markdownContentByteBudget-5)
-	body := fence + "\n" + strings.Repeat("界", markdownByteBudget) + "\n```\n"
+	body := fence + "\n" + strings.Repeat("\u754c", markdownByteBudget) + "\n```\n"
 	chunks := chunkMarkdown(body)
 	if len(chunks) < 2 {
 		t.Fatalf("pathological fenced body must split, got %d chunks", len(chunks))
@@ -142,14 +156,49 @@ func TestChunkMarkdown_LongFenceInfoCannotExhaustPieceBudget(t *testing.T) {
 
 func TestHardSplitDefendsAgainstInvalidBudget(t *testing.T) {
 	for _, budget := range []int{-1, 0, 1} {
-		pieces := hardSplit("界界", budget)
-		if got := strings.Join(pieces, ""); got != "界界" {
+		pieces := hardSplit("\u754c\u754c", budget)
+		if got := strings.Join(pieces, ""); got != "\u754c\u754c" {
 			t.Fatalf("hardSplit budget %d rejoined to %q", budget, got)
 		}
 		for _, piece := range pieces {
 			if !utf8.ValidString(piece) {
 				t.Fatalf("hardSplit budget %d produced invalid UTF-8 %q", budget, piece)
 			}
+		}
+	}
+}
+
+func TestQuotePreviewPreservesLiteralParagraphsAndByteBudget(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{"", ""}, {" \n\t", ""},
+		{"**literal** [link](url)\nsecond line\n\nLater paragraph", "**literal** [link](url)\nsecond line\n\nLater paragraph"},
+		{"First\r\n \t\r\nLater", "First\n \t\nLater"},
+		{strings.Repeat("界", 86), strings.Repeat("界", 84) + "\n..."},
+		{strings.Repeat("x", 256), strings.Repeat("x", 256)},
+		{strings.Repeat("x", 256) + "\n\nLater", strings.Repeat("x", 252) + "\n..."},
+		{"Already shortened\n...", "Already shortened\n..."},
+	} {
+		got := quotePreview(tc.body)
+		if got != tc.want || len(got) > 256 || !utf8.ValidString(got) {
+			t.Fatalf("quote preview=%q, want=%q", got, tc.want)
+		}
+		if quotePreview(got) != got {
+			t.Fatal("rendering an already stored preview changed it")
+		}
+	}
+}
+
+func TestMarkdownTitle(t *testing.T) {
+	cases := map[string]string{
+		"# Heading one\nbody":   "Heading one",
+		"\n\n## Second\nmore":   "Second",
+		"no heading here":       defaultMarkdownTitle,
+		"plain line\n# late":    defaultMarkdownTitle, // first non-empty line is not a heading
+		"###   spaced   \nbody": "spaced",
+	}
+	for body, want := range cases {
+		if got := markdownTitle(body); got != want {
+			t.Errorf("markdownTitle(%q) = %q, want %q", body, got, want)
 		}
 	}
 }

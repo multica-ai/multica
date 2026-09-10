@@ -254,6 +254,9 @@ func assertDingTalkMatrixMessage(
 	if err != nil {
 		t.Fatalf("decode raw matrix event: %v", err)
 	}
+	if raw.CurrentText != current.body {
+		t.Fatalf("current visible text = %q, want %q", raw.CurrentText, current.body)
+	}
 	if len(raw.Media) != len(wantRefs) {
 		t.Fatalf("media count = %d, want %d: %+v", len(raw.Media), len(wantRefs), raw.Media)
 	}
@@ -268,6 +271,11 @@ func assertDingTalkMatrixMessage(
 	}
 	if msg.Type != wantType {
 		t.Fatalf("message type = %q, want %q", msg.Type, wantType)
+	}
+
+	_, routingJSON := dingtalkSessionRouting(msg)
+	if strings.Contains(string(routingJSON), "quote_text") || strings.Contains(string(routingJSON), "source_message_id") || strings.Contains(string(routingJSON), "session_webhook") {
+		t.Fatalf("routing retained per-message state: %s", routingJSON)
 	}
 
 }

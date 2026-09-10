@@ -46,13 +46,15 @@ func (f *fakeGroupPresenceQueries) RecordDingTalkGroupActivity(_ context.Context
 }
 
 type captureChatSession struct {
-	ensure      engine.EnsureSessionInput
-	ensureCalls int
-	ensureErr   error
-	start       engine.StartSessionInput
-	append      engine.AppendInput
-	appendErr   error
-	media       engine.BindMediaInput
+	ensure       engine.EnsureSessionInput
+	ensureCalls  int
+	ensureErr    error
+	start        engine.StartSessionInput
+	append       engine.AppendInput
+	appendErr    error
+	appendResult engine.AppendResult
+	startResult  engine.StartSessionResult
+	media        engine.BindMediaInput
 }
 
 func (c *captureChatSession) EnsureSession(_ context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error) {
@@ -62,12 +64,12 @@ func (c *captureChatSession) EnsureSession(_ context.Context, in engine.EnsureSe
 }
 func (c *captureChatSession) StartSession(_ context.Context, in engine.StartSessionInput) (engine.StartSessionResult, error) {
 	c.start = in
-	return engine.StartSessionResult{}, c.ensureErr
+	return c.startResult, c.ensureErr
 }
 func (c *captureChatSession) MarkPendingFresh(context.Context, pgtype.UUID, string) error { return nil }
 func (c *captureChatSession) AppendUserMessage(_ context.Context, in engine.AppendInput) (engine.AppendResult, error) {
 	c.append = in
-	return engine.AppendResult{}, c.appendErr
+	return c.appendResult, c.appendErr
 }
 
 func TestSessionBinder_RecordsActivityOnlyAfterSuccessfulGroupAppend(t *testing.T) {
@@ -407,5 +409,55 @@ func TestOutboundTarget_FallsBackToChatID(t *testing.T) {
 	target := outboundTarget(db.ChannelChatSessionBinding{ChannelChatID: "cid-4"})
 	if target.ConversationType != convTypeGroup || target.ConversationID != "cid-4" {
 		t.Errorf("missing config must fall back to a group send on chat id: %+v", target)
+	}
+}
+
+func TestDingTalkVisibleQuoteTextPreservesCurrentImagePlaceholders(t *testing.T) {
+	tests := []struct {
+		name        string
+		msg         channel.InboundMessage
+		currentText string
+		want        string
+	}{
+		{
+			name: "multi-level reply",
+			msg: channel.InboundMessage{
+				Text:        channel.FormatQuotedMessage("", "internal card JSON") + "\n\nVerify this information",
+				CommandText: "Verify this information",
+				ReplyTo:     &channel.ReplyCtx{MessageID: "parent"},
+			},
+			currentText: "Verify this information",
+			want:        "Verify this information",
+		},
+		{
+			name: "images with instruction",
+			msg: channel.InboundMessage{
+				Type: channel.MsgTypeImage, Text: "[Image]\n[Image]\nReview these", CommandText: "Review these",
+			},
+			currentText: "[Image]\n[Image]\nReview these",
+			want:        "[Image]\n[Image]\nReview these",
+		},
+		{
+			name: "image only",
+			msg: channel.InboundMessage{
+				Type: channel.MsgTypeImage, Text: dingtalkImagePlaceholder, CommandText: dingtalkImagePlaceholder,
+			},
+			currentText: dingtalkImagePlaceholder,
+			want:        dingtalkImagePlaceholder,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.msg.Source = channel.Source{ChatID: "group", ChatType: channel.ChatTypeGroup, SenderID: "staff-7"}
+			tc.msg.Raw, _ = json.Marshal(dingtalkRawEvent{
+				CurrentText: tc.currentText,
+			})
+			if got := dingtalkVisibleQuoteText(tc.msg); got != tc.want {
+				t.Fatalf("visible quote = %q, want %q", got, tc.want)
+			}
+			if target := targetFromMessage(tc.msg); target.QuoteText != tc.want || target.StaffID != "" {
+				t.Fatalf("immediate-reply target = %+v, want quote %q without a group mention recipient", target, tc.want)
+			}
+		})
 	}
 }

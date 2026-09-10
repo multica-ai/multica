@@ -2,6 +2,7 @@ package dingtalk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -19,6 +21,7 @@ import (
 // outboundQueries is the slice of generated queries the DingTalk outbound
 // subscriber needs. *db.Queries satisfies it.
 type outboundQueries interface {
+	ListChatInputMessages(context.Context, pgtype.UUID) ([]db.ChatMessage, error)
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
@@ -36,27 +39,55 @@ type Outbound struct {
 	q       outboundQueries
 	decrypt Decrypter
 	client  *Client
+	ack     *ackNotifier
 	logger  *slog.Logger
 }
 
-// NewOutbound builds the DingTalk outbound subscriber over the generated queries,
-// the AppSecret decrypter, and the shared token-caching Client.
-func NewOutbound(q outboundQueries, decrypt Decrypter, client *Client, logger *slog.Logger) *Outbound {
+// NewOutbound builds the DingTalk outbound subscriber over the generated
+// queries, the AppSecret decrypter, the shared token-caching Client, and the
+// optional processing-reaction lifecycle owner.
+func NewOutbound(q outboundQueries, decrypt Decrypter, client *Client, ack *ackNotifier, logger *slog.Logger) *Outbound {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if client == nil {
 		client = NewClient(nil, "")
 	}
-	return &Outbound{q: q, decrypt: decrypt, client: client, logger: logger}
+	return &Outbound{q: q, decrypt: decrypt, client: client, ack: ack, logger: logger}
 }
 
-// Register subscribes to chat-done and task-failed. Task-failed keeps the DingTalk
-// conversation consistent with the web transcript — without it a failed run
-// leaves the user staring at the "👀 On it" ack forever.
+// Register subscribes to every chat-task terminal event. Task-cancelled carries
+// no reply content, but still has to clear the source-message reaction.
 func (o *Outbound) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventChatDone, o.handleEvent)
 	bus.Subscribe(protocol.EventTaskFailed, o.handleEvent)
+	bus.Subscribe(protocol.EventTaskCancelled, o.handleEvent)
+	bus.Subscribe(protocol.EventAgentArchived, o.handleAgentArchived)
+}
+
+func (o *Outbound) handleAgentArchived(e events.Event) {
+	if o.ack == nil {
+		return
+	}
+	raw, err := json.Marshal(e.Payload)
+	if err != nil {
+		return
+	}
+	var payload struct {
+		Agent struct {
+			ID string `json:"id"`
+		} `json:"agent"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return
+	}
+	id, err := util.ParseUUID(payload.Agent.ID)
+	if err != nil || !id.Valid {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ackCleanupTimeout)
+	defer cancel()
+	o.ack.onAgentArchived(ctx, id)
 }
 
 func (o *Outbound) handleEvent(e events.Event) {
@@ -77,13 +108,28 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return nil
 	}
 	content := eventContent(e)
+	if content == "" && eventRetryPending(e) {
+		return nil
+	}
+	var deliveredInput pgtype.UUID
+	var deliveredInstallation engine.ResolvedInstallation
+	if o.ack != nil {
+		// Reactions are optional: do not spend the reply's network budget on
+		// cleanup. Every terminal return attempts to settle its own input batch.
+		defer func() {
+			o.settleTaskReactions(ctx, taskID, sessionID)
+			if deliveredInput.Valid {
+				o.ack.OnReplyDelivered(ctx, deliveredInstallation, deliveredInput)
+			}
+		}()
+	}
 	if content == "" {
-		return nil // nothing to say (empty completion, or a retry-pending failure)
+		return nil
 	}
 	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil // direct Multica task or violated snapshot invariant: fail closed
+			return nil
 		}
 		return fmt.Errorf("lookup dingtalk task delivery: %w", err)
 	}
@@ -102,9 +148,23 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if !deliver {
 		return nil
 	}
+
+	var input db.ChatMessage
+	if task.ChatInputTaskID.Valid {
+		messages, err := o.q.ListChatInputMessages(ctx, task.ChatInputTaskID)
+		if err != nil {
+			o.logger.WarnContext(ctx, "dingtalk: sealed input unavailable; sending without attribution", "error", err)
+			messages = nil
+		}
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].ChannelIngested {
+				input = messages[i]
+				break
+			}
+		}
+	}
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
-		ID:          binding.InstallationID,
-		ChannelType: string(TypeDingTalk),
+		ID: binding.InstallationID, ChannelType: string(TypeDingTalk),
 	})
 	if err != nil {
 		return fmt.Errorf("load dingtalk installation: %w", err)
@@ -117,10 +177,54 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("decode dingtalk credentials: %w", err)
 	}
 	s := &sender{client: o.client, robotCode: creds.RobotCode, appKey: creds.AppKey, appSecret: creds.AppSecret}
-	if _, err := s.send(ctx, outboundTarget(binding), content); err != nil {
+	target := outboundTarget(binding)
+	target.QuoteText = sealedInputQuote(input.Content)
+	if _, err := s.send(ctx, target, content); err != nil {
 		return fmt.Errorf("post dingtalk reply: %w", err)
 	}
+	// A failure notice is terminal, but it is not a successfully completed task.
+	// Only chat:done earns the positive Done reaction.
+	if o.ack != nil && e.Type == protocol.EventChatDone {
+		deliveredInput = input.ID
+		deliveredInstallation = engine.ResolvedInstallation{
+			ID: inst.ID, WorkspaceID: inst.WorkspaceID, AgentID: inst.AgentID,
+			InstallerUserID: inst.InstallerUserID, Active: true, Platform: inst,
+		}
+	}
 	return nil
+}
+
+// Task completion owns a sealed input batch, not every pending message in the
+// conversation. This also runs for cancellation and empty terminal replies.
+func (o *Outbound) settleTaskReactions(ctx context.Context, taskID, sessionID pgtype.UUID) {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), ackCleanupTimeout)
+	defer cancel()
+	task, err := o.q.GetAgentTask(cleanup, taskID)
+	if err != nil {
+		o.logger.WarnContext(cleanup, "dingtalk reaction: terminal task unavailable", "error", err)
+		return
+	}
+	if !task.ChatInputTaskID.Valid || (task.ChatSessionID.Valid && task.ChatSessionID != sessionID) {
+		return
+	}
+	inputs, err := o.q.ListChatInputMessages(cleanup, task.ChatInputTaskID)
+	if err != nil {
+		o.logger.WarnContext(cleanup, "dingtalk reaction: terminal input unavailable", "error", err)
+		return
+	}
+	o.ack.onInputsSettled(cleanup, sessionID, inputs)
+}
+
+func eventRetryPending(e events.Event) bool {
+	if e.Type != protocol.EventTaskFailed {
+		return false
+	}
+	p, ok := e.Payload.(map[string]any)
+	if !ok {
+		return false
+	}
+	retryPending, _ := p["retry_pending"].(bool)
+	return retryPending
 }
 
 func bindingFromTaskDelivery(delivery db.ChannelTaskDelivery) db.ChannelChatSessionBinding {
