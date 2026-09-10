@@ -18,6 +18,10 @@ const historyState = vi.hoisted(() => ({
 }));
 
 const navigationState = vi.hoisted(() => ({ push: vi.fn() }));
+const sidebarState = vi.hoisted(() => ({
+  state: "expanded" as "expanded" | "collapsed",
+  isCompact: false,
+}));
 
 vi.mock("@/hooks/use-tab-history", () => ({
   useTabHistory: () => historyState,
@@ -36,6 +40,7 @@ vi.mock("@multica/views/layout", () => ({
 }));
 
 vi.mock("@multica/ui/components/ui/sidebar", () => ({
+  useSidebar: () => sidebarState,
   SidebarTrigger: (props: ComponentProps<"button">) => (
     <button type="button" aria-label="Toggle sidebar" {...props} />
   ),
@@ -65,6 +70,8 @@ beforeEach(() => {
   historyState.goForward.mockReset();
   historyState.goToHistoryIndex.mockReset();
   navigationState.push.mockReset();
+  sidebarState.state = "expanded";
+  sidebarState.isCompact = false;
   vi.useFakeTimers();
 });
 
@@ -112,6 +119,24 @@ describe("browsingHistoryForMenu", () => {
 });
 
 describe("WindowToolbar history controls", () => {
+  it("right-aligns the controls to the expanded sidebar edge", () => {
+    render(<WindowToolbar />);
+
+    const toolbar = document.querySelector('[data-slot="window-toolbar"]');
+    expect(toolbar).toHaveClass("justify-end", "w-(--sidebar-width)");
+    expect(toolbar).not.toHaveClass("w-[208px]");
+  });
+
+  it("keeps the fixed tab clearance when the sidebar is hidden", () => {
+    sidebarState.state = "collapsed";
+
+    render(<WindowToolbar />);
+
+    const toolbar = document.querySelector('[data-slot="window-toolbar"]');
+    expect(toolbar).toHaveClass("justify-end", "w-[208px]");
+    expect(toolbar).not.toHaveClass("w-(--sidebar-width)");
+  });
+
   it("opens workspace browsing history and navigates the active tab to a selected entry", () => {
     render(<WindowToolbar />);
 

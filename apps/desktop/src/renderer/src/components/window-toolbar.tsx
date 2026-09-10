@@ -7,7 +7,11 @@ import {
   type PointerEventHandler,
 } from "react";
 import { ChevronLeft, ChevronRight, History } from "lucide-react";
-import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
+import {
+  SidebarTrigger,
+  useSidebar,
+} from "@multica/ui/components/ui/sidebar";
+import { cn } from "@multica/ui/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -168,6 +172,8 @@ function HistoryMenuItem({
 }
 
 export function WindowToolbar() {
+  const { state: sidebarState, isCompact } = useSidebar();
+  const sidebarHidden = sidebarState === "collapsed" || isCompact;
   const {
     canGoBack,
     canGoForward,
@@ -236,7 +242,11 @@ export function WindowToolbar() {
 
   return (
     <div
-      className="fixed left-0 top-0 z-30 flex h-12 w-[208px] shrink-0 items-center px-3"
+      data-slot="window-toolbar"
+      className={cn(
+        "fixed left-0 top-0 z-30 flex h-12 shrink-0 items-center justify-end px-3 transition-[width] duration-200 ease-out motion-reduce:transition-none",
+        sidebarHidden ? "w-[208px]" : "w-(--sidebar-width)",
+      )}
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     >
       <div
