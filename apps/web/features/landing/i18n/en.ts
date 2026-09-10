@@ -23,7 +23,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     cta: "Start free trial",
     downloadDesktop: "Download Desktop",
     talkToSales: "Talk to sales",
-    worksWith: "Works with",
+    worksWith: "Works with 20+ AI coding tools",
     imageAlt: "Multica board view \u2014 issues managed by humans and agents",
   },
 

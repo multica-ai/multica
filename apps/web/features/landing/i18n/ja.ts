@@ -26,7 +26,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
       cta: "無料トライアルを始める",
       downloadDesktop: "デスクトップ版をダウンロード",
       talkToSales: "営業に相談する",
-      worksWith: "対応ツール",
+      worksWith: "20+ の AI コーディングツールに対応",
       imageAlt: "人間と AI エージェントがタスクを管理する Multica のボード画面",
     },
     features: {

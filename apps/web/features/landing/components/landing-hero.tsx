@@ -4,19 +4,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Download } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
-import { useLocale } from "../i18n";
+import { docsHrefForLocale, useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
-import {
-  AntigravityLogo,
-  ClaudeCodeLogo,
-  CodexLogo,
-  OpenClawLogo,
-  OpenCodeLogo,
-  heroButtonClassName,
-} from "./shared";
+import { HERO_PROVIDERS } from "./provider-marks";
+import { heroButtonClassName } from "./shared";
 
 export function LandingHero() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const user = useAuthStore((s) => s.user);
   const ctaHref = useDashboardCtaHref();
 
@@ -64,39 +58,51 @@ export function LandingHero() {
             </div>
           </div>
 
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
-            <span className="text-body-lg text-white/50">
-              {t.hero.worksWith}
-            </span>
-            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-3">
-              <div className="flex items-center gap-2.5 text-white/80">
-                <ClaudeCodeLogo className="size-5" />
-                <span className="text-body-lg font-medium">Claude Code</span>
-              </div>
-              <div className="flex items-center gap-2.5 text-white/80">
-                <CodexLogo className="size-5" />
-                <span className="text-body-lg font-medium">Codex</span>
-              </div>
-              <div className="flex items-center gap-2.5 text-white/80">
-                <AntigravityLogo className="size-5" />
-                <span className="text-body-lg font-medium">Antigravity</span>
-              </div>
-              <div className="flex items-center gap-2.5 text-white/80">
-                <OpenClawLogo className="size-5" />
-                <span className="text-body-lg font-medium">OpenClaw</span>
-              </div>
-              <div className="flex items-center gap-2.5 text-white/80">
-                <OpenCodeLogo className="size-5" />
-                <span className="text-body-lg font-medium">OpenCode</span>
-              </div>
-            </div>
-          </div>
+          <WorksWithRow
+            label={t.hero.worksWith}
+            href={`${docsHrefForLocale(locale)}/providers`}
+          />
 
           <div id="preview" className="mt-10 sm:mt-12">
             <ProductImage alt={t.hero.imageAlt} />
           </div>
         </section>
       </main>
+    </div>
+  );
+}
+
+/**
+ * The runtime catalog is far longer than this row (see `/docs/providers`), so
+ * the marks are a sample and the label carries the full claim — that split is
+ * what keeps the row honest without growing it every time a runtime lands.
+ */
+function WorksWithRow({ label, href }: { label: string; href: string }) {
+  return (
+    <div className="mt-12 flex flex-col items-center gap-6">
+      <Link
+        href={href}
+        className="group inline-flex items-center gap-1.5 text-body text-white/60 transition-colors hover:text-white"
+      >
+        {label}
+        <ArrowRight
+          className="size-3.5 transition-transform group-hover:translate-x-0.5"
+          aria-hidden
+        />
+      </Link>
+
+      <ul className="flex max-w-[880px] flex-wrap items-center justify-center gap-x-7 gap-y-5 sm:gap-x-9">
+        {HERO_PROVIDERS.map(({ name, Mark, size }) => (
+          <li
+            key={name}
+            title={name}
+            className="flex items-center text-white opacity-70 drop-shadow-[0_1px_6px_rgba(0,0,0,0.28)] transition-opacity duration-200 hover:opacity-100"
+          >
+            <Mark className={size ?? "size-6"} />
+            <span className="sr-only">{name}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

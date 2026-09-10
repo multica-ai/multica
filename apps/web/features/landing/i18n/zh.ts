@@ -23,7 +23,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     cta: "免费开始",
     downloadDesktop: "下载桌面端",
     talkToSales: "联系商务",
-    worksWith: "支持",
+    worksWith: "支持 20+ 种 AI 编程工具",
     imageAlt: "Multica \u770b\u677f\u89c6\u56fe\u2014\u2014\u4eba\u7c7b\u548c 智能体 \u534f\u540c\u7ba1\u7406\u4efb\u52a1",
   },
 

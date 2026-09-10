@@ -26,7 +26,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       cta: "무료로 시작하기",
       downloadDesktop: "데스크톱 다운로드",
       talkToSales: "영업팀에 문의",
-      worksWith: "지원 도구",
+      worksWith: "20개 이상의 AI 코딩 도구 지원",
       imageAlt: "사람과 AI 에이전트가 함께 태스크를 관리하는 Multica 보드 화면",
     },
     features: {
