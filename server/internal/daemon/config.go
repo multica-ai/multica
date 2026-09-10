@@ -994,6 +994,24 @@ var codexDesktopAppBundlePaths = func() []string {
 	return paths
 }
 
+// dshDesktopAppBundlePaths returns candidate macOS app-bundle locations for
+// the DSH CLI bundled inside DeepSeek Harness Desktop. The desktop app ships
+// its CLI in the app's unpacked node_modules tree and never installs `dsh`
+// onto PATH, so a GUI-launched daemon misses it on exec.LookPath and the
+// login-shell fallback cannot rescue it either — a user's rc files have no
+// reason to know that path.
+//
+// Candidates are ordered by install location first (system /Applications
+// before user ~/Applications), matching codexDesktopAppBundlePaths.
+var dshDesktopAppBundlePaths = func() []string {
+	const bundle = "DSH Desktop.app/Contents/Resources/app.asar.unpacked/node_modules/@deepseek-ai/dsh/lib/bin.js"
+	paths := []string{filepath.Join("/Applications", bundle)}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, "Applications", bundle))
+	}
+	return paths
+}
+
 // loginShellResolveTimeout caps how long the daemon will wait for the user's
 // login shell to print canonical agent paths. A broken rc file should not
 // block startup — if the shell takes longer than this, we proceed without

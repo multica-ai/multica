@@ -149,6 +149,27 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 				}
 			}
 		}
+		if defaultCmd == "dsh" && cmd == defaultCmd {
+			// DeepSeek Harness Desktop bundles its CLI inside the macOS app
+			// instead of installing `dsh` onto PATH, and the login-shell
+			// fallback above cannot rescue it: no rc file knows that path.
+			// The candidate is a Node script rather than a native binary, so
+			// it only counts while it is executable — an entry discovered
+			// without the executable bit would be advertised as a healthy
+			// runtime and then fail on every spawn.
+			//
+			// The Multica runtime profile gate in the caller still applies:
+			// a bundled CLI without the `multica` profile is not a runtime.
+			for _, p := range dshDesktopAppBundlePaths() {
+				if executableCandidate(p) {
+					return AgentEntry{
+						Path:    p,
+						Command: cmd,
+						Model:   strings.TrimSpace(os.Getenv(modelEnv)),
+					}, true
+				}
+			}
+		}
 		return AgentEntry{}, false
 	}
 
@@ -304,6 +325,15 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 		agents["zeroclaw"] = e
 	}
 	return agents
+}
+
+// executableCandidate reports whether a Desktop-app bundle candidate can be
+// spawned directly: it exists, is not a directory, and carries an executable
+// bit. Bundle candidates reached through probe() never went through
+// exec.LookPath, which is what normally enforces the last of those.
+func executableCandidate(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0
 }
 
 func probeDshMulticaProfile(executablePath string) bool {
