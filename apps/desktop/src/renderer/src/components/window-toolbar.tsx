@@ -25,7 +25,7 @@ import {
 } from "@multica/views/layout";
 import { useNavigation } from "@multica/views/navigation";
 import { useTabHistory } from "@/hooks/use-tab-history";
-import { resourceKeyForUrl } from "@/stores/tab-store";
+import { browsingHistoryKeyForUrl } from "@/stores/tab-store";
 
 export const WINDOW_TOOLBAR_CLEARANCE = 208;
 const LONG_PRESS_DURATION_MS = 500;
@@ -144,10 +144,10 @@ export function browsingHistoryForMenu(
   currentUrl: string | undefined,
 ): string[] {
   const currentResource = currentUrl
-    ? resourceKeyForUrl(currentUrl)
+    ? browsingHistoryKeyForUrl(currentUrl)
     : undefined;
   return browsingHistory
-    .filter((url) => resourceKeyForUrl(url) !== currentResource)
+    .filter((url) => browsingHistoryKeyForUrl(url) !== currentResource)
     .slice(0, MAX_HISTORY_MENU_ITEMS);
 }
 

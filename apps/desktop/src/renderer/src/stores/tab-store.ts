@@ -329,6 +329,32 @@ export function resourceKeyForUrl(url: string): string {
 }
 
 /**
+ * Dedup identity for the workspace-wide browsing history.
+ *
+ * Tab sessions intentionally treat search params as view state, but selecting
+ * an Inbox row changes the content being viewed without leaving /inbox. Keep
+ * those selections distinct in global History while leaving Back/Forward's
+ * pathname-based session semantics unchanged.
+ */
+export function browsingHistoryKeyForUrl(url: string): string {
+  return inboxSelectionKeyForUrl(url) ?? resourceKeyForUrl(url);
+}
+
+function inboxSelectionKeyForUrl(url: string): string | null {
+  const { pathname, suffix } = splitTabUrl(url);
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length !== 2 || segments[1] !== "inbox") return null;
+  if (!suffix.startsWith("?")) return null;
+
+  const hashIndex = suffix.indexOf("#");
+  const search = hashIndex === -1 ? suffix.slice(1) : suffix.slice(1, hashIndex);
+  const selectedKey = new URLSearchParams(search).get("issue");
+  if (!selectedKey) return null;
+
+  return `${pathname}?issue=${encodeURIComponent(selectedKey)}`;
+}
+
+/**
  * Defensive: catch URLs that don't belong in the tab store, and normalize
  * the ones that do.
  *
@@ -416,10 +442,12 @@ function prependBrowsingHistoryEntry(
   url: string,
 ): string[] {
   if (entries[0] === url) return entries;
-  const resourceKey = resourceKeyForUrl(url);
+  const resourceKey = browsingHistoryKeyForUrl(url);
   return [
     url,
-    ...entries.filter((entry) => resourceKeyForUrl(entry) !== resourceKey),
+    ...entries.filter(
+      (entry) => browsingHistoryKeyForUrl(entry) !== resourceKey,
+    ),
   ].slice(0, BROWSING_HISTORY_MAX_ENTRIES);
 }
 
@@ -431,12 +459,18 @@ function withBrowsingVisit(
 ): WorkspaceTabGroup {
   const clean = sanitizeTabPath(url);
   if (!clean || extractWorkspaceSlug(clean) !== slug) return group;
-  const replacedResource = replacedUrl
-    ? resourceKeyForUrl(replacedUrl)
+  const historyKey = browsingHistoryKeyForUrl(clean);
+  const replacedHistoryKey = replacedUrl
+    ? browsingHistoryKeyForUrl(replacedUrl)
     : undefined;
-  const previousEntries = replacedResource
+  const preserveDistinctInboxVisit =
+    replacedUrl !== undefined &&
+    replacedHistoryKey !== historyKey &&
+    (inboxSelectionKeyForUrl(clean) !== null ||
+      inboxSelectionKeyForUrl(replacedUrl) !== null);
+  const previousEntries = replacedHistoryKey && !preserveDistinctInboxVisit
     ? group.browsingHistory.filter(
-        (entry) => resourceKeyForUrl(entry) !== replacedResource,
+        (entry) => browsingHistoryKeyForUrl(entry) !== replacedHistoryKey,
       )
     : group.browsingHistory;
   const browsingHistory = prependBrowsingHistoryEntry(
@@ -464,7 +498,7 @@ function normalizeBrowsingHistory(value: unknown, slug: string): string[] {
     if (typeof candidate !== "string") continue;
     const clean = sanitizeTabPath(candidate);
     if (!clean || extractWorkspaceSlug(clean) !== slug) continue;
-    const resourceKey = resourceKeyForUrl(clean);
+    const resourceKey = browsingHistoryKeyForUrl(clean);
     if (seenResources.has(resourceKey)) continue;
     seenResources.add(resourceKey);
     result.push(clean);

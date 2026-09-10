@@ -109,6 +109,24 @@ describe("browsingHistoryForMenu", () => {
     ).toEqual(["/acme/issues/issue-2", "/acme/projects"]);
   });
 
+  it("excludes only the current Inbox issue while keeping other Inbox visits", () => {
+    expect(
+      browsingHistoryForMenu(
+        [
+          "/acme/inbox?issue=issue-b",
+          "/acme/inbox?issue=issue-a",
+          "/acme/inbox",
+          "/acme/projects",
+        ],
+        "/acme/inbox?view=archived&issue=issue-b",
+      ),
+    ).toEqual([
+      "/acme/inbox?issue=issue-a",
+      "/acme/inbox",
+      "/acme/projects",
+    ]);
+  });
+
   it("bounds the recently viewed menu to thirty entries", () => {
     const entries = Array.from(
       { length: 60 },

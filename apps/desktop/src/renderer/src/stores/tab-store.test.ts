@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
   sanitizeTabPath,
   resourceKeyForUrl,
+  browsingHistoryKeyForUrl,
   migrateV1ToV2,
   migrateV2ToV3,
   migrateV3ToV4,
@@ -61,6 +62,26 @@ describe("resourceKeyForUrl", () => {
     expect(resourceKeyForUrl("/acme/issues?filter=a")).toBe("/acme/issues");
     expect(resourceKeyForUrl("/acme/issues#anchor")).toBe("/acme/issues");
     expect(resourceKeyForUrl("/acme/issues?filter=a#x")).toBe("/acme/issues");
+  });
+});
+
+describe("browsingHistoryKeyForUrl", () => {
+  it("keeps Inbox selections distinct while ignoring their other view state", () => {
+    expect(browsingHistoryKeyForUrl("/acme/inbox")).toBe("/acme/inbox");
+    expect(browsingHistoryKeyForUrl("/acme/inbox?issue=issue-a")).toBe(
+      "/acme/inbox?issue=issue-a",
+    );
+    expect(
+      browsingHistoryKeyForUrl(
+        "/acme/inbox?view=archived&issue=issue-a#comment-comment-1",
+      ),
+    ).toBe("/acme/inbox?issue=issue-a");
+  });
+
+  it("continues treating ordinary query and hash changes as one resource", () => {
+    expect(browsingHistoryKeyForUrl("/acme/issues?filter=mine#top")).toBe(
+      "/acme/issues",
+    );
   });
 });
 
@@ -464,6 +485,54 @@ describe("navigateActiveSession", () => {
 
     expect(useTabStore.getState().byWorkspace.acme.browsingHistory).toEqual([
       "/acme/issues/issue-1#comment-comment-1",
+      "/acme/issues",
+    ]);
+  });
+
+  it("records each issue viewed inside Inbox without changing its replace-based session history", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+
+    store.navigateActiveSession("/acme/inbox");
+    store.navigateActiveSession("/acme/inbox?issue=issue-a", {
+      replace: true,
+    });
+    store.navigateActiveSession("/acme/inbox?issue=issue-b", {
+      replace: true,
+    });
+
+    const state = useTabStore.getState();
+    expect(getActiveTab(state)?.history).toEqual({
+      stack: ["/acme/issues", "/acme/inbox?issue=issue-b"],
+      index: 1,
+    });
+    expect(state.byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/inbox?issue=issue-b",
+      "/acme/inbox?issue=issue-a",
+      "/acme/inbox",
+      "/acme/issues",
+    ]);
+  });
+
+  it("moves a revisited Inbox issue to the front instead of duplicating it", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.navigateActiveSession("/acme/inbox");
+    store.navigateActiveSession("/acme/inbox?issue=issue-a", {
+      replace: true,
+    });
+    store.navigateActiveSession("/acme/inbox?issue=issue-b", {
+      replace: true,
+    });
+    store.navigateActiveSession(
+      "/acme/inbox?view=archived&issue=issue-a#comment-comment-1",
+      { replace: true },
+    );
+
+    expect(useTabStore.getState().byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/inbox?view=archived&issue=issue-a#comment-comment-1",
+      "/acme/inbox?issue=issue-b",
+      "/acme/inbox",
       "/acme/issues",
     ]);
   });
@@ -1387,6 +1456,10 @@ describe("mergePersistedTabs (rehydration, MUL-4370)", () => {
             browsingHistory: [
               "/acme/issues/issue-1?tab=activity",
               "/acme/issues/issue-1",
+              "/acme/inbox?view=archived&issue=issue-b",
+              "/acme/inbox?issue=issue-a#comment-comment-1",
+              "/acme/inbox?issue=issue-a",
+              "/acme/inbox",
               "/other/issues/issue-2",
               "/login",
               7,
@@ -1399,6 +1472,9 @@ describe("mergePersistedTabs (rehydration, MUL-4370)", () => {
 
     expect(result.byWorkspace.acme.browsingHistory).toEqual([
       "/acme/issues/issue-1?tab=activity",
+      "/acme/inbox?view=archived&issue=issue-b",
+      "/acme/inbox?issue=issue-a#comment-comment-1",
+      "/acme/inbox",
     ]);
   });
 });
