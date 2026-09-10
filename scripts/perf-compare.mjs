@@ -91,8 +91,13 @@ async function measure(ref, label) {
 
   // REMOTE_API_URL is a runtime setting. Passing it to the build breaks
   // prerendering, and turbo filters it out of the build env anyway.
+  //
+  // `--force` because this report states a build time. A cache hit would put
+  // seconds next to a build that CI pays minutes for, and a run where one ref
+  // hits the cache and the other misses would read as a difference between the
+  // products.
   const buildStart = Date.now();
-  run("pnpm", ["exec", "turbo", "build", "--filter=@multica/web"], { cwd: checkout });
+  run("pnpm", ["exec", "turbo", "build", "--filter=@multica/web", "--force"], { cwd: checkout });
   const buildS = seconds(buildStart);
 
   const port = await freePort();
