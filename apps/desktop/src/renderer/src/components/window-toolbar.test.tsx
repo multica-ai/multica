@@ -47,6 +47,7 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
 }));
 
 const {
+  WINDOW_TOOLBAR_CLEARANCE,
   WindowToolbar,
   browsingHistoryForMenu,
   historyIndicesForMenu,
@@ -141,18 +142,19 @@ describe("WindowToolbar history controls", () => {
     render(<WindowToolbar />);
 
     const toolbar = document.querySelector('[data-slot="window-toolbar"]');
-    expect(toolbar).toHaveClass("justify-end", "w-(--sidebar-width)");
-    expect(toolbar).not.toHaveClass("w-[208px]");
+    expect(toolbar).toHaveClass("justify-end");
+    expect(toolbar).toHaveStyle({ width: "var(--sidebar-width)" });
   });
 
-  it("keeps the fixed tab clearance when the sidebar is hidden", () => {
+  it("keeps the controls clear of the traffic lights after toggling the sidebar", () => {
+    const { rerender } = render(<WindowToolbar />);
     sidebarState.state = "collapsed";
-
-    render(<WindowToolbar />);
+    rerender(<WindowToolbar />);
 
     const toolbar = document.querySelector('[data-slot="window-toolbar"]');
-    expect(toolbar).toHaveClass("justify-end", "w-[208px]");
-    expect(toolbar).not.toHaveClass("w-(--sidebar-width)");
+    expect(WINDOW_TOOLBAR_CLEARANCE).toBe(256);
+    expect(toolbar).toHaveClass("justify-end");
+    expect(toolbar).toHaveStyle({ width: "256px" });
   });
 
   it("opens workspace browsing history and navigates the active tab to a selected entry", () => {

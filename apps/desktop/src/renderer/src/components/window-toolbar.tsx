@@ -11,7 +11,6 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@multica/ui/components/ui/sidebar";
-import { cn } from "@multica/ui/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +26,7 @@ import { useNavigation } from "@multica/views/navigation";
 import { useTabHistory } from "@/hooks/use-tab-history";
 import { browsingHistoryKeyForUrl } from "@/stores/tab-store";
 
-export const WINDOW_TOOLBAR_CLEARANCE = 208;
+export const WINDOW_TOOLBAR_CLEARANCE = 256;
 const LONG_PRESS_DURATION_MS = 500;
 const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
 const MAX_HISTORY_MENU_ITEMS = 30;
@@ -174,6 +173,9 @@ function HistoryMenuItem({
 export function WindowToolbar() {
   const { state: sidebarState, isCompact } = useSidebar();
   const sidebarHidden = sidebarState === "collapsed" || isCompact;
+  const toolbarWidth: React.CSSProperties["width"] = sidebarHidden
+    ? WINDOW_TOOLBAR_CLEARANCE
+    : "var(--sidebar-width)";
   const {
     canGoBack,
     canGoForward,
@@ -243,11 +245,13 @@ export function WindowToolbar() {
   return (
     <div
       data-slot="window-toolbar"
-      className={cn(
-        "fixed left-0 top-0 z-30 flex h-12 shrink-0 items-center justify-end px-3 transition-[width] duration-200 ease-out motion-reduce:transition-none",
-        sidebarHidden ? "w-[208px]" : "w-(--sidebar-width)",
-      )}
-      style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+      className="fixed left-0 top-0 z-30 flex h-12 shrink-0 items-center justify-end px-3 transition-[width] duration-200 ease-out motion-reduce:transition-none"
+      style={
+        {
+          WebkitAppRegion: "drag",
+          width: toolbarWidth,
+        } as React.CSSProperties
+      }
     >
       <div
         className="flex items-center gap-1 pl-16"
