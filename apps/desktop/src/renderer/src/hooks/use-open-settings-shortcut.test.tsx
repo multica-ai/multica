@@ -33,6 +33,7 @@ function seedTabs() {
         activeTabId: "t1",
         recentTabIds: ["t1"],
         browsingHistory: ["/acme/issues"],
+        browsingHistoryTitles: {},
       },
     },
   });

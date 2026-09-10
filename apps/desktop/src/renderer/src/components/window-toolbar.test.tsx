@@ -8,9 +8,9 @@ const historyState = vi.hoisted(() => ({
   historyEntries: ["/acme/issues", "/acme/projects", "/acme/agents"],
   historyIndex: 1,
   browsingHistory: [
-    "/acme/settings",
-    "/acme/issues/issue-1",
-    "/acme/projects",
+    { url: "/acme/settings", title: "Settings" },
+    { url: "/acme/issues/issue-1", title: "MUL-1: Fix history" },
+    { url: "/acme/projects", title: "Projects" },
   ],
   goBack: vi.fn(),
   goForward: vi.fn(),
@@ -32,9 +32,9 @@ vi.mock("@multica/views/navigation", () => ({
 }));
 
 vi.mock("@multica/views/layout", () => ({
-  useTabPresentation: (url: string) => ({
+  useTabPresentation: (url: string, fallbackTitle?: string) => ({
     visual: { kind: "icon", icon: "Inbox" },
-    title: `Title ${url}`,
+    title: fallbackTitle ?? `Title ${url}`,
   }),
   ResourceLeadingVisual: () => <span aria-hidden />,
 }));
@@ -63,9 +63,9 @@ beforeEach(() => {
   ];
   historyState.historyIndex = 1;
   historyState.browsingHistory = [
-    "/acme/settings",
-    "/acme/issues/issue-1",
-    "/acme/projects",
+    { url: "/acme/settings", title: "Settings" },
+    { url: "/acme/issues/issue-1", title: "MUL-1: Fix history" },
+    { url: "/acme/projects", title: "Projects" },
   ];
   historyState.goBack.mockReset();
   historyState.goForward.mockReset();
@@ -101,37 +101,43 @@ describe("browsingHistoryForMenu", () => {
     expect(
       browsingHistoryForMenu(
         [
-          "/acme/issues/issue-2",
-          "/acme/issues?filter=mine",
-          "/acme/projects",
+          { url: "/acme/issues/issue-2", title: "Issue 2" },
+          { url: "/acme/issues?filter=mine", title: "Issues" },
+          { url: "/acme/projects", title: "Projects" },
         ],
         "/acme/issues",
       ),
-    ).toEqual(["/acme/issues/issue-2", "/acme/projects"]);
+    ).toEqual([
+      { url: "/acme/issues/issue-2", title: "Issue 2" },
+      { url: "/acme/projects", title: "Projects" },
+    ]);
   });
 
   it("excludes only the current Inbox issue while keeping other Inbox visits", () => {
     expect(
       browsingHistoryForMenu(
         [
-          "/acme/inbox?issue=issue-b",
-          "/acme/inbox?issue=issue-a",
-          "/acme/inbox",
-          "/acme/projects",
+          { url: "/acme/inbox?issue=issue-b", title: "Issue B" },
+          { url: "/acme/inbox?issue=issue-a", title: "Issue A" },
+          { url: "/acme/inbox", title: "Inbox" },
+          { url: "/acme/projects", title: "Projects" },
         ],
         "/acme/inbox?view=archived&issue=issue-b",
       ),
     ).toEqual([
-      "/acme/inbox?issue=issue-a",
-      "/acme/inbox",
-      "/acme/projects",
+      { url: "/acme/inbox?issue=issue-a", title: "Issue A" },
+      { url: "/acme/inbox", title: "Inbox" },
+      { url: "/acme/projects", title: "Projects" },
     ]);
   });
 
   it("bounds the recently viewed menu to thirty entries", () => {
     const entries = Array.from(
       { length: 60 },
-      (_, index) => `/acme/issues/issue-${index}`,
+      (_, index) => ({
+        url: `/acme/issues/issue-${index}`,
+        title: `Issue ${index}`,
+      }),
     );
     expect(browsingHistoryForMenu(entries, "/acme/settings")).toHaveLength(30);
   });
@@ -143,7 +149,12 @@ describe("WindowToolbar history controls", () => {
 
     const toolbar = document.querySelector('[data-slot="window-toolbar"]');
     expect(toolbar).toHaveClass("justify-end");
-    expect(toolbar).toHaveStyle({ width: "var(--sidebar-width)" });
+    expect(toolbar).toHaveStyle({
+      width:
+        "max(var(--sidebar-live-width, var(--sidebar-width)), 256px)",
+    });
+    expect(toolbar).toHaveAttribute("data-sidebar-resize-consumer");
+    expect(toolbar).not.toHaveClass("transition-[width]");
   });
 
   it("keeps the controls clear of the traffic lights after toggling the sidebar", () => {
@@ -162,9 +173,10 @@ describe("WindowToolbar history controls", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "History" }));
     expect(screen.getByText("Recently viewed")).toBeInTheDocument();
+    expect(screen.getByTitle("MUL-1: Fix history")).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("menuitem", { name: "Title /acme/issues/issue-1" }),
+      screen.getByRole("menuitem", { name: "MUL-1: Fix history" }),
     );
     expect(navigationState.push).toHaveBeenCalledWith(
       "/acme/issues/issue-1",
@@ -178,8 +190,8 @@ describe("WindowToolbar history controls", () => {
     historyState.historyEntries = ["/acme/issues"];
     historyState.historyIndex = 0;
     historyState.browsingHistory = [
-      "/acme/issues",
-      "/acme/issues/issue-1",
+      { url: "/acme/issues", title: "Issues" },
+      { url: "/acme/issues/issue-1", title: "MUL-1: Fix history" },
     ];
 
     render(<WindowToolbar />);
@@ -216,5 +228,31 @@ describe("WindowToolbar history controls", () => {
 
     fireEvent.keyDown(forward, { key: "ArrowDown" });
     expect(screen.getByText("Forward history")).toBeInTheDocument();
+  });
+
+  it("jumps to the selected Back history index", () => {
+    render(<WindowToolbar />);
+    const back = screen.getByRole("button", { name: "Go back" });
+
+    fireEvent.keyDown(back, { key: "ArrowDown" });
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Title /acme/issues" }),
+    );
+
+    expect(historyState.goToHistoryIndex).toHaveBeenCalledWith(0);
+  });
+
+  it("restores focus to the toolbar button when its menu closes", () => {
+    render(<WindowToolbar />);
+    const forward = screen.getByRole("button", { name: "Go forward" });
+    forward.focus();
+
+    fireEvent.keyDown(forward, { key: "ArrowDown" });
+    act(() => vi.runOnlyPendingTimers());
+    expect(screen.getAllByRole("menuitem")[0]).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    act(() => vi.runOnlyPendingTimers());
+
+    expect(forward).toHaveFocus();
   });
 });

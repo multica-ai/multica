@@ -1,9 +1,16 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
+  browsingHistoryKeyForUrl,
   useTabStore,
   useActiveBrowsingHistory,
+  useActiveBrowsingHistoryTitles,
   useActiveTabHistory,
 } from "@/stores/tab-store";
+
+export interface BrowsingHistoryEntry {
+  url: string;
+  title?: string;
+}
 
 /**
  * Shell back/forward for the active tab (MUL-4741 session architecture).
@@ -16,7 +23,16 @@ import {
  */
 export function useTabHistory() {
   const { historyIndex, historyLength, historyEntries } = useActiveTabHistory();
-  const browsingHistory = useActiveBrowsingHistory();
+  const browsingHistoryUrls = useActiveBrowsingHistory();
+  const browsingHistoryTitles = useActiveBrowsingHistoryTitles();
+  const browsingHistory = useMemo<BrowsingHistoryEntry[]>(
+    () =>
+      browsingHistoryUrls.map((url) => ({
+        url,
+        title: browsingHistoryTitles[browsingHistoryKeyForUrl(url)],
+      })),
+    [browsingHistoryTitles, browsingHistoryUrls],
+  );
 
   const canGoBack = historyIndex > 0;
   const canGoForward = historyIndex < historyLength - 1;

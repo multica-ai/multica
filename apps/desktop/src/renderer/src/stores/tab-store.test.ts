@@ -148,6 +148,9 @@ describe("useTabStore actions", () => {
       index: 0,
     });
     expect(s.byWorkspace.acme.browsingHistory).toEqual(["/acme/issues"]);
+    expect(s.byWorkspace.acme.browsingHistoryTitles).toEqual({
+      "/acme/issues": "Issues",
+    });
   });
 
   it("switchWorkspace without openPath restores the group's last active tab", () => {
@@ -179,6 +182,23 @@ describe("useTabStore actions", () => {
       (t) => t.id === s.byWorkspace.acme.activeTabId,
     );
     expect(activeTab?.url).toBe("/acme/issues");
+  });
+
+  it("records the URL of the tab actually restored by a cross-workspace open", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("butter");
+    store.navigateActiveSession("/butter/issues?filter=mine", {
+      replace: true,
+    });
+    store.switchWorkspace("acme");
+
+    store.switchWorkspace("butter", "/butter/issues");
+
+    const state = useTabStore.getState();
+    expect(getActiveTab(state)?.url).toBe("/butter/issues?filter=mine");
+    expect(state.byWorkspace.butter.browsingHistory[0]).toBe(
+      "/butter/issues?filter=mine",
+    );
   });
 
   it("switchWorkspace with openPath not matching any tab adds a new tab", () => {
@@ -487,6 +507,22 @@ describe("navigateActiveSession", () => {
       "/acme/issues/issue-1#comment-comment-1",
       "/acme/issues",
     ]);
+  });
+
+  it("persists the resolved title for a visited resource", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.navigateActiveSession("/acme/issues/issue-1");
+    const active = getActiveTab(useTabStore.getState())!;
+
+    store.updateTab(active.id, { title: "MUL-1: Fix history" });
+
+    expect(
+      useTabStore.getState().byWorkspace.acme.browsingHistoryTitles,
+    ).toEqual({
+      "/acme/issues": "Issues",
+      "/acme/issues/issue-1": "MUL-1: Fix history",
+    });
   });
 
   it("records each issue viewed inside Inbox without changing its replace-based session history", () => {
@@ -1326,6 +1362,10 @@ describe("migrateV4ToV5", () => {
       "/acme/issues",
       "/acme/issues/issue-1",
     ]);
+    expect(v5.byWorkspace.acme.browsingHistoryTitles).toEqual({
+      "/acme/issues/issue-1": "Issue",
+      "/acme/projects": "Projects",
+    });
   });
 });
 
@@ -1476,5 +1516,63 @@ describe("mergePersistedTabs (rehydration, MUL-4370)", () => {
       "/acme/inbox?issue=issue-a#comment-comment-1",
       "/acme/inbox",
     ]);
+  });
+
+  it("restores only titles belonging to valid browsing-history entries", () => {
+    const result = mergePersistedTabs(
+      {
+        activeWorkspaceSlug: "acme",
+        byWorkspace: {
+          acme: {
+            activeTabId: "t1",
+            tabs: [
+              persistedTab("/acme/issues/issue-1", {
+                title: "MUL-1: Fix history",
+              }),
+            ],
+            browsingHistory: [
+              "/acme/issues/issue-1",
+              "/acme/projects",
+            ],
+            browsingHistoryTitles: {
+              "/acme/issues/issue-1": "MUL-1: Fix history",
+              "/acme/projects": "Projects",
+              "/other/issues/issue-2": "Other workspace",
+              "/acme/agents": 7,
+            },
+          },
+        },
+      },
+      emptyState(),
+    );
+
+    expect(result.byWorkspace.acme.browsingHistoryTitles).toEqual({
+      "/acme/issues/issue-1": "MUL-1: Fix history",
+      "/acme/projects": "Projects",
+    });
+  });
+
+  it("backfills a known tab title when an older v5 payload has no title map", () => {
+    const result = mergePersistedTabs(
+      {
+        activeWorkspaceSlug: "acme",
+        byWorkspace: {
+          acme: {
+            activeTabId: "t1",
+            tabs: [
+              persistedTab("/acme/issues/issue-1", {
+                title: "MUL-1: Fix history",
+              }),
+            ],
+            browsingHistory: ["/acme/issues/issue-1"],
+          },
+        },
+      },
+      emptyState(),
+    );
+
+    expect(result.byWorkspace.acme.browsingHistoryTitles).toEqual({
+      "/acme/issues/issue-1": "MUL-1: Fix history",
+    });
   });
 });

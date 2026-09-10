@@ -23,7 +23,10 @@ import {
   useTabPresentation,
 } from "@multica/views/layout";
 import { useNavigation } from "@multica/views/navigation";
-import { useTabHistory } from "@/hooks/use-tab-history";
+import {
+  useTabHistory,
+  type BrowsingHistoryEntry,
+} from "@/hooks/use-tab-history";
 import { browsingHistoryKeyForUrl } from "@/stores/tab-store";
 
 export const WINDOW_TOOLBAR_CLEARANCE = 256;
@@ -139,25 +142,29 @@ export function historyIndicesForMenu(
 }
 
 export function browsingHistoryForMenu(
-  browsingHistory: string[],
+  browsingHistory: BrowsingHistoryEntry[],
   currentUrl: string | undefined,
-): string[] {
+): BrowsingHistoryEntry[] {
   const currentResource = currentUrl
     ? browsingHistoryKeyForUrl(currentUrl)
     : undefined;
   return browsingHistory
-    .filter((url) => browsingHistoryKeyForUrl(url) !== currentResource)
+    .filter(
+      (entry) => browsingHistoryKeyForUrl(entry.url) !== currentResource,
+    )
     .slice(0, MAX_HISTORY_MENU_ITEMS);
 }
 
 function HistoryMenuItem({
   url,
+  fallbackTitle,
   onSelect,
 }: {
   url: string;
+  fallbackTitle?: string;
   onSelect: () => void;
 }) {
-  const { visual, title } = useTabPresentation(url);
+  const { visual, title } = useTabPresentation(url, fallbackTitle);
 
   return (
     <DropdownMenuItem
@@ -165,7 +172,9 @@ function HistoryMenuItem({
       onClick={onSelect}
     >
       <ResourceLeadingVisual visual={visual} />
-      <span className="min-w-0 flex-1 truncate">{title}</span>
+      <span className="min-w-0 flex-1 truncate" title={title}>
+        {title}
+      </span>
     </DropdownMenuItem>
   );
 }
@@ -175,7 +184,7 @@ export function WindowToolbar() {
   const sidebarHidden = sidebarState === "collapsed" || isCompact;
   const toolbarWidth: React.CSSProperties["width"] = sidebarHidden
     ? WINDOW_TOOLBAR_CLEARANCE
-    : "var(--sidebar-width)";
+    : `max(var(--sidebar-live-width, var(--sidebar-width)), ${WINDOW_TOOLBAR_CLEARANCE}px)`;
   const {
     canGoBack,
     canGoForward,
@@ -188,10 +197,22 @@ export function WindowToolbar() {
   } = useTabHistory();
   const { push } = useNavigation();
   const [menu, setMenu] = useState<OpenHistoryMenu | null>(null);
+  const menuAnchorRef = useRef<HTMLElement | null>(null);
+  const menuContentRef = useRef<HTMLDivElement | null>(null);
 
   const openMenu = useCallback((mode: HistoryMenuMode, anchor: HTMLElement) => {
+    menuAnchorRef.current = anchor;
     setMenu({ mode, anchor });
   }, []);
+  useEffect(() => {
+    if (menu === null) return;
+    const focusTimer = setTimeout(() => {
+      menuContentRef.current
+        ?.querySelector<HTMLElement>('[role="menuitem"]')
+        ?.focus();
+    }, 0);
+    return () => clearTimeout(focusTimer);
+  }, [menu]);
   const openBackMenu = useCallback(
     (anchor: HTMLButtonElement) => openMenu("back", anchor),
     [openMenu],
@@ -217,6 +238,17 @@ export function WindowToolbar() {
         historyEntries[historyIndex],
       ),
     [browsingHistory, historyEntries, historyIndex],
+  );
+  const browsingHistoryTitles = useMemo(
+    () =>
+      new Map(
+        browsingHistory.flatMap((entry) =>
+          entry.title
+            ? [[browsingHistoryKeyForUrl(entry.url), entry.title] as const]
+            : [],
+        ),
+      ),
+    [browsingHistory],
   );
   const menuLabel =
     menu?.mode === "back"
@@ -245,7 +277,8 @@ export function WindowToolbar() {
   return (
     <div
       data-slot="window-toolbar"
-      className="fixed left-0 top-0 z-30 flex h-12 shrink-0 items-center justify-end px-3 transition-[width] duration-200 ease-out motion-reduce:transition-none"
+      data-sidebar-resize-consumer
+      className="fixed left-0 top-0 z-30 flex h-12 shrink-0 items-center justify-end px-3"
       style={
         {
           WebkitAppRegion: "drag",
@@ -254,7 +287,7 @@ export function WindowToolbar() {
       }
     >
       <div
-        className="flex items-center gap-1 pl-16"
+        className="flex items-center gap-1"
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
         <SidebarTrigger
@@ -344,26 +377,35 @@ export function WindowToolbar() {
         onOpenChange={(open) => {
           if (!open) setMenu(null);
         }}
+        onOpenChangeComplete={(open) => {
+          if (!open) menuAnchorRef.current?.focus();
+        }}
       >
         <DropdownMenuContent
+          ref={menuContentRef}
           align="start"
           anchor={menu?.anchor}
+          finalFocus={false}
           className="w-80 max-w-[calc(100vw-1rem)] motion-reduce:animate-none motion-reduce:transition-none"
         >
           <DropdownMenuGroup>
             <DropdownMenuLabel>{menuLabel}</DropdownMenuLabel>
             {menu?.mode === "all"
-              ? browsingMenuEntries.map((url) => (
+              ? browsingMenuEntries.map((entry) => (
                   <HistoryMenuItem
-                    key={url}
-                    url={url}
-                    onSelect={() => selectBrowsingHistory(url)}
+                    key={entry.url}
+                    url={entry.url}
+                    fallbackTitle={entry.title}
+                    onSelect={() => selectBrowsingHistory(entry.url)}
                   />
                 ))
               : menuIndices.map((index) => (
                   <HistoryMenuItem
                     key={`${index}:${historyEntries[index]}`}
                     url={historyEntries[index]}
+                    fallbackTitle={browsingHistoryTitles.get(
+                      browsingHistoryKeyForUrl(historyEntries[index]),
+                    )}
                     onSelect={() => selectHistoryIndex(index)}
                   />
                 ))}

@@ -40,6 +40,7 @@ function seedTabs(count: number, activeIndex = 1): void {
         activeTabId: `t${activeIndex}`,
         recentTabIds: [],
         browsingHistory: tabs.map((tab) => tab.url).reverse(),
+        browsingHistoryTitles: {},
       },
     },
   });

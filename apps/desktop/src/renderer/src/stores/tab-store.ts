@@ -122,6 +122,13 @@ export interface WorkspaceTabGroup {
    */
   browsingHistory: string[];
   /**
+   * Last resolved display title for each browsing-history resource key.
+   * Kept separately so the URL list stays backward-compatible with v5
+   * payloads while cold-start menus can render useful labels before query
+   * caches refill.
+   */
+  browsingHistoryTitles: Record<string, string>;
+  /**
    * Previously visited tabs of this group, most recent first. Never contains
    * `activeTabId`, never contains an id that is no longer in `tabs`.
    *
@@ -451,23 +458,45 @@ function prependBrowsingHistoryEntry(
   ].slice(0, BROWSING_HISTORY_MAX_ENTRIES);
 }
 
+function normalizedBrowsingHistoryTitle(title: unknown): string | undefined {
+  if (typeof title !== "string" || title.trim().length === 0) return undefined;
+  return title;
+}
+
+function sameStringRecord(
+  left: Record<string, string>,
+  right: Record<string, string>,
+): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every((key) => left[key] === right[key])
+  );
+}
+
+interface BrowsingVisitOptions {
+  replacedUrl?: string;
+  title?: string;
+}
+
 function withBrowsingVisit(
   group: WorkspaceTabGroup,
   slug: string,
   url: string,
-  replacedUrl?: string,
+  options: BrowsingVisitOptions = {},
 ): WorkspaceTabGroup {
   const clean = sanitizeTabPath(url);
   if (!clean || extractWorkspaceSlug(clean) !== slug) return group;
   const historyKey = browsingHistoryKeyForUrl(clean);
-  const replacedHistoryKey = replacedUrl
-    ? browsingHistoryKeyForUrl(replacedUrl)
+  const replacedHistoryKey = options.replacedUrl
+    ? browsingHistoryKeyForUrl(options.replacedUrl)
     : undefined;
   const preserveDistinctInboxVisit =
-    replacedUrl !== undefined &&
+    options.replacedUrl !== undefined &&
     replacedHistoryKey !== historyKey &&
     (inboxSelectionKeyForUrl(clean) !== null ||
-      inboxSelectionKeyForUrl(replacedUrl) !== null);
+      inboxSelectionKeyForUrl(options.replacedUrl) !== null);
   const previousEntries = replacedHistoryKey && !preserveDistinctInboxVisit
     ? group.browsingHistory.filter(
         (entry) => browsingHistoryKeyForUrl(entry) !== replacedHistoryKey,
@@ -477,9 +506,25 @@ function withBrowsingVisit(
     previousEntries,
     clean,
   );
-  return browsingHistory === group.browsingHistory
+  const knownTitle =
+    normalizedBrowsingHistoryTitle(options.title) ??
+    group.browsingHistoryTitles[historyKey] ??
+    (replacedHistoryKey
+      ? group.browsingHistoryTitles[replacedHistoryKey]
+      : undefined);
+  const browsingHistoryTitles: Record<string, string> = {};
+  for (const entry of browsingHistory) {
+    const entryKey = browsingHistoryKeyForUrl(entry);
+    const title =
+      entryKey === historyKey
+        ? knownTitle
+        : group.browsingHistoryTitles[entryKey];
+    if (title) browsingHistoryTitles[entryKey] = title;
+  }
+  return browsingHistory === group.browsingHistory &&
+    sameStringRecord(browsingHistoryTitles, group.browsingHistoryTitles)
     ? group
-    : { ...group, browsingHistory };
+    : { ...group, browsingHistory, browsingHistoryTitles };
 }
 
 function withActiveSessionVisit(
@@ -488,6 +533,44 @@ function withActiveSessionVisit(
 ): WorkspaceTabGroup {
   const active = group.tabs.find((tab) => tab.id === group.activeTabId);
   return active ? withBrowsingVisit(group, slug, active.url) : group;
+}
+
+function withBrowsingNavigation(
+  group: WorkspaceTabGroup,
+  slug: string,
+  current: TabSession,
+  nextUrl: string,
+  replace: boolean,
+): WorkspaceTabGroup {
+  const withOrigin = withBrowsingVisit(group, slug, current.url);
+  return withBrowsingVisit(withOrigin, slug, nextUrl, {
+    replacedUrl: replace ? current.url : undefined,
+  });
+}
+
+function withBrowsingHistoryTitle(
+  group: WorkspaceTabGroup,
+  url: string,
+  title: string,
+): WorkspaceTabGroup {
+  const normalizedTitle = normalizedBrowsingHistoryTitle(title);
+  if (!normalizedTitle) return group;
+  const historyKey = browsingHistoryKeyForUrl(url);
+  if (
+    !group.browsingHistory.some(
+      (entry) => browsingHistoryKeyForUrl(entry) === historyKey,
+    ) ||
+    group.browsingHistoryTitles[historyKey] === normalizedTitle
+  ) {
+    return group;
+  }
+  return {
+    ...group,
+    browsingHistoryTitles: {
+      ...group.browsingHistoryTitles,
+      [historyKey]: normalizedTitle,
+    },
+  };
 }
 
 function normalizeBrowsingHistory(value: unknown, slug: string): string[] {
@@ -503,6 +586,34 @@ function normalizeBrowsingHistory(value: unknown, slug: string): string[] {
     seenResources.add(resourceKey);
     result.push(clean);
     if (result.length === BROWSING_HISTORY_MAX_ENTRIES) break;
+  }
+  return result;
+}
+
+function normalizeBrowsingHistoryTitles(
+  value: unknown,
+  browsingHistory: string[],
+  tabs: TabSession[],
+): Record<string, string> {
+  const persistedTitles =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const tabTitles = new Map(
+    tabs.flatMap((tab) => {
+      const title = normalizedBrowsingHistoryTitle(tab.title);
+      return title
+        ? [[browsingHistoryKeyForUrl(tab.url), title] as const]
+        : [];
+    }),
+  );
+  const result: Record<string, string> = {};
+  for (const url of browsingHistory) {
+    const historyKey = browsingHistoryKeyForUrl(url);
+    const title =
+      normalizedBrowsingHistoryTitle(persistedTitles[historyKey]) ??
+      tabTitles.get(historyKey);
+    if (title) result[historyKey] = title;
   }
   return result;
 }
@@ -542,6 +653,7 @@ function reconcileGroup(
     tabs,
     activeTabId,
     browsingHistory: prev?.browsingHistory ?? [],
+    browsingHistoryTitles: prev?.browsingHistoryTitles ?? {},
     recentTabIds,
   };
 }
@@ -630,6 +742,7 @@ export const useTabStore = create<TabStore>()(
             reconcileGroup(null, [tab], tab.id),
             slug,
             seedPath,
+            { title: tab.title },
           );
           set({
             activeWorkspaceSlug: slug,
@@ -652,7 +765,8 @@ export const useTabStore = create<TabStore>()(
               const nextGroup = withBrowsingVisit(
                 reconcileGroup(existing, existing.tabs, match.id),
                 slug,
-                clean,
+                match.url,
+                { title: match.title },
               );
               set({
                 activeWorkspaceSlug: slug,
@@ -672,6 +786,7 @@ export const useTabStore = create<TabStore>()(
               ),
               slug,
               clean,
+              { title: tab.title },
             );
             set({
               activeWorkspaceSlug: slug,
@@ -708,6 +823,7 @@ export const useTabStore = create<TabStore>()(
             reconcileGroup(historyBase, group.tabs, existing.id),
             activeWorkspaceSlug,
             existing.url,
+            { title: existing.title },
           );
           set({
             byWorkspace: {
@@ -748,6 +864,7 @@ export const useTabStore = create<TabStore>()(
           ),
           activeWorkspaceSlug,
           clean,
+          { title: tab.title },
         );
         set({
           byWorkspace: {
@@ -778,6 +895,7 @@ export const useTabStore = create<TabStore>()(
           ),
           activeWorkspaceSlug,
           clean,
+          { title: tab.title },
         );
         set({
           byWorkspace: {
@@ -803,6 +921,7 @@ export const useTabStore = create<TabStore>()(
             reconcileGroup(group, [fresh], fresh.id),
             slug,
             fresh.url,
+            { title: fresh.title },
           );
           set({
             byWorkspace: {
@@ -856,15 +975,19 @@ export const useTabStore = create<TabStore>()(
         const { slug, group, index } = hit;
         const current = group.tabs[index];
         const next: TabSession = { ...current, ...patch };
-        if (next.title === current.title) {
-          return;
-        }
-        const nextTabs = [...group.tabs];
-        nextTabs[index] = next;
+        const titleChanged = next.title !== current.title;
+        const nextTabs = titleChanged ? [...group.tabs] : group.tabs;
+        if (titleChanged) nextTabs[index] = next;
+        const nextGroup = withBrowsingHistoryTitle(
+          titleChanged ? { ...group, tabs: nextTabs } : group,
+          next.url,
+          next.title,
+        );
+        if (!titleChanged && nextGroup === group) return;
         set({
           byWorkspace: {
             ...byWorkspace,
-            [slug]: { ...group, tabs: nextTabs },
+            [slug]: nextGroup,
           },
         });
       },
@@ -905,16 +1028,12 @@ export const useTabStore = create<TabStore>()(
         };
         const nextTabs = [...group.tabs];
         nextTabs[index] = next;
-        const historyBase = withBrowsingVisit(
+        const nextGroup = withBrowsingNavigation(
           { ...group, tabs: nextTabs },
           activeWorkspaceSlug,
-          current.url,
-        );
-        const nextGroup = withBrowsingVisit(
-          historyBase,
-          activeWorkspaceSlug,
+          current,
           clean,
-          replace ? current.url : undefined,
+          replace,
         );
         set({
           byWorkspace: {
@@ -1134,6 +1253,7 @@ export const useTabStore = create<TabStore>()(
               reconcileGroup(null, [fresh], fresh.id),
               fallbackSlug,
               fresh.url,
+              { title: fresh.title },
             );
             nextActive = fallbackSlug;
             changed = true;
@@ -1194,6 +1314,7 @@ export const useTabStore = create<TabStore>()(
               // the positional neighbour.
               recentTabIds: group.recentTabIds,
               browsingHistory: group.browsingHistory,
+              browsingHistoryTitles: group.browsingHistoryTitles,
               tabs: group.tabs.map((t) => ({
                 id: t.id,
                 url: t.url,
@@ -1291,6 +1412,10 @@ export function mergePersistedTabs<T extends PersistedTabState>(
       : tabs[0].id;
     // reconcileGroup filters the persisted MRU order down to live tab ids
     // (tabs dropped just above), drops the active tab from it, and dedupes.
+    const browsingHistory = normalizeBrowsingHistory(
+      pGroup.browsingHistory,
+      slug,
+    );
     byWorkspace[slug] = reconcileGroup(
       {
         tabs,
@@ -1298,9 +1423,11 @@ export function mergePersistedTabs<T extends PersistedTabState>(
         recentTabIds: Array.isArray(pGroup.recentTabIds)
           ? pGroup.recentTabIds.filter((id) => typeof id === "string")
           : [],
-        browsingHistory: normalizeBrowsingHistory(
-          pGroup.browsingHistory,
-          slug,
+        browsingHistory,
+        browsingHistoryTitles: normalizeBrowsingHistoryTitles(
+          pGroup.browsingHistoryTitles,
+          browsingHistory,
+          tabs,
         ),
       },
       tabs,
@@ -1355,10 +1482,12 @@ function setHistoryIndex(
   };
   const nextTabs = [...group.tabs];
   nextTabs[index] = next;
-  const nextGroup = withBrowsingVisit(
+  const nextGroup = withBrowsingNavigation(
     { ...group, tabs: nextTabs },
     activeWorkspaceSlug,
+    current,
     url,
+    false,
   );
   set({
     byWorkspace: {
@@ -1457,6 +1586,7 @@ interface V4Persisted {
 
 interface V5PersistedGroup extends V4PersistedGroup {
   browsingHistory: string[];
+  browsingHistoryTitles?: Record<string, string>;
 }
 
 interface V5Persisted {
@@ -1485,6 +1615,14 @@ export function migrateV4ToV5(v4: V4Persisted): V5Persisted {
     byWorkspace[slug] = {
       ...group,
       browsingHistory: normalizeBrowsingHistory(candidates, slug),
+      browsingHistoryTitles: Object.fromEntries(
+        group.tabs.flatMap((tab) => {
+          const title = normalizedBrowsingHistoryTitle(tab.title);
+          return title
+            ? [[browsingHistoryKeyForUrl(tab.url), title] as const]
+            : [];
+        }),
+      ),
     };
   }
   return {
@@ -1646,6 +1784,7 @@ export function useActiveTabHistory(): {
 }
 
 const EMPTY_HISTORY_ENTRIES: string[] = [];
+const EMPTY_BROWSING_HISTORY_TITLES: Record<string, string> = {};
 
 /** Workspace browsing history shared by all tabs, newest first. */
 export function useActiveBrowsingHistory(): string[] {
@@ -1654,6 +1793,17 @@ export function useActiveBrowsingHistory(): string[] {
     return (
       s.byWorkspace[s.activeWorkspaceSlug]?.browsingHistory ??
       EMPTY_HISTORY_ENTRIES
+    );
+  });
+}
+
+/** Persisted display-title fallbacks keyed by browsing-history resource. */
+export function useActiveBrowsingHistoryTitles(): Record<string, string> {
+  return useTabStore((s) => {
+    if (!s.activeWorkspaceSlug) return EMPTY_BROWSING_HISTORY_TITLES;
+    return (
+      s.byWorkspace[s.activeWorkspaceSlug]?.browsingHistoryTitles ??
+      EMPTY_BROWSING_HISTORY_TITLES
     );
   });
 }

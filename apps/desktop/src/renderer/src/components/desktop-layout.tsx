@@ -63,31 +63,44 @@ function useNativeNavigationGestures() {
 
 
 // The main area's top bar doubles as a window drag region. When the sidebar
-// is not occupying main-flow width, leave room for the fixed window toolbar
-// so tabs do not land beneath the traffic lights / navigation controls.
+// is not occupying enough main-flow width, leave the remainder here so tabs
+// do not land beneath the traffic lights / navigation controls. The matching
+// 200ms transition cancels the sidebar gap's movement during toggle; live
+// resize previews disable it through data-sidebar-resize-consumer.
 function MainTopBar() {
   const { state, isCompact } = useSidebar();
   const sidebarHidden = state === "collapsed" || isCompact;
+  const toolbarClearance: React.CSSProperties["paddingLeft"] = sidebarHidden
+    ? WINDOW_TOOLBAR_CLEARANCE
+    : `max(0px, calc(${WINDOW_TOOLBAR_CLEARANCE}px - var(--sidebar-live-width, var(--sidebar-width))))`;
 
   return (
-    <motion.header
-      animate={{ paddingLeft: sidebarHidden ? WINDOW_TOOLBAR_CLEARANCE : 0 }}
-      className={cn("relative shrink-0 flex items-center gap-2", TOP_BAR_HEIGHT_CLASS)}
-      initial={false}
-      transition={toolbarMotion}
+    <header
+      data-slot="main-top-bar"
+      data-sidebar-resize-consumer
+      className={cn(
+        "relative shrink-0 flex items-center gap-2 transition-[padding-left] duration-200 ease-out motion-reduce:transition-none",
+        TOP_BAR_HEIGHT_CLASS,
+      )}
+      style={{ paddingLeft: toolbarClearance }}
     >
-      <motion.div
+      <div
         aria-hidden
-        animate={{ left: sidebarHidden ? WINDOW_TOOLBAR_CLEARANCE : 0 }}
         className="absolute inset-y-0 right-0"
-        initial={false}
-        transition={toolbarMotion}
-        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+        style={
+          {
+            left: toolbarClearance,
+            WebkitAppRegion: "drag",
+          } as React.CSSProperties
+        }
       />
-      <div className="relative z-10 flex h-full min-w-0 max-w-full items-center">
+      <div
+        data-slot="main-top-bar-content"
+        className="relative z-10 flex h-full min-w-0 max-w-full items-center"
+      >
         <TabBar />
       </div>
-    </motion.header>
+    </header>
   );
 }
 
