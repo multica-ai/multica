@@ -163,13 +163,16 @@ func (q *Queries) RevokePersonalAccessToken(ctx context.Context, arg RevokePerso
 	return token_hash, err
 }
 
-const updatePersonalAccessTokenLastUsed = `-- name: UpdatePersonalAccessTokenLastUsed :exec
+const updatePersonalAccessTokensLastUsed = `-- name: UpdatePersonalAccessTokensLastUsed :exec
 UPDATE personal_access_token
 SET last_used_at = now()
-WHERE id = $1
+WHERE id = ANY($1::uuid[])
 `
 
-func (q *Queries) UpdatePersonalAccessTokenLastUsed(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, updatePersonalAccessTokenLastUsed, id)
+// Batch last_used_at refresh, called by the background PATLastUsedRecorder.
+// now() records flush time, not exact use time; the ~30s flush window makes
+// the skew irrelevant for a display-only timestamp.
+func (q *Queries) UpdatePersonalAccessTokensLastUsed(ctx context.Context, ids []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, updatePersonalAccessTokensLastUsed, ids)
 	return err
 }

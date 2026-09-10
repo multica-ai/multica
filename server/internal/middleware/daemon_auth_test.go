@@ -28,7 +28,7 @@ func TestDaemonAuth_DaemonTokenCacheHit(t *testing.T) {
 	}, auth.AuthCacheTTL)
 
 	var gotWS, gotDaemon, gotPath string
-	mw := DaemonAuth(nil, nil, cache, nil) // nil queries — only safe on cache hit
+	mw := DaemonAuth(nil, nil, cache, nil, auth.NoopPATLastUsedRecorder{}) // nil queries — only safe on cache hit
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotWS = DaemonWorkspaceIDFromContext(r.Context())
 		gotDaemon = DaemonIDFromContext(r.Context())
@@ -67,7 +67,7 @@ func TestDaemonAuth_PATCacheHit(t *testing.T) {
 	cache.Set(context.Background(), hash, "cached-user-id", auth.AuthCacheTTL)
 
 	var gotUserID, gotPath string
-	mw := DaemonAuth(nil, cache, nil, nil)
+	mw := DaemonAuth(nil, cache, nil, nil, auth.NoopPATLastUsedRecorder{})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUserID = r.Header.Get("X-User-ID")
 		gotPath = DaemonAuthPathFromContext(r.Context())
@@ -91,7 +91,7 @@ func TestDaemonAuth_PATCacheHit(t *testing.T) {
 }
 
 func TestDaemonAuth_MissingAuth(t *testing.T) {
-	mw := DaemonAuth(nil, nil, nil, nil)
+	mw := DaemonAuth(nil, nil, nil, nil, auth.NoopPATLastUsedRecorder{})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next must not be called")
 	}))
@@ -129,7 +129,7 @@ func TestDaemonAuth_StripsClientSuppliedActorSource(t *testing.T) {
 	}, auth.AuthCacheTTL)
 
 	var gotActorSource string
-	mw := DaemonAuth(nil, nil, cache, nil)
+	mw := DaemonAuth(nil, nil, cache, nil, auth.NoopPATLastUsedRecorder{})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotActorSource = r.Header.Get("X-Actor-Source")
 		w.WriteHeader(http.StatusOK)
@@ -167,7 +167,7 @@ func TestDaemonAuth_StripsForgedAgentIdentityHeaders(t *testing.T) {
 	}, auth.AuthCacheTTL)
 
 	var gotAgentID, gotTaskID string
-	mw := DaemonAuth(nil, nil, cache, nil)
+	mw := DaemonAuth(nil, nil, cache, nil, auth.NoopPATLastUsedRecorder{})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAgentID = r.Header.Get("X-Agent-ID")
 		gotTaskID = r.Header.Get("X-Task-ID")
@@ -190,7 +190,7 @@ func TestDaemonAuth_StripsForgedAgentIdentityHeaders(t *testing.T) {
 }
 
 func TestDaemonAuth_InvalidMDT_NilQueries(t *testing.T) {
-	mw := DaemonAuth(nil, nil, nil, nil) // no caches, no DB
+	mw := DaemonAuth(nil, nil, nil, nil, auth.NoopPATLastUsedRecorder{}) // no caches, no DB
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next must not be called")
 	}))
@@ -209,7 +209,7 @@ func TestDaemonAuth_InvalidMDT_NilQueries(t *testing.T) {
 // through to the mul_/JWT paths (an mcn_ string would never match a
 // valid PAT or JWT, but failing closed makes the contract explicit).
 func TestDaemonAuth_MCN_NoVerifierConfigured(t *testing.T) {
-	mw := DaemonAuth(nil, nil, nil, nil)
+	mw := DaemonAuth(nil, nil, nil, nil, auth.NoopPATLastUsedRecorder{})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next must not be called when verifier is unconfigured")
 	}))
@@ -240,7 +240,7 @@ func TestDaemonAuth_MCN_ValidTokenSetsUserID(t *testing.T) {
 	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
 
 	var gotUser, gotPath, gotActorSource string
-	mw := DaemonAuth(nil, nil, nil, verifier)
+	mw := DaemonAuth(nil, nil, nil, verifier, auth.NoopPATLastUsedRecorder{})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUser = r.Header.Get("X-User-ID")
 		gotPath = DaemonAuthPathFromContext(r.Context())
@@ -283,7 +283,7 @@ func TestDaemonAuth_MCN_FleetSaysInvalid(t *testing.T) {
 	defer srv.Close()
 
 	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
-	mw := DaemonAuth(nil, nil, nil, verifier)
+	mw := DaemonAuth(nil, nil, nil, verifier, auth.NoopPATLastUsedRecorder{})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next must not be called when fleet says invalid")
 	}))
@@ -309,7 +309,7 @@ func TestDaemonAuth_MCN_FleetUnreachable(t *testing.T) {
 	defer srv.Close()
 
 	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
-	mw := DaemonAuth(nil, nil, nil, verifier)
+	mw := DaemonAuth(nil, nil, nil, verifier, auth.NoopPATLastUsedRecorder{})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next must not be called when fleet is unavailable")
 	}))
@@ -348,7 +348,7 @@ func TestDaemonAuth_MCN_OwnerNotInLocalDB(t *testing.T) {
 
 	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
 
-	mw := DaemonAuth(queries, nil, nil, verifier)
+	mw := DaemonAuth(queries, nil, nil, verifier, auth.NoopPATLastUsedRecorder{})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next must not be called when owner_id has no local user")
 	}))

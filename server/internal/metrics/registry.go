@@ -22,6 +22,7 @@ type RegistryOptions struct {
 
 type Registry struct {
 	Gatherer     prometheus.Gatherer
+	Registerer   prometheus.Registerer
 	HTTP         *HTTPMetrics
 	Business     *BusinessMetrics
 	ChannelMedia *ChannelMediaReconcilerMetrics
@@ -71,6 +72,7 @@ func NewRegistry(opts RegistryOptions) *Registry {
 
 	return &Registry{
 		Gatherer:     reg,
+		Registerer:   reg,
 		HTTP:         httpMetrics,
 		Business:     businessMetrics,
 		ChannelMedia: channelMedia,
