@@ -17,7 +17,6 @@
     "editor": {
       "create_title": "New status",
       "edit_title": "Edit status",
-      "behavior_hint": "This status belongs to {{category}}. It does not inherit built-in parking, review, or failure recovery behavior.",
       "name": "Name",
       "name_placeholder": "e.g. Code Review",
       "key_hint": "Referred to as {{key}} by the API and the CLI.",

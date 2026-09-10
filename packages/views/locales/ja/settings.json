@@ -17,7 +17,6 @@
     "editor": {
       "create_title": "新しいステータス",
       "edit_title": "ステータスを編集",
-      "behavior_hint": "{{category}} に属します。組み込み状態の保留・レビュー・失敗回復の動作は継承しません。",
       "name": "名前",
       "name_placeholder": "例: Code Review",
       "key_hint": "API と CLI では {{key}} として参照されます。",

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { IssueStatusEntry } from "@multica/core/types";
 import en from "../../locales/en/settings.json";
 import { IssueStatusesTab } from "./issue-statuses-tab";
@@ -87,6 +87,29 @@ afterEach(() => {
 });
 
 describe("IssueStatusesTab", () => {
+  it("keeps the create dialog concise and category choices text-only", async () => {
+    catalog = [BUILT_IN_IN_REVIEW];
+    render(<IssueStatusesTab />);
+    fireEvent.click(screen.getByLabelText(
+      `${en.issue_statuses.add}: ${en.issue_statuses.category_labels.started}`,
+    ));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByText(/inherit|parking|recovery/i)).toBeNull();
+    expect(within(dialog).getByLabelText(en.issue_statuses.editor.name)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(en.issue_statuses.editor.description)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", {
+      name: en.issue_statuses.editor.color,
+    }).querySelector("svg")).not.toBeNull();
+    const category = within(dialog).getByRole("combobox");
+    // The chevron is a selector affordance, not a status glyph.
+    expect(category.querySelector("svg:not(.lucide-chevron-down)")).toBeNull();
+    fireEvent.click(category);
+    for (const option of await screen.findAllByRole("option")) {
+      expect(option.querySelector("svg:not(.lucide-check)")).toBeNull();
+    }
+  });
+
   // Creation answers to workspace role alone since MUL-6643 removed the
   // rollout flag; an owner gets the affordance on every deployment.
   it("offers status creation to an owner", () => {

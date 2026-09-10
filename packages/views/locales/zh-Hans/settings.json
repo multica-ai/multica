@@ -17,7 +17,6 @@
     "editor": {
       "create_title": "新建状态",
       "edit_title": "编辑状态",
-      "behavior_hint": "此状态属于 {{category}}，不继承内置状态的停放、验收或失败恢复行为。",
       "name": "名称",
       "name_placeholder": "例如：Code Review",
       "key_hint": "API 和 CLI 中通过 {{key}} 引用。",

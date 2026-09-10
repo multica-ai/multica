@@ -55,7 +55,6 @@ import { Switch } from "@multica/ui/components/ui/switch";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -490,12 +489,7 @@ function StatusEditorDialog({
 
   const categoryItems = ALL_STATUSES.map((c) => ({
     value: c,
-    label: (
-      <span className="flex items-center gap-2">
-        <StatusIcon status={c} category={c} className="size-3.5" />
-        {t(($) => $.issue_statuses.category_labels[c])}
-      </span>
-    ),
+    label: t(($) => $.issue_statuses.category_labels[c]),
   }));
 
   useEffect(() => {
@@ -574,11 +568,6 @@ function StatusEditorDialog({
                 ? t(($) => $.issue_statuses.editor.edit_title)
                 : t(($) => $.issue_statuses.editor.create_title)}
             </DialogTitle>
-            <DialogDescription>
-              {t(($) => $.issue_statuses.editor.behavior_hint, {
-                category: t(($) => $.issue_statuses.category_labels[draft.category]),
-              })}
-            </DialogDescription>
           </DialogHeader>
           <div className="space-y-5 py-2">
             <div className="space-y-2">
@@ -607,9 +596,9 @@ function StatusEditorDialog({
               )}
             </div>
             <div className="space-y-2">
-              <FieldLabel>{t(($) => $.issue_statuses.editor.category)}</FieldLabel>
-              {/* Immutable after creation: changing it would silently regroup
-                  every issue already on this status. */}
+              <FieldLabel htmlFor="status-category">{t(($) => $.issue_statuses.editor.category)}</FieldLabel>
+              {/* Immutable after creation: changing it would alter the
+                  lifecycle of every issue already on this status. */}
               <Select
                 items={categoryItems}
                 value={draft.category}
@@ -619,7 +608,7 @@ function StatusEditorDialog({
                 }
                 disabled={Boolean(status)}
               >
-                <SelectTrigger>
+                <SelectTrigger id="status-category">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -667,7 +656,12 @@ function StatusEditorDialog({
                     aria-label={t(($) => $.issue_statuses.editor.color)}
                     className="flex h-9 items-center gap-2.5 rounded-md border border-surface-border px-2.5 transition-colors hover:bg-surface-hover"
                   >
-                    <span className="size-5 rounded-full" style={{ backgroundColor: draft.color }} />
+                    <StatusIcon
+                      status={status?.key ?? ""}
+                      category={draft.category}
+                      color={draft.color}
+                      className="size-5"
+                    />
                     <span className="font-mono text-caption uppercase text-muted-foreground">
                       {draft.color}
                     </span>

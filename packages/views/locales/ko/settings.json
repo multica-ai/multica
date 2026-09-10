@@ -17,7 +17,6 @@
     "editor": {
       "create_title": "새 상태",
       "edit_title": "상태 편집",
-      "behavior_hint": "{{category}}에 속합니다. 기본 상태의 보류, 검토 또는 실패 복구 동작은 상속하지 않습니다.",
       "name": "이름",
       "name_placeholder": "예: Code Review",
       "key_hint": "API와 CLI에서는 {{key}}로 참조합니다.",
