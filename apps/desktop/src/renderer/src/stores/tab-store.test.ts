@@ -468,6 +468,24 @@ describe("navigateActiveSession", () => {
     ]);
   });
 
+  it("records both sides of a navigation when upgrading from an empty browsing history", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const group = useTabStore.getState().byWorkspace.acme;
+    useTabStore.setState({
+      byWorkspace: {
+        acme: { ...group, browsingHistory: [] },
+      },
+    });
+
+    store.navigateActiveSession("/acme/issues/issue-1");
+
+    expect(useTabStore.getState().byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/issues/issue-1",
+      "/acme/issues",
+    ]);
+  });
+
   it("replaces an issue UUID visit with its canonical identifier URL", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");

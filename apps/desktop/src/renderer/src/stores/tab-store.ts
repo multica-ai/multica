@@ -448,6 +448,14 @@ function withBrowsingVisit(
     : { ...group, browsingHistory };
 }
 
+function withActiveSessionVisit(
+  group: WorkspaceTabGroup,
+  slug: string,
+): WorkspaceTabGroup {
+  const active = group.tabs.find((tab) => tab.id === group.activeTabId);
+  return active ? withBrowsingVisit(group, slug, active.url) : group;
+}
+
 function normalizeBrowsingHistory(value: unknown, slug: string): string[] {
   if (!Array.isArray(value)) return [];
   const result: string[] = [];
@@ -658,8 +666,12 @@ export const useTabStore = create<TabStore>()(
         const key = resourceKeyForUrl(clean);
         const existing = group.tabs.find((t) => t.resourceKey === key);
         if (existing) {
+          const historyBase = withActiveSessionVisit(
+            group,
+            activeWorkspaceSlug,
+          );
           const nextGroup = withBrowsingVisit(
-            reconcileGroup(group, group.tabs, existing.id),
+            reconcileGroup(historyBase, group.tabs, existing.id),
             activeWorkspaceSlug,
             existing.url,
           );
@@ -690,9 +702,13 @@ export const useTabStore = create<TabStore>()(
           tab,
           ...group.tabs.slice(insertAt),
         ];
+        const historyBase = withActiveSessionVisit(
+          group,
+          activeWorkspaceSlug,
+        );
         const nextGroup = withBrowsingVisit(
           reconcileGroup(
-            group,
+            historyBase,
             nextTabs,
             opts?.activate === true ? tab.id : group.activeTabId,
           ),
@@ -716,8 +732,16 @@ export const useTabStore = create<TabStore>()(
         if (!group) return "";
 
         const tab = makeSession(clean, title);
+        const historyBase = withActiveSessionVisit(
+          group,
+          activeWorkspaceSlug,
+        );
         const nextGroup = withBrowsingVisit(
-          reconcileGroup(group, [...group.tabs, tab], group.activeTabId),
+          reconcileGroup(
+            historyBase,
+            [...group.tabs, tab],
+            group.activeTabId,
+          ),
           activeWorkspaceSlug,
           clean,
         );
@@ -847,8 +871,13 @@ export const useTabStore = create<TabStore>()(
         };
         const nextTabs = [...group.tabs];
         nextTabs[index] = next;
-        const nextGroup = withBrowsingVisit(
+        const historyBase = withBrowsingVisit(
           { ...group, tabs: nextTabs },
+          activeWorkspaceSlug,
+          current.url,
+        );
+        const nextGroup = withBrowsingVisit(
+          historyBase,
           activeWorkspaceSlug,
           clean,
           replace ? current.url : undefined,
