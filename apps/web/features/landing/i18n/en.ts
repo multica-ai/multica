@@ -294,6 +294,29 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.43",
+        date: "2026-09-10",
+        title: "Native Lark group replies, truer usage numbers, truncated tool output notices, and smoother run logs",
+        changes: [],
+        features: [
+          "Set, replace, or clear an agent's conversation starters from the command line.",
+          "Run details now say when a tool output only kept its beginning.",
+        ],
+        improvements: [
+          "Several agents running on one Issue no longer slow the page down.",
+          "The homepage now shows Antigravity among the agents Multica supports.",
+        ],
+        fixes: [
+          "In ordinary Lark groups, a reply quotes your question and mentions you.",
+          "Several people asking at once no longer get the wrong mention.",
+          "Analytics and the command line tell unreported usage apart from real zero spend.",
+          "Partial usage numbers are marked as a lower bound.",
+          "A task still starts when the Codex environment cannot be prepared.",
+          "Agent run cards in an Issue are ordered by when they actually appeared.",
+          "A dialog with many options scrolls, and its save button stays reachable.",
+        ],
+      },
+      {
         version: "0.4.42",
         date: "2026-09-09",
         title: "Agent runs inside comment threads, an Issue thread outline, more reliable channel replies, and steadier search in large workspaces",
