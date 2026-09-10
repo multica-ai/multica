@@ -115,7 +115,7 @@ export function useUpdateWorkspaceMcpServer(wsId: string) {
         queryClient.invalidateQueries({ queryKey: workspaceKeys.mcpServers(wsId) }),
         // Assignments include the library entry's name and transport, so every
         // agent's cached projection may change when the entry is updated.
-        queryClient.invalidateQueries({ queryKey: ["agents"] }),
+        queryClient.invalidateQueries({ queryKey: workspaceKeys.agentMcpServersAll(wsId) }),
       ]),
   });
 }
@@ -128,16 +128,16 @@ export function useDeleteWorkspaceMcpServer(wsId: string) {
       queryClient.invalidateQueries({ queryKey: workspaceKeys.mcpServers(wsId) });
       // Deleting a library entry drops it from every agent that had it, so
       // no agent's assignment list can be trusted afterwards.
-      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.agentMcpServersAll(wsId) });
     },
   });
 }
 
 /**
- * Assignment writes all return the agent's resulting list, so the cache is
- * updated from the server's answer rather than a guess.
+ * Refetch the agent's assignments after a write, including ambiguous failures.
  */
 function useAgentMcpMutation<TVariables>(
+  wsId: string,
   agentId: string,
   mutationFn: (variables: TVariables) => Promise<unknown>,
 ) {
@@ -145,21 +145,21 @@ function useAgentMcpMutation<TVariables>(
   return useMutation({
     mutationFn,
     onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: ["agents", agentId, "mcp-servers"] }),
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.agentMcpServers(wsId, agentId) }),
   });
 }
 
-export function useAddAgentMcpServer(agentId: string) {
-  return useAgentMcpMutation(agentId, (serverId: string) =>
+export function useAddAgentMcpServer(wsId: string, agentId: string) {
+  return useAgentMcpMutation(wsId, agentId, (serverId: string) =>
     api.addAgentMcpServer(agentId, serverId));
 }
 
-export function useSetAgentMcpServerEnabled(agentId: string) {
-  return useAgentMcpMutation(agentId, ({ serverId, enabled }: { serverId: string; enabled: boolean }) =>
+export function useSetAgentMcpServerEnabled(wsId: string, agentId: string) {
+  return useAgentMcpMutation(wsId, agentId, ({ serverId, enabled }: { serverId: string; enabled: boolean }) =>
     api.setAgentMcpServerEnabled(agentId, serverId, enabled));
 }
 
-export function useRemoveAgentMcpServer(agentId: string) {
-  return useAgentMcpMutation(agentId, (serverId: string) =>
+export function useRemoveAgentMcpServer(wsId: string, agentId: string) {
+  return useAgentMcpMutation(wsId, agentId, (serverId: string) =>
     api.removeAgentMcpServer(agentId, serverId));
 }
