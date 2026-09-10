@@ -205,6 +205,9 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	if err := os.MkdirAll(codexHome, 0o755); err != nil {
 		return fmt.Errorf("create codex-home dir: %w", err)
 	}
+	if err := syncCodexNativeConfig(codexHome, sharedHome); err != nil {
+		return fmt.Errorf("sync codex native configuration: %w", err)
+	}
 
 	// Give the task its own local sessions/ directory instead of symlinking the
 	// shared ~/.codex/sessions in — a huge shared history would otherwise stall
@@ -1021,7 +1024,13 @@ func materialiseInCodexHome(codexHome, relPath, src, key string) error {
 			return fmt.Errorf("create %s directory %s: %w", key, dir, err)
 		}
 	}
-	if _, err := root.Lstat(relPath); err == nil {
+	mode := os.FileMode(0o644)
+	if info, err := root.Lstat(relPath); err == nil {
+		// A reference may alias a private native instruction or role copy.
+		// Refresh regular files without broadening their existing permissions.
+		if info.Mode().IsRegular() {
+			mode &= info.Mode().Perm()
+		}
 		if err := root.Remove(relPath); err != nil {
 			return fmt.Errorf("remove stale %s copy %s: %w", key, relPath, err)
 		}
@@ -1035,7 +1044,7 @@ func materialiseInCodexHome(codexHome, relPath, src, key string) error {
 	}
 	defer in.Close()
 
-	out, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	out, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return fmt.Errorf("create %s copy %s: %w", key, relPath, err)
 	}
