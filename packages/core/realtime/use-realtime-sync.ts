@@ -687,10 +687,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: chatKeys.messagesAll() });
   qc.invalidateQueries({ queryKey: chatKeys.messagesPageAll() });
   qc.invalidateQueries({ queryKey: chatKeys.pendingTaskAll() });
-  // `task-messages` is deliberately absent: the connect handler in
-  // `useRealtimeSync` owns that repair and runs on reconnects too, so
-  // repeating it here only issued the same unpaginated transcript request a
-  // second time (MUL-7227).
+  qc.invalidateQueries({ queryKey: chatKeys.taskMessagesAll() });
   // A chat:cancel_finalized broadcast missed while disconnected is exactly
   // what the durable draft-restore rows exist for (#5219) — re-pull them so
   // a mounted composer recovers the prompt without a remount.
@@ -1748,49 +1745,6 @@ export function useRealtimeSync(
       timers.clear();
     };
   }, [ws, qc, authStore, onToast]);
-
-  // Connect -> repair timelines read before this client was subscribed.
-  //
-  // `taskMessagesOptions` holds `staleTime: Infinity` and is otherwise kept
-  // current by `task:message` frames, so a row persisted between the HTTP read
-  // and the socket coming up is in neither: the response was snapshotted
-  // before it existed, and its broadcast went out while nobody here was
-  // listening. Removing the focus refetch (MUL-7227) took away the accident
-  // that used to paper over that, so it is repaired where it happens instead.
-  //
-  // Cancel first, and do not settle for invalidating. Invalidation is a no-op
-  // against a fetch that is already in flight — which is precisely the read
-  // this is here to distrust, since it started before the socket was live.
-  // Cancelling ends it and lets the refetch below start a read that cannot
-  // predate the connection. The request already on the wire is spent either
-  // way; what this decides is whether its answer is allowed to be the one we
-  // keep.
-  //
-  // This is the only owner of that repair. `onConnect` fires for reconnects
-  // too, so `invalidateWorkspaceScopedQueries` deliberately leaves
-  // `task-messages` alone — two owners meant a reconnect issued the same
-  // request twice, one behind the other, which React Query has no reason to
-  // dedupe.
-  useEffect(() => {
-    if (!ws) return;
-    return ws.onConnect(() => {
-      // `type: "active"` on both, and not by default: `refetchQueries` reads
-      // everything it matches, unlike `invalidateQueries`. These keys carry no
-      // workspace and sit in the cache for a `gcTime` of ten minutes, so the
-      // default would re-download the full transcript of every run left behind
-      // by an old page or an old workspace, on every connection — the
-      // unpaginated traffic this change exists to stop. A query nobody is
-      // watching needs no repair: `refetchOnMount: "always"` reads it fresh if
-      // it is ever mounted again.
-      const active = { queryKey: chatKeys.taskMessagesAll(), type: "active" } as const;
-      void qc
-        .cancelQueries(active)
-        .then(() => qc.refetchQueries(active))
-        .catch(() => {
-          // a repair that could not run leaves the next mount to fetch
-        });
-    });
-  }, [ws, qc]);
 
   // Reconnect -> refetch all data to recover missed events
   useEffect(() => {

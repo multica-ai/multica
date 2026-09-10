@@ -17,8 +17,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { cn } from "@multica/ui/lib/utils";
 import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
-import { buildTimelineStructure, redactTimelineItems, type TimelineItem } from "../../common/task-transcript/build-timeline";
-import { buildSteps, groupSteps, isCallStep, isGroupRow, redactTraceRow, redactTraceStep, type TraceRow } from "../../common/task-transcript/build-steps";
+import { buildTimeline } from "../../common/task-transcript/build-timeline";
+import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceRow } from "../../common/task-transcript/build-steps";
 import { traceEventSummary, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
 import { redactSecrets } from "../../common/task-transcript/redact";
 import { ReadonlyContent } from "../../editor";
@@ -31,12 +31,6 @@ import { useStatusLabel } from "./task-run-labels";
 import { commentRunOutput, isActiveCommentRun, showCommentRunInHeader, type CommentRun } from "./comment-runs";
 
 import { useRunAnimationVisibility, useRunDisclosureMotion } from "./use-run-comment-motion";
-
-/** Stable empty timeline, so a closed dialog does not re-render on every flush. */
-const NO_ITEMS: TimelineItem[] = [];
-
-/** Stable empty rows, so a collapsed disclosure does the same. */
-const NO_ROWS: TraceRow[] = [];
 
 export function useInlineCommentRunState() {
   const [expanded, setExpanded] = useState(false);
@@ -83,31 +77,10 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   // Historical, collapsed runs still don't fetch transcripts.
   const loadTranscript = task.status === "running" || (presentation === "inline" && expanded) || fullLogOpen;
   const { data, isPending, isError, refetch } = useTaskMessages(task.id, active, loadTranscript);
-  // Redaction scans every byte of every message and is ~all of the cost of
-  // deriving a timeline, so a live run — which rebuilds on each 100ms flush —
-  // re-scans the whole transcript several times a second (MUL-7227). Nothing
-  // this component renders needs it: each summary below is redacted at the
-  // point it becomes a string, and `StepBody` redacts every body it draws.
-  // The dialog renders `item.content` directly, so it gets the redacted copy —
-  // built only while it is open, which is where paying for the whole transcript
-  // belongs.
-  const items = useMemo(() => buildTimelineStructure(data ?? []), [data]);
-  const transcriptItems = useMemo(
-    () => (fullLogOpen ? redactTimelineItems(items) : NO_ITEMS),
-    [fullLogOpen, items],
-  );
+  const items = useMemo(() => buildTimeline(data ?? []), [data]);
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, loadTranscript);
   const steps = useMemo(() => buildSteps(items), [items]);
   const rows = useMemo(() => groupSteps(steps), [steps]);
-  // Only the rows on screen, and only once the disclosure is open. Both bounds
-  // matter: the transcript behind this slice can be thousands of messages, and
-  // a tool argument has no size limit anywhere in the pipeline, so redacting a
-  // collapsed run's rows would put megabytes back on the 100ms flush path that
-  // this change exists to clear (MUL-7227).
-  const visibleRows = useMemo(
-    () => (expanded ? rows.slice(-visibleCount).map(redactTraceRow) : NO_ROWS),
-    [expanded, rows, visibleCount],
-  );
   useEffect(() => {
     if (!active) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -123,10 +96,6 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const output = !hasReply ? commentRunOutput(task) : null;
   const latest = steps.findLast((step) => step.kind !== "text" || step.item.content?.trim());
   const pendingCall = steps.findLast((step) => isCallStep(step) && !step.result);
-  // Raw on purpose. Redacting the step would walk its whole argument object —
-  // unbounded, and re-walked on every flush — to produce one line. The
-  // summary below redacts what it displays instead: `traceToolArgSummary`
-  // scans only the single value it selects, and does it before the cut.
   const current = pendingCall ?? latest;
   // Keep the last activity visible after a tool returns, until new progress arrives.
   const activitySummary = current && isCallStep(current)
@@ -145,7 +114,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const stepLabel = steps.length > 0 ? t(($) => $.inline_run.steps, { count: steps.length }) : "";
   const stopLabel = cancel.isPending || cancel.isSuccess ? t(($) => $.inline_run.stopping) : t(($) => $.inline_run.stop);
   const transcript = fullLogOpen && <AgentTranscriptDialog open onOpenChange={setFullLogOpen}
-    task={task} items={transcriptItems} agentName={name} isLive={active} finalFocus={logFromKeyboard}
+    task={task} items={items} agentName={name} isLive={active} finalFocus={logFromKeyboard}
     contentState={isPending ? <p role="status" className="text-body text-muted-foreground">{t(($) => $.inline_run.loading)}</p>
       : isError ? <div role="alert" className="text-body text-destructive">{t(($) => $.inline_run.load_failed)}
         <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button>
@@ -218,7 +187,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {!isPending && !isError && rows.length === 0 && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.empty)}</p>}
           {rows.length > visibleCount && <button type="button" className="py-1 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
-          {visibleRows.map((row) => <InlineStep key={row.seq} row={row} live={active} formatText={formatText} />)}
+          {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={active} formatText={formatText} />)}
           <button type="button" className="flex items-center gap-1.5 rounded py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={openFullLog}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
         </div>}
@@ -260,10 +229,7 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
       {grouped ? <>
         {row.steps.length > limit && <button type="button" className="py-1 text-muted-foreground" onClick={() => setLimit((value) => value + 12)}>
           {t(($) => $.inline_run.show_earlier, { count: row.steps.length - limit })}</button>}
-        {/* Redacted here rather than with the group row: a fold can hold any
-            number of calls and shows none of their bodies until it is opened,
-            so this slice is the first bounded set (MUL-7227). */}
-        {row.steps.slice(-limit).map((step) => <InlineStep key={step.seq} row={redactTraceStep(step)} live={live} formatText={formatText} />)}
+        {row.steps.slice(-limit).map((step) => <InlineStep key={step.seq} row={step} live={live} formatText={formatText} />)}
       </> : call ? <>
         {row.call && <StepBody item={row.call} />}
         {row.result && <StepBody item={row.result} />}

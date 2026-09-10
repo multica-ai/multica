@@ -5,8 +5,6 @@ import {
   buildSteps,
   groupSteps,
   laneSegmentPosition,
-  redactTraceRow,
-  redactTraceStep,
   rowCalls,
   timelineTicks,
   toolKindTotals,
@@ -303,40 +301,5 @@ describe("toolKindTotals", () => {
       read: 1_000,
       other: 0,
     });
-  });
-});
-
-describe("redacting what a row renders", () => {
-  const secret = "AKIA1234567890ABCDEF";
-  const call = (seq: number): TraceCallStep => ({
-    kind: "call", seq, tool: "Read",
-    call: { seq, type: "tool_use", tool: "Read", input: { file_path: `/src/${seq}.ts` } },
-    result: { seq: seq + 1, type: "tool_result", tool: "Read", output: `key = ${secret}` },
-  });
-
-  it("leaves a fold's members alone, so a thousand hidden calls cost nothing", () => {
-    // A group shows only its tool name and a count until it is opened, and it
-    // can hold any number of calls. Redacting members here would put the whole
-    // fold back on the live-run flush path — the bound this exists to keep.
-    const group = groupSteps(Array.from({ length: 500 }, (_, i) => call(i * 2)))[0]!;
-    expect(group.kind).toBe("group");
-
-    expect(redactTraceRow(group)).toBe(group);
-  });
-
-  it("redacts a member once it is revealed", () => {
-    const step = redactTraceStep(call(0)) as TraceCallStep;
-
-    expect(step.result?.output).not.toContain(secret);
-    expect(step.result?.output).toContain("[REDACTED AWS KEY]");
-  });
-
-  it("redacts a standalone call's arguments as well as its result", () => {
-    const raw = call(0);
-    raw.call!.input = { command: `deploy --key ${secret}` };
-
-    const step = redactTraceStep(raw) as TraceCallStep;
-
-    expect(JSON.stringify(step.call?.input)).not.toContain(secret);
   });
 });

@@ -62,7 +62,7 @@ import {
   FOLLOW_EDGE_THRESHOLD,
   LINE_SCROLL_PX,
 } from "./transcript-follow";
-import { isOutputTruncated, redactTimelineItem, type TimelineItem } from "./build-timeline";
+import { isOutputTruncated, type TimelineItem } from "./build-timeline";
 import {
   buildLanes,
   buildSteps,
@@ -1757,18 +1757,12 @@ const DISPLAY_CLIP_CHARS = 8000;
 
 export function StepBody({ item }: { item: TimelineItem }) {
   const { t } = useT("agents");
-  // Redacted here, not by the caller, so this component is correct on its own
-  // — it already did this for `content` and `output`, and a tool argument is
-  // no less on screen than a tool result. It has to happen before
-  // `traceEventDetail`, which splits an edit's arguments into diff lines: a
-  // rule spanning lines, like a PEM block, cannot be matched after that split.
-  const safe = useMemo(() => redactTimelineItem(item), [item]);
-  const detail = useMemo(() => traceEventDetail(safe), [safe]);
-  const image = useMemo(() => readImageResult(safe.output), [safe.output]);
+  const detail = useMemo(() => traceEventDetail(item), [item]);
+  const image = useMemo(() => readImageResult(item.output), [item.output]);
   // Stated where the output actually ends, for a reader who has just reached
   // the bottom and is wondering whether that was all of it. A header badge said
   // the same thing louder, before anyone had asked the question.
-  const note = isOutputTruncated(safe) ? t(($) => $.transcript.output_truncated_note) : undefined;
+  const note = isOutputTruncated(item) ? t(($) => $.transcript.output_truncated_note) : undefined;
 
   // A screenshot is a picture, not a 200KB base64 string in a <pre>.
   if (image) {
@@ -1801,16 +1795,12 @@ export function StepBody({ item }: { item: TimelineItem }) {
       // — under a note that already reports the same loss. Tool input has no
       // server-side budget and keeps the clip at its existing length; nothing
       // about how long an input renders is this change's business.
-      const clip = safe.type === "tool_result" ? null : DISPLAY_CLIP_CHARS;
-      // `text` is already redacted: it comes from `detail`, which was built
-      // from the redacted record above. That order is the point — clipping
-      // first would drop the tail a rule needs to match and render its head,
-      // letting a display budget decide what stays hidden (MUL-7227 review).
+      const clip = item.type === "tool_result" ? null : DISPLAY_CLIP_CHARS;
       const clipped =
         clip !== null && text.length > clip
-          ? `${text.slice(0, clip)}\n${t(($) => $.transcript.display_clipped)}`
-          : text;
-      const path = safe.type === "tool_use" ? readPathFromInput(safe.input) : undefined;
+          ? `${redactSecrets(text.slice(0, clip))}\n${t(($) => $.transcript.display_clipped)}`
+          : redactSecrets(text);
+      const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
       return (
         <ToolDetailSurface
           text={clipped}

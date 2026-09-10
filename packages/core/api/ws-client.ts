@@ -48,7 +48,6 @@ export class WSClient {
   // on each connect() so a fresh connection logs once again.
   private badFrameLogged = false;
   private onReconnectCallbacks = new Set<() => void>();
-  private onConnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
 
@@ -193,13 +192,6 @@ export class WSClient {
         }
       }
     }
-    for (const cb of this.onConnectCallbacks) {
-      try {
-        cb();
-      } catch {
-        // ignore connect callback errors
-      }
-    }
     this.hasConnectedBefore = true;
   }
 
@@ -220,7 +212,6 @@ export class WSClient {
     this.handlers.clear();
     this.anyHandlers.clear();
     this.onReconnectCallbacks.clear();
-    this.onConnectCallbacks.clear();
   }
 
   on(event: WSEventType, handler: EventHandler) {
@@ -244,23 +235,6 @@ export class WSClient {
     this.onReconnectCallbacks.add(callback);
     return () => {
       this.onReconnectCallbacks.delete(callback);
-    };
-  }
-
-  /**
-   * Every authenticated connection, including the first one.
-   *
-   * `onReconnect` skips the first deliberately: a client that has never been
-   * subscribed has no missed events to recover. That reasoning does not hold
-   * for data this client read over HTTP before the socket came up — the fetch
-   * and the subscription are not ordered, so a row persisted in between is
-   * broadcast to nobody here and is absent from the response. Consumers whose
-   * only live source is this socket need the first connection too.
-   */
-  onConnect(callback: () => void) {
-    this.onConnectCallbacks.add(callback);
-    return () => {
-      this.onConnectCallbacks.delete(callback);
     };
   }
 

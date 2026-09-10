@@ -4,10 +4,8 @@ import type { TaskMessagePayload } from "@multica/core/types/events";
 import {
   appendTimelineItem,
   buildTimeline,
-  buildTimelineStructure,
   coalesceTimelineItems,
   isOutputTruncated,
-  redactTimelineItems,
   type TimelineItem,
 } from "./build-timeline";
 
@@ -86,22 +84,6 @@ describe("task transcript timeline", () => {
     expect(items[0]?.content).not.toContain("def456");
   });
 
-  it("leaves bodies raw when only the structure was asked for", () => {
-    const raw = buildTimelineStructure([
-      message(1, "text", "Authorization: Bearer abc123xyz."),
-      message(2, "text", "def456"),
-    ]);
-
-    // Coalescing still happens; redaction is what the caller opted out of, and
-    // it must still fold the same way once applied.
-    expect(raw[0]?.content).toBe("Authorization: Bearer abc123xyz.def456");
-    expect(redactTimelineItems(raw)[0]?.content).toBe("Authorization: Bearer [REDACTED]");
-    expect(redactTimelineItems(raw)).toEqual(buildTimeline([
-      message(1, "text", "Authorization: Bearer abc123xyz."),
-      message(2, "text", "def456"),
-    ]));
-  });
-
   it("keeps the latest created_at when coalescing streaming fragments", () => {
     const items = coalesceTimelineItems([
       { seq: 1, type: "text", content: "hello ", created_at: "2026-06-09T09:00:00.000Z" },
@@ -167,34 +149,45 @@ describe("tool output completeness", () => {
     ];
     expect(others.some(isOutputTruncated)).toBe(false);
   });
+});
 
-  it("rewrites strings in tool arguments without changing their shape", () => {
-    // Arbitrary JSON, including keys that are hostile to object literals:
-    // assigning `__proto__` runs the prototype setter instead of defining a
-    // property, which drops the own key and moves its value to the prototype.
-    const input = JSON.parse(
-      '{"__proto__": {"note": "key AKIA1234567890ABCDEF here"}, "file_path": "a.ts"}',
-    ) as Record<string, unknown>;
+describe("reusing work across rebuilds", () => {
+  it("reuses the item for a run whose messages have not changed", () => {
+    // Redaction is the whole cost of building a timeline and a live run rebuilds
+    // on every 100ms flush, so a message that has not changed must not be
+    // scanned again (MUL-7227). Identity of the returned item is the observable
+    // form of that: a fresh scan would produce a fresh object.
+    const msgs = [message(1, "text", "hello"), message(2, "tool_result", "out")];
 
-    const redacted = buildTimeline([
-      { task_id: "task-1", issue_id: "issue-1", seq: 1, type: "tool_use", tool: "Edit", input },
-    ])[0]!.input!;
+    const first = buildTimeline(msgs);
+    const second = buildTimeline([...msgs]);
 
-    expect(Object.prototype.hasOwnProperty.call(redacted, "__proto__")).toBe(true);
-    expect(JSON.stringify(redacted)).not.toContain("AKIA1234567890ABCDEF");
-    expect(JSON.stringify(redacted)).toContain("[REDACTED AWS KEY]");
-    expect(redacted.file_path).toBe("a.ts");
+    expect(second[0]).toBe(first[0]);
+    expect(second[1]).toBe(first[1]);
   });
 
-  it("derives an unchanged argument object once, however often it is rebuilt", () => {
-    // A live run rebuilds its timeline on every flush; `input` is carried by
-    // reference, so the same megabyte-scale arguments must not be re-walked
-    // several times a second (MUL-7227).
-    const input = { command: "deploy --key AKIA1234567890ABCDEF" };
-    const msgs: TaskMessagePayload[] = [
-      { task_id: "task-1", issue_id: "issue-1", seq: 1, type: "tool_use", tool: "Bash", input },
-    ];
+  it("rebuilds a run that gained a fragment, so redaction still sees the merged text", () => {
+    // The reuse key is the run's exact message list, precisely so a coalescing
+    // run that grew is redacted again as one string. Split so neither half
+    // matches alone: reusing the first half's item, or redacting the fragments
+    // separately, would leave the key on screen.
+    const first = message(1, "text", "key AKIA123456");
+    const partial = buildTimeline([first]);
+    expect(partial[0]?.content).toBe("key AKIA123456");
 
-    expect(buildTimeline(msgs)[0]!.input).toBe(buildTimeline(msgs)[0]!.input);
+    const merged = buildTimeline([first, message(2, "text", "7890ABCDEF")]);
+
+    expect(merged[0]?.content).toBe("key [REDACTED AWS KEY]");
+    expect(merged[0]).not.toBe(partial[0]);
+  });
+
+  it("rebuilds when a message is replaced at the same seq", () => {
+    // A fetch response is the authority and replaces what the cache held, so a
+    // same-seq record with different content arrives as a different object.
+    const before = buildTimeline([message(1, "text", "first body")]);
+    const after = buildTimeline([message(1, "text", "second body")]);
+
+    expect(before[0]?.content).toBe("first body");
+    expect(after[0]?.content).toBe("second body");
   });
 });

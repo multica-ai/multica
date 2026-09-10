@@ -47,102 +47,12 @@ export function appendTimelineItem(items: TimelineItem[], item: TimelineItem): T
   return coalesceTimelineItems([...items, item]);
 }
 
-/**
- * Run the display safety net over every message body.
- *
- * This is the whole cost of building a timeline — coalescing a 3000-message
- * transcript is ~0.1ms, redacting it is ~23ms, because every pattern scans
- * every byte of every `content` and `output`. That is fine once per opened
- * transcript and ruinous on a live run, whose timeline is rebuilt on each
- * 100ms flush window (MUL-7227). Callers that redact the bounded strings they
- * actually render should build the structure and skip this.
- */
-export function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
-  return items.map(redactTimelineItem);
-}
-
-/**
- * Redact everything one record can put on screen.
- *
- * Whole values, before anything downstream clips, summarizes, splits or
- * highlights them. Every consumer cuts first and redacts second — `StepBody`
- * at its display clip, the argument summary at 120 characters, the diff
- * surface line by line — and a pattern only matches while both of its ends are
- * present. Redacting the record first is what makes all of that harmless, and
- * it only stays harmless while no raw record reaches a renderer.
- *
- * `input` is included, and it is not decoration: a tool's arguments are
- * displayed as prominently as its output — as the row summary, and as the diff
- * body for an edit, which is built by splitting `old_string` / `new_string`
- * into lines. Redacting after that split can never match a rule spanning lines,
- * such as a PEM block; redacting the source before it is split does.
- */
-export function redactTimelineItem(item: TimelineItem): TimelineItem {
-  return {
+function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
+  return items.map((item) => ({
     ...item,
     content: item.content ? redactSecrets(item.content) : item.content,
     output: item.output ? redactSecrets(item.output) : item.output,
-    input: item.input ? redactInput(item.input) : item.input,
-  };
-}
-
-/**
- * Redact the strings inside an arbitrary tool-argument value.
- *
- * Tool inputs are whatever JSON the agent sent, so the shape is not ours to
- * assume: `patch_apply` nests per-file bodies, `Edit` keeps them flat. Only
- * strings are rewritten, and objects are rebuilt only when something in them
- * changed, so an unaffected input keeps its identity and the memos downstream
- * keep their hits.
- */
-function redactUnknown(value: unknown): unknown {
-  if (typeof value === "string") return redactSecrets(value);
-  if (Array.isArray(value)) {
-    let changed = false;
-    const next = value.map((entry) => {
-      const redacted = redactUnknown(entry);
-      if (redacted !== entry) changed = true;
-      return redacted;
-    });
-    return changed ? next : value;
-  }
-  if (value && typeof value === "object") {
-    let changed = false;
-    // `Object.fromEntries`, not assignment into a literal. Tool arguments are
-    // arbitrary JSON, and `next[key] = ...` for the key `__proto__` runs the
-    // prototype setter instead of defining a property: the own key disappears
-    // and its value silently becomes the new object's prototype. Redaction is
-    // supposed to rewrite strings and leave the shape alone.
-    const entries = Object.entries(value).map(([key, entry]) => {
-      const redacted = redactUnknown(entry);
-      if (redacted !== entry) changed = true;
-      return [key, redacted] as const;
-    });
-    return changed ? Object.fromEntries(entries) : value;
-  }
-  return value;
-}
-
-/**
- * Redacted tool arguments, keyed on the arguments themselves.
- *
- * A live run rebuilds its timeline on every 100ms flush and each rebuild
- * allocates fresh `TimelineItem`s, but `input` is carried across by reference
- * and `unionTaskMessagesBySeq` keeps a message's identity once it has landed.
- * So the same arguments would be walked several times a second while never
- * changing. Nothing in the pipeline bounds a tool argument — a single patch can
- * be megabytes — and re-walking one of those on every flush is the stall this
- * change exists to remove (MUL-7227). Weak, so arguments that leave the query
- * cache are collectable with it.
- */
-const redactedInputs = new WeakMap<object, Record<string, unknown>>();
-
-function redactInput(input: Record<string, unknown>): Record<string, unknown> {
-  const cached = redactedInputs.get(input);
-  if (cached) return cached;
-  const redacted = redactUnknown(input) as Record<string, unknown>;
-  redactedInputs.set(input, redacted);
-  return redacted;
+  }));
 }
 
 /**
@@ -159,31 +69,83 @@ export function isOutputTruncated(item: TimelineItem): boolean {
 }
 
 /**
- * Chronological timeline of the raw message bodies, without redaction.
+ * Timeline items already built, keyed on the first message behind each one.
  *
- * Only for callers that redact at every point where they put one of these
- * strings on screen — a caller that renders `content` or `output` directly
- * wants `buildTimeline`. `input` and `output_truncated` are untouched by
- * redaction either way.
+ * Redaction is essentially the whole cost of building a timeline: coalescing a
+ * 3000-message transcript takes ~0.1ms and redacting it ~20ms, because every
+ * rule scans every byte of every body. A live run rebuilds its timeline on each
+ * 100ms flush window, so that scan was repeating over the entire transcript
+ * several times a second while all but its newest messages were byte for byte
+ * what they had been on the previous pass (MUL-7227).
+ *
+ * A message is immutable once it lands — the realtime merge appends unseen seqs
+ * and keeps the objects it already holds — so identity is a sound proof that a
+ * body has not changed. Each entry records the exact messages it was built
+ * from, and is reused only when that list still matches: a coalescing run that
+ * gained a fragment is rebuilt, which is what keeps redaction applied to merged
+ * text rather than to the pieces.
+ *
+ * Weak, so entries are collected with the messages they belong to. They hold
+ * little: `String.replace` returns its input unchanged when nothing matches, so
+ * a body with no secrets in it is shared rather than copied.
  */
-export function buildTimelineStructure(msgs: TaskMessagePayload[]): TimelineItem[] {
-  const items: TimelineItem[] = [];
-  for (const msg of msgs) {
-    items.push({
-      seq: msg.seq,
-      type: msg.type,
-      tool: msg.tool,
-      content: msg.content,
-      input: msg.input,
-      output: msg.output,
-      output_truncated: msg.output_truncated,
-      created_at: msg.created_at,
-    });
-  }
-  return coalesceTimelineItems(items);
+const builtRuns = new WeakMap<
+  TaskMessagePayload,
+  { members: readonly TaskMessagePayload[]; item: TimelineItem }
+>();
+
+function sameMembers(a: readonly TaskMessagePayload[], b: readonly TaskMessagePayload[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((message, index) => message === b[index]);
 }
 
-/** Build a chronologically ordered, redacted timeline from raw task messages. */
+/** Merge one coalescing run into its item, exactly as `coalesceTimelineItems` would. */
+function mergeRun(run: readonly TaskMessagePayload[]): TimelineItem {
+  const first = run[0]!;
+  let content = first.content;
+  let createdAt = first.created_at;
+  for (const message of run.slice(1)) {
+    content = `${content ?? ""}${message.content ?? ""}`;
+    createdAt = message.created_at ?? createdAt;
+  }
+  return {
+    seq: first.seq,
+    type: first.type,
+    tool: first.tool,
+    content,
+    input: first.input,
+    output: first.output,
+    output_truncated: first.output_truncated,
+    created_at: createdAt,
+  };
+}
+
+function buildRun(run: readonly TaskMessagePayload[]): TimelineItem {
+  const cached = builtRuns.get(run[0]!);
+  if (cached && sameMembers(cached.members, run)) return cached.item;
+  const item = redactTimelineItems([mergeRun(run)])[0]!;
+  builtRuns.set(run[0]!, { members: [...run], item });
+  return item;
+}
+
+/** Build a chronologically ordered timeline from raw task messages. */
 export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
-  return redactTimelineItems(buildTimelineStructure(msgs));
+  const sorted = [...msgs].sort((a, b) => a.seq - b.seq);
+  const out: TimelineItem[] = [];
+  let run: TaskMessagePayload[] = [];
+
+  for (const msg of sorted) {
+    const previous = run[run.length - 1];
+    // Same rule as `canMergeStreamingText`, read off the messages: a run's type
+    // is its first message's, and every member shares it.
+    if (previous && (previous.type === "text" || previous.type === "thinking") && previous.type === msg.type) {
+      run.push(msg);
+      continue;
+    }
+    if (run.length > 0) out.push(buildRun(run));
+    run = [msg];
+  }
+  if (run.length > 0) out.push(buildRun(run));
+
+  return out;
 }

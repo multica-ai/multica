@@ -16,12 +16,8 @@ vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Reviewer" }) }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 vi.mock("../../editor", () => ({ ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div> }));
-const dialogItems: { current: { content?: string }[] } = { current: [] };
 vi.mock("../../common/task-transcript/agent-transcript-dialog", () => ({
-  AgentTranscriptDialog: ({ contentState, isLive, items }: { contentState?: ReactNode; isLive?: boolean; items?: { content?: string }[] }) => {
-    dialogItems.current = items ?? [];
-    return <div role="dialog" data-live={isLive}>{contentState ?? "Full transcript"}</div>;
-  },
+  AgentTranscriptDialog: ({ contentState, isLive }: { contentState?: ReactNode; isLive?: boolean }) => <div role="dialog" data-live={isLive}>{contentState ?? "Full transcript"}</div>,
   StepBody: ({ item }: { item: { output?: string } }) => <div>{item.output}</div>,
 }));
 
@@ -222,85 +218,5 @@ describe("InlineCommentRun", () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
-  });
-
-  it("redacts the live progress line without redacting the whole transcript", async () => {
-    // The collapsed row derives from an unredacted timeline (MUL-7227: doing it
-    // eagerly re-scans the transcript on every 100ms flush), so the safety net
-    // has to hold at the point the summary becomes a string.
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(chatKeys.taskMessages(id), [
-      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Found AKIA1234567890ABCDEF in config." },
-    ] satisfies TaskMessagePayload[]);
-    vi.mocked(api.listTaskMessages).mockResolvedValue([
-      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Found AKIA1234567890ABCDEF in config." },
-    ]);
-    renderWithI18n(<QueryClientProvider client={client}>
-      <InlineCommentRun run={{ task: task(), commentId: "comment", hasReply: false }} />
-    </QueryClientProvider>);
-
-    await screen.findByText("Found [REDACTED AWS KEY] in config.");
-    expect(screen.queryByText(/AKIA1234567890ABCDEF/)).not.toBeInTheDocument();
-  });
-
-  it("hands the full log a redacted transcript, and only once it is open", async () => {
-    const secret: TaskMessagePayload[] = [
-      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Found AKIA1234567890ABCDEF in config." },
-    ];
-    vi.mocked(api.listTaskMessages).mockResolvedValue(secret);
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(chatKeys.taskMessages(id), secret);
-    dialogItems.current = [];
-    renderWithI18n(<QueryClientProvider client={client}>
-      <InlineCommentRun run={{ task: task({ status: "completed", completed_at: "2026-09-07T00:01:23Z" }), commentId: "comment", hasReply: true }} presentation="header" />
-    </QueryClientProvider>);
-
-    expect(dialogItems.current).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "Open full log" }));
-    await waitFor(() => expect(dialogItems.current).toHaveLength(1));
-    expect(dialogItems.current[0]?.content).toBe("Found [REDACTED AWS KEY] in config.");
-  });
-
-  it("never walks a large tool argument for a collapsed run, and walks it once when opened", async () => {
-    // Nothing bounds a tool argument — a single patch can be megabytes — and a
-    // live run rebuilds its steps on every 100ms flush. So a collapsed row must
-    // not touch the argument object at all, and an open one must not re-walk an
-    // argument that has not changed (MUL-7227).
-    //
-    // `patch` counts reads: the summary selects `command` and returns before
-    // reaching it, so any read means something enumerated the whole object.
-    let walked = 0;
-    const input: Record<string, unknown> = { command: "pnpm test" };
-    Object.defineProperty(input, "patch", {
-      enumerable: true,
-      get() { walked += 1; return "diff --git a/x b/x\n".repeat(2_000); },
-    });
-    const live: TaskMessagePayload[] = [
-      { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "exec_command", input },
-    ];
-    vi.mocked(api.listTaskMessages).mockResolvedValue(live);
-
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const view = renderWithI18n(<QueryClientProvider client={client}>
-      <InlineCommentRun run={{ task: task(), commentId: "comment", hasReply: false }} />
-    </QueryClientProvider>);
-    await screen.findByText("pnpm test");
-    expect(walked).toBe(0);
-
-    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
-    await waitFor(() => expect(walked).toBeGreaterThan(0));
-    const afterOpen = walked;
-
-    // A further flush writes a new array, so every step and row identity
-    // changes; the argument itself did not.
-    await act(async () => {
-      client.setQueryData(chatKeys.taskMessages(id), [
-        ...live,
-        { task_id: id, issue_id: "issue", seq: 2, type: "text", content: "still working" },
-      ]);
-    });
-    await waitFor(() => expect(view.container.querySelectorAll("details")).toHaveLength(2));
-    expect(walked).toBe(afterOpen);
-    client.clear();
   });
 });
