@@ -1,5 +1,44 @@
 # Migration runner operations
 
+## Issue description search index retirement
+
+Migrations 461 and 462 retire the two historical issue-description search
+indexes: `idx_issue_description_bigm` and `idx_issue_description_trgm`.
+`SearchIssues` now scans the selected workspace's issue candidates and evaluates
+description matches during projection, so neither global description GIN is
+read. Fresh installs also skip migration 139's historical trigram build. Do not
+repair or recreate these indexes after applying migrations 461 and 462.
+
+The down migrations restore the trigram index everywhere and also restore the
+CJK-friendly bigram index where `gin_bigm_ops` is available. Both use
+`CREATE INDEX CONCURRENTLY` and retry safely after an interrupted build.
+
+These migrations run during backend startup. A concurrent drop can wait for old
+transactions, so for multi-gigabyte production indexes prefer a low-traffic
+window: check for long-running transactions, then run each statement separately
+and outside a transaction before deploying:
+
+```sql
+DROP INDEX CONCURRENTLY IF EXISTS idx_issue_description_bigm;
+DROP INDEX CONCURRENTLY IF EXISTS idx_issue_description_trgm;
+```
+
+The subsequent migrations become fast no-ops. If startup performs a drop and
+is interrupted, `IF EXISTS` makes the next run retry safely; one index may
+remain until that retry completes. Application rollback remains functionally
+correct because issue search no longer consumes either index. A database
+rollback rebuilds up to two multi-gigabyte GIN indexes and is not immediate;
+verify every restored index is live, ready, and valid before relying on it:
+
+```sql
+SELECT indexrelid::regclass AS index_name, indisvalid, indisready, indislive
+FROM pg_index
+WHERE indexrelid IN (
+    to_regclass('idx_issue_description_bigm'),
+    to_regclass('idx_issue_description_trgm')
+);
+```
+
 ## Comment content search index retirement
 
 Migrations 454 and 455 retire both historical comment-content search indexes:
