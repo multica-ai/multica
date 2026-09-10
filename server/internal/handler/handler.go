@@ -280,6 +280,10 @@ type Handler struct {
 	// wired with the same encrypted installation store and regional HTTP client
 	// as messaging, and remains nil when the Lark master key is unset.
 	LarkDocuments feishuDocumentExecutor
+	// LarkDocumentInstallations resolves the active installation for the exact
+	// fresh Agent during claim assembly. The narrow interface also makes lookup
+	// failure and cross-Agent behavior independently testable.
+	LarkDocumentInstallations lark.DocumentInstallationStore
 	// Test seam for the capability resolver. Production always leaves this nil
 	// and performs fresh task/runtime/Agent/installation reads on every call.
 	feishuDocumentsScopeLoader feishuDocumentsScopeLoader
