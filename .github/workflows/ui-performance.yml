@@ -1,0 +1,96 @@
+name: UI performance report
+
+# Reports only. This workflow is deliberately not part of the required
+# `frontend` gate: one sample per ref cannot separate a small regression from
+# machine noise, so a number here is something a reviewer reads, not something
+# that blocks a merge. Wire it into the gate only after the noise floor has
+# been calibrated on real CI hardware.
+on:
+  pull_request:
+    paths:
+      - "apps/web/**"
+      - "packages/core/**"
+      - "packages/views/**"
+      - "packages/ui/**"
+      - "e2e/perf/**"
+      - "playwright.perf.config.ts"
+      - "scripts/perf-compare.mjs"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - ".github/workflows/ui-performance.yml"
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Base ref to measure"
+        required: true
+      head:
+        description: "Head ref to measure"
+        required: true
+
+# Read-only, and `pull_request` rather than `pull_request_target`: this builds
+# and runs the PR's own code, so it must never hold write access or secrets.
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-performance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    # One scenario, two builds, measured one after the other on this runner.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Both refs must be reachable: the script builds each one in its own
+          # worktree, and a shallow clone cannot produce them.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (runner tree — supplies the spec and the browser)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Resolve refs
+        id: refs
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "base=${{ inputs.base }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ inputs.head }}" >> "$GITHUB_OUTPUT"
+          else
+            # Pin the SHAs the PR actually names. `main` moves, and the default
+            # merge checkout is neither of the two commits under comparison.
+            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compare
+        run: node scripts/perf-compare.mjs --base "${{ steps.refs.outputs.base }}" --head "${{ steps.refs.outputs.head }}" --out perf-report
+
+      - name: Publish to the job summary
+        if: always()
+        run: |
+          if [ -f perf-report/comparison.md ]; then
+            cat perf-report/comparison.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The comparison produced no report; see the job log." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-performance-report
+          path: perf-report/
+          if-no-files-found: warn
