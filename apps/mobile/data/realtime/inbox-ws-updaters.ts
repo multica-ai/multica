@@ -31,12 +31,32 @@ export function patchInboxIssueStatus(
   );
 }
 
+/**
+ * THE entry point for refreshing the cross-workspace unread summary that backs
+ * the tab badge. Mutations, inbox events, issue deletion and reconnect all go
+ * through here. Mirrors `onInboxSummaryInvalidate` in
+ * packages/core/inbox/ws-updaters.ts — including why the cancel comes first.
+ *
+ * TanStack only cancels an in-flight request on invalidation once the query
+ * already holds data (`Query.fetch` guards that branch on
+ * `state.data !== undefined`, and otherwise returns the in-flight promise). An
+ * invalidation racing the FIRST summary load is therefore answered by the
+ * pre-change response, which resolves successfully and clears `isInvalidated`
+ * — leaving the badge on a count the user's own action already invalidated,
+ * with nothing scheduled to ask again. Cancelling first makes a refresh behave
+ * the same whether or not the summary has loaded yet (MUL-6967).
+ */
+export async function refreshInboxUnreadSummary(qc: QueryClient) {
+  await qc.cancelQueries({ queryKey: inboxKeys.unreadSummary() });
+  await qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+}
+
 // Dropping unread rows changes the tab badge, which reads the server-side
 // unread summary rather than this list. `issue:deleted` fires no `inbox:*`
 // event, so nothing else would refresh it and the badge would stay above an
-// empty inbox — hence the invalidation lives here, not at the call site.
+// empty inbox — hence the refresh lives here, not at the call site.
 // Web does the same in packages/core/inbox/ws-updaters.ts (MUL-6967).
-export function dropInboxItemsByIssue(
+export async function dropInboxItemsByIssue(
   qc: QueryClient,
   wsId: string,
   issueId: string,
@@ -44,5 +64,5 @@ export function dropInboxItemsByIssue(
   qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
     old?.filter((i) => i.issue_id !== issueId),
   );
-  qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+  await refreshInboxUnreadSummary(qc);
 }

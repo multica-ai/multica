@@ -30,12 +30,19 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { InboxItem } from "@multica/core/types";
 import { api } from "@/data/api";
 import { inboxKeys } from "@/data/queries/inbox";
+import { refreshInboxUnreadSummary } from "@/data/realtime/inbox-ws-updaters";
 import { useWorkspaceStore } from "@/data/workspace-store";
 
 /**
- * Refresh the cross-workspace unread summary that backs the tab badge. It
- * lives under its own account-level key, so invalidating the workspace list
- * does not reach it — every mutation here can change the number it holds.
+ * Refresh the cross-workspace unread summary that backs the tab badge after a
+ * write. It lives under its own account-level key, so invalidating the
+ * workspace list does not reach it — every mutation here can change the number
+ * it holds.
+ *
+ * Deliberately the shared entry point rather than a second local copy: a
+ * mutation racing the first summary load hits exactly the same in-flight hole
+ * a WS event does, and `refreshInboxUnreadSummary` is where that is handled.
+ * Not awaited by `onSettled` — the mutation is done once the server answers.
  *
  * Rows are optimistic, the badge is not: it follows the server's confirmation.
  * Mirrors the same decision in packages/core/inbox/mutations.ts, whose comment
@@ -44,7 +51,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
  * an in-flight summary response that no `cancelQueries` here covers.
  */
 function invalidateUnreadSummary(qc: QueryClient) {
-  qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+  void refreshInboxUnreadSummary(qc);
 }
 
 export function useMarkInboxRead() {

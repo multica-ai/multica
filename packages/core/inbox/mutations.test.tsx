@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
@@ -11,6 +11,8 @@ import type { ApiClient } from "../api/client";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
 import { useMarkInboxRead, useMarkInboxUnread, useUnarchiveInbox } from "./mutations";
 import { inboxKeys, useInboxUnreadCount } from "./queries";
+import { onInboxSummaryInvalidate } from "./ws-updaters";
+import { createQueryClient } from "../query-client";
 
 vi.mock("../hooks", () => ({
   useWorkspaceId: () => "workspace-1",
@@ -266,38 +268,99 @@ describe("unread summary is server-owned", () => {
     ).toBe(true);
   });
 
-  it("converges on the server value even when a stale summary lands mid-flight", async () => {
-    // A summary request already in flight when the user marks something read
-    // resolves AFTER the mutation. `cancelQueries` here is workspace-scoped
-    // and never covers the account-level summary key, so that stale response
-    // does land — the refetch `onSettled` triggers is what makes the badge
-    // right regardless of who won the race.
-    let serverCount = 1;
-    setApiInstance({
-      markInboxRead: vi.fn(async (id: string) => {
-        serverCount = 0;
-        return item({ id, read: true });
-      }),
-      getInboxUnreadSummary: vi.fn(async () =>
-        serverCount > 0
-          ? [{ workspace_id: WORKSPACE_ID, count: serverCount }]
-          : [],
-      ),
-    } as unknown as ApiClient);
-    queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
-      item({ id: "inbox-1", read: false, archived: false }),
-    ]);
+  // Ordering is controlled explicitly: the first summary response is held open
+  // until after the write and the event have both landed. An earlier version
+  // of this test waited for the badge to read 1 first, which meant the first
+  // response had ALREADY resolved — it exercised an ordinary sequential update
+  // and could not have caught the bug below.
+  //
+  // Both parameters matter. With the summary already cached, invalidation
+  // cancels the in-flight request on its own. On a FIRST load it does not:
+  // `Query.fetch` only takes the cancel branch when `state.data !== undefined`
+  // and otherwise returns the request already on the wire, which then resolves
+  // successfully and clears `isInvalidated`. With `staleTime: Infinity` and no
+  // refetch on focus, nothing asks again — so only the uncached case regressed.
+  it.each([
+    ["already cached", true],
+    ["first load", false],
+  ])(
+    "converges after a late summary response — %s",
+    async (_label, cached) => {
+      const qc = createQueryClient();
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
+        item({ id: "inbox-1", read: false, archived: false }),
+      ]);
+      if (cached) {
+        qc.setQueryData<InboxWorkspaceUnread[]>(inboxKeys.unreadSummary(), [
+          { workspace_id: WORKSPACE_ID, count: 1 },
+        ]);
+        await qc.invalidateQueries({
+          queryKey: inboxKeys.unreadSummary(),
+          refetchType: "none",
+        });
+      }
 
-    const { result } = renderHook(() => useInboxUnreadCount(WORKSPACE_ID), {
-      wrapper: createWrapper(queryClient),
-    });
-    await waitFor(() => expect(result.current).toBe(1));
+      let releaseFirst!: (rows: InboxWorkspaceUnread[]) => void;
+      const firstResponse = new Promise<InboxWorkspaceUnread[]>((resolve) => {
+        releaseFirst = resolve;
+      });
+      let serverCount = 1;
+      const getInboxUnreadSummary = vi
+        .fn()
+        .mockImplementationOnce(() => firstResponse)
+        .mockImplementation(async () =>
+          serverCount > 0
+            ? [{ workspace_id: WORKSPACE_ID, count: serverCount }]
+            : [],
+        );
+      setApiInstance({
+        getInboxUnreadSummary,
+        markInboxRead: vi.fn(async (id: string) => {
+          serverCount = 0;
+          return item({ id, read: true });
+        }),
+      } as unknown as ApiClient);
 
-    const { result: mutation } = renderHook(() => useMarkInboxRead(), {
-      wrapper: createWrapper(queryClient),
-    });
-    mutation.current.mutate("inbox-1");
+      const { result, unmount } = renderHook(
+        () => ({
+          count: useInboxUnreadCount(WORKSPACE_ID),
+          markRead: useMarkInboxRead(),
+        }),
+        { wrapper: createWrapper(qc) },
+      );
 
-    await waitFor(() => expect(result.current).toBe(0));
-  });
+      try {
+        // The first summary read is on the wire and still open.
+        await waitFor(() =>
+          expect(getInboxUnreadSummary).toHaveBeenCalledTimes(1),
+        );
+        expect(qc.getQueryState(inboxKeys.unreadSummary())?.fetchStatus).toBe(
+          "fetching",
+        );
+
+        await act(async () => {
+          await result.current.markRead.mutateAsync("inbox-1");
+        });
+        // A self-event, or an event from another client, can arrive before the
+        // first read answers — it must not be swallowed by that request.
+        await act(async () => {
+          await onInboxSummaryInvalidate(qc);
+        });
+        // Now the pre-change response finally lands.
+        await act(async () => {
+          releaseFirst([{ workspace_id: WORKSPACE_ID, count: 1 }]);
+          await firstResponse;
+        });
+
+        expect(listCache(qc)[0]?.read).toBe(true);
+        await waitFor(() => expect(result.current.count).toBe(0));
+        // Convergence came from a fresh read, not from the stale one.
+        expect(getInboxUnreadSummary.mock.calls.length).toBeGreaterThan(1);
+      } finally {
+        releaseFirst([]);
+        unmount();
+        qc.clear();
+      }
+    },
+  );
 });

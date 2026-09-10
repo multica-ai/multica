@@ -30,6 +30,7 @@ import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
 import {
   dropInboxItemsByIssue,
   patchInboxIssueStatus,
+  refreshInboxUnreadSummary,
 } from "./inbox-ws-updaters";
 
 export function useInboxRealtime() {
@@ -39,7 +40,9 @@ export function useInboxRealtime() {
     (ws, wsId) => {
       const invalidate = () => {
         qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
-        qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+        // Shared entry point: it cancels an in-flight summary request before
+        // invalidating, which a plain invalidate cannot do on a first load.
+        void refreshInboxUnreadSummary(qc);
       };
 
       return [
@@ -69,7 +72,7 @@ export function useInboxRealtime() {
           );
         }),
         ws.on("issue:deleted", (payload) => {
-          dropInboxItemsByIssue(qc, wsId, payload.issue_id);
+          void dropInboxItemsByIssue(qc, wsId, payload.issue_id);
         }),
 
         // After a reconnect we don't know what we missed during the

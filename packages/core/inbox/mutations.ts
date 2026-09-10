@@ -2,31 +2,41 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { inboxKeys } from "./queries";
+import { onInboxSummaryInvalidate } from "./ws-updaters";
 import { useWorkspaceId } from "../hooks";
 import type { InboxItem } from "../types";
 
 /**
- * Refresh the cross-workspace unread summary.
+ * Refresh the cross-workspace unread summary after a write.
  *
  * The unread badge reads that summary (`useInboxUnreadCount`), and it lives
  * under its own account-level key which `inboxKeys.all(wsId)` does not reach.
  * Every mutation here can change the number it holds, so each one refreshes it
- * on settle rather than waiting for the WebSocket echo of its own action.
+ * once the server has confirmed, rather than waiting for the WebSocket echo of
+ * its own action.
+ *
+ * Deliberately the same entry point realtime uses, not a second local copy:
+ * refreshing the summary has to cancel any in-flight request first, and a
+ * mutation racing the first summary load hits exactly the same hole a WS event
+ * does. `onInboxSummaryInvalidate` carries the reasoning.
+ *
+ * Not awaited by `onSettled`: the mutation is finished once the server has
+ * answered, and a background refresh should not hold its lifecycle open.
  *
  * The rows are patched optimistically but the badge is NOT: it follows the
- * server's confirmation, which costs a round-trip of latency and buys a single
- * writer. Deriving it locally instead — recomputing the count from the list
- * cache and writing that back — reads as instant but is unsound: a list cache
- * proves only that the list was loaded ONCE, never that it is complete or
- * concurrent with the summary, and the account-level summary request is not
- * cancelled by the workspace-scoped `cancelQueries` below, so a response
- * already in flight lands on top of the local value anyway. Under pagination
- * it would be wrong by construction — one loaded page cannot produce a global
- * count. If instant feedback is wanted later, it has to be a per-group delta
- * that handles the race, not a recomputed total.
+ * server's confirmation, which buys a single writer at the cost of the badge
+ * trailing the row. Deriving it locally instead — recomputing the count from
+ * the list cache and writing that back — reads as instant but is unsound: a
+ * list cache proves only that the list was loaded ONCE, never that it is
+ * complete or concurrent with the summary, and the account-level summary
+ * request is not cancelled by the workspace-scoped `cancelQueries` below, so a
+ * response already in flight lands on top of the local value anyway. Under
+ * pagination it would be wrong by construction — one loaded page cannot
+ * produce a global count. If instant feedback is wanted later, it has to be a
+ * per-group delta that handles the race, not a recomputed total.
  */
 function invalidateUnreadSummary(qc: QueryClient) {
-  qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+  void onInboxSummaryInvalidate(qc);
 }
 
 export function useMarkInboxRead() {

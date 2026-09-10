@@ -77,7 +77,7 @@ describe("onInboxIssueDeleted", () => {
     expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))).toBeUndefined();
   });
 
-  it("refreshes the unread summary, which the dropped rows can change", () => {
+  it("refreshes the unread summary, which the dropped rows can change", async () => {
     // The badge reads the server summary, not these lists (MUL-6967). Deletion
     // arrives as an `issue:*` event, so no `inbox:*` handler runs to refresh
     // it, and the summary query is staleTime: Infinity with no refetch on
@@ -88,7 +88,7 @@ describe("onInboxIssueDeleted", () => {
       makeItem("i1", "issue-a", { read: false }),
     ]);
 
-    onInboxIssueDeleted(qc, wsId, "issue-a");
+    await onInboxIssueDeleted(qc, wsId, "issue-a");
 
     expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))).toEqual([]);
     expect(spy).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() });
@@ -123,21 +123,46 @@ describe("onInboxInvalidate", () => {
 });
 
 describe("onInboxSummaryInvalidate", () => {
-  it("invalidates the account-level summary key regardless of active workspace", () => {
+  it("invalidates the account-level summary key regardless of active workspace", async () => {
     const qc = new QueryClient();
     const spy = vi.spyOn(qc, "invalidateQueries");
 
-    onInboxSummaryInvalidate(qc);
+    await onInboxSummaryInvalidate(qc);
 
     expect(spy).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() });
   });
 
-  it("does not disturb a workspace-scoped inbox list cache", () => {
+  it("cancels an in-flight summary request BEFORE invalidating", async () => {
+    // Order is the whole point. TanStack skips its own cancel on a first fetch
+    // (`Query.fetch` guards it on `state.data !== undefined`) and hands back
+    // the request already on the wire, whose success then clears
+    // `isInvalidated` — so invalidating without cancelling first can be
+    // answered by a pre-change response and never asked again (MUL-6967).
     const qc = new QueryClient();
+    const calls: string[] = [];
+    vi.spyOn(qc, "cancelQueries").mockImplementation(async () => {
+      calls.push("cancel");
+    });
+    vi.spyOn(qc, "invalidateQueries").mockImplementation(async () => {
+      calls.push("invalidate");
+    });
+
+    await onInboxSummaryInvalidate(qc);
+
+    expect(calls).toEqual(["cancel", "invalidate"]);
+  });
+
+  it("cancels only the summary key, never a workspace inbox list", async () => {
+    // A list request in flight for the active workspace must survive: the
+    // cancel is aimed at the account-level summary alone.
+    const qc = new QueryClient();
+    const cancel = vi.spyOn(qc, "cancelQueries");
     qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [makeItem("i1", "issue-a")]);
 
-    onInboxSummaryInvalidate(qc);
+    await onInboxSummaryInvalidate(qc);
 
+    expect(cancel).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() });
+    expect(cancel).not.toHaveBeenCalledWith({ queryKey: inboxKeys.list(wsId) });
     // The list cache entry is untouched (different key); only the summary
     // query is marked stale.
     expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0]?.id).toBe("i1");
