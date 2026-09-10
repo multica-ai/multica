@@ -43,6 +43,12 @@ var (
 // member-facing recovery guidance describe the actual failure.
 const concurrentRequestLimitWitness = "concurrent request limit"
 
+// oauthSessionExpiredWitness is the stable Codex login-session failure text.
+// It carries neither "refresh token" nor another existing auth marker, so it
+// used to fall through to agent_error.unknown and left the UI with a generic
+// failure plus a retry that could never repair the expired credential.
+const oauthSessionExpiredWitness = "oauth session expired"
+
 // Classify maps a free-form error string from the agent runtime / CLI
 // to one of the 14 agent_error.* sub-reasons. Always returns a valid
 // Reason; falls back to ReasonAgentUnknown when no rule matches and for
@@ -125,6 +131,7 @@ func Classify(rawError string) Reason {
 			"not logged in",
 			"please login again",
 			"refresh token",
+			oauthSessionExpiredWitness,
 			"invalid api key",
 			"access token",
 			"subscription access",
@@ -478,6 +485,14 @@ var legacyConcurrentRequestLimitReasons = map[string]bool{
 	"agent_error":                           true,
 }
 
+// legacyOAuthSessionExpiredReasons are the catchalls emitted by daemons whose
+// classifier predates oauthSessionExpiredWitness. The exact witness is narrow,
+// and a different refined reason remains authoritative.
+var legacyOAuthSessionExpiredReasons = map[string]bool{
+	string(ReasonAgentUnknown): true,
+	"agent_error":              true,
+}
+
 // NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
 // onto the taxonomy this server understands, using the raw error text as the
 // witness. It returns the reason unchanged when nothing applies.
@@ -497,6 +512,10 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	if legacyConcurrentRequestLimitReasons[reason] &&
 		strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
 		return ReasonAgentProviderCapacityOrRateLimit
+	}
+	if legacyOAuthSessionExpiredReasons[reason] &&
+		strings.Contains(strings.ToLower(rawError), oauthSessionExpiredWitness) {
+		return ReasonAgentProviderAuthOrAccess
 	}
 	if legacySkillBundleReasons[reason] &&
 		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {

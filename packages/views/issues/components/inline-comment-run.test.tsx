@@ -13,7 +13,15 @@ vi.mock("@multica/core/api", () => ({ api: {
   getIssue: vi.fn(), listTaskMessages: vi.fn(), cancelTask: vi.fn(), rerunIssue: vi.fn(),
 }, dispatchReasonCode: () => undefined }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
+vi.mock("@multica/core/paths", () => ({
+  useWorkspacePaths: () => ({ agentDetail: (agentId: string) => `/acme/agents/${agentId}` }),
+}));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Reviewer" }) }));
+vi.mock("../../navigation", () => ({
+  AppLink: ({ children, href, ...props }: { href: string; children: ReactNode; [key: string]: unknown }) => (
+    <a href={href} {...props}>{children}</a>
+  ),
+}));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 vi.mock("../../editor", () => ({ ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock("../../common/task-transcript/agent-transcript-dialog", () => ({
@@ -218,6 +226,52 @@ describe("InlineCommentRun", () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("sends provider authentication failures to agent settings without offering a blind retry", () => {
+    setup(task({
+      status: "failed",
+      completed_at: "2026-09-07T00:01:23Z",
+      failure_reason: "agent_error.provider_auth_or_access",
+      error: "provider rejected credentials",
+    }), true);
+
+    expect(screen.getByText("Provider auth failed")).toBeInTheDocument();
+    expect(screen.getByText("Reconnect Reviewer's coding provider before retrying.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open settings" })).toHaveAttribute(
+      "href",
+      "/acme/agents/agent?view=general",
+    );
+    expect(screen.queryByRole("button", { name: "Retry run" })).not.toBeInTheDocument();
+  });
+
+  it("recognizes the expired OAuth witness from a legacy failure row", () => {
+    setup(task({
+      status: "failed",
+      completed_at: "2026-09-07T00:01:23Z",
+      failure_reason: "agent_error.unknown",
+      error: "Failed to authenticate: OAuth session expired and could not be refreshed",
+    }));
+
+    expect(screen.getByText("Provider auth failed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry run" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a concise retry action for a generic execution failure", async () => {
+    vi.mocked(api.rerunIssue).mockResolvedValue(task({ status: "queued" }));
+    setup(task({
+      status: "failed",
+      completed_at: "2026-09-07T00:01:23Z",
+      failure_reason: "agent_error.unknown",
+      error: "agent process exited unexpectedly",
+    }));
+
+    expect(screen.getByText("Agent execution error")).toBeInTheDocument();
+    expect(screen.getByText("The agent stopped unexpectedly. Try this run again.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry run" }));
+    await waitFor(() => expect(api.rerunIssue).toHaveBeenCalledWith("issue", id));
+    expect(screen.queryByRole("button", { name: "Open settings" })).not.toBeInTheDocument();
   });
 
   it("shows who cancelled the run and keeps legacy rows readable", () => {

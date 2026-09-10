@@ -18,7 +18,10 @@
     "full_log": "打开完整日志",
     "message": "智能体消息",
     "error": "错误",
-    "waiting_result": "等待工具返回结果..."
+    "waiting_result": "等待工具返回结果...",
+    "provider_auth_guidance": "重新连接 {{name}} 使用的提供商后再重试。",
+    "generic_failure_guidance": "智能体意外停止，可重试此次运行。",
+    "open_agent_settings": "打开设置"
   },
   "status_catalog_error": {
     "title": "状态列表加载失败",

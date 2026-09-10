@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { AlertCircle, Brain, ChevronRight, CirclePause, Clock3, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "lucide-react";
+import { AlertCircle, Brain, ChevronRight, CirclePause, Clock3, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Settings, Square, Terminal } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useTraceIssueLabels } from "../../common/task-transcript/use-trace-issue-labels";
@@ -10,6 +10,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useTaskMessages } from "@multica/core/chat/queries";
 import { useCancelIssueRun, useRetryIssueRun } from "@multica/core/issues/mutations";
 import { dispatchReasonCode } from "@multica/core/api";
+import { useWorkspacePaths } from "@multica/core/paths";
 import type { AgentTask } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
@@ -23,8 +24,9 @@ import { traceEventSummary, traceToolArgSummary } from "../../common/task-transc
 import { redactSecrets } from "../../common/task-transcript/redact";
 import { ReadonlyContent } from "../../editor";
 import { useT } from "../../i18n";
+import { AppLink } from "../../navigation";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
-import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel, isProviderAuthFailure } from "../../agents/components/tabs/task-failure";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel } from "./task-run-labels";
@@ -59,6 +61,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const { task, hasReply } = run;
   const { t } = useT("issues");
   const { t: tAgents } = useT("agents");
+  const paths = useWorkspacePaths();
   const { getActorName } = useActorName();
   const name = getActorName("agent", task.agent_id);
   const status = useStatusLabel(task.status);
@@ -91,9 +94,18 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const end = active ? now : task.completed_at ? Date.parse(task.completed_at) : undefined;
   const elapsed = end !== undefined && Number.isFinite(Date.parse(start)) && Number.isFinite(end)
     ? formatDuration(start, end) : "";
+  const providerAuthFailure = isProviderAuthFailure(task);
+  const genericAgentFailure = task.status === "failed" && (!task.failure_reason
+    || task.failure_reason === "agent_error"
+    || task.failure_reason === "agent_error.unknown");
   const failure = task.status === "failed"
-    ? failureReasonLabel(task.failure_reason, tAgents)
+    ? failureReasonLabel(providerAuthFailure ? "agent_error.provider_auth_or_access" : task.failure_reason, tAgents)
     : cancelReasonLabel(task, tAgents);
+  const failureGuidance = providerAuthFailure
+    ? t(($) => $.inline_run.provider_auth_guidance, { name })
+    : genericAgentFailure
+      ? t(($) => $.inline_run.generic_failure_guidance)
+      : null;
   const output = !hasReply ? commentRunOutput(task) : null;
   const latest = steps.findLast((step) => step.kind !== "text" || step.item.content?.trim());
   const pendingCall = steps.findLast((step) => isCallStep(step) && !step.result);
@@ -128,6 +140,34 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const stopDialog = <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
     showRunningNote={task.status !== "queued"}
     onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />;
+  const retryButton = (variant: "default" | "ghost", compact: boolean) => <Button
+    size="sm" variant={variant} className={cn(variant === "ghost" && "text-muted-foreground", compact && "@max-[32rem]/run:size-7 @max-[32rem]/run:p-0")}
+    disabled={retry.isPending || retry.isSuccess}
+    onClick={() => retry.mutate(task.id, { onError: (error) => toast.error(
+      dispatchReasonCode(error) === "invocation_not_allowed" ? t(($) => $.execution_log.retry_blocked) : t(($) => $.execution_log.retry_failed),
+    ) })}>
+    <RotateCcw className="size-3.5" /><span className={cn(compact && "@max-[32rem]/run:sr-only")}>{t(($) => $.execution_log.retry_task_tooltip)}</span>
+  </Button>;
+  const activityButton = <button type="button"
+    className={cn("flex min-w-0 items-center gap-1.5 rounded py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+      showProgress ? "ml-auto flex-1 text-body" : "ml-auto order-last shrink-0",
+      showIdentity && !showProgress && "@max-[32rem]/run:min-w-7 @max-[32rem]/run:justify-center")}
+    aria-label={stepLabel ? `${activityLabel} · ${stepLabel}` : activityLabel}
+    aria-expanded={expanded} aria-controls={expanded ? regionId : undefined}
+    onClick={(event) => { state.disclosure.onTrigger(event); setExpanded(!expanded); }}>
+    {showProgress
+      ? <><RunActivityIndicator status={task.status} animate={animationVisibility.visible} />
+          <RunActivitySummary summary={summary} motionKey={summaryMotionKey} /></>
+      : <span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{activityLabel}</span>}
+    {!showProgress && stepLabel && <span className="text-faint-foreground @max-[32rem]/run:hidden">· {stepLabel}</span>}
+    <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
+  </button>;
+  const failedAction = providerAuthFailure
+    ? <Button size="sm" nativeButton={false}
+        render={<AppLink href={`${paths.agentDetail(task.agent_id)}?view=general`} />}>
+        <Settings className="size-3.5" />{t(($) => $.inline_run.open_agent_settings)}
+      </Button>
+    : retryButton("default", false);
   if (presentation === "header" && showCommentRunInHeader(run)) {
     return <span className="inline-flex shrink-0" data-comment-actions data-run-id={task.id}>
       <Tooltip>
@@ -145,42 +185,42 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   return (
     <section aria-label={t(($) => $.inline_run.label, { name })}
       className={cn("@container/run min-w-0 py-2", className)} data-run-id={task.id}>
-      <div ref={animationVisibility.ref} className="flex min-h-7 min-w-0 items-center gap-2" data-run-summary-row>
+      {task.status === "failed" ? <div ref={animationVisibility.ref}
+        className="flex min-h-9 min-w-0 flex-wrap items-start gap-x-2 gap-y-1" data-run-summary-row>
         {showIdentity && <>
           <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard />
           <span className="max-w-[30%] shrink-0 truncate text-body font-medium" title={name}>{name}</span>
         </>}
-        <span className={cn("flex min-w-0 max-w-[50%] shrink-0 items-center gap-1.5 whitespace-nowrap text-caption text-muted-foreground", showProgress && "sr-only")}
-          role="status" data-run-status>
-          <TaskStatusIcon status={task.status} /><span className="truncate" title={statusText}>{statusText}</span>
-        </span>
-        <button type="button"
-          className={cn("flex min-w-0 items-center gap-1.5 rounded py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            showProgress ? "flex-1 text-body" : "order-last ml-auto shrink-0",
-            showIdentity && !showProgress && "@max-[32rem]/run:min-w-7 @max-[32rem]/run:justify-center")}
-          aria-label={stepLabel ? `${activityLabel} · ${stepLabel}` : activityLabel}
-          aria-expanded={expanded} aria-controls={expanded ? regionId : undefined}
-          onClick={(event) => { state.disclosure.onTrigger(event); setExpanded(!expanded); }}>
-          {showProgress
-            ? <><RunActivityIndicator status={task.status} animate={animationVisibility.visible} />
-                <RunActivitySummary summary={summary} motionKey={summaryMotionKey} /></>
-            : <span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{activityLabel}</span>}
-          {!showProgress && stepLabel && <span className="text-faint-foreground @max-[32rem]/run:hidden">· {stepLabel}</span>}
-          <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
-        </button>
-        <span className={cn("shrink-0 whitespace-nowrap text-caption tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
-        {stopButton}
-        {!hasReply && (task.status === "failed" || task.status === "cancelled") && <Button
-          size="sm" variant="ghost" className={cn("text-muted-foreground", showIdentity && "@max-[32rem]/run:size-7 @max-[32rem]/run:p-0")} disabled={retry.isPending || retry.isSuccess}
-          onClick={() => retry.mutate(task.id, { onError: (error) => toast.error(
-            dispatchReasonCode(error) === "invocation_not_allowed" ? t(($) => $.execution_log.retry_blocked) : t(($) => $.execution_log.retry_failed),
-          ) })}>
-          <RotateCcw className="size-3.5" /><span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{t(($) => $.execution_log.retry_task_tooltip)}</span>
-        </Button>}
-      </div>
+        <span className="mt-1 shrink-0 text-destructive"><TaskStatusIcon status={task.status} /></span>
+        <div className="min-w-40 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5 text-caption" role="status" data-run-status>
+            <span className="shrink-0 font-medium text-destructive">{statusText}</span>
+            {failure && <><span className="text-faint-foreground">·</span><span className="truncate font-medium" title={failure}>{failure}</span></>}
+            {elapsed && <span className="shrink-0 whitespace-nowrap tabular-nums text-muted-foreground">· {elapsed}</span>}
+          </div>
+          {failureGuidance && <p className="mt-0.5 text-caption text-muted-foreground">{failureGuidance}</p>}
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-1 @max-[32rem]/run:ml-5">
+          {failedAction}
+          {activityButton}
+        </div>
+      </div> : <div ref={animationVisibility.ref} className="flex min-h-7 min-w-0 items-center gap-2" data-run-summary-row>
+          {showIdentity && <>
+            <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard />
+            <span className="max-w-[30%] shrink-0 truncate text-body font-medium" title={name}>{name}</span>
+          </>}
+          <span className={cn("flex min-w-0 max-w-[50%] shrink-0 items-center gap-1.5 whitespace-nowrap text-caption text-muted-foreground", showProgress && "sr-only")}
+            role="status" data-run-status>
+            <TaskStatusIcon status={task.status} /><span className="truncate" title={statusText}>{statusText}</span>
+          </span>
+          {activityButton}
+          <span className={cn("shrink-0 whitespace-nowrap text-caption tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
+          {stopButton}
+          {!hasReply && task.status === "cancelled" && retryButton("ghost", showIdentity)}
+        </div>}
       <div className={cn(showIdentity && "pl-8")}>
         {output && <div className="mt-2 text-body"><ReadonlyContent content={redactSecrets(output)} /></div>}
-        {failure && <p className="mt-1 text-caption text-destructive">{failure}</p>}
+        {task.status !== "failed" && failure && <p className="mt-1 text-caption text-destructive">{failure}</p>}
         {expanded && <div id={regionId} className="mt-2 min-w-0 space-y-1">
           {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
           {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}

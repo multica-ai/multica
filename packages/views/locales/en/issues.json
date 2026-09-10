@@ -19,7 +19,10 @@
     "full_log": "Open full log",
     "message": "Agent message",
     "error": "Error",
-    "waiting_result": "Waiting for the tool result..."
+    "waiting_result": "Waiting for the tool result...",
+    "provider_auth_guidance": "Reconnect {{name}}'s coding provider before retrying.",
+    "generic_failure_guidance": "The agent stopped unexpectedly. Try this run again.",
+    "open_agent_settings": "Open settings"
   },
   "status_catalog_error": {
     "title": "Couldn't load the status list",

@@ -61,6 +61,32 @@ export const FAILURE_REASON_I18N_KEYS = {
 
 type KnownFailureReason = keyof typeof FAILURE_REASON_I18N_KEYS;
 
+const providerAuthReason = "agent_error.provider_auth_or_access";
+const legacyProviderAuthReasons = new Set([
+  "agent_error",
+  "agent_error.unknown",
+]);
+const oauthSessionExpiredWitness = "oauth session expired";
+
+/**
+ * Detect the settings-recoverable provider-auth state across mixed server and
+ * daemon versions. A canonical reason is authoritative; the raw-text fallback
+ * is deliberately limited to the exact Codex OAuth expiry witness and only
+ * upgrades legacy catchalls.
+ */
+export function isProviderAuthFailure(task: {
+  status: string;
+  failure_reason?: string | null;
+  error?: string | null;
+}): boolean {
+  if (task.status !== "failed") return false;
+  if (task.failure_reason === providerAuthReason) return true;
+  if (task.failure_reason && !legacyProviderAuthReasons.has(task.failure_reason)) {
+    return false;
+  }
+  return task.error?.toLowerCase().includes(oauthSessionExpiredWitness) === true;
+}
+
 /**
  * Localized label for a `failure_reason`, or `null` when there is nothing to
  * show. Unknown values remain raw so an older installed client degrades
