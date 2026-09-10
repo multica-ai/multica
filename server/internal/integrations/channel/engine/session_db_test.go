@@ -1265,6 +1265,58 @@ func TestChannelTaskDeliveryFreezesTriggerPerGeneration(t *testing.T) {
 	}
 }
 
+// TestChannelTaskDeliveryKeepsRouteWhenTriggerIsMissing pins the route/trigger
+// split for the case migration 457 leaves behind: a generation with no
+// recorded trigger (pre-migration, recovered after deploy).
+//
+// The trigger is legitimately NULL there — we cannot say which message the run
+// answers. The ROUTE is not: the binding is isolated to one thread/topic, so
+// its thread id names that thread for every generation of it. Sourcing the
+// thread from the generation instead would hand these runs an empty thread and
+// silently relocate their answers to the parent chat, which is a visibility
+// change rather than a degradation. Slack (thread_ts) and Telegram
+// (message_thread_id) can still place the message correctly from the thread
+// alone; Lark, whose only route into a topic is replying to a message in it,
+// declines to send (see topicRouteWithoutTrigger).
+func TestChannelTaskDeliveryKeepsRouteWhenTriggerIsMissing(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	f := seedSessionPersistenceFixture(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	// A thread-isolated binding: the cursor carries the thread, and the
+	// generation predates the migration so it has no trigger.
+	if err := q.UpdateChannelChatSessionBindingReplyTarget(ctx, db.UpdateChannelChatSessionBindingReplyTargetParams{
+		ReplyChatSessionID: f.sessionID,
+		LastMessageID:      pgtype.Text{String: "om_older_turn", Valid: true},
+		LastThreadID:       pgtype.Text{String: "omt_topic", Valid: true},
+	}); err != nil {
+		t.Fatalf("seed binding route: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO channel_chat_context_generation (chat_session_id, revision)
+		VALUES ($1, 1) ON CONFLICT DO NOTHING
+	`, f.sessionID); err != nil {
+		t.Fatalf("create generation: %v", err)
+	}
+
+	taskID := newDeliveryTaskID(t, pool)
+	delivery, err := q.CreateChannelTaskDeliveryFromSession(ctx, db.CreateChannelTaskDeliveryFromSessionParams{
+		TaskID: taskID, ChatSessionID: f.sessionID, ContextRevision: 1,
+	})
+	if err != nil {
+		t.Fatalf("create delivery: %v", err)
+	}
+	if delivery.ChannelThreadID.String != "omt_topic" {
+		t.Errorf("thread = %q, want omt_topic — the route must survive a missing trigger",
+			delivery.ChannelThreadID.String)
+	}
+	if delivery.ChannelMessageID.Valid || delivery.ChannelSenderID.Valid {
+		t.Errorf("trigger = message %+v sender %+v, want both NULL — an unattributable run must not borrow the session cursor",
+			delivery.ChannelMessageID, delivery.ChannelSenderID)
+	}
+}
+
 // TestChannelTaskDeliveryIsImmutableAfterCreation covers the other half: once
 // a task's delivery row exists, later inbound turns on the same generation
 // must not move it.

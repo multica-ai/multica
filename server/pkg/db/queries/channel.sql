@@ -774,12 +774,12 @@ RETURNING initiator_user_id;
 -- no longer be the session's newest, so reading the trigger from the session
 -- would answer one member's question quoting and @-mentioning another's.
 --
--- All three columns move together in one statement: a sender that described a
+-- Both columns move together in one statement: a sender that described a
 -- different message than the reply targets is precisely the cross-mention this
--- exists to prevent.
+-- exists to prevent. The thread is NOT here — it is route, not trigger; see
+-- CreateChannelTaskDeliveryFromSession.
 UPDATE channel_chat_context_generation
 SET last_message_id = sqlc.narg('last_message_id'),
-    last_thread_id  = sqlc.narg('last_thread_id'),
     last_sender_id  = sqlc.narg('last_sender_id')
 WHERE chat_session_id = @chat_session_id
   AND revision = @revision;
@@ -840,12 +840,23 @@ WHERE binding.installation_id = sqlc.arg('installation_id')
 -- =====================
 
 -- name: CreateChannelTaskDeliveryFromSession :one
--- Freezes one task's outbound route. The ROUTE (chat, type, config, revision)
--- comes from the session binding; the TRIGGER (message, thread, sender) comes
--- from the generation this task answers, NOT from the binding's latest-trigger
--- cursor, which a newer generation may already have advanced past. An INNER
--- JOIN on purpose: a task whose generation row is missing has no trigger we
--- can attribute, and inventing one would risk quoting the wrong member.
+-- Freezes one task's outbound delivery, from two different sources on purpose.
+--
+-- ROUTE — chat, type, config, thread, revision — comes from the session
+-- binding. A thread/topic-isolated session has one binding per topic, so its
+-- last_thread_id names that topic for every generation of it. Reading the
+-- route from a generation instead would leave pre-migration generations with
+-- no topic and quietly relocate their answers to the parent chat, which is a
+-- visibility change, not a degradation.
+--
+-- TRIGGER — the message an answer quotes and the account it @-mentions —
+-- comes from the generation this task answers, NOT from the binding's
+-- latest-trigger cursor, which a newer generation may already have advanced
+-- past. A NULL trigger means "we cannot attribute this run": callers reply
+-- without a quote or mention rather than inventing one.
+--
+-- INNER JOIN on the generation: a task whose generation row is missing
+-- entirely has no context to deliver against at all.
 INSERT INTO channel_task_delivery (
     task_id, binding_id, installation_id, channel_type, channel_chat_id, chat_type,
     channel_message_id, channel_thread_id, channel_sender_id, route_revision, config
@@ -853,7 +864,7 @@ INSERT INTO channel_task_delivery (
 SELECT
     @task_id, binding.id, binding.installation_id, binding.channel_type,
     binding.channel_chat_id, binding.chat_type,
-    generation.last_message_id, generation.last_thread_id, generation.last_sender_id,
+    generation.last_message_id, binding.last_thread_id, generation.last_sender_id,
     binding.route_revision, binding.config
 FROM channel_chat_session_binding AS binding
 JOIN channel_chat_context_generation AS generation

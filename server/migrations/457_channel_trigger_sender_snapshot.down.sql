@@ -3,5 +3,4 @@ ALTER TABLE channel_task_delivery
 
 ALTER TABLE channel_chat_context_generation
     DROP COLUMN IF EXISTS last_message_id,
-    DROP COLUMN IF EXISTS last_thread_id,
     DROP COLUMN IF EXISTS last_sender_id;

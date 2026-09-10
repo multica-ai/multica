@@ -24,18 +24,23 @@
 -- crash recovery. The trigger belongs beside it. channel_task_delivery then
 -- freezes the generation's values per task.
 --
--- The binding keeps its own last_message_id / last_thread_id: those drive the
--- history-boundary bookkeeping (history_start_message_id, history_end_message_id)
--- which is genuinely a per-session latest-trigger cursor, not per-generation.
--- That cursor is deliberately NOT interchangeable with the values here: it
--- advances for channel commands (/issue) too, whereas the generation trigger
--- is written only for messages that are actually agent input.
+-- Only the TRIGGER moves here. The ROUTE stays on the binding, and the split
+-- matters: last_thread_id is the topic/thread a session is isolated to, which
+-- is a property of the binding (one binding per topic), so it is correct for
+-- every generation and must keep coming from there. Sourcing the route from a
+-- generation would leave pre-migration generations with no topic and silently
+-- relocate their answers to the parent chat.
+--
+-- The binding also keeps last_message_id for the history-boundary bookkeeping
+-- (history_start_message_id, history_end_message_id). That cursor is
+-- deliberately NOT interchangeable with the trigger here: it advances for
+-- channel commands (/issue) too, whereas the trigger is written only for
+-- messages that are actually agent input.
 --
 -- No index: every read here goes through an existing key (chat_session_id +
 -- revision, or task_id).
 ALTER TABLE channel_chat_context_generation
     ADD COLUMN IF NOT EXISTS last_message_id TEXT,
-    ADD COLUMN IF NOT EXISTS last_thread_id  TEXT,
     ADD COLUMN IF NOT EXISTS last_sender_id  TEXT;
 
 ALTER TABLE channel_task_delivery

@@ -1183,3 +1183,91 @@ func TestPatcherMentionsTriggeringAccountNotSiblingIdentity(t *testing.T) {
 		t.Errorf("text = %q, want %q — the mention must name the account that sent the trigger", got, want)
 	}
 }
+
+// TestPatcherSkipsTopicReplyWithoutTrigger is the leak guard. A
+// topic-isolated session whose task carries no trigger message has no way
+// into the topic — Lark can only reply into one — and outboundChatID would
+// resolve the composite key to the PARENT group. Posting there is not a
+// degraded reply, it is the member's topic conversation appearing in front
+// of the whole group, so the Patcher must send nothing at all.
+func TestPatcherSkipsTopicReplyWithoutTrigger(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.ChatType = string(ChatTypeGroup)
+	q.binding.ChannelChatID = "oc_test_chat:omt_topic1"
+	q.binding.Config = []byte(`{"chat_id":"oc_test_chat"}`)
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic1", Valid: true}
+	q.binding.LastMessageID = pgtype.Text{} // pre-migration generation: no trigger
+	taskID := uuidFromString(t, "eeccdddd-eecc-eecc-eecc-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "answer for the topic"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 0 || len(api.mdCardSent) != 0 || len(api.sent) != 0 {
+		t.Errorf("a topic reply with no trigger must not reach the parent group; text=%d md=%d card=%d",
+			len(api.textSent), len(api.mdCardSent), len(api.sent))
+	}
+}
+
+// TestPatcherSkipsTopicErrorCardWithoutTrigger covers the same leak on the
+// failure path: an error card names the run and its agent, so it must not
+// surface in the parent group either.
+func TestPatcherSkipsTopicErrorCardWithoutTrigger(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.ChatType = string(ChatTypeGroup)
+	q.binding.ChannelChatID = "oc_test_chat:omt_topic1"
+	q.binding.Config = []byte(`{"chat_id":"oc_test_chat"}`)
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic1", Valid: true}
+	q.binding.LastMessageID = pgtype.Text{}
+	taskID := uuidFromString(t, "eecceeee-eecc-eecc-eecc-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventTaskFailed,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       map[string]any{"error": "boom"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.sent) != 0 || len(api.textSent) != 0 {
+		t.Errorf("a topic error card with no trigger must not reach the parent group; card=%d text=%d",
+			len(api.sent), len(api.textSent))
+	}
+}
+
+// TestPatcherStillRepliesInOrdinaryGroupWithoutTrigger is the boundary: the
+// guard is about topics only. An ordinary group has no isolation to breach —
+// the chat-level send lands in the very chat the session belongs to — so a
+// missing trigger degrades to an unquoted, unmentioned reply, not silence.
+func TestPatcherStillRepliesInOrdinaryGroupWithoutTrigger(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.ChatType = string(ChatTypeGroup)
+	q.binding.LastMessageID = pgtype.Text{}
+	q.binding.LastThreadID = pgtype.Text{}
+	taskID := uuidFromString(t, "eeccffff-eecc-eecc-eecc-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	if api.textSent[0].ChatID != "oc_test_chat" {
+		t.Errorf("chat_id = %q, want the session's own chat", api.textSent[0].ChatID)
+	}
+	if got := api.textSent[0].Text; got != "plain reply" {
+		t.Errorf("text = %q, want the body unchanged", got)
+	}
+}

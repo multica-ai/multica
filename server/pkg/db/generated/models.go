@@ -338,7 +338,6 @@ type ChannelChatContextGeneration struct {
 	InitiatorUserID        pgtype.UUID        `json:"initiator_user_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	LastMessageID          pgtype.Text        `json:"last_message_id"`
-	LastThreadID           pgtype.Text        `json:"last_thread_id"`
 	LastSenderID           pgtype.Text        `json:"last_sender_id"`
 }
 

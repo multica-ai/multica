@@ -1378,8 +1378,14 @@ func TestAppendUserMessage_ReplyTargetCarriesSender(t *testing.T) {
 		t.Fatalf("AppendUserMessage: %v", err)
 	}
 	got := f.lastContextReply
-	if got.LastMessageID.String != "om_1" || got.LastThreadID.String != "omt_1" {
-		t.Fatalf("context reply target = %+v, want the trigger message and thread", got)
+	if got.LastMessageID.String != "om_1" {
+		t.Fatalf("context reply target = %+v, want the trigger message", got)
+	}
+	// The thread is NOT recorded here: it is route, carried by the binding,
+	// so that a generation with no trigger still routes into its topic.
+	if f.lastReplyTarget.LastThreadID.String != "omt_1" {
+		t.Errorf("binding cursor thread = %+v, want the route to stay on the binding",
+			f.lastReplyTarget.LastThreadID)
 	}
 	if !got.LastSenderID.Valid || got.LastSenderID.String != "ou_sender" {
 		t.Errorf("last_sender_id = %+v, want ou_sender recorded alongside the message", got.LastSenderID)
