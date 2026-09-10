@@ -491,6 +491,31 @@ describe("reloadActiveTab", () => {
   });
 });
 
+describe("flashActiveTab", () => {
+  it("raises a flash signal for the active tab and bumps seq on each call", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const activeTabId = useTabStore.getState().byWorkspace.acme.activeTabId;
+
+    store.flashActiveTab();
+    expect(useTabStore.getState().flashSignal).toEqual({
+      tabId: activeTabId,
+      seq: 1,
+    });
+
+    store.flashActiveTab();
+    expect(useTabStore.getState().flashSignal).toEqual({
+      tabId: activeTabId,
+      seq: 2,
+    });
+  });
+
+  it("is a no-op with no active workspace", () => {
+    useTabStore.getState().flashActiveTab();
+    expect(useTabStore.getState().flashSignal).toBeNull();
+  });
+});
+
 describe("commitScrollMemento", () => {
   it("stores route-scoped entries on the addressed tab", () => {
     const store = useTabStore.getState();

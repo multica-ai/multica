@@ -245,6 +245,9 @@ export function DesktopNavigationProvider({
         }
         store.openTab(path, title ?? "", { activate: opts?.activate });
       },
+      flashActiveTab: () => {
+        useTabStore.getState().flashActiveTab();
+      },
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),
     [appUrl, location],

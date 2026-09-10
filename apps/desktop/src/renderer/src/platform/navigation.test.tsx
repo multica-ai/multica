@@ -291,6 +291,20 @@ describe("current location", () => {
   });
 });
 
+describe("flashActiveTab", () => {
+  it("raises a flash signal on the active tab without navigating", () => {
+    const getAdapter = renderProvider();
+    const activeBefore = acmeGroup().activeTabId;
+
+    getAdapter().flashActiveTab!();
+
+    const s = useTabStore.getState();
+    expect(s.flashSignal).toEqual({ tabId: activeBefore, seq: 1 });
+    // No navigation happened.
+    expect(getActiveTab(s)?.url).toBe("/acme/issues");
+  });
+});
+
 describe("routeContentLinkPath (links inside content — MUL-5208)", () => {
   it("opens a same-workspace path in a foreground tab of its own", () => {
     routeContentLinkPath("/acme/issues/MUL-1");
