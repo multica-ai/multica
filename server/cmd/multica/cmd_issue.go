@@ -397,12 +397,33 @@ var validIssuePriorities = []string{
 	"urgent", "high", "medium", "low", "none",
 }
 
+// issueListMaxPageSize mirrors the page clamp in the server's ListIssues
+// handler; the two must move together.
+const issueListMaxPageSize = 100
+
 // validIssueSortColumns are the sort keys `issue list --sort` accepts. They
 // mirror the server's ListIssues handler. "position" is the default and is
 // always sorted ascending (the board's manual drag order), so --direction is
 // only meaningful for the other columns.
 var validIssueSortColumns = []string{
 	"position", "title", "created_at", "start_date", "due_date", "priority",
+}
+
+// validIssueFields are the top-level keys /api/issues actually emits for
+// `issue list` — i.e. the JSON tags of handler.IssueResponse
+// (server/internal/handler/issue.go), minus reactions/attachments/
+// source_context, which are omitempty and never set by the list endpoint
+// (detail-only). TestValidIssueFieldsMatchListEndpointShape guards this
+// against drifting from that struct. There is no plain "assignee" field —
+// it is split into assignee_type/assignee_id — so that name is rejected
+// rather than silently ignored.
+var validIssueFields = []string{
+	"id", "workspace_id", "number", "identifier", "title", "description",
+	"status", "status_category", "status_name", "priority", "assignee_type",
+	"assignee_id", "creator_type", "creator_id", "parent_issue_id",
+	"project_id", "position", "stage", "start_date", "due_date", "created_at",
+	"updated_at", "revision", "last_activity_at", "metadata", "properties",
+	"labels",
 }
 
 // directionalIssueSortColumns are the sort keys for which --direction is
@@ -495,13 +516,16 @@ func init() {
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
 	issueListCmd.Flags().StringArray("property", nil, `Filter by custom property, written as "Name=Value" (repeatable, one value per flag). Name is a property name (case-insensitive) or its UUID. Value depends on the type: an option name or id for select and multi_select, true or false for checkbox, a member name, email, or id for actor types, and the value itself for text, url, number, and date (YYYY-MM-DD). Use __none__ to match issues where the property is unset; it works for every type, so an option or member actually named __none__ has to be given by id, as does a property whose name contains "=" or ends in <, > or ! (the >=, <=, and != spellings are reserved for comparison filters). Repeating a property matches ANY of its values; different properties must ALL match.`)
-	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return in one page (the server caps a page at 100; use --offset to page through more)")
-	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
+	issueListCmd.Flags().Int("limit", 50, fmt.Sprintf("Page size, 1 to %d (the server returns at most %d issues per request; use --offset to page through more)", issueListMaxPageSize, issueListMaxPageSize))
+	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination; while --output json reports has_more, advance it by the number of issues in that same response)")
 	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority, or property:<name-or-id> to sort by a custom property (select properties sort by option order)")
 	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column or a property sort (position is always ascending)")
+	issueListCmd.Flags().String("fields", "", "JSON output only: comma-separated list of issue fields to include (e.g. id,title,status,priority). Filtering happens client-side after the full response is fetched, so this shrinks CLI output size and agent context cost, not network/server-side cost. Omit for the full issue object (default, unchanged). Valid fields: "+strings.Join(validIssueFields, ", "))
+	issueListCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
+	issueGetCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
@@ -646,6 +670,19 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	// The server clamps limit and applies its own default when the flag is
+	// missing, so reject a value it cannot honour up front (before any
+	// request) rather than report a page that was never returned. Same
+	// reasoning as the --direction guard below.
+	limit, _ := cmd.Flags().GetInt("limit")
+	if limit < 1 || limit > issueListMaxPageSize {
+		return fmt.Errorf("--limit must be between 1 and %d (the server returns at most %d issues per request); use --offset to page through more", issueListMaxPageSize, issueListMaxPageSize)
+	}
+	offset, _ := cmd.Flags().GetInt("offset")
+	if offset < 0 {
+		return fmt.Errorf("--offset must be zero or greater")
+	}
+
 	params := url.Values{}
 	params.Set("workspace_id", client.WorkspaceID)
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
@@ -654,8 +691,9 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("priority"); v != "" {
 		params.Set("priority", v)
 	}
-	if v, _ := cmd.Flags().GetInt("limit"); v > 0 {
-		params.Set("limit", fmt.Sprintf("%d", v))
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	if offset > 0 {
+		params.Set("offset", fmt.Sprintf("%d", offset))
 	}
 	_, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)
 	if resolveErr != nil {
@@ -663,9 +701,6 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 	if hasAssignee {
 		params.Set("assignee_id", aID)
-	}
-	if v, _ := cmd.Flags().GetInt("offset"); v > 0 {
-		params.Set("offset", fmt.Sprintf("%d", v))
 	}
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
 		project, err := resolveProjectID(ctx, client, v)
@@ -682,11 +717,13 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		params.Set("metadata", filter)
 	}
 	// --property filtering and property:<ref> sorting both address definitions
-	// by name or UUID, so they share a single catalog fetch.
+	// by name or UUID, so they share a single catalog fetch. An actor filter
+	// and --resolve-properties share one member request the same way.
 	const propertySortPrefix = "property:"
 	propertyFlags, _ := cmd.Flags().GetStringArray("property")
 	sortVal, _ := cmd.Flags().GetString("sort")
 	var properties []propertyDTO
+	var members memberDirectory
 	if len(propertyFlags) > 0 || strings.HasPrefix(sortVal, propertySortPrefix) {
 		var err error
 		if properties, err = fetchProperties(ctx, client); err != nil {
@@ -694,7 +731,7 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	if len(propertyFlags) > 0 {
-		filter, err := buildPropertiesFilterQueryParam(ctx, client, properties, propertyFlags)
+		filter, err := buildPropertiesFilterQueryParam(ctx, client, &members, properties, propertyFlags)
 		if err != nil {
 			return err
 		}
@@ -734,6 +771,40 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		params.Set("direction", d)
 	}
 
+	var fields []string
+	if v, _ := cmd.Flags().GetString("fields"); v != "" {
+		valid := make(map[string]bool, len(validIssueFields))
+		for _, f := range validIssueFields {
+			valid[f] = true
+		}
+		keepsProperties := false
+		for _, f := range strings.Split(v, ",") {
+			f = strings.TrimSpace(f)
+			if !valid[f] {
+				return fmt.Errorf("invalid --fields value %q; valid values: %s", f, strings.Join(validIssueFields, ", "))
+			}
+			if f == "properties" {
+				keepsProperties = true
+			}
+			fields = append(fields, f)
+		}
+		// --fields without `properties` deletes the very key
+		// --resolve-properties rewrites, so the pair would either cost two
+		// requests for output nobody sees or leave the flag silently doing
+		// nothing. A passed-but-ignored flag is a footgun in scripts (the
+		// same reason --fields rejects "assignee" instead of dropping it),
+		// so say so instead of picking one of those.
+		//
+		// Only in JSON mode, though: both flags document themselves as having
+		// no effect on --output table, so a table reader who leaves them on
+		// the command line must still get their table.
+		outputFormat, _ := cmd.Flags().GetString("output")
+		resolve, _ := cmd.Flags().GetBool("resolve-properties")
+		if outputFormat == "json" && resolve && !keepsProperties {
+			return fmt.Errorf("--resolve-properties needs the properties field, but --fields does not include it; add properties to --fields or drop --resolve-properties")
+		}
+	}
+
 	path := "/api/issues"
 	if len(params) > 0 {
 		path += "?" + params.Encode()
@@ -745,13 +816,41 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 
 	issuesRaw, _ := result["issues"].([]any)
+	total, totalOK := result["total"].(float64)
+	returned := len(issuesRaw)
+	// total cannot end a walk on its own. The server answers with the row
+	// count it just returned when its count query fails, and a newer backend
+	// may drop the field; either one reports has_more false beside a full page
+	// and truncates the walk in silence. So total is trusted only when it is
+	// larger than this page, which a failed count never is; otherwise the page
+	// decides. The one cost is a first page that fills exactly: it cannot tell
+	// a genuine total from a failed count, so it probes onward and the next
+	// request comes back empty.
+	totalTrusted := totalOK && int(total) > returned
+	hasMore := false
+	switch {
+	case returned == 0:
+		// An empty page ends a walk whatever total says.
+	case totalTrusted:
+		hasMore = offset+returned < int(total)
+	default:
+		hasMore = returned == limit
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
-		total, _ := result["total"].(float64)
-		limit, _ := cmd.Flags().GetInt("limit")
-		offset, _ := cmd.Flags().GetInt("offset")
-		hasMore := offset+len(issuesRaw) < int(total)
+		// --fields runs first so a page that drops `properties` never pays for
+		// the catalog and member requests resolving it would need. Combining
+		// the two with `properties` filtered out is rejected above, so nothing
+		// resolvable is deleted before it is resolved.
+		if len(fields) > 0 {
+			filterIssueFields(issuesRaw, fields)
+		}
+		if resolve, _ := cmd.Flags().GetBool("resolve-properties"); resolve {
+			if err := resolveIssueProperties(ctx, client, properties, &members, issuesRaw); err != nil {
+				return err
+			}
+		}
 		wrapped := map[string]any{
 			"issues":   issuesRaw,
 			"total":    int(total),
@@ -807,6 +906,27 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		rows = append(rows, row)
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
+	// Page footer on stderr so stdout stays a plain table. It speaks whenever
+	// there is more or the page was offset, and stays silent for a short
+	// first page. "of N" appears only while total is trusted, so the line
+	// never claims a page is the whole list beside a pointer to the next one.
+	switch {
+	case returned == 0 && offset > 0:
+		if totalTrusted {
+			fmt.Fprintf(os.Stderr, "No issues at --offset %d (%d total).\n", offset, int(total))
+		} else {
+			fmt.Fprintf(os.Stderr, "No issues at --offset %d.\n", offset)
+		}
+	case hasMore || offset > 0:
+		line := fmt.Sprintf("Showing issues %d-%d.", offset+1, offset+returned)
+		if totalTrusted {
+			line = fmt.Sprintf("Showing %d-%d of %d issues.", offset+1, offset+returned, int(total))
+		}
+		if hasMore {
+			line += fmt.Sprintf(" Next page: --offset %d", offset+returned)
+		}
+		fmt.Fprintln(os.Stderr, line)
+	}
 	return nil
 }
 
@@ -918,6 +1038,11 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	if resolve, _ := cmd.Flags().GetBool("resolve-properties"); resolve {
+		if err := resolveIssueProperties(ctx, client, nil, &memberDirectory{}, []any{issue}); err != nil {
+			return err
+		}
+	}
 	return cli.PrintJSON(os.Stdout, issue)
 }
 
@@ -1806,12 +1931,13 @@ func fetchIssue(ctx context.Context, client *cli.APIClient, id string) (map[stri
 
 // fetchIssueColumn returns every issue in a status column ordered by position
 // ascending, paginating through the list endpoint so columns larger than one
-// page (the server caps a page at 100) still produce a complete, correctly
-// ordered set. A non-empty projectID scopes the column to that project,
-// matching a project board; an empty projectID lists the whole workspace
-// column.
+// page (the server caps a page at issueListMaxPageSize) still produce a
+// complete, correctly ordered set. A non-empty projectID scopes the column to
+// that project, matching a project board; an empty projectID lists the whole
+// workspace column.
 func fetchIssueColumn(ctx context.Context, client *cli.APIClient, workspaceID, projectID, status string) ([]map[string]any, error) {
 	var all []map[string]any
+	seen := make(map[string]struct{})
 	offset := 0
 	for {
 		params := url.Values{}
@@ -1821,22 +1947,38 @@ func fetchIssueColumn(ctx context.Context, client *cli.APIClient, workspaceID, p
 			params.Set("project_id", projectID)
 		}
 		params.Set("sort", "position")
-		params.Set("limit", "100")
+		params.Set("limit", fmt.Sprintf("%d", issueListMaxPageSize))
 		params.Set("offset", fmt.Sprintf("%d", offset))
 
 		var result map[string]any
 		if err := client.GetJSON(ctx, "/api/issues?"+params.Encode(), &result); err != nil {
 			return nil, err
 		}
-		page, _ := result["issues"].([]any)
-		for _, raw := range page {
-			if m, ok := raw.(map[string]any); ok {
-				all = append(all, m)
-			}
+		page, ok := result["issues"].([]any)
+		if !ok {
+			return nil, fmt.Errorf("invalid issue column response: expected an issues array")
 		}
-		total, _ := result["total"].(float64)
+		for _, raw := range page {
+			m, ok := raw.(map[string]any)
+			if !ok || strVal(m, "id") == "" {
+				return nil, fmt.Errorf("invalid issue in column response")
+			}
+			id := strVal(m, "id")
+			if _, exists := seen[id]; exists {
+				return nil, fmt.Errorf("issue column returned duplicate issue %s; retry the reorder", id)
+			}
+			seen[id] = struct{}{}
+			all = append(all, m)
+		}
+		total, totalOK := result["total"].(float64)
 		offset += len(page)
-		if len(page) == 0 || offset >= int(total) {
+		// Older servers substitute the page length when COUNT fails. Such a
+		// total cannot prove the column is complete. Without a usable count,
+		// read through the empty page, including when the server uses smaller
+		// pages; a short page does not establish its applied limit. Duplicate
+		// IDs above reject a repeated page before any position is written.
+		totalTrusted := totalOK && total > float64(len(page))
+		if len(page) == 0 || (totalTrusted && float64(offset) >= total) {
 			break
 		}
 	}
@@ -2717,51 +2859,47 @@ func (k assigneeKinds) describe() string {
 	}
 }
 
+// assigneeCandidate is one directory entry matchAssignee ranks. aliases are
+// additional unique identifiers that select a candidate outright, ranked with
+// id matches rather than name matches — a member's email is as unambiguous as
+// their id, and is what people actually have to hand. Without it,
+// `--value bohan@example.com` fails to resolve.
+type assigneeCandidate struct {
+	assigneeMatch
+	aliases []string
+}
+
+func (c assigneeCandidate) matchesAlias(input string) bool {
+	for _, alias := range c.aliases {
+		if alias != "" && strings.EqualFold(alias, input) {
+			return true
+		}
+	}
+	return false
+}
+
+func memberCandidates(members []map[string]any) []assigneeCandidate {
+	candidates := make([]assigneeCandidate, 0, len(members))
+	for _, m := range members {
+		candidates = append(candidates, assigneeCandidate{
+			assigneeMatch: assigneeMatch{Type: "member", ID: strVal(m, "user_id"), Name: strVal(m, "name")},
+			aliases:       []string{strVal(m, "email")},
+		})
+	}
+	return candidates
+}
+
 func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, kinds assigneeKinds) (string, string, error) {
 	if client.WorkspaceID == "" {
 		return "", "", fmt.Errorf("workspace ID is required to resolve assignees; use --workspace-id or set MULTICA_WORKSPACE_ID")
 	}
-
-	input := normalizeAssigneeLookupInput(name)
-	if input == "" {
+	if normalizeAssigneeLookupInput(name) == "" {
 		return "", "", fmt.Errorf("no %s found matching %q", kinds.describe(), name)
 	}
-	inputLower := strings.ToLower(input)
 
-	// Matches are collected into three priority buckets. Higher-priority buckets
-	// short-circuit lower-priority matching so that, e.g., an exact name match
-	// always wins over a substring collision with another candidate.
-	//   1. idMatches        — full UUID or 8-char ShortID (as shown by `truncateID`).
-	//   2. exactMatches     — case-insensitive full name equality.
-	//   3. substringMatches — preserves the existing partial-name UX.
-	var idMatches, exactMatches, substringMatches []assigneeMatch
+	var candidates []assigneeCandidate
 	var errs []error
 	var fetchAttempts int
-
-	// exactAliases are additional unique identifiers that select a candidate
-	// outright, ranked with id matches rather than name matches — a member's
-	// email is as unambiguous as their id, and is what people actually have to
-	// hand. Without it, `--value bohan@example.com` fails to resolve.
-	classify := func(entityType, id, displayName string, exactAliases ...string) {
-		match := assigneeMatch{Type: entityType, ID: id, Name: displayName}
-		if id != "" && (strings.EqualFold(id, input) || strings.EqualFold(truncateID(id), input)) {
-			idMatches = append(idMatches, match)
-			return
-		}
-		for _, alias := range exactAliases {
-			if alias != "" && strings.EqualFold(alias, input) {
-				idMatches = append(idMatches, match)
-				return
-			}
-		}
-		if strings.EqualFold(displayName, input) {
-			exactMatches = append(exactMatches, match)
-			return
-		}
-		if strings.Contains(strings.ToLower(displayName), inputLower) {
-			substringMatches = append(substringMatches, match)
-		}
-	}
 
 	// Search members.
 	if kinds.member {
@@ -2770,9 +2908,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 		if err := getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err != nil {
 			errs = append(errs, fmt.Errorf("fetch members: %w", err))
 		} else {
-			for _, m := range members {
-				classify("member", strVal(m, "user_id"), strVal(m, "name"), strVal(m, "email"))
-			}
+			candidates = append(candidates, memberCandidates(members)...)
 		}
 	}
 
@@ -2785,7 +2921,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 			errs = append(errs, fmt.Errorf("fetch agents: %w", err))
 		} else {
 			for _, a := range agents {
-				classify("agent", strVal(a, "id"), strVal(a, "name"))
+				candidates = append(candidates, assigneeCandidate{assigneeMatch: assigneeMatch{Type: "agent", ID: strVal(a, "id"), Name: strVal(a, "name")}})
 			}
 		}
 	}
@@ -2807,7 +2943,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 				if strVal(s, "archived_at") != "" {
 					continue
 				}
-				classify("squad", strVal(s, "id"), strVal(s, "name"))
+				candidates = append(candidates, assigneeCandidate{assigneeMatch: assigneeMatch{Type: "squad", ID: strVal(s, "id"), Name: strVal(s, "name")}})
 			}
 		}
 	}
@@ -2819,6 +2955,37 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 			msgs[i] = e.Error()
 		}
 		return "", "", fmt.Errorf("failed to resolve assignee: %s", strings.Join(msgs, "; "))
+	}
+
+	return matchAssignee(name, kinds, candidates)
+}
+
+// matchAssignee resolves name against candidates a caller already fetched.
+// Matches are collected into three priority buckets. Higher-priority buckets
+// short-circuit lower-priority matching so that, e.g., an exact name match
+// always wins over a substring collision with another candidate.
+//  1. idMatches        — full UUID or 8-char ShortID (as shown by `truncateID`), or an alias.
+//  2. exactMatches     — case-insensitive full name equality.
+//  3. substringMatches — preserves the existing partial-name UX.
+func matchAssignee(name string, kinds assigneeKinds, candidates []assigneeCandidate) (string, string, error) {
+	input := normalizeAssigneeLookupInput(name)
+	if input == "" {
+		return "", "", fmt.Errorf("no %s found matching %q", kinds.describe(), name)
+	}
+	inputLower := strings.ToLower(input)
+
+	var idMatches, exactMatches, substringMatches []assigneeMatch
+	for _, c := range candidates {
+		switch {
+		case c.ID != "" && (strings.EqualFold(c.ID, input) || strings.EqualFold(truncateID(c.ID), input)):
+			idMatches = append(idMatches, c.assigneeMatch)
+		case c.matchesAlias(input):
+			idMatches = append(idMatches, c.assigneeMatch)
+		case strings.EqualFold(c.Name, input):
+			exactMatches = append(exactMatches, c.assigneeMatch)
+		case strings.Contains(strings.ToLower(c.Name), inputLower):
+			substringMatches = append(substringMatches, c.assigneeMatch)
+		}
 	}
 
 	for _, bucket := range [][]assigneeMatch{idMatches, exactMatches, substringMatches} {
@@ -2973,6 +3140,27 @@ func formatAssignee(issue map[string]any, actors actorDisplayLookup) string {
 		return ""
 	}
 	return actors.actor(aType, aID)
+}
+
+// filterIssueFields keeps only the requested top-level keys on each issue,
+// dropping everything else — including description, which makes up most of
+// a typical issue payload. Opt-in via --fields on JSON output only.
+func filterIssueFields(issuesRaw []any, fields []string) {
+	keep := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		keep[f] = true
+	}
+	for _, raw := range issuesRaw {
+		issue, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		for k := range issue {
+			if !keep[k] {
+				delete(issue, k)
+			}
+		}
+	}
 }
 
 func truncateID(id string) string {

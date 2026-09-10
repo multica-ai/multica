@@ -387,7 +387,6 @@ export function McpConfigTab({
                   remove: t(($) => $.tab_body.mcp_config.delete_action_short),
                   removeAria: t(($) => $.tab_body.mcp_config.delete_aria),
                 }}
-                configureKind="edit"
                 onRenameStart={() => startRename(server)}
                 onConfigure={() => openEditDialog(server)}
                 onRemove={() => {

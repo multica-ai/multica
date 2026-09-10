@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -436,7 +437,7 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/autopilots", body, &result); err != nil {
-		return fmt.Errorf("create autopilot: %w", err)
+		return autopilotWriteRequestError("create autopilot", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -527,7 +528,7 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if err := client.PatchJSON(ctx, "/api/autopilots/"+autopilotRef.ID, body, &result); err != nil {
-		return fmt.Errorf("update autopilot: %w", err)
+		return autopilotWriteRequestError("update autopilot", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -553,7 +554,7 @@ func runAutopilotDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := client.DeleteJSON(ctx, "/api/autopilots/"+autopilotRef.ID); err != nil {
-		return fmt.Errorf("delete autopilot: %w", err)
+		return autopilotWriteRequestError("delete autopilot", err)
 	}
 	fmt.Printf("Autopilot %s deleted.\n", autopilotRef.Display)
 	return nil
@@ -575,15 +576,84 @@ func runAutopilotTrigger(cmd *cobra.Command, args []string) error {
 
 	var run map[string]any
 	if err := client.PostJSON(ctx, "/api/autopilots/"+autopilotRef.ID+"/trigger", nil, &run); err != nil {
-		return fmt.Errorf("trigger autopilot: %w", err)
+		return autopilotTriggerRequestError(err)
 	}
 
+	status := strVal(run, "status")
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
-		return cli.PrintJSON(os.Stdout, run)
+		// Print the run either way: a caller parsing JSON still wants the row,
+		// including its failure_reason, before the non-zero exit below.
+		if err := cli.PrintJSON(os.Stdout, run); err != nil {
+			return err
+		}
+	} else if autopilotRunStarted(status) {
+		fmt.Printf("Autopilot triggered: run %s (status: %s)\n", strVal(run, "id"), status)
 	}
-	fmt.Printf("Autopilot triggered: run %s (status: %s)\n", strVal(run, "id"), strVal(run, "status"))
-	return nil
+	if autopilotRunStarted(status) {
+		return nil
+	}
+	// The server recorded a run but dispatched nothing. Reporting exit 0 with
+	// "Autopilot triggered" is what made #8078 look like a silent no-op for a
+	// day: the operator, and any agent running this on their behalf, read
+	// success and moved on. Surface it as the failure it is.
+	msg := fmt.Sprintf("autopilot did not run (status: %s)", status)
+	if reason := strVal(run, "failure_reason"); reason != "" {
+		msg += ": " + reason
+	}
+	if code := strVal(run, "reason_code"); code != "" {
+		msg += " [" + code + "]"
+	}
+	return errors.New(msg)
+}
+
+// autopilotTriggerRequestError turns a failed trigger request into what the
+// user should read.
+//
+// FormatError deliberately collapses every 403 into generic "no access" copy so
+// a refusal cannot confirm that a resource exists. For a manual trigger that
+// hides the one refusal a workspace can actually act on — the calling run having
+// no originating human — which is exactly the silence #8078 was about. These two
+// refusals opt out by carrying a stable server code; the branch is on that code,
+// never on the English sentence, which changes with copy edits and disappears
+// under translation.
+func autopilotTriggerRequestError(err error) error {
+	switch cli.ServerErrorCode(err) {
+	case "autopilot_trigger_no_originator":
+		return cli.WithUserMessage("this run has no originating human, so it cannot trigger an autopilot on anyone's behalf: a manual trigger is authorized as the person who asked for it", err)
+	case "autopilot_trigger_forbidden":
+		return cli.WithUserMessage("the person this run acts for cannot trigger this autopilot: triggering requires its creator, a workspace admin, or a granted collaborator", err)
+	}
+	return fmt.Errorf("trigger autopilot: %w", err)
+}
+
+// autopilotWriteRequestError turns a refused autopilot write into what the user
+// should read, for the same reason autopilotTriggerRequestError exists: an
+// autopilot write is authorized as the human who asked for it, so when YOU are
+// the one running this, "no access" is about them and not about you — and
+// FormatError's generic 403 copy cannot say which (MUL-7108). The branch is on
+// the server's stable code, never on the English sentence.
+func autopilotWriteRequestError(action string, err error) error {
+	switch cli.ServerErrorCode(err) {
+	case "autopilot_no_originator":
+		return cli.WithUserMessage("this run has no originating human, so it cannot change an autopilot on anyone's behalf: an autopilot write is authorized as the person who asked for it", err)
+	case "autopilot_forbidden":
+		return cli.WithUserMessage("the person this run acts for cannot manage this autopilot: it requires its creator, a workspace admin, or a granted collaborator", err)
+	case "autopilot_actor_not_member":
+		return cli.WithUserMessage("the person this run acts for is not a member of this workspace, so nothing can be created on their behalf", err)
+	}
+	return fmt.Errorf("%s: %w", action, err)
+}
+
+// autopilotRunStarted reports whether a manual trigger actually dispatched work.
+//
+// Mirrors the web client's runNowToastKind whitelist (packages/views/autopilots):
+// success is an explicit start status, never "anything that is not skipped or
+// failed". The run schema accepts any status string for forward compatibility, so
+// a future or anomalous-but-parseable status must read as "did not start" rather
+// than be reported as a successful trigger.
+func autopilotRunStarted(status string) bool {
+	return status == "issue_created" || status == "running"
 }
 
 func runAutopilotRuns(cmd *cobra.Command, args []string) error {
@@ -750,7 +820,7 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/autopilots/"+autopilotRef.ID+"/triggers", body, &result); err != nil {
-		return fmt.Errorf("create trigger: %w", err)
+		return autopilotWriteRequestError("create trigger", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -815,7 +885,7 @@ func runAutopilotTriggerRotateURL(cmd *cobra.Command, args []string) error {
 	var result map[string]any
 	path := "/api/autopilots/" + autopilotRef.ID + "/triggers/" + triggerRef.ID + "/rotate-webhook-token"
 	if err := client.PostJSON(ctx, path, nil, &result); err != nil {
-		return fmt.Errorf("rotate webhook url: %w", err)
+		return autopilotWriteRequestError("rotate webhook url", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -869,7 +939,7 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 	var result map[string]any
 	path := "/api/autopilots/" + autopilotRef.ID + "/triggers/" + triggerRef.ID
 	if err := client.PatchJSON(ctx, path, body, &result); err != nil {
-		return fmt.Errorf("update trigger: %w", err)
+		return autopilotWriteRequestError("update trigger", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -900,7 +970,7 @@ func runAutopilotTriggerDelete(cmd *cobra.Command, args []string) error {
 
 	path := "/api/autopilots/" + autopilotRef.ID + "/triggers/" + triggerRef.ID
 	if err := client.DeleteJSON(ctx, path); err != nil {
-		return fmt.Errorf("delete trigger: %w", err)
+		return autopilotWriteRequestError("delete trigger", err)
 	}
 	fmt.Printf("Trigger %s deleted.\n", triggerRef.ID)
 	return nil

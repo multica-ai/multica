@@ -1,6 +1,6 @@
 -- name: CreateTaskMessage :one
-INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output, output_truncated)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: CreateTaskMessages :many
@@ -24,7 +24,10 @@ RETURNING *;
 -- `pgtype.Text{Valid: x != ""}` mapping the single-row query carries — empty
 -- string means SQL NULL. input is passed as text and cast here for the same
 -- reason; it is the one column that genuinely has to be parsed as JSON, because
--- it is a jsonb column.
+-- it is a jsonb column. output_truncated rides the same trick for the same
+-- reason: it is a genuinely tri-state boolean (NULL = the reporting daemon did
+-- not measure it), and a bool[] parameter becomes a Go []bool, which has no way
+-- to spell the third state.
 --
 -- Callers MUST still run the Postgres text sanitizer first. A NUL anywhere in
 -- the batch fails the whole statement (GH #7098) — that is inherent to batching
@@ -56,9 +59,10 @@ WITH incoming AS (
         unnest(sqlc.arg('tools')::text[]) AS tool,
         unnest(sqlc.arg('contents')::text[]) AS content,
         unnest(sqlc.arg('inputs')::text[]) AS input,
-        unnest(sqlc.arg('outputs')::text[]) AS output
+        unnest(sqlc.arg('outputs')::text[]) AS output,
+        unnest(sqlc.arg('output_truncations')::text[]) AS output_truncated
 ), inserted AS (
-    INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output)
+    INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output, output_truncated)
     SELECT
         m.id,
         sqlc.arg('task_id')::uuid,
@@ -67,7 +71,8 @@ WITH incoming AS (
         NULLIF(m.tool, ''),
         NULLIF(m.content, ''),
         NULLIF(m.input, '')::jsonb,
-        NULLIF(m.output, '')
+        NULLIF(m.output, ''),
+        NULLIF(m.output_truncated, '')::bool
     FROM incoming AS m
     RETURNING *
 )

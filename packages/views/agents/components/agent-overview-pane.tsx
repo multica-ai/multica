@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { cn } from "@multica/ui/lib/utils";
+import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
 import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
@@ -327,11 +328,11 @@ export function AgentOverviewPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div
-        className="shrink-0 overflow-x-auto border-b px-4 sm:px-6"
+        className="shrink-0 overflow-x-auto border-b"
         role="tablist"
         aria-label={t(($) => $.tabs.page_navigation_aria)}
       >
-        <div className="mx-auto flex max-w-[1440px] items-center gap-6">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-6")}>
           {TOP_TABS.map((tab) => (
             <button
               key={tab.id}
@@ -352,7 +353,24 @@ export function AgentOverviewPane({
         </div>
       </div>
 
-      {/* Overview/Work scroll as one page. Sidebar views split scrolling on
+      {/* Header, tab bar, banners and every panel read PAGE_RAIL, so the page
+          is one centred column at every width (MUL-7107). The first pass put
+          the chrome on the rail and left the panels off it, which is the bug;
+          the second put everything full-bleed, which aligned the leading edge
+          and then stretched this two-column layout to 2200px and stranded the
+          summary card 1200px from the list it summarises.
+
+          A detail page is a document about one entity, not a table. Genuine
+          list surfaces — Issues, My Issues, member detail — stay full-bleed on
+          PAGE_GUTTER alone; `runtimes` and skill detail read the same rail.
+
+          Panels that own no inner gutter take PAGE_GUTTER on the rail element
+          itself; Work and the secondary nav layout take a bare rail because
+          their toolbar and nav rail already carry it. Below ~1730px the rail
+          is wider than the viewport, so it costs small and medium screens
+          nothing.
+
+          Overview/Work scroll as one page. Sidebar views split scrolling on
           md+ (nav rail pinned, content pane scrolls) like settings-page.tsx;
           below md the rail is a horizontal strip and the page scrolls whole. */}
       <div
@@ -362,7 +380,9 @@ export function AgentOverviewPane({
         )}
       >
         {effectiveView === "overview" && (
-          <div className="mx-auto max-w-[1440px] p-4 sm:p-6">
+          <div
+            className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6")}
+          >
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
               <ActivityTab agent={agent} showPerformance={false} />
               <AgentOverviewSummary
@@ -375,16 +395,21 @@ export function AgentOverviewPane({
         )}
 
         {effectiveView === "work" && (
-          <div className="flex min-h-[620px] flex-col">
+          <div className={cn(PAGE_RAIL, "flex min-h-[620px] flex-col")}>
             <ActorIssuesPanel actorType="agent" actorId={agent.id} />
           </div>
         )}
 
         {secondaryTabs.length > 0 && activeSecondaryTab && (
-          <div className="flex min-h-full flex-col md:h-full md:flex-row">
+          <div className={cn(PAGE_RAIL, "flex min-h-full flex-col md:h-full md:flex-row")}>
             {/* Content-surface color, no shell tint — same rule as the settings
                 nav: in-card panels must not break the desktop tab merge (MUL-4439). */}
-            <aside className="shrink-0 overflow-x-auto border-b border-surface-border p-2 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:p-4">
+            <aside
+              className={cn(
+                "shrink-0 overflow-x-auto border-b border-surface-border py-2 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:py-4",
+                PAGE_GUTTER,
+              )}
+            >
               <div
                 className="flex w-max min-w-full items-center gap-1 md:w-full md:flex-col md:items-stretch"
                 role="tablist"
@@ -415,7 +440,7 @@ export function AgentOverviewPane({
             </aside>
 
             <section className="min-w-0 flex-1 md:overflow-y-auto">
-              <div className="mx-auto w-full max-w-3xl p-4 sm:p-6 md:p-8">
+              <div className="w-full max-w-3xl p-4 sm:p-6 md:p-8">
                 <header>
                   <h2 className="text-title-sm font-medium text-balance">
                     {t(($) => $.tabs[activeSecondaryTab.labelKey])}

@@ -88,6 +88,7 @@ export function ComposioTab() {
     // Drop only the Composio one-shot params; keep everything else (notably
     // ?tab=integrations) so the user stays on this tab.
     const params = new URLSearchParams(navigation.searchParams);
+    params.set("integration", "composio");
     params.delete("connected");
     params.delete("error");
     const qs = params.toString();

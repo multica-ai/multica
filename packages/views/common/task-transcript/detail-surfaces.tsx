@@ -229,10 +229,24 @@ export function DiffDetailSurface({ lines, path }: { lines: TraceDiffLine[]; pat
   );
 }
 
-export function ToolDetailSurface({ text, language }: { text: string; language?: string }) {
+export function ToolDetailSurface({
+  text,
+  language,
+  note,
+}: {
+  text: string;
+  language?: string;
+  /**
+   * A remark about the body, shown at its end once the whole body is on
+   * screen. Withheld while the fade is up: a note that answers "was that all
+   * of it?" is only an answer to a reader who has reached the bottom.
+   */
+  note?: string;
+}) {
   const { t } = useT("agents");
   const [showAll, setShowAll] = useState(false);
   const isLong = text.length > 1600 || text.split("\n").length > 14;
+  const revealed = !isLong || showAll;
   // Only file bodies carry a language; command output and JSON stay plain.
   const html = useMemo(() => (language ? highlightBlock(text, language) : null), [text, language]);
 
@@ -265,6 +279,7 @@ export function ToolDetailSurface({ text, language }: { text: string; language?:
           </button>
         </div>
       )}
+      {note && revealed && <p className="px-3 pb-2 text-micro text-faint-foreground">{note}</p>}
     </div>
   );
 }

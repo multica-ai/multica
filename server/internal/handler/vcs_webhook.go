@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/integrations/vcs"
 	"github.com/multica-ai/multica/server/internal/issuepolicy"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -261,9 +262,17 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	}
 
 	if ev.State == "merged" || ev.State == "closed" {
+		// Keep the catalog local to this delivery and connection's workspace.
+		lifecycleEnabled := featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)
+		resolver := issuestatus.NewResolver(conn.WorkspaceID)
 		for _, issue := range reevalIssues {
 			// A custom terminal status counts as terminal here. (MUL-6243)
-			if issuepolicy.ResolveIssue(ctx, h.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)).IsTerminal() {
+			status := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status)
+			terminal := status == "done" || status == "cancelled"
+			if lifecycleEnabled {
+				terminal = issuepolicy.ResolveIssue(ctx, h.Queries, issue, true).IsTerminal()
+			}
+			if terminal {
 				continue
 			}
 			counts, err := h.Queries.GetIssueCombinedPullRequestCloseAggregate(ctx, issue.ID)

@@ -506,14 +506,13 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		if taskID := r.FormValue("task_id"); taskID != "" {
 			// Authoritative task-token boundary (load-bearing, mirrors
 			// chat_history.go:chatHistorySession). X-Task-ID is only trustworthy
-			// when the auth middleware set it from a task-scoped `mat_` token —
-			// that path is also the ONLY one that stamps X-Actor-Source=task_token
-			// and strips a client-forged X-Task-ID. A normal JWT / `mul_` PAT
-			// leaves X-Actor-Source empty and does NOT strip a forged X-Task-ID,
-			// and resolveActor's fallback will accept a real X-Agent-ID +
-			// X-Task-ID pair. So without this gate a member who learns a task ID
-			// could forge both headers and inject an attachment onto another chat
-			// task's assistant reply — a cross-session/privacy leak.
+			// when the auth middleware set it from a task-scoped `mat_` token:
+			// that is the only branch that stamps it, because the middleware
+			// deletes any client-supplied agent/task identity first (MUL-3428).
+			// The gate is kept explicit because of what it protects — an
+			// attachment injected onto another chat task's assistant reply is a
+			// cross-session privacy leak, and this endpoint should say which
+			// credential it requires rather than rely on a distant strip.
 			if r.Header.Get("X-Actor-Source") != "task_token" {
 				writeError(w, http.StatusForbidden, "task_id upload is only available from within an agent task")
 				return

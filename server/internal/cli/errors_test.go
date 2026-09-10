@@ -579,3 +579,34 @@ func TestUserMessageError(t *testing.T) {
 		}
 	})
 }
+
+// TestServerErrorCode pins the contract a command relies on when it opts a
+// specific refusal out of the generic kind-based copy.
+func TestServerErrorCode(t *testing.T) {
+	httpErr := func(body string) error {
+		return &HTTPError{Method: "POST", Path: "/x", StatusCode: 403, Body: body}
+	}
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"code present", httpErr(`{"error":"nope","code":"autopilot_trigger_no_originator"}`), "autopilot_trigger_no_originator"},
+		{"no code field", httpErr(`{"error":"nope"}`), ""},
+		{"empty body", httpErr(""), ""},
+		{"non-JSON body", httpErr("plain text refusal"), ""},
+		{"malformed JSON", httpErr(`{"code":`), ""},
+		// A server that put prose in `code` must not have it treated as an
+		// identifier a command can branch on.
+		{"prose in code", httpErr(`{"code":"You do not have access"}`), ""},
+		{"not an HTTP error", errors.New("local failure"), ""},
+		{"nil", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ServerErrorCode(tc.err); got != tc.want {
+				t.Errorf("ServerErrorCode() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

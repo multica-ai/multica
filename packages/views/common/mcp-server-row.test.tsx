@@ -33,7 +33,6 @@ describe("McpServerRow", () => {
             remove: "Delete",
             removeAria: "Delete MCP server",
           }}
-          configureKind="edit"
           onRenameStart={vi.fn()}
           onConfigure={vi.fn()}
           onRemove={vi.fn()}
@@ -53,6 +52,42 @@ describe("McpServerRow", () => {
     expect(
       screen.getByRole("button", { name: "Delete MCP server linear" }),
     ).toBeInTheDocument();
+  });
+
+  // Regression: the configure action opens the server's configuration dialog,
+  // so it must not wear the circular-arrows icon this repo uses everywhere for
+  // "refresh" (MUL-7057). That reading survived because the workspace library
+  // calls the same action "Replace configuration".
+  it("marks the configure action with the configure icon, not a refresh icon", () => {
+    render(
+      <ul>
+        <McpServerRow
+          name="linear"
+          transport="stdio"
+          canManage
+          labels={{
+            rename: "Rename",
+            renameAria: "Rename server",
+            renameSave: "Save name",
+            renameCancel: "Cancel rename",
+            configure: "Replace configuration",
+            configureAria: "Replace configuration",
+            remove: "Delete",
+            removeAria: "Delete MCP server",
+          }}
+          onRenameStart={vi.fn()}
+          onConfigure={vi.fn()}
+          onRemove={vi.fn()}
+        />
+      </ul>,
+    );
+
+    const icon = screen
+      .getByRole("button", { name: "Replace configuration linear" })
+      .querySelector("svg");
+
+    expect(icon).toHaveClass("lucide-sliders-horizontal");
+    expect(icon?.getAttribute("class")).not.toMatch(/refresh|rotate/i);
   });
 
   it("cancels inline rename when Escape is pressed", async () => {
@@ -82,7 +117,6 @@ describe("McpServerRow", () => {
             remove: "Delete",
             removeAria: "Delete MCP server",
           }}
-          configureKind="edit"
           onRenameStart={vi.fn()}
           onConfigure={vi.fn()}
           onRemove={vi.fn()}

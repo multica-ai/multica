@@ -9,6 +9,12 @@ export interface TimelineItem {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+  /**
+   * Whether the stored `output` dropped bytes at the source (`tool_result`
+   * only). `undefined` means unknown — the record predates the flag or came
+   * from an older daemon — and must never be rendered as "complete".
+   */
+  output_truncated?: boolean;
   created_at?: string;
 }
 
@@ -49,6 +55,19 @@ function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
   }));
 }
 
+/**
+ * Whether this record's stored output is known to have dropped bytes.
+ *
+ * Only tool results carry the measurement, and an empty output has nothing to
+ * be missing — truncation keeps the first 8 KiB, so a preview that dropped
+ * bytes is never empty.
+ */
+export function isOutputTruncated(item: TimelineItem): boolean {
+  return (
+    item.type === "tool_result" && (item.output?.length ?? 0) > 0 && item.output_truncated === true
+  );
+}
+
 /** Build a chronologically ordered timeline from raw task messages. */
 export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
   const items: TimelineItem[] = [];
@@ -60,6 +79,7 @@ export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
       content: msg.content,
       input: msg.input,
       output: msg.output,
+      output_truncated: msg.output_truncated,
       created_at: msg.created_at,
     });
   }

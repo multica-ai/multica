@@ -72,11 +72,11 @@ type extensionOperatorClass struct {
 	Extension     string
 }
 
-// issuePropertiesBigramOperatorClass gates migration 446. pg_bigm ships with
-// neither core Postgres nor the pgvector image CI and self-hosted deployments
-// run, so the index it builds is best-effort; the contains prefilter it
-// accelerates stays correct without it.
-var issuePropertiesBigramOperatorClass = extensionOperatorClass{
+// pgBigmOperatorClass gates migrations that build optional pg_bigm indexes.
+// pg_bigm ships with neither core Postgres nor the pgvector image CI and
+// self-hosted deployments run, so those migrations must remain safe when the
+// operator class is unavailable.
+var pgBigmOperatorClass = extensionOperatorClass{
 	AccessMethod:  "gin",
 	OperatorClass: "gin_bigm_ops",
 	Extension:     "pg_bigm",
@@ -298,18 +298,20 @@ var concurrentIndexCleanups = map[string]string{
 	"443_issue_project_status_index":                            "idx_issue_project_status",
 	"445_comment_delegated_failure_unsettled_index":             "idx_comment_delegated_failure_unsettled",
 	"446_issue_properties_bigm_index":                           "idx_issue_properties_bigm",
-	"452_issue_lifecycle_pkey_index":                            "issue_lifecycle_pkey_uidx",
-	"453_issue_lifecycle_status_pkey_index":                     "issue_lifecycle_status_pkey_uidx",
-	"454_issue_transition_pkey_index":                           "issue_transition_pkey_uidx",
-	"455_automation_execution_pkey_index":                       "automation_execution_pkey_uidx",
-	"457_issue_lifecycle_scope_index":                           "idx_issue_lifecycle_scope",
-	"458_issue_lifecycle_legacy_status_index":                   "idx_issue_lifecycle_status_legacy_key",
-	"459_issue_transition_revision_index":                       "idx_issue_transition_revision",
-	"460_automation_execution_trigger_index":                    "idx_automation_execution_trigger",
-	"461_issue_transition_timeline_index":                       "idx_issue_transition_timeline",
-	"462_issue_lifecycle_binding_index":                         "idx_issue_lifecycle_binding",
-	"463_agent_task_automation_execution_index":                 "idx_agent_task_automation_execution",
-	"467_issue_lifecycle_spec_key_index":                        "idx_issue_lifecycle_status_spec_key",
+	"452_agent_task_pending_thread_unique":                      "idx_one_pending_task_per_issue_agent_thread",
+	"458_activity_log_member_assignee_frequency_index":          "idx_activity_log_member_assignee_frequency",
+	"460_issue_lifecycle_pkey_index":                            "issue_lifecycle_pkey_uidx",
+	"461_issue_lifecycle_status_pkey_index":                     "issue_lifecycle_status_pkey_uidx",
+	"462_issue_transition_pkey_index":                           "issue_transition_pkey_uidx",
+	"463_automation_execution_pkey_index":                       "automation_execution_pkey_uidx",
+	"465_issue_lifecycle_scope_index":                           "idx_issue_lifecycle_scope",
+	"466_issue_lifecycle_legacy_status_index":                   "idx_issue_lifecycle_status_legacy_key",
+	"467_issue_transition_revision_index":                       "idx_issue_transition_revision",
+	"468_automation_execution_trigger_index":                    "idx_automation_execution_trigger",
+	"469_issue_transition_timeline_index":                       "idx_issue_transition_timeline",
+	"470_issue_lifecycle_binding_index":                         "idx_issue_lifecycle_binding",
+	"471_agent_task_automation_execution_index":                 "idx_agent_task_automation_execution",
+	"475_issue_lifecycle_spec_key_index":                        "idx_issue_lifecycle_status_spec_key",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -334,6 +336,9 @@ var concurrentDownIndexCleanups = map[string]string{
 	"391_drop_agent_task_queue_dispatched_prepare_index":    "idx_agent_task_queue_dispatched_prepare",
 	"437_drop_agent_runtime_last_seen_at_index":             "idx_agent_runtime_last_seen_at",
 	"450_drop_comment_delegated_failure_pending_index":      "idx_comment_delegated_failure_pending",
+	"453_drop_pending_issue_agent_unique":                   "idx_one_pending_task_per_issue_agent_v2",
+	"454_drop_comment_content_bigm_index":                   "idx_comment_content_bigm",
+	"455_drop_comment_content_trgm_index":                   "idx_comment_content_trgm",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {
@@ -407,9 +412,9 @@ func refuseChannelChatRouteHistoryRollbackWith(ctx context.Context, query rowQue
 }
 
 var upMigrationConditions = map[string]migrationCondition{
-	// Fresh databases that successfully built the CJK-friendly bigram index do
-	// not need to build the trigram fallback only to remove it at migration 371.
-	"140_comment_content_trgm_index": whenIndexNotUsable(commentContentBigramIndex),
+	// Current search no longer consumes a comment-content GIN. Fresh installs
+	// should not build the historical fallback only to retire it at migration 455.
+	"140_comment_content_trgm_index": skipMigration("comment content search indexes are retired by migration 455"),
 	// Existing pg_bigm deployments already have both indexes. Remove the
 	// fallback only after proving the preferred index has the exact usable shape;
 	// pg_bigm-less self-hosted databases keep trgm and record 371 as a no-op.
@@ -418,7 +423,15 @@ var upMigrationConditions = map[string]migrationCondition{
 	// requirement: build it where pg_bigm exists and record a no-op everywhere
 	// else, rather than failing the run (and with it backend startup) on every
 	// database without the extension.
-	"446_issue_properties_bigm_index": whenOperatorClassAvailable(issuePropertiesBigramOperatorClass),
+	"446_issue_properties_bigm_index": whenOperatorClassAvailable(pgBigmOperatorClass),
+}
+
+// Migrations 454 and 455 restore the mutually exclusive comment search index
+// selected before its retirement: pg_bigm deployments get the preferred bigram
+// index, while pg_bigm-less self-hosted deployments get the trigram fallback.
+var downMigrationConditions = map[string]migrationCondition{
+	"454_drop_comment_content_bigm_index": whenOperatorClassAvailable(pgBigmOperatorClass),
+	"455_drop_comment_content_trgm_index": whenOperatorClassUnavailable(pgBigmOperatorClass),
 }
 
 func hooksForDirection(direction string) map[string]preMigrationHook {
@@ -448,12 +461,20 @@ func ensureSourceContextRollbackSafe(ctx context.Context, pool *pgxpool.Pool) er
 }
 
 func conditionsForDirection(direction string) map[string]migrationCondition {
-	if direction == "up" {
+	switch direction {
+	case "up":
 		return upMigrationConditions
+	case "down":
+		return downMigrationConditions
+	default:
+		return nil
 	}
-	// Rollbacks intentionally ignore environment gates: they restore the
-	// portable pre-migration schema regardless of which up SQL actually ran.
-	return nil
+}
+
+func skipMigration(reason string) migrationCondition {
+	return func(context.Context, *pgxpool.Conn) (bool, string, error) {
+		return false, reason, nil
+	}
 }
 
 func whenIndexUsable(requirement usableIndexRequirement) migrationCondition {
@@ -513,6 +534,20 @@ func whenOperatorClassAvailable(opclass extensionOperatorClass) migrationConditi
 		}
 		if !available {
 			return false, fmt.Sprintf("operator class %s (%s) is not installed", opclass.OperatorClass, opclass.Extension), nil
+		}
+		return true, "", nil
+	}
+}
+
+func whenOperatorClassUnavailable(opclass extensionOperatorClass) migrationCondition {
+	availableCondition := whenOperatorClassAvailable(opclass)
+	return func(ctx context.Context, conn *pgxpool.Conn) (bool, string, error) {
+		available, _, err := availableCondition(ctx, conn)
+		if err != nil {
+			return false, "", err
+		}
+		if available {
+			return false, fmt.Sprintf("operator class %s (%s) is installed", opclass.OperatorClass, opclass.Extension), nil
 		}
 		return true, "", nil
 	}

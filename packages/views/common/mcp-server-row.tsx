@@ -6,7 +6,6 @@ import {
   Globe2,
   Loader2,
   Pencil,
-  RefreshCw,
   Server,
   SlidersHorizontal,
   SquareTerminal,
@@ -113,7 +112,9 @@ export function McpRemoveButton({
  * Data writes remain the caller's responsibility: workspace settings replaces
  * a write-only config, while an agent edits its readable local config. Keeping
  * those semantics outside this component prevents the visual treatment and
- * the security contract from becoming coupled again.
+ * the security contract from becoming coupled again. Both open the same
+ * configuration dialog, so both carry the same "configure" icon; only the
+ * caller's tooltip and accessible name say whether it edits or replaces.
  */
 export function McpServerRow({
   name,
@@ -123,7 +124,6 @@ export function McpServerRow({
   actionsDisabled = false,
   rename,
   labels,
-  configureKind,
   onRenameStart,
   onConfigure,
   onRemove,
@@ -135,14 +135,11 @@ export function McpServerRow({
   actionsDisabled?: boolean;
   rename?: McpServerRenameState;
   labels: McpServerRowLabels;
-  configureKind: "edit" | "replace";
   onRenameStart: () => void;
   onConfigure: () => void;
   onRemove: () => void;
 }) {
   const errorId = `${useId()}-rename-error`;
-  const ConfigureIcon =
-    configureKind === "replace" ? RefreshCw : SlidersHorizontal;
 
   return (
     <li className="group flex min-h-16 items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30">
@@ -251,7 +248,7 @@ export function McpServerRow({
                   disabled={actionsDisabled}
                   aria-label={`${labels.configureAria} ${name}`}
                 >
-                  <ConfigureIcon />
+                  <SlidersHorizontal />
                 </Button>
               }
             />

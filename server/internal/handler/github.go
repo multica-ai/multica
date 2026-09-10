@@ -27,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issuelifecycle"
 	"github.com/multica-ai/multica/server/internal/issuepolicy"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -1671,9 +1672,18 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// silently auto-closing the issue — if nothing carrying closing
 		// intent was ever delivered, the user should decide manually.
 		if state == "merged" || state == "closed" {
+			// All linked issues belong to this workspace. Resolve custom statuses
+			// once per delivery; built-in statuses still need no catalog read.
+			lifecycleEnabled := featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)
+			resolver := issuestatus.NewResolver(wsID)
 			for _, issue := range reevalIssues {
 				// A custom terminal status counts as terminal here. (MUL-6243)
-				if issuepolicy.ResolveIssue(ctx, h.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)).IsTerminal() {
+				status := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status)
+				terminal := status == "done" || status == "cancelled"
+				if lifecycleEnabled {
+					terminal = issuepolicy.ResolveIssue(ctx, h.Queries, issue, true).IsTerminal()
+				}
+				if terminal {
 					continue
 				}
 				// Combined across providers: an issue may also carry a still-open

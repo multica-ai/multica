@@ -436,6 +436,7 @@ func TestConcurrentCommentRevisionConflictCancelsTaskBatchOnce(t *testing.T) {
 	}
 	ctx := context.Background()
 	fixture := createCommentDeliveryFixture(t, "revision task side effects")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(ctx, `
 		UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1
 	`, fixture.issueID, fixture.agentID); err != nil {

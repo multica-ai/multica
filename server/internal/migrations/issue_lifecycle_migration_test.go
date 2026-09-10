@@ -87,29 +87,29 @@ func TestIssueLifecycleMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 	}
 
 	up := []string{
-		"451_issue_lifecycle_foundation.up.sql",
-		"452_issue_lifecycle_pkey_index.up.sql",
-		"453_issue_lifecycle_status_pkey_index.up.sql",
-		"454_issue_transition_pkey_index.up.sql",
-		"455_automation_execution_pkey_index.up.sql",
-		"456_issue_lifecycle_primary_keys.up.sql",
-		"457_issue_lifecycle_scope_index.up.sql",
-		"458_issue_lifecycle_legacy_status_index.up.sql",
-		"459_issue_transition_revision_index.up.sql",
-		"460_automation_execution_trigger_index.up.sql",
-		"461_issue_transition_timeline_index.up.sql",
-		"462_issue_lifecycle_binding_index.up.sql",
-		"463_agent_task_automation_execution_index.up.sql",
-		"464_issue_lifecycle_backfill.up.sql",
-		"465_automation_execution_task_status.up.sql",
-		"466_issue_lifecycle_spec_fields.up.sql",
-		"467_issue_lifecycle_spec_key_index.up.sql",
+		"459_issue_lifecycle_foundation.up.sql",
+		"460_issue_lifecycle_pkey_index.up.sql",
+		"461_issue_lifecycle_status_pkey_index.up.sql",
+		"462_issue_transition_pkey_index.up.sql",
+		"463_automation_execution_pkey_index.up.sql",
+		"464_issue_lifecycle_primary_keys.up.sql",
+		"465_issue_lifecycle_scope_index.up.sql",
+		"466_issue_lifecycle_legacy_status_index.up.sql",
+		"467_issue_transition_revision_index.up.sql",
+		"468_automation_execution_trigger_index.up.sql",
+		"469_issue_transition_timeline_index.up.sql",
+		"470_issue_lifecycle_binding_index.up.sql",
+		"471_agent_task_automation_execution_index.up.sql",
+		"472_issue_lifecycle_backfill.up.sql",
+		"473_automation_execution_task_status.up.sql",
+		"474_issue_lifecycle_spec_fields.up.sql",
+		"475_issue_lifecycle_spec_key_index.up.sql",
 	}
 	for _, name := range up {
 		applyMigrationFile(t, ctx, conn.Conn(), name)
 	}
 	// The backfill itself is explicitly restartable after partial operator runs.
-	applyMigrationFile(t, ctx, conn.Conn(), "464_issue_lifecycle_backfill.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "472_issue_lifecycle_backfill.up.sql")
 
 	assertLifecycleMigrationCount(t, ctx, conn, "issue_lifecycle", 1)
 	assertLifecycleMigrationCount(t, ctx, conn, "issue_lifecycle_status", 8)
@@ -160,23 +160,23 @@ func TestIssueLifecycleMigrationsBackfillIdempotentlyAndRollBack(t *testing.T) {
 	}
 
 	down := []string{
-		"467_issue_lifecycle_spec_key_index.down.sql",
-		"466_issue_lifecycle_spec_fields.down.sql",
-		"465_automation_execution_task_status.down.sql",
-		"464_issue_lifecycle_backfill.down.sql",
-		"463_agent_task_automation_execution_index.down.sql",
-		"462_issue_lifecycle_binding_index.down.sql",
-		"461_issue_transition_timeline_index.down.sql",
-		"460_automation_execution_trigger_index.down.sql",
-		"459_issue_transition_revision_index.down.sql",
-		"458_issue_lifecycle_legacy_status_index.down.sql",
-		"457_issue_lifecycle_scope_index.down.sql",
-		"456_issue_lifecycle_primary_keys.down.sql",
-		"455_automation_execution_pkey_index.down.sql",
-		"454_issue_transition_pkey_index.down.sql",
-		"453_issue_lifecycle_status_pkey_index.down.sql",
-		"452_issue_lifecycle_pkey_index.down.sql",
-		"451_issue_lifecycle_foundation.down.sql",
+		"475_issue_lifecycle_spec_key_index.down.sql",
+		"474_issue_lifecycle_spec_fields.down.sql",
+		"473_automation_execution_task_status.down.sql",
+		"472_issue_lifecycle_backfill.down.sql",
+		"471_agent_task_automation_execution_index.down.sql",
+		"470_issue_lifecycle_binding_index.down.sql",
+		"469_issue_transition_timeline_index.down.sql",
+		"468_automation_execution_trigger_index.down.sql",
+		"467_issue_transition_revision_index.down.sql",
+		"466_issue_lifecycle_legacy_status_index.down.sql",
+		"465_issue_lifecycle_scope_index.down.sql",
+		"464_issue_lifecycle_primary_keys.down.sql",
+		"463_automation_execution_pkey_index.down.sql",
+		"462_issue_transition_pkey_index.down.sql",
+		"461_issue_lifecycle_status_pkey_index.down.sql",
+		"460_issue_lifecycle_pkey_index.down.sql",
+		"459_issue_lifecycle_foundation.down.sql",
 	}
 	for _, name := range down {
 		applyMigrationFile(t, ctx, conn.Conn(), name)

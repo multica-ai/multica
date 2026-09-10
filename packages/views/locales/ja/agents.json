@@ -734,6 +734,8 @@
     "show_all": "すべて表示",
     "patch_truncated": "...（切り詰め済み）",
     "patch_body_truncated": "...（本文を切り詰めました）",
+    "display_clipped": "...（内容が長いため先頭のみ表示しています）",
+    "output_truncated_note": "出力が長すぎるため、先頭部分のみ保存されています。",
     "patch_no_content": "（内容の記録なし）",
     "patch_summary_more": "{{path}} 他 {{extra}} 件",
     "status_queued": "待機列",

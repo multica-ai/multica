@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/handler"
 )
 
 // stderrCapture redirects os.Stderr through a pipe so a test can assert on
@@ -1255,7 +1256,7 @@ func TestResolveAssignee(t *testing.T) {
 	})
 
 	t.Run("resolveActorPropertyRef renders a prefixed reference", func(t *testing.T) {
-		ref, err := resolveActorPropertyRef(ctx, client, "alice@example.com")
+		ref, err := resolveActorPropertyRef(ctx, client, &memberDirectory{}, "alice@example.com")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1265,7 +1266,7 @@ func TestResolveAssignee(t *testing.T) {
 	})
 
 	t.Run("resolveActorPropertyRef rejects a non-member kind", func(t *testing.T) {
-		if _, err := resolveActorPropertyRef(ctx, client, "codebot"); err == nil {
+		if _, err := resolveActorPropertyRef(ctx, client, &memberDirectory{}, "codebot"); err == nil {
 			t.Error("expected an agent name to be unresolvable for an actor property")
 		}
 	})
@@ -2928,6 +2929,8 @@ func newIssueListTestCmd() *cobra.Command {
 	cmd.Flags().Int("offset", 0, "")
 	cmd.Flags().String("sort", "", "")
 	cmd.Flags().String("direction", "", "")
+	cmd.Flags().String("fields", "", "")
+	cmd.Flags().Bool("resolve-properties", false, "")
 	return cmd
 }
 
@@ -3267,6 +3270,254 @@ func TestRunIssueListRejectsDirectionWithoutDirectionalSort(t *testing.T) {
 	}
 }
 
+// sampleIssueResponse returns a handler.IssueResponse populated the way the
+// /api/issues list endpoint actually populates one (ListIssues in
+// server/internal/handler/issue.go) — every field a real "issue list
+// --output json" row carries. Reactions, Attachments, and SourceContext are
+// left zero-valued on purpose: they are `omitempty` and ListIssues never
+// sets them (detail-only), so a real list payload never carries those keys.
+// This is the single source of truth for both fullTestIssue (the --fields
+// filtering fixture) and the drift guard below, so the two can't diverge
+// from each other the way the whitelist once diverged from the real API.
+func sampleIssueResponse() handler.IssueResponse {
+	desc := "a very long description"
+	assigneeType := "member"
+	assigneeID := "user-1"
+	parentID := "parent-1"
+	projectID := "proj-1"
+	stage := int32(1)
+	startDate := "2024-01-01"
+	dueDate := "2024-01-02"
+	lastActivity := "2024-01-01T00:00:00Z"
+	labels := []handler.LabelResponse{}
+
+	return handler.IssueResponse{
+		ID:             "iss-1",
+		WorkspaceID:    "ws-1",
+		Number:         42,
+		Identifier:     "MUL-42",
+		Title:          "Test issue",
+		Description:    &desc,
+		Status:         "in_progress",
+		StatusCategory: "active",
+		StatusName:     "In Progress",
+		Priority:       "high",
+		AssigneeType:   &assigneeType,
+		AssigneeID:     &assigneeID,
+		CreatorType:    "member",
+		CreatorID:      "user-2",
+		ParentIssueID:  &parentID,
+		ProjectID:      &projectID,
+		Position:       1,
+		Stage:          &stage,
+		StartDate:      &startDate,
+		DueDate:        &dueDate,
+		CreatedAt:      "2024-01-01T00:00:00Z",
+		UpdatedAt:      "2024-01-01T00:00:00Z",
+		Revision:       1,
+		LastActivityAt: &lastActivity,
+		Metadata:       map[string]any{},
+		Properties:     map[string]any{},
+		Labels:         &labels,
+	}
+}
+
+// fullTestIssue returns a JSON-decoded issue map carrying every field a real
+// "issue list --output json" row exposes (see sampleIssueResponse), so
+// --fields tests can assert on a realistic full payload rather than a
+// hand-picked subset.
+func fullTestIssue(t *testing.T) map[string]any {
+	t.Helper()
+	return issueResponseJSONMap(t, sampleIssueResponse())
+}
+
+func keysOf(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func issueResponseJSONMap(t *testing.T, resp handler.IssueResponse) map[string]any {
+	t.Helper()
+	b, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal handler.IssueResponse: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal handler.IssueResponse: %v", err)
+	}
+	return m
+}
+
+// TestValidIssueFieldsMatchListEndpointShape guards validIssueFields (the
+// --fields whitelist) against drifting from what /api/issues actually
+// returns for `issue list`. It caught a real bug: the whitelist was modeled
+// on publicapi/v1.Issue, which the list endpoint never serializes — the real
+// response is handler.IssueResponse, which also emits status_name and
+// labels that the whitelist rejected as invalid field names.
+func TestValidIssueFieldsMatchListEndpointShape(t *testing.T) {
+	realKeys := keysOf(fullTestIssue(t))
+
+	valid := make(map[string]bool, len(validIssueFields))
+	for _, f := range validIssueFields {
+		valid[f] = true
+	}
+	real := make(map[string]bool, len(realKeys))
+	for _, k := range realKeys {
+		real[k] = true
+	}
+
+	for _, k := range realKeys {
+		if !valid[k] {
+			t.Errorf("validIssueFields is missing %q, which a real issue list JSON response emits", k)
+		}
+	}
+	for _, f := range validIssueFields {
+		if !real[f] {
+			t.Errorf("validIssueFields has %q, which a real issue list JSON response never emits", f)
+		}
+	}
+}
+
+// TestRunIssueListFieldsFiltersJSONOutput guards that --fields whitelists
+// exactly the requested top-level keys on each returned issue, so an agent
+// asking for id/title/status/priority never pays for the description field
+// that makes up most of a typical issue payload.
+func TestRunIssueListFieldsFiltersJSONOutput(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name   string
+		fields string
+		want   []string
+	}{
+		{"id, title, status, priority", "id,title,status,priority", []string{"id", "title", "status", "priority"}},
+		{"assignee pair", "assignee_type,assignee_id", []string{"assignee_type", "assignee_id"}},
+		{"single field", "identifier", []string{"identifier"}},
+		{"description explicitly requested", "id,description", []string{"id", "description"}},
+		{"whitespace around names", " id , title ", []string{"id", "title"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set("output", "json")
+			_ = cmd.Flags().Set("fields", tc.fields)
+
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+
+			var resp struct {
+				Issues []map[string]any `json:"issues"`
+			}
+			if err := json.Unmarshal([]byte(out), &resp); err != nil {
+				t.Fatalf("unmarshal output: %v\noutput: %s", err, out)
+			}
+			if len(resp.Issues) != 1 {
+				t.Fatalf("issues = %d, want 1", len(resp.Issues))
+			}
+			got := resp.Issues[0]
+			if len(got) != len(tc.want) {
+				t.Fatalf("issue keys = %v, want exactly %v", keysOf(got), tc.want)
+			}
+			for _, f := range tc.want {
+				if _, ok := got[f]; !ok {
+					t.Fatalf("issue missing field %q; got keys %v", f, keysOf(got))
+				}
+			}
+		})
+	}
+}
+
+// TestRunIssueListDefaultKeepsFullIssueUnchanged guards backward
+// compatibility: omitting --fields must return the full issue object,
+// description included, exactly as before this flag existed.
+func TestRunIssueListDefaultKeepsFullIssueUnchanged(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+
+	out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+	var resp struct {
+		Issues []map[string]any `json:"issues"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	got := resp.Issues[0]
+	if len(got) != len(issue) {
+		t.Fatalf("issue keys = %v, want all %d original fields", keysOf(got), len(issue))
+	}
+	if _, ok := got["description"]; !ok {
+		t.Fatalf("expected description to remain in default (no --fields) output, got %v", got)
+	}
+}
+
+// TestRunIssueListRejectsInvalidFields guards that a typo'd or non-existent
+// field name fails fast with the valid list, instead of silently returning
+// an issue object missing the field the caller expected.
+func TestRunIssueListRejectsInvalidFields(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	_ = cmd.Flags().Set("fields", "id,bogus_field")
+	err := runIssueList(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueList: expected error for invalid --fields")
+	}
+	if !strings.Contains(err.Error(), `invalid --fields value "bogus_field"`) {
+		t.Fatalf("error = %q, want it to mention the invalid field name", err)
+	}
+}
+
+// TestRunIssueListIgnoresFieldsWithTableOutput guards that --output table
+// (the default) is completely unaffected by --fields, matching how
+// issue comment list's --compact/--summary are JSON-only no-ops for table.
+func TestRunIssueListIgnoresFieldsWithTableOutput(t *testing.T) {
+	issue := fullTestIssue(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("fields", "id") // table output; --fields must not error or change behavior
+	if err := runIssueList(cmd, nil); err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+}
+
 func TestComputeReorderPosition(t *testing.T) {
 	positions := map[string]float64{"a": 10, "b": 20, "x": 99}
 	tests := []struct {
@@ -3398,10 +3649,7 @@ func reorderTestServer(t *testing.T, gotPosition *float64) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/issues" && r.Method == http.MethodGet {
 			// The column query only ever asks for "todo" in these tests.
-			json.NewEncoder(w).Encode(map[string]any{
-				"issues": []any{a, b, target},
-				"total":  3,
-			})
+			writeReorderColumnPage(w, r, []any{a, b, target})
 			return
 		}
 		ref, _ := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/api/issues/"))
@@ -3592,7 +3840,7 @@ func TestRunIssueReorderNoOpSkipsPut(t *testing.T) {
 	putCalled := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/issues" && r.Method == http.MethodGet {
-			json.NewEncoder(w).Encode(map[string]any{"issues": []any{a, target, b}, "total": 3})
+			writeReorderColumnPage(w, r, []any{a, target, b})
 			return
 		}
 		if r.Method == http.MethodPut {
@@ -3636,7 +3884,7 @@ func TestRunIssueReorderSingleItemColumnValidatesTarget(t *testing.T) {
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/issues" && r.Method == http.MethodGet {
-			json.NewEncoder(w).Encode(map[string]any{"issues": []any{target}, "total": 1})
+			writeReorderColumnPage(w, r, []any{target})
 			return
 		}
 		ref, _ := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/api/issues/"))
@@ -3684,7 +3932,7 @@ func TestRunIssueReorderOnlyIssueInColumnIsNoOp(t *testing.T) {
 	putCalled := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/issues" && r.Method == http.MethodGet {
-			json.NewEncoder(w).Encode(map[string]any{"issues": []any{target}, "total": 1})
+			writeReorderColumnPage(w, r, []any{target})
 			return
 		}
 		if r.Method == http.MethodPut {
@@ -4150,6 +4398,313 @@ func TestRunIssueRunsWarnsOnTruncatedFamilyRead(t *testing.T) {
 			warned := strings.Contains(stderr, "truncated")
 			if warned != tc.truncated {
 				t.Fatalf("warned = %v, want %v; stderr was %q", warned, tc.truncated, stderr)
+			}
+		})
+	}
+}
+
+// fakeIssueRows builds n minimal issue rows for a fake /api/issues response.
+func fakeIssueRows(n int) []map[string]any {
+	rows := make([]map[string]any, 0, n)
+	for i := 0; i < n; i++ {
+		rows = append(rows, map[string]any{
+			"id":         fmt.Sprintf("issue-%d", i+1),
+			"identifier": fmt.Sprintf("MUL-%d", i+1),
+			"title":      fmt.Sprintf("Issue %d", i+1),
+			"status":     "todo",
+			"priority":   "none",
+		})
+	}
+	return rows
+}
+
+// newFakeIssueListServer serves /api/issues with the given rows and total
+// (nil omits the field); other paths get an empty object. It returns the
+// /api/issues request count and the last request's query.
+func newFakeIssueListServer(t *testing.T, rows []map[string]any, total any) (*httptest.Server, *int, *url.Values) {
+	t.Helper()
+	var (
+		requests int
+		query    url.Values
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" {
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		requests++
+		query = r.URL.Query()
+		body := map[string]any{"issues": rows}
+		if total != nil {
+			body["total"] = total
+		}
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &requests, &query
+}
+
+// TestRunIssueListRejectsOutOfRangeLimitAndOffset guards that --limit outside
+// 1..100 and a negative --offset are rejected before any request is made. The
+// --assignee case pins that the guard runs before the assignee resolver.
+func TestRunIssueListRejectsOutOfRangeLimitAndOffset(t *testing.T) {
+	srv, requests, _ := newFakeIssueListServer(t, nil, 0)
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name     string
+		flag     string
+		value    string
+		assignee string
+		wantErr  string
+	}{
+		{name: "limit zero", flag: "limit", value: "0", wantErr: "--limit must be between 1 and 100"},
+		{name: "limit negative", flag: "limit", value: "-5", wantErr: "--limit must be between 1 and 100"},
+		{name: "limit above the page cap", flag: "limit", value: "101", wantErr: "--limit must be between 1 and 100"},
+		{name: "limit checked before assignee resolution", flag: "limit", value: "500", assignee: "someone", wantErr: "--limit must be between 1 and 100"},
+		{name: "offset negative", flag: "offset", value: "-1", wantErr: "--offset must be zero or greater"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set(tc.flag, tc.value)
+			if tc.assignee != "" {
+				_ = cmd.Flags().Set("assignee", tc.assignee)
+			}
+			err := runIssueList(cmd, nil)
+			if err == nil {
+				t.Fatalf("runIssueList: expected error for --%s %s", tc.flag, tc.value)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %q, want it to contain %q", err, tc.wantErr)
+			}
+			if *requests != 0 {
+				t.Fatalf("server received %d request(s); a rejected flag must not reach the API", *requests)
+			}
+		})
+	}
+}
+
+// TestRunIssueListSendsLimitAndOffset guards that limit and offset reach the
+// query as given.
+func TestRunIssueListSendsLimitAndOffset(t *testing.T) {
+	srv, _, query := newFakeIssueListServer(t, nil, 0)
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	if err := runIssueList(cmd, nil); err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+	if got := query.Get("limit"); got != "50" {
+		t.Fatalf("default limit query = %q, want 50", got)
+	}
+	if query.Has("offset") {
+		t.Fatalf("offset query = %q, want it omitted at the default of 0", query.Get("offset"))
+	}
+
+	cmd = newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	_ = cmd.Flags().Set("limit", "100")
+	_ = cmd.Flags().Set("offset", "200")
+	if err := runIssueList(cmd, nil); err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+	if got := query.Get("limit"); got != "100" {
+		t.Fatalf("limit query = %q, want 100", got)
+	}
+	if got := query.Get("offset"); got != "200" {
+		t.Fatalf("offset query = %q, want 200", got)
+	}
+}
+
+// TestRunIssueListJSONEnvelopeReportsPage guards the --output json paging
+// contract: limit and offset echo the request on every page, has_more is
+// false on an empty page and true on a full one whatever total says, and
+// nothing is written to stderr.
+func TestRunIssueListJSONEnvelopeReportsPage(t *testing.T) {
+	cases := []struct {
+		name        string
+		limit       string
+		offset      string
+		rows        int
+		total       any
+		wantTotal   float64
+		wantLimit   float64
+		wantHasMore bool
+	}{
+		{name: "full page", limit: "100", offset: "0", rows: 100, total: 145, wantTotal: 145, wantLimit: 100, wantHasMore: true},
+		{name: "last partial page", limit: "100", offset: "100", rows: 45, total: 145, wantTotal: 145, wantLimit: 100, wantHasMore: false},
+		{name: "server applied a smaller page than requested", limit: "100", offset: "0", rows: 20, total: 145, wantTotal: 145, wantLimit: 100, wantHasMore: true},
+		{name: "empty page past the end", limit: "100", offset: "500", rows: 0, total: 145, wantTotal: 145, wantLimit: 100, wantHasMore: false},
+		{name: "empty page while total still claims more", limit: "100", offset: "100", rows: 0, total: 145, wantTotal: 145, wantLimit: 100, wantHasMore: false},
+		{name: "total missing from the response", limit: "100", offset: "0", rows: 3, total: nil, wantTotal: 0, wantLimit: 100, wantHasMore: false},
+		{name: "full page ending exactly on a later page boundary", limit: "100", offset: "100", rows: 100, total: 200, wantTotal: 200, wantLimit: 100, wantHasMore: false},
+		// total cannot end a walk on its own: the server answers with the row
+		// count it just returned when its count query fails, and a newer
+		// backend may drop the field. A total no larger than the page is one
+		// of those, so a full page carries the walk on and a short one ends it.
+		{name: "full page while total equals the page at a later offset", limit: "10", offset: "20", rows: 10, total: 10, wantTotal: 10, wantLimit: 10, wantHasMore: true},
+		{name: "full page while total undercounts the page", limit: "10", offset: "20", rows: 10, total: 5, wantTotal: 5, wantLimit: 10, wantHasMore: true},
+		{name: "full page with total missing", limit: "10", offset: "0", rows: 10, total: nil, wantTotal: 0, wantLimit: 10, wantHasMore: true},
+		// On the first page a failed count is indistinguishable from a genuine
+		// single-page total, so a full first page probes onward; a short one
+		// still ends the walk.
+		{name: "full first page while total equals the page", limit: "100", offset: "0", rows: 100, total: 100, wantTotal: 100, wantLimit: 100, wantHasMore: true},
+		{name: "short first page while total equals the page", limit: "100", offset: "0", rows: 45, total: 45, wantTotal: 45, wantLimit: 100, wantHasMore: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _, _ := newFakeIssueListServer(t, fakeIssueRows(tc.rows), tc.total)
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			stderr := captureStderr(t)
+			defer stderr.restore()
+
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set("output", "json")
+			_ = cmd.Flags().Set("limit", tc.limit)
+			_ = cmd.Flags().Set("offset", tc.offset)
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+
+			var env map[string]any
+			if err := json.Unmarshal([]byte(out), &env); err != nil {
+				t.Fatalf("decode envelope: %v\n%s", err, out)
+			}
+			if issues, _ := env["issues"].([]any); len(issues) != tc.rows {
+				t.Errorf("issues = %d rows, want %d", len(issues), tc.rows)
+			}
+			if got := env["limit"]; got != tc.wantLimit {
+				t.Errorf("limit = %v, want %v", got, tc.wantLimit)
+			}
+			wantOffset, _ := strconv.ParseFloat(tc.offset, 64)
+			if got := env["offset"]; got != wantOffset {
+				t.Errorf("offset = %v, want %v", got, wantOffset)
+			}
+			if got := env["total"]; got != tc.wantTotal {
+				t.Errorf("total = %v, want %v", got, tc.wantTotal)
+			}
+			if got := env["has_more"]; got != tc.wantHasMore {
+				t.Errorf("has_more = %v, want %v", got, tc.wantHasMore)
+			}
+			if got := stderr.read(); got != "" {
+				t.Errorf("stderr = %q, want nothing in JSON mode", got)
+			}
+		})
+	}
+}
+
+// TestRunIssueListJSONEnvelopePagingSurvivesFieldFiltering pins that --fields
+// cannot move the paging numbers. Both write into the same JSON branch, and
+// --fields deletes keys inside each issue rather than dropping issues, so the
+// envelope must still describe the page the server sent.
+func TestRunIssueListJSONEnvelopePagingSurvivesFieldFiltering(t *testing.T) {
+	srv, _, _ := newFakeIssueListServer(t, fakeIssueRows(10), 145)
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	_ = cmd.Flags().Set("limit", "10")
+	_ = cmd.Flags().Set("fields", "id,title")
+	out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("decode envelope: %v\n%s", err, out)
+	}
+	if got := env["limit"]; got != float64(10) {
+		t.Errorf("limit = %v, want 10", got)
+	}
+	if got := env["total"]; got != float64(145) {
+		t.Errorf("total = %v, want 145", got)
+	}
+	if got := env["has_more"]; got != true {
+		t.Errorf("has_more = %v, want true", got)
+	}
+	issues, _ := env["issues"].([]any)
+	if len(issues) != 10 {
+		t.Fatalf("issues = %d rows, want 10", len(issues))
+	}
+	// The filter still ran, so the envelope numbers are not just an unfiltered
+	// page slipping through.
+	first, _ := issues[0].(map[string]any)
+	if _, ok := first["status"]; ok {
+		t.Error("issue kept status, want --fields to have dropped it")
+	}
+	if first["id"] != "issue-1" {
+		t.Errorf("issue id = %v, want issue-1", first["id"])
+	}
+}
+
+// TestRunIssueListTableFooterReportsPage guards the table-mode page footer:
+// on stderr, stdout stays a plain table, silent for a short first page.
+func TestRunIssueListTableFooterReportsPage(t *testing.T) {
+	cases := []struct {
+		name       string
+		limit      string
+		offset     string
+		rows       int
+		total      any
+		wantStderr string
+	}{
+		{name: "first page of many", limit: "3", offset: "0", rows: 3, total: 145, wantStderr: "Showing 1-3 of 145 issues. Next page: --offset 3"},
+		{name: "middle page", limit: "3", offset: "50", rows: 3, total: 145, wantStderr: "Showing 51-53 of 145 issues. Next page: --offset 53"},
+		{name: "server applied a smaller page than requested", limit: "50", offset: "0", rows: 20, total: 145, wantStderr: "Showing 1-20 of 145 issues. Next page: --offset 20"},
+		{name: "last page", limit: "5", offset: "140", rows: 5, total: 145, wantStderr: "Showing 141-145 of 145 issues."},
+		{name: "everything fits", limit: "50", offset: "0", rows: 3, total: 3, wantStderr: ""},
+		{name: "no results", limit: "50", offset: "0", rows: 0, total: 0, wantStderr: ""},
+		{name: "empty page past the end", limit: "50", offset: "500", rows: 0, total: 145, wantStderr: "No issues at --offset 500 (145 total)."},
+		{name: "empty page exactly at the end", limit: "50", offset: "3", rows: 0, total: 3, wantStderr: "No issues at --offset 3 (3 total)."},
+		// Without a trusted total the footer still points at the next page,
+		// but never claims an "of N" it cannot stand behind.
+		{name: "full page with total missing", limit: "3", offset: "50", rows: 3, total: nil, wantStderr: "Showing issues 51-53. Next page: --offset 53"},
+		{name: "full page while total undercounts the walk", limit: "3", offset: "50", rows: 3, total: 3, wantStderr: "Showing issues 51-53. Next page: --offset 53"},
+		{name: "full first page while total equals the page", limit: "3", offset: "0", rows: 3, total: 3, wantStderr: "Showing issues 1-3. Next page: --offset 3"},
+		{name: "last page with total missing", limit: "50", offset: "100", rows: 45, total: nil, wantStderr: "Showing issues 101-145."},
+		{name: "empty page while the count failed", limit: "50", offset: "50", rows: 0, total: 0, wantStderr: "No issues at --offset 50."},
+		{name: "total missing on an empty page", limit: "50", offset: "50", rows: 0, total: nil, wantStderr: "No issues at --offset 50."},
+		{name: "total not a number on an empty page", limit: "50", offset: "50", rows: 0, total: "145", wantStderr: "No issues at --offset 50."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _, _ := newFakeIssueListServer(t, fakeIssueRows(tc.rows), tc.total)
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			stderr := captureStderr(t)
+			defer stderr.restore()
+
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set("limit", tc.limit)
+			_ = cmd.Flags().Set("offset", tc.offset)
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+
+			if !strings.HasPrefix(out, "KEY") {
+				t.Errorf("stdout should start with the table header, got %q", out)
+			}
+			if strings.Contains(out, "Showing") || strings.Contains(out, "No issues at") {
+				t.Errorf("stdout must stay a plain table, got %q", out)
+			}
+			if got := strings.TrimSpace(stderr.read()); got != tc.wantStderr {
+				t.Errorf("stderr = %q, want %q", got, tc.wantStderr)
 			}
 		})
 	}

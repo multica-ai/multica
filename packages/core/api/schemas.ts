@@ -1440,12 +1440,10 @@ const SearchIssueResultSchema = IssueSchema.extend({
 
 export const SearchIssuesResponseSchema = z.object({
   issues: z.array(SearchIssueResultSchema).default([]),
-  total: z.number().default(0),
 }).loose();
 
 export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   issues: [],
-  total: 0,
 };
 
 const ProjectSchema = z.object({
@@ -1477,12 +1475,10 @@ const SearchProjectResultSchema = ProjectSchema.extend({
 
 export const SearchProjectsResponseSchema = z.object({
   projects: z.array(SearchProjectResultSchema).default([]),
-  total: z.number().default(0),
 }).loose();
 
 export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
   projects: [],
-  total: 0,
 };
 
 const IssueAssigneeGroupSchema = z.object({
@@ -1906,6 +1902,7 @@ const TaskUsageSchema = z.object({
 }).loose();
 
 export const AgentTaskSchema = z.object({
+  cancelled_by_comment_change: z.boolean().optional().catch(undefined),
   id: z.string(),
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
@@ -1946,6 +1943,31 @@ export const AgentTaskSchema = z.object({
 }).loose();
 
 export const AgentTaskListSchema = z.array(AgentTaskSchema);
+
+// One row of a run transcript. `output_truncated` gates a completeness claim
+// the UI makes about a tool's output, so it stays `.optional()` with no
+// default: a server that does not send it means "unknown", and defaulting it
+// to false would turn a missing field into an assertion that the record is
+// complete. `.catch(undefined)` keeps a malformed value that far too — without
+// it a single bad boolean fails its row, the array fails with it, and
+// `parseWithFallback` hands the viewer an empty transcript. Degrading one
+// field to "unknown" is the correct loss; deleting the run is not. Every other
+// field keeps a default for the same reason.
+export const TaskMessagePayloadSchema = z.object({
+  task_id: z.string().default(""),
+  issue_id: z.string().default(""),
+  chat_session_id: z.string().optional(),
+  seq: z.number().default(0),
+  type: z.enum(["text", "thinking", "tool_use", "tool_result", "error"]).catch("text"),
+  tool: z.string().optional(),
+  content: z.string().optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+  output: z.string().optional(),
+  output_truncated: z.boolean().optional().catch(undefined),
+  created_at: z.string().optional(),
+}).loose();
+
+export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);
 
 // Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
 // chat recovery. Its optional message payload must be well-formed before the

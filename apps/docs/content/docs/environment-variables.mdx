@@ -33,6 +33,7 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `DATABASE_URL` | local `multica` database | PostgreSQL connection string |
 | `DATABASE_MAX_CONNS` | `25` | Maximum database connections per API process |
 | `DATABASE_MIN_CONNS` | `5` | Minimum connections each API process keeps |
+| `DATABASE_SEARCH_WORK_MEM_MB` | `64` | PostgreSQL `work_mem` ceiling in MB for each search plan node; set `1`-`64` to lower it or `0` to keep the database/session default |
 | `DATABASE_REPLICA_URL` | empty | Optional PostgreSQL read-only replica connection string; new connections are validated as read-only, while businesses must explicitly opt into eventual-consistency reads in code |
 | `DATABASE_REPLICA_MAX_CONNS` | `10` | Maximum replica connections per API process |
 | `DATABASE_REPLICA_MIN_CONNS` | `0` | Minimum replica connections each API process keeps |
@@ -233,11 +234,12 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Concurrent run ceiling per daemon |
 | `MULTICA_AGENT_TIMEOUT` | `0` | Absolute time limit per run; `0` means no limit |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | Silence ceiling with no output and no tool execution; `0` disables the watchdog entirely |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Silence ceiling for a single tool call; set it only to give tools more room than the model gets, `0` never force-stops a tool call |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Silence ceiling for a single tool call; set it only to give tools more room than the model gets, `0` never force-stops a tool call. Cursor background shells stay in flight until their owned processes exit; at this boundary the daemon stops those processes and gives Cursor a fresh watchdog budget to produce its terminal result. If process ownership or cleanup cannot be verified, the ordinary run-cancellation policy applies |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode-specific silence threshold |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Codex semantic-silence threshold. Codex's own timer cannot see that a tool is running, so it tracks the larger of the idle / tool budgets instead of holding a separate, shorter ceiling |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Explicit override for the Codex first-turn no-progress ceiling; `0` keeps the default. The effective first-turn wait stays bounded by `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` and the overall execution timeout — set `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` strictly above this value (with some margin), or the wait is truncated to it and the model-catalog startup retry is skipped. Equal values are not enough: the semantic timer is armed first, so at equal durations the retry can still be lost |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`; `thread/start`, `thread/resume`: `60s` | Codex app-server startup handshake ceilings. An explicit value overrides both budgets globally |
+| `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | Grace period after cancellation for Codex app-server to acknowledge `turn/interrupt` and emit `turn/completed`, preserving final token usage before forced process cleanup. On unusually slow hosts, tune this from the interrupt latency recorded in daemon logs |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Whether to restart into a `multica` binary replaced on disk out of band (`brew upgrade`, a re-download, a local build). Independent of `MULTICA_DAEMON_AUTO_UPDATE` |
@@ -253,6 +255,10 @@ Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MO
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
+
+Cursor's verified background cleanup requires Linux 6.9 or newer (process-group pidfds), macOS kernel support for process identity queries and audit-token signalling, or a successfully assigned nested Job Object on Windows. On macOS, each process is signalled using a kernel-checked PID version; no same-session group join is required. These macOS APIs are private and checked at capture time. A launch that cannot be claimed returns its original tool result and uses the ordinary idle watchdog, including when the tool watchdog is `0`. Already-claimed work remains in flight if cleanup cannot be confirmed. With the tool watchdog set to `0` there is no such boundary at all: claimed background work keeps the run in flight for as long as it lives, so the run is bounded only by `MULTICA_AGENT_TIMEOUT`, which is `0` by default.
+
+Owned Cursor background processes are also stopped when the run completes normally, so a background server started by that run does not intentionally survive finalization. macOS can recognize late children through retained original-parent identities, but cannot prove a chain whose intermediate processes disappeared before observation. Such processes, work that leaves the tracked group, or persistent ownership/signalling errors can leave background work behind. Unconfirmed cleanup is logged and never grants a successful-cleanup recovery window; unknown processes are not killed based only on their numeric PID or process group.
 
 Precedence is command-line flag → environment variable → `~/.multica/config.json` → built-in default. For watchdog behavior, see [Daemon and runtimes](/daemon-runtimes).
 

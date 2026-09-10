@@ -290,6 +290,21 @@ html[data-dnd-dragging="true"] * {
   transition: none;
 }
 
+/* Each block owns only its own author/body, excluding nested replies.
+ * Keep space reserved and keyboard access intact when mouse actions fade out.
+ * Portaled menus hold their trigger visible even after focus leaves the block. */
+[data-comment-actions] {
+  transition: opacity 120ms ease-out;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-comment-block]:not(:hover):not(:focus-within)
+    [data-comment-actions]:not(:has([aria-haspopup][aria-expanded="true"])) {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-entrance-spin,
   .animate-onboarding-enter,
@@ -302,8 +317,24 @@ html[data-dnd-dragging="true"] * {
     animation: none;
   }
 
+  .animate-chat-text-shimmer {
+    background-image: none;
+    color: var(--muted-foreground);
+    -webkit-text-fill-color: currentColor;
+  }
+
+  [data-comment-actions],
   [data-right-sidebar-panel] {
     transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .animate-chat-text-shimmer {
+    animation: none;
+    background-image: none;
+    color: CanvasText;
+    -webkit-text-fill-color: currentColor;
   }
 }
 

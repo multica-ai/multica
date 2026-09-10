@@ -1,0 +1,13 @@
+-- Records whether a tool_result's stored output dropped bytes to fit the
+-- daemon's preview budget.
+--
+-- Nullable with NO DEFAULT, and deliberately not backfilled. Three states:
+--   NULL  = unknown. The row predates this column, or an older installed
+--           daemon reported it. The original length is gone, so nothing can
+--           recover whether it was complete.
+--   FALSE = the daemon measured the output and stored all of it.
+--   TRUE  = the remainder was never uploaded and cannot be recovered.
+--
+-- Backfilling NULL to FALSE would assert completeness the data cannot support,
+-- which is the specific claim the truncation indicator exists to stop making.
+ALTER TABLE task_message ADD COLUMN IF NOT EXISTS output_truncated BOOLEAN;

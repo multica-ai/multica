@@ -514,6 +514,11 @@ type TaskMessageData struct {
 	Content string         `json:"content,omitempty"`
 	Input   map[string]any `json:"input,omitempty"`
 	Output  string         `json:"output,omitempty"`
+	// OutputTruncated reports whether Output dropped bytes to fit the preview
+	// budget. Tri-state on purpose: nil means this daemon did not measure it,
+	// which an older installed daemon talking to a newer server cannot say any
+	// other way, and which the server must not record as "complete".
+	OutputTruncated *bool `json:"output_truncated,omitempty"`
 }
 
 func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages []TaskMessageData) error {

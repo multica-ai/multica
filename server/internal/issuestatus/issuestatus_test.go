@@ -507,6 +507,34 @@ func TestResolverFailsSafeWhenTheCatalogReadFails(t *testing.T) {
 	}
 }
 
+func TestResolverReportsCachedLoadFailure(t *testing.T) {
+	ctx := context.Background()
+	q := newFakeQuerier(custom("parked", Backlog))
+	readErr := errors.New("transient catalog failure")
+	q.err = readErr
+	r := NewResolver(testWorkspace)
+	if got := r.Err(); got != nil || q.lists != 0 {
+		t.Fatalf("unused resolver: err=%v, reads=%d", got, q.lists)
+	}
+	if got := r.Effective(ctx, q, Done); got != Done || r.Err() != nil || q.lists != 0 {
+		t.Fatalf("built-in status touched the catalog: status=%q, err=%v, reads=%d", got, r.Err(), q.lists)
+	}
+	if got := r.Effective(ctx, q, "parked"); got != "parked" || !errors.Is(r.Err(), readErr) {
+		t.Fatalf("failed read: status=%q, err=%v", got, r.Err())
+	}
+	q.err = nil
+	if got := r.Effective(ctx, q, "parked"); got != "parked" || !errors.Is(r.Err(), readErr) || q.lists != 1 {
+		t.Fatalf("failure was not cached: status=%q, err=%v, reads=%d", got, r.Err(), q.lists)
+	}
+	fresh := NewResolver(testWorkspace)
+	if got := fresh.Effective(ctx, q, "parked"); got != Backlog || fresh.Err() != nil || q.lists != 2 {
+		t.Fatalf("fresh resolver did not recover: status=%q, err=%v, reads=%d", got, fresh.Err(), q.lists)
+	}
+	if got := fresh.Effective(ctx, q, "unknown"); got != "unknown" || fresh.Err() != nil || q.lists != 2 {
+		t.Fatalf("unknown key confused with read failure: status=%q, err=%v, reads=%d", got, fresh.Err(), q.lists)
+	}
+}
+
 // ExpandCategories is what keeps the (workspace_id, status) index usable for a
 // category filter; wrapping the column in issue_effective_status() instead made
 // it a full workspace scan.

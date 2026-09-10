@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -192,8 +193,19 @@ var ErrNoResolverSet = errors.New("channel router: no resolver set for channel t
 // needs-binding, …) are not errors.
 func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 	// Preserve the user's original normalized text before any shared command
-	// rewrites. Session binders pass this source to command classifiers while
-	// Text remains the agent-readable body.
+	// rewrites. Session binders pass this source to command classifiers and to
+	// first-title selection (chatTitleSource) while Text remains the
+	// agent-readable body.
+	//
+	// INVARIANT: an adapter that enriches Text with content the member did not
+	// type — a quoted reply, recent group history — MUST set CommandText itself
+	// before its message reaches Router. This fallback assigns the ALREADY
+	// enriched Text, so an enriching adapter that leaves CommandText empty
+	// silently reinstates #8058 (the enrichment prefix becomes the Chat title)
+	// while every title test stays green. lark and telegram are today's only
+	// enriching adapters and both comply: lark maps the decoder's
+	// pre-enrichment CommandBody, telegram the cleaned instruction captured
+	// before enrichWithQuotedHumanMessage.
 	if msg.CommandText == "" {
 		msg.CommandText = msg.Text
 	}
@@ -205,9 +217,10 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 	startChat := hasControl && control.Kind == ControlCommandNewChat
 	bareFresh := false
 	if startChat {
-		if parsedText, textOK := ParseControlCommand(msg.Text); textOK && parsedText.Kind == ControlCommandNewChat {
-			msg.Text = parsedText.Body
-		} else if msg.Text == msg.CommandText {
+		// Rich-media adapters may already have stripped the original directive.
+		// A remainder beginning with /new is literal, so consume only an
+		// untouched command source here.
+		if msg.Text == msg.CommandText {
 			msg.Text = control.Body
 		}
 		// The consumed /new source must not be reinterpreted as /issue by a
@@ -372,6 +385,11 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	}
 	issueNeedsUsage := parsedCommand != nil && parsedCommand.Title == ""
 	hasMedia := set.Media != nil && set.Media.HasMedia(msg)
+	// Only sender-selected context counts as input for an otherwise bare
+	// control command. Automatic recent history must not create an agent turn.
+	hasSelectedContext := msg.HasSelectedContext && strings.TrimSpace(msg.Text) != ""
+	persistStartedMessage := msg.CommandText != "" || hasSelectedContext || hasMedia
+	bareFresh = bareFresh && !hasSelectedContext && !hasMedia
 	resolveMedia := !issueNeedsUsage && hasMedia
 	localMediaDeadline := time.Now().Add(r.mediaTimeout)
 	if resolveMedia {
@@ -391,9 +409,8 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 
 		if startChat {
 			startedTask = db.AgentTaskQueue{}
-			persistMessage := msg.CommandText != "" || hasMedia
 			var beforeCommit func(context.Context, pgx.Tx, db.ChatSession) error
-			if persistMessage && !msg.SkipAgentRun {
+			if persistStartedMessage && !msg.SkipAgentRun {
 				prepared, prepareErr := r.tasks.PrepareChatTaskEnqueue(ctx, inst.AgentID, identity.UserID)
 				if prepareErr != nil {
 					return Result{}, finalizeRelease, fmt.Errorf("prepare started chat task: %w", prepareErr)
@@ -409,7 +426,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			started, err = set.Session.StartSession(ctx, StartSessionParams{
 				Installation: inst, Creator: sessionCreator, Sender: identity.UserID, Message: msg,
 				ClaimToken: claimToken, MediaPendingSeconds: mediaPendingSeconds,
-				PersistMessage: persistMessage, BeforeCommit: beforeCommit,
+				PersistMessage: persistStartedMessage, BeforeCommit: beforeCommit,
 			})
 			sessionID, appendRes = started.SessionID, started.Append
 		} else {
@@ -447,7 +464,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 				startTaskCommitted = true
 			}
 			r.notifyChatStarted(inst, sessionCreator, msg.Source.ChannelType, started)
-			if msg.CommandText == "" && !hasMedia {
+			if !persistStartedMessage {
 				finalize := finalizeMark
 				if appendRes.DedupMarked {
 					finalize = finalizeNone
@@ -559,8 +576,8 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			)
 		}
 		// One lookup feeds both the broadcast payload's identifier and the
-		// chat reply's.
-		prefix := r.issuePrefix(ctx, inst.WorkspaceID)
+		// chat reply's deep link.
+		prefix, workspaceSlug := r.issueWorkspaceIdentity(ctx, inst.WorkspaceID)
 		var assignedRunFireAt time.Time
 		if resolveMedia {
 			// The generic deferred-task sweeper is the crash fallback. Leave room
@@ -575,6 +592,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			res.IssueNumber = duplicate.Number
 			res.IssueTitle = duplicate.Title
 			res.IssueIdentifier = service.IssueIdentifier(prefix, duplicate.Number)
+			res.IssueWorkspaceSlug = workspaceSlug
 			res.IssueDuplicate = true
 			// A duplicate is a terminal product outcome, not an infrastructure
 			// failure and not a chat prompt. Finalize the durable chat message's
@@ -597,6 +615,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		// Same renderer the broadcast payload uses, so a degraded prefix can't
 		// show the chat "#42" while the realtime list shows "-42".
 		res.IssueIdentifier = service.IssueIdentifier(prefix, issueRes.Issue.Number)
+		res.IssueWorkspaceSlug = workspaceSlug
 		// IssueService.Create already enqueues the assigned agent's issue task.
 		// Scheduling the command as a chat run too makes the agent execute the
 		// same /issue input again. A synchronous issue command is terminal.
@@ -664,7 +683,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		if !startChat && !appendRes.BecameVisible {
 			r.lifecycle.ChannelChatTitleInitialized(inst.WorkspaceID, sessionCreator, sessionID, appendRes.InitialTitle)
 		}
-		r.lifecycle.GenerateChannelChatTitle(inst.WorkspaceID, sessionCreator, sessionID, appendRes.InitialTitle, msg.Text)
+		r.lifecycle.GenerateChannelChatTitle(inst.WorkspaceID, sessionCreator, sessionID, appendRes.InitialTitle, chatTitleSource(msg.Text, msg.CommandText, !startChat && msg.ForceFresh))
 	}
 	return res, postAppendFinalize, nil
 }
@@ -1085,17 +1104,17 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 	return r.issues.Create(ctx, params, opts)
 }
 
-// issuePrefix reads the workspace's issue key (the "MUL" in MUL-42). A read
-// failure is not worth failing issue creation over, so it degrades to empty
-// and only the rendered identifier suffers.
-func (r *Router) issuePrefix(ctx context.Context, workspaceID pgtype.UUID) string {
+// issueWorkspaceIdentity reads the workspace slug and issue key prefix. A read
+// failure is not worth failing issue creation over, so it degrades to empty and
+// only the rendered identifier/link suffers.
+func (r *Router) issueWorkspaceIdentity(ctx context.Context, workspaceID pgtype.UUID) (prefix, slug string) {
 	ws, err := r.reader.GetWorkspace(ctx, workspaceID)
 	if err != nil {
-		r.logger.Warn("channel engine: workspace lookup for issue prefix failed",
+		r.logger.Warn("channel engine: workspace lookup for issue identity failed",
 			"workspace_id", util.UUIDToString(workspaceID), "error", err)
-		return ""
+		return "", ""
 	}
-	return ws.IssuePrefix
+	return ws.IssuePrefix, ws.Slug
 }
 
 // ErrEmptyIssueTitle is a defensive invariant error. Router handles a

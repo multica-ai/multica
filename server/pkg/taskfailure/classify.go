@@ -35,6 +35,14 @@ var (
 	httpCapacityCodeRe = regexp.MustCompile(`(^|[^0-9])(429|529)([^0-9]|$)`)
 )
 
+// concurrentRequestLimitWitness is emitted by Anthropic-compatible providers
+// that use HTTP 403 for a transient concurrency rejection. Claude Code may
+// prefix it with an authentication or access-token failure, but credentials
+// remain valid and a later request can succeed. Match the semantic witness
+// before both token-window and generic auth rules so the persisted reason and
+// member-facing recovery guidance describe the actual failure.
+const concurrentRequestLimitWitness = "concurrent request limit"
+
 // Classify maps a free-form error string from the agent runtime / CLI
 // to one of the 14 agent_error.* sub-reasons. Always returns a valid
 // Reason; falls back to ReasonAgentUnknown when no rule matches and for
@@ -71,6 +79,12 @@ func Classify(rawError string) Reason {
 	lower := strings.ToLower(trimmed)
 
 	switch {
+	// A concurrent-request rejection can contain both "access token" and HTTP
+	// 403. Its specific semantic witness must beat the broader context and auth
+	// rules below; this classification does not itself make the reason retryable.
+	case strings.Contains(lower, concurrentRequestLimitWitness):
+		return ReasonAgentProviderCapacityOrRateLimit
+
 	// 1. Context / token window overflow. Checked early so "token
 	//    limit" doesn't get swallowed by the broader "limit" / "quota"
 	//    rule below.
@@ -453,6 +467,17 @@ var legacyOpencodeStreamEndedReasons = map[string]bool{
 	"agent_error":                     true,
 }
 
+// legacyConcurrentRequestLimitReasons are the stale buckets emitted by daemons
+// whose classifiers let a generic token/context or HTTP 403 rule win over this
+// more specific wire shape. The raw witness keeps the upgrade narrow; unrelated
+// context overflows and authentication failures retain their original reason.
+var legacyConcurrentRequestLimitReasons = map[string]bool{
+	string(ReasonAgentContextOverflow):      true,
+	string(ReasonAgentProviderAuthOrAccess): true,
+	string(ReasonAgentUnknown):              true,
+	"agent_error":                           true,
+}
+
 // NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
 // onto the taxonomy this server understands, using the raw error text as the
 // witness. It returns the reason unchanged when nothing applies.
@@ -469,6 +494,10 @@ var legacyOpencodeStreamEndedReasons = map[string]bool{
 // can be deleted once no daemon old enough to produce its wire shape is still
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
+	if legacyConcurrentRequestLimitReasons[reason] &&
+		strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
+		return ReasonAgentProviderCapacityOrRateLimit
+	}
 	if legacySkillBundleReasons[reason] &&
 		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {
 		return ReasonSkillBundleUnavailable
