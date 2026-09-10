@@ -357,6 +357,7 @@ type ChannelChatSessionBinding struct {
 	HistoryStartMessageID  pgtype.Text        `json:"history_start_message_id"`
 	HistoryEndMessageID    pgtype.Text        `json:"history_end_message_id"`
 	HistoryBoundaryPending bool               `json:"history_boundary_pending"`
+	LastSenderID           pgtype.Text        `json:"last_sender_id"`
 }
 
 type ChannelInboundAudit struct {
@@ -445,6 +446,7 @@ type ChannelTaskDelivery struct {
 	RouteRevision    int64              `json:"route_revision"`
 	Config           []byte             `json:"config"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ChannelSenderID  pgtype.Text        `json:"channel_sender_id"`
 }
 
 type ChannelUserBinding struct {

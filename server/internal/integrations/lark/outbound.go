@@ -149,7 +149,6 @@ type PatcherQueries interface {
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error)
 	GetLarkChatSessionBindingBySession(ctx context.Context, chatSessionID pgtype.UUID) (ChatSessionBinding, error)
-	GetLarkUserBindingByMember(ctx context.Context, arg GetUserBindingByMemberParams) (UserBinding, error)
 	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error)
 	CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error)
 	UpdateLarkOutboundCardStatus(ctx context.Context, arg UpdateOutboundCardStatusParams) error
@@ -354,6 +353,7 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		ID: delivery.BindingID, InstallationID: delivery.InstallationID,
 		ChannelChatID: delivery.ChannelChatID, ChatType: delivery.ChatType, Config: delivery.Config,
 		LastMessageID: delivery.ChannelMessageID, LastThreadID: delivery.ChannelThreadID,
+		LastSenderID: delivery.ChannelSenderID,
 	}
 
 	// Only bound sessions reach here, so classify the task origin before
@@ -402,47 +402,41 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 
 	switch e.Type {
 	case protocol.EventChatDone:
-		return p.sendChatReply(ctx, creds, binding, p.mentionOpenID(ctx, binding, task), e.Payload)
+		return p.sendChatReply(ctx, creds, binding, mentionOpenID(binding), e.Payload)
 	case protocol.EventTaskFailed:
 		return p.fail(ctx, creds, binding, taskID, agentName, e.Payload)
 	}
 	return nil
 }
 
-// mentionOpenID resolves the Feishu open_id to @-mention on this reply, or
-// "" for "send without a mention".
+// mentionOpenID returns the Feishu open_id to @-mention on this reply, or ""
+// for "send without a mention".
 //
-// The identity comes from the task's own initiator_user_id, which is stamped
-// when the run is created and never rewritten — so a slow answer mentions the
-// member who asked THAT question, even if someone else has since messaged the
-// group. That is the same per-task freeze the reply target relies on, and it
-// is why two members triggering runs concurrently cannot be cross-mentioned.
+// It reads the sender frozen onto this task's delivery row — the same
+// per-task snapshot the reply target comes from, recorded together with it on
+// the inbound turn. Two properties follow, and both matter:
+//
+//   - The mention names the account that sent THIS trigger, not whoever
+//     messaged the chat most recently, so a slow answer cannot mention a
+//     later speaker.
+//
+//   - It is the exact platform identity, not one re-derived from the Multica
+//     member. channel_user_binding is unique on (installation_id,
+//     channel_user_id) only, so one member can hold several open_ids on a
+//     single installation; a member-keyed reverse lookup would then be free
+//     to name whichever it found first, and a reply to one account could
+//     mention another.
 //
 // Group chats only. A p2p reply already lands in a 1:1 conversation that
 // notifies on its own, so a mention there is pure noise.
 //
-// Every failure is a silent "no mention": the member is unbound on this
-// installation, the row is gone, or the lookup errored. The answer itself
-// still goes out — losing the ping is a much smaller regression than losing
-// the reply.
-func (p *Patcher) mentionOpenID(ctx context.Context, binding ChatSessionBinding, task db.AgentTaskQueue) string {
-	if ChatType(binding.ChatType) != ChatTypeGroup || !task.InitiatorUserID.Valid {
+// Pre-migration deliveries carry no sender and mention nobody, which is the
+// same degradation as an unresolvable one — the answer still goes out.
+func mentionOpenID(binding ChatSessionBinding) string {
+	if ChatType(binding.ChatType) != ChatTypeGroup || !binding.LastSenderID.Valid {
 		return ""
 	}
-	userBinding, err := p.queries.GetLarkUserBindingByMember(ctx, GetUserBindingByMemberParams{
-		InstallationID: binding.InstallationID,
-		MulticaUserID:  task.InitiatorUserID,
-	})
-	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			p.cfg.Logger.Warn("lark: mention lookup failed; replying without a mention",
-				"installation_id", uuidString(binding.InstallationID),
-				"task_id", uuidString(task.ID),
-				"error", err)
-		}
-		return ""
-	}
-	return userBinding.ChannelUserID
+	return binding.LastSenderID.String
 }
 
 // sendChatReply turns ChatDonePayload.Content into a Lark message.

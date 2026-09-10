@@ -59,13 +59,6 @@ type GetUserBindingByOpenIDParams struct {
 	ChannelUserID  string
 }
 
-// GetUserBindingByMemberParams looks up a binding by the Multica member it
-// belongs to, scoped to one installation — the outbound @-mention direction.
-type GetUserBindingByMemberParams struct {
-	InstallationID pgtype.UUID
-	MulticaUserID  pgtype.UUID
-}
-
 // CreateUserBindingParams binds a workspace member to a channel-native user id.
 type CreateUserBindingParams struct {
 	WorkspaceID    pgtype.UUID
@@ -87,6 +80,7 @@ type UpdateChatSessionBindingReplyTargetParams struct {
 	ChatSessionID pgtype.UUID
 	LastMessageID pgtype.Text
 	LastThreadID  pgtype.Text
+	LastSenderID  pgtype.Text
 }
 
 // ClaimInboundDedupParams claims the two-phase idempotency row for a message.

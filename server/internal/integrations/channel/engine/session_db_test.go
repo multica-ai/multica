@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 func sessionPersistenceTestDB(t *testing.T) *pgxpool.Pool {
@@ -1165,4 +1166,87 @@ func TestAppendUserMessage_MediaDeadlineUsesDatabaseClock(t *testing.T) {
 	if remaining < 55 || remaining > 60 {
 		t.Fatalf("deadline remaining = %.2fs (DB clock), want ~60s budget", remaining)
 	}
+}
+
+// TestChannelTaskDeliveryFreezesTriggerSender exercises the whole snapshot
+// against real Postgres: the inbound reply-target write records the trigger's
+// channel-native sender on the binding, and creating a task freezes it onto
+// that task's delivery row alongside the message id.
+//
+// The freeze is the correctness property behind #8234's mention. The binding
+// keeps only the LATEST trigger, so a second member messaging the group while
+// a run is still working overwrites it — but the first run's delivery row was
+// already taken and must not move, or the answer to member A would quote and
+// @-mention member B.
+func TestChannelTaskDeliveryFreezesTriggerSender(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	f := seedSessionPersistenceFixture(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	record := func(messageID, senderID string) {
+		t.Helper()
+		if err := q.UpdateChannelChatSessionBindingReplyTarget(ctx, db.UpdateChannelChatSessionBindingReplyTargetParams{
+			ReplyChatSessionID: f.sessionID,
+			LastMessageID:      pgtype.Text{String: messageID, Valid: true},
+			LastSenderID:       pgtype.Text{String: senderID, Valid: true},
+		}); err != nil {
+			t.Fatalf("record reply target: %v", err)
+		}
+	}
+
+	// Member A asks; their run is created and takes its snapshot.
+	record("om_from_alice", "ou_alice")
+	taskA := newDeliveryTaskID(t, pool)
+	deliveryA, err := q.CreateChannelTaskDeliveryFromSession(ctx, db.CreateChannelTaskDeliveryFromSessionParams{
+		TaskID: taskA, ChatSessionID: f.sessionID,
+	})
+	if err != nil {
+		t.Fatalf("create delivery for A: %v", err)
+	}
+	if deliveryA.ChannelSenderID.String != "ou_alice" || deliveryA.ChannelMessageID.String != "om_from_alice" {
+		t.Fatalf("delivery A = sender %q message %q, want alice's trigger",
+			deliveryA.ChannelSenderID.String, deliveryA.ChannelMessageID.String)
+	}
+
+	// Member B messages the same group while A's run is still working.
+	record("om_from_bob", "ou_bob")
+
+	reread, err := q.GetChannelTaskDelivery(ctx, taskA)
+	if err != nil {
+		t.Fatalf("re-read delivery for A: %v", err)
+	}
+	if reread.ChannelSenderID.String != "ou_alice" {
+		t.Errorf("delivery A sender = %q after B spoke, want ou_alice — the snapshot must not follow the binding",
+			reread.ChannelSenderID.String)
+	}
+	if reread.ChannelMessageID.String != "om_from_alice" {
+		t.Errorf("delivery A message = %q after B spoke, want om_from_alice",
+			reread.ChannelMessageID.String)
+	}
+
+	// B's own run freezes B's trigger.
+	taskB := newDeliveryTaskID(t, pool)
+	deliveryB, err := q.CreateChannelTaskDeliveryFromSession(ctx, db.CreateChannelTaskDeliveryFromSessionParams{
+		TaskID: taskB, ChatSessionID: f.sessionID,
+	})
+	if err != nil {
+		t.Fatalf("create delivery for B: %v", err)
+	}
+	if deliveryB.ChannelSenderID.String != "ou_bob" || deliveryB.ChannelMessageID.String != "om_from_bob" {
+		t.Errorf("delivery B = sender %q message %q, want bob's trigger",
+			deliveryB.ChannelSenderID.String, deliveryB.ChannelMessageID.String)
+	}
+}
+
+// newDeliveryTaskID mints a task id to hang a channel_task_delivery off.
+// channel_task_delivery carries no foreign keys (MUL-3515 §4), so the row
+// under test needs no agent_task_queue peer — only its own cleanup.
+func newDeliveryTaskID(t *testing.T, pool *pgxpool.Pool) pgtype.UUID {
+	t.Helper()
+	taskID := dbid.NewV7()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_task_delivery WHERE task_id = $1`, taskID)
+	})
+	return taskID
 }

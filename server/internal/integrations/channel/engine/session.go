@@ -379,14 +379,20 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 // its own binding row, recording the real thread here per session does not clash
 // across sibling threads.
 type AppendInput struct {
-	SessionID           pgtype.UUID
-	Sender              pgtype.UUID
-	InstallationID      pgtype.UUID
-	Body                string
-	CommandText         string
-	MessageID           string
-	DedupMessageID      string
-	ThreadID            string
+	SessionID      pgtype.UUID
+	Sender         pgtype.UUID
+	InstallationID pgtype.UUID
+	Body           string
+	CommandText    string
+	MessageID      string
+	DedupMessageID string
+	ThreadID       string
+	// SenderChannelID is the platform-native id of whoever sent THIS message
+	// (Lark open_id, Slack user id, ...). Sender above is the Multica user it
+	// resolved to; both are recorded because the outbound side needs the
+	// platform id to render a native @-mention, and a Multica user can hold
+	// more than one platform identity on the same installation.
+	SenderChannelID     string
 	ClaimToken          pgtype.UUID
 	MediaPendingSeconds float64
 	ForceFresh          bool
@@ -407,10 +413,12 @@ type StartSessionInput struct {
 	// CommandText is the current member-authored instruction before adapter
 	// context enrichment. It is used only for the initial Chat title; Body
 	// remains the canonical persisted/agent-visible content.
-	CommandText            string
-	MessageID              string
-	DedupMessageID         string
-	ThreadID               string
+	CommandText    string
+	MessageID      string
+	DedupMessageID string
+	ThreadID       string
+	// SenderChannelID mirrors AppendInput.SenderChannelID.
+	SenderChannelID        string
 	ClaimToken             pgtype.UUID
 	MediaPendingSeconds    float64
 	PersistMessage         bool
@@ -541,6 +549,7 @@ func (s *ChatSession) StartSession(ctx context.Context, in StartSessionInput) (S
 	if in.MessageID != "" {
 		if err := qtx.UpdateChannelChatSessionBindingReplyTarget(ctx, db.UpdateChannelChatSessionBindingReplyTargetParams{
 			ReplyChatSessionID: session.ID, LastMessageID: textOrNull(in.MessageID), LastThreadID: textOrNull(in.ThreadID),
+			LastSenderID: textOrNull(in.SenderChannelID),
 		}); err != nil {
 			return StartSessionResult{}, fmt.Errorf("set started chat reply target: %w", err)
 		}
@@ -730,12 +739,15 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	}
 
 	// Record the latest trigger so the decoupled outbound patcher can thread
-	// its reply back into the originating topic.
+	// its reply back into the originating topic and @-mention its sender. All
+	// three move together: the sender must describe the same message the reply
+	// targets, or a reply to one member could carry another member's mention.
 	if in.MessageID != "" {
 		if err := qtx.UpdateChannelChatSessionBindingReplyTarget(ctx, db.UpdateChannelChatSessionBindingReplyTargetParams{
 			ReplyChatSessionID: in.SessionID,
 			LastMessageID:      textOrNull(in.MessageID),
 			LastThreadID:       textOrNull(in.ThreadID),
+			LastSenderID:       textOrNull(in.SenderChannelID),
 		}); err != nil {
 			return AppendResult{}, fmt.Errorf("update reply target: %w", err)
 		}

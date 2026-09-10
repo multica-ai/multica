@@ -463,20 +463,6 @@ RETURNING *;
 SELECT * FROM channel_user_binding
 WHERE installation_id = $1 AND channel_user_id = $2;
 
--- name: GetChannelUserBindingByMember :one
--- The outbound mention lookup, the reverse of GetChannelUserBindingByUserID:
--- given the Multica user a task recorded as its initiator, recover the
--- platform-native user id to @-mention when the answer is posted back
--- (#8234). Scoped to ONE installation on purpose — FindChannelBindingForMember
--- deliberately searches workspace-wide because inbox push only needs some
--- reachable bot, but a mention is rendered inside a specific chat: an open_id
--- from another installation (a different Feishu tenant, or a second bot in a
--- multi-bot workspace) is not addressable there and would render as a dead
--- mention. No row means "this member has no identity on this installation" —
--- callers send without a mention rather than guessing.
-SELECT * FROM channel_user_binding
-WHERE installation_id = $1 AND multica_user_id = $2;
-
 -- name: FindChannelBindingForMember :one
 -- Outbound notification lookup: given a Multica member and a channel_type,
 -- return the (installation, channel_user_id) that outbound push should
@@ -649,8 +635,9 @@ SELECT * FROM channel_chat_session_binding
 WHERE chat_session_id = ANY(@chat_session_ids::uuid[]);
 
 -- name: UpdateChannelChatSessionBindingReplyTarget :exec
--- Records the most recent inbound trigger message + thread so the decoupled
--- outbound patcher can thread its reply back into the originating topic.
+-- Records the most recent inbound trigger — message, thread and the
+-- channel-native sender — so the decoupled outbound patcher can thread its
+-- reply back into the originating topic and @-mention whoever asked.
 WITH current_route AS (
     SELECT current_binding.*
     FROM channel_chat_session_binding AS current_binding
@@ -674,6 +661,7 @@ WITH current_route AS (
 UPDATE channel_chat_session_binding AS binding
 SET last_message_id = sqlc.narg('last_message_id'),
     last_thread_id  = sqlc.narg('last_thread_id'),
+    last_sender_id  = sqlc.narg('last_sender_id'),
     history_start_message_id = CASE
         WHEN binding.history_boundary_pending
           AND sqlc.narg('last_message_id')::text IS NOT NULL
@@ -835,12 +823,12 @@ WHERE binding.installation_id = sqlc.arg('installation_id')
 -- name: CreateChannelTaskDeliveryFromSession :one
 INSERT INTO channel_task_delivery (
     task_id, binding_id, installation_id, channel_type, channel_chat_id, chat_type,
-    channel_message_id, channel_thread_id, route_revision, config
+    channel_message_id, channel_thread_id, channel_sender_id, route_revision, config
 )
 SELECT
     @task_id, binding.id, binding.installation_id, binding.channel_type,
     binding.channel_chat_id, binding.chat_type, binding.last_message_id, binding.last_thread_id,
-    binding.route_revision, binding.config
+    binding.last_sender_id, binding.route_revision, binding.config
 FROM channel_chat_session_binding AS binding
 WHERE binding.chat_session_id = @chat_session_id
 RETURNING *;
@@ -851,11 +839,11 @@ SELECT * FROM channel_task_delivery WHERE task_id = $1;
 -- name: CopyChannelTaskDelivery :exec
 INSERT INTO channel_task_delivery (
     task_id, binding_id, installation_id, channel_type, channel_chat_id, chat_type,
-    channel_message_id, channel_thread_id, route_revision, config
+    channel_message_id, channel_thread_id, channel_sender_id, route_revision, config
 )
 SELECT
     @child_task_id, delivery.binding_id, delivery.installation_id, delivery.channel_type, delivery.channel_chat_id, delivery.chat_type,
-    delivery.channel_message_id, delivery.channel_thread_id, delivery.route_revision, delivery.config
+    delivery.channel_message_id, delivery.channel_thread_id, delivery.channel_sender_id, delivery.route_revision, delivery.config
 FROM channel_task_delivery AS delivery
 WHERE delivery.task_id = @parent_task_id;
 
