@@ -71,6 +71,14 @@ func resolveSkillSlugs(skills []SkillContextForEnv) []string {
 	return slugs
 }
 
+// ResolveSkillSlugs returns the provider-visible directory identity for each
+// skill in the original batch order. The daemon's invocation observer uses the
+// same names as writeSkillFiles so a read of one mounted SKILL.md can be joined
+// back to the exact task skill without maintaining a second slug algorithm.
+func ResolveSkillSlugs(skills []SkillContextForEnv) []string {
+	return resolveSkillSlugs(skills)
+}
+
 func skillModelInvocationVisible(skill SkillContextForEnv) bool {
 	return !skillDisablesModelInvocation(skill.Content)
 }

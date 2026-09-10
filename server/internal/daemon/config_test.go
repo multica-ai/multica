@@ -142,6 +142,35 @@ func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *tes
 	}
 }
 
+func TestLoadConfig_SkillTraceIsOptInAndDefaultsUnderWorkspacesRoot(t *testing.T) {
+	stageFakeAgent(t)
+	root := t.TempDir()
+	t.Setenv("MULTICA_SKILL_TRACE_ENABLED", "")
+	t.Setenv("MULTICA_SKILL_TRACE_PATH", "")
+
+	cfg, err := LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: root})
+	if err != nil {
+		t.Fatalf("LoadConfig default: %v", err)
+	}
+	if cfg.SkillTraceEnabled {
+		t.Fatal("skill trace should be disabled by default")
+	}
+	if want := filepath.Join(root, "skill-invocations.jsonl"); cfg.SkillTracePath != want {
+		t.Fatalf("SkillTracePath = %q, want %q", cfg.SkillTracePath, want)
+	}
+
+	custom := filepath.Join(t.TempDir(), "custom.jsonl")
+	t.Setenv("MULTICA_SKILL_TRACE_ENABLED", "yes")
+	t.Setenv("MULTICA_SKILL_TRACE_PATH", custom)
+	cfg, err = LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: root})
+	if err != nil {
+		t.Fatalf("LoadConfig opt-in: %v", err)
+	}
+	if !cfg.SkillTraceEnabled || cfg.SkillTracePath != custom {
+		t.Fatalf("skill trace config = enabled:%v path:%q", cfg.SkillTraceEnabled, cfg.SkillTracePath)
+	}
+}
+
 func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
 	stageFakeAgent(t)
 	t.Setenv("HOME", t.TempDir())
