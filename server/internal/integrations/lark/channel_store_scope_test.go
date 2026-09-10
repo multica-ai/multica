@@ -58,18 +58,20 @@ func TestChannelStore_ScopesToFeishu(t *testing.T) {
 	// why the test cleans up explicitly, by deterministic key, before and
 	// after (a killed prior run must not leave colliding rows behind).
 	const (
-		feishuApp     = "cli_scope_feishu"
-		slackApp      = "cli_scope_slack"
-		wsID          = "5c09e000-0000-4000-8000-000000000001"
-		agentID       = "5c09e000-0000-4000-8000-000000000002"
-		chatSessionID = "5c09e000-0000-4000-8000-000000000003"
-		taskID        = "5c09e000-0000-4000-8000-000000000004"
-		installerID   = "5c09e000-0000-4000-8000-000000000005"
+		feishuApp      = "cli_scope_feishu"
+		otherFeishuApp = "cli_scope_feishu_other"
+		slackApp       = "cli_scope_slack"
+		wsID           = "5c09e000-0000-4000-8000-000000000001"
+		agentID        = "5c09e000-0000-4000-8000-000000000002"
+		otherAgentID   = "5c09e000-0000-4000-8000-000000000006"
+		chatSessionID  = "5c09e000-0000-4000-8000-000000000003"
+		taskID         = "5c09e000-0000-4000-8000-000000000004"
+		installerID    = "5c09e000-0000-4000-8000-000000000005"
 	)
 	clean := func() {
 		_, _ = pool.Exec(context.Background(),
 			`DELETE FROM channel_installation WHERE config->>'app_id' = ANY($1)`,
-			[]string{feishuApp, slackApp})
+			[]string{feishuApp, otherFeishuApp, slackApp})
 		_, _ = pool.Exec(context.Background(),
 			`DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, chatSessionID)
 		_, _ = pool.Exec(context.Background(),
@@ -78,19 +80,20 @@ func TestChannelStore_ScopesToFeishu(t *testing.T) {
 	clean()
 	t.Cleanup(clean)
 
-	insertInstallation := func(channelType, app string) pgtype.UUID {
+	insertInstallation := func(channelType, app, ownerAgentID string) pgtype.UUID {
 		var id string
 		if err := pool.QueryRow(ctx, `
 INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id)
 VALUES ($1, $2, $3, jsonb_build_object('app_id', $4::text), $5)
 RETURNING id
-`, wsID, agentID, channelType, app, installerID).Scan(&id); err != nil {
+`, wsID, ownerAgentID, channelType, app, installerID).Scan(&id); err != nil {
 			t.Fatalf("insert %s installation: %v", channelType, err)
 		}
 		return util.MustParseUUID(id)
 	}
-	feishuID := insertInstallation("feishu", feishuApp)
-	slackID := insertInstallation("slack", slackApp)
+	feishuID := insertInstallation("feishu", feishuApp, agentID)
+	otherFeishuID := insertInstallation("feishu", otherFeishuApp, otherAgentID)
+	slackID := insertInstallation("slack", slackApp, agentID)
 
 	// A non-Feishu binding/card sharing this test's chat_session and task.
 	if _, err := pool.Exec(ctx, `
@@ -125,18 +128,28 @@ VALUES ($1, $2, 'slack', 'oc_scope_slack', 'om_scope_slack', 'pending')
 	if _, err := store.GetLarkInstallationInWorkspace(ctx, GetInstallationInWorkspaceParams{ID: slackID, WorkspaceID: wsUUID}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("GetLarkInstallationInWorkspace(slack): err=%v, want pgx.ErrNoRows (scoped out)", err)
 	}
+	gotForAgent, err := store.GetActiveLarkInstallationForAgent(ctx, wsUUID, util.MustParseUUID(agentID))
+	if err != nil || gotForAgent.ID != feishuID {
+		t.Fatalf("GetActiveLarkInstallationForAgent(primary): id=%v err=%v, want %v", gotForAgent.ID, err, feishuID)
+	}
+	gotForOtherAgent, err := store.GetActiveLarkInstallationForAgent(ctx, wsUUID, util.MustParseUUID(otherAgentID))
+	if err != nil || gotForOtherAgent.ID != otherFeishuID {
+		t.Fatalf("GetActiveLarkInstallationForAgent(other): id=%v err=%v, want %v", gotForOtherAgent.ID, err, otherFeishuID)
+	}
 
 	// list-by-workspace: only the Feishu installation in this workspace
 	byWs, err := store.ListLarkInstallationsByWorkspace(ctx, wsUUID)
 	if err != nil {
 		t.Fatalf("ListLarkInstallationsByWorkspace: %v", err)
 	}
-	if len(byWs) != 1 || byWs[0].AppID != feishuApp {
-		apps := make([]string, len(byWs))
-		for i, r := range byWs {
-			apps[i] = r.AppID
-		}
-		t.Fatalf("ListLarkInstallationsByWorkspace: got apps=%v, want exactly [%s]", apps, feishuApp)
+	apps := make([]string, len(byWs))
+	seenApps := make(map[string]bool, len(byWs))
+	for i, row := range byWs {
+		apps[i] = row.AppID
+		seenApps[row.AppID] = true
+	}
+	if len(byWs) != 2 || !seenApps[feishuApp] || !seenApps[otherFeishuApp] {
+		t.Fatalf("ListLarkInstallationsByWorkspace: got apps=%v, want two Feishu installations", apps)
 	}
 
 	// (ListActiveLarkInstallations channel-type + live workspace/agent scoping
