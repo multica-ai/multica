@@ -87,6 +87,34 @@ describe("ModelPicker (inspector)", () => {
     expect(onChange).toHaveBeenCalledWith("claude-fable-5");
   });
 
+  it("keeps an exact label match available as a verbatim custom model id", async () => {
+    const qualifiedId = "commandcode/deepseek/deepseek-v4.1-flash";
+    discovery = async () => ({
+      models: [
+        {
+          id: "deepseek/deepseek-v4.1-flash",
+          label: qualifiedId,
+          provider: "commandcode",
+        },
+      ],
+      supported: true,
+    });
+
+    const { container, onChange } = renderPicker();
+    openPicker(container);
+    fireEvent.change(
+      await screen.findByPlaceholderText(
+        enAgents.pickers.model_search_placeholder,
+      ),
+      { target: { value: qualifiedId } },
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: `Use "${qualifiedId}"` }),
+    );
+    expect(onChange).toHaveBeenCalledWith(qualifiedId);
+  });
+
   it("shows an unavailable model with its reason and no way to select it", async () => {
     const { container, onChange } = renderPicker();
     openPicker(container);

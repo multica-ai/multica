@@ -80,10 +80,11 @@ export function ModelPicker({
   }, [models, search]);
 
   const trimmedSearch = search.trim();
-  const exactMatch = models.some(
-    (m) => m.id === trimmedSearch || m.label === trimmedSearch,
-  );
-  const canCreate = trimmedSearch.length > 0 && !exactMatch;
+  // Labels are display copy, not aliases for the persistable model ID. Keep
+  // the verbatim option when only a label matches so a provider-qualified
+  // value cannot be silently replaced with that row's different ID (#8246).
+  const exactIdMatch = models.some((m) => m.id === trimmedSearch);
+  const canCreate = trimmedSearch.length > 0 && !exactIdMatch;
 
   const triggerLabel = value || t(($) => $.pickers.model_default);
   const triggerTitle = t(($) => $.pickers.model_tooltip, { value: triggerLabel });
