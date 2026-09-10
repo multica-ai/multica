@@ -251,6 +251,17 @@ func (s *ChannelStore) GetLarkUserBindingByOpenID(ctx context.Context, arg GetUs
 	return userBindingFromRow(row)
 }
 
+func (s *ChannelStore) GetLarkUserBindingByMember(ctx context.Context, arg GetUserBindingByMemberParams) (UserBinding, error) {
+	row, err := s.Queries.GetChannelUserBindingByMember(ctx, db.GetChannelUserBindingByMemberParams{
+		InstallationID: arg.InstallationID,
+		MulticaUserID:  arg.MulticaUserID,
+	})
+	if err != nil {
+		return UserBinding{}, err
+	}
+	return userBindingFromRow(row)
+}
+
 func (s *ChannelStore) CreateLarkUserBinding(ctx context.Context, arg CreateUserBindingParams) (UserBinding, error) {
 	cfg, err := encodeBindingConfig(UserBinding{UnionID: arg.UnionID})
 	if err != nil {

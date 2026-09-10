@@ -1566,6 +1566,42 @@ func (q *Queries) GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID
 	return i, err
 }
 
+const getChannelUserBindingByMember = `-- name: GetChannelUserBindingByMember :one
+SELECT id, workspace_id, multica_user_id, installation_id, channel_type, channel_user_id, config, bound_at FROM channel_user_binding
+WHERE installation_id = $1 AND multica_user_id = $2
+`
+
+type GetChannelUserBindingByMemberParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
+}
+
+// The outbound mention lookup, the reverse of GetChannelUserBindingByUserID:
+// given the Multica user a task recorded as its initiator, recover the
+// platform-native user id to @-mention when the answer is posted back
+// (#8234). Scoped to ONE installation on purpose — FindChannelBindingForMember
+// deliberately searches workspace-wide because inbox push only needs some
+// reachable bot, but a mention is rendered inside a specific chat: an open_id
+// from another installation (a different Feishu tenant, or a second bot in a
+// multi-bot workspace) is not addressable there and would render as a dead
+// mention. No row means "this member has no identity on this installation" —
+// callers send without a mention rather than guessing.
+func (q *Queries) GetChannelUserBindingByMember(ctx context.Context, arg GetChannelUserBindingByMemberParams) (ChannelUserBinding, error) {
+	row := q.db.QueryRow(ctx, getChannelUserBindingByMember, arg.InstallationID, arg.MulticaUserID)
+	var i ChannelUserBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.Config,
+		&i.BoundAt,
+	)
+	return i, err
+}
+
 const getChannelUserBindingByUserID = `-- name: GetChannelUserBindingByUserID :one
 SELECT id, workspace_id, multica_user_id, installation_id, channel_type, channel_user_id, config, bound_at FROM channel_user_binding
 WHERE installation_id = $1 AND channel_user_id = $2

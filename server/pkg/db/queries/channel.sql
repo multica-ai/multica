@@ -463,6 +463,20 @@ RETURNING *;
 SELECT * FROM channel_user_binding
 WHERE installation_id = $1 AND channel_user_id = $2;
 
+-- name: GetChannelUserBindingByMember :one
+-- The outbound mention lookup, the reverse of GetChannelUserBindingByUserID:
+-- given the Multica user a task recorded as its initiator, recover the
+-- platform-native user id to @-mention when the answer is posted back
+-- (#8234). Scoped to ONE installation on purpose — FindChannelBindingForMember
+-- deliberately searches workspace-wide because inbox push only needs some
+-- reachable bot, but a mention is rendered inside a specific chat: an open_id
+-- from another installation (a different Feishu tenant, or a second bot in a
+-- multi-bot workspace) is not addressable there and would render as a dead
+-- mention. No row means "this member has no identity on this installation" —
+-- callers send without a mention rather than guessing.
+SELECT * FROM channel_user_binding
+WHERE installation_id = $1 AND multica_user_id = $2;
+
 -- name: FindChannelBindingForMember :one
 -- Outbound notification lookup: given a Multica member and a channel_type,
 -- return the (installation, channel_user_id) that outbound push should

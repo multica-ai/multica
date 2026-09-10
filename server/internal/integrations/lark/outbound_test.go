@@ -34,9 +34,21 @@ type fakePatcherQueries struct {
 	created             []CreateOutboundCardMessageParams
 	createReturn        OutboundCardMessage
 	statusUpdates       []UpdateOutboundCardStatusParams
+	// userBindingsByMember maps multica_user_id → the member's open_id on
+	// this installation. Absent means "unbound here" (pgx.ErrNoRows), which
+	// is the default every pre-existing test runs under.
+	userBindingsByMember map[string]string
+	userBindingErr       error
+	userBindingLookups   []GetUserBindingByMemberParams
+	// tasksByID overrides `task` per task_id so a test can fire two events
+	// carrying different initiators; empty falls back to `task`.
+	tasksByID map[string]db.AgentTaskQueue
 }
 
 func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
+	if task, ok := f.tasksByID[uuidString(id)]; ok {
+		return task, f.taskErr
+	}
 	return f.task, f.taskErr
 }
 func (f *fakePatcherQueries) TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error) {
@@ -68,6 +80,23 @@ func (f *fakePatcherQueries) GetLarkInstallation(ctx context.Context, id pgtype.
 }
 func (f *fakePatcherQueries) GetLarkChatSessionBindingBySession(ctx context.Context, sessID pgtype.UUID) (ChatSessionBinding, error) {
 	return f.binding, f.bindingErr
+}
+func (f *fakePatcherQueries) GetLarkUserBindingByMember(ctx context.Context, arg GetUserBindingByMemberParams) (UserBinding, error) {
+	f.mu.Lock()
+	f.userBindingLookups = append(f.userBindingLookups, arg)
+	f.mu.Unlock()
+	if f.userBindingErr != nil {
+		return UserBinding{}, f.userBindingErr
+	}
+	openID := f.userBindingsByMember[uuidString(arg.MulticaUserID)]
+	if openID == "" {
+		return UserBinding{}, pgx.ErrNoRows
+	}
+	return UserBinding{
+		InstallationID: arg.InstallationID,
+		MulticaUserID:  arg.MulticaUserID,
+		ChannelUserID:  openID,
+	}, nil
 }
 func (f *fakePatcherQueries) GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error) {
 	return f.card, f.cardErr
@@ -676,14 +705,14 @@ func TestPatcherLegacyBindingFallsBackToKey(t *testing.T) {
 	}
 }
 
-// TestPatcherSendsToChatWhenNoThread verifies that a non-thread trigger
-// (no last_lark_thread_id on the binding) keeps the historical
-// chat-level send: ReplyTarget stays empty so SendTextMessage targets
-// the chat by chat_id. This is the no-behavior-change guarantee for
-// normal group / p2p chats.
-func TestPatcherSendsToChatWhenNoThread(t *testing.T) {
+// TestPatcherRepliesNativelyInOrdinaryGroup pins the #8234 fix: an
+// ordinary group trigger (last_lark_message_id present, NO
+// last_lark_thread_id) now replies natively to that message instead of
+// posting a standalone chat-level message — but reply_in_thread stays
+// false, because there is no topic to stay inside.
+func TestPatcherRepliesNativelyInOrdinaryGroup(t *testing.T) {
 	p, q, api := newTestPatcher(t)
-	// binding has a message id but NO thread id → must not thread.
+	q.binding.ChatType = string(ChatTypeGroup)
 	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
 	taskID := uuidFromString(t, "ee777777-ee77-ee77-ee77-eeeeeeeeeeee")
 
@@ -699,9 +728,45 @@ func TestPatcherSendsToChatWhenNoThread(t *testing.T) {
 	if len(api.textSent) != 1 {
 		t.Fatalf("expected one text send; got %d", len(api.textSent))
 	}
+	got := api.textSent[0].ReplyTarget
+	if got.MessageID != "om_trigger" {
+		t.Errorf("ordinary group reply must target the trigger message; got %+v", got)
+	}
+	if got.InThread {
+		t.Errorf("no thread id on the trigger, so reply_in_thread must be false; got %+v", got)
+	}
+}
+
+// TestPatcherSendsToChatWithoutTriggerMessage covers the one case that
+// still has nothing to reply to: a binding with no last_lark_message_id
+// at all (pre-#8234 rows, or a session whose trigger was never
+// recorded). ReplyTarget stays empty and the send goes to the chat by
+// chat_id.
+func TestPatcherSendsToChatWithoutTriggerMessage(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.ChatType = string(ChatTypeGroup)
+	q.binding.LastMessageID = pgtype.Text{}
+	q.binding.LastThreadID = pgtype.Text{}
+	taskID := uuidFromString(t, "ee779999-ee77-ee77-ee77-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
 	if api.textSent[0].ReplyTarget.IsSet() {
-		t.Errorf("non-thread trigger must NOT route through the reply endpoint; got %+v",
+		t.Errorf("no trigger message id means chat-level send; got %+v",
 			api.textSent[0].ReplyTarget)
+	}
+	if api.textSent[0].ChatID != "oc_test_chat" {
+		t.Errorf("chat_id = %q, want the binding chat", api.textSent[0].ChatID)
 	}
 }
 
@@ -916,5 +981,230 @@ func TestPatcherClearsTypingAfterSessionDeleteRemovedTheBinding(t *testing.T) {
 	if len(api.sent) != 0 || len(api.textSent) != 0 || len(api.patched) != 0 {
 		t.Errorf("a cancelled run must post nothing; sent=%d textSent=%d patched=%d",
 			len(api.sent), len(api.textSent), len(api.patched))
+	}
+}
+
+// ---- native @-mention of the triggering member (#8234) ----
+
+// groupPatcherWithMember wires the shared setup for the mention tests: a
+// group binding (mentions are group-only), a trigger message to reply to,
+// and one bound member who will be the task initiator.
+func groupPatcherWithMember(t *testing.T, memberID pgtype.UUID, openID string) (*Patcher, *fakePatcherQueries, *fakeAPIClient) {
+	t.Helper()
+	p, q, api := newTestPatcher(t)
+	q.binding.ChatType = string(ChatTypeGroup)
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.task = db.AgentTaskQueue{InitiatorUserID: memberID}
+	if openID != "" {
+		q.userBindingsByMember = map[string]string{uuidString(memberID): openID}
+	}
+	return p, q, api
+}
+
+// TestPatcherMentionsInitiatorInTextReply is the core of the mention half
+// of #8234: the member who @-mentioned the bot is rendered as a native
+// Feishu mention (which notifies them), built from the open_id we resolved
+// for the task's initiator — never from an "@name" in the agent's prose.
+func TestPatcherMentionsInitiatorInTextReply(t *testing.T) {
+	member := uuidFromString(t, "dddd1111-dddd-dddd-dddd-dddddddddddd")
+	p, q, api := groupPatcherWithMember(t, member, "ou_member_1")
+	taskID := uuidFromString(t, "ee991111-ee99-ee99-ee99-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	want := `<at user_id="ou_member_1"></at> plain reply`
+	if got := api.textSent[0].Text; got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
+	// The mention must not change where the reply lands.
+	if api.textSent[0].ReplyTarget.MessageID != "om_trigger" {
+		t.Errorf("reply target = %+v, want the trigger message", api.textSent[0].ReplyTarget)
+	}
+}
+
+// TestPatcherMentionsInitiatorInMarkdownCard pins the second wire shape:
+// a markdown answer goes out as a schema-2.0 card, where the same mention
+// is spelled `<at id=...>`. Using the text spelling here would leave raw
+// markup visible in the card.
+func TestPatcherMentionsInitiatorInMarkdownCard(t *testing.T) {
+	member := uuidFromString(t, "dddd2222-dddd-dddd-dddd-dddddddddddd")
+	p, q, api := groupPatcherWithMember(t, member, "ou_member_2")
+	taskID := uuidFromString(t, "ee992222-ee99-ee99-ee99-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "# heading\n- bullet"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.mdCardSent) != 1 {
+		t.Fatalf("expected one markdown card send; got %d", len(api.mdCardSent))
+	}
+	want := "<at id=ou_member_2></at> # heading\n- bullet"
+	if got := api.mdCardSent[0].Markdown; got != want {
+		t.Errorf("markdown = %q, want %q", got, want)
+	}
+}
+
+// TestPatcherSendsWithoutMentionWhenMemberUnbound covers the degradation
+// the issue asks for explicitly: with no identity for the initiator on this
+// installation, the answer still goes out — just without a mention. It must
+// never fall back to guessing some other member.
+func TestPatcherSendsWithoutMentionWhenMemberUnbound(t *testing.T) {
+	member := uuidFromString(t, "dddd3333-dddd-dddd-dddd-dddddddddddd")
+	p, q, api := groupPatcherWithMember(t, member, "")
+	taskID := uuidFromString(t, "ee993333-ee99-ee99-ee99-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	if got := api.textSent[0].Text; got != "plain reply" {
+		t.Errorf("unbound initiator must send the body unchanged; got %q", got)
+	}
+}
+
+// TestPatcherMentionLookupErrorStillSends pins that a database failure on
+// the mention lookup costs the ping, not the answer.
+func TestPatcherMentionLookupErrorStillSends(t *testing.T) {
+	member := uuidFromString(t, "dddd4444-dddd-dddd-dddd-dddddddddddd")
+	p, q, api := groupPatcherWithMember(t, member, "ou_member_4")
+	q.userBindingErr = errors.New("connection reset")
+	taskID := uuidFromString(t, "ee994444-ee99-ee99-ee99-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	if got := api.textSent[0].Text; got != "plain reply" {
+		t.Errorf("lookup failure must not block the reply; got %q", got)
+	}
+}
+
+// TestPatcherDoesNotMentionInP2P keeps 1:1 chats quiet: the member is the
+// only other participant and already gets a normal message notification, so
+// a mention there is noise. The lookup should not even run.
+func TestPatcherDoesNotMentionInP2P(t *testing.T) {
+	member := uuidFromString(t, "dddd5555-dddd-dddd-dddd-dddddddddddd")
+	p, q, api := groupPatcherWithMember(t, member, "ou_member_5")
+	q.binding.ChatType = string(ChatTypeP2P)
+	taskID := uuidFromString(t, "ee995555-ee99-ee99-ee99-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if got := api.textSent[0].Text; got != "plain reply" {
+		t.Errorf("p2p reply must carry no mention; got %q", got)
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.userBindingLookups) != 0 {
+		t.Errorf("p2p must not query for a mention identity; got %d lookups", len(q.userBindingLookups))
+	}
+}
+
+// TestPatcherMentionsEachTaskOwnInitiator is the cross-mention guard the
+// issue calls out. Two members each trigger a run in the same group; the
+// runs finish in the reverse order. Because the mention is resolved from
+// each TASK's frozen initiator_user_id (not from whoever messaged the chat
+// most recently), each answer mentions the member who actually asked it.
+func TestPatcherMentionsEachTaskOwnInitiator(t *testing.T) {
+	alice := uuidFromString(t, "dddd6666-dddd-dddd-dddd-dddddddddddd")
+	bob := uuidFromString(t, "dddd7777-dddd-dddd-dddd-dddddddddddd")
+	p, q, api := groupPatcherWithMember(t, alice, "ou_alice")
+	q.userBindingsByMember[uuidString(bob)] = "ou_bob"
+
+	aliceTask := uuidFromString(t, "ee996666-ee99-ee99-ee99-eeeeeeeeeeee")
+	bobTask := uuidFromString(t, "ee997777-ee99-ee99-ee99-eeeeeeeeeeee")
+	q.tasksByID = map[string]db.AgentTaskQueue{
+		uuidString(aliceTask): {InitiatorUserID: alice},
+		uuidString(bobTask):   {InitiatorUserID: bob},
+	}
+
+	// Bob asked second but his run finishes first.
+	for _, taskID := range []pgtype.UUID{bobTask, aliceTask} {
+		p.handleEvent(events.Event{
+			Type:          protocol.EventChatDone,
+			TaskID:        uuidString(taskID),
+			ChatSessionID: uuidString(q.binding.ChatSessionID),
+			Payload:       protocol.ChatDonePayload{Content: "answer"},
+		})
+	}
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 2 {
+		t.Fatalf("expected two text sends; got %d", len(api.textSent))
+	}
+	want := []string{
+		`<at user_id="ou_bob"></at> answer`,
+		`<at user_id="ou_alice"></at> answer`,
+	}
+	for i, w := range want {
+		if got := api.textSent[i].Text; got != w {
+			t.Errorf("send[%d] = %q, want %q", i, got, w)
+		}
+	}
+}
+
+// TestPatcherSendsToChatInP2P pins the deliberate scope of #8234: the
+// native reply is a group affordance. A 1:1 chat has no competing
+// questions for a quote to disambiguate, so DMs keep the plain
+// chat-level send they have always had.
+func TestPatcherSendsToChatInP2P(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.ChatType = string(ChatTypeP2P)
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	taskID := uuidFromString(t, "ee77aaaa-ee77-ee77-ee77-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	if api.textSent[0].ReplyTarget.IsSet() {
+		t.Errorf("p2p must keep the chat-level send; got %+v", api.textSent[0].ReplyTarget)
 	}
 }
