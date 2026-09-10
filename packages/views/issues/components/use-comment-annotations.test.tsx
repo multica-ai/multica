@@ -18,15 +18,28 @@ function Fixture({ actorType = "agent" }: { actorType?: string }) {
   </div>;
 }
 
-function selectText(container: HTMLElement) {
+function selectText(container: HTMLElement, input: "mouse" | "keyboard" = "mouse") {
   const source = container.querySelector<HTMLElement>("[data-comment-content]")!;
+  if (input === "mouse") {
+    fireEvent.pointerDown(source, { pointerType: "mouse", button: 0 });
+    fireEvent.mouseDown(source, { button: 0 });
+  } else {
+    source.focus();
+    fireEvent.keyDown(source, { key: "ArrowRight", shiftKey: true });
+  }
   const range = document.createRange();
   range.selectNodeContents(source);
   act(() => {
     window.getSelection()!.removeAllRanges();
     window.getSelection()!.addRange(range);
   });
-  fireEvent.pointerUp(source);
+  if (input === "mouse") {
+    fireEvent.pointerUp(source);
+    fireEvent.mouseUp(source, { button: 0 });
+    fireEvent.click(source, { button: 0 });
+  } else {
+    fireEvent.keyUp(source, { key: "ArrowRight", shiftKey: true });
+  }
   return source;
 }
 
@@ -61,10 +74,34 @@ describe("selection to reply", () => {
     expect(screen.queryByRole("button", { name: "Add to reply" })).not.toBeInTheDocument();
   });
 
-  it("makes the action reachable from a keyboard selection without trapping Tab", async () => {
+  it("keeps the action open through the mouseup and click that finish a drag", async () => {
+    const { container } = renderWithI18n(<Fixture />);
+    selectText(container);
+    expect(await screen.findByRole("button", { name: "Add to reply" })).toBeVisible();
+    fireEvent.pointerDown(document.body, { pointerType: "mouse", button: 0 });
+    fireEvent.mouseDown(document.body, { button: 0 });
+    fireEvent.pointerUp(document.body);
+    fireEvent.mouseUp(document.body, { button: 0 });
+    fireEvent.click(document.body, { button: 0 });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Add to reply" })).not.toBeInTheDocument());
+  });
+
+  it("dismisses when the next gesture clears the selection in the source", async () => {
     const { container } = renderWithI18n(<Fixture />);
     const source = selectText(container);
-    source.focus();
+    expect(await screen.findByRole("button", { name: "Add to reply" })).toBeVisible();
+    fireEvent.pointerDown(source, { pointerType: "mouse", button: 0 });
+    fireEvent.mouseDown(source, { button: 0 });
+    act(() => window.getSelection()!.removeAllRanges());
+    fireEvent.pointerUp(source);
+    fireEvent.mouseUp(source, { button: 0 });
+    fireEvent.click(source, { button: 0 });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Add to reply" })).not.toBeInTheDocument());
+  });
+
+  it("makes the action reachable from a keyboard selection without trapping Tab", async () => {
+    const { container } = renderWithI18n(<Fixture />);
+    const source = selectText(container, "keyboard");
     const action = await screen.findByRole("button", { name: "Add to reply" });
     fireEvent.keyDown(source, { key: "Tab" });
     expect(action).toHaveFocus();

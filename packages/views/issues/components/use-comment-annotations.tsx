@@ -26,6 +26,7 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
   const [selection, setSelection] = useState<CapturedSelection | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const selectionGestureRef = useRef(false);
   const annotations = useCommentDraftStore((s) => s.getAnnotations(draftKey));
   const anchorsRef = useRef(annotations);
   anchorsRef.current = annotations;
@@ -34,20 +35,35 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
   const highlightName = `reply-annotation-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`;
 
   const close = (restoreFocus = false) => {
+    selectionGestureRef.current = false;
     if (restoreFocus && selection?.root.isConnected) selection.root.focus({ preventScroll: true });
     setSelection(null); setEditingId(null); setError(false);
   };
-  const capture = () => {
+  const capture = (fromPointer = false) => {
     if (!enabled || !cardRef.current) return;
     const captured = captureCommentSelection(cardRef.current, window.getSelection());
     const source = captured && [entry, ...replies].find((e) => e.id === captured.sourceCommentId);
     if (!captured || source?.actor_type !== "agent" || source.type !== "comment" ||
       (source.comment_type && source.comment_type !== "comment")) return;
+    selectionGestureRef.current = fromPointer;
     setSelection(captured);
     setEditingId(null);
     setError(false);
   };
   const actionRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!selection) return;
+    // Only the click finishing the selection gesture belongs to the opening
+    // interaction. A new press must retain normal outside-dismiss behavior.
+    const reset = () => { selectionGestureRef.current = false; };
+    document.addEventListener("pointerdown", reset, true);
+    document.addEventListener("keydown", reset, true);
+    return () => {
+      document.removeEventListener("pointerdown", reset, true);
+      document.removeEventListener("keydown", reset, true);
+    };
+  }, [selection]);
 
   useEffect(() => {
     if (editingId && window.matchMedia("(pointer: fine)").matches) textareaRef.current?.focus();
@@ -79,6 +95,7 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
   }, [anchorKey, highlightName]);
 
   const add = () => {
+    selectionGestureRef.current = false;
     if (!selection) return;
     const source = [entry, ...replies].find((e) => e.id === selection.sourceCommentId);
     if (!source) { close(); return; }
@@ -99,7 +116,7 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
       "data-annotation-thread": entry.id,
       onPointerUp: (event: React.PointerEvent) => {
         if (event.target instanceof Element && event.target.closest("[data-comment-content]") &&
-          !event.target.closest("button, [contenteditable=true]")) capture();
+          !event.target.closest("button, [contenteditable=true]")) capture(true);
       },
       onKeyUp: (event: React.KeyboardEvent) => {
         if (event.shiftKey && event.key.startsWith("Arrow")) capture();
@@ -114,7 +131,19 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
     },
     popup: <>
       {annotations.length > 0 && <style>{`::highlight(${highlightName}) { background: color-mix(in srgb, var(--brand) 20%, transparent); }`}</style>}
-      <Popover.Root open={!!selection} onOpenChange={(open) => { if (!open) close(); }}>
+      <Popover.Root open={!!selection} onOpenChange={(open, details) => {
+        if (open) return;
+        // A virtual anchor is not a Popover.Trigger, so Base UI otherwise
+        // treats the click immediately after pointerup as an outside press.
+        if (details.reason === "outside-press" && details.event.type === "click" &&
+          selectionGestureRef.current && details.event.target instanceof Node &&
+          selection?.root.contains(details.event.target)) {
+          selectionGestureRef.current = false;
+          details.cancel();
+          return;
+        }
+        close();
+      }}>
         <Popover.Portal>
           <Popover.Positioner
             anchor={selection ? { getBoundingClientRect: () => selection.range.getBoundingClientRect(), contextElement: selection.root } : undefined}
