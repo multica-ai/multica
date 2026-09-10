@@ -3,7 +3,7 @@ import { hashKey, useMutation, useQueryClient, type QueryKey } from "@tanstack/r
 import { api } from "../api";
 import { issueKeys } from "./queries";
 import { projectKeys } from "../projects/queries";
-import { issueLifecycleKeys } from "../issue-lifecycles/queries";
+import { issueWorkflowKeys } from "../issue-workflows/queries";
 import { inboxKeys } from "../inbox/queries";
 import {
   applyIssueChange,
@@ -97,6 +97,10 @@ function useIssueCreateMutation<TVariables>(
         qc.invalidateQueries({ queryKey: issueKeys.children(wsId, newIssue.parent_issue_id) });
         qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
       }
+    },
+    onError: () => {
+      // The selected project may have changed its pipeline while a draft was open.
+      qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
@@ -340,7 +344,7 @@ export function useUpdateIssue() {
 }
 
 /**
- * Canonical lifecycle-native status transition. The server returns both the
+ * Canonical workflow status transition. The server returns both the
  * committed issue snapshot and immutable transition record, so the cache can
  * converge without translating the stable node id back through the legacy
  * workspace status catalog.
@@ -367,9 +371,10 @@ export function useTransitionIssueStatusNode() {
       invalidateStaleListKeys(qc, change.staleKeys);
       invalidateIssueDerivatives(qc, wsId, { statusOrProjectChanged: true });
       qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
-      qc.invalidateQueries({ queryKey: issueLifecycleKeys.executions(wsId, issue.id) });
+      qc.invalidateQueries({ queryKey: issueWorkflowKeys.executions(wsId, issue.id) });
     },
     onError: (_error, { id }) => {
+      qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, id) });
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });

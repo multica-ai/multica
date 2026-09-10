@@ -1970,15 +1970,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
-			// Lifecycle-native API. The issue-status catalog routes above remain
+			// Workflow API. The issue-status catalog routes above remain
 			// installed-client adapters while new clients address stable status
 			// nodes and project inheritance explicitly.
-			r.Get("/api/issue-lifecycles/effective", h.GetEffectiveIssueLifecycle)
-			r.Route("/api/issue-lifecycles/{lifecycleId}", func(r chi.Router) {
-				r.Get("/", h.GetIssueLifecycle)
-				r.Patch("/statuses/reorder", h.ReorderIssueLifecycleStatuses)
-				r.Patch("/statuses/{statusId}", h.UpdateIssueLifecycleStatus)
-				r.Delete("/statuses/{statusId}", h.ArchiveIssueLifecycleStatus)
+			r.Get("/api/issue-workflows/effective", h.GetEffectiveIssueWorkflow)
+			r.Route("/api/issue-workflows/{workflowId}", func(r chi.Router) {
+				r.Get("/", h.GetIssueWorkflow)
+				r.Patch("/statuses/reorder", h.ReorderIssueWorkflowStatuses)
+				r.Patch("/statuses/{statusId}", h.UpdateIssueWorkflowStatus)
+				r.Delete("/statuses/{statusId}", h.ArchiveIssueWorkflowStatus)
 			})
 
 			// Projects
@@ -1990,7 +1990,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
-					r.Put("/issue-lifecycle", h.UpdateProjectIssueLifecycle)
+					r.Put("/issue-workflow", h.UpdateProjectIssueWorkflow)
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)

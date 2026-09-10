@@ -144,8 +144,8 @@ describe("ApiClient edit guards", () => {
   });
 });
 
-describe("ApiClient issue lifecycle routes", () => {
-  it("serializes effective lifecycle, mode, and stable-node transition requests", async () => {
+describe("ApiClient issue workflow routes", () => {
+  it("serializes effective workflow, mode, and stable-node transition requests", async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
       Promise.resolve(new Response("{}", {
         status: 200,
@@ -155,9 +155,9 @@ describe("ApiClient issue lifecycle routes", () => {
     vi.stubGlobal("fetch", fetchMock);
     const client = new ApiClient("https://api.example.test");
 
-    await client.getEffectiveIssueLifecycle("project-1", true);
-    await client.updateProjectIssueLifecycle("project-1", "custom");
-    await client.updateIssueLifecycleStatus("lifecycle-1", "status-2", {
+    await client.getEffectiveIssueWorkflow("project-1", true);
+    await client.updateProjectIssueWorkflow("project-1", "custom");
+    await client.updateIssueWorkflowStatus("workflow-1", "status-2", {
       expected_revision: 4,
       name: "Building",
       entry_policy: {
@@ -167,26 +167,26 @@ describe("ApiClient issue lifecycle routes", () => {
         advance: "executor_may_transition",
       },
     });
-    await client.reorderIssueLifecycleStatuses("lifecycle-1", ["status-2", "status-1"], 5);
-    await client.archiveIssueLifecycleStatus("lifecycle-1", "status-1", 6);
+    await client.reorderIssueWorkflowStatuses("workflow-1", ["status-2", "status-1"], 5);
+    await client.archiveIssueWorkflowStatus("workflow-1", "status-1", 6);
     await client.transitionIssueStatusNode("issue-1", {
-      lifecycle_status_id: "status-2",
+      workflow_status_id: "status-2",
       expected_revision: 9,
       expected_transition_id: "transition-8",
     });
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://api.example.test/api/issue-lifecycles/effective?project_id=project-1&include_archived=true",
+      "https://api.example.test/api/issue-workflows/effective?project_id=project-1&include_archived=true",
     );
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
-      "https://api.example.test/api/projects/project-1/issue-lifecycle",
+      "https://api.example.test/api/projects/project-1/issue-workflow",
     );
     expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("PUT");
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
       mode: "custom",
     });
     expect(fetchMock.mock.calls[2]?.[0]).toBe(
-      "https://api.example.test/api/issue-lifecycles/lifecycle-1/statuses/status-2",
+      "https://api.example.test/api/issue-workflows/workflow-1/statuses/status-2",
     );
     expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("PATCH");
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
@@ -195,14 +195,14 @@ describe("ApiClient issue lifecycle routes", () => {
       entry_policy: { executor: { type: "agent", id: "agent-1" } },
     });
     expect(fetchMock.mock.calls[3]?.[0]).toBe(
-      "https://api.example.test/api/issue-lifecycles/lifecycle-1/statuses/reorder",
+      "https://api.example.test/api/issue-workflows/workflow-1/statuses/reorder",
     );
     expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body))).toEqual({
       status_ids: ["status-2", "status-1"],
       expected_revision: 5,
     });
     expect(fetchMock.mock.calls[4]?.[0]).toBe(
-      "https://api.example.test/api/issue-lifecycles/lifecycle-1/statuses/status-1?expected_revision=6",
+      "https://api.example.test/api/issue-workflows/workflow-1/statuses/status-1?expected_revision=6",
     );
     expect(fetchMock.mock.calls[4]?.[1]?.method).toBe("DELETE");
     expect(fetchMock.mock.calls[5]?.[0]).toBe(
@@ -210,7 +210,7 @@ describe("ApiClient issue lifecycle routes", () => {
     );
     expect(fetchMock.mock.calls[5]?.[1]?.method).toBe("POST");
     expect(JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body))).toEqual({
-      lifecycle_status_id: "status-2",
+      workflow_status_id: "status-2",
       expected_revision: 9,
       expected_transition_id: "transition-8",
     });
@@ -2792,5 +2792,18 @@ describe("ApiClient session expiry", () => {
     expect(store.getState().status).toBe("unauthenticated");
     expect(store.getState().expired).toBe(true);
     expect(storage.getItem("multica_token")).toBeNull();
+  });
+});
+
+describe("ApiClient workflow apply boundary", () => {
+  it("serializes the complete draft and rejects a malformed success response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"workflow":null,"statuses":"bad"}', { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const request = { mode: "custom" as const, expected_revision: 7, allow_archive: false,
+      spec: { api_version: 1 as const, name: "Launch", initial_status: "ready", statuses: [{ key: "ready", name: "Ready", description: "", color: "#6b7280", phase: "backlog" as const,
+        entry_policy: { assignee: { type: "keep" as const }, executor: { type: "none" as const }, instructions: "", advance: "human_confirms" as const } }] } };
+    await expect(client.applyProjectWorkflow("project", request)).rejects.toThrow(/Invalid workflow response/);
+    expect(fetchMock).toHaveBeenCalledWith("https://api.example.test/api/projects/project/issue-workflow", expect.objectContaining({ method: "PUT", body: JSON.stringify(request) }));
   });
 });

@@ -11,7 +11,7 @@ import type { BoardColumnGroup } from "../components/board-column";
 
 export type DragMoveTargetUpdates = Pick<
   UpdateIssueRequest,
-  "status" | "lifecycle_status_id" | "assignee_type" | "assignee_id" | "project_id" | "position"
+  "status" | "workflow_status_id" | "assignee_type" | "assignee_id" | "project_id" | "position"
 >;
 
 export type DragMoveUpdates = DragMoveTargetUpdates & {
@@ -58,17 +58,17 @@ export function getIssueGroupId(
   issue: Issue,
   grouping: IssueGrouping,
   knownOptionIds?: ReadonlySet<string>,
-  lifecycleStatusGrouping = false,
+  workflowStatusGrouping = false,
 ): string {
   // Status columns are CATEGORIES, so the card buckets by the category it
   // behaves as. Bucketing by the raw key gave a custom status a column id no
   // column has, and the card was dropped from the board/list entirely
   // (MUL-6409).
   if (grouping === "status") {
-    if (lifecycleStatusGrouping) {
-      return issue.lifecycle_status_id
-        ? `lifecycle_status:${issue.lifecycle_status_id}`
-        : `lifecycle_status:legacy:${issue.status}`;
+    if (workflowStatusGrouping) {
+      return issue.workflow_status_id
+        ? `workflow_status:${issue.workflow_status_id}`
+        : `workflow_status:legacy:${issue.status}`;
     }
     return statusGroupId(issueColumnCategory(issue));
   }
@@ -97,15 +97,15 @@ export function buildColumns(
 ): Record<string, string[]> {
   const cols: Record<string, string[]> = {};
   for (const group of groups) cols[group.id] = [];
-  const lifecycleStatusGrouping =
+  const workflowStatusGrouping =
     grouping === "status" &&
-    groups.some((group) => group.lifecycleStatusId !== undefined);
+    groups.some((group) => group.workflowStatusId !== undefined);
   for (const issue of issues) {
     const gid = getIssueGroupId(
       issue,
       grouping,
       knownOptionIds,
-      lifecycleStatusGrouping,
+      workflowStatusGrouping,
     );
     if (cols[gid]) cols[gid].push(issue.id);
   }
@@ -167,11 +167,11 @@ export function findColumn(
 }
 
 export function issueMatchesGroup(issue: Issue, group: BoardColumnGroup): boolean {
-  if (group.lifecycleStatusId !== undefined) {
-    return group.lifecycleStatusId
-      ? issue.lifecycle_status_id === group.lifecycleStatusId
-      : issue.lifecycle_status_id == null &&
-          issue.status === group.lifecycleStatusLegacyKey;
+  if (group.workflowStatusId !== undefined) {
+    return group.workflowStatusId
+      ? issue.workflow_status_id === group.workflowStatusId
+      : issue.workflow_status_id == null &&
+          issue.status === group.workflowStatusLegacyKey;
   }
   // "Is this card already in that column?" — a category question, like the
   // column itself. Comparing the raw key answered no for every custom status,
@@ -199,23 +199,21 @@ export function getMoveUpdates(
    *  DIFFERENT key — so writing the column's canonical key would silently
    *  rewrite `awaiting_response` to `in_review`, and a status change starts an
    *  agent run, for a drag that only changed the row order (MUL-6409). */
-  issue?: Pick<Issue, "status" | "status_category" | "lifecycle_status_id">,
+  issue?: Pick<Issue, "status" | "status_category" | "workflow_status_id">,
 ): DragMoveTargetUpdates {
-  if (group.lifecycleStatusId !== undefined) {
-    if (group.lifecycleStatusId) {
-      return issue?.lifecycle_status_id === group.lifecycleStatusId
+  if (group.workflowStatusId !== undefined) {
+    if (group.workflowStatusId) {
+      return issue?.workflow_status_id === group.workflowStatusId
         ? { position }
-        : { lifecycle_status_id: group.lifecycleStatusId, position };
+        : { workflow_status_id: group.workflowStatusId, position };
     }
-    return group.lifecycleStatusLegacyKey
-      ? { status: group.lifecycleStatusLegacyKey, position }
+    return group.workflowStatusLegacyKey
+      ? { status: group.workflowStatusLegacyKey, position }
       : { position };
   }
   if (group.status) {
     const keepsStatus =
-      issue !== undefined &&
-      issue.status !== group.status &&
-      issueColumnCategory(issue) === group.status;
+      issue !== undefined && issueColumnCategory(issue) === group.status;
     if (keepsStatus) return { position };
     return { status: group.status, position };
   }

@@ -6,7 +6,7 @@ display metadata; it is context later injected into task briefs and
 
 - [Core model](#core-model)
 - [CLI](#cli)
-- [Lifecycle as code](#lifecycle-as-code)
+- [Workflow as code](#workflow-as-code)
 - [local_directory execution modes](#local_directory-execution-modes)
 - [Referring to a project in a comment](#referring-to-a-project-in-a-comment)
 - [When to add a resource](#when-to-add-a-resource)
@@ -47,7 +47,7 @@ Common resource types:
 multica project list --output json
 multica project get <project-id> --output json
 multica project create --title "<title>" --repo <github-url> --output json
-multica project create --title "<title>" --repo <github-url> --lifecycle-file ./lifecycle.yml --output json
+multica project create --title "<title>" --repo <github-url> --workflow-file ./workflow.yml --output json
 multica project create --title "<title>" --start-date 2026-03-01 --due-date 2026-03-31 --output json
 multica project update <project-id> --title "<title>" --output json
 multica project update <project-id> --due-date 2026-04-15 --output json
@@ -62,12 +62,12 @@ multica project resource update <project-id> <resource-id> --execution-mode in_p
 multica project resource update <project-id> <resource-id> --url <new-github-url> --output json
 multica project resource update <project-id> <resource-id> --ref <branch-or-sha> --output json
 multica project resource remove <project-id> <resource-id> --output json
-multica project lifecycle get <project-id> --output yaml
-multica project lifecycle apply <project-id> --file ./lifecycle.yml --dry-run
-multica project lifecycle apply <project-id> --file ./lifecycle.yml --expected-revision <revision>
-multica project lifecycle use-default <project-id>
-multica issue create --title "<title>" --project <project-id> --lifecycle-status <stable-key>
-multica issue lifecycle-status <issue-id> <stable-key>
+multica project workflow get <project-id> --output yaml
+multica project workflow apply <project-id> --file ./workflow.yml --dry-run
+multica project workflow apply <project-id> --file ./workflow.yml --expected-revision <revision>
+multica project workflow use-default <project-id>
+multica issue create --title "<title>" --project <project-id> --workflow-status <stable-key>
+multica issue workflow-status <issue-id> <stable-key>
 ```
 
 For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default
@@ -80,9 +80,35 @@ shortcuts. `project resource update` merges shortcut edits with the existing
 issue dates). On `project update`, pass an empty string (`--start-date ""`) to
 clear a date; an unset flag leaves it untouched.
 
-## Lifecycle as code
+## Project workflow setup in Web and Desktop
 
-A project can inherit the workspace lifecycle or materialize a project-owned
+Project creation collects project details first, then offers three workflow sources:
+start from scratch, use a preset template, or copy an existing project's workflow.
+Specific business workflows, such as development and review, live inside the
+template library. The selected workflow is editable before the project is created.
+Project metadata, resources, and the `issue_workflow` definition are committed in
+one transaction. Creating a project does not create issues or start agent runs.
+Incomplete workflow configuration remains in the workspace-scoped local project
+draft; the UI does not silently replace it with the workspace default.
+
+The workflow contains statuses. Each status independently configures its owner,
+action (executor and instructions), and transition rules. `entry_policy` stores
+all three; it is not an action definition. An action may run an agent or squad,
+and can later support a composed agent flow without changing the outer workflow.
+
+The project's Workflow tab displays the full workflow and opens the same status
+editor used during creation. Editing is local until Save workflow applies one
+revision-guarded definition. Reordering explicitly rewrites handoff links to the
+new order; users can configure different next-status links in status details.
+Copying a workflow preserves its explicit links and initial status. Removing a
+status requires an archive acknowledgement when saving: existing issues remain
+bound to their archived status until explicitly transitioned. Customizing an
+inherited workflow applies to new issues; existing issues retain their pinned
+workflow. Runs already started keep their policy snapshots.
+
+## Workflow as code
+
+A project can inherit the workspace workflow or materialize a project-owned
 definition from YAML/JSON. The file is declarative: `key` is the immutable
 configuration identity, order is significant, and statuses omitted by a later
 apply are rejected unless `--allow-archive` is explicit. Use `--dry-run` first
@@ -106,15 +132,34 @@ statuses:
       assignee: { type: agent, ref: Architect }
       executor: { type: agent, ref: Architect }
       instructions: Implement the approved technical spec and report evidence.
-      advance: executor_may_transition
+      advance: human_confirms
+      next_status_key: shipped
   - key: shipped
     name: Shipped
     color: "#16a34a"
     phase: completed
 ```
 
+`entry_policy.next_status_key` optionally names the explicit handoff destination
+within this workflow. It must name another active status. Renaming or reordering
+statuses does not change the destination; without this field, no next status is
+inferred. Entry executions keep the original policy snapshot, including this key.
+
+`advance: human_confirms` requires a member to move out of an automated status
+or an explicitly configured human handoff. Agent, system and integration status
+writes cannot bypass it. Completion leaves the issue in its current status until
+a member confirms. Taking over also leaves the status unchanged and prevents the
+superseded executor from advancing it.
+
+The Web/Desktop task detail keeps its status selector and exposes a handoff action
+when entering the configured destination assigns responsibility or starts work,
+or when the current execution awaits human confirmation. State changes that start
+or interrupt execution show the entry effects. The native transition API accepts
+`expected_workflow_revision` alongside the issue revision and transition ID to
+reject a stale preview before applying any effects.
+
 Actor `ref` values accept the same names, IDs, emails, and unambiguous short
-IDs as assignee flags. Project creation applies its lifecycle in the same
+IDs as assignee flags. Project creation applies its workflow in the same
 server transaction as the project and bundled resources. `get --output yaml`
 exports an applyable definition (actor refs are emitted as stable IDs).
 
@@ -196,7 +241,7 @@ is task-local checkout state.
 
 ## Side effects
 
-Project create/update/delete/status, lifecycle apply/use-default, and project
+Project create/update/delete/status, workflow apply/use-default, and project
 resource add/update/remove mutate durable workspace state and affect future
 tasks. Ask before changing `local_directory` unless the user explicitly
 requested that exact local path.

@@ -312,6 +312,7 @@ describe("useIssueActions", () => {
     expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", {
       parent_issue_id: "issue-1",
       parent_issue_identifier: "TES-1",
+      project_id: null,
     });
 
     act(() => {

@@ -31,7 +31,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueguard"
-	"github.com/multica-ai/multica/server/internal/issuelifecycle"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -282,7 +282,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
 			return
 		}
-		issue, _, _, err = issuelifecycle.RecordTransition(r.Context(), qtx, nil, issue, issuelifecycle.TransitionActor{
+		issue, _, _, err = issueworkflow.RecordTransition(r.Context(), qtx, nil, issue, issueworkflow.TransitionActor{
 			Type: "member",
 			ID:   parseUUID(userID),
 		}, "onboarding_issue_created")
@@ -454,7 +454,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
 			return
 		}
-		issue, _, _, err = issuelifecycle.RecordTransition(r.Context(), qtx, nil, issue, issuelifecycle.TransitionActor{
+		issue, _, _, err = issueworkflow.RecordTransition(r.Context(), qtx, nil, issue, issueworkflow.TransitionActor{
 			Type: "member",
 			ID:   parseUUID(userID),
 		}, "onboarding_issue_created")

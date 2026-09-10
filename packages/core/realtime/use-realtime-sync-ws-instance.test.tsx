@@ -13,7 +13,7 @@ import { runtimeKeys } from "../runtimes/queries";
 import { workspaceWorkingAgentsKeys } from "../agents/queries";
 import { workspaceKeys } from "../workspace/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
-import { issueLifecycleKeys } from "../issue-lifecycles/queries";
+import { issueWorkflowKeys } from "../issue-workflows/queries";
 import {
   markWorkspaceDeletePending,
   unmarkWorkspaceDeletePending,
@@ -281,7 +281,7 @@ describe("useRealtimeSync — ws instance change", () => {
       queryKey: issueStatusKeys.all("ws-1"),
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: issueLifecycleKeys.all("ws-1"),
+      queryKey: issueWorkflowKeys.all("ws-1"),
     });
     // Deliberately NOT the issue caches. A row stores the status KEY; its name,
     // color and category are resolved from the catalog at render time, so no
@@ -388,6 +388,9 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
     onAny!({ type: "task:completed", payload: {} } as never);
     vi.advanceTimersByTime(100);
 
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: issueWorkflowKeys.executionsAll("ws-1"),
+    });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: issueKeys.tableAll("ws-1"),
     });

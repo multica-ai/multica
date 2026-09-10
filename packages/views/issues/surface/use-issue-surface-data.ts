@@ -356,7 +356,7 @@ export function useIssueSurfaceData({
     );
   }, [statusFilters, hiddenStatusCategories, catalog]);
 
-  // Hidden columns are the lifecycle statuses not currently visible, so
+  // Hidden columns are the workflow statuses not currently visible, so
   // `cancelled` participates in the board show/hide controls exactly like the
   // rest of the statuses.
   const hiddenStatuses = useMemo<IssueStatusCategory[]>(

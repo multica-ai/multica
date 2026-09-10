@@ -109,10 +109,10 @@ function issueMatchesDescriptor(
     if (resolved !== value.status) return false;
   }
   if (
-    value.kind === "lifecycle_status" &&
-    (value.lifecycle_status_id
-      ? issue.lifecycle_status_id !== value.lifecycle_status_id
-      : issue.lifecycle_status_id != null || issue.status !== value.status)
+    value.kind === "workflow_status" &&
+    (value.workflow_status_id
+      ? issue.workflow_status_id !== value.workflow_status_id
+      : issue.workflow_status_id != null || issue.status !== value.status)
   ) {
     return false;
   }
@@ -137,10 +137,10 @@ function issueMatchesDescriptor(
     }
     case "status":
       return issue.status === owner.status;
-    case "lifecycle_status":
-      return owner.lifecycle_status_id
-        ? issue.lifecycle_status_id === owner.lifecycle_status_id
-        : issue.lifecycle_status_id == null && issue.status === owner.status;
+    case "workflow_status":
+      return owner.workflow_status_id
+        ? issue.workflow_status_id === owner.workflow_status_id
+        : issue.workflow_status_id == null && issue.status === owner.status;
   }
 }
 
@@ -168,7 +168,7 @@ export function useIssueGroupBranches({
    * Activate those when their mounted sentinel becomes visible so drag
    * targets have live heads. */
   observeEmptyBranches?: boolean;
-  /** Fixed, bounded catalogs (for example one project's lifecycle nodes) can
+  /** Fixed, bounded catalogs (for example one project's workflow nodes) can
    * load every branch head immediately instead of waiting for a sentinel. */
   eagerBranches?: boolean;
   enabled: boolean;

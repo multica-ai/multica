@@ -431,7 +431,7 @@ func isTerminalChildStatus(status string) bool {
 // catalog snapshot. A miss must not bypass a parked/terminal parent's guard.
 func (h *Handler) childStatusResolver(ctx context.Context) func(db.Issue) (string, error) {
 	resolvers := make(map[pgtype.UUID]*issuestatus.Resolver)
-	lifecycleEnabled := featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)
+	workflowEnabled := featureflags.IssueWorkflowV1Enabled(ctx, h.FeatureFlags)
 	return func(c db.Issue) (string, error) {
 		status := c.Status
 		if !issuestatus.IsBuiltIn(c.Status) {
@@ -449,7 +449,7 @@ func (h *Handler) childStatusResolver(ctx context.Context) func(db.Issue) (strin
 			}
 		}
 
-		state := issuepolicy.ResolveIssue(ctx, h.Queries, c, lifecycleEnabled)
+		state := issuepolicy.ResolveIssue(ctx, h.Queries, c, workflowEnabled)
 		switch state.Outcome {
 		case "completed":
 			return "done", nil

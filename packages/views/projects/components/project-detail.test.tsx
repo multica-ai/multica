@@ -222,8 +222,8 @@ vi.mock("./project-resources-section", () => ({
   ProjectResourcesSection: () => null,
 }));
 
-vi.mock("./project-lifecycle-section", () => ({
-  ProjectLifecycleSection: () => null,
+vi.mock("./project-workflow-section", () => ({
+  ProjectWorkflowSection: () => null,
 }));
 
 vi.mock("./project-start-date-picker", () => ({

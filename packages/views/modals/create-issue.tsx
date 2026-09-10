@@ -55,7 +55,10 @@ import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef,
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
-import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
+import { StatusIcon, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
+import { WorkflowEntryEffects } from "../issues/components/workflow-transition-dialog";
+import { WorkflowNodePicker } from "../issues/components/pickers/workflow-node-picker";
+import { effectiveIssueWorkflowOptions, activeWorkflowStatuses, resolveCreateWorkflowStatus } from "@multica/core/issue-workflows";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
@@ -284,6 +287,12 @@ export function ManualCreatePanel({
     }
     return draft.shared.projectId;
   });
+  const [statusSelection, setStatusSelection] = useState(() => ({
+    projectId: projectId ?? null,
+    nodeId: typeof data?.workflow_status_id === "string" ? data.workflow_status_id
+      : (draft.manual.workflowProjectId ?? null) === (projectId ?? null) ? draft.manual.workflowStatusId : undefined,
+    legacyKey: typeof data?.status === "string" ? data.status : undefined,
+  }));
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
@@ -321,6 +330,9 @@ export function ManualCreatePanel({
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
+  const workflowQuery = useQuery(effectiveIssueWorkflowOptions(wsId, projectId ?? null));
+  const selectedNode = resolveCreateWorkflowStatus(workflowQuery.data, projectId ?? null, statusSelection);
+  const workflowReady = workflowQuery.isSuccess && !!selectedNode;
   const { categoryOf: draftStatusCategory } = useIssueStatuses(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const { data: parentIssue } = useQuery({
@@ -378,13 +390,18 @@ export function ManualCreatePanel({
   // Sync field changes to the draft store — manual-only fields to the manual
   // slot, project / priority / due date to the shared slot.
   const updateTitle = (v: string) => { setTitle(v); setManual({ title: v }); };
-  const updateStatus = (v: IssueStatus) => { setStatus(v); setManual({ status: v }); };
   const updatePriority = (v: IssuePriority) => { setPriority(v); setShared({ priority: v }); };
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
     setAssigneeType(type); setAssigneeId(id);
     setManual({ assigneeType: type, assigneeId: id });
   };
-  const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
+  const updateProject = (id?: string) => {
+    if (id !== projectId) {
+      setStatusSelection({ projectId: id ?? null, nodeId: undefined, legacyKey: undefined });
+      setManual({ workflowStatusId: undefined, workflowProjectId: id ?? null });
+    }
+    setProjectId(id); setShared({ projectId: id });
+  };
   const updateStartDate = (v: string | null) => { setStartDate(v); setManual({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setShared({ dueDate: v }); };
   const updateLabelIds = (ids: string[]) => { setLabelIds(ids); setManual({ labelIds: ids }); };
@@ -401,7 +418,7 @@ export function ManualCreatePanel({
   // draft or a mode-switch carry may have set it), or just opened from the ⋯
   // overflow (the picker popover needs the inline pill as its anchor).
   const showField = {
-    status: manualFields.includes("status") || status !== "todo" || fieldPickerOpen === "status",
+    status: true,
     priority: manualFields.includes("priority") || priority !== "none" || fieldPickerOpen === "priority",
     assignee: manualFields.includes("assignee") || assigneeId != null || fieldPickerOpen === "assignee",
     labels: manualFields.includes("labels") || labelIds.length > 0 || fieldPickerOpen === "labels",
@@ -418,6 +435,7 @@ export function ManualCreatePanel({
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
+    setStatusSelection({ projectId: null, nodeId: undefined, legacyKey: undefined });
     setPriority("none");
     setStartDate(null);
     setDueDate(null);
@@ -434,6 +452,8 @@ export function ManualCreatePanel({
       title: "",
       description: "",
       status: "todo",
+      workflowStatusId: undefined,
+      workflowProjectId: undefined,
       assigneeType,
       assigneeId,
       startDate: null,
@@ -474,6 +494,7 @@ export function ManualCreatePanel({
     uploadGate: gate,
     normalize: () => title.trim(),
     onSubmit: async (): Promise<boolean> => {
+      if (!workflowReady || !selectedNode) return false;
       // Flush the description editor's pending debounce into the store BEFORE
       // snapshotting, so a late flush of pre-submit typing cannot masquerade
       // as an edit made during the request.
@@ -495,7 +516,7 @@ export function ManualCreatePanel({
             issue: {
               title: title.trim(),
               description,
-              status,
+              workflow_status_id: selectedNode.id,
               priority,
               assignee_type: assigneeType,
               assignee_id: assigneeId,
@@ -504,7 +525,7 @@ export function ManualCreatePanel({
               attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
               label_ids: labelIds.length > 0 ? labelIds : undefined,
               stage: parentIssueId && stage != null ? stage : undefined,
-              project_id: projectId,
+              project_id: projectId ?? null,
             },
           },
         });
@@ -512,7 +533,7 @@ export function ManualCreatePanel({
         issue = await createIssueMutation.mutateAsync({
           title: title.trim(),
           description,
-          status,
+          workflow_status_id: selectedNode.id,
           priority,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
@@ -528,7 +549,7 @@ export function ManualCreatePanel({
           parent_issue_id: parentIssueId,
           // Stage is only meaningful for a sub-issue (relative to its siblings).
           stage: parentIssueId && stage != null ? stage : undefined,
-          project_id: projectId,
+          project_id: projectId ?? null,
         });
       }
 
@@ -765,7 +786,7 @@ export function ManualCreatePanel({
   // at the fix; otherwise hand off to the composer (single-flight + gate live
   // there).
   const handleSubmit = () => {
-    if (anchorCommentId && !sourcePreview) return;
+    if (!workflowReady || (anchorCommentId && !sourcePreview)) return;
     if (!title.trim()) {
       titleEditorRef.current?.focus();
       return;
@@ -847,7 +868,7 @@ export function ManualCreatePanel({
       // for a missing title — a native-disabled button is not focusable, so
       // keyboard and screen-reader users could never reach the tooltip that
       // explains why nothing happens. `handleSubmit` is the real gate either way.
-      disabled={submitBusy}
+      disabled={submitBusy || !workflowReady}
       aria-disabled={submitState === "missing_title" || submitState === "source_unavailable" || undefined}
       aria-busy={submitBusy || undefined}
       // The Button base only dims/blocks on native `disabled`, so aria-disabled
@@ -973,18 +994,28 @@ export function ManualCreatePanel({
 
             {/* Pre-trigger preview — a passive caption above the toolbar; reveals
                 when an agent assignee will pick the issue up. */}
-            <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
+            {selectedNode && (workflowQuery.data?.workflow.scope_type === "project"
+              ? <div className="px-4"><WorkflowEntryEffects node={selectedNode} /></div>
+              : <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={selectedNode.legacy_status_key ?? status} />)}
+            {!workflowReady && <p role={workflowQuery.isError ? "alert" : "status"} className="px-4 text-caption text-muted-foreground">
+              {workflowQuery.isPending ? tIssues(($) => $.workflow_selection.loading) : tIssues(($) => $.workflow_selection.load_error)}
+              {!workflowQuery.isPending && <Button variant="link" size="sm" onClick={() => void workflowQuery.refetch()}>{tIssues(($) => $.workflow_selection.retry)}</Button>}
+            </p>}
 
             {/* Property toolbar — each field renders per the Settings → Preferences → Issue creation
                 selection (see showField above). */}
             <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
               {/* Status */}
               {showField.status && (
-                <StatusPicker
-                  status={status}
-                  onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
+                <WorkflowNodePicker
+                  nodes={activeWorkflowStatuses(workflowQuery.data)}
+                  value={selectedNode?.id}
+                  disabled={submitting || !workflowReady}
+                  onChange={(node) => {
+                    setStatusSelection({ projectId: projectId ?? null, nodeId: node.id, legacyKey: undefined });
+                    setManual({ workflowStatusId: node.id, workflowProjectId: projectId ?? null });
+                  }}
                   triggerRender={<PillButton />}
-                  align="start"
                   open={fieldPickerOpen === "status" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "status" : null)}
                 />

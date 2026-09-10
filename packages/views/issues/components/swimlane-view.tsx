@@ -687,7 +687,7 @@ function SwimLaneViewImpl({
 
   // Re-impose canonical status order (ALL_STATUSES) on whatever the controller
   // marked visible, so columns — including `cancelled`, ordered last — render
-  // in lifecycle order.
+  // in workflow order.
   const sortedStatuses = useMemo(
     () => ALL_STATUSES.filter((s) => visibleStatuses.includes(s)),
     [visibleStatuses],

@@ -11,8 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/issuelifecycle"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -262,7 +262,7 @@ func (h *Handler) createIssueStatusEntry(ctx context.Context, workspaceID pgtype
 	if err != nil {
 		return db.IssueStatus{}, "", err
 	}
-	if err := issuelifecycle.SyncDefault(ctx, qtx, workspaceID); err != nil {
+	if err := issueworkflow.SyncDefault(ctx, qtx, workspaceID); err != nil {
 		return db.IssueStatus{}, "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -357,8 +357,8 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update issue status")
 		return
 	}
-	if err := issuelifecycle.SyncDefault(r.Context(), qtx, wsUUID); err != nil {
-		slog.Warn("UpdateIssueStatus lifecycle sync failed", append(logger.RequestAttrs(r), "error", err)...)
+	if err := issueworkflow.SyncDefault(r.Context(), qtx, wsUUID); err != nil {
+		slog.Warn("UpdateIssueStatus workflow sync failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue status")
 		return
 	}
@@ -429,8 +429,8 @@ func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to archive issue status")
 		return
 	}
-	if err := issuelifecycle.SyncDefault(r.Context(), qtx, wsUUID); err != nil {
-		slog.Warn("ArchiveIssueStatus lifecycle sync failed", append(logger.RequestAttrs(r), "error", err)...)
+	if err := issueworkflow.SyncDefault(r.Context(), qtx, wsUUID); err != nil {
+		slog.Warn("ArchiveIssueStatus workflow sync failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to archive issue status")
 		return
 	}
@@ -647,8 +647,8 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "issue status catalog changed during reorder")
 		return
 	}
-	if err := issuelifecycle.SyncDefault(r.Context(), qtx, wsUUID); err != nil {
-		slog.Warn("ReorderIssueStatuses lifecycle sync failed", append(logger.RequestAttrs(r), "error", err)...)
+	if err := issueworkflow.SyncDefault(r.Context(), qtx, wsUUID); err != nil {
+		slog.Warn("ReorderIssueStatuses workflow sync failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to reorder issue statuses")
 		return
 	}

@@ -26,7 +26,7 @@ import { currentPath, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
-import { ProjectLifecycleSection } from "./project-lifecycle-section";
+import { ProjectWorkflowSection } from "./project-workflow-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
 import { IssueSurface } from "../../issues/surface/issue-surface";
@@ -147,6 +147,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const descEditorRef = useRef<ContentEditorRef>(null);
   const isMobile = useIsMobile();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const workflowView = router.searchParams?.get("view") === "workflow";
+  const showProjectView = (workflow: boolean) => {
+    const params = new URLSearchParams(router.searchParams);
+    if (workflow) params.set("view", "workflow"); else params.delete("view");
+    router.push(`${wsPaths.projectDetail(projectId)}${params.size ? `?${params}` : ""}`);
+  };
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
@@ -469,8 +475,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         </div>}
       </div>
 
-      {/* Issue lifecycle */}
-      <ProjectLifecycleSection projectId={projectId} canEdit={isWorkspaceAdmin} />
+      {/* Issue workflow */}
 
       {/* Resources */}
       <ProjectResourcesSection projectId={projectId} />
@@ -552,10 +557,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             }
           />
 
-          <IssueSurface
+          <div className="flex shrink-0 gap-2 border-b px-6 pb-2">
+            <Button size="sm" variant={workflowView ? "ghost" : "secondary"} aria-pressed={!workflowView} onClick={() => showProjectView(false)}>{t(($) => $.table.issues)}</Button>
+            <Button size="sm" variant={workflowView ? "secondary" : "ghost"} aria-pressed={workflowView} onClick={() => showProjectView(true)}>{t(($) => $.workflow.title)}</Button>
+          </div>
+          {workflowView ? <div className="min-h-0 flex-1 overflow-y-auto"><ProjectWorkflowSection projectId={projectId} canEdit={isWorkspaceAdmin} /></div> : <IssueSurface
             scope={issueScope}
             modes={["board", "list", "table", "swimlane", "gantt"]}
-          />
+          />}
           </div>
         </ResizablePanel>
         {!isMobile && <ResizableHandle />}

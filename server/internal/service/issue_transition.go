@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/issuelifecycle"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -17,7 +17,7 @@ import (
 
 var (
 	// ErrIssueTransitionConflict means a caller attempted to transition from a
-	// stale issue revision or lifecycle entry.
+	// stale issue revision or workflow entry.
 	ErrIssueTransitionConflict = errors.New("issue transition conflict")
 	// ErrIssueTransitionStatusUnavailable means the target status is absent or
 	// archived in the issue's workspace catalog.
@@ -32,20 +32,21 @@ type IssueTransitionParams struct {
 	IssueID              pgtype.UUID
 	WorkspaceID          pgtype.UUID
 	Status               string
-	Actor                issuelifecycle.TransitionActor
+	Actor                issueworkflow.TransitionActor
 	Cause                string
 	ExpectedRevision     pgtype.Int8
 	ExpectedTransitionID pgtype.UUID
 }
 
 type IssueStatusNodeTransitionParams struct {
-	IssueID              pgtype.UUID
-	WorkspaceID          pgtype.UUID
-	LifecycleStatusID    pgtype.UUID
-	Actor                issuelifecycle.TransitionActor
-	Cause                string
-	ExpectedRevision     pgtype.Int8
-	ExpectedTransitionID pgtype.UUID
+	ExpectedWorkflowRevision pgtype.Int8
+	IssueID                  pgtype.UUID
+	WorkspaceID              pgtype.UUID
+	WorkflowStatusID         pgtype.UUID
+	Actor                    issueworkflow.TransitionActor
+	Cause                    string
+	ExpectedRevision         pgtype.Int8
+	ExpectedTransitionID     pgtype.UUID
 }
 
 type IssueTransitionResult struct {
@@ -76,7 +77,7 @@ type IssueAutomationTakeoverResult struct {
 
 // TransitionIssue is the canonical status-only write boundary. It serializes
 // the issue row, applies optimistic preconditions, dual-writes the legacy key
-// and lifecycle node, and records the immutable transition in one transaction.
+// and workflow node, and records the immutable transition in one transaction.
 func TransitionIssue(ctx context.Context, q *db.Queries, txStarter TxStarter, p IssueTransitionParams) (IssueTransitionResult, error) {
 	if txStarter == nil {
 		return IssueTransitionResult{}, errors.New("issue transition requires transaction starter")
@@ -115,13 +116,19 @@ func TransitionIssue(ctx context.Context, q *db.Queries, txStarter TxStarter, p 
 		return IssueTransitionResult{}, ErrIssueTransitionConflict
 	}
 
+	if previous.Status != p.Status {
+		if err := AssertIssueWorkflowAdvance(ctx, qtx, previous, p.Actor); err != nil {
+			return IssueTransitionResult{}, err
+		}
+	}
+
 	current, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 		ID: p.IssueID, WorkspaceID: p.WorkspaceID, Status: p.Status,
 	})
 	if err != nil {
 		return IssueTransitionResult{}, err
 	}
-	current, transition, changed, err := issuelifecycle.RecordTransition(
+	current, transition, changed, err := issueworkflow.RecordTransition(
 		ctx, qtx, &previous, current, p.Actor, p.Cause,
 	)
 	if err != nil {
@@ -135,7 +142,7 @@ func TransitionIssue(ctx context.Context, q *db.Queries, txStarter TxStarter, p 
 	}, nil
 }
 
-// TransitionIssueToStatusNode is the canonical lifecycle-native status write.
+// TransitionIssueToStatusNode is the canonical workflow-native status write.
 // The stable node ID, not the legacy status key, selects the destination. The
 // legacy key is updated in the same transaction as a compatibility projection
 // for installed clients and rolling rollback.
@@ -166,13 +173,13 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 	if p.ExpectedTransitionID.Valid && previous.LastTransitionID != p.ExpectedTransitionID {
 		return IssueTransitionResult{}, ErrIssueTransitionConflict
 	}
-	if !previous.LifecycleID.Valid {
+	if !previous.WorkflowID.Valid {
 		return IssueTransitionResult{}, ErrIssueTransitionConflict
 	}
-	target, err := qtx.LockActiveIssueLifecycleStatus(ctx, db.LockActiveIssueLifecycleStatusParams{
+	target, err := qtx.LockActiveIssueWorkflowStatus(ctx, db.LockActiveIssueWorkflowStatusParams{
 		WorkspaceID: p.WorkspaceID,
-		LifecycleID: previous.LifecycleID,
-		ID:          p.LifecycleStatusID,
+		WorkflowID:  previous.WorkflowID,
+		ID:          p.WorkflowStatusID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -180,31 +187,34 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 		}
 		return IssueTransitionResult{}, err
 	}
-	if previous.LifecycleStatusID == target.ID {
-		name := lifecycleStatusSnapshotName(target)
+	if previous.WorkflowStatusID == target.ID {
+		name := workflowStatusSnapshotName(target)
 		return IssueTransitionResult{
 			Previous: previous, Issue: previous,
 			PreviousStatusName: name, StatusName: name,
 		}, nil
 	}
-	var previousStatus db.IssueLifecycleStatus
-	if previous.LifecycleStatusID.Valid {
-		previousStatus, err = qtx.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
+	if err := AssertIssueWorkflowAdvance(ctx, qtx, previous, p.Actor); err != nil {
+		return IssueTransitionResult{}, err
+	}
+	var previousStatus db.IssueWorkflowStatus
+	if previous.WorkflowStatusID.Valid {
+		previousStatus, err = qtx.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
 			WorkspaceID: p.WorkspaceID,
-			LifecycleID: previous.LifecycleID,
-			ID:          previous.LifecycleStatusID,
+			WorkflowID:  previous.WorkflowID,
+			ID:          previous.WorkflowStatusID,
 		})
 		if err != nil {
-			return IssueTransitionResult{}, fmt.Errorf("load previous lifecycle status: %w", err)
+			return IssueTransitionResult{}, fmt.Errorf("load previous workflow status: %w", err)
 		}
 	}
-	policy, err := issuelifecycle.DecodeEntryPolicy(target.EntryPolicy)
+	policy, err := issueworkflow.DecodeEntryPolicy(target.EntryPolicy)
 	if err != nil {
-		return IssueTransitionResult{}, fmt.Errorf("decode lifecycle entry policy: %w", err)
+		return IssueTransitionResult{}, fmt.Errorf("decode workflow entry policy: %w", err)
 	}
-	policySnapshot, policy, err := issuelifecycle.EncodeEntryPolicy(policy)
+	policySnapshot, policy, err := issueworkflow.EncodeEntryPolicy(policy)
 	if err != nil {
-		return IssueTransitionResult{}, fmt.Errorf("normalize lifecycle entry policy: %w", err)
+		return IssueTransitionResult{}, fmt.Errorf("normalize workflow entry policy: %w", err)
 	}
 	assigneeType, assigneeID, err := resolveEntryPolicyAssignee(ctx, qtx, previous, policy)
 	if err != nil {
@@ -214,15 +224,19 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 	if err != nil {
 		return IssueTransitionResult{}, err
 	}
-	lifecycle, err := qtx.GetIssueLifecycleByID(ctx, db.GetIssueLifecycleByIDParams{
-		ID: previous.LifecycleID, WorkspaceID: p.WorkspaceID,
+	workflow, err := qtx.GetIssueWorkflowByID(ctx, db.GetIssueWorkflowByIDParams{
+		ID: previous.WorkflowID, WorkspaceID: p.WorkspaceID,
 	})
 	if err != nil {
-		return IssueTransitionResult{}, fmt.Errorf("load issue lifecycle: %w", err)
+		return IssueTransitionResult{}, fmt.Errorf("load issue workflow: %w", err)
 	}
 
-	current, err := qtx.UpdateIssueLifecycleStatusAndAssignee(ctx, db.UpdateIssueLifecycleStatusAndAssigneeParams{
-		IssueID: p.IssueID, WorkspaceID: p.WorkspaceID, LifecycleStatusID: target.ID,
+	if p.ExpectedWorkflowRevision.Valid && workflow.Revision != p.ExpectedWorkflowRevision.Int64 {
+		return IssueTransitionResult{}, ErrIssueTransitionConflict
+	}
+
+	current, err := qtx.UpdateIssueWorkflowStatusAndAssignee(ctx, db.UpdateIssueWorkflowStatusAndAssigneeParams{
+		IssueID: p.IssueID, WorkspaceID: p.WorkspaceID, WorkflowStatusID: target.ID,
 		AssigneeType: assigneeType, AssigneeID: assigneeID,
 	})
 	if err != nil {
@@ -231,7 +245,7 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 		}
 		return IssueTransitionResult{}, err
 	}
-	current, transition, changed, err := issuelifecycle.RecordTransition(
+	current, transition, changed, err := issueworkflow.RecordTransition(
 		ctx, qtx, &previous, current, p.Actor, p.Cause,
 	)
 	if err != nil {
@@ -240,8 +254,8 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 	if !changed {
 		return IssueTransitionResult{
 			Previous: previous, Issue: current,
-			PreviousStatusName: lifecycleStatusSnapshotName(previousStatus),
-			StatusName:         lifecycleStatusSnapshotName(target),
+			PreviousStatusName: workflowStatusSnapshotName(previousStatus),
+			StatusName:         workflowStatusSnapshotName(target),
 		}, nil
 	}
 
@@ -262,8 +276,8 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 	}
 	execution, err := qtx.CreateAutomationExecution(ctx, db.CreateAutomationExecutionParams{
 		ID: dbid.NewV7(), WorkspaceID: p.WorkspaceID, IssueID: current.ID,
-		TriggerTransitionID: transition.ID, LifecycleID: lifecycle.ID,
-		LifecycleRevision: lifecycle.Revision, StatusID: target.ID,
+		TriggerTransitionID: transition.ID, WorkflowID: workflow.ID,
+		WorkflowRevision: workflow.Revision, StatusID: target.ID,
 		PolicyRevision: target.EntryPolicyRevision, PolicySnapshot: policySnapshot,
 		ExecutorType: executor.executorType, ExecutorID: executor.executorID,
 		Status: executionStatus,
@@ -274,9 +288,9 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 
 	var task db.AgentTaskQueue
 	if executor.agent.ID.Valid {
-		task, err = createLifecycleEntryTask(ctx, qtx, current, transition, execution, executor, policy, p.Actor)
+		task, err = createWorkflowEntryTask(ctx, qtx, current, transition, execution, executor, policy, p.Actor)
 		if err != nil {
-			return IssueTransitionResult{}, fmt.Errorf("create lifecycle entry task: %w", err)
+			return IssueTransitionResult{}, fmt.Errorf("create workflow entry task: %w", err)
 		}
 		execution, err = qtx.GetAutomationExecution(ctx, db.GetAutomationExecutionParams{
 			ID: execution.ID, WorkspaceID: p.WorkspaceID,
@@ -299,16 +313,16 @@ func transitionIssueToStatusNode(ctx context.Context, q *db.Queries, txStarter T
 	}
 	return IssueTransitionResult{
 		Previous: previous, Issue: current, Transition: transition, Execution: execution,
-		PreviousStatusName: lifecycleStatusSnapshotName(previousStatus),
-		StatusName:         lifecycleStatusSnapshotName(target),
+		PreviousStatusName: workflowStatusSnapshotName(previousStatus),
+		StatusName:         workflowStatusSnapshotName(target),
 		Task:               task, CancelledTasks: cancelledTasks, Changed: changed,
 	}, nil
 }
 
-// lifecycleStatusSnapshotName keeps user-authored lifecycle names in history
+// workflowStatusSnapshotName keeps user-authored workflow names in history
 // while leaving untouched built-ins blank so clients can continue localizing
 // those canonical labels from their stable legacy keys.
-func lifecycleStatusSnapshotName(status db.IssueLifecycleStatus) string {
+func workflowStatusSnapshotName(status db.IssueWorkflowStatus) string {
 	if !status.LegacyStatusKey.Valid {
 		return status.Name
 	}
@@ -322,15 +336,15 @@ func lifecycleStatusSnapshotName(status db.IssueLifecycleStatus) string {
 	return status.Name
 }
 
-func createLifecycleEntryTask(
+func createWorkflowEntryTask(
 	ctx context.Context,
 	q *db.Queries,
 	issue db.Issue,
 	transition db.IssueTransition,
 	execution db.AutomationExecution,
 	executor resolvedEntryExecutor,
-	policy issuelifecycle.EntryPolicy,
-	actor issuelifecycle.TransitionActor,
+	policy issueworkflow.EntryPolicy,
+	actor issueworkflow.TransitionActor,
 ) (db.AgentTaskQueue, error) {
 	originatorID := executor.agent.OwnerID
 	originatorSource := "owner_fallback"
@@ -352,21 +366,21 @@ func createLifecycleEntryTask(
 	})
 }
 
-// enterInitialLifecycleStatus applies the first node's policy after
+// enterInitialWorkflowStatus applies the first node's policy after
 // RecordTransition has pinned a new issue. The caller keeps this inside the
 // create transaction, so assignment, execution, and run are atomic.
-func enterInitialLifecycleStatus(ctx context.Context, q *db.Queries, issue db.Issue, transition db.IssueTransition, actor issuelifecycle.TransitionActor) (db.Issue, db.AutomationExecution, db.AgentTaskQueue, error) {
-	target, err := q.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
-		WorkspaceID: issue.WorkspaceID, LifecycleID: issue.LifecycleID, ID: issue.LifecycleStatusID,
+func enterInitialWorkflowStatus(ctx context.Context, q *db.Queries, issue db.Issue, transition db.IssueTransition, actor issueworkflow.TransitionActor) (db.Issue, db.AutomationExecution, db.AgentTaskQueue, error) {
+	target, err := q.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
+		WorkspaceID: issue.WorkspaceID, WorkflowID: issue.WorkflowID, ID: issue.WorkflowStatusID,
 	})
 	if err != nil {
-		return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, fmt.Errorf("load initial lifecycle status: %w", err)
+		return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, fmt.Errorf("load initial workflow status: %w", err)
 	}
-	policy, err := issuelifecycle.DecodeEntryPolicy(target.EntryPolicy)
+	policy, err := issueworkflow.DecodeEntryPolicy(target.EntryPolicy)
 	if err != nil {
 		return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, fmt.Errorf("decode initial entry policy: %w", err)
 	}
-	policySnapshot, policy, err := issuelifecycle.EncodeEntryPolicy(policy)
+	policySnapshot, policy, err := issueworkflow.EncodeEntryPolicy(policy)
 	if err != nil {
 		return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, err
 	}
@@ -387,11 +401,11 @@ func enterInitialLifecycleStatus(ctx context.Context, q *db.Queries, issue db.Is
 			return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, fmt.Errorf("apply initial entry assignee: %w", err)
 		}
 	}
-	lifecycle, err := q.GetIssueLifecycleByID(ctx, db.GetIssueLifecycleByIDParams{
-		ID: issue.LifecycleID, WorkspaceID: issue.WorkspaceID,
+	workflow, err := q.GetIssueWorkflowByID(ctx, db.GetIssueWorkflowByIDParams{
+		ID: issue.WorkflowID, WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
-		return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, fmt.Errorf("load initial lifecycle: %w", err)
+		return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, fmt.Errorf("load initial workflow: %w", err)
 	}
 	executionStatus := "dormant"
 	if executor.agent.ID.Valid {
@@ -399,8 +413,8 @@ func enterInitialLifecycleStatus(ctx context.Context, q *db.Queries, issue db.Is
 	}
 	execution, err := q.CreateAutomationExecution(ctx, db.CreateAutomationExecutionParams{
 		ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, IssueID: issue.ID,
-		TriggerTransitionID: transition.ID, LifecycleID: lifecycle.ID,
-		LifecycleRevision: lifecycle.Revision, StatusID: target.ID,
+		TriggerTransitionID: transition.ID, WorkflowID: workflow.ID,
+		WorkflowRevision: workflow.Revision, StatusID: target.ID,
 		PolicyRevision: target.EntryPolicyRevision, PolicySnapshot: policySnapshot,
 		ExecutorType: executor.executorType, ExecutorID: executor.executorID, Status: executionStatus,
 	})
@@ -409,16 +423,16 @@ func enterInitialLifecycleStatus(ctx context.Context, q *db.Queries, issue db.Is
 	}
 	var task db.AgentTaskQueue
 	if executor.agent.ID.Valid {
-		task, err = createLifecycleEntryTask(ctx, q, issue, transition, execution, executor, policy, actor)
+		task, err = createWorkflowEntryTask(ctx, q, issue, transition, execution, executor, policy, actor)
 		if err != nil {
-			return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, fmt.Errorf("create initial lifecycle task: %w", err)
+			return db.Issue{}, db.AutomationExecution{}, db.AgentTaskQueue{}, fmt.Errorf("create initial workflow task: %w", err)
 		}
 	}
 	return issue, execution, task, nil
 }
 
-func resolveEntryPolicyAssignee(ctx context.Context, q *db.Queries, issue db.Issue, policy issuelifecycle.EntryPolicy) (pgtype.Text, pgtype.UUID, error) {
-	if policy.Assignee.Type == issuelifecycle.AssigneeKeep {
+func resolveEntryPolicyAssignee(ctx context.Context, q *db.Queries, issue db.Issue, policy issueworkflow.EntryPolicy) (pgtype.Text, pgtype.UUID, error) {
+	if policy.Assignee.Type == issueworkflow.AssigneeKeep {
 		return issue.AssigneeType, issue.AssigneeID, nil
 	}
 	id, err := util.ParseUUID(policy.Assignee.ID)
@@ -426,7 +440,7 @@ func resolveEntryPolicyAssignee(ctx context.Context, q *db.Queries, issue db.Iss
 		return pgtype.Text{}, pgtype.UUID{}, fmt.Errorf("invalid entry policy assignee: %w", err)
 	}
 	typ := policy.Assignee.Type
-	if typ == issuelifecycle.AssigneeHuman {
+	if typ == issueworkflow.AssigneeHuman {
 		typ = "member"
 	}
 	switch typ {
@@ -455,8 +469,8 @@ type resolvedEntryExecutor struct {
 	squadID      pgtype.UUID
 }
 
-func resolveEntryPolicyExecutor(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, policy issuelifecycle.EntryPolicy) (resolvedEntryExecutor, error) {
-	if policy.Executor.Type == issuelifecycle.ExecutorNone {
+func resolveEntryPolicyExecutor(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, policy issueworkflow.EntryPolicy) (resolvedEntryExecutor, error) {
+	if policy.Executor.Type == issueworkflow.ExecutorNone {
 		return resolvedEntryExecutor{}, nil
 	}
 	executorID, err := util.ParseUUID(policy.Executor.ID)
@@ -485,14 +499,14 @@ func resolveEntryPolicyExecutor(ctx context.Context, q *db.Queries, workspaceID 
 
 func (s *IssueService) TransitionStatus(ctx context.Context, p IssueTransitionParams) (IssueTransitionResult, error) {
 	issue, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: p.IssueID, WorkspaceID: p.WorkspaceID})
-	if err == nil && issue.LifecycleID.Valid {
-		target, targetErr := s.Queries.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
-			WorkspaceID: p.WorkspaceID, LifecycleID: issue.LifecycleID,
+	if err == nil && issue.WorkflowID.Valid {
+		target, targetErr := s.Queries.GetIssueWorkflowStatusByLegacyKey(ctx, db.GetIssueWorkflowStatusByLegacyKeyParams{
+			WorkspaceID: p.WorkspaceID, WorkflowID: issue.WorkflowID,
 			LegacyStatusKey: pgtype.Text{String: p.Status, Valid: true},
 		})
 		if targetErr == nil {
 			return transitionIssueToStatusNode(ctx, s.Queries, s.TxStarter, s.TaskService, IssueStatusNodeTransitionParams{
-				IssueID: p.IssueID, WorkspaceID: p.WorkspaceID, LifecycleStatusID: target.ID,
+				IssueID: p.IssueID, WorkspaceID: p.WorkspaceID, WorkflowStatusID: target.ID,
 				Actor: p.Actor, Cause: p.Cause, ExpectedRevision: p.ExpectedRevision,
 				ExpectedTransitionID: p.ExpectedTransitionID,
 			})
@@ -510,7 +524,7 @@ func (s *IssueService) TransitionStatusNode(ctx context.Context, p IssueStatusNo
 	return transitionIssueToStatusNode(ctx, s.Queries, s.TxStarter, s.TaskService, p)
 }
 
-// TakeOverAutomationExecution atomically stops the active lifecycle run and
+// TakeOverAutomationExecution atomically stops the active workflow run and
 // assigns the issue to the requesting human without guessing a next status.
 func (s *IssueService) TakeOverAutomationExecution(ctx context.Context, p IssueAutomationTakeoverParams) (IssueAutomationTakeoverResult, error) {
 	if s.TxStarter == nil {
@@ -534,7 +548,7 @@ func (s *IssueService) TakeOverAutomationExecution(ctx context.Context, p IssueA
 	execution, err := qtx.GetAutomationExecution(ctx, db.GetAutomationExecutionParams{
 		ID: p.ExecutionID, WorkspaceID: p.WorkspaceID,
 	})
-	if err != nil || execution.IssueID != issue.ID || execution.StatusID != issue.LifecycleStatusID {
+	if err != nil || execution.IssueID != issue.ID || execution.StatusID != issue.WorkflowStatusID {
 		return IssueAutomationTakeoverResult{}, ErrIssueTransitionConflict
 	}
 	execution, err = qtx.SupersedeAutomationExecution(ctx, db.SupersedeAutomationExecutionParams{

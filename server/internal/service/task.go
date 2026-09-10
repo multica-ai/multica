@@ -22,9 +22,9 @@ import (
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
-	"github.com/multica-ai/multica/server/internal/issuelifecycle"
 	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -2550,7 +2550,7 @@ func (s *TaskService) OpenMikaOnboardingChat(ctx context.Context, session db.Cha
 // affected agent's status, and broadcasts task:cancelled events so frontends
 // clear their live cards.
 //
-// Callers are explicit issue-lifecycle cleanup paths only — DeleteIssue and
+// Callers are explicit issue-workflow cleanup paths only — DeleteIssue and
 // BatchDeleteIssues, where the owning issue row is going away so its tasks
 // must not be left orphaned. A plain status flip, `cancelled` included, no
 // longer routes here (MUL-4465): cancelling an issue is not an implicit "stop
@@ -5797,7 +5797,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				// the issue then — and a custom status resolves to the canonical
 				// status it inherits, so a custom review gate is excluded for
 				// the same reason In Review is. (MUL-6243)
-				state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags))
+				state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags))
 				if state.AgentOwnsActiveWork() && !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
@@ -5811,7 +5811,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							IssueID:     t.IssueID,
 							WorkspaceID: issue.WorkspaceID,
 							Status:      "todo",
-							Actor:       issuelifecycle.TransitionActor{Type: "system"},
+							Actor:       issueworkflow.TransitionActor{Type: "system"},
 							Cause:       "task_failure_recovery",
 						})
 						if updateErr != nil {
@@ -7056,7 +7056,7 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 //
 // The `issue` payload is a map (IssueToMap), which the workspace WS fanout
 // marshals and broadcasts as-is — that is what drives the UI reconcile. A
-// status change is additionally published as issue:transitioned so lifecycle
+// status change is additionally published as issue:transitioned so workflow
 // consumers no longer need to infer a transition from a generic update.
 func (s *TaskService) broadcastIssueUpdated(ctx context.Context, issue db.Issue, prevStatus string) {
 	prefix := s.getIssuePrefix(issue.WorkspaceID)

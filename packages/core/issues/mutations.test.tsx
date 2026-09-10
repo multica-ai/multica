@@ -10,6 +10,7 @@ import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import {
   useBatchUpdateIssues,
+  useCreateIssue,
   useCreateComment,
   useCreateCommentSubIssue,
   useDeleteComment,
@@ -96,6 +97,21 @@ function createWrapper(qc: QueryClient) {
     return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
   };
 }
+
+describe("create issue workflow cache", () => {
+  it("refreshes project workflows after a rejected create so stale draft nodes can be repaired", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const key = ["issue-workflows", WS_ID, "effective", "project", { includeArchived: false }];
+    qc.setQueryData(key, { workflow: { id: "old" } });
+    setApiInstance({ createIssue: vi.fn().mockRejectedValue(new Error("status retired")) } as unknown as ApiClient);
+    const { result } = renderHook(() => useCreateIssue(), { wrapper: createWrapper(qc) });
+    await act(async () => {
+      await expect(result.current.mutateAsync({ title: "Draft", project_id: "project", workflow_status_id: "retired" })).rejects.toThrow("status retired");
+    });
+    expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+    qc.clear();
+  });
+});
 
 describe("useCreateCommentSubIssue", () => {
   it("applies the normal issue-create cache coordination", async () => {

@@ -626,13 +626,22 @@ func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Req
 		return sourceContextBadRequest("title is required")
 	}
 	status := strings.TrimSpace(input.Status)
-	if status == "" {
-		status = "todo"
+	if status != "" && input.WorkflowStatusID != nil {
+		return sourceContextBadRequest("status and workflow_status_id are mutually exclusive")
 	}
 	var ok bool
-	status, ok = h.resolveIssueStatusKey(w, r, workspaceID, status)
-	if !ok {
-		return errSourceContextResponseWritten
+	if status != "" {
+		status, ok = h.resolveIssueStatusKey(w, r, workspaceID, status)
+		if !ok {
+			return errSourceContextResponseWritten
+		}
+	}
+	var workflowStatusID pgtype.UUID
+	if input.WorkflowStatusID != nil {
+		workflowStatusID, ok = parseUUIDOrBadRequest(w, *input.WorkflowStatusID, "workflow_status_id")
+		if !ok {
+			return errSourceContextResponseWritten
+		}
 	}
 	priority := strings.TrimSpace(input.Priority)
 	if priority == "" {
@@ -703,7 +712,7 @@ func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Req
 		WorkspaceID: workspaceID, Title: title, Description: ptrToText(input.Description), Status: status, Priority: priority,
 		AssigneeType: assigneeType, AssigneeID: assigneeID, CreatorType: "member", CreatorID: userID,
 		ParentIssueID: capture.SourceIssueID, ProjectID: projectID, StartDate: startDate, DueDate: dueDate,
-		AttachmentIDs: attachmentIDs, LabelIDs: labelIDs, Stage: stage,
+		AttachmentIDs: attachmentIDs, LabelIDs: labelIDs, Stage: stage, WorkflowStatusID: workflowStatusID, ProjectIDExplicit: input.projectIDSet,
 		AllowDuplicate: input.AllowDuplicate, SourceContext: &capture,
 	}, service.IssueCreateOpts{
 		ActorID: util.UUIDToString(userID),

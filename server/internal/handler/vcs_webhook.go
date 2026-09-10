@@ -263,13 +263,13 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 
 	if ev.State == "merged" || ev.State == "closed" {
 		// Keep the catalog local to this delivery and connection's workspace.
-		lifecycleEnabled := featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)
+		workflowEnabled := featureflags.IssueWorkflowV1Enabled(ctx, h.FeatureFlags)
 		resolver := issuestatus.NewResolver(conn.WorkspaceID)
 		for _, issue := range reevalIssues {
 			// A custom terminal status counts as terminal here. (MUL-6243)
 			status := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status)
 			terminal := status == "done" || status == "cancelled"
-			if lifecycleEnabled {
+			if workflowEnabled {
 				terminal = issuepolicy.ResolveIssue(ctx, h.Queries, issue, true).IsTerminal()
 			}
 			if terminal {

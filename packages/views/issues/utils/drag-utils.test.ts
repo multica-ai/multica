@@ -146,53 +146,48 @@ describe("status grouping with custom statuses", () => {
     expect(getMoveUpdates(inReviewColumn, 5)).toEqual({ status: "in_review", position: 5 });
   });
 
-  // A built-in card in its own column keeps carrying the (unchanged) key, so a
-  // workspace without custom statuses sends exactly the payload it always did.
-  it("keeps the status in the payload for a built-in card", () => {
-    expect(getMoveUpdates(inReviewColumn, 5, builtIn)).toEqual({
-      status: "in_review",
-      position: 5,
-    });
+  it("only reorders a built-in card within its current status column", () => {
+    expect(getMoveUpdates(inReviewColumn, 5, builtIn)).toEqual({ position: 5 });
   });
 });
 
-describe("project lifecycle status-node grouping", () => {
+describe("project workflow status-node grouping", () => {
   const first = {
     ...mk("first", 1),
-    lifecycle_id: "lifecycle-a",
-    lifecycle_status_id: "node-a",
+    workflow_id: "workflow-a",
+    workflow_status_id: "node-a",
   } as Issue;
   const second = {
     ...mk("second", 2),
-    lifecycle_id: "lifecycle-b",
-    lifecycle_status_id: "node-b",
+    workflow_id: "workflow-b",
+    workflow_status_id: "node-b",
   } as Issue;
   const firstColumn: BoardColumnGroup = {
-    id: "lifecycle_status:node-a",
+    id: "workflow_status:node-a",
     title: "Implementation",
-    lifecycleStatusId: "node-a",
-    lifecycleStatusLegacyKey: "todo",
+    workflowStatusId: "node-a",
+    workflowStatusLegacyKey: "todo",
   };
   const secondColumn: BoardColumnGroup = {
-    id: "lifecycle_status:node-b",
+    id: "workflow_status:node-b",
     title: "Implementation",
-    lifecycleStatusId: "node-b",
-    lifecycleStatusLegacyKey: "todo",
+    workflowStatusId: "node-b",
+    workflowStatusLegacyKey: "todo",
   };
 
   it("keeps same-name nodes isolated by stable id", () => {
     expect(buildColumns([first, second], [firstColumn, secondColumn], "status")).toEqual({
-      "lifecycle_status:node-a": ["first"],
-      "lifecycle_status:node-b": ["second"],
+      "workflow_status:node-a": ["first"],
+      "workflow_status:node-b": ["second"],
     });
   });
 
-  it("moves with lifecycle_status_id and recognizes a same-node reorder", () => {
+  it("moves with workflow_status_id and recognizes a same-node reorder", () => {
     expect(issueMatchesGroup(first, firstColumn)).toBe(true);
     expect(issueMatchesGroup(first, secondColumn)).toBe(false);
     expect(getMoveUpdates(firstColumn, 3, first)).toEqual({ position: 3 });
     expect(getMoveUpdates(secondColumn, 3, first)).toEqual({
-      lifecycle_status_id: "node-b",
+      workflow_status_id: "node-b",
       position: 3,
     });
   });

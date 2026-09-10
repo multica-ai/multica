@@ -8,11 +8,14 @@ export interface CreateIssueRequest {
   title: string;
   description?: string;
   status?: IssueStatus;
+  /** Status node in the selected project’s effective workflow; excludes status. */
+  workflow_status_id?: string;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;
   parent_issue_id?: string;
-  project_id?: string;
+  /** Omit to inherit the parent project; null explicitly creates without a project. */
+  project_id?: string | null;
   /** Ordered stage (>= 1) grouping this sub-issue under its parent. */
   stage?: number;
   start_date?: string;
@@ -61,8 +64,8 @@ export interface UpdateIssueRequest {
    * update. The server uses it to merge channel media that landed meanwhile. */
   description_base?: string;
   status?: IssueStatus;
-  /** Canonical status-node destination. Required for cross-lifecycle moves. */
-  lifecycle_status_id?: string;
+  /** Canonical status-node destination. Required for cross-workflow moves. */
+  workflow_status_id?: string;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
@@ -92,7 +95,7 @@ export interface MoveIssueRequest
   extends Pick<
     UpdateIssueRequest,
     | "status"
-    | "lifecycle_status_id"
+    | "workflow_status_id"
     | "assignee_type"
     | "assignee_id"
     | "parent_issue_id"
@@ -340,8 +343,8 @@ export interface IssueTableQuerySpec {
 export type IssueTableGroupSpec =
   | { kind: "none" }
   | { kind: "status" }
-  /** Group project work by stable lifecycle Status Node identity. */
-  | { kind: "lifecycle_status" }
+  /** Group project work by stable workflow Status Node identity. */
+  | { kind: "workflow_status" }
   /**
    * Group by the CATEGORY a status behaves as, not by the status key.
    *
@@ -387,9 +390,9 @@ export interface IssueTableParentRef {
 export type IssueTableGroupValue =
   | { kind: "status"; status: string }
   | {
-      kind: "lifecycle_status";
-      lifecycle_id?: string;
-      lifecycle_status_id?: string;
+      kind: "workflow_status";
+      workflow_id?: string;
+      workflow_status_id?: string;
       /** Legacy adapter key used by older create paths. */
       status: string;
       name: string;

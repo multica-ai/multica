@@ -71,7 +71,7 @@ func (h *Handler) loadProjectIssueStats(ctx context.Context, workspaceID, projec
 		WorkspaceID:        workspaceID,
 		ProjectIds:         []pgtype.UUID{projectID},
 		TerminalStatusKeys: terminalStatusKeys,
-		LifecycleEnabled:   featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags),
+		WorkflowEnabled:    featureflags.IssueWorkflowV1Enabled(ctx, h.FeatureFlags),
 	})
 	if err != nil || len(stats) == 0 {
 		return 0, 0
@@ -111,7 +111,7 @@ type CreateProjectRequest struct {
 	StartDate   *string                               `json:"start_date"`
 	DueDate     *string                               `json:"due_date"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
-	Lifecycle   *issueLifecycleSpecRequest            `json:"issue_lifecycle,omitempty"`
+	Workflow    *issueWorkflowSpecRequest             `json:"issue_workflow,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -173,7 +173,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID:        wsUUID,
 			ProjectIds:         projectIDs,
 			TerminalStatusKeys: terminalStatusKeys,
-			LifecycleEnabled:   featureflags.IssueLifecycleV1Enabled(r.Context(), h.FeatureFlags),
+			WorkflowEnabled:    featureflags.IssueWorkflowV1Enabled(r.Context(), h.FeatureFlags),
 		})
 		if statsErr == nil {
 			for _, s := range stats {
@@ -304,13 +304,13 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var lifecycleSpec normalizedLifecycleSpec
-	if req.Lifecycle != nil {
+	var workflowSpec normalizedWorkflowSpec
+	if req.Workflow != nil {
 		if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
 			return
 		}
 		var valid bool
-		lifecycleSpec, valid = h.normalizeLifecycleSpec(w, r, workspaceID, *req.Lifecycle)
+		workflowSpec, valid = h.normalizeWorkflowSpec(w, r, workspaceID, *req.Workflow)
 		if !valid {
 			return
 		}
@@ -396,7 +396,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Without resources, keep the simple non-tx path.
-	if len(req.Resources) == 0 && req.Lifecycle == nil {
+	if len(req.Resources) == 0 && req.Workflow == nil {
 		project, err := h.Queries.CreateProject(r.Context(), createParams)
 		if err != nil {
 			h.writeProjectWriteError(w, r, err, "create")
@@ -422,16 +422,16 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		h.writeProjectWriteError(w, r, err, "create")
 		return
 	}
-	var lifecycleResponse *issueLifecycleResponse
-	if req.Lifecycle != nil {
-		lifecycle, statuses, _, applyErr := applyLifecycleSpec(r.Context(), qtx, wsUUID, project.ID, lifecycleSpec, nil, false)
+	var workflowResponse *issueWorkflowResponse
+	if req.Workflow != nil {
+		workflow, statuses, _, applyErr := applyWorkflowSpec(r.Context(), qtx, wsUUID, project.ID, workflowSpec, nil, false)
 		if applyErr != nil {
-			slog.Warn("create project lifecycle failed", append(logger.RequestAttrs(r), "error", applyErr)...)
-			writeError(w, http.StatusInternalServerError, "failed to create project lifecycle")
+			slog.Warn("create project workflow failed", append(logger.RequestAttrs(r), "error", applyErr)...)
+			writeError(w, http.StatusInternalServerError, "failed to create project workflow")
 			return
 		}
-		response := buildIssueLifecycleResponse(lifecycle, statuses, project.ID)
-		lifecycleResponse = &response
+		response := buildIssueWorkflowResponse(workflow, statuses, project.ID)
+		workflowResponse = &response
 	}
 
 	creator, _ := h.parseUserUUIDOrZero(userID)
@@ -487,12 +487,12 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	// reads — GET /projects/{id} stays metadata-only with resource_count.
 	writeJSON(w, http.StatusCreated, struct {
 		ProjectResponse
-		Resources      []ProjectResourceResponse `json:"resources"`
-		IssueLifecycle *issueLifecycleResponse   `json:"issue_lifecycle,omitempty"`
+		Resources     []ProjectResourceResponse `json:"resources"`
+		IssueWorkflow *issueWorkflowResponse    `json:"issue_workflow,omitempty"`
 	}{
 		ProjectResponse: resp,
 		Resources:       resourceResp,
-		IssueLifecycle:  lifecycleResponse,
+		IssueWorkflow:   workflowResponse,
 	})
 }
 
@@ -945,7 +945,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID:        wsUUID,
 			ProjectIds:         projectIDs,
 			TerminalStatusKeys: terminalStatusKeys,
-			LifecycleEnabled:   featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags),
+			WorkflowEnabled:    featureflags.IssueWorkflowV1Enabled(ctx, h.FeatureFlags),
 		})
 		if statsErr == nil {
 			for _, s := range stats {

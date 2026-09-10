@@ -205,8 +205,8 @@ type AutomationExecution struct {
 	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
 	IssueID             pgtype.UUID        `json:"issue_id"`
 	TriggerTransitionID pgtype.UUID        `json:"trigger_transition_id"`
-	LifecycleID         pgtype.UUID        `json:"lifecycle_id"`
-	LifecycleRevision   int64              `json:"lifecycle_revision"`
+	WorkflowID          pgtype.UUID        `json:"workflow_id"`
+	WorkflowRevision    int64              `json:"workflow_revision"`
 	StatusID            pgtype.UUID        `json:"status_id"`
 	PolicyRevision      int64              `json:"policy_revision"`
 	PolicySnapshot      []byte             `json:"policy_snapshot"`
@@ -801,8 +801,8 @@ type Issue struct {
 	Properties         []byte             `json:"properties"`
 	Revision           int64              `json:"revision"`
 	LastActivityAt     pgtype.Timestamptz `json:"last_activity_at"`
-	LifecycleID        pgtype.UUID        `json:"lifecycle_id"`
-	LifecycleStatusID  pgtype.UUID        `json:"lifecycle_status_id"`
+	WorkflowID         pgtype.UUID        `json:"workflow_id"`
+	WorkflowStatusID   pgtype.UUID        `json:"workflow_status_id"`
 	LastTransitionID   pgtype.UUID        `json:"last_transition_id"`
 }
 
@@ -822,37 +822,6 @@ type IssueLabel struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	ResourceType string             `json:"resource_type"`
 	Description  string             `json:"description"`
-}
-
-type IssueLifecycle struct {
-	ID              pgtype.UUID        `json:"id"`
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	ScopeType       string             `json:"scope_type"`
-	ScopeID         pgtype.UUID        `json:"scope_id"`
-	Name            string             `json:"name"`
-	Revision        int64              `json:"revision"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	InitialStatusID pgtype.UUID        `json:"initial_status_id"`
-}
-
-type IssueLifecycleStatus struct {
-	ID                  pgtype.UUID        `json:"id"`
-	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
-	LifecycleID         pgtype.UUID        `json:"lifecycle_id"`
-	LegacyStatusKey     pgtype.Text        `json:"legacy_status_key"`
-	Name                string             `json:"name"`
-	Description         string             `json:"description"`
-	Color               string             `json:"color"`
-	Position            float64            `json:"position"`
-	Phase               string             `json:"phase"`
-	Outcome             pgtype.Text        `json:"outcome"`
-	EntryPolicy         []byte             `json:"entry_policy"`
-	EntryPolicyRevision int64              `json:"entry_policy_revision"`
-	ArchivedAt          pgtype.Timestamptz `json:"archived_at"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	SpecKey             string             `json:"spec_key"`
 }
 
 type IssueProperty struct {
@@ -953,8 +922,8 @@ type IssueTransition struct {
 	ID                  pgtype.UUID        `json:"id"`
 	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
 	IssueID             pgtype.UUID        `json:"issue_id"`
-	LifecycleID         pgtype.UUID        `json:"lifecycle_id"`
-	LifecycleRevision   int64              `json:"lifecycle_revision"`
+	WorkflowID          pgtype.UUID        `json:"workflow_id"`
+	WorkflowRevision    int64              `json:"workflow_revision"`
 	FromStatusID        pgtype.UUID        `json:"from_status_id"`
 	ToStatusID          pgtype.UUID        `json:"to_status_id"`
 	ActorType           string             `json:"actor_type"`
@@ -999,6 +968,37 @@ type IssueViewPreference struct {
 	ScopeID     pgtype.UUID        `json:"scope_id"`
 	Prefs       []byte             `json:"prefs"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type IssueWorkflow struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ScopeType       string             `json:"scope_type"`
+	ScopeID         pgtype.UUID        `json:"scope_id"`
+	Name            string             `json:"name"`
+	Revision        int64              `json:"revision"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	InitialStatusID pgtype.UUID        `json:"initial_status_id"`
+}
+
+type IssueWorkflowStatus struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	WorkflowID          pgtype.UUID        `json:"workflow_id"`
+	LegacyStatusKey     pgtype.Text        `json:"legacy_status_key"`
+	Name                string             `json:"name"`
+	Description         string             `json:"description"`
+	Color               string             `json:"color"`
+	Position            float64            `json:"position"`
+	Phase               string             `json:"phase"`
+	Outcome             pgtype.Text        `json:"outcome"`
+	EntryPolicy         []byte             `json:"entry_policy"`
+	EntryPolicyRevision int64              `json:"entry_policy_revision"`
+	ArchivedAt          pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	SpecKey             string             `json:"spec_key"`
 }
 
 type LarkBindingToken struct {
@@ -1221,20 +1221,20 @@ type PluginStorage struct {
 }
 
 type Project struct {
-	ID                      pgtype.UUID        `json:"id"`
-	WorkspaceID             pgtype.UUID        `json:"workspace_id"`
-	Title                   string             `json:"title"`
-	Description             pgtype.Text        `json:"description"`
-	Icon                    pgtype.Text        `json:"icon"`
-	Status                  string             `json:"status"`
-	LeadType                pgtype.Text        `json:"lead_type"`
-	LeadID                  pgtype.UUID        `json:"lead_id"`
-	CreatedAt               pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
-	Priority                string             `json:"priority"`
-	StartDate               pgtype.Date        `json:"start_date"`
-	DueDate                 pgtype.Date        `json:"due_date"`
-	DefaultIssueLifecycleID pgtype.UUID        `json:"default_issue_lifecycle_id"`
+	ID                     pgtype.UUID        `json:"id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	Title                  string             `json:"title"`
+	Description            pgtype.Text        `json:"description"`
+	Icon                   pgtype.Text        `json:"icon"`
+	Status                 string             `json:"status"`
+	LeadType               pgtype.Text        `json:"lead_type"`
+	LeadID                 pgtype.UUID        `json:"lead_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Priority               string             `json:"priority"`
+	StartDate              pgtype.Date        `json:"start_date"`
+	DueDate                pgtype.Date        `json:"due_date"`
+	DefaultIssueWorkflowID pgtype.UUID        `json:"default_issue_workflow_id"`
 }
 
 type ProjectResource struct {
@@ -1598,8 +1598,8 @@ type Workspace struct {
 	IssueCounter int32              `json:"issue_counter"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	// When TRUE, an agent run that resolves to no precise accountable human (would be owner_fallback) is refused at enqueue instead of degrading to the agent owner (MUL-4302 §3.5). Default FALSE = owner_fallback. Never affects authorization (originator_user_id).
-	AttributionFailClosed   bool        `json:"attribution_fail_closed"`
-	DefaultIssueLifecycleID pgtype.UUID `json:"default_issue_lifecycle_id"`
+	AttributionFailClosed  bool        `json:"attribution_fail_closed"`
+	DefaultIssueWorkflowID pgtype.UUID `json:"default_issue_workflow_id"`
 }
 
 type WorkspaceInvitation struct {

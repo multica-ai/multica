@@ -22,6 +22,8 @@ function GithubIcon({ className }: { className?: string }) {
   );
 }
 import { useQuery } from "@tanstack/react-query";
+import { workflowProblems, workflowToSpec, type WorkflowDraft } from "@multica/core/issue-workflows";
+import { WorkflowSetup, type WorkflowSetupScreen } from "../projects/components/workflow-setup";
 import { useCreateProject } from "@multica/core/projects/mutations";
 import { useProjectDraftStore } from "@multica/core/projects";
 import {
@@ -145,6 +147,16 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const draft = useProjectDraftStore((s) => s.draft);
   const setDraft = useProjectDraftStore((s) => s.setDraft);
   const clearDraft = useProjectDraftStore((s) => s.clearDraft);
+  const [step, setStep] = useState<"info" | "workflow">("info");
+  const [showWorkflowErrors, setShowWorkflowErrors] = useState(false);
+  const workflow = draft.workflowWorkspaceId === wsId ? draft.workflow : undefined;
+  const [workflowScreen, setWorkflowScreen] = useState<WorkflowSetupScreen>(workflow ? "editor" : "source");
+  const updateWorkflow = (value: WorkflowDraft) => setDraft({ workflow: value, workflowWorkspaceId: wsId });
+  const advanceToWorkflow = () => {
+    if (!title.trim()) return;
+    setDraft({ description: descEditorRef.current?.getMarkdown() ?? draft.description });
+    setStep("workflow");
+  };
 
   const [title, setTitle] = useState(draft.title);
   const descEditorRef = useRef<ContentEditorRef>(null);
@@ -319,7 +331,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const createProject = useCreateProject();
 
   const handleSubmit = async () => {
-    if (!title.trim() || submitting) return;
+    if (!title.trim() || submitting || step !== "workflow") return;
+    setShowWorkflowErrors(true);
+    if (workflowScreen !== "editor" || !workflow || workflowProblems(workflow).length) return;
     // `sourceMode` decides which side's stash gets persisted — the other
     // side is silently dropped, so repos picked then abandoned for local
     // mode don't leak into the project.
@@ -352,6 +366,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     try {
       const project = await createProject.mutateAsync({
         title: title.trim(),
+        issue_workflow: workflowToSpec(workflow, title),
         description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
         icon,
         status,
@@ -366,7 +381,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       clearDraft();
       onClose();
       toast.success(t(($) => $.create_project.toast_created));
-      router.push(wsPaths.projectDetail(project.id));
+      router.push(`${wsPaths.projectDetail(project.id)}?view=workflow`);
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
@@ -392,16 +407,16 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog open onOpenChange={(v) => { if (!v && !submitting) onClose(); }}>
       <DialogContent
         showCloseButton={false}
         className={cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
           "!top-1/2 !left-1/2 !-translate-x-1/2",
           "!transition-all !duration-300 !ease-out",
-          isExpanded
+          isExpanded || step === "workflow"
             ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
-            : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
+            : "!max-w-2xl !w-full !h-[min(80vh,620px)] !-translate-y-1/2",
         )}
       >
         <DialogTitle className="sr-only">{t(($) => $.create_project.title)}</DialogTitle>
@@ -436,6 +451,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 render={
                   <button
                     type="button"
+                    disabled={submitting}
                     onClick={onClose}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                   >
@@ -448,6 +464,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2 border-b px-5 pb-3">
+          <Button variant={step === "info" ? "secondary" : "ghost"} size="sm" disabled={submitting} onClick={() => setStep("info")}><span aria-hidden="true">{1}</span>{tProjects(($) => $.workflow.info)}</Button>
+          <ChevronRight className="size-3 text-muted-foreground" />
+          <Button variant={step === "workflow" ? "secondary" : "ghost"} size="sm" disabled={!title.trim() || submitting} onClick={advanceToWorkflow}><span aria-hidden="true">{2}</span>{tProjects(($) => $.workflow.title)}</Button>
+        </div>
+        <div className={step === "info" ? "flex min-h-0 flex-1 flex-col pt-3" : "hidden"}>
         <div className="px-5 pb-2 shrink-0">
           <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
             <PopoverTrigger
@@ -476,7 +498,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             placeholder={t(($) => $.create_project.title_placeholder)}
             className="text-title font-semibold"
             onChange={(v) => updateTitle(v)}
-            onSubmit={handleSubmit}
+            onSubmit={advanceToWorkflow}
           />
         </div>
 
@@ -978,17 +1000,18 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        {/* Footer action bar — primary action in its own strip, matching
-            create-issue. */}
-        <div className="flex items-center justify-end border-t px-4 py-3 shrink-0">
-          <Button
-            size="sm"
-            onClick={handleSubmit}
-            disabled={!title.trim() || submitting}
-            className="shrink-0"
-          >
-            {submitting ? t(($) => $.create_project.submitting) : t(($) => $.create_project.submit)}
-          </Button>
+        </div>
+        {step === "workflow" && <div className="min-h-0 flex-1 overflow-y-auto p-5"><WorkflowSetup value={workflow} onChange={updateWorkflow} showErrors={showWorkflowErrors} disabled={submitting} screen={workflowScreen} onScreenChange={setWorkflowScreen} /></div>}
+
+        {/* Keep project resources mounted while configuring the workflow. */}
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
+          <p className="max-w-sm text-caption text-muted-foreground">{tProjects(($) => step === "info" ? $.workflow.create_hint : $.workflow.draft_hint)}</p>
+          <div className="flex gap-2">
+            {step === "workflow" && <Button variant="ghost" size="sm" disabled={submitting} onClick={() => setStep("info")}>{tProjects(($) => $.workflow.back)}</Button>}
+            <Button size="sm" onClick={step === "info" ? advanceToWorkflow : handleSubmit} disabled={!title.trim() || submitting || (step === "workflow" && (!workflow || workflowScreen !== "editor"))}>
+              {step === "info" ? tProjects(($) => $.workflow.next) : submitting ? t(($) => $.create_project.submitting) : t(($) => $.create_project.submit)}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

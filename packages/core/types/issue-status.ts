@@ -76,14 +76,14 @@ export interface UpdateIssueStatusRequest {
   position?: number;
 }
 
-export type IssueLifecyclePhase =
+export type IssueWorkflowPhase =
   | "backlog"
   | "unstarted"
   | "started"
   | "completed"
   | "cancelled";
 
-export interface IssueLifecycleDefinition {
+export interface IssueWorkflowDefinition {
   id: string;
   workspace_id: string;
   scope_type: "workspace" | "project" | (string & {});
@@ -95,57 +95,60 @@ export interface IssueLifecycleDefinition {
   updated_at: string;
 }
 
-export type IssueLifecycleAssigneeTarget =
+export type IssueWorkflowAssigneeTarget =
   | { type: "keep"; id?: never }
   | { type: "human" | "agent" | "squad"; id: string };
 
-export type IssueLifecycleExecutorTarget =
+export type IssueWorkflowExecutorTarget =
   | { type: "none"; id?: never }
   | { type: "agent" | "squad"; id: string };
 
-export interface IssueLifecycleEntryPolicy {
-  assignee: IssueLifecycleAssigneeTarget;
-  executor: IssueLifecycleExecutorTarget;
+/** Status entry rules: ownership, action execution, and workflow transitions. */
+export interface IssueWorkflowEntryPolicy {
+  assignee: IssueWorkflowAssigneeTarget;
+  executor: IssueWorkflowExecutorTarget;
   /** Prompt supplied to the executor when the issue enters this node. */
   instructions: string;
   advance: "executor_may_transition" | "human_confirms";
+  /** Explicit handoff destination within this workflow; never inferred from order. */
+  next_status_key?: string;
 }
 
-export interface IssueLifecycleStatusNode {
+export interface IssueWorkflowStatusNode {
   id: string;
-  lifecycle_id: string;
+  workflow_id: string;
   legacy_status_key: string | null;
-  /** Stable key used by lifecycle YAML/JSON definitions. */
+  /** Stable key used by workflow YAML/JSON definitions. */
   spec_key: string;
   name: string;
   description: string;
   color: string;
   position: number;
-  phase: IssueLifecyclePhase | (string & {});
+  phase: IssueWorkflowPhase | (string & {});
   outcome: "completed" | "cancelled" | null | (string & {});
-  entry_policy: IssueLifecycleEntryPolicy;
+  entry_policy: IssueWorkflowEntryPolicy;
   entry_policy_revision: number;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export interface IssueLifecycleResponse {
-  lifecycle: IssueLifecycleDefinition;
-  statuses: IssueLifecycleStatusNode[];
+export interface IssueWorkflowResponse {
+  workflow: IssueWorkflowDefinition;
+  statuses: IssueWorkflowStatusNode[];
   mode: "default" | "custom" | (string & {});
 }
 
-export interface UpdateIssueLifecycleStatusRequest {
+export interface UpdateIssueWorkflowStatusRequest {
   expected_revision: number;
   name?: string;
   description?: string;
   color?: string;
-  phase?: IssueLifecyclePhase;
-  entry_policy?: IssueLifecycleEntryPolicy;
+  phase?: IssueWorkflowPhase;
+  entry_policy?: IssueWorkflowEntryPolicy;
 }
 
-export interface ReorderIssueLifecycleStatusesRequest {
+export interface ReorderIssueWorkflowStatusesRequest {
   expected_revision: number;
   status_ids: string[];
 }
@@ -176,11 +179,11 @@ export interface AutomationExecution {
   id: string;
   issue_id: string;
   trigger_transition_id: string;
-  lifecycle_id: string;
-  lifecycle_revision: number;
+  workflow_id: string;
+  workflow_revision: number;
   status_id: string;
   policy_revision: number;
-  policy_snapshot: IssueLifecycleEntryPolicy;
+  policy_snapshot: IssueWorkflowEntryPolicy;
   executor_type: "agent" | "squad" | null | (string & {});
   executor_id: string | null;
   status: AutomationExecutionStatus | (string & {});
@@ -189,7 +192,9 @@ export interface AutomationExecution {
 }
 
 export interface TransitionIssueStatusNodeRequest {
-  lifecycle_status_id: string;
+  /** Reject if the displayed entry effects have changed since preview. */
+  expected_workflow_revision?: number;
+  workflow_status_id: string;
   expected_revision?: number;
   expected_transition_id?: string;
 }
@@ -207,4 +212,25 @@ export interface TransitionIssueStatusNodeResponse {
 export interface TakeOverAutomationExecutionResponse {
   issue: import("./issue").Issue;
   execution: AutomationExecution;
+}
+
+export interface IssueWorkflowSpec {
+  api_version: 1;
+  name: string;
+  initial_status: string;
+  statuses: Array<{
+    key: string;
+    name: string;
+    description: string;
+    color: string;
+    phase: IssueWorkflowPhase;
+    entry_policy: IssueWorkflowEntryPolicy;
+  }>;
+}
+
+export interface ApplyProjectWorkflowRequest {
+  mode: "custom";
+  spec: IssueWorkflowSpec;
+  expected_revision: number;
+  allow_archive: boolean;
 }

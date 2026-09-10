@@ -7,8 +7,8 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/issuelifecycle"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -29,19 +29,19 @@ type State struct {
 
 type Querier interface {
 	issuestatus.Querier
-	GetIssueLifecycleStatusByID(context.Context, db.GetIssueLifecycleStatusByIDParams) (db.IssueLifecycleStatus, error)
-	GetIssueLifecycleStatusByLegacyKey(context.Context, db.GetIssueLifecycleStatusByLegacyKeyParams) (db.IssueLifecycleStatus, error)
+	GetIssueWorkflowStatusByID(context.Context, db.GetIssueWorkflowStatusByIDParams) (db.IssueWorkflowStatus, error)
+	GetIssueWorkflowStatusByLegacyKey(context.Context, db.GetIssueWorkflowStatusByLegacyKeyParams) (db.IssueWorkflowStatus, error)
 }
 
 // ResolveIssue reads the stable lifecycle node only when the release flag is
 // enabled. The adapter path remains authoritative while the flag is off, and
 // is also the rolling-deploy fallback when an older writer left a stale pin.
 func ResolveIssue(ctx context.Context, q Querier, issue db.Issue, lifecycleEnabled bool) State {
-	if lifecycleEnabled && issue.LifecycleID.Valid && issue.LifecycleStatusID.Valid {
-		if node, err := q.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
+	if lifecycleEnabled && issue.WorkflowID.Valid && issue.WorkflowStatusID.Valid {
+		if node, err := q.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
 			WorkspaceID: issue.WorkspaceID,
-			LifecycleID: issue.LifecycleID,
-			ID:          issue.LifecycleStatusID,
+			WorkflowID:  issue.WorkflowID,
+			ID:          issue.WorkflowStatusID,
 		}); err == nil && node.LegacyStatusKey.Valid && node.LegacyStatusKey.String == issue.Status {
 			return State{
 				Phase:          node.Phase,
@@ -55,11 +55,11 @@ func ResolveIssue(ctx context.Context, q Querier, issue db.Issue, lifecycleEnabl
 
 // ResolveStatus resolves an arbitrary status key against the issue's pinned
 // lifecycle. It is used for the from-side of transition policies.
-func ResolveStatus(ctx context.Context, q Querier, workspaceID, lifecycleID pgtype.UUID, status string, lifecycleEnabled bool) State {
-	if lifecycleEnabled && lifecycleID.Valid {
-		if node, err := q.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
+func ResolveStatus(ctx context.Context, q Querier, workspaceID, workflowID pgtype.UUID, status string, lifecycleEnabled bool) State {
+	if lifecycleEnabled && workflowID.Valid {
+		if node, err := q.GetIssueWorkflowStatusByLegacyKey(ctx, db.GetIssueWorkflowStatusByLegacyKeyParams{
 			WorkspaceID: workspaceID,
-			LifecycleID: lifecycleID,
+			WorkflowID:  workflowID,
 			LegacyStatusKey: pgtype.Text{
 				String: status,
 				Valid:  true,
@@ -76,7 +76,7 @@ func ResolveStatus(ctx context.Context, q Querier, workspaceID, lifecycleID pgty
 }
 
 func FromLegacyCategory(category string) State {
-	phase, outcome, err := issuelifecycle.LegacyCategoryPhase(category)
+	phase, outcome, err := issueworkflow.LegacyCategoryPhase(category)
 	if err != nil {
 		return State{LegacyCategory: category}
 	}
@@ -90,7 +90,7 @@ func text(value pgtype.Text) string {
 	return ""
 }
 
-func (s State) IsParked() bool { return s.Phase == issuelifecycle.PhaseBacklog }
+func (s State) IsParked() bool { return s.Phase == issueworkflow.PhaseBacklog }
 
 func (s State) IsTerminal() bool { return s.Outcome == "completed" || s.Outcome == "cancelled" }
 

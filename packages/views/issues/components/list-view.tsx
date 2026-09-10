@@ -17,7 +17,7 @@ import {
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Virtuoso } from "react-virtuoso";
 import { Button } from "@multica/ui/components/ui/button";
-import type { Issue, IssueLifecycleStatusNode, IssueStatusCategory, Project } from "@multica/core/types";
+import type { Issue, IssueWorkflowStatusNode, IssueStatusCategory, Project } from "@multica/core/types";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
@@ -44,7 +44,7 @@ import type {
   IssueStatusPagination,
 } from "../surface/use-issue-status-branches";
 import type { IssueGroupBranches } from "../surface/use-issue-group-branches";
-import { buildLifecycleStatusGroups } from "../utils/lifecycle-status-groups";
+import { buildWorkflowStatusGroups } from "../utils/workflow-status-groups";
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { useRestoredScrollRef } from "../../platform";
@@ -85,7 +85,7 @@ function ListViewImpl({
   projectMap,
   statusPagination,
   groupBranches,
-  lifecycleStatuses,
+  workflowStatuses,
   projectId,
   onMoveIssue,
   onCreateIssue,
@@ -96,7 +96,7 @@ function ListViewImpl({
   projectMap?: Map<string, Project>;
   statusPagination?: IssueStatusPagination;
   groupBranches?: IssueGroupBranches;
-  lifecycleStatuses?: IssueLifecycleStatusNode[];
+  workflowStatuses?: IssueWorkflowStatusNode[];
   projectId?: string;
   onMoveIssue?: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
@@ -109,7 +109,7 @@ function ListViewImpl({
   );
   const sortBy = useViewStore((s) => s.sortBy);
   const { t } = useT("issues");
-  const [collapsedLifecycleStatuses, setCollapsedLifecycleStatuses] = useState<string[]>([]);
+  const [collapsedWorkflowStatuses, setCollapsedWorkflowStatuses] = useState<string[]>([]);
 
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
   const sortLabel = sortBy !== "position"
@@ -120,13 +120,13 @@ function ListViewImpl({
 
   const groups = useMemo(
     () =>
-      lifecycleStatuses === undefined
+      workflowStatuses === undefined
         ? buildListGroups(visibleStatuses)
-        : buildLifecycleStatusGroups(
-            lifecycleStatuses,
+        : buildWorkflowStatusGroups(
+            workflowStatuses,
             groupBranches?.descriptors ?? [],
           ),
-    [groupBranches?.descriptors, lifecycleStatuses, visibleStatuses],
+    [groupBranches?.descriptors, workflowStatuses, visibleStatuses],
   );
   const groupedIssues = useMemo(
     () => (groupBranches?.enabled ? groupBranches.issues : issues),
@@ -136,12 +136,12 @@ function ListViewImpl({
     () =>
       groups
         .filter((group) =>
-          lifecycleStatuses === undefined
+          workflowStatuses === undefined
             ? group.status != null && !listCollapsedStatuses.includes(group.status)
-            : !collapsedLifecycleStatuses.includes(group.id),
+            : !collapsedWorkflowStatuses.includes(group.id),
         )
         .map((group) => group.id),
-    [collapsedLifecycleStatuses, groups, lifecycleStatuses, listCollapsedStatuses],
+    [collapsedWorkflowStatuses, groups, workflowStatuses, listCollapsedStatuses],
   );
   const groupIds = useMemo(
     () => new Set(groups.map((g) => g.id)),
@@ -387,10 +387,10 @@ function ListViewImpl({
           const wasExpanded = expandedGroupIds.includes(group.id);
           const isExpanded = value.includes(group.id);
           if (wasExpanded !== isExpanded) {
-            if (lifecycleStatuses === undefined && group.status) {
+            if (workflowStatuses === undefined && group.status) {
               toggleListCollapsed(group.status);
             } else {
-              setCollapsedLifecycleStatuses((current) =>
+              setCollapsedWorkflowStatuses((current) =>
                 isExpanded
                   ? current.filter((id) => id !== group.id)
                   : current.includes(group.id)
@@ -404,7 +404,7 @@ function ListViewImpl({
     >
       {groups.map((group) => {
         const isExpanded = expandedGroupIds.includes(group.id);
-        const page = group.lifecycleStatusId !== undefined
+        const page = group.workflowStatusId !== undefined
           ? groupBranches?.pagination[group.id]
           : group.status
             ? statusPagination?.[group.status]
@@ -617,11 +617,11 @@ function StatusAccordionItem({
         </div>
         <Accordion.Trigger className="group/trigger flex flex-1 items-center gap-2 px-2 h-full text-left outline-none cursor-pointer">
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
-          {group.lifecycleStatusId !== undefined ? (
+          {group.workflowStatusId !== undefined ? (
             <div className="flex min-w-0 items-center gap-2">
               <span
                 className="size-2.5 shrink-0 rounded-full bg-muted-foreground/30"
-                style={group.lifecycleStatusColor ? { backgroundColor: group.lifecycleStatusColor } : undefined}
+                style={group.workflowStatusColor ? { backgroundColor: group.workflowStatusColor } : undefined}
               />
               <span className="truncate text-body font-medium" title={group.title}>
                 {group.title}
@@ -635,7 +635,7 @@ function StatusAccordionItem({
           ) : null}
         </Accordion.Trigger>
         {onCreateIssue &&
-          (group.lifecycleStatusId === undefined ||
+          (group.workflowStatusId === undefined ||
             group.createData !== undefined) && (
             <div className="pr-2">
               {/* Lazy-mounted tooltip machinery — see DeferredTooltip. */}

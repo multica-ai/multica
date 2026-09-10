@@ -53,7 +53,7 @@ export function useStatusOptions(
         );
         // No catalog row for this category: the fetch is still in flight, or
         // this workspace predates the seed. Offer the built-in, whose key IS
-        // the category, so a lifecycle step is never missing.
+        // the category, so a workflow step is never missing.
         if (entries.length === 0) {
           return [
             {

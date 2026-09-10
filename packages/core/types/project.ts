@@ -24,6 +24,7 @@ export interface Project {
 }
 
 export interface CreateProjectRequest {
+  issue_workflow?: import("./issue-status").IssueWorkflowSpec;
   title: string;
   description?: string;
   icon?: string;

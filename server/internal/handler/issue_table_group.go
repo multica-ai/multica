@@ -21,22 +21,22 @@ import (
 )
 
 type issueTableGroupValueResponse struct {
-	Kind              string               `json:"kind"`
-	Status            string               `json:"status,omitempty"`
-	LifecycleID       *string              `json:"lifecycle_id,omitempty"`
-	LifecycleStatusID *string              `json:"lifecycle_status_id,omitempty"`
-	Name              string               `json:"name,omitempty"`
-	Color             string               `json:"color,omitempty"`
-	Position          *float64             `json:"position,omitempty"`
-	Phase             string               `json:"phase,omitempty"`
-	Archived          bool                 `json:"archived,omitempty"`
-	Actor             *issueTableActorRef  `json:"actor"`
-	ProjectID         *string              `json:"project_id,omitempty"`
-	ParentID          *string              `json:"parent_id,omitempty"`
-	Parent            *issueTableParentRef `json:"parent,omitempty"`
-	PropertyID        string               `json:"property_id,omitempty"`
-	Value             any                  `json:"value,omitempty"`
-	ValueState        string               `json:"value_state,omitempty"`
+	Kind             string               `json:"kind"`
+	Status           string               `json:"status,omitempty"`
+	WorkflowID       *string              `json:"workflow_id,omitempty"`
+	WorkflowStatusID *string              `json:"workflow_status_id,omitempty"`
+	Name             string               `json:"name,omitempty"`
+	Color            string               `json:"color,omitempty"`
+	Position         *float64             `json:"position,omitempty"`
+	Phase            string               `json:"phase,omitempty"`
+	Archived         bool                 `json:"archived,omitempty"`
+	Actor            *issueTableActorRef  `json:"actor"`
+	ProjectID        *string              `json:"project_id,omitempty"`
+	ParentID         *string              `json:"parent_id,omitempty"`
+	Parent           *issueTableParentRef `json:"parent,omitempty"`
+	PropertyID       string               `json:"property_id,omitempty"`
+	Value            any                  `json:"value,omitempty"`
+	ValueState       string               `json:"value_state,omitempty"`
 }
 
 type issueTableParentRef struct {
@@ -48,13 +48,13 @@ type issueTableParentRef struct {
 }
 
 type issueTableGroupContext struct {
-	Parent          *issueTableParentRef          `json:"parent,omitempty"`
-	LifecycleStatus *issueTableLifecycleStatusRef `json:"lifecycle_status,omitempty"`
+	Parent         *issueTableParentRef         `json:"parent,omitempty"`
+	WorkflowStatus *issueTableWorkflowStatusRef `json:"workflow_status,omitempty"`
 }
 
-type issueTableLifecycleStatusRef struct {
+type issueTableWorkflowStatusRef struct {
 	ID              string  `json:"id"`
-	LifecycleID     string  `json:"lifecycle_id"`
+	WorkflowID      string  `json:"workflow_id"`
 	LegacyStatusKey string  `json:"legacy_status_key"`
 	Name            string  `json:"name"`
 	Color           string  `json:"color"`
@@ -187,15 +187,15 @@ func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request,
 		return resolvedIssueTableGroup{kind: "none"}, true
 	case "status":
 		return resolvedIssueTableGroup{kind: "status", groupExpr: "i.status"}, true
-	case "lifecycle_status":
+	case "workflow_status":
 		// Status node ids are globally unique, so they are the grouping identity.
 		// The legacy fallback keeps a mixed-version row visible instead of making
 		// pgx scan a NULL group value into string and fail the complete surface.
 		return resolvedIssueTableGroup{
-			kind:      "lifecycle_status",
-			groupExpr: "COALESCE(i.lifecycle_status_id::text, 'legacy:' || i.status)",
+			kind:      "workflow_status",
+			groupExpr: "COALESCE(i.workflow_status_id::text, 'legacy:' || i.status)",
 			groupSortExpr: `CASE WHEN group_value LIKE 'legacy:%' THEN group_value ELSE COALESCE(
-  (SELECT LOWER(s.name) FROM issue_lifecycle_status s WHERE s.workspace_id = $1 AND s.id = group_value::uuid),
+  (SELECT LOWER(s.name) FROM issue_workflow_status s WHERE s.workspace_id = $1 AND s.id = group_value::uuid),
   group_value
 ) END`,
 		}, true
@@ -393,9 +393,9 @@ func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) st
 	switch group.kind {
 	case "status", "status_category":
 		return "CASE group_value WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
-	case "lifecycle_status":
+	case "workflow_status":
 		return `CASE WHEN group_value LIKE 'legacy:%' THEN 2147483646 ELSE COALESCE(
-  (SELECT FLOOR(s.position)::int FROM issue_lifecycle_status s WHERE s.workspace_id = $1 AND s.id = group_value::uuid),
+  (SELECT FLOOR(s.position)::int FROM issue_workflow_status s WHERE s.workspace_id = $1 AND s.id = group_value::uuid),
   2147483647
 ) END`
 	case "assignee":
@@ -419,11 +419,11 @@ func (group resolvedIssueTableGroup) contextExpression(addArg func(any) string, 
 	if group.kind == "compound" && group.primary != nil {
 		return group.primary.contextExpression(addArg, issuePrefix)
 	}
-	if group.kind == "lifecycle_status" {
+	if group.kind == "workflow_status" {
 		return `CASE WHEN group_value LIKE 'legacy:%' THEN '{}'::jsonb ELSE COALESCE((
-  SELECT jsonb_build_object('lifecycle_status', jsonb_build_object(
+  SELECT jsonb_build_object('workflow_status', jsonb_build_object(
     'id', s.id::text,
-    'lifecycle_id', s.lifecycle_id::text,
+    'workflow_id', s.workflow_id::text,
     'legacy_status_key', COALESCE(s.legacy_status_key, ''),
     'name', s.name,
     'color', s.color,
@@ -431,7 +431,7 @@ func (group resolvedIssueTableGroup) contextExpression(addArg func(any) string, 
     'phase', s.phase,
     'archived_at', s.archived_at
   ))
-  FROM issue_lifecycle_status s
+  FROM issue_workflow_status s
   WHERE s.workspace_id = $1 AND s.id = group_value::uuid
 ), '{}'::jsonb) END`
 	}
@@ -530,32 +530,32 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 		// existing consumer of a status group keeps working. The KEY is what
 		// distinguishes the two contracts. (MUL-6243)
 		descriptor.Value = issueTableGroupValueResponse{Kind: "status", Status: raw}
-	case "lifecycle_status":
+	case "workflow_status":
 		if legacy, found := strings.CutPrefix(raw, "legacy:"); found {
 			if legacy == "" || len(legacy) > 64 {
-				return descriptor, fmt.Errorf("unexpected lifecycle status group value %q", raw)
+				return descriptor, fmt.Errorf("unexpected workflow status group value %q", raw)
 			}
-			descriptor.Key = "lifecycle_status:legacy:" + legacy
+			descriptor.Key = "workflow_status:legacy:" + legacy
 			descriptor.Value = issueTableGroupValueResponse{
-				Kind: "lifecycle_status", Status: legacy, Name: legacy,
+				Kind: "workflow_status", Status: legacy, Name: legacy,
 			}
 			break
 		}
-		if _, err := util.ParseUUID(raw); err != nil || context.LifecycleStatus == nil {
-			return descriptor, fmt.Errorf("unexpected lifecycle status group value %q", raw)
+		if _, err := util.ParseUUID(raw); err != nil || context.WorkflowStatus == nil {
+			return descriptor, fmt.Errorf("unexpected workflow status group value %q", raw)
 		}
-		status := context.LifecycleStatus
-		descriptor.Key = "lifecycle_status:" + raw
+		status := context.WorkflowStatus
+		descriptor.Key = "workflow_status:" + raw
 		descriptor.Value = issueTableGroupValueResponse{
-			Kind:              "lifecycle_status",
-			Status:            status.LegacyStatusKey,
-			LifecycleID:       &status.LifecycleID,
-			LifecycleStatusID: &status.ID,
-			Name:              status.Name,
-			Color:             status.Color,
-			Position:          &status.Position,
-			Phase:             status.Phase,
-			Archived:          status.ArchivedAt != nil,
+			Kind:             "workflow_status",
+			Status:           status.LegacyStatusKey,
+			WorkflowID:       &status.WorkflowID,
+			WorkflowStatusID: &status.ID,
+			Name:             status.Name,
+			Color:            status.Color,
+			Position:         &status.Position,
+			Phase:            status.Phase,
+			Archived:         status.ArchivedAt != nil,
 		}
 	case "assignee":
 		descriptor.Value.Kind = "assignee"
@@ -699,8 +699,8 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 		// category function: `status = ANY(...)` keeps the (workspace_id,
 		// status) index, a function wrapper would force a workspace scan.
 		return fmt.Sprintf("i.status = ANY(%s::text[])", addArg(group.categoryKeysFor(category))), true
-	case "lifecycle_status":
-		const prefix = "lifecycle_status:"
+	case "workflow_status":
+		const prefix = "workflow_status:"
 		raw, found := strings.CutPrefix(key, prefix)
 		if !found || raw == "" {
 			writeError(w, http.StatusBadRequest, "invalid group_key")
@@ -711,14 +711,14 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 				writeError(w, http.StatusBadRequest, "invalid group_key")
 				return "", false
 			}
-			return fmt.Sprintf("i.lifecycle_status_id IS NULL AND i.status = %s::text", addArg(legacy)), true
+			return fmt.Sprintf("i.workflow_status_id IS NULL AND i.status = %s::text", addArg(legacy)), true
 		}
 		id, err := util.ParseUUID(raw)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid group_key")
 			return "", false
 		}
-		return fmt.Sprintf("i.lifecycle_status_id = %s::uuid", addArg(id)), true
+		return fmt.Sprintf("i.workflow_status_id = %s::uuid", addArg(id)), true
 	case "assignee":
 		const prefix = "assignee:"
 		if !strings.HasPrefix(key, prefix) {

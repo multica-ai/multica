@@ -65,7 +65,7 @@ import type {
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
   IssueStatusEntry,
-  IssueLifecycleResponse,
+  IssueWorkflowResponse,
   TransitionIssueStatusNodeResponse,
   ListIssueStatusesResponse,
   NotificationPreferenceResponse,
@@ -522,7 +522,7 @@ export const EMPTY_LIST_ISSUE_STATUSES_RESPONSE: ListIssueStatusesResponse = {
   total: 0,
 };
 
-export const IssueLifecycleDefinitionSchema = z.object({
+export const IssueWorkflowDefinitionSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
   scope_type: z.string(),
@@ -534,26 +534,27 @@ export const IssueLifecycleDefinitionSchema = z.object({
   updated_at: z.string(),
 }).loose();
 
-export const IssueLifecycleAssigneeTargetSchema = z.discriminatedUnion("type", [
+export const IssueWorkflowAssigneeTargetSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("keep") }),
   z.object({ type: z.enum(["human", "agent", "squad"]), id: z.string() }),
 ]);
 
-export const IssueLifecycleExecutorTargetSchema = z.discriminatedUnion("type", [
+export const IssueWorkflowExecutorTargetSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("none") }),
   z.object({ type: z.enum(["agent", "squad"]), id: z.string() }),
 ]);
 
-export const IssueLifecycleEntryPolicySchema = z.object({
-  assignee: IssueLifecycleAssigneeTargetSchema.default({ type: "keep" }),
-  executor: IssueLifecycleExecutorTargetSchema.default({ type: "none" }),
+export const IssueWorkflowEntryPolicySchema = z.object({
+  assignee: IssueWorkflowAssigneeTargetSchema.default({ type: "keep" }),
+  executor: IssueWorkflowExecutorTargetSchema.default({ type: "none" }),
   instructions: z.string().default(""),
   advance: z.enum(["executor_may_transition", "human_confirms"]).default("human_confirms"),
+  next_status_key: z.string().optional(),
 });
 
-export const IssueLifecycleStatusNodeSchema = z.object({
+export const IssueWorkflowStatusNodeSchema = z.object({
   id: z.string(),
-  lifecycle_id: z.string(),
+  workflow_id: z.string(),
   legacy_status_key: z.string().nullable().default(null),
   spec_key: z.string().default(""),
   name: z.string(),
@@ -562,7 +563,7 @@ export const IssueLifecycleStatusNodeSchema = z.object({
   position: z.number().default(0),
   phase: z.string(),
   outcome: z.string().nullable().default(null),
-  entry_policy: IssueLifecycleEntryPolicySchema.default({
+  entry_policy: IssueWorkflowEntryPolicySchema.default({
     assignee: { type: "keep" },
     executor: { type: "none" },
     instructions: "",
@@ -574,14 +575,14 @@ export const IssueLifecycleStatusNodeSchema = z.object({
   updated_at: z.string(),
 }).loose();
 
-export const IssueLifecycleResponseSchema = z.object({
-  lifecycle: IssueLifecycleDefinitionSchema,
-  statuses: z.array(IssueLifecycleStatusNodeSchema).default([]),
+export const IssueWorkflowResponseSchema = z.object({
+  workflow: IssueWorkflowDefinitionSchema,
+  statuses: z.array(IssueWorkflowStatusNodeSchema).default([]),
   mode: z.string(),
 }).loose();
 
-export const EMPTY_ISSUE_LIFECYCLE_RESPONSE: IssueLifecycleResponse = {
-  lifecycle: {
+export const EMPTY_ISSUE_LIFECYCLE_RESPONSE: IssueWorkflowResponse = {
+  workflow: {
     id: "",
     workspace_id: "",
     scope_type: "workspace",
@@ -1317,10 +1318,10 @@ export const IssueSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   revision: z.number().int().positive().optional(),
-  // Additive lifecycle identity. Drop only a malformed field instead of
+  // Additive workflow identity. Drop only a malformed field instead of
   // degrading the entire issue/list response during a mixed-version rollout.
-  lifecycle_id: z.string().nullable().optional().catch(undefined),
-  lifecycle_status_id: z.string().nullable().optional().catch(undefined),
+  workflow_id: z.string().nullable().optional().catch(undefined),
+  workflow_status_id: z.string().nullable().optional().catch(undefined),
   transition_id: z.string().nullable().optional().catch(undefined),
   // Optional for compatibility with older self-hosted backends; a current
   // backend emits null until its historical backfill reaches the issue.
@@ -1346,11 +1347,11 @@ export const AutomationExecutionSchema = z.object({
   id: z.string(),
   issue_id: z.string(),
   trigger_transition_id: z.string(),
-  lifecycle_id: z.string(),
-  lifecycle_revision: z.number().int().positive(),
+  workflow_id: z.string(),
+  workflow_revision: z.number().int().positive(),
   status_id: z.string(),
   policy_revision: z.number().int().positive(),
-  policy_snapshot: IssueLifecycleEntryPolicySchema,
+  policy_snapshot: IssueWorkflowEntryPolicySchema,
   executor_type: z.string().nullable(),
   executor_id: z.string().nullable(),
   status: z.string(),
@@ -1518,9 +1519,9 @@ const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
     status: z.string(),
   }).loose(),
   z.object({
-    kind: z.literal("lifecycle_status"),
-    lifecycle_id: z.string().optional(),
-    lifecycle_status_id: z.string().optional(),
+    kind: z.literal("workflow_status"),
+    workflow_id: z.string().optional(),
+    workflow_status_id: z.string().optional(),
     status: z.string().default(""),
     name: z.string(),
     color: z.string().optional(),

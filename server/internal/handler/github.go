@@ -25,9 +25,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/featureflags"
-	"github.com/multica-ai/multica/server/internal/issuelifecycle"
 	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -1674,13 +1674,13 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		if state == "merged" || state == "closed" {
 			// All linked issues belong to this workspace. Resolve custom statuses
 			// once per delivery; built-in statuses still need no catalog read.
-			lifecycleEnabled := featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)
+			workflowEnabled := featureflags.IssueWorkflowV1Enabled(ctx, h.FeatureFlags)
 			resolver := issuestatus.NewResolver(wsID)
 			for _, issue := range reevalIssues {
 				// A custom terminal status counts as terminal here. (MUL-6243)
 				status := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status)
 				terminal := status == "done" || status == "cancelled"
-				if lifecycleEnabled {
+				if workflowEnabled {
 					terminal = issuepolicy.ResolveIssue(ctx, h.Queries, issue, true).IsTerminal()
 				}
 				if terminal {
@@ -1911,7 +1911,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 		IssueID:     issue.ID,
 		Status:      "done",
 		WorkspaceID: issue.WorkspaceID,
-		Actor:       issuelifecycle.TransitionActor{Type: "system"},
+		Actor:       issueworkflow.TransitionActor{Type: "system"},
 		Cause:       "github_pr_merged",
 	})
 	if err != nil {

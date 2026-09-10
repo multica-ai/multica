@@ -1,8 +1,12 @@
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithI18n } from "../test/i18n";
+
+import { useProjectDraftStore } from "@multica/core/projects";
+const { createProject, push } = vi.hoisted(() => ({ createProject: vi.fn(), push: vi.fn() }));
+beforeEach(() => { useProjectDraftStore.getState().clearDraft(); createProject.mockReset().mockResolvedValue({ id: "new-project" }); push.mockClear(); });
 
 const longRepoUrl =
   "https://github.com/multica-ai/a-very-long-repository-name-that-needs-a-tooltip";
@@ -17,25 +21,13 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 vi.mock("@multica/core/projects/mutations", () => ({
-  useCreateProject: () => ({ mutateAsync: vi.fn() }),
+  useCreateProject: () => ({ mutateAsync: createProject }),
 }));
 
-vi.mock("@multica/core/projects", () => ({
-  useProjectDraftStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      draft: {
-        title: "",
-        description: "",
-        status: "planned",
-        priority: "medium",
-        leadType: undefined,
-        leadId: undefined,
-        icon: undefined,
-      },
-      setDraft: vi.fn(),
-      clearDraft: vi.fn(),
-    }),
-}));
+vi.mock("@multica/core/projects", async (importOriginal) => {
+  const { useProjectDraftStore } = await importOriginal<typeof import("@multica/core/projects")>();
+  return { useProjectDraftStore };
+});
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
@@ -56,6 +48,7 @@ vi.mock("@multica/core/paths", () => ({
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"], queryFn: vi.fn() }),
   agentListOptions: () => ({ queryKey: ["agents"], queryFn: vi.fn() }),
+  squadListOptions: () => ({ queryKey: ["squads"], queryFn: vi.fn() }),
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
@@ -63,12 +56,15 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 }));
 
 vi.mock("../navigation", () => ({
-  useNavigation: () => ({ push: vi.fn() }),
+  useNavigation: () => ({ push }),
 }));
 
 vi.mock("../editor", () => {
-  const ContentEditor = React.forwardRef<HTMLTextAreaElement, { placeholder?: string }>(
-    ({ placeholder }, ref) => <textarea ref={ref} placeholder={placeholder} />,
+  const ContentEditor = React.forwardRef<{ getMarkdown: () => string }, { placeholder?: string }>(
+    ({ placeholder }, ref) => {
+      React.useImperativeHandle(ref, () => ({ getMarkdown: () => "Project goal" }));
+      return <textarea placeholder={placeholder} />;
+    },
   );
   ContentEditor.displayName = "ContentEditor";
 
@@ -225,4 +221,31 @@ describe("CreateProjectModal", () => {
 
     expect(screen.getByText("No repositories match your search.")).toBeInTheDocument();
   });
+});
+
+
+it("waits for workflow setup, submits project and workflow together, and keeps the draft on failure", async () => {
+  const user = userEvent.setup(); const onClose = vi.fn();
+  createProject.mockRejectedValueOnce(new Error("Could not save project"));
+  renderWithI18n(<CreateProjectModal onClose={onClose} />);
+  await user.type(screen.getByPlaceholderText("Project title"), "Launch");
+  await user.click(screen.getByRole("button", { name: "Next: configure workflow" }));
+  expect(createProject).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: /Start from scratch/ }));
+  await user.click(screen.getByRole("button", { name: "Change workflow source" }));
+  expect(screen.getByRole("button", { name: "Create Project" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  await user.click(screen.getByRole("button", { name: "Next: configure workflow" }));
+  expect(screen.getByRole("button", { name: "Create Project" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: /Start from scratch/ })).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  await user.click(screen.getByRole("button", { name: "Create Project" }));
+  await waitFor(() => expect(createProject).toHaveBeenCalledTimes(1));
+  expect(createProject).toHaveBeenCalledWith(expect.objectContaining({ title: "Launch", description: "Project goal", issue_workflow: expect.objectContaining({ api_version: 1, initial_status: "status_1", statuses: expect.arrayContaining([expect.objectContaining({ name: "Ready" }), expect.objectContaining({ name: "Done" })]) }) }));
+  expect(onClose).not.toHaveBeenCalled();
+  expect(useProjectDraftStore.getState().draft.workflow?.statuses).toHaveLength(2);
+  await user.click(screen.getByRole("button", { name: "Create Project" }));
+  await waitFor(() => expect(push).toHaveBeenCalledWith("/test-workspace/projects/new-project?view=workflow"));
+  expect(onClose).toHaveBeenCalledOnce();
+  expect(useProjectDraftStore.getState().draft.workflow).toBeUndefined();
 });

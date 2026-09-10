@@ -23,11 +23,11 @@ const (
 	// gate pinned Task/Run execution: disabling discovery and management must not
 	// mutate an immutable execution manifest that is already in flight.
 	PluginsV1 = "plugins_v1"
-	// IssueLifecycleV1 gates reading the new lifecycle projection as the
+	// IssueWorkflowV1 gates reading the new workflow projection as the
 	// canonical product model. Schema migration, dual-write, and immutable
 	// transition recording are intentionally not gated so a rollback never
 	// leaves an unrepairable history gap.
-	IssueLifecycleV1 = "issue_lifecycle_v1"
+	IssueWorkflowV1 = "issue_workflow_v1"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -63,8 +63,8 @@ func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, PluginsV1, false)
 }
 
-func IssueLifecycleV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
-	return flags.IsEnabled(ctx, IssueLifecycleV1, false)
+func IssueWorkflowV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, IssueWorkflowV1, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

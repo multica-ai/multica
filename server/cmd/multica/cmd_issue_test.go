@@ -4824,3 +4824,44 @@ func TestRunIssueListTableFooterReportsPage(t *testing.T) {
 		})
 	}
 }
+
+func TestRunIssueCreateResolvesWorkflowStatusFromParentProject(t *testing.T) {
+	const parentID = "00000000-0000-4000-8000-000000000001"
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/" + parentID:
+			json.NewEncoder(w).Encode(map[string]any{"id": parentID, "project_id": "editorial"})
+		case "/api/issue-workflows/effective":
+			if r.URL.Query().Get("project_id") != "editorial" {
+				t.Errorf("status resolved outside parent project: %s", r.URL)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"statuses": []map[string]any{{"id": "review-node", "spec_key": "review", "name": "Editorial review"}}})
+		case "/api/issues":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "created", "title": "Child", "identifier": "MUL-1"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	cmd := newIssueCreateTestCmd()
+	cmd.Flags().String("workflow-status", "", "")
+	_ = cmd.Flags().Set("title", "Child")
+	_ = cmd.Flags().Set("parent", parentID)
+	_ = cmd.Flags().Set("workflow-status", "review")
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if body["workflow_status_id"] != "review-node" || body["parent_issue_id"] != parentID {
+		t.Fatalf("create body = %#v", body)
+	}
+	if _, exists := body["status"]; exists {
+		t.Fatal("sent legacy status alongside node identity")
+	}
+}

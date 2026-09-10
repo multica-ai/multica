@@ -20,9 +20,9 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issueguard"
-	"github.com/multica-ai/multica/server/internal/issuelifecycle"
 	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issueposition"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -334,7 +334,7 @@ func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, aut
 	if err != nil {
 		return fmt.Errorf("dispatch for webhook delivery: load linked issue: %w", err)
 	}
-	state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags))
+	state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags))
 	if state.LegacyCategory != "todo" && state.LegacyCategory != "in_progress" {
 		return nil
 	}
@@ -683,39 +683,39 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("refresh autopilot: %w", err)
 	}
 	projectID := currentAutopilot.ProjectID
-	lifecycle, err := issuelifecycle.Effective(ctx, qtx, ap.WorkspaceID, projectID)
+	workflow, err := issueworkflow.Effective(ctx, qtx, ap.WorkspaceID, projectID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if seedErr := qtx.SeedIssueStatusEntries(ctx, ap.WorkspaceID); seedErr != nil {
 			return fmt.Errorf("seed issue status catalog: %w", seedErr)
 		}
-		if _, ensureErr := issuelifecycle.EnsureDefault(ctx, qtx, ap.WorkspaceID); ensureErr != nil {
+		if _, ensureErr := issueworkflow.EnsureDefault(ctx, qtx, ap.WorkspaceID); ensureErr != nil {
 			return ensureErr
 		}
-		lifecycle, err = issuelifecycle.Effective(ctx, qtx, ap.WorkspaceID, projectID)
+		workflow, err = issueworkflow.Effective(ctx, qtx, ap.WorkspaceID, projectID)
 	}
 	if err != nil {
-		return fmt.Errorf("resolve issue lifecycle: %w", err)
+		return fmt.Errorf("resolve issue workflow: %w", err)
 	}
-	var lifecycleStatus db.IssueLifecycleStatus
-	if lifecycle.InitialStatusID.Valid {
-		lifecycleStatus, err = qtx.LockActiveIssueLifecycleStatus(ctx, db.LockActiveIssueLifecycleStatusParams{
-			WorkspaceID: ap.WorkspaceID, LifecycleID: lifecycle.ID, ID: lifecycle.InitialStatusID,
+	var workflowStatus db.IssueWorkflowStatus
+	if workflow.InitialStatusID.Valid {
+		workflowStatus, err = qtx.LockActiveIssueWorkflowStatus(ctx, db.LockActiveIssueWorkflowStatusParams{
+			WorkspaceID: ap.WorkspaceID, WorkflowID: workflow.ID, ID: workflow.InitialStatusID,
 		})
 	} else {
-		lifecycleStatus, err = qtx.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
-			WorkspaceID: ap.WorkspaceID, LifecycleID: lifecycle.ID,
+		workflowStatus, err = qtx.GetIssueWorkflowStatusByLegacyKey(ctx, db.GetIssueWorkflowStatusByLegacyKeyParams{
+			WorkspaceID: ap.WorkspaceID, WorkflowID: workflow.ID,
 			LegacyStatusKey: pgtype.Text{String: "todo", Valid: true},
 		})
 		if err == nil {
-			lifecycleStatus, err = qtx.LockActiveIssueLifecycleStatus(ctx, db.LockActiveIssueLifecycleStatusParams{
-				WorkspaceID: ap.WorkspaceID, LifecycleID: lifecycle.ID, ID: lifecycleStatus.ID,
+			workflowStatus, err = qtx.LockActiveIssueWorkflowStatus(ctx, db.LockActiveIssueWorkflowStatusParams{
+				WorkspaceID: ap.WorkspaceID, WorkflowID: workflow.ID, ID: workflowStatus.ID,
 			})
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("resolve initial lifecycle status: %w", err)
+		return fmt.Errorf("resolve initial workflow status: %w", err)
 	}
-	compatibilityStatus := issuelifecycle.LegacyProjection(lifecycleStatus)
+	compatibilityStatus := issueworkflow.LegacyProjection(workflowStatus)
 
 	if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
 		ctx, qtx, ap.WorkspaceID, ap.ID, projectID, title, autopilotRecentDuplicateWindow,
@@ -756,23 +756,23 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		// is captured separately via origin_type=autopilot + origin_id. For
 		// squad-assigned autopilots, the creator is the resolved leader —
 		// the same agent the issue listener will end up enqueueing.
-		CreatorType:       "agent",
-		CreatorID:         leader.ID,
-		ParentIssueID:     pgtype.UUID{},
-		Position:          newPosition,
-		StartDate:         pgtype.Date{},
-		DueDate:           pgtype.Date{},
-		Number:            issueNumber,
-		ProjectID:         projectID,
-		OriginType:        pgtype.Text{String: "autopilot", Valid: true},
-		OriginID:          ap.ID,
-		LifecycleID:       lifecycle.ID,
-		LifecycleStatusID: lifecycleStatus.ID,
+		CreatorType:      "agent",
+		CreatorID:        leader.ID,
+		ParentIssueID:    pgtype.UUID{},
+		Position:         newPosition,
+		StartDate:        pgtype.Date{},
+		DueDate:          pgtype.Date{},
+		Number:           issueNumber,
+		ProjectID:        projectID,
+		OriginType:       pgtype.Text{String: "autopilot", Valid: true},
+		OriginID:         ap.ID,
+		WorkflowID:       workflow.ID,
+		WorkflowStatusID: workflowStatus.ID,
 	})
 	if err != nil {
 		return fmt.Errorf("create issue: %w", err)
 	}
-	issue, _, _, err = issuelifecycle.RecordTransition(ctx, qtx, nil, issue, issuelifecycle.TransitionActor{
+	issue, _, _, err = issueworkflow.RecordTransition(ctx, qtx, nil, issue, issueworkflow.TransitionActor{
 		Type: "agent",
 		ID:   leader.ID,
 	}, "autopilot_issue_created")
@@ -1122,7 +1122,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 	// The failure reason below deliberately keeps issue.Status, not the
 	// normalized key, so the audit trail names the status a human actually
 	// chose. (MUL-6243)
-	state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags))
+	state := issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags))
 
 	switch state.AutopilotResolution() {
 	case issuepolicy.AutopilotComplete:

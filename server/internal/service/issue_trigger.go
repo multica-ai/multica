@@ -118,9 +118,9 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	// like Todo. Built-in keys resolve to themselves without a query, leaving
 	// this decision bit-identical for workspaces with no custom statuses —
 	// which is the whole set of them until an admin defines one. (MUL-6243)
-	lifecycleEnabled := featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags)
-	currentState := issuepolicy.ResolveIssue(ctx, s.Queries, issue, lifecycleEnabled)
-	prevState := issuepolicy.ResolveStatus(ctx, s.Queries, issue.WorkspaceID, issue.LifecycleID, in.PrevStatus, lifecycleEnabled)
+	workflowEnabled := featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags)
+	currentState := issuepolicy.ResolveIssue(ctx, s.Queries, issue, workflowEnabled)
+	prevState := issuepolicy.ResolveStatus(ctx, s.Queries, issue.WorkspaceID, issue.WorkflowID, in.PrevStatus, workflowEnabled)
 
 	var source RunEnqueueSource
 	switch {

@@ -1757,11 +1757,11 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
-  it("renders lifecycle status snapshots instead of legacy projection names", async () => {
+  it("renders workflow status snapshots instead of legacy projection names", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       {
         type: "activity",
-        id: "act-lifecycle-names",
+        id: "act-workflow-names",
         actor_type: "member",
         actor_id: "user-1",
         action: "status_changed",

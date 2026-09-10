@@ -122,9 +122,9 @@ import type {
   IssueStatusEntry,
   CreateIssueStatusRequest,
   UpdateIssueStatusRequest,
-  IssueLifecycleResponse,
+  IssueWorkflowResponse,
   AutomationExecution,
-  UpdateIssueLifecycleStatusRequest,
+  UpdateIssueWorkflowStatusRequest,
   TransitionIssueStatusNodeRequest,
   TransitionIssueStatusNodeResponse,
   TakeOverAutomationExecutionResponse,
@@ -390,7 +390,7 @@ import {
   ListLabelsResponseSchema,
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
-  IssueLifecycleResponseSchema,
+  IssueWorkflowResponseSchema,
   AutomationExecutionListSchema,
   EMPTY_ISSUE_LIFECYCLE_RESPONSE,
   TransitionIssueStatusNodeResponseSchema,
@@ -3732,24 +3732,24 @@ export class ApiClient {
     });
   }
 
-  async getEffectiveIssueLifecycle(
+  async getEffectiveIssueWorkflow(
     projectId?: string | null,
     includeArchived = false,
-  ): Promise<IssueLifecycleResponse> {
+  ): Promise<IssueWorkflowResponse> {
     const query = new URLSearchParams();
     if (projectId) query.set("project_id", projectId);
     if (includeArchived) query.set("include_archived", "true");
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
-    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/effective${suffix}`);
-    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
-      endpoint: "GET /api/issue-lifecycles/effective",
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/effective${suffix}`);
+    return parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "GET /api/issue-workflows/effective",
     });
   }
 
-  async getIssueLifecycle(lifecycleId: string): Promise<IssueLifecycleResponse> {
-    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/${lifecycleId}`);
-    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
-      endpoint: "GET /api/issue-lifecycles/{lifecycleId}",
+  async getIssueWorkflow(workflowId: string): Promise<IssueWorkflowResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${workflowId}`);
+    return parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "GET /api/issue-workflows/{workflowId}",
     });
   }
 
@@ -3760,57 +3760,68 @@ export class ApiClient {
     });
   }
 
-  async updateProjectIssueLifecycle(
+  async applyProjectWorkflow(projectId: string, data: import("../types").ApplyProjectWorkflowRequest): Promise<IssueWorkflowResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/issue-workflow`, {
+      method: "PUT", body: JSON.stringify(data),
+    });
+    const result = parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PUT /api/projects/{id}/issue-workflow (spec)",
+    });
+    if (!result.workflow.id || result.statuses.length === 0) throw new Error("Invalid workflow response. Reload the project to verify the saved configuration.");
+    return result;
+  }
+
+  async updateProjectIssueWorkflow(
     projectId: string,
     mode: "default" | "custom",
-  ): Promise<IssueLifecycleResponse> {
-    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/issue-lifecycle`, {
+  ): Promise<IssueWorkflowResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/issue-workflow`, {
       method: "PUT",
       body: JSON.stringify({ mode }),
     });
-    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
-      endpoint: "PUT /api/projects/{id}/issue-lifecycle",
+    return parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PUT /api/projects/{id}/issue-workflow",
     });
   }
 
-  async updateIssueLifecycleStatus(
-    lifecycleId: string,
+  async updateIssueWorkflowStatus(
+    workflowId: string,
     statusId: string,
-    data: UpdateIssueLifecycleStatusRequest,
-  ): Promise<IssueLifecycleResponse> {
-    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/${lifecycleId}/statuses/${statusId}`, {
+    data: UpdateIssueWorkflowStatusRequest,
+  ): Promise<IssueWorkflowResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${workflowId}/statuses/${statusId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
-    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
-      endpoint: "PATCH /api/issue-lifecycles/{lifecycleId}/statuses/{statusId}",
+    return parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PATCH /api/issue-workflows/{workflowId}/statuses/{statusId}",
     });
   }
 
-  async archiveIssueLifecycleStatus(
-    lifecycleId: string,
+  async archiveIssueWorkflowStatus(
+    workflowId: string,
     statusId: string,
     expectedRevision: number,
-  ): Promise<IssueLifecycleResponse> {
-    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/${lifecycleId}/statuses/${statusId}?expected_revision=${expectedRevision}`, {
+  ): Promise<IssueWorkflowResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${workflowId}/statuses/${statusId}?expected_revision=${expectedRevision}`, {
       method: "DELETE",
     });
-    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
-      endpoint: "DELETE /api/issue-lifecycles/{lifecycleId}/statuses/{statusId}",
+    return parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "DELETE /api/issue-workflows/{workflowId}/statuses/{statusId}",
     });
   }
 
-  async reorderIssueLifecycleStatuses(
-    lifecycleId: string,
+  async reorderIssueWorkflowStatuses(
+    workflowId: string,
     statusIds: string[],
     expectedRevision: number,
-  ): Promise<IssueLifecycleResponse> {
-    const raw = await this.fetch<unknown>(`/api/issue-lifecycles/${lifecycleId}/statuses/reorder`, {
+  ): Promise<IssueWorkflowResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${workflowId}/statuses/reorder`, {
       method: "PATCH",
       body: JSON.stringify({ status_ids: statusIds, expected_revision: expectedRevision }),
     });
-    return parseWithFallback(raw, IssueLifecycleResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
-      endpoint: "PATCH /api/issue-lifecycles/{lifecycleId}/statuses/reorder",
+    return parseWithFallback(raw, IssueWorkflowResponseSchema, EMPTY_ISSUE_LIFECYCLE_RESPONSE, {
+      endpoint: "PATCH /api/issue-workflows/{workflowId}/statuses/reorder",
     });
   }
 

@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type {
   Issue,
-  IssueLifecycleStatusNode,
+  IssueWorkflowStatusNode,
   IssueStatus,
   IssueStatusCategory,
 } from "@multica/core/types";
@@ -262,16 +262,16 @@ describe("ListView status header collapse", () => {
   });
 });
 
-describe("ListView project lifecycle status nodes", () => {
+describe("ListView project workflow status nodes", () => {
   it("renders the concrete node name and rows from its stable-id branch", () => {
-    const lifecycleIssue = {
+    const workflowIssue = {
       ...ISSUES[0],
-      lifecycle_id: "lifecycle-1",
-      lifecycle_status_id: "node-implementation",
+      workflow_id: "workflow-1",
+      workflow_status_id: "node-implementation",
     } as Issue;
-    const lifecycleStatus = {
+    const workflowStatus = {
       id: "node-implementation",
-      lifecycle_id: "lifecycle-1",
+      workflow_id: "workflow-1",
       legacy_status_key: "todo",
       spec_key: "implementation",
       name: "Implementation",
@@ -290,20 +290,20 @@ describe("ListView project lifecycle status nodes", () => {
       archived_at: null,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
-    } satisfies IssueLifecycleStatusNode;
+    } satisfies IssueWorkflowStatusNode;
     const page = { ...emptyPage, loaded: 1, total: 1 };
 
-    renderListView([lifecycleIssue], ["todo"], {
-      lifecycleStatuses: [lifecycleStatus],
+    renderListView([workflowIssue], ["todo"], {
+      workflowStatuses: [workflowStatus],
       groupBranches: {
         enabled: true,
         descriptors: [
           {
-            key: "lifecycle_status:node-implementation",
+            key: "workflow_status:node-implementation",
             value: {
-              kind: "lifecycle_status",
-              lifecycle_id: "lifecycle-1",
-              lifecycle_status_id: "node-implementation",
+              kind: "workflow_status",
+              workflow_id: "workflow-1",
+              workflow_status_id: "node-implementation",
               status: "todo",
               name: "Implementation",
               color: "#2563eb",
@@ -312,9 +312,9 @@ describe("ListView project lifecycle status nodes", () => {
             count: 1,
           },
         ],
-        issues: [lifecycleIssue],
+        issues: [workflowIssue],
         pagination: {
-          "lifecycle_status:node-implementation": page,
+          "workflow_status:node-implementation": page,
         },
         total: 1,
         isLoading: false,

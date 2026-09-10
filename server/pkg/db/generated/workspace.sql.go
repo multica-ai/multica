@@ -14,7 +14,7 @@ import (
 const createWorkspace = `-- name: CreateWorkspace :one
 INSERT INTO workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, default_issue_lifecycle_id
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, default_issue_workflow_id
 `
 
 type CreateWorkspaceParams struct {
@@ -48,7 +48,7 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.IssueCounter,
 		&i.AvatarUrl,
 		&i.AttributionFailClosed,
-		&i.DefaultIssueLifecycleID,
+		&i.DefaultIssueWorkflowID,
 	)
 	return i, err
 }
@@ -146,11 +146,11 @@ cleared_automation_executions AS (
 cleared_issue_transitions AS (
     DELETE FROM issue_transition WHERE workspace_id = $1
 ),
-cleared_issue_lifecycle_statuses AS (
-    DELETE FROM issue_lifecycle_status WHERE workspace_id = $1
+cleared_issue_workflow_statuses AS (
+    DELETE FROM issue_workflow_status WHERE workspace_id = $1
 ),
-cleared_issue_lifecycles AS (
-    DELETE FROM issue_lifecycle WHERE workspace_id = $1
+cleared_issue_workflows AS (
+    DELETE FROM issue_workflow WHERE workspace_id = $1
 ),
 ws_mcp_servers AS (
     SELECT id FROM workspace_mcp_server WHERE workspace_id = $1
@@ -240,7 +240,7 @@ func (q *Queries) GetDaemonWorkspace(ctx context.Context, id pgtype.UUID) (GetDa
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, default_issue_lifecycle_id FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, default_issue_workflow_id FROM workspace
 WHERE id = $1
 `
 
@@ -261,7 +261,7 @@ func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, 
 		&i.IssueCounter,
 		&i.AvatarUrl,
 		&i.AttributionFailClosed,
-		&i.DefaultIssueLifecycleID,
+		&i.DefaultIssueWorkflowID,
 	)
 	return i, err
 }
@@ -281,7 +281,7 @@ func (q *Queries) GetWorkspaceAttributionFailClosed(ctx context.Context, id pgty
 }
 
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, default_issue_lifecycle_id FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, default_issue_workflow_id FROM workspace
 WHERE slug = $1
 `
 
@@ -302,7 +302,7 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 		&i.IssueCounter,
 		&i.AvatarUrl,
 		&i.AttributionFailClosed,
-		&i.DefaultIssueLifecycleID,
+		&i.DefaultIssueWorkflowID,
 	)
 	return i, err
 }
@@ -361,7 +361,7 @@ const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
        w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed,
-       w.default_issue_lifecycle_id
+       w.default_issue_workflow_id
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
@@ -391,7 +391,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.IssueCounter,
 			&i.AvatarUrl,
 			&i.AttributionFailClosed,
-			&i.DefaultIssueLifecycleID,
+			&i.DefaultIssueWorkflowID,
 		); err != nil {
 			return nil, err
 		}
@@ -458,7 +458,7 @@ UPDATE workspace SET
     avatar_url = COALESCE($8, avatar_url),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, default_issue_lifecycle_id
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed, default_issue_workflow_id
 `
 
 type UpdateWorkspaceParams struct {
@@ -498,7 +498,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.IssueCounter,
 		&i.AvatarUrl,
 		&i.AttributionFailClosed,
-		&i.DefaultIssueLifecycleID,
+		&i.DefaultIssueWorkflowID,
 	)
 	return i, err
 }

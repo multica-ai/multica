@@ -16,10 +16,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issueguard"
-	"github.com/multica-ai/multica/server/internal/issuelifecycle"
 	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -65,11 +65,13 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // to IssueService.Create. The handler owns the parsing step that turns its
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
+	// ProjectIDExplicit allows an explicitly empty project without parent inheritance.
+	ProjectIDExplicit bool
 	WorkspaceID       pgtype.UUID
 	Title             string
 	Description       pgtype.Text
 	Status            string
-	LifecycleStatusID pgtype.UUID
+	WorkflowStatusID  pgtype.UUID
 	Priority          string
 	AssigneeType      pgtype.Text
 	AssigneeID        pgtype.UUID
@@ -261,7 +263,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	// Re-checking under the lock is what makes the status provably active at
 	// the moment the row is written. Built-in statuses skip both — they can
 	// never be archived, so the common path is unchanged. (MUL-6243)
-	if !p.LifecycleStatusID.Valid && p.Status != "" && !issuestatus.IsBuiltIn(p.Status) {
+	if !p.WorkflowStatusID.Valid && p.Status != "" && !issuestatus.IsBuiltIn(p.Status) {
 		if err := qtx.LockIssueStatusCatalogShared(ctx, p.WorkspaceID); err != nil {
 			return IssueCreateResult{}, err
 		}
@@ -290,7 +292,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		// Back-fill project from parent when the caller did not pin
 		// one explicitly. Matches the long-standing HTTP behavior: a
 		// sub-issue inherits its parent's project unless overridden.
-		if !projectID.Valid {
+		if !projectID.Valid && !p.ProjectIDExplicit {
 			projectID = parent.ProjectID
 		}
 	}
@@ -304,54 +306,54 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 
 	// The legacy request still names a status key, but the durable write is a
-	// stable lifecycle node. Resolve that node before allocating a number so an
+	// stable workflow node. Resolve that node before allocating a number so an
 	// archived project-specific node is rejected instead of creating an issue
-	// with a NULL or retired lifecycle binding. The active node is share-locked
+	// with a NULL or retired workflow binding. The active node is share-locked
 	// below so an apply cannot archive it between validation and INSERT.
-	lifecycle, err := issuelifecycle.Effective(ctx, qtx, p.WorkspaceID, projectID)
+	workflow, err := issueworkflow.Effective(ctx, qtx, p.WorkspaceID, projectID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Rolling deployments and old test fixtures can encounter a workspace
-		// before the backfill has installed its default lifecycle. Repair it in
+		// before the backfill has installed its default workflow. Repair it in
 		// this same transaction, then resolve the project inheritance again.
 		if seedErr := qtx.SeedIssueStatusEntries(ctx, p.WorkspaceID); seedErr != nil {
 			return IssueCreateResult{}, fmt.Errorf("seed issue status catalog: %w", seedErr)
 		}
-		if _, ensureErr := issuelifecycle.EnsureDefault(ctx, qtx, p.WorkspaceID); ensureErr != nil {
+		if _, ensureErr := issueworkflow.EnsureDefault(ctx, qtx, p.WorkspaceID); ensureErr != nil {
 			return IssueCreateResult{}, ensureErr
 		}
-		lifecycle, err = issuelifecycle.Effective(ctx, qtx, p.WorkspaceID, projectID)
+		workflow, err = issueworkflow.Effective(ctx, qtx, p.WorkspaceID, projectID)
 	}
 	if err != nil {
 		return IssueCreateResult{}, err
 	}
-	var lifecycleStatus db.IssueLifecycleStatus
-	if p.LifecycleStatusID.Valid {
-		lifecycleStatus, err = qtx.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
-			WorkspaceID: p.WorkspaceID, LifecycleID: lifecycle.ID, ID: p.LifecycleStatusID,
+	var workflowStatus db.IssueWorkflowStatus
+	if p.WorkflowStatusID.Valid {
+		workflowStatus, err = qtx.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
+			WorkspaceID: p.WorkspaceID, WorkflowID: workflow.ID, ID: p.WorkflowStatusID,
 		})
-	} else if p.Status == "" && lifecycle.InitialStatusID.Valid {
-		lifecycleStatus, err = qtx.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
-			WorkspaceID: p.WorkspaceID, LifecycleID: lifecycle.ID, ID: lifecycle.InitialStatusID,
+	} else if p.Status == "" && workflow.InitialStatusID.Valid {
+		workflowStatus, err = qtx.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
+			WorkspaceID: p.WorkspaceID, WorkflowID: workflow.ID, ID: workflow.InitialStatusID,
 		})
 	} else {
 		if p.Status == "" {
 			p.Status = "todo"
 		}
-		lifecycleStatus, err = qtx.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
-			WorkspaceID: p.WorkspaceID, LifecycleID: lifecycle.ID,
+		workflowStatus, err = qtx.GetIssueWorkflowStatusByLegacyKey(ctx, db.GetIssueWorkflowStatusByLegacyKeyParams{
+			WorkspaceID: p.WorkspaceID, WorkflowID: workflow.ID,
 			LegacyStatusKey: pgtype.Text{String: p.Status, Valid: true},
 		})
 	}
-	if !p.LifecycleStatusID.Valid && p.Status != "" && lifecycle.ScopeType == "workspace" && (errors.Is(err, pgx.ErrNoRows) || (err == nil && lifecycleStatus.ArchivedAt.Valid)) {
+	if !p.WorkflowStatusID.Valid && p.Status != "" && workflow.ScopeType == "workspace" && (errors.Is(err, pgx.ErrNoRows) || (err == nil && workflowStatus.ArchivedAt.Valid)) {
 		// Until the final adapter cutover the workspace-default definition is
 		// projected from issue_status. A direct legacy write (including older
 		// binaries during a rolling deploy) may have committed between syncs;
 		// repair that projection before deciding the node is unavailable.
-		if syncErr := issuelifecycle.SyncDefault(ctx, qtx, p.WorkspaceID); syncErr != nil {
+		if syncErr := issueworkflow.SyncDefault(ctx, qtx, p.WorkspaceID); syncErr != nil {
 			return IssueCreateResult{}, syncErr
 		}
-		lifecycleStatus, err = qtx.GetIssueLifecycleStatusByLegacyKey(ctx, db.GetIssueLifecycleStatusByLegacyKeyParams{
-			WorkspaceID: p.WorkspaceID, LifecycleID: lifecycle.ID,
+		workflowStatus, err = qtx.GetIssueWorkflowStatusByLegacyKey(ctx, db.GetIssueWorkflowStatusByLegacyKeyParams{
+			WorkspaceID: p.WorkspaceID, WorkflowID: workflow.ID,
 			LegacyStatusKey: pgtype.Text{String: p.Status, Valid: true},
 		})
 	}
@@ -359,21 +361,21 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if errors.Is(err, pgx.ErrNoRows) {
 			return IssueCreateResult{}, ErrIssueStatusUnavailable
 		}
-		return IssueCreateResult{}, fmt.Errorf("resolve issue lifecycle status: %w", err)
+		return IssueCreateResult{}, fmt.Errorf("resolve issue workflow status: %w", err)
 	}
-	if lifecycleStatus.ArchivedAt.Valid {
+	if workflowStatus.ArchivedAt.Valid {
 		return IssueCreateResult{}, ErrIssueStatusUnavailable
 	}
-	lifecycleStatus, err = qtx.LockActiveIssueLifecycleStatus(ctx, db.LockActiveIssueLifecycleStatusParams{
-		WorkspaceID: p.WorkspaceID, LifecycleID: lifecycle.ID, ID: lifecycleStatus.ID,
+	workflowStatus, err = qtx.LockActiveIssueWorkflowStatus(ctx, db.LockActiveIssueWorkflowStatusParams{
+		WorkspaceID: p.WorkspaceID, WorkflowID: workflow.ID, ID: workflowStatus.ID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return IssueCreateResult{}, ErrIssueStatusUnavailable
 		}
-		return IssueCreateResult{}, fmt.Errorf("lock issue lifecycle status: %w", err)
+		return IssueCreateResult{}, fmt.Errorf("lock issue workflow status: %w", err)
 	}
-	p.Status = issuelifecycle.LegacyProjection(lifecycleStatus)
+	p.Status = issueworkflow.LegacyProjection(workflowStatus)
 
 	// Validate labels before we increment the issue counter so a stale or
 	// wrong-scope selection fails the create cheaply. The de-duplicated rows
@@ -414,81 +416,81 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 
 	var issue db.Issue
 	var assignedTask db.AgentTaskQueue
-	var lifecycleEntryTask bool
-	var customLifecycleEntryPolicy bool
+	var workflowEntryTask bool
+	var customWorkflowEntryPolicy bool
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-			ID:                dbid.NewV7(),
-			WorkspaceID:       p.WorkspaceID,
-			Title:             p.Title,
-			Description:       p.Description,
-			Status:            p.Status,
-			Priority:          p.Priority,
-			AssigneeType:      p.AssigneeType,
-			AssigneeID:        p.AssigneeID,
-			CreatorType:       p.CreatorType,
-			CreatorID:         p.CreatorID,
-			ParentIssueID:     p.ParentIssueID,
-			Position:          newPosition,
-			StartDate:         p.StartDate,
-			DueDate:           p.DueDate,
-			Number:            issueNumber,
-			ProjectID:         projectID,
-			OriginType:        p.OriginType,
-			OriginID:          p.OriginID,
-			Stage:             p.Stage,
-			LifecycleID:       lifecycle.ID,
-			LifecycleStatusID: lifecycleStatus.ID,
+			ID:               dbid.NewV7(),
+			WorkspaceID:      p.WorkspaceID,
+			Title:            p.Title,
+			Description:      p.Description,
+			Status:           p.Status,
+			Priority:         p.Priority,
+			AssigneeType:     p.AssigneeType,
+			AssigneeID:       p.AssigneeID,
+			CreatorType:      p.CreatorType,
+			CreatorID:        p.CreatorID,
+			ParentIssueID:    p.ParentIssueID,
+			Position:         newPosition,
+			StartDate:        p.StartDate,
+			DueDate:          p.DueDate,
+			Number:           issueNumber,
+			ProjectID:        projectID,
+			OriginType:       p.OriginType,
+			OriginID:         p.OriginID,
+			Stage:            p.Stage,
+			WorkflowID:       workflow.ID,
+			WorkflowStatusID: workflowStatus.ID,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
-			ID:                dbid.NewV7(),
-			WorkspaceID:       p.WorkspaceID,
-			Title:             p.Title,
-			Description:       p.Description,
-			Status:            p.Status,
-			Priority:          p.Priority,
-			AssigneeType:      p.AssigneeType,
-			AssigneeID:        p.AssigneeID,
-			CreatorType:       p.CreatorType,
-			CreatorID:         p.CreatorID,
-			ParentIssueID:     p.ParentIssueID,
-			Position:          newPosition,
-			StartDate:         p.StartDate,
-			DueDate:           p.DueDate,
-			Number:            issueNumber,
-			ProjectID:         projectID,
-			Stage:             p.Stage,
-			LifecycleID:       lifecycle.ID,
-			LifecycleStatusID: lifecycleStatus.ID,
+			ID:               dbid.NewV7(),
+			WorkspaceID:      p.WorkspaceID,
+			Title:            p.Title,
+			Description:      p.Description,
+			Status:           p.Status,
+			Priority:         p.Priority,
+			AssigneeType:     p.AssigneeType,
+			AssigneeID:       p.AssigneeID,
+			CreatorType:      p.CreatorType,
+			CreatorID:        p.CreatorID,
+			ParentIssueID:    p.ParentIssueID,
+			Position:         newPosition,
+			StartDate:        p.StartDate,
+			DueDate:          p.DueDate,
+			Number:           issueNumber,
+			ProjectID:        projectID,
+			Stage:            p.Stage,
+			WorkflowID:       workflow.ID,
+			WorkflowStatusID: workflowStatus.ID,
 		})
 	}
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
 	}
 	var initialTransition db.IssueTransition
-	issue, initialTransition, _, err = issuelifecycle.RecordTransition(ctx, qtx, nil, issue, issuelifecycle.TransitionActor{
+	issue, initialTransition, _, err = issueworkflow.RecordTransition(ctx, qtx, nil, issue, issueworkflow.TransitionActor{
 		Type: p.CreatorType,
 		ID:   p.CreatorID,
 	}, "issue_created")
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("record initial issue transition: %w", err)
 	}
-	issue, _, assignedTask, err = enterInitialLifecycleStatus(ctx, qtx, issue, initialTransition, issuelifecycle.TransitionActor{
+	issue, _, assignedTask, err = enterInitialWorkflowStatus(ctx, qtx, issue, initialTransition, issueworkflow.TransitionActor{
 		Type: p.CreatorType,
 		ID:   p.CreatorID,
 	})
 	if err != nil {
-		return IssueCreateResult{}, fmt.Errorf("apply initial lifecycle entry policy: %w", err)
+		return IssueCreateResult{}, fmt.Errorf("apply initial workflow entry policy: %w", err)
 	}
-	lifecycleEntryTask = assignedTask.ID.Valid
-	initialLifecycle, err := qtx.GetIssueLifecycleByID(ctx, db.GetIssueLifecycleByIDParams{
-		ID: issue.LifecycleID, WorkspaceID: issue.WorkspaceID,
+	workflowEntryTask = assignedTask.ID.Valid
+	initialWorkflow, err := qtx.GetIssueWorkflowByID(ctx, db.GetIssueWorkflowByIDParams{
+		ID: issue.WorkflowID, WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
-		return IssueCreateResult{}, fmt.Errorf("load initial lifecycle policy scope: %w", err)
+		return IssueCreateResult{}, fmt.Errorf("load initial workflow policy scope: %w", err)
 	}
-	customLifecycleEntryPolicy = initialLifecycle.ScopeType == "project"
+	customWorkflowEntryPolicy = initialWorkflow.ScopeType == "project"
 
 	if p.SourceContext != nil {
 		if _, err := PersistSourceContext(ctx, qtx, *p.SourceContext, issue.ID, pgtype.UUID{}); err != nil {
@@ -563,7 +565,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}
 	}
 
-	if !customLifecycleEntryPolicy && !assignedTask.ID.Valid && !opts.AssignedAgentRunFireAt.IsZero() && s.shouldEnqueueAgentTaskWithQueries(ctx, qtx, issue) {
+	if !customWorkflowEntryPolicy && !assignedTask.ID.Valid && !opts.AssignedAgentRunFireAt.IsZero() && s.shouldEnqueueAgentTaskWithQueries(ctx, qtx, issue) {
 		// The issue must never become visible without its media-gated assigned
 		// task. Inserting both rows through qtx makes the unique-index winner
 		// deterministic: any observer that can discover the committed issue also
@@ -588,7 +590,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	assignedTaskID := assignedTask.ID
 	if !opts.AssignedAgentRunFireAt.IsZero() {
 		if assignedTaskID.Valid {
-			if !lifecycleEntryTask {
+			if !workflowEntryTask {
 				// The deferred task became durable with the issue at commit. Refresh the
 				// daemon's schedule only now so a wakeup can never race uncommitted data.
 				s.TaskService.notifyRuntimeMayHaveWork(assignedTask.RuntimeID, "")
@@ -612,12 +614,12 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 
 	s.publishIssueCreated(issue, attachments, labels, p.CreatorType, actorID, opts)
 	s.captureCreatedAnalytics(issue, p.CreatorType, actorID, opts)
-	if lifecycleEntryTask {
+	if workflowEntryTask {
 		if s.TaskService != nil {
 			s.TaskService.BroadcastTaskQueued(ctx, assignedTask)
 			s.TaskService.NotifyTaskEnqueued(ctx, assignedTask)
 		}
-	} else if !customLifecycleEntryPolicy && opts.AssignedAgentRunFireAt.IsZero() {
+	} else if !customWorkflowEntryPolicy && opts.AssignedAgentRunFireAt.IsZero() {
 		assignedTaskID = s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID, opts.AssignedAgentRunFireAt)
 	}
 
@@ -844,7 +846,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 	// Backlog is the parking lot: nothing runs from it, so nothing here needs
 	// explaining either. A custom status in the backlog category parks the
 	// same way. (MUL-6243)
-	if issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags)).IsParked() {
+	if issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags)).IsParked() {
 		return pgtype.UUID{}
 	}
 	verdict, admitted := agentAssigneeVerdict(ctx, s.runtimeLookup(s.Queries), issue)
@@ -890,7 +892,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
 	// Resolved through q, not s.Queries: this runs inside the create
 	// transaction and must see the same snapshot as the rest of it. (MUL-6243)
-	if issuepolicy.ResolveIssue(ctx, q, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags)).IsParked() {
+	if issuepolicy.ResolveIssue(ctx, q, issue, featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags)).IsParked() {
 		return false
 	}
 	return isAgentAssigneeReadyWithQueries(ctx, s.runtimeLookup(q), issue)
@@ -923,7 +925,7 @@ func agentAssigneeVerdict(ctx context.Context, lookup RuntimeLookup, issue db.Is
 }
 
 func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
-	if issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueLifecycleV1Enabled(ctx, s.FeatureFlags)).IsParked() {
+	if issuepolicy.ResolveIssue(ctx, s.Queries, issue, featureflags.IssueWorkflowV1Enabled(ctx, s.FeatureFlags)).IsParked() {
 		return false
 	}
 	return s.isSquadLeaderReady(ctx, issue)

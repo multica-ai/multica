@@ -517,22 +517,22 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 			"status":       "todo",
 		})
 
-		for _, lifecycleEnabled := range []bool{false, true} {
+		for _, workflowEnabled := range []bool{false, true} {
 			stats, err := testHandler.Queries.GetProjectIssueStats(ctx, db.GetProjectIssueStatsParams{
 				WorkspaceID:        parseUUID(testWorkspaceID),
 				ProjectIds:         []pgtype.UUID{projectID},
 				TerminalStatusKeys: terminalStatusKeys,
-				LifecycleEnabled:   lifecycleEnabled,
+				WorkflowEnabled:    workflowEnabled,
 			})
 			if err != nil {
-				t.Fatalf("GetProjectIssueStats lifecycle=%v: %v", lifecycleEnabled, err)
+				t.Fatalf("GetProjectIssueStats workflow=%v: %v", workflowEnabled, err)
 			}
 			if len(stats) != 1 {
 				t.Fatalf("expected stats for one project, got %d", len(stats))
 			}
 			if stats[0].TotalCount != 2 || stats[0].DoneCount != 1 {
-				t.Errorf("project stats lifecycle=%v = %d done / %d total, want 1/2 (the custom done status must count)",
-					lifecycleEnabled, stats[0].DoneCount, stats[0].TotalCount)
+				t.Errorf("project stats workflow=%v = %d done / %d total, want 1/2 (the custom done status must count)",
+					workflowEnabled, stats[0].DoneCount, stats[0].TotalCount)
 			}
 		}
 	})
@@ -548,22 +548,22 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 			}
 		}
 
-		for _, lifecycleEnabled := range []bool{false, true} {
+		for _, workflowEnabled := range []bool{false, true} {
 			rows, err := testHandler.Queries.ChildIssueProgress(ctx, db.ChildIssueProgressParams{
 				WorkspaceID:        parseUUID(testWorkspaceID),
 				TerminalStatusKeys: terminalStatusKeys,
-				LifecycleEnabled:   lifecycleEnabled,
+				WorkflowEnabled:    workflowEnabled,
 			})
 			if err != nil {
-				t.Fatalf("ChildIssueProgress lifecycle=%v: %v", lifecycleEnabled, err)
+				t.Fatalf("ChildIssueProgress workflow=%v: %v", workflowEnabled, err)
 			}
 			matched := false
 			for _, row := range rows {
 				if row.ParentIssueID == parent {
 					matched = true
 					if row.Total != 2 || row.Done != 1 {
-						t.Errorf("child progress lifecycle=%v = %d done / %d total, want 1/2 (the custom done status must count)",
-							lifecycleEnabled, row.Done, row.Total)
+						t.Errorf("child progress workflow=%v = %d done / %d total, want 1/2 (the custom done status must count)",
+							workflowEnabled, row.Done, row.Total)
 					}
 				}
 			}

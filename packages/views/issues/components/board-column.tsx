@@ -77,15 +77,15 @@ export interface BoardColumnGroup {
   title: string;
   /** Workspace-wide boards use categories; project boards use Status Nodes. */
   status?: IssueStatusCategory;
-  /** Stable project lifecycle node. `null` is a legacy unbound fallback
-   * bucket; `undefined` means this is not a lifecycle-status column. */
-  lifecycleStatusId?: string | null;
-  lifecycleId?: string;
-  lifecycleStatusLegacyKey?: string;
-  lifecycleStatusColor?: string;
-  lifecycleStatusPosition?: number;
-  lifecycleStatusArchived?: boolean;
-  lifecycleStatusHistorical?: boolean;
+  /** Stable project workflow node. `null` is a legacy unbound fallback
+   * bucket; `undefined` means this is not a workflow-status column. */
+  workflowStatusId?: string | null;
+  workflowId?: string;
+  workflowStatusLegacyKey?: string;
+  workflowStatusColor?: string;
+  workflowStatusPosition?: number;
+  workflowStatusArchived?: boolean;
+  workflowStatusHistorical?: boolean;
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
   /** Project id for this column; null = the "No project" column. Set only
@@ -238,7 +238,7 @@ export const BoardColumn = memo(function BoardColumn({
             </DeferredPopup>
           )}
           {onCreateIssue &&
-            (group.lifecycleStatusId === undefined ||
+            (group.workflowStatusId === undefined ||
               group.createData !== undefined) && (
               <DeferredTooltip
                 content={t(($) => $.board.add_issue_tooltip)}
@@ -353,12 +353,12 @@ function BoardGroupHeading({
   group: BoardColumnGroup;
   count: number;
 }) {
-  if (group.lifecycleStatusId !== undefined) {
+  if (group.workflowStatusId !== undefined) {
     return (
       <div className="flex min-w-0 items-center gap-2">
         <span
           className="size-2.5 shrink-0 rounded-full bg-muted-foreground/30"
-          style={group.lifecycleStatusColor ? { backgroundColor: group.lifecycleStatusColor } : undefined}
+          style={group.workflowStatusColor ? { backgroundColor: group.workflowStatusColor } : undefined}
         />
         <span className="truncate text-body font-medium" title={group.title}>
           {group.title}

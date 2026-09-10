@@ -10,12 +10,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/multica-ai/multica/server/internal/issuelifecycle"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
-func TestLifecycleStatusSnapshotName(t *testing.T) {
+func TestWorkflowStatusSnapshotName(t *testing.T) {
 	for _, tc := range []struct {
 		name, key, want string
 	}{
@@ -23,12 +23,12 @@ func TestLifecycleStatusSnapshotName(t *testing.T) {
 		{name: "Ready for Agent", key: "todo", want: "Ready for Agent"},
 		{name: "Customer Review", key: "customer_review", want: "Customer Review"},
 	} {
-		status := db.IssueLifecycleStatus{
+		status := db.IssueWorkflowStatus{
 			Name:            tc.name,
 			LegacyStatusKey: pgtype.Text{String: tc.key, Valid: true},
 		}
-		if got := lifecycleStatusSnapshotName(status); got != tc.want {
-			t.Errorf("lifecycleStatusSnapshotName(%q, %q) = %q, want %q", tc.key, tc.name, got, tc.want)
+		if got := workflowStatusSnapshotName(status); got != tc.want {
+			t.Errorf("workflowStatusSnapshotName(%q, %q) = %q, want %q", tc.key, tc.name, got, tc.want)
 		}
 	}
 }
@@ -50,17 +50,17 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 	var workspaceID pgtype.UUID
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO workspace (name, slug, issue_prefix)
-		VALUES ('Lifecycle transition test', $1, 'LCT')
+		VALUES ('Workflow transition test', $1, 'LCT')
 		RETURNING id
-	`, "lifecycle-transition-"+suffix).Scan(&workspaceID); err != nil {
+	`, "workflow-transition-"+suffix).Scan(&workspaceID); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM automation_execution WHERE workspace_id = $1`, workspaceID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM issue_transition WHERE workspace_id = $1`, workspaceID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM issue WHERE workspace_id = $1`, workspaceID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM issue_lifecycle_status WHERE workspace_id = $1`, workspaceID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM issue_lifecycle WHERE workspace_id = $1`, workspaceID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM issue_workflow_status WHERE workspace_id = $1`, workspaceID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM issue_workflow WHERE workspace_id = $1`, workspaceID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM issue_status WHERE workspace_id = $1`, workspaceID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
 	})
@@ -79,18 +79,18 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		t.Fatalf("begin lifecycle bootstrap: %v", err)
+		t.Fatalf("begin workflow bootstrap: %v", err)
 	}
-	if _, err := issuelifecycle.EnsureDefault(ctx, q.WithTx(tx), workspaceID); err != nil {
+	if _, err := issueworkflow.EnsureDefault(ctx, q.WithTx(tx), workspaceID); err != nil {
 		_ = tx.Rollback(ctx)
-		t.Fatalf("bootstrap lifecycle: %v", err)
+		t.Fatalf("bootstrap workflow: %v", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		t.Fatalf("commit lifecycle bootstrap: %v", err)
+		t.Fatalf("commit workflow bootstrap: %v", err)
 	}
 
 	// Simulate an issue inserted by an older binary during a rolling deploy:
-	// the legacy status/revision exist, but lifecycle pins and transition do
+	// the legacy status/revision exist, but workflow pins and transition do
 	// not. The first new transition repairs the binding and still resolves its
 	// from-node instead of losing that audit edge.
 	rollingCreator := dbid.NewV7()
@@ -110,16 +110,16 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 	}
 	if _, err := pool.Exec(ctx, `
 		UPDATE issue
-		SET lifecycle_id = NULL, lifecycle_status_id = NULL, last_transition_id = NULL
+		SET workflow_id = NULL, workflow_status_id = NULL, last_transition_id = NULL
 		WHERE id = $1
 	`, rollingCreated.Issue.ID); err != nil {
-		t.Fatalf("strip rolling fixture lifecycle projection: %v", err)
+		t.Fatalf("strip rolling fixture workflow projection: %v", err)
 	}
 	rollingResult, err := TransitionIssue(ctx, q, pool, IssueTransitionParams{
 		IssueID:     rollingCreated.Issue.ID,
 		WorkspaceID: workspaceID,
 		Status:      "in_progress",
-		Actor:       issuelifecycle.TransitionActor{Type: "system"},
+		Actor:       issueworkflow.TransitionActor{Type: "system"},
 		Cause:       "rolling_deploy_repair",
 	})
 	if err != nil {
@@ -128,9 +128,9 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 	if !rollingResult.Transition.FromStatusID.Valid {
 		t.Fatal("rolling repair transition lost its legacy from-status node")
 	}
-	rollingFrom, err := q.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
+	rollingFrom, err := q.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
 		WorkspaceID: workspaceID,
-		LifecycleID: rollingResult.Transition.LifecycleID,
+		WorkflowID:  rollingResult.Transition.WorkflowID,
 		ID:          rollingResult.Transition.FromStatusID,
 	})
 	if err != nil || !rollingFrom.LegacyStatusKey.Valid || rollingFrom.LegacyStatusKey.String != "todo" {
@@ -149,15 +149,15 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	if !created.Issue.LifecycleID.Valid || !created.Issue.LifecycleStatusID.Valid || !created.Issue.LastTransitionID.Valid {
-		t.Fatalf("created issue missing lifecycle pins: %#v", created.Issue)
+	if !created.Issue.WorkflowID.Valid || !created.Issue.WorkflowStatusID.Valid || !created.Issue.LastTransitionID.Valid {
+		t.Fatalf("created issue missing workflow pins: %#v", created.Issue)
 	}
 
 	human := IssueTransitionParams{
 		IssueID:              created.Issue.ID,
 		WorkspaceID:          workspaceID,
 		Status:               "human_review",
-		Actor:                issuelifecycle.TransitionActor{Type: "member", ID: creatorID},
+		Actor:                issueworkflow.TransitionActor{Type: "member", ID: creatorID},
 		Cause:                "human_review",
 		ExpectedRevision:     pgtype.Int8{Int64: created.Issue.Revision, Valid: true},
 		ExpectedTransitionID: created.Issue.LastTransitionID,
@@ -177,7 +177,7 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 
 	staleAgent := human
 	staleAgent.Status = "in_progress"
-	staleAgent.Actor = issuelifecycle.TransitionActor{Type: "agent", ID: dbid.NewV7()}
+	staleAgent.Actor = issueworkflow.TransitionActor{Type: "agent", ID: dbid.NewV7()}
 	staleAgent.Cause = "agent_progress"
 	if _, err := TransitionIssue(ctx, q, pool, staleAgent); !errors.Is(err, ErrIssueTransitionConflict) {
 		t.Fatalf("stale agent transition error = %v, want conflict", err)
@@ -192,7 +192,7 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 
 	// Move off the review node, then rename and archive it. The node ID remains
 	// stable so the already-committed historical transition still resolves,
-	// while the lifecycle revision records the catalog edit.
+	// while the workflow revision records the catalog edit.
 	done := human
 	done.Status = "done"
 	done.Cause = "human_completed"
@@ -202,19 +202,19 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 	if err != nil {
 		t.Fatalf("complete issue: %v", err)
 	}
-	reviewNodeBefore, err := q.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
+	reviewNodeBefore, err := q.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
 		WorkspaceID: workspaceID,
-		LifecycleID: humanResult.Transition.LifecycleID,
+		WorkflowID:  humanResult.Transition.WorkflowID,
 		ID:          humanResult.Transition.ToStatusID,
 	})
 	if err != nil {
 		t.Fatalf("load historical review node: %v", err)
 	}
-	lifecycleBefore, err := q.GetIssueLifecycleByID(ctx, db.GetIssueLifecycleByIDParams{
-		ID: reviewNodeBefore.LifecycleID, WorkspaceID: workspaceID,
+	workflowBefore, err := q.GetIssueWorkflowByID(ctx, db.GetIssueWorkflowByIDParams{
+		ID: reviewNodeBefore.WorkflowID, WorkspaceID: workspaceID,
 	})
 	if err != nil {
-		t.Fatalf("load lifecycle before catalog edit: %v", err)
+		t.Fatalf("load workflow before catalog edit: %v", err)
 	}
 	catalogTx, err := pool.Begin(ctx)
 	if err != nil {
@@ -228,16 +228,16 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 		_ = catalogTx.Rollback(ctx)
 		t.Fatalf("update legacy catalog: %v", err)
 	}
-	if err := issuelifecycle.SyncDefault(ctx, q.WithTx(catalogTx), workspaceID); err != nil {
+	if err := issueworkflow.SyncDefault(ctx, q.WithTx(catalogTx), workspaceID); err != nil {
 		_ = catalogTx.Rollback(ctx)
-		t.Fatalf("sync lifecycle catalog: %v", err)
+		t.Fatalf("sync workflow catalog: %v", err)
 	}
 	if err := catalogTx.Commit(ctx); err != nil {
 		t.Fatalf("commit catalog edit: %v", err)
 	}
-	reviewNodeAfter, err := q.GetIssueLifecycleStatusByID(ctx, db.GetIssueLifecycleStatusByIDParams{
+	reviewNodeAfter, err := q.GetIssueWorkflowStatusByID(ctx, db.GetIssueWorkflowStatusByIDParams{
 		WorkspaceID: workspaceID,
-		LifecycleID: humanResult.Transition.LifecycleID,
+		WorkflowID:  humanResult.Transition.WorkflowID,
 		ID:          humanResult.Transition.ToStatusID,
 	})
 	if err != nil {
@@ -246,14 +246,14 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 	if reviewNodeAfter.ID != reviewNodeBefore.ID || reviewNodeAfter.Name != "Review archived" || !reviewNodeAfter.ArchivedAt.Valid {
 		t.Fatalf("catalog projection lost stable node identity: before=%#v after=%#v", reviewNodeBefore, reviewNodeAfter)
 	}
-	lifecycleAfter, err := q.GetIssueLifecycleByID(ctx, db.GetIssueLifecycleByIDParams{
-		ID: reviewNodeAfter.LifecycleID, WorkspaceID: workspaceID,
+	workflowAfter, err := q.GetIssueWorkflowByID(ctx, db.GetIssueWorkflowByIDParams{
+		ID: reviewNodeAfter.WorkflowID, WorkspaceID: workspaceID,
 	})
 	if err != nil {
-		t.Fatalf("load lifecycle after catalog edit: %v", err)
+		t.Fatalf("load workflow after catalog edit: %v", err)
 	}
-	if lifecycleAfter.Revision != lifecycleBefore.Revision+1 {
-		t.Fatalf("lifecycle revision = %d, want %d", lifecycleAfter.Revision, lifecycleBefore.Revision+1)
+	if workflowAfter.Revision != workflowBefore.Revision+1 {
+		t.Fatalf("workflow revision = %d, want %d", workflowAfter.Revision, workflowBefore.Revision+1)
 	}
 	historical, err := q.GetIssueTransition(ctx, db.GetIssueTransitionParams{
 		ID: humanResult.Transition.ID, WorkspaceID: workspaceID,
@@ -261,7 +261,7 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 	if err != nil {
 		t.Fatalf("reload historical transition: %v", err)
 	}
-	if historical.ToStatusID != reviewNodeBefore.ID || historical.LifecycleRevision != lifecycleBefore.Revision {
+	if historical.ToStatusID != reviewNodeBefore.ID || historical.WorkflowRevision != workflowBefore.Revision {
 		t.Fatalf("historical transition drifted after catalog edit: %#v", historical)
 	}
 	current = doneResult.Issue
@@ -272,7 +272,7 @@ func TestTransitionIssueRecordsImmutableHistoryAndRejectsStaleAgent(t *testing.T
 	if len(transitions) != 3 {
 		t.Fatalf("transition count = %d, want creation + review + completion", len(transitions))
 	}
-	consistency, err := q.GetIssueLifecycleConsistency(ctx, workspaceID)
+	consistency, err := q.GetIssueWorkflowConsistency(ctx, workspaceID)
 	if err != nil {
 		t.Fatalf("audit consistency: %v", err)
 	}

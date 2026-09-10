@@ -310,6 +310,20 @@ const { ApiError } = vi.hoisted(() => {
   return { ApiError: ApiErrorImpl };
 });
 
+const mockGetEffectiveWorkflow = vi.hoisted(() => vi.fn());
+function workflowFixture(projectId: string | null = null) {
+  const prefix = projectId ?? "workspace";
+  return {
+    workflow: { id: `${prefix}-flow`, workspace_id: "ws-test", scope_type: projectId ? "project" : "workspace", scope_id: projectId ?? "ws-test", name: "Workflow", revision: 1, initial_status_id: `${prefix}-ready`, created_at: "", updated_at: "" },
+    mode: projectId ? "custom" : "default",
+    statuses: ["Ready", "Review"].map((name, position) => ({
+      id: `${prefix}-${name.toLowerCase()}`, workflow_id: `${prefix}-flow`, spec_key: name.toLowerCase(), legacy_status_key: `${prefix}_${name.toLowerCase()}`, name,
+      position, phase: position ? "started" : "backlog", color: "#123456", description: "", outcome: null, archived_at: null,
+      entry_policy: { assignee: { type: "keep" }, executor: { type: "none" }, instructions: "", advance: "human_confirms" }, entry_policy_revision: 1, created_at: "", updated_at: "",
+    })),
+  };
+}
+
 vi.mock("@multica/core/api", async () => {
   // Pull real `parseWithFallback` + `DuplicateIssueErrorBodySchema` from the
   // schema modules so the drift-fallback branch in create-issue.tsx runs the
@@ -324,6 +338,7 @@ vi.mock("@multica/core/api", async () => {
   >("@multica/core/api/schemas");
   return {
     api: {
+      getEffectiveIssueWorkflow: mockGetEffectiveWorkflow,
       createCommentSubIssue: mockCreateCommentSubIssue,
       listProperties: mockListProperties,
       setIssueProperty: mockSetIssueProperty,
@@ -611,10 +626,14 @@ import {
   ManualCreatePanel,
 } from "./create-issue";
 
-function renderModal(element: React.ReactElement) {
+function renderModal(element: React.ReactElement, seedWorkflow = true) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  if (seedWorkflow) {
+    const projectId = mockDraftStore.draft.shared.projectId ?? null;
+    qc.setQueryData(["issue-workflows", "ws-test", "effective", projectId, { includeArchived: false }], workflowFixture(projectId));
+  }
   return render(
     <I18nWrapper>
       <QueryClientProvider client={qc}>{element}</QueryClientProvider>
@@ -625,6 +644,7 @@ function renderModal(element: React.ReactElement) {
 describe("CreateIssueModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetEffectiveWorkflow.mockImplementation(async (projectId: string | null) => workflowFixture(projectId));
     mockQuickCreateStore.keepOpen = false;
     mockCreateSettingsStore.manualCreateFields = DEFAULT_MANUAL_FIELDS;
     mockSetKeepOpen.mockImplementation((v: boolean) => {
@@ -708,6 +728,34 @@ describe("CreateIssueModal", () => {
     });
   });
 
+  it("uses project nodes and resets a selected workspace status when the project changes", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Project scoped task");
+    await user.click(screen.getByRole("button", { name: "Ready" }));
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByTestId("project-picker"));
+    await user.click(await screen.findByRole("button", { name: "Ready" }));
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({ project_id: "proj-1", workflow_status_id: "proj-1-review" })));
+    expect(mockCreateIssue.mock.calls[0]?.[0]).not.toHaveProperty("status");
+  });
+
+  it("disables creation while workflow loading fails and allows retry", async () => {
+    const user = userEvent.setup();
+    mockGetEffectiveWorkflow.mockRejectedValue(new Error("offline"));
+    renderModal(<CreateIssueModal onClose={vi.fn()} />, false);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Needs workflow");
+    await screen.findByText("Unable to load this workflow.");
+    expect(screen.getByRole("button", { name: "Create Issue" })).toBeDisabled();
+    mockGetEffectiveWorkflow.mockImplementation(async (projectId: string | null) => workflowFixture(projectId));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create Issue" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalled());
+  });
+
   it("uses the same compact attachment control as agent mode", () => {
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
@@ -729,7 +777,7 @@ describe("CreateIssueModal", () => {
       expect(mockCreateIssue).toHaveBeenCalledWith({
         title: "Ship create issue regression coverage",
         description: undefined,
-        status: "todo",
+        workflow_status_id: "workspace-ready",
         priority: "none",
         assignee_type: undefined,
         assignee_id: undefined,
@@ -737,7 +785,7 @@ describe("CreateIssueModal", () => {
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
-        project_id: undefined,
+        project_id: null,
       });
     });
 
@@ -841,7 +889,7 @@ describe("CreateIssueModal", () => {
       expect(mockCreateIssue).toHaveBeenCalledWith({
         title: "First follow-up issue",
         description: "Description to clear",
-        status: "todo",
+        workflow_status_id: "workspace-ready",
         priority: "none",
         assignee_type: undefined,
         assignee_id: undefined,
@@ -849,7 +897,7 @@ describe("CreateIssueModal", () => {
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
-        project_id: undefined,
+        project_id: null,
       });
     });
 

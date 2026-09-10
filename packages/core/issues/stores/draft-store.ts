@@ -48,6 +48,8 @@ export interface IssueCreateManual {
   title: string;
   description: string;
   status: IssueStatus;
+  workflowStatusId?: string;
+  workflowProjectId?: string | null;
   startDate: string | null;
   assigneeType?: IssueAssigneeType;
   assigneeId?: string;

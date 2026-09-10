@@ -29,6 +29,7 @@ import {
 } from "@multica/core/issues/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { issueWorkflowOptions, activeWorkflowStatuses, workflowPhaseCategory } from "@multica/core/issue-workflows";
 import { useStatusOptions } from "../utils/status-options";
 import { issueKeys } from "@multica/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
@@ -107,7 +108,11 @@ export function IssueActionsMenuItems({
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const statusOptions = useStatusOptions(wsId);
+  const legacyOptions = useStatusOptions(wsId);
+  const workflowQuery = useQuery(issueWorkflowOptions(wsId, issue.workflow_id ?? ""));
+  const statusOptions = issue.workflow_id ? activeWorkflowStatuses(workflowQuery.data).map((node) => ({
+    key: node.id, label: node.name, color: node.color, category: workflowPhaseCategory(node.phase),
+  })) : legacyOptions;
   const { categoryOf, colorOf } = useIssueStatuses(wsId);
   const {
     isPinned,
@@ -187,10 +192,13 @@ export function IssueActionsMenuItems({
               that can change a status must offer the same set, or a custom
               status is unreachable from the board's right-click menu. One flat
               list in canonical category order. (MUL-6243) */}
+          {issue.workflow_id && !workflowQuery.isSuccess && <P.Item onClick={() => void workflowQuery.refetch()}>
+            {workflowQuery.isError ? t(($) => $.workflow_selection.retry) : t(($) => $.workflow_selection.loading)}
+          </P.Item>}
           {statusOptions.map((option) => (
             <P.Item
               key={option.key}
-              onClick={() => updateField({ status: option.key })}
+              onClick={() => updateField(issue.workflow_id ? { workflow_status_id: option.key } : { status: option.key })}
             >
               <StatusIcon
                 status={option.key}
@@ -199,7 +207,7 @@ export function IssueActionsMenuItems({
                 className="h-3.5 w-3.5"
               />
               {option.label}
-              {issue.status === option.key && (
+              {(issue.workflow_id ? issue.workflow_status_id === option.key : issue.status === option.key) && (
                 <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>

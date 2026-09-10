@@ -20,6 +20,7 @@ import { commonIssueFields } from "@multica/core/issues/batch";
 import { issueBehavesAs } from "@multica/core/issues";
 import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
+import { BatchWorkflowStatusPicker } from "./pickers/batch-workflow-status-picker";
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
 import { useT } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
@@ -222,6 +223,7 @@ export function BatchActionToolbar({
         </div>
 
         {/* Status */}
+        {selectedIssues.some((issue) => !!issue.workflow_id) ? <BatchWorkflowStatusPicker issues={selectedIssues} disabled={loading} /> : (
         <StatusPicker
           status={common.status}
           onUpdate={handleBatchStatus}
@@ -231,6 +233,7 @@ export function BatchActionToolbar({
           trigger={t(($) => $.batch.status)}
           align="center"
         />
+        )}
 
         {/* Priority */}
         <PriorityPicker

@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import type {
   Issue,
   IssueAssigneeType,
-  IssueLifecycleStatusNode,
+  IssueWorkflowStatusNode,
   IssueStatusCategory,
   Project,
   IssueProperty,
@@ -61,7 +61,7 @@ import {
   propertyGroupId,
   projectGroupId,
 } from "../utils/drag-utils";
-import { buildLifecycleStatusGroups } from "../utils/lifecycle-status-groups";
+import { buildWorkflowStatusGroups } from "../utils/workflow-status-groups";
 
 function isStatusGroup(
   group: BoardColumnGroup,
@@ -255,7 +255,7 @@ function BoardViewImpl({
   onCreateIssue,
   statusPagination,
   groupBranches,
-  lifecycleStatuses,
+  workflowStatuses,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatusCategory[];
@@ -268,7 +268,7 @@ function BoardViewImpl({
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   statusPagination?: IssueStatusPagination;
   groupBranches?: IssueGroupBranches;
-  lifecycleStatuses?: IssueLifecycleStatusNode[];
+  workflowStatuses?: IssueWorkflowStatusNode[];
 }) {
   const { t } = useT("issues");
   const storeGrouping = useViewStore((s) => s.grouping);
@@ -366,13 +366,13 @@ function BoardViewImpl({
     }
     return undefined;
   }, [getActorName, groupBranches, grouping, t]);
-  const hydratedLifecycleGroups = useMemo<BoardColumnGroup[] | undefined>(() => {
-    if (lifecycleStatuses === undefined || grouping !== "status") return undefined;
-    return buildLifecycleStatusGroups(
-      lifecycleStatuses,
+  const hydratedWorkflowGroups = useMemo<BoardColumnGroup[] | undefined>(() => {
+    if (workflowStatuses === undefined || grouping !== "status") return undefined;
+    return buildWorkflowStatusGroups(
+      workflowStatuses,
       groupBranches?.descriptors ?? [],
     );
-  }, [groupBranches?.descriptors, grouping, lifecycleStatuses]);
+  }, [groupBranches?.descriptors, grouping, workflowStatuses]);
   const projectColumnLabels = useMemo<ProjectColumnLabels>(
     () => ({
       noProject: t(($) => $.swimlane.no_project),
@@ -446,7 +446,7 @@ function BoardViewImpl({
   const groups = useMemo(
     () => {
       const built =
-        hydratedLifecycleGroups ??
+        hydratedWorkflowGroups ??
         hydratedAssigneeGroups ??
         hydratedProjectGroups ??
         buildGroups(issues, visibleStatuses, grouping, {
@@ -462,7 +462,7 @@ function BoardViewImpl({
         totalCount: groupPagination?.[group.id]?.total ?? group.totalCount,
       }));
     },
-    [hydratedLifecycleGroups, hydratedAssigneeGroups, hydratedProjectGroups, issues, visibleStatuses, grouping, getActorName, groupingProperty, projectMap, projectColumnLabels, groupPagination, t],
+    [hydratedWorkflowGroups, hydratedAssigneeGroups, hydratedProjectGroups, issues, visibleStatuses, grouping, getActorName, groupingProperty, projectMap, projectColumnLabels, groupPagination, t],
   );
   const groupIds = useMemo(
     () => new Set(groups.map((group) => group.id)),
@@ -778,7 +778,7 @@ function BoardViewImpl({
         )}
 
 
-        {grouping === "status" && lifecycleStatuses === undefined && hiddenStatuses.length > 0 && (
+        {grouping === "status" && workflowStatuses === undefined && hiddenStatuses.length > 0 && (
           <BoardHiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
             statusPagination={statusPagination}

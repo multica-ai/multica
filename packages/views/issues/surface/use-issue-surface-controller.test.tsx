@@ -245,26 +245,26 @@ describe("useIssueSurfaceController", () => {
     );
   });
 
-  it("uses lifecycle status-node branches for a project Board", async () => {
+  it("uses workflow status-node branches for a project Board", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("board");
     store.getState().setGrouping("status");
-    const lifecycleIssue = makeIssue({
-      id: "issue-lifecycle",
+    const workflowIssue = makeIssue({
+      id: "issue-workflow",
       status: "todo",
-      lifecycle_id: "lifecycle-1",
-      lifecycle_status_id: "node-implementation",
+      workflow_id: "workflow-1",
+      workflow_status_id: "node-implementation",
     });
     const listIssueTableGroups = vi.fn(async () => ({
       query_fingerprint: "test",
       total: 1,
       groups: [
         {
-          key: "lifecycle_status:node-implementation",
+          key: "workflow_status:node-implementation",
           value: {
-            kind: "lifecycle_status" as const,
-            lifecycle_id: "lifecycle-1",
-            lifecycle_status_id: "node-implementation",
+            kind: "workflow_status" as const,
+            workflow_id: "workflow-1",
+            workflow_status_id: "node-implementation",
             status: "todo",
             name: "Implementation",
             color: "#2563eb",
@@ -275,20 +275,20 @@ describe("useIssueSurfaceController", () => {
       ],
       next_cursor: null,
     }));
-    const lifecycleRows = vi.fn(async () => ({
+    const workflowRows = vi.fn(async () => ({
       query_fingerprint: "test",
-      group_key: "lifecycle_status:node-implementation",
+      group_key: "workflow_status:node-implementation",
       parent_id: null,
       total: 1,
       branch_total: 1,
-      rows: [{ issue: lifecycleIssue, has_children: false }],
+      rows: [{ issue: workflowIssue, has_children: false }],
       next_cursor: null,
     }));
     setApiInstance({
       listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
-      getEffectiveIssueLifecycle: async () => ({
-        lifecycle: {
-          id: "lifecycle-1",
+      getEffectiveIssueWorkflow: async () => ({
+        workflow: {
+          id: "workflow-1",
           workspace_id: "ws-1",
           scope_type: "project",
           scope_id: "p1",
@@ -300,7 +300,7 @@ describe("useIssueSurfaceController", () => {
         statuses: [
           {
             id: "node-implementation",
-            lifecycle_id: "lifecycle-1",
+            workflow_id: "workflow-1",
             legacy_status_key: "todo",
             name: "Implementation",
             description: "",
@@ -323,7 +323,7 @@ describe("useIssueSurfaceController", () => {
         mode: "custom",
       }),
       listIssueTableGroups,
-      listIssueTableRows: lifecycleRows,
+      listIssueTableRows: workflowRows,
       listIssueTableFacets: async () => ({
         query_fingerprint: "test",
         total: 1,
@@ -345,16 +345,16 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(listIssueTableGroups).toHaveBeenCalled());
     expect(listIssueTableGroups).toHaveBeenCalledWith(
-      expect.objectContaining({ group: { kind: "lifecycle_status" } }),
+      expect.objectContaining({ group: { kind: "workflow_status" } }),
     );
-    await waitFor(() => expect(lifecycleRows).toHaveBeenCalled());
-    expect(lifecycleRows).toHaveBeenCalledWith(
+    await waitFor(() => expect(workflowRows).toHaveBeenCalled());
+    expect(workflowRows).toHaveBeenCalledWith(
       expect.objectContaining({
-        group: { kind: "lifecycle_status" },
-        group_key: "lifecycle_status:node-implementation",
+        group: { kind: "workflow_status" },
+        group_key: "workflow_status:node-implementation",
       }),
     );
-    expect(result.current.lifecycleStatuses?.map((status) => status.name)).toEqual([
+    expect(result.current.workflowStatuses?.map((status) => status.name)).toEqual([
       "Implementation",
     ]);
   });
@@ -601,7 +601,7 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.selection.selectedIds).toEqual(new Set());
   });
 
-  it("delegates drag movement as a server-owned relative intent", () => {
+  it("resolves a project/status drag before sending its relative move intent", () => {
     const { result } = renderHook(
       () =>
         useIssueSurfaceController({
@@ -626,28 +626,12 @@ describe("useIssueSurfaceController", () => {
       );
     });
 
-    expect(updateIssueMutate).toHaveBeenCalledWith(
-      {
-        id: "issue-1",
-        status: "in_progress",
-        position: 42,
-        project_id: "p2",
-        move_intent: {
-          before_id: "issue-0",
-          after_id: "issue-2",
-        },
-      },
-      expect.objectContaining({
-        onError: expect.any(Function),
-        onSettled: expect.any(Function),
-      }),
-    );
-
-    const options = updateIssueMutate.mock.calls[0]?.[1] as
-      | { onSettled?: () => void }
-      | undefined;
-    options?.onSettled?.();
-    expect(onSettled).toHaveBeenCalled();
+    expect(updateIssueMutate).not.toHaveBeenCalled();
+    expect(onSettled).toHaveBeenCalledOnce();
+    expect(openModal).toHaveBeenCalledWith("issue-workflow-change", {
+      issueId: "issue-1",
+      updates: { status: "in_progress", position: 42, project_id: "p2", move_intent: { before_id: "issue-0", after_id: "issue-2" } },
+    });
   });
 
   it("never reports isEmpty in gantt mode — an empty scheduled subset cannot prove the window is empty", async () => {
@@ -1300,7 +1284,7 @@ describe("useIssueSurfaceController", () => {
   });
 
   // --- cancelled as a default status (MUL-4290) ------------------------
-  // Cancelled is a first-class default lifecycle status: fetched into the
+  // Cancelled is a first-class default workflow status: fetched into the
   // cache, surfaced by default, narrowed (not unlocked) by the status filter,
   // and hideable like any other status.
 

@@ -77,6 +77,11 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       options?: IssueSurfaceMutationOptions,
     ) => {
       if (!issueId) return;
+      if (issue?.workflow_id && (updates.status !== undefined || updates.workflow_status_id !== undefined ||
+        (updates.project_id !== undefined && updates.project_id !== issue.project_id))) {
+        openModal("issue-workflow-change", { issueId, updates, options });
+        return;
+      }
       // The two writes that can hand work to an agent — giving it an owner, and
       // promoting it out of the parking lot — confirm first, through the shared
       // gate every single-issue entry point routes on (runConfirmIntent). The
@@ -173,7 +178,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openModal("create-issue", {
       parent_issue_id: issueId,
       parent_issue_identifier: issueIdentifier,
-      ...(issueProjectId ? { project_id: issueProjectId } : {}),
+      project_id: issueProjectId,
       // Inherit the parent's assignee (member/agent/squad) so a sub-issue
       // created from the "Add sub-issue" entry starts with the same owner
       // (discussion #1728). The modal keys off whether these fields are
