@@ -337,6 +337,9 @@ type ChannelChatContextGeneration struct {
 	PendingFresh           bool               `json:"pending_fresh"`
 	InitiatorUserID        pgtype.UUID        `json:"initiator_user_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	LastMessageID          pgtype.Text        `json:"last_message_id"`
+	LastThreadID           pgtype.Text        `json:"last_thread_id"`
+	LastSenderID           pgtype.Text        `json:"last_sender_id"`
 }
 
 type ChannelChatSessionBinding struct {
@@ -357,7 +360,6 @@ type ChannelChatSessionBinding struct {
 	HistoryStartMessageID  pgtype.Text        `json:"history_start_message_id"`
 	HistoryEndMessageID    pgtype.Text        `json:"history_end_message_id"`
 	HistoryBoundaryPending bool               `json:"history_boundary_pending"`
-	LastSenderID           pgtype.Text        `json:"last_sender_id"`
 }
 
 type ChannelInboundAudit struct {

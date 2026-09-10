@@ -234,7 +234,6 @@ func chatSessionBindingFromRow(row db.ChannelChatSessionBinding) ChatSessionBind
 		CreatedAt:      row.CreatedAt,
 		LastMessageID:  row.LastMessageID,
 		LastThreadID:   row.LastThreadID,
-		LastSenderID:   row.LastSenderID,
 	}
 }
 

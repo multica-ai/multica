@@ -635,9 +635,11 @@ SELECT * FROM channel_chat_session_binding
 WHERE chat_session_id = ANY(@chat_session_ids::uuid[]);
 
 -- name: UpdateChannelChatSessionBindingReplyTarget :exec
--- Records the most recent inbound trigger — message, thread and the
--- channel-native sender — so the decoupled outbound patcher can thread its
--- reply back into the originating topic and @-mention whoever asked.
+-- Advances the session's latest-trigger cursor, which drives the history
+-- boundary bookkeeping below. NOT the outbound reply target: that is frozen
+-- per context generation (SetChannelChatContextReplyTarget), because this row
+-- only ever remembers the newest trigger and a debounced run can be enqueued
+-- after a later generation has already moved it.
 WITH current_route AS (
     SELECT current_binding.*
     FROM channel_chat_session_binding AS current_binding
@@ -661,7 +663,6 @@ WITH current_route AS (
 UPDATE channel_chat_session_binding AS binding
 SET last_message_id = sqlc.narg('last_message_id'),
     last_thread_id  = sqlc.narg('last_thread_id'),
-    last_sender_id  = sqlc.narg('last_sender_id'),
     history_start_message_id = CASE
         WHEN binding.history_boundary_pending
           AND sqlc.narg('last_message_id')::text IS NOT NULL
@@ -765,6 +766,24 @@ WHERE chat_session_id = @chat_session_id
   AND revision = @revision
 RETURNING initiator_user_id;
 
+-- name: SetChannelChatContextReplyTarget :exec
+-- Snapshots the trigger this generation will be answered on: the message an
+-- outbound reply targets, its thread, and the channel-native id of whoever
+-- sent it. The sibling of SetChannelChatContextInitiator, and load-bearing for
+-- the same reason — a debounced run flushes against ITS generation, which may
+-- no longer be the session's newest, so reading the trigger from the session
+-- would answer one member's question quoting and @-mentioning another's.
+--
+-- All three columns move together in one statement: a sender that described a
+-- different message than the reply targets is precisely the cross-mention this
+-- exists to prevent.
+UPDATE channel_chat_context_generation
+SET last_message_id = sqlc.narg('last_message_id'),
+    last_thread_id  = sqlc.narg('last_thread_id'),
+    last_sender_id  = sqlc.narg('last_sender_id')
+WHERE chat_session_id = @chat_session_id
+  AND revision = @revision;
+
 -- name: ClearChannelChatContextPendingFresh :exec
 UPDATE channel_chat_context_generation
 SET pending_fresh = FALSE
@@ -821,15 +840,25 @@ WHERE binding.installation_id = sqlc.arg('installation_id')
 -- =====================
 
 -- name: CreateChannelTaskDeliveryFromSession :one
+-- Freezes one task's outbound route. The ROUTE (chat, type, config, revision)
+-- comes from the session binding; the TRIGGER (message, thread, sender) comes
+-- from the generation this task answers, NOT from the binding's latest-trigger
+-- cursor, which a newer generation may already have advanced past. An INNER
+-- JOIN on purpose: a task whose generation row is missing has no trigger we
+-- can attribute, and inventing one would risk quoting the wrong member.
 INSERT INTO channel_task_delivery (
     task_id, binding_id, installation_id, channel_type, channel_chat_id, chat_type,
     channel_message_id, channel_thread_id, channel_sender_id, route_revision, config
 )
 SELECT
     @task_id, binding.id, binding.installation_id, binding.channel_type,
-    binding.channel_chat_id, binding.chat_type, binding.last_message_id, binding.last_thread_id,
-    binding.last_sender_id, binding.route_revision, binding.config
+    binding.channel_chat_id, binding.chat_type,
+    generation.last_message_id, generation.last_thread_id, generation.last_sender_id,
+    binding.route_revision, binding.config
 FROM channel_chat_session_binding AS binding
+JOIN channel_chat_context_generation AS generation
+  ON generation.chat_session_id = binding.chat_session_id
+ AND generation.revision = @context_revision
 WHERE binding.chat_session_id = @chat_session_id
 RETURNING *;
 

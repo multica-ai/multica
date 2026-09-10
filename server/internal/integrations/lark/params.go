@@ -80,7 +80,6 @@ type UpdateChatSessionBindingReplyTargetParams struct {
 	ChatSessionID pgtype.UUID
 	LastMessageID pgtype.Text
 	LastThreadID  pgtype.Text
-	LastSenderID  pgtype.Text
 }
 
 // ClaimInboundDedupParams claims the two-phase idempotency row for a message.

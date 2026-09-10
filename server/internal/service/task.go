@@ -2049,6 +2049,7 @@ func (s *TaskService) enqueueChatTaskTx(
 		if _, err := qtx.CreateChannelTaskDeliveryFromSession(
 			ctx, db.CreateChannelTaskDeliveryFromSessionParams{
 				TaskID: task.ID, ChatSessionID: chatSession.ID,
+				ContextRevision: contextRevision,
 			},
 		); err != nil {
 			return db.AgentTaskQueue{}, fmt.Errorf("snapshot channel task delivery: %w", err)

@@ -1168,74 +1168,147 @@ func TestAppendUserMessage_MediaDeadlineUsesDatabaseClock(t *testing.T) {
 	}
 }
 
-// TestChannelTaskDeliveryFreezesTriggerSender exercises the whole snapshot
-// against real Postgres: the inbound reply-target write records the trigger's
-// channel-native sender on the binding, and creating a task freezes it onto
-// that task's delivery row alongside the message id.
+// TestChannelTaskDeliveryFreezesTriggerPerGeneration is the regression for the
+// cross-generation mis-attribution #8234 has to survive.
 //
-// The freeze is the correctness property behind #8234's mention. The binding
-// keeps only the LATEST trigger, so a second member messaging the group while
-// a run is still working overwrites it — but the first run's delivery row was
-// already taken and must not move, or the answer to member A would quote and
-// @-mention member B.
-func TestChannelTaskDeliveryFreezesTriggerSender(t *testing.T) {
+// The debouncer keys its timers on (chat_session, context revision), so a run
+// batched in revision 1 can be enqueued AFTER a /clear has opened revision 2
+// and revision 2's own message has already committed. If the delivery snapshot
+// read the session's latest trigger, A's answer would quote and @-mention B —
+// and the ordering here is the ordinary one, not a rare interleaving: it only
+// needs B's append to commit before A's flush fires, which is what a 3s
+// debounce window invites.
+//
+// Both generations are appended first, with NO delivery created in between,
+// and only then are the two tasks enqueued. That is what distinguishes this
+// from "a created delivery is immutable" — the value has to be correct at
+// creation time, not merely stable afterwards.
+func TestChannelTaskDeliveryFreezesTriggerPerGeneration(t *testing.T) {
 	pool := sessionPersistenceTestDB(t)
 	f := seedSessionPersistenceFixture(t, pool)
 	ctx := context.Background()
 	q := db.New(pool)
 
-	record := func(messageID, senderID string) {
+	recordGeneration := func(revision int64, messageID, senderID string) {
 		t.Helper()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO channel_chat_context_generation (chat_session_id, revision)
+			VALUES ($1, $2)
+			ON CONFLICT DO NOTHING
+		`, f.sessionID, revision); err != nil {
+			t.Fatalf("create generation %d: %v", revision, err)
+		}
+		if err := q.SetChannelChatContextReplyTarget(ctx, db.SetChannelChatContextReplyTargetParams{
+			ChatSessionID: f.sessionID, Revision: revision,
+			LastMessageID: pgtype.Text{String: messageID, Valid: true},
+			LastSenderID:  pgtype.Text{String: senderID, Valid: true},
+		}); err != nil {
+			t.Fatalf("snapshot generation %d reply target: %v", revision, err)
+		}
+		// Every inbound turn also advances the session-wide cursor, which is
+		// exactly the value that must NOT reach the delivery rows below.
 		if err := q.UpdateChannelChatSessionBindingReplyTarget(ctx, db.UpdateChannelChatSessionBindingReplyTargetParams{
 			ReplyChatSessionID: f.sessionID,
 			LastMessageID:      pgtype.Text{String: messageID, Valid: true},
-			LastSenderID:       pgtype.Text{String: senderID, Valid: true},
 		}); err != nil {
-			t.Fatalf("record reply target: %v", err)
+			t.Fatalf("advance session cursor for %d: %v", revision, err)
 		}
 	}
 
-	// Member A asks; their run is created and takes its snapshot.
-	record("om_from_alice", "ou_alice")
-	taskA := newDeliveryTaskID(t, pool)
-	deliveryA, err := q.CreateChannelTaskDeliveryFromSession(ctx, db.CreateChannelTaskDeliveryFromSessionParams{
-		TaskID: taskA, ChatSessionID: f.sessionID,
+	// A asks in revision 1; before its debounce fires, B's /clear opens
+	// revision 2 and B's question lands there. The session cursor now reads B.
+	recordGeneration(1, "om_from_alice", "ou_alice")
+	recordGeneration(2, "om_from_bob", "ou_bob")
+
+	// Pin the hazard this test exists for: the session-wide cursor now reads
+	// B, so sourcing the delivery from the binding — what this code did before
+	// #8234 — would hand revision 1 B's message and B's sender.
+	binding, err := q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
+		ChatSessionID: f.sessionID, ChannelType: "lark",
 	})
 	if err != nil {
-		t.Fatalf("create delivery for A: %v", err)
+		t.Fatalf("read binding cursor: %v", err)
 	}
-	if deliveryA.ChannelSenderID.String != "ou_alice" || deliveryA.ChannelMessageID.String != "om_from_alice" {
-		t.Fatalf("delivery A = sender %q message %q, want alice's trigger",
-			deliveryA.ChannelSenderID.String, deliveryA.ChannelMessageID.String)
+	if binding.LastMessageID.String != "om_from_bob" {
+		t.Fatalf("precondition: session cursor = %q, want om_from_bob so the wrong answer is genuinely reachable",
+			binding.LastMessageID.String)
 	}
 
-	// Member B messages the same group while A's run is still working.
-	record("om_from_bob", "ou_bob")
+	for _, tc := range []struct {
+		name        string
+		revision    int64
+		wantMessage string
+		wantSender  string
+	}{
+		{"revision 1 (A)", 1, "om_from_alice", "ou_alice"},
+		{"revision 2 (B)", 2, "om_from_bob", "ou_bob"},
+	} {
+		taskID := newDeliveryTaskID(t, pool)
+		delivery, err := q.CreateChannelTaskDeliveryFromSession(ctx, db.CreateChannelTaskDeliveryFromSessionParams{
+			TaskID: taskID, ChatSessionID: f.sessionID, ContextRevision: tc.revision,
+		})
+		if err != nil {
+			t.Fatalf("%s: create delivery: %v", tc.name, err)
+		}
+		if delivery.ChannelMessageID.String != tc.wantMessage {
+			t.Errorf("%s: message = %q, want %q — the delivery must freeze its OWN generation's trigger",
+				tc.name, delivery.ChannelMessageID.String, tc.wantMessage)
+		}
+		if delivery.ChannelSenderID.String != tc.wantSender {
+			t.Errorf("%s: sender = %q, want %q", tc.name, delivery.ChannelSenderID.String, tc.wantSender)
+		}
+		// The route still comes from the binding, which is per-session.
+		if delivery.ChannelChatID != f.channelChatID {
+			t.Errorf("%s: chat id = %q, want the session's route %q",
+				tc.name, delivery.ChannelChatID, f.channelChatID)
+		}
+	}
+}
 
-	reread, err := q.GetChannelTaskDelivery(ctx, taskA)
+// TestChannelTaskDeliveryIsImmutableAfterCreation covers the other half: once
+// a task's delivery row exists, later inbound turns on the same generation
+// must not move it.
+func TestChannelTaskDeliveryIsImmutableAfterCreation(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	f := seedSessionPersistenceFixture(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO channel_chat_context_generation (chat_session_id, revision)
+		VALUES ($1, 1) ON CONFLICT DO NOTHING
+	`, f.sessionID); err != nil {
+		t.Fatalf("create generation: %v", err)
+	}
+	setTrigger := func(messageID, senderID string) {
+		t.Helper()
+		if err := q.SetChannelChatContextReplyTarget(ctx, db.SetChannelChatContextReplyTargetParams{
+			ChatSessionID: f.sessionID, Revision: 1,
+			LastMessageID: pgtype.Text{String: messageID, Valid: true},
+			LastSenderID:  pgtype.Text{String: senderID, Valid: true},
+		}); err != nil {
+			t.Fatalf("snapshot reply target: %v", err)
+		}
+	}
+
+	setTrigger("om_from_alice", "ou_alice")
+	taskID := newDeliveryTaskID(t, pool)
+	if _, err := q.CreateChannelTaskDeliveryFromSession(ctx, db.CreateChannelTaskDeliveryFromSessionParams{
+		TaskID: taskID, ChatSessionID: f.sessionID, ContextRevision: 1,
+	}); err != nil {
+		t.Fatalf("create delivery: %v", err)
+	}
+
+	// B speaks into the same generation while A's run is still working.
+	setTrigger("om_from_bob", "ou_bob")
+
+	reread, err := q.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
-		t.Fatalf("re-read delivery for A: %v", err)
+		t.Fatalf("re-read delivery: %v", err)
 	}
-	if reread.ChannelSenderID.String != "ou_alice" {
-		t.Errorf("delivery A sender = %q after B spoke, want ou_alice — the snapshot must not follow the binding",
-			reread.ChannelSenderID.String)
-	}
-	if reread.ChannelMessageID.String != "om_from_alice" {
-		t.Errorf("delivery A message = %q after B spoke, want om_from_alice",
-			reread.ChannelMessageID.String)
-	}
-
-	// B's own run freezes B's trigger.
-	taskB := newDeliveryTaskID(t, pool)
-	deliveryB, err := q.CreateChannelTaskDeliveryFromSession(ctx, db.CreateChannelTaskDeliveryFromSessionParams{
-		TaskID: taskB, ChatSessionID: f.sessionID,
-	})
-	if err != nil {
-		t.Fatalf("create delivery for B: %v", err)
-	}
-	if deliveryB.ChannelSenderID.String != "ou_bob" || deliveryB.ChannelMessageID.String != "om_from_bob" {
-		t.Errorf("delivery B = sender %q message %q, want bob's trigger",
-			deliveryB.ChannelSenderID.String, deliveryB.ChannelMessageID.String)
+	if reread.ChannelSenderID.String != "ou_alice" || reread.ChannelMessageID.String != "om_from_alice" {
+		t.Errorf("delivery = sender %q message %q after B spoke, want alice's trigger frozen",
+			reread.ChannelSenderID.String, reread.ChannelMessageID.String)
 	}
 }
 

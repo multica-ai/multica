@@ -90,6 +90,8 @@ type fakeSessionQueries struct {
 	touched               int
 	replyTargets          int
 	lastReplyTarget       db.UpdateChannelChatSessionBindingReplyTargetParams
+	contextReplyTargets   int
+	lastContextReply      db.SetChannelChatContextReplyTargetParams
 	lockedWorkspace       int    // count of LockWorkspaceForChatSessionCreate calls
 	lastConfig            []byte // config of the most recent CreateChannelChatSessionBinding
 	attachments           []db.CreateAttachmentParams
@@ -356,6 +358,12 @@ func (f *fakeSessionQueries) SetChannelChatContextInitiator(_ context.Context, a
 func (f *fakeSessionQueries) UpdateChannelChatSessionBindingReplyTarget(_ context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error {
 	f.replyTargets++
 	f.lastReplyTarget = arg
+	return nil
+}
+
+func (f *fakeSessionQueries) SetChannelChatContextReplyTarget(_ context.Context, arg db.SetChannelChatContextReplyTargetParams) error {
+	f.contextReplyTargets++
+	f.lastContextReply = arg
 	return nil
 }
 
@@ -1369,12 +1377,16 @@ func TestAppendUserMessage_ReplyTargetCarriesSender(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendUserMessage: %v", err)
 	}
-	got := f.lastReplyTarget
+	got := f.lastContextReply
 	if got.LastMessageID.String != "om_1" || got.LastThreadID.String != "omt_1" {
-		t.Fatalf("reply target = %+v, want the trigger message and thread", got)
+		t.Fatalf("context reply target = %+v, want the trigger message and thread", got)
 	}
 	if !got.LastSenderID.Valid || got.LastSenderID.String != "ou_sender" {
 		t.Errorf("last_sender_id = %+v, want ou_sender recorded alongside the message", got.LastSenderID)
+	}
+	if got.Revision != f.contextRevision {
+		t.Errorf("snapshot revision = %d, want the generation this message belongs to (%d)",
+			got.Revision, f.contextRevision)
 	}
 }
 
@@ -1390,7 +1402,7 @@ func TestAppendUserMessage_ReplyTargetSenderNullWhenAbsent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendUserMessage: %v", err)
 	}
-	if f.lastReplyTarget.LastSenderID.Valid {
-		t.Errorf("absent sender must be NULL; got %+v", f.lastReplyTarget.LastSenderID)
+	if f.lastContextReply.LastSenderID.Valid {
+		t.Errorf("absent sender must be NULL; got %+v", f.lastContextReply.LastSenderID)
 	}
 }

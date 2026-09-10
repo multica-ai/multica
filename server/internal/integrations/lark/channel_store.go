@@ -307,7 +307,6 @@ func (s *ChannelStore) UpdateLarkChatSessionBindingReplyTarget(ctx context.Conte
 		ReplyChatSessionID: arg.ChatSessionID,
 		LastMessageID:      arg.LastMessageID,
 		LastThreadID:       arg.LastThreadID,
-		LastSenderID:       arg.LastSenderID,
 	})
 }
 

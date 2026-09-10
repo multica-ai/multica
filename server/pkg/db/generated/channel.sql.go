@@ -66,7 +66,7 @@ WITH closed AS (
         pending_fresh = TRUE
     WHERE binding.chat_session_id = $2
       AND binding.context_revision = $3
-    RETURNING binding.id, binding.chat_session_id, binding.installation_id, binding.channel_type, binding.channel_chat_id, binding.chat_type, binding.last_message_id, binding.last_thread_id, binding.config, binding.created_at, binding.pending_fresh, binding.context_revision, binding.route_revision, binding.retired_at, binding.history_start_message_id, binding.history_end_message_id, binding.history_boundary_pending, binding.last_sender_id
+    RETURNING binding.id, binding.chat_session_id, binding.installation_id, binding.channel_type, binding.channel_chat_id, binding.chat_type, binding.last_message_id, binding.last_thread_id, binding.config, binding.created_at, binding.pending_fresh, binding.context_revision, binding.route_revision, binding.retired_at, binding.history_start_message_id, binding.history_end_message_id, binding.history_boundary_pending
 ), opened AS (
     INSERT INTO channel_chat_context_generation (
         chat_session_id, revision, history_start_message_id,
@@ -77,9 +77,9 @@ WITH closed AS (
            NOT $4::boolean,
            TRUE
     FROM advanced
-    RETURNING chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at
+    RETURNING chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_thread_id, last_sender_id
 )
-SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at FROM opened
+SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_thread_id, last_sender_id FROM opened
 `
 
 type AdvanceChannelChatContextGenerationParams struct {
@@ -98,6 +98,9 @@ type AdvanceChannelChatContextGenerationRow struct {
 	PendingFresh           bool               `json:"pending_fresh"`
 	InitiatorUserID        pgtype.UUID        `json:"initiator_user_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	LastMessageID          pgtype.Text        `json:"last_message_id"`
+	LastThreadID           pgtype.Text        `json:"last_thread_id"`
+	LastSenderID           pgtype.Text        `json:"last_sender_id"`
 }
 
 // Opens a new agent-visible context while retaining the same Multica Chat.
@@ -120,6 +123,9 @@ func (q *Queries) AdvanceChannelChatContextGeneration(ctx context.Context, arg A
 		&i.PendingFresh,
 		&i.InitiatorUserID,
 		&i.CreatedAt,
+		&i.LastMessageID,
+		&i.LastThreadID,
+		&i.LastSenderID,
 	)
 	return i, err
 }
@@ -472,12 +478,12 @@ INSERT INTO channel_chat_session_binding (
 )
 SELECT $1, $2, $3, $4, $5, $6, next_route.route_revision
 FROM next_route
-RETURNING id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending, last_sender_id
+RETURNING id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending
 ), generation AS (
     INSERT INTO channel_chat_context_generation (chat_session_id, revision)
     SELECT chat_session_id, context_revision FROM binding
 )
-SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending, last_sender_id FROM binding
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending FROM binding
 `
 
 type CreateChannelChatSessionBindingParams struct {
@@ -507,7 +513,6 @@ type CreateChannelChatSessionBindingRow struct {
 	HistoryStartMessageID  pgtype.Text        `json:"history_start_message_id"`
 	HistoryEndMessageID    pgtype.Text        `json:"history_end_message_id"`
 	HistoryBoundaryPending bool               `json:"history_boundary_pending"`
-	LastSenderID           pgtype.Text        `json:"last_sender_id"`
 }
 
 // =====================
@@ -547,7 +552,6 @@ func (q *Queries) CreateChannelChatSessionBinding(ctx context.Context, arg Creat
 		&i.HistoryStartMessageID,
 		&i.HistoryEndMessageID,
 		&i.HistoryBoundaryPending,
-		&i.LastSenderID,
 	)
 	return i, err
 }
@@ -569,7 +573,7 @@ INSERT INTO channel_chat_session_binding (
     $4, $2, $5, $3, $6,
     $7, next_route.route_revision, $8, $9
 FROM next_route
-RETURNING id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending, last_sender_id
+RETURNING id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending
 ), generation AS (
     INSERT INTO channel_chat_context_generation (
         chat_session_id, revision, history_start_message_id, history_boundary_pending
@@ -577,7 +581,7 @@ RETURNING id, chat_session_id, installation_id, channel_type, channel_chat_id, c
     SELECT chat_session_id, context_revision, history_start_message_id, history_boundary_pending
     FROM binding
 )
-SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending, last_sender_id FROM binding
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending FROM binding
 `
 
 type CreateChannelChatSessionBindingGenerationParams struct {
@@ -610,7 +614,6 @@ type CreateChannelChatSessionBindingGenerationRow struct {
 	HistoryStartMessageID  pgtype.Text        `json:"history_start_message_id"`
 	HistoryEndMessageID    pgtype.Text        `json:"history_end_message_id"`
 	HistoryBoundaryPending bool               `json:"history_boundary_pending"`
-	LastSenderID           pgtype.Text        `json:"last_sender_id"`
 }
 
 func (q *Queries) CreateChannelChatSessionBindingGeneration(ctx context.Context, arg CreateChannelChatSessionBindingGenerationParams) (CreateChannelChatSessionBindingGenerationRow, error) {
@@ -644,7 +647,6 @@ func (q *Queries) CreateChannelChatSessionBindingGeneration(ctx context.Context,
 		&i.HistoryStartMessageID,
 		&i.HistoryEndMessageID,
 		&i.HistoryBoundaryPending,
-		&i.LastSenderID,
 	)
 	return i, err
 }
@@ -704,23 +706,34 @@ INSERT INTO channel_task_delivery (
 )
 SELECT
     $1, binding.id, binding.installation_id, binding.channel_type,
-    binding.channel_chat_id, binding.chat_type, binding.last_message_id, binding.last_thread_id,
-    binding.last_sender_id, binding.route_revision, binding.config
+    binding.channel_chat_id, binding.chat_type,
+    generation.last_message_id, generation.last_thread_id, generation.last_sender_id,
+    binding.route_revision, binding.config
 FROM channel_chat_session_binding AS binding
-WHERE binding.chat_session_id = $2
+JOIN channel_chat_context_generation AS generation
+  ON generation.chat_session_id = binding.chat_session_id
+ AND generation.revision = $2
+WHERE binding.chat_session_id = $3
 RETURNING task_id, binding_id, installation_id, channel_type, channel_chat_id, chat_type, channel_message_id, channel_thread_id, route_revision, config, created_at, channel_sender_id
 `
 
 type CreateChannelTaskDeliveryFromSessionParams struct {
-	TaskID        pgtype.UUID `json:"task_id"`
-	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	TaskID          pgtype.UUID `json:"task_id"`
+	ContextRevision int64       `json:"context_revision"`
+	ChatSessionID   pgtype.UUID `json:"chat_session_id"`
 }
 
 // =====================
 // channel_task_delivery
 // =====================
+// Freezes one task's outbound route. The ROUTE (chat, type, config, revision)
+// comes from the session binding; the TRIGGER (message, thread, sender) comes
+// from the generation this task answers, NOT from the binding's latest-trigger
+// cursor, which a newer generation may already have advanced past. An INNER
+// JOIN on purpose: a task whose generation row is missing has no trigger we
+// can attribute, and inventing one would risk quoting the wrong member.
 func (q *Queries) CreateChannelTaskDeliveryFromSession(ctx context.Context, arg CreateChannelTaskDeliveryFromSessionParams) (ChannelTaskDelivery, error) {
-	row := q.db.QueryRow(ctx, createChannelTaskDeliveryFromSession, arg.TaskID, arg.ChatSessionID)
+	row := q.db.QueryRow(ctx, createChannelTaskDeliveryFromSession, arg.TaskID, arg.ContextRevision, arg.ChatSessionID)
 	var i ChannelTaskDelivery
 	err := row.Scan(
 		&i.TaskID,
@@ -1184,7 +1197,7 @@ func (q *Queries) FindReusableChannelUserBinding(ctx context.Context, arg FindRe
 }
 
 const getChannelChatContextGeneration = `-- name: GetChannelChatContextGeneration :one
-SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at FROM channel_chat_context_generation
+SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_thread_id, last_sender_id FROM channel_chat_context_generation
 WHERE chat_session_id = $1
   AND revision = $2
 `
@@ -1206,12 +1219,15 @@ func (q *Queries) GetChannelChatContextGeneration(ctx context.Context, arg GetCh
 		&i.PendingFresh,
 		&i.InitiatorUserID,
 		&i.CreatedAt,
+		&i.LastMessageID,
+		&i.LastThreadID,
+		&i.LastSenderID,
 	)
 	return i, err
 }
 
 const getChannelChatSessionBinding = `-- name: GetChannelChatSessionBinding :one
-SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending, last_sender_id FROM channel_chat_session_binding
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending FROM channel_chat_session_binding
 WHERE installation_id = $1 AND channel_chat_id = $2 AND retired_at IS NULL
 `
 
@@ -1243,13 +1259,12 @@ func (q *Queries) GetChannelChatSessionBinding(ctx context.Context, arg GetChann
 		&i.HistoryStartMessageID,
 		&i.HistoryEndMessageID,
 		&i.HistoryBoundaryPending,
-		&i.LastSenderID,
 	)
 	return i, err
 }
 
 const getChannelChatSessionBindingBySession = `-- name: GetChannelChatSessionBindingBySession :one
-SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending, last_sender_id FROM channel_chat_session_binding
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending FROM channel_chat_session_binding
 WHERE chat_session_id = $1
   AND channel_type = $2
 `
@@ -1284,13 +1299,12 @@ func (q *Queries) GetChannelChatSessionBindingBySession(ctx context.Context, arg
 		&i.HistoryStartMessageID,
 		&i.HistoryEndMessageID,
 		&i.HistoryBoundaryPending,
-		&i.LastSenderID,
 	)
 	return i, err
 }
 
 const getChannelChatSessionBindingBySessionAny = `-- name: GetChannelChatSessionBindingBySessionAny :one
-SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending, last_sender_id FROM channel_chat_session_binding
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending FROM channel_chat_session_binding
 WHERE chat_session_id = $1
 `
 
@@ -1321,7 +1335,6 @@ func (q *Queries) GetChannelChatSessionBindingBySessionAny(ctx context.Context, 
 		&i.HistoryStartMessageID,
 		&i.HistoryEndMessageID,
 		&i.HistoryBoundaryPending,
-		&i.LastSenderID,
 	)
 	return i, err
 }
@@ -1710,7 +1723,7 @@ func (q *Queries) ListAllActiveChannelInstallations(ctx context.Context) ([]Chan
 }
 
 const listChannelChatSessionBindingsBySessions = `-- name: ListChannelChatSessionBindingsBySessions :many
-SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending, last_sender_id FROM channel_chat_session_binding
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending FROM channel_chat_session_binding
 WHERE chat_session_id = ANY($1::uuid[])
 `
 
@@ -1744,7 +1757,6 @@ func (q *Queries) ListChannelChatSessionBindingsBySessions(ctx context.Context, 
 			&i.HistoryStartMessageID,
 			&i.HistoryEndMessageID,
 			&i.HistoryBoundaryPending,
-			&i.LastSenderID,
 		); err != nil {
 			return nil, err
 		}
@@ -1913,7 +1925,7 @@ func (q *Queries) ListChannelOutboundMessagesByIDs(ctx context.Context, arg List
 }
 
 const lockChannelChatContextGenerationByRevision = `-- name: LockChannelChatContextGenerationByRevision :one
-SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at FROM channel_chat_context_generation
+SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, last_message_id, last_thread_id, last_sender_id FROM channel_chat_context_generation
 WHERE chat_session_id = $1
   AND revision = $2
 FOR UPDATE
@@ -1936,12 +1948,15 @@ func (q *Queries) LockChannelChatContextGenerationByRevision(ctx context.Context
 		&i.PendingFresh,
 		&i.InitiatorUserID,
 		&i.CreatedAt,
+		&i.LastMessageID,
+		&i.LastThreadID,
+		&i.LastSenderID,
 	)
 	return i, err
 }
 
 const lockChannelChatSessionBindingForContext = `-- name: LockChannelChatSessionBindingForContext :one
-SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending, last_sender_id FROM channel_chat_session_binding
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending FROM channel_chat_session_binding
 WHERE chat_session_id = $1
 FOR UPDATE
 `
@@ -1970,7 +1985,6 @@ func (q *Queries) LockChannelChatSessionBindingForContext(ctx context.Context, c
 		&i.HistoryStartMessageID,
 		&i.HistoryEndMessageID,
 		&i.HistoryBoundaryPending,
-		&i.LastSenderID,
 	)
 	return i, err
 }
@@ -2021,7 +2035,7 @@ func (q *Queries) LockChannelInstallationAppIDSlot(ctx context.Context, arg Lock
 }
 
 const lockCurrentChannelChatSessionBinding = `-- name: LockCurrentChannelChatSessionBinding :one
-SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending, last_sender_id FROM channel_chat_session_binding
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending FROM channel_chat_session_binding
 WHERE installation_id = $1 AND channel_chat_id = $2 AND retired_at IS NULL
 FOR UPDATE
 `
@@ -2052,13 +2066,12 @@ func (q *Queries) LockCurrentChannelChatSessionBinding(ctx context.Context, arg 
 		&i.HistoryStartMessageID,
 		&i.HistoryEndMessageID,
 		&i.HistoryBoundaryPending,
-		&i.LastSenderID,
 	)
 	return i, err
 }
 
 const lockCurrentChannelChatSessionBindingBySession = `-- name: LockCurrentChannelChatSessionBindingBySession :one
-SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending, last_sender_id FROM channel_chat_session_binding
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending FROM channel_chat_session_binding
 WHERE chat_session_id = $1 AND retired_at IS NULL
 FOR UPDATE
 `
@@ -2088,7 +2101,6 @@ func (q *Queries) LockCurrentChannelChatSessionBindingBySession(ctx context.Cont
 		&i.HistoryStartMessageID,
 		&i.HistoryEndMessageID,
 		&i.HistoryBoundaryPending,
-		&i.LastSenderID,
 	)
 	return i, err
 }
@@ -2540,7 +2552,7 @@ UPDATE channel_chat_session_binding
 SET retired_at = now(),
     history_end_message_id = $1
 WHERE id = $2 AND retired_at IS NULL
-RETURNING id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending, last_sender_id
+RETURNING id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, pending_fresh, context_revision, route_revision, retired_at, history_start_message_id, history_end_message_id, history_boundary_pending
 `
 
 type RetireChannelChatSessionBindingParams struct {
@@ -2569,7 +2581,6 @@ func (q *Queries) RetireChannelChatSessionBinding(ctx context.Context, arg Retir
 		&i.HistoryStartMessageID,
 		&i.HistoryEndMessageID,
 		&i.HistoryBoundaryPending,
-		&i.LastSenderID,
 	)
 	return i, err
 }
@@ -2596,6 +2607,44 @@ func (q *Queries) SetChannelChatContextInitiator(ctx context.Context, arg SetCha
 	var initiator_user_id pgtype.UUID
 	err := row.Scan(&initiator_user_id)
 	return initiator_user_id, err
+}
+
+const setChannelChatContextReplyTarget = `-- name: SetChannelChatContextReplyTarget :exec
+UPDATE channel_chat_context_generation
+SET last_message_id = $1,
+    last_thread_id  = $2,
+    last_sender_id  = $3
+WHERE chat_session_id = $4
+  AND revision = $5
+`
+
+type SetChannelChatContextReplyTargetParams struct {
+	LastMessageID pgtype.Text `json:"last_message_id"`
+	LastThreadID  pgtype.Text `json:"last_thread_id"`
+	LastSenderID  pgtype.Text `json:"last_sender_id"`
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	Revision      int64       `json:"revision"`
+}
+
+// Snapshots the trigger this generation will be answered on: the message an
+// outbound reply targets, its thread, and the channel-native id of whoever
+// sent it. The sibling of SetChannelChatContextInitiator, and load-bearing for
+// the same reason — a debounced run flushes against ITS generation, which may
+// no longer be the session's newest, so reading the trigger from the session
+// would answer one member's question quoting and @-mentioning another's.
+//
+// All three columns move together in one statement: a sender that described a
+// different message than the reply targets is precisely the cross-mention this
+// exists to prevent.
+func (q *Queries) SetChannelChatContextReplyTarget(ctx context.Context, arg SetChannelChatContextReplyTargetParams) error {
+	_, err := q.db.Exec(ctx, setChannelChatContextReplyTarget,
+		arg.LastMessageID,
+		arg.LastThreadID,
+		arg.LastSenderID,
+		arg.ChatSessionID,
+		arg.Revision,
+	)
+	return err
 }
 
 const setChannelInstallationConfig = `-- name: SetChannelInstallationConfig :exec
@@ -2684,9 +2733,9 @@ func (q *Queries) TombstoneChannelMediaPendingObject(ctx context.Context, arg To
 
 const updateChannelChatSessionBindingReplyTarget = `-- name: UpdateChannelChatSessionBindingReplyTarget :exec
 WITH current_route AS (
-    SELECT current_binding.id, current_binding.chat_session_id, current_binding.installation_id, current_binding.channel_type, current_binding.channel_chat_id, current_binding.chat_type, current_binding.last_message_id, current_binding.last_thread_id, current_binding.config, current_binding.created_at, current_binding.pending_fresh, current_binding.context_revision, current_binding.route_revision, current_binding.retired_at, current_binding.history_start_message_id, current_binding.history_end_message_id, current_binding.history_boundary_pending, current_binding.last_sender_id
+    SELECT current_binding.id, current_binding.chat_session_id, current_binding.installation_id, current_binding.channel_type, current_binding.channel_chat_id, current_binding.chat_type, current_binding.last_message_id, current_binding.last_thread_id, current_binding.config, current_binding.created_at, current_binding.pending_fresh, current_binding.context_revision, current_binding.route_revision, current_binding.retired_at, current_binding.history_start_message_id, current_binding.history_end_message_id, current_binding.history_boundary_pending
     FROM channel_chat_session_binding AS current_binding
-    WHERE current_binding.chat_session_id = $4
+    WHERE current_binding.chat_session_id = $3
     FOR UPDATE OF current_binding
 ), closed_previous AS (
     UPDATE channel_chat_session_binding AS previous
@@ -2706,7 +2755,6 @@ WITH current_route AS (
 UPDATE channel_chat_session_binding AS binding
 SET last_message_id = $1,
     last_thread_id  = $2,
-    last_sender_id  = $3,
     history_start_message_id = CASE
         WHEN binding.history_boundary_pending
           AND $1::text IS NOT NULL
@@ -2724,20 +2772,16 @@ WHERE binding.id = current_route.id
 type UpdateChannelChatSessionBindingReplyTargetParams struct {
 	LastMessageID      pgtype.Text `json:"last_message_id"`
 	LastThreadID       pgtype.Text `json:"last_thread_id"`
-	LastSenderID       pgtype.Text `json:"last_sender_id"`
 	ReplyChatSessionID pgtype.UUID `json:"reply_chat_session_id"`
 }
 
-// Records the most recent inbound trigger — message, thread and the
-// channel-native sender — so the decoupled outbound patcher can thread its
-// reply back into the originating topic and @-mention whoever asked.
+// Advances the session's latest-trigger cursor, which drives the history
+// boundary bookkeeping below. NOT the outbound reply target: that is frozen
+// per context generation (SetChannelChatContextReplyTarget), because this row
+// only ever remembers the newest trigger and a debounced run can be enqueued
+// after a later generation has already moved it.
 func (q *Queries) UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg UpdateChannelChatSessionBindingReplyTargetParams) error {
-	_, err := q.db.Exec(ctx, updateChannelChatSessionBindingReplyTarget,
-		arg.LastMessageID,
-		arg.LastThreadID,
-		arg.LastSenderID,
-		arg.ReplyChatSessionID,
-	)
+	_, err := q.db.Exec(ctx, updateChannelChatSessionBindingReplyTarget, arg.LastMessageID, arg.LastThreadID, arg.ReplyChatSessionID)
 	return err
 }
 
