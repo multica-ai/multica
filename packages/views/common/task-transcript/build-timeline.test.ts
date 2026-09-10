@@ -5,7 +5,6 @@ import {
   appendTimelineItem,
   buildTimeline,
   coalesceTimelineItems,
-  hasUnmeasuredOutput,
   isOutputTruncated,
   type TimelineItem,
 } from "./build-timeline";
@@ -134,17 +133,10 @@ describe("tool output completeness", () => {
     expect(isOutputTruncated(result("x"))).toBe(false);
   });
 
-  // A truncated preview keeps the first 8 KiB, so an empty output cannot be
-  // one, either as a truncation or as an unanswered question.
+  // A truncated preview keeps the first 8 KiB, so an empty output cannot be one.
   it("says nothing about an empty output", () => {
-    expect(isOutputTruncated(result(""))).toBe(false);
-    expect(hasUnmeasuredOutput([result(""), result(undefined)])).toBe(false);
-  });
-
-  // One daemon produces a whole run, so unknown-ness is a fact about the run.
-  it("reports an unmeasured run once, from any unmeasured step", () => {
-    expect(hasUnmeasuredOutput([result("a", false), result("b")])).toBe(true);
-    expect(hasUnmeasuredOutput([result("a", false), result("b", true)])).toBe(false);
+    expect(isOutputTruncated(result("", true))).toBe(false);
+    expect(isOutputTruncated(result(undefined, true))).toBe(false);
   });
 
   // The flag only describes tool output; prose and thinking have no preview
@@ -156,6 +148,5 @@ describe("tool output completeness", () => {
       { seq: 3, type: "error", content: "boom" },
     ];
     expect(others.some(isOutputTruncated)).toBe(false);
-    expect(hasUnmeasuredOutput(others)).toBe(false);
   });
 });

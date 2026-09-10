@@ -68,24 +68,6 @@ export function isOutputTruncated(item: TimelineItem): boolean {
   );
 }
 
-/**
- * Whether nobody measured this run's tool output at all — every message in a
- * run comes from one daemon execution, so either that daemon reported the flag
- * or it did not. That makes "unknown" a fact about the RUN, which is why the
- * viewer states it once for the run rather than on each step the reader opens.
- *
- * `false` is a measurement and needs no remark; an empty output cannot have
- * been truncated, so it says nothing either way.
- */
-export function hasUnmeasuredOutput(items: TimelineItem[]): boolean {
-  return items.some(
-    (item) =>
-      item.type === "tool_result" &&
-      (item.output?.length ?? 0) > 0 &&
-      item.output_truncated === undefined,
-  );
-}
-
 /** Build a chronologically ordered timeline from raw task messages. */
 export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
   const items: TimelineItem[] = [];

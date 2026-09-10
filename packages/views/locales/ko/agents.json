@@ -744,7 +744,6 @@
     "patch_body_truncated": "...(본문 잘림)",
     "display_clipped": "...(내용이 길어 앞부분만 표시합니다)",
     "output_truncated_note": "출력이 너무 길어 앞부분만 저장되어 있습니다.",
-    "output_completeness_unknown_note": "이 실행에는 완전성 기록 이전의 도구 출력이 있어 완전한지 확인할 수 없습니다.",
     "patch_no_content": "(기록된 내용 없음)",
     "patch_summary_more": "{{path}} 외 {{extra}}개",
     "status_queued": "대기열",

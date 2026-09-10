@@ -858,7 +858,6 @@
     "patch_body_truncated": "... (body truncated)",
     "display_clipped": "... (too long to show in full — only the start is displayed)",
     "output_truncated_note": "Output was too long — only the beginning was kept.",
-    "output_completeness_unknown_note": "Some tool outputs in this run predate completeness tracking, so whether they are complete cannot be confirmed.",
     "patch_no_content": "(no content reported)",
     "patch_summary_more": "{{path}} +{{extra}} more",
     "status_queued": "Queued",

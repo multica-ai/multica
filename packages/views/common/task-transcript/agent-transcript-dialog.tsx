@@ -62,7 +62,7 @@ import {
   FOLLOW_EDGE_THRESHOLD,
   LINE_SCROLL_PX,
 } from "./transcript-follow";
-import { hasUnmeasuredOutput, isOutputTruncated, type TimelineItem } from "./build-timeline";
+import { isOutputTruncated, type TimelineItem } from "./build-timeline";
 import {
   buildLanes,
   buildSteps,
@@ -469,10 +469,6 @@ export function AgentTranscriptDialog({
   // One step per tool call, with its result folded in — see build-steps.ts for
   // why the pairing is positional.
   const steps = useMemo(() => buildSteps(items), [items]);
-
-  // Said once for the run: one daemon produced every message in it, so either
-  // it measured this run's outputs or it measured none of them.
-  const unmeasured = useMemo(() => hasUnmeasuredOutput(items), [items]);
 
   // A facet reads as what its rows look like: the glyph the rows carry, and the
   // name the rows print. The first step of a kind stands in for the glyph. The
@@ -1212,12 +1208,6 @@ export function AgentTranscriptDialog({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-
-        {unmeasured && (
-          <p className="shrink-0 px-4 pb-1.5 text-micro text-faint-foreground">
-            {t(($) => $.transcript.output_completeness_unknown_note)}
-          </p>
-        )}
 
         {/* ── Steps, and the inspector when one is selected ───────────── */}
         <div className="flex min-h-0 flex-1">

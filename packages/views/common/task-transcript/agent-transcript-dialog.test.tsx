@@ -1005,17 +1005,14 @@ describe("tool output completeness", () => {
     expect(body.textContent).not.toMatch(/copy|whole record|everything that was saved/i);
   });
 
-  // Unknown-ness is a property of the run: one daemon either measured its
-  // outputs or measured none of them. Stated once, not on each step opened.
-  it("states an unmeasured run once, without opening a step", () => {
-    renderDialog([...run(SHORT, undefined), ...run(SHORT, undefined).map((i) => ({ ...i, seq: i.seq + 2 }))]);
+  // A record from before the flag existed says nothing at all. The viewer only
+  // speaks when a daemon measured the output and found bytes missing; it never
+  // volunteers that it cannot tell, in the transcript or above it.
+  it("stays silent on a record whose completeness was never measured", () => {
+    openStep(run(LONG, undefined));
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
 
-    expect(screen.getAllByText(/whether they are complete cannot be confirmed/i)).toHaveLength(1);
-  });
-
-  it("drops the run remark once the daemon has measured the run", () => {
-    renderDialog(run(SHORT, true));
-
-    expect(screen.queryByText(/whether they are complete cannot be confirmed/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/only the beginning was kept/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cannot be confirmed|completeness/i)).not.toBeInTheDocument();
   });
 });
