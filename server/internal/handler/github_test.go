@@ -3383,3 +3383,136 @@ func TestWebhook_UninstallDeletesAllBindings(t *testing.T) {
 		t.Errorf("deleted broadcasts must cover both workspaces; saw %v", seen)
 	}
 }
+
+// TestWebhook_WithdrawnKeyUnlinksThePR covers the other half of withdrawing a
+// claim: the author deletes the issue key outright instead of downgrading it to
+// a passing mention. The payload then carries no trace of the key at all, so the
+// stored links are the only way to notice — a per-payload scan would leave the
+// link behind forever (MUL-7072).
+func TestWebhook_WithdrawnKeyUnlinksThePR(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "withdrawn-key-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "claim then withdraw",
+		"status": "in_progress",
+	})
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 30264010
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "withdrawn-key-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	linkCount := func() int {
+		t.Helper()
+		var n int
+		dbfx.QueryRow(t, `SELECT count(*) FROM issue_pull_request WHERE issue_id = $1`, created.ID).Scan(&n)
+		return n
+	}
+
+	// Claimed by a title prefix.
+	firePRWebhook(t, secret, installationID, 1, created.Identifier+": primary work", "", "feat/primary", "opened")
+	if n := linkCount(); n != 1 {
+		t.Fatalf("title claim should link, got %d rows", n)
+	}
+
+	// The key is removed from every field — not downgraded to a mention, gone.
+	firePRWebhook(t, secret, installationID, 1, "primary work", "", "feat/primary", "edited")
+	if n := linkCount(); n != 0 {
+		t.Errorf("withdrawing the key entirely should unlink, got %d rows", n)
+	}
+}
+
+// TestWebhook_WithdrawnClaimOnOpenPRReleasesTheGate guards the auto-advance gate
+// against the state where an unlink is the unblocking event. PR A merged with a
+// closing keyword, PR B still blocks the issue by claiming it in its title; B
+// then withdraws the claim. The gate used to run only for terminal PR events, so
+// B's `edited` delivery dropped the link and left the issue stuck in_progress
+// with nothing else able to advance it (MUL-7072).
+func TestWebhook_WithdrawnClaimOnOpenPRReleasesTheGate(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "withdrawn-claim-gate-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "blocked by a sibling that walks away",
+		"status": "in_progress",
+	})
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 30264011
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "withdrawn-claim-gate-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	// PR A carries the closing intent; PR B only claims the issue in its title.
+	firePRWebhook(t, secret, installationID, 1, "Primary work", "Closes "+created.Identifier, "feat/primary", "opened")
+	firePRWebhook(t, secret, installationID, 2, created.Identifier+": follow-up cleanup", "", "feat/cleanup", "opened")
+
+	// A merges; B is still open and still claims the issue, so it keeps blocking.
+	firePRWebhook(t, secret, installationID, 1, "Primary work", "Closes "+created.Identifier, "feat/primary", "merged")
+	got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue after A merge: %v", err)
+	}
+	if got.Status != "in_progress" {
+		t.Fatalf("after A merged with B still claiming: status = %q, want in_progress", got.Status)
+	}
+
+	// B withdraws its claim while still open. Nothing about B is terminal, but
+	// dropping its link is what makes the issue advanceable.
+	firePRWebhook(t, secret, installationID, 2, "follow-up cleanup", "", "feat/cleanup", "edited")
+	got, err = testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue after B withdrew: %v", err)
+	}
+	if got.Status != "done" {
+		t.Errorf("withdrawing the only blocking claim must release the gate: status = %q, want done", got.Status)
+	}
+
+	listed, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Errorf("only the merged PR should remain linked, got %d rows", len(listed))
+	}
+}

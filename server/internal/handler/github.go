@@ -1577,36 +1577,40 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 	// switch is off).
 	linkedIssueIDs := make([]string, 0)
 	if h.workspaceAutoLinkPRsEnabled(ctx, wsID) {
-		idents := extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)
 		// closingIdents is the subset of identifiers that this PR explicitly
 		// declared via a closing keyword ("Closes/Fixes/Resolves MUL-X"). The
 		// link row's close_intent column — and therefore whether the
 		// auto-advance gate eventually fires — is only set for keyword-
 		// declared identifiers. Bare title prefixes and branch-name
 		// references are link-only.
-		closingIdents := map[string]struct{}{}
-		for _, c := range extractClosingIdentifiers(p.PullRequest.Title, p.PullRequest.Body) {
+		closing := extractClosingIdentifiers(p.PullRequest.Title, p.PullRequest.Body)
+		closingIdents := make(map[string]struct{}, len(closing))
+		for _, c := range closing {
 			closingIdents[c] = struct{}{}
 		}
-		// claimedIdents are the identifiers this PR actually claims: a title
-		// prefix, a branch-name reference, or a body closing keyword. An
-		// identifier matched only by a bare mention in the body ("Related
-		// MUL-1", "Follow up in MUL-1") is not a claim — a passing mention must
-		// not surface the PR as a working PR for that issue (MUL-3739) — so it
-		// gets no link row at all, and drops one an earlier claim had created.
+		// claims are the identifiers this PR actually claims: a title prefix, a
+		// branch-name reference, or a body closing keyword. An identifier
+		// matched only by a bare mention in the body ("Related MUL-1", "Follow
+		// up in MUL-1") is not a claim — a passing mention must not surface the
+		// PR as a working PR for that issue (MUL-3739) — so it links nothing.
 		//
-		// MUL-3739 used to write that row anyway and flag it reference_only,
+		// MUL-3739 used to link it anyway and flag the row reference_only,
 		// hidden from every read path. A hidden row had no reader, and once the
 		// PR went terminal the preserve gate froze the flag, so adding a closing
 		// keyword to a merged PR's body could never surface it — the one
 		// recovery action a user can take was the one that could not work
 		// (MUL-7072).
-		claimedIdents := map[string]struct{}{}
-		for _, id := range extractIdentifiers(p.PullRequest.Title, p.PullRequest.Head.Ref) {
-			claimedIdents[id] = struct{}{}
+		claims := extractIdentifiers(p.PullRequest.Title, p.PullRequest.Head.Ref)
+		seen := make(map[string]struct{}, len(claims)+len(closing))
+		for _, id := range claims {
+			seen[id] = struct{}{}
 		}
-		for c := range closingIdents {
-			claimedIdents[c] = struct{}{}
+		for _, c := range closing {
+			if _, dup := seen[c]; dup {
+				continue
+			}
+			seen[c] = struct{}{}
+			claims = append(claims, c)
 		}
 		// close_intent should follow the PR title/body while the PR is still
 		// editable before its terminal close event. Once GitHub has delivered
@@ -1623,33 +1627,14 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// open, then the sibling closes later — its webhook has no closing
 		// keyword, but the earlier link row carries close_intent=true, so
 		// MUL-1 still advances.
-		reevalIssues := make([]db.Issue, 0, len(idents))
-		for _, id := range idents {
+		reevalIssues := make([]db.Issue, 0, len(claims))
+		claimedIssueIDs := make(map[string]struct{}, len(claims))
+		for _, id := range claims {
 			issue, ok := h.lookupIssueByIdentifier(ctx, wsID, prefix, id)
 			if !ok {
 				continue
 			}
-			if _, claimed := claimedIdents[id]; !claimed {
-				// A passing mention. Never links; while the PR is still
-				// editable it also drops a link an earlier claim created, so
-				// the list follows the live parse. Once the PR is terminal the
-				// same preserve rule that freezes close_intent applies: a
-				// post-merge edit must not unlink a PR that did the work.
-				if preserveCloseIntent {
-					continue
-				}
-				if err := h.Queries.UnlinkIssueFromPullRequest(ctx, db.UnlinkIssueFromPullRequestParams{
-					IssueID:       issue.ID,
-					PullRequestID: pr.ID,
-				}); err != nil {
-					slog.Warn("github: unlink failed", "err", err)
-					continue
-				}
-				// Dropping a link can be what lets the issue advance, so the
-				// gate below still re-evaluates it.
-				reevalIssues = append(reevalIssues, issue)
-				continue
-			}
+			claimedIssueIDs[uuidToString(issue.ID)] = struct{}{}
 			_, declared := closingIdents[id]
 			if declared && !closePolicy.permits(id, workspaceID) {
 				// The delivery-wide scan did not prove this workspace is the one
@@ -1675,6 +1660,38 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 			reevalIssues = append(reevalIssues, issue)
 		}
 
+		// Withdrawn claims: drop every link this PR still carries for an issue it
+		// no longer claims. The payload cannot answer that on its own — deleting
+		// a key outright leaves no trace in it — so the stored links are the
+		// source of truth, which also covers a claim downgraded to a passing
+		// mention. Frozen once the PR is terminal, by the same rule that freezes
+		// close_intent: a post-merge edit must not unlink a PR that did the work.
+		unlinkedIssues := make([]db.Issue, 0)
+		if !preserveCloseIntent {
+			linked, err := h.Queries.ListIssueIDsForPullRequest(ctx, pr.ID)
+			if err != nil {
+				slog.Warn("github: list linked issues failed", "err", err)
+			}
+			for _, issueID := range linked {
+				if _, keep := claimedIssueIDs[uuidToString(issueID)]; keep {
+					continue
+				}
+				issue, err := h.Queries.GetIssue(ctx, issueID)
+				if err != nil {
+					slog.Warn("github: load unlinked issue failed", "err", err, "issue_id", uuidToString(issueID))
+					continue
+				}
+				if err := h.Queries.UnlinkIssueFromPullRequest(ctx, db.UnlinkIssueFromPullRequestParams{
+					IssueID:       issueID,
+					PullRequestID: pr.ID,
+				}); err != nil {
+					slog.Warn("github: unlink failed", "err", err)
+					continue
+				}
+				unlinkedIssues = append(unlinkedIssues, issue)
+			}
+		}
+
 		// A terminal PR event (`merged` or `closed`) may be the moment the
 		// last in-flight sibling resolves. We re-evaluate every issue we
 		// just linked once both the PR row and the link row are persisted,
@@ -1689,11 +1706,20 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// also prevents an "all closed-without-merge" sequence from
 		// silently auto-closing the issue — if nothing carrying closing
 		// intent was ever delivered, the user should decide manually.
+		//
+		// Dropping a link can be the moment an issue becomes advanceable too —
+		// an open PR that withdraws its claim stops blocking the gate — and that
+		// happens at any PR state, so unlinked issues are re-checked on every
+		// event, not only terminal ones (MUL-7072).
+		gateIssues := unlinkedIssues
 		if state == "merged" || state == "closed" {
+			gateIssues = append(gateIssues, reevalIssues...)
+		}
+		if len(gateIssues) > 0 {
 			// All linked issues belong to this workspace. Resolve custom statuses
 			// once per delivery; built-in statuses still need no catalog read.
 			resolver := issuestatus.NewResolver(wsID)
-			for _, issue := range reevalIssues {
+			for _, issue := range gateIssues {
 				// A custom terminal status counts as terminal here. (MUL-6243)
 				if s := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status); s == "done" || s == "cancelled" {
 					continue

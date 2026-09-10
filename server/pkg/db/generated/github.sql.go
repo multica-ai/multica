@@ -401,6 +401,10 @@ SELECT issue_id FROM issue_pull_request
 WHERE pull_request_id = $1
 `
 
+// Every issue this PR is currently linked to. Two callers: the snapshot
+// broadcast fans a refresh out to them, and the webhook uses it to drop links
+// for issues the PR no longer claims — a removed key leaves no trace in the
+// payload, so the stored links are the only source of truth.
 func (q *Queries) ListIssueIDsForPullRequest(ctx context.Context, pullRequestID pgtype.UUID) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listIssueIDsForPullRequest, pullRequestID)
 	if err != nil {

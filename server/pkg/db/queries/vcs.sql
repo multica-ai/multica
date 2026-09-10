@@ -216,3 +216,10 @@ ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
 -- cannot retroactively unlink a PR that did the work.
 DELETE FROM issue_vcs_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2;
+
+-- name: ListIssueIDsForVCSPullRequest :many
+-- Every issue this PR is currently linked to. The webhook uses it to drop links
+-- for issues the PR no longer claims: a removed key leaves no trace in the
+-- payload, so the stored links are the only source of truth.
+SELECT issue_id FROM issue_vcs_pull_request
+WHERE pull_request_id = $1;

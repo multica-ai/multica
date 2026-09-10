@@ -127,11 +127,18 @@ Returns `{"pull_requests": [...]}`. Each element exposes:
 So "is it merged?" is `state == "merged"` (or `merged_at != null`); "is it still
 a draft?" is `state == "draft"`; coarse CI status is `checks_conclusion`.
 
-If the command returns no linked PRs after a PR was opened, the link scanner saw
-no routable issue key in the PR title or branch and no key after a closing keyword
-in the body. A bare body mention does not count — see the passing-mention rule
-above. Fix it by editing the PR title (or adding a closing keyword), which
-re-runs the scan.
+If the command returns no linked PRs after a PR was opened, check the syntax
+first: the scanner needs a routable issue key in the PR title or branch, or one
+right after a closing keyword in the body — a bare body mention does not count
+(see the passing-mention rule above). When the syntax is the problem, editing the
+title or adding a closing keyword re-runs the scan.
+
+If the key is already written correctly and the list is still empty, stop editing
+the PR — re-triggering cannot repair a delivery that never arrives. What is left
+is on the integration side: the app may not be installed on that repository, the
+installation may be bound to a different workspace, the workspace may have
+auto-linking turned off, or the event may not have been delivered at all. Say so
+in the result comment instead of editing the PR again.
 
 ## Listing and ordering issues
 

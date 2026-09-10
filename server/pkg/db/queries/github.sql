@@ -218,6 +218,10 @@ ORDER BY (state IN ('open', 'draft')) DESC, pr_updated_at DESC
 LIMIT 1;
 
 -- name: ListIssueIDsForPullRequest :many
+-- Every issue this PR is currently linked to. Two callers: the snapshot
+-- broadcast fans a refresh out to them, and the webhook uses it to drop links
+-- for issues the PR no longer claims — a removed key leaves no trace in the
+-- payload, so the stored links are the only source of truth.
 SELECT issue_id FROM issue_pull_request
 WHERE pull_request_id = $1;
 
