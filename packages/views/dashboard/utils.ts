@@ -205,9 +205,12 @@ export interface AgentDashboardRow {
   cost: number;
   seconds: number;
   taskCount: number;
-  meteredTaskCount: number;
   unreportedTaskCount: number;
   hasReportedUsage: boolean;
+  // Token/cost totals come from the asynchronous hourly rollup. Keep their
+  // availability separate from real-time task_usage coverage so rollup lag
+  // never turns a reported run into either a fake zero or an unreported run.
+  hasUsageTotals: boolean;
 }
 
 // Merge per-agent token totals with per-agent run-time totals into one
@@ -242,9 +245,9 @@ export function mergeAgentDashboardRows(
       cost: r.cost,
       seconds: rt?.total_seconds ?? 0,
       taskCount,
-      meteredTaskCount,
       unreportedTaskCount: Math.max(0, taskCount - meteredTaskCount),
       hasReportedUsage: true,
+      hasUsageTotals: true,
     });
   }
   // Agents with run-time rows but zero tokens still belong on the list
@@ -259,9 +262,10 @@ export function mergeAgentDashboardRows(
       cost: 0,
       seconds: r.total_seconds,
       taskCount: r.task_count,
-      meteredTaskCount,
       unreportedTaskCount: Math.max(0, r.task_count - meteredTaskCount),
-      hasReportedUsage: false,
+      hasReportedUsage:
+        r.metered_task_count === undefined ? false : meteredTaskCount > 0,
+      hasUsageTotals: false,
     });
   }
   return Array.from(merged.values()).toSorted((a, b) => {
@@ -297,10 +301,12 @@ export const RESTRICTED_AGENTS_ROW_ID = "__restricted_agents__";
 // (those totals aggregate `task_usage_hourly` without joining `agent`), so the
 // per-agent breakdown no longer reconciled with the totals (MUL-3776, #4640).
 // Aggregating instead of dropping keeps `sum(visible rows) == KPI total` while
-// still never exposing a UUID. The bucket carries tokens + cost only; seconds
-// and taskCount stay 0 because the run-time rollups inner-join `agent`, so
-// deleted agents already contribute nothing to the Time/Tasks KPIs — the
-// component renders those two columns as "—" for this row.
+// still never exposing a UUID. The bucket carries tokens + cost and their
+// coverage metadata only; seconds and taskCount stay 0 because the run-time
+// rollups inner-join `agent`, so deleted agents already contribute nothing to
+// the Time/Tasks KPIs — the component renders those two columns as "—" for
+// this row. Preserving coverage also handles a cross-query deletion race where
+// a run-time row was read just before the agent disappeared.
 //
 // `knownAgentIds` is `null` while the agent list is still loading; callers
 // pass `null` in that case so the rows pass through untouched instead of the
@@ -322,9 +328,9 @@ export function bucketUnknownAgentRows(
     cost: 0,
     seconds: 0,
     taskCount: 0,
-    meteredTaskCount: 0,
     unreportedTaskCount: 0,
     hasReportedUsage: false,
+    hasUsageTotals: false,
   };
   let hasDeleted = false;
   for (const r of rows) {
@@ -335,7 +341,9 @@ export function bucketUnknownAgentRows(
     hasDeleted = true;
     bucket.tokens += r.tokens;
     bucket.cost += r.cost;
+    bucket.unreportedTaskCount += r.unreportedTaskCount;
     bucket.hasReportedUsage ||= r.hasReportedUsage;
+    bucket.hasUsageTotals ||= r.hasUsageTotals;
   }
   return hasDeleted ? [...known, bucket] : known;
 }

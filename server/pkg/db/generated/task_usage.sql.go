@@ -32,10 +32,7 @@ WITH usage AS (
         COUNT(*)::int AS terminal_task_count,
         COUNT(*) FILTER (WHERE EXISTS (
             SELECT 1 FROM task_usage tu WHERE tu.task_id = atq.id
-        ))::int AS metered_task_count,
-        COUNT(*) FILTER (WHERE NOT EXISTS (
-            SELECT 1 FROM task_usage tu WHERE tu.task_id = atq.id
-        ))::int AS unreported_task_count
+        ))::int AS metered_task_count
     FROM agent_task_queue atq
     WHERE atq.issue_id = $1
       AND atq.status IN ('completed', 'failed', 'cancelled')
@@ -46,7 +43,7 @@ SELECT
     usage.total_input_tokens, usage.total_output_tokens, usage.total_cache_read_tokens, usage.total_cache_write_tokens, usage.total_cost_usd_ticks, usage.uncosted_input_tokens, usage.uncosted_output_tokens, usage.uncosted_cache_read_tokens, usage.uncosted_cache_write_tokens, usage.task_count,
     terminal_runs.terminal_task_count,
     terminal_runs.metered_task_count,
-    terminal_runs.unreported_task_count
+    (terminal_runs.terminal_task_count - terminal_runs.metered_task_count)::int AS unreported_task_count
 FROM usage
 CROSS JOIN terminal_runs
 `

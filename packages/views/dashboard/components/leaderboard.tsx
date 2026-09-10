@@ -200,8 +200,10 @@ export function Leaderboard({
                 const agent = agents.find((a) => a.id === row.agentId);
                 const value = SORT_METRIC[sortBy](row);
                 const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
-                const usageUnavailable = !row.hasReportedUsage;
+                const usageUnavailable = !row.hasUsageTotals;
                 const usageIncomplete = row.unreportedTaskCount > 0;
+                const usageTotalsPending =
+                  row.hasReportedUsage && !row.hasUsageTotals;
                 const tokenText = usageUnavailable
                   ? "—"
                   : `${usageIncomplete ? "≥" : ""}${formatTokens(row.tokens)}`;
@@ -212,7 +214,9 @@ export function Leaderboard({
                   ? t(($) => $.leaderboard.usage_unreported, {
                       count: row.unreportedTaskCount,
                     })
-                  : null;
+                  : usageTotalsPending
+                    ? t(($) => $.leaderboard.usage_totals_pending)
+                    : null;
                 return (
                   <li
                     key={row.agentId}
