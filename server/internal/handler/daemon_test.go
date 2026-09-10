@@ -4599,3 +4599,40 @@ func TestClaimOmitsFeishuDocumentsWhenUnsupportedUnboundRevokedOrUnavailable(t *
 		})
 	}
 }
+
+func TestReconnectingFeishuBotChangesOnlyTheNextClaim(t *testing.T) {
+	workspaceID := util.MustParseUUID("10000000-0000-4000-8000-000000000041")
+	agentID := util.MustParseUUID("30000000-0000-4000-8000-000000000041")
+	runtimeID := util.MustParseUUID("40000000-0000-4000-8000-000000000041")
+	task := db.AgentTaskQueue{
+		ID:      util.MustParseUUID("20000000-0000-4000-8000-000000000041"),
+		AgentID: agentID, RuntimeID: runtimeID,
+	}
+	agent := db.Agent{ID: agentID, WorkspaceID: workspaceID, RuntimeID: runtimeID}
+	oldInstallation := claimFeishuInstallation(
+		util.MustParseUUID("50000000-0000-4000-8000-000000000041"), workspaceID, agentID, 1_700_000_000_000_000_041)
+	store := &fakeClaimFeishuDocumentsStore{installations: map[string]lark.Installation{
+		util.UUIDToString(agentID): oldInstallation,
+	}}
+	h := newFeishuDocumentsClaimHandler(store)
+	oldClaim := AgentTaskResponse{}
+	h.mountAgentScopedFeishuDocuments(remoteMCPClaimRequest(), task, agent, &oldClaim)
+	if len(oldClaim.RemoteMCPConnections) != 1 {
+		t.Fatalf("old claim connections=%+v", oldClaim.RemoteMCPConnections)
+	}
+
+	newInstallation := claimFeishuInstallation(
+		util.MustParseUUID("50000000-0000-4000-8000-000000000042"), workspaceID, agentID, 1_700_000_000_000_000_042)
+	store.installations[util.UUIDToString(agentID)] = newInstallation
+	newClaim := AgentTaskResponse{}
+	h.mountAgentScopedFeishuDocuments(remoteMCPClaimRequest(), task, agent, &newClaim)
+	if len(newClaim.RemoteMCPConnections) != 1 || newClaim.RemoteMCPConnections[0].InstallationID != util.UUIDToString(newInstallation.ID) {
+		t.Fatalf("new claim did not use reconnected installation: %+v", newClaim.RemoteMCPConnections)
+	}
+	if oldClaim.RemoteMCPConnections[0].InstallationID != util.UUIDToString(oldInstallation.ID) {
+		t.Fatalf("existing claim was mutated after reconnect: %+v", oldClaim.RemoteMCPConnections)
+	}
+	if oldClaim.RemoteMCPConnections[0].ContributionID == newClaim.RemoteMCPConnections[0].ContributionID {
+		t.Fatal("reconnect did not produce a new pinned contribution")
+	}
+}

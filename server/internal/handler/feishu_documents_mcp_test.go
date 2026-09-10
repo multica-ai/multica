@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
@@ -80,6 +83,25 @@ func TestFeishuDocumentsConnectionPinsExactlySixTools(t *testing.T) {
 	}
 }
 
+func TestFeishuDocumentsConnectionRequiresHTTPSOrigin(t *testing.T) {
+	installation := lark.Installation{
+		ID:        util.MustParseUUID("30000000-0000-4000-8000-000000000001"),
+		UpdatedAt: pgtype.Timestamptz{Time: time.Unix(1_700_000_000, 123), Valid: true},
+	}
+	for _, publicURL := range []string{
+		"http://agents.example.com",
+		"https://user@agents.example.com",
+		"https://agents.example.com/base",
+		"https://agents.example.com?region=cn",
+		"https://agents.example.com#fragment",
+	} {
+		_, err := FeishuDocumentsConnection(publicURL, "task-id", installation)
+		if err == nil {
+			t.Fatalf("accepted non-origin public URL %q", publicURL)
+		}
+	}
+}
+
 func TestParseFeishuDocumentsContributionRejectsMalformedValues(t *testing.T) {
 	for _, raw := range []string{
 		"",
@@ -135,8 +157,9 @@ func TestValidateFeishuDocumentsScopeRejectsCrossIdentityAndStaleCapabilities(t 
 	}
 
 	tests := map[string]func(*feishuDocumentsScope){
-		"wrong daemon": func(s *feishuDocumentsScope) { s.DaemonID = "daemon-b" },
-		"ended task":   func(s *feishuDocumentsScope) { s.Task.Status = "completed" },
+		"wrong daemon":   func(s *feishuDocumentsScope) { s.DaemonID = "daemon-b" },
+		"ended task":     func(s *feishuDocumentsScope) { s.Task.Status = "completed" },
+		"cancelled task": func(s *feishuDocumentsScope) { s.Task.Status = "cancelled" },
 		"different task runtime": func(s *feishuDocumentsScope) {
 			s.Task.RuntimeID = util.MustParseUUID("40000000-0000-4000-8000-000000000002")
 		},
@@ -312,5 +335,187 @@ func TestResolveRemoteMCPCredentialReturnsOnlyExistingTaskToken(t *testing.T) {
 		if strings.Contains(recorder.Body.String(), secret) {
 			t.Fatalf("credential response leaked %q", secret)
 		}
+	}
+}
+
+type mutableFeishuDocumentStore struct {
+	installations map[string]lark.Installation
+}
+
+func (s *mutableFeishuDocumentStore) GetActiveLarkInstallationForAgent(_ context.Context, workspaceID, agentID pgtype.UUID) (lark.Installation, error) {
+	installation, ok := s.installations[util.UUIDToString(agentID)]
+	if !ok || installation.WorkspaceID != workspaceID || installation.Status != "active" {
+		return lark.Installation{}, pgx.ErrNoRows
+	}
+	return installation, nil
+}
+
+type mappedFeishuDocumentCredentials struct {
+	secrets map[string]string
+}
+
+func (c mappedFeishuDocumentCredentials) DecryptAppSecret(installation lark.Installation) (string, error) {
+	secret, ok := c.secrets[util.UUIDToString(installation.ID)]
+	if !ok {
+		return "", io.EOF
+	}
+	return secret, nil
+}
+
+type recordingFeishuDocumentClient struct {
+	credentials []lark.InstallationCredentials
+}
+
+func (c *recordingFeishuDocumentClient) FetchDocument(_ context.Context, credentials lark.InstallationCredentials, _ lark.DocumentFetchParams) (lark.DocumentSnapshot, error) {
+	c.credentials = append(c.credentials, credentials)
+	return lark.DocumentSnapshot{RevisionID: int64(len(c.credentials)), Content: "bounded content"}, nil
+}
+
+func (c *recordingFeishuDocumentClient) UpdateDocument(_ context.Context, credentials lark.InstallationCredentials, _ lark.DocumentUpdateParams) (lark.DocumentUpdateResult, error) {
+	c.credentials = append(c.credentials, credentials)
+	return lark.DocumentUpdateResult{RevisionID: int64(len(c.credentials))}, nil
+}
+
+type feishuDocumentSecurityFixture struct {
+	handler       *Handler
+	store         *mutableFeishuDocumentStore
+	client        *recordingFeishuDocumentClient
+	tasks         map[string]db.AgentTaskQueue
+	agents        map[string]db.Agent
+	workspaceID   pgtype.UUID
+	runtimeID     pgtype.UUID
+	pikachuTaskID pgtype.UUID
+	maimaiTaskID  pgtype.UUID
+}
+
+func newFeishuDocumentSecurityFixture() *feishuDocumentSecurityFixture {
+	workspaceID := util.MustParseUUID("10000000-0000-4000-8000-000000000101")
+	runtimeID := util.MustParseUUID("40000000-0000-4000-8000-000000000101")
+	pikachuID := util.MustParseUUID("30000000-0000-4000-8000-000000000101")
+	maimaiID := util.MustParseUUID("30000000-0000-4000-8000-000000000102")
+	pikachuTaskID := util.MustParseUUID("20000000-0000-4000-8000-000000000101")
+	maimaiTaskID := util.MustParseUUID("20000000-0000-4000-8000-000000000102")
+	pikachuInstallation := lark.Installation{
+		ID: util.MustParseUUID("50000000-0000-4000-8000-000000000101"), WorkspaceID: workspaceID, AgentID: pikachuID,
+		AppID: "cli_pikachu", Status: "active", Region: string(lark.RegionFeishu),
+		UpdatedAt: pgtype.Timestamptz{Time: time.Unix(0, 1_700_000_000_000_000_101), Valid: true},
+	}
+	maimaiInstallation := lark.Installation{
+		ID: util.MustParseUUID("50000000-0000-4000-8000-000000000102"), WorkspaceID: workspaceID, AgentID: maimaiID,
+		AppID: "cli_maimai", Status: "active", Region: string(lark.RegionFeishu),
+		UpdatedAt: pgtype.Timestamptz{Time: time.Unix(0, 1_700_000_000_000_000_102), Valid: true},
+	}
+	store := &mutableFeishuDocumentStore{installations: map[string]lark.Installation{
+		util.UUIDToString(pikachuID): pikachuInstallation,
+		util.UUIDToString(maimaiID):  maimaiInstallation,
+	}}
+	client := &recordingFeishuDocumentClient{}
+	service := lark.NewDocumentService(store, mappedFeishuDocumentCredentials{secrets: map[string]string{
+		util.UUIDToString(pikachuInstallation.ID): "pikachu-secret",
+		util.UUIDToString(maimaiInstallation.ID):  "maimai-secret",
+	}}, client, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	fixture := &feishuDocumentSecurityFixture{
+		store: store, client: client, workspaceID: workspaceID, runtimeID: runtimeID,
+		pikachuTaskID: pikachuTaskID, maimaiTaskID: maimaiTaskID,
+		tasks: map[string]db.AgentTaskQueue{
+			util.UUIDToString(pikachuTaskID): {ID: pikachuTaskID, AgentID: pikachuID, RuntimeID: runtimeID, Status: "running"},
+			util.UUIDToString(maimaiTaskID):  {ID: maimaiTaskID, AgentID: maimaiID, RuntimeID: runtimeID, Status: "running"},
+		},
+		agents: map[string]db.Agent{
+			util.UUIDToString(pikachuID): {ID: pikachuID, WorkspaceID: workspaceID, RuntimeID: runtimeID},
+			util.UUIDToString(maimaiID):  {ID: maimaiID, WorkspaceID: workspaceID, RuntimeID: runtimeID},
+		},
+	}
+	fixture.handler = &Handler{LarkDocuments: service}
+	fixture.handler.feishuDocumentsScopeLoader = func(_ context.Context, _ *http.Request, taskID, _ string) (feishuDocumentsScope, error) {
+		task, ok := fixture.tasks[taskID]
+		if !ok {
+			return feishuDocumentsScope{}, errFeishuDocumentsCapabilityDenied
+		}
+		agent := fixture.agents[util.UUIDToString(task.AgentID)]
+		installation, err := fixture.store.GetActiveLarkInstallationForAgent(context.Background(), fixture.workspaceID, task.AgentID)
+		if err != nil {
+			return feishuDocumentsScope{}, errFeishuDocumentsCapabilityDenied
+		}
+		return feishuDocumentsScope{
+			Task: task,
+			Runtime: db.AgentRuntime{
+				ID: fixture.runtimeID, WorkspaceID: fixture.workspaceID,
+				DaemonID: pgtype.Text{String: "daemon-shared", Valid: true},
+			},
+			Agent: agent, Installation: installation,
+			WorkspaceID: fixture.workspaceID, DaemonID: "daemon-shared",
+		}, nil
+	}
+	return fixture
+}
+
+func (f *feishuDocumentSecurityFixture) contribution(t *testing.T, agentID pgtype.UUID) string {
+	t.Helper()
+	installation := f.store.installations[util.UUIDToString(agentID)]
+	connection, err := FeishuDocumentsConnection("https://agents.example.com", "task", installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return connection.ContributionID
+}
+
+func (f *feishuDocumentSecurityFixture) callFetch(taskID pgtype.UUID, contribution string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"feishu_docs_fetch","arguments":{"document_url":"https://example.feishu.cn/docx/AbCdEfGh1234"}}}`))
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("id", util.UUIDToString(taskID))
+	routeContext.URLParams.Add("contributionId", contribution)
+	ctx := context.WithValue(request.Context(), chi.RouteCtxKey, routeContext)
+	ctx = middleware.WithDaemonContext(ctx, util.UUIDToString(f.workspaceID), "daemon-shared")
+	request = request.WithContext(ctx)
+	request.Header.Set("Authorization", "Bearer mdt_security_fixture")
+	recorder := httptest.NewRecorder()
+	f.handler.ServeFeishuDocumentsMCP(recorder, request)
+	return recorder
+}
+
+func TestFeishuDocumentsEndToEndKeepsBotIdentityAndRevocationLive(t *testing.T) {
+	fixture := newFeishuDocumentSecurityFixture()
+	pikachuAgentID := fixture.tasks[util.UUIDToString(fixture.pikachuTaskID)].AgentID
+	maimaiAgentID := fixture.tasks[util.UUIDToString(fixture.maimaiTaskID)].AgentID
+	pikachuContribution := fixture.contribution(t, pikachuAgentID)
+	maimaiContribution := fixture.contribution(t, maimaiAgentID)
+
+	for _, call := range []struct {
+		task         pgtype.UUID
+		contribution string
+	}{
+		{fixture.pikachuTaskID, pikachuContribution},
+		{fixture.maimaiTaskID, maimaiContribution},
+	} {
+		response := fixture.callFetch(call.task, call.contribution)
+		if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "secret") {
+			t.Fatalf("valid call failed or leaked a secret: status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	if len(fixture.client.credentials) != 2 ||
+		fixture.client.credentials[0].AppID != "cli_pikachu" || fixture.client.credentials[0].AppSecret != "pikachu-secret" ||
+		fixture.client.credentials[1].AppID != "cli_maimai" || fixture.client.credentials[1].AppSecret != "maimai-secret" {
+		t.Fatalf("document credentials crossed Agent identity: %+v", fixture.client.credentials)
+	}
+
+	swapped := fixture.callFetch(fixture.pikachuTaskID, maimaiContribution)
+	if swapped.Code != http.StatusForbidden || !strings.Contains(swapped.Body.String(), "capability_denied") {
+		t.Fatalf("swapped contribution was not refused: status=%d body=%s", swapped.Code, swapped.Body.String())
+	}
+	pikachuInstallation := fixture.store.installations[util.UUIDToString(pikachuAgentID)]
+	pikachuInstallation.UpdatedAt.Time = pikachuInstallation.UpdatedAt.Time.Add(time.Nanosecond)
+	fixture.store.installations[util.UUIDToString(pikachuAgentID)] = pikachuInstallation
+	stale := fixture.callFetch(fixture.pikachuTaskID, pikachuContribution)
+	if stale.Code != http.StatusForbidden || !strings.Contains(stale.Body.String(), "capability_denied") {
+		t.Fatalf("changed installation revision was not live-revoked: status=%d body=%s", stale.Code, stale.Body.String())
+	}
+	maimaiTask := fixture.tasks[util.UUIDToString(fixture.maimaiTaskID)]
+	maimaiTask.Status = "completed"
+	fixture.tasks[util.UUIDToString(fixture.maimaiTaskID)] = maimaiTask
+	ended := fixture.callFetch(fixture.maimaiTaskID, maimaiContribution)
+	if ended.Code != http.StatusForbidden || !strings.Contains(ended.Body.String(), "capability_denied") {
+		t.Fatalf("completed task retained document capability: status=%d body=%s", ended.Code, ended.Body.String())
 	}
 }

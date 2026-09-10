@@ -35,7 +35,8 @@ var (
 // FeishuDocumentsConnection builds the fixed, task-scoped built-in MCP connection.
 func FeishuDocumentsConnection(publicURL, taskID string, installation lark.Installation) (remotemcp.Connection, error) {
 	base, err := url.Parse(strings.TrimRight(publicURL, "/"))
-	if err != nil || base.Scheme != "https" || base.Hostname() == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+	if err != nil || base.Scheme != "https" || base.Hostname() == "" || base.User != nil ||
+		base.Path != "" || base.RawQuery != "" || base.Fragment != "" {
 		return remotemcp.Connection{}, errors.New("feishu documents: public URL must be an absolute HTTPS origin")
 	}
 	if taskID == "" || !installation.ID.Valid || !installation.UpdatedAt.Valid {
