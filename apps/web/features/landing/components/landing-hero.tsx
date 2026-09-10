@@ -91,7 +91,15 @@ function WorksWithRow({ label, href }: { label: string; href: string }) {
         />
       </Link>
 
-      <ul className="flex max-w-[880px] flex-wrap items-center justify-center gap-x-7 gap-y-5 sm:gap-x-9">
+      {/*
+        Explicit column counts, not free wrapping: with `flex-wrap` the 14 marks
+        broke 13 + 1 around 834px and 12 + 2 around 768px, and a single orphan
+        on the second row reads as a bug rather than a layout. Fourteen columns
+        once there is room for one row, seven — an exact 7 x 2 — below that. The
+        columns carry the spacing, so the marks stay evenly pitched at every
+        width and the grid still shrinks below its max width on a narrow phone.
+      */}
+      <ul className="grid w-full max-w-[392px] grid-cols-7 items-center justify-items-center gap-y-6 sm:max-w-[532px] lg:max-w-[896px] lg:grid-cols-14">
         {HERO_PROVIDERS.map(({ name, Mark, size }) => (
           <li
             key={name}

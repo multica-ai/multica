@@ -210,49 +210,15 @@ function PiMark({ className }: { className?: string }) {
   );
 }
 
-// OpenClaw — the pixel lobster as a single-colour silhouette: shell and outline
-// share currentColor, and the eyes are held back to keep the mascot legible at
-// hero size.
-function OpenClawMark({ className }: { className?: string }) {
+// OpenCode — official pixel "O" mark from the anomalyco/opencode brand assets.
+// Upstream draws it as two greys; the same light/dark relationship survives as
+// two opacities of one colour, which is what keeps a solid mark from shouting
+// over the outline glyphs beside it.
+function OpenCodeMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" className={className} fill="currentColor">
-      <g>
-        <rect x="1" y="5" width="1" height="3" />
-        <rect x="2" y="4" width="1" height="1" />
-        <rect x="2" y="8" width="1" height="1" />
-        <rect x="3" y="3" width="1" height="1" />
-        <rect x="3" y="9" width="1" height="1" />
-        <rect x="4" y="2" width="1" height="1" />
-        <rect x="4" y="10" width="1" height="1" />
-        <rect x="5" y="2" width="6" height="1" />
-        <rect x="11" y="2" width="1" height="1" />
-        <rect x="12" y="3" width="1" height="1" />
-        <rect x="12" y="9" width="1" height="1" />
-        <rect x="13" y="4" width="1" height="1" />
-        <rect x="13" y="8" width="1" height="1" />
-        <rect x="14" y="5" width="1" height="3" />
-        <rect x="5" y="11" width="6" height="1" />
-        <rect x="4" y="12" width="1" height="1" />
-        <rect x="11" y="12" width="1" height="1" />
-        <rect x="3" y="13" width="1" height="1" />
-        <rect x="12" y="13" width="1" height="1" />
-        <rect x="5" y="14" width="6" height="1" />
-        <rect x="5" y="3" width="6" height="1" />
-        <rect x="4" y="4" width="8" height="1" />
-        <rect x="3" y="5" width="10" height="1" />
-        <rect x="3" y="6" width="10" height="1" />
-        <rect x="3" y="7" width="10" height="1" />
-        <rect x="4" y="8" width="8" height="1" />
-        <rect x="5" y="9" width="6" height="1" />
-        <rect x="5" y="12" width="6" height="1" />
-        <rect x="6" y="13" width="4" height="1" />
-        <rect x="1" y="6" width="2" height="1" />
-        <rect x="13" y="6" width="2" height="1" />
-      </g>
-      <g fillOpacity="0.32">
-        <rect x="6" y="4" width="1" height="2" />
-        <rect x="9" y="4" width="1" height="2" />
-      </g>
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
+      <path fillOpacity="0.5" d="M18 3H6V18H18V3ZM24 24H0V0H24V24Z" />
+      <path d="M18 18H6V6H18V18Z" />
     </svg>
   );
 }
@@ -289,5 +255,5 @@ export const HERO_PROVIDERS: HeroProvider[] = [
   { name: "Trae", Mark: TraeMark, size: "size-[22px]" },
   { name: "Hermes", Mark: HermesMark, size: "size-[23px]" },
   { name: "Pi", Mark: PiMark, size: "size-[22px]" },
-  { name: "OpenClaw", Mark: OpenClawMark, size: "size-[23px]" },
+  { name: "OpenCode", Mark: OpenCodeMark, size: "size-[21px]" },
 ];
