@@ -25,10 +25,12 @@ DROP INDEX CONCURRENTLY IF EXISTS idx_issue_description_trgm;
 
 The subsequent migrations become fast no-ops. If startup performs a drop and
 is interrupted, `IF EXISTS` makes the next run retry safely; one index may
-remain until that retry completes. Application rollback remains functionally
-correct because issue search no longer consumes either index. A database
-rollback rebuilds up to two multi-gigabyte GIN indexes and is not immediate;
-verify every restored index is live, ready, and valid before relying on it:
+remain until that retry completes. Rolling back to the current candidate-first
+search remains functionally correct without either index, but rolling back to
+the legacy search can make description queries much slower or time out until
+the database rollback rebuilds the indexes. Rebuilding up to two multi-gigabyte
+GIN indexes is not immediate; verify every restored index is live, ready, and
+valid before relying on it:
 
 ```sql
 SELECT indexrelid::regclass AS index_name, indisvalid, indisready, indislive
