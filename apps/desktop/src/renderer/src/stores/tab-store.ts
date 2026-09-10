@@ -207,6 +207,8 @@ interface TabStore {
   /** Session-driven back/forward (there is no router history to pop). */
   goBack: () => void;
   goForward: () => void;
+  /** Jump directly to one entry in the active session's virtual history. */
+  goToHistoryIndex: (historyIndex: number) => void;
   /**
    * Persist captured scroll offsets for one route of a tab (Coordinator, on
    * deactivate / before in-tab navigation). REPLACE semantics per route: all
@@ -766,6 +768,10 @@ export const useTabStore = create<TabStore>()(
         stepHistory(get, set, +1);
       },
 
+      goToHistoryIndex(historyIndex) {
+        setHistoryIndex(get, set, historyIndex);
+      },
+
       commitScrollMemento(tabId, routeKey, entries) {
         const { byWorkspace } = get();
         const hit = findTabLocation(byWorkspace, tabId);
@@ -1140,6 +1146,17 @@ function stepHistory(
   set: (partial: Partial<TabStore>) => void,
   delta: -1 | 1,
 ) {
+  const active = getActiveTab(get());
+  if (!active) return;
+  setHistoryIndex(get, set, active.history.index + delta);
+}
+
+function setHistoryIndex(
+  get: () => TabStore,
+  set: (partial: Partial<TabStore>) => void,
+  historyIndex: number,
+) {
+  if (!Number.isInteger(historyIndex)) return;
   const { activeWorkspaceSlug, byWorkspace } = get();
   if (!activeWorkspaceSlug) return;
   const group = byWorkspace[activeWorkspaceSlug];
@@ -1147,14 +1164,19 @@ function stepHistory(
   const index = group.tabs.findIndex((t) => t.id === group.activeTabId);
   if (index < 0) return;
   const current = group.tabs[index];
-  const nextIndex = current.history.index + delta;
-  if (nextIndex < 0 || nextIndex >= current.history.stack.length) return;
-  const url = current.history.stack[nextIndex];
+  if (
+    historyIndex === current.history.index ||
+    historyIndex < 0 ||
+    historyIndex >= current.history.stack.length
+  ) {
+    return;
+  }
+  const url = current.history.stack[historyIndex];
   const next: TabSession = {
     ...current,
     url,
     resourceKey: resourceKeyForUrl(url),
-    history: { ...current.history, index: nextIndex },
+    history: { ...current.history, index: historyIndex },
   };
   const nextTabs = [...group.tabs];
   nextTabs[index] = next;
@@ -1385,13 +1407,13 @@ export function useActiveTabUrl(): string | null {
 }
 
 /**
- * History tracking for the active tab as primitives. Subscribers re-render
- * only when the numeric index / length change (i.e. on actual navigations),
- * not on unrelated store updates.
+ * History tracking for the active tab. The stack reference changes only on
+ * actual navigation, so subscribers do not re-render for unrelated updates.
  */
 export function useActiveTabHistory(): {
   historyIndex: number;
   historyLength: number;
+  historyEntries: string[];
 } {
   const historyIndex = useTabStore(
     (s) => getActiveTab(s)?.history.index ?? 0,
@@ -1399,5 +1421,10 @@ export function useActiveTabHistory(): {
   const historyLength = useTabStore(
     (s) => getActiveTab(s)?.history.stack.length ?? 1,
   );
-  return { historyIndex, historyLength };
+  const historyEntries = useTabStore(
+    (s) => getActiveTab(s)?.history.stack ?? EMPTY_HISTORY_ENTRIES,
+  );
+  return { historyIndex, historyLength, historyEntries };
 }
+
+const EMPTY_HISTORY_ENTRIES: string[] = [];

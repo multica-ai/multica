@@ -31,8 +31,11 @@ vi.mock("@/hooks/use-tab-history", () => ({
   useTabHistory: () => ({
     canGoBack: false,
     canGoForward: false,
+    historyEntries: [],
+    historyIndex: 0,
     goBack: vi.fn(),
     goForward: vi.fn(),
+    goToHistoryIndex: vi.fn(),
   }),
   useNavigationInputBindings: () => {},
 }));

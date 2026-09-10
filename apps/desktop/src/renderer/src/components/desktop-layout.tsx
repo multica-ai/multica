@@ -1,5 +1,4 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
@@ -9,7 +8,6 @@ import {
 } from "@/hooks/use-tab-history";
 import {
   SidebarProvider,
-  SidebarTrigger,
   useSidebar,
 } from "@multica/ui/components/ui/sidebar";
 import { ModalRegistry } from "@multica/views/modals/registry";
@@ -35,65 +33,15 @@ import {
 import { TabBar } from "./tab-bar";
 import { TabContent } from "./tab-content";
 import { WindowOverlay } from "./window-overlay";
+import { WindowToolbar, WINDOW_TOOLBAR_CLEARANCE } from "./window-toolbar";
 
 const TOP_BAR_HEIGHT_CLASS = "h-12";
-const WINDOW_TOOLBAR_CLEARANCE = 184;
 const toolbarMotion = {
   type: "spring",
   stiffness: 420,
   damping: 38,
   mass: 0.8,
 } as const;
-
-function WindowToolbar() {
-  const { canGoBack, canGoForward, goBack, goForward } = useTabHistory();
-  const navButtonClassName =
-    "flex size-7 items-center justify-center rounded-md text-faint-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-30";
-
-  return (
-    <div
-      className={cn(
-        "fixed left-0 top-0 z-30 flex w-[184px] shrink-0 items-center px-3",
-        TOP_BAR_HEIGHT_CLASS,
-      )}
-      style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
-    >
-      <div
-        className="flex items-center gap-1 pl-[70px]"
-        style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-      >
-        <SidebarTrigger
-          className="size-7 text-faint-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-        />
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={goBack}
-            disabled={!canGoBack}
-            aria-label="Go back"
-            title="Go back"
-            className={navButtonClassName}
-            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          <button
-            type="button"
-            onClick={goForward}
-            disabled={!canGoForward}
-            aria-label="Go forward"
-            title="Go forward"
-            className={navButtonClassName}
-            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-          >
-            <ChevronRight className="size-4" />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function SidebarTopSpacer() {
   return <div className={cn("shrink-0", TOP_BAR_HEIGHT_CLASS)} />;

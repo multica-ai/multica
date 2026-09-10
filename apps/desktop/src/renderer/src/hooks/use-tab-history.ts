@@ -11,7 +11,7 @@ import { useTabStore, useActiveTabHistory } from "@/stores/tab-store";
  * direction hints, no router.navigate(±1).
  */
 export function useTabHistory() {
-  const { historyIndex, historyLength } = useActiveTabHistory();
+  const { historyIndex, historyLength, historyEntries } = useActiveTabHistory();
 
   const canGoBack = historyIndex > 0;
   const canGoForward = historyIndex < historyLength - 1;
@@ -24,7 +24,19 @@ export function useTabHistory() {
     useTabStore.getState().goForward();
   }, []);
 
-  return { canGoBack, canGoForward, goBack, goForward };
+  const goToHistoryIndex = useCallback((index: number) => {
+    useTabStore.getState().goToHistoryIndex(index);
+  }, []);
+
+  return {
+    canGoBack,
+    canGoForward,
+    historyEntries,
+    historyIndex,
+    goBack,
+    goForward,
+    goToHistoryIndex,
+  };
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

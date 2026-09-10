@@ -470,6 +470,28 @@ describe("navigateActiveSession", () => {
     store.goForward();
     expect(getActiveTab(useTabStore.getState())!.history.index).toBe(1);
   });
+
+  it("goToHistoryIndex jumps directly and ignores invalid indices", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.navigateActiveSession("/acme/projects");
+    store.navigateActiveSession("/acme/agents");
+
+    store.goToHistoryIndex(0);
+    let active = getActiveTab(useTabStore.getState())!;
+    expect(active.url).toBe("/acme/issues");
+    expect(active.history.index).toBe(0);
+
+    store.goToHistoryIndex(2);
+    active = getActiveTab(useTabStore.getState())!;
+    expect(active.url).toBe("/acme/agents");
+    expect(active.history.index).toBe(2);
+
+    store.goToHistoryIndex(-1);
+    store.goToHistoryIndex(3);
+    store.goToHistoryIndex(1.5);
+    expect(getActiveTab(useTabStore.getState())).toBe(active);
+  });
 });
 
 describe("reloadActiveTab", () => {
