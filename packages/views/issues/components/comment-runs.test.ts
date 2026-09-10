@@ -316,7 +316,7 @@ describe("orderTimelineWithRuns", () => {
       .toEqual(["first", "second", "run"]);
   });
 
-  it("parks a working run at the live end and keeps live runs in start order", () => {
+  it("parks a working run at the live end and keeps live runs in enqueue order", () => {
     const earlier = task("earlier", { status: "running", created_at: "2026-09-07T10:00:00Z" });
     const later = task("later", { status: "queued", created_at: "2026-09-07T10:30:00Z" });
     const posted = comment("posted", { created_at: "2026-09-07T10:45:00Z" });
@@ -341,5 +341,20 @@ describe("orderTimelineWithRuns", () => {
     const same = "2026-09-07T10:00:00Z";
     expect(order([comment("b", { created_at: same }), comment("a", { created_at: same })], []))
       .toEqual(["a", "b"]);
+  });
+
+  // The API serializes timestamps to whole seconds, so a reply sharing one
+  // with a neighbouring comment is routine. The run block must tie-break on
+  // its reply's id — the row that owns the slot — not on the task behind it,
+  // which carries an unrelated enqueue time and id.
+  it("breaks a tie between a reply and a comment on the reply's own row", () => {
+    const same = "2026-09-07T10:40:00Z";
+    const run = task("zzz-task", { status: "completed", created_at: "2026-09-07T10:00:00Z", completed_at: same });
+    const reply = comment("bbb-reply", { actor_type: "agent", source_task_id: run.id, created_at: same });
+    const neighbour = comment("aaa-comment", { created_at: same });
+    const placed: CommentRun = { task: run, commentId: reply.id, hasReply: true };
+    expect(order([neighbour, reply], [placed])).toEqual(["aaa-comment", "zzz-task"]);
+    expect(order([comment("ccc-comment", { created_at: same }), reply], [placed]))
+      .toEqual(["zzz-task", "ccc-comment"]);
   });
 });

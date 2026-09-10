@@ -187,8 +187,12 @@ export function buildCommentRunView(
  * no jump. A run that ended without a reply is history, not live: it sorts at
  * the moment it ended.
  */
+function publishedReply(run: CommentRun, entryById: ReadonlyMap<string, TimelineEntry>): TimelineEntry | undefined {
+  return run.hasReply && run.commentId ? entryById.get(run.commentId) : undefined;
+}
+
 function standaloneRunSortTime(run: CommentRun, entryById: ReadonlyMap<string, TimelineEntry>): number {
-  const reply = run.hasReply && run.commentId ? entryById.get(run.commentId) : undefined;
+  const reply = publishedReply(run, entryById);
   if (reply) return Date.parse(reply.created_at);
   if (isActiveCommentRun(run.task)) return Number.POSITIVE_INFINITY;
   return Date.parse(run.task.completed_at ?? run.task.created_at);
@@ -208,13 +212,21 @@ export function orderTimelineWithRuns(
   const slotted = new Set(standaloneRuns.filter((run) => run.hasReply).map((run) => run.commentId));
   const sortTime = (item: TimelineEntry | CommentRun): number =>
     "task" in item ? standaloneRunSortTime(item, entryById) : Date.parse(item.created_at);
-  // Ties keep the server's own `created_at ASC, id ASC` order. Compare with
-  // `<` rather than subtraction: two live runs both sort at Infinity, and
-  // Infinity - Infinity is NaN, which would leave the comparator inconsistent.
+  // Ties are ordinary, not exotic: the API serializes timestamps to whole
+  // seconds (util.TimestampToString), so a reply and the comment next to it
+  // routinely share one. Break them on the row that OWNS the slot — the reply
+  // for a run that published one, never the task behind it — so equal
+  // timestamps keep the server's `created_at ASC, id ASC` order, the same
+  // invariant sortTimelineEntriesAsc holds for the flat cache.
+  const slotRow = (item: TimelineEntry | CommentRun): { created_at: string; id: string } =>
+    "task" in item ? publishedReply(item, entryById) ?? item.task : item;
+  // Compare with `<` rather than subtraction: two live runs both sort at
+  // Infinity, and Infinity - Infinity is NaN, which would leave the
+  // comparator inconsistent.
   return [...topLevel.filter((entry) => !slotted.has(entry.id)), ...standaloneRuns].sort((a, b) => {
     const left = sortTime(a), right = sortTime(b);
     if (left !== right) return left < right ? -1 : 1;
-    const leftRow = "task" in a ? a.task : a, rightRow = "task" in b ? b.task : b;
+    const leftRow = slotRow(a), rightRow = slotRow(b);
     return leftRow.created_at.localeCompare(rightRow.created_at) || leftRow.id.localeCompare(rightRow.id);
   });
 }
