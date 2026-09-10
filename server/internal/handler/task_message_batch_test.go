@@ -25,7 +25,11 @@ func seedBatchTask(t *testing.T, label string) string {
 		"custom_env":   testutil.Raw("'{}'::jsonb"),
 		"custom_args":  testutil.Raw("'[]'::jsonb"),
 	})
-	issueID := dbfx.Issue(t, label+" fixture", testutil.Cols{"status": "in_progress"})
+	issueID := dbfx.Issue(t, label+" fixture", testutil.Cols{
+		"status":        "in_progress",
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
 	return dbfx.Task(t, agentID, testutil.Cols{
 		"runtime_id": handlerTestRuntimeID(t),
 		"issue_id":   issueID,

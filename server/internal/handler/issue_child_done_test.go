@@ -38,7 +38,7 @@ func newChildDoneFixture(t *testing.T, parentStatus string) childDoneFixture {
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           "child-done child " + time.Now().Format(time.RFC3339Nano),
-		"status":          "in_progress",
+		"status":          "todo",
 		"parent_issue_id": parent.ID,
 	})
 	testHandler.CreateIssue(w, req)
@@ -114,7 +114,7 @@ func systemCommentOn(t *testing.T, issueID string) (content, authorIDStr string,
 // only mention we ever inject (see MUL-2538 Option C — covered separately
 // in TestChildDoneMentionsParentAssignee_* below).
 func TestChildDoneNotifiesParent(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
+	fx := newChildDoneFixture(t, "todo")
 
 	updateChildStatus(t, fx.child.ID, "done")
 
@@ -159,7 +159,7 @@ func TestChildDoneNotifiesParent(t *testing.T) {
 // status='done' twice; only the first call is a transition and should
 // produce a comment.
 func TestChildDoneNotificationIsIdempotent(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
+	fx := newChildDoneFixture(t, "todo")
 
 	updateChildStatus(t, fx.child.ID, "done")
 	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
@@ -177,10 +177,10 @@ func TestChildDoneNotificationIsIdempotent(t *testing.T) {
 // new completion event and should produce a second notification. This
 // captures the "reopen + done counts as a new event" line from MUL-2538.
 func TestChildReopenAndDoneFiresAgain(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
+	fx := newChildDoneFixture(t, "todo")
 
 	updateChildStatus(t, fx.child.ID, "done")
-	updateChildStatus(t, fx.child.ID, "in_progress")
+	updateChildStatus(t, fx.child.ID, "todo")
 	updateChildStatus(t, fx.child.ID, "done")
 
 	if got := countSystemCommentsOn(t, fx.parent.ID); got != 2 {
@@ -234,7 +234,7 @@ func TestChildDoneSkippedWhenNoParent(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "orphan child-done " + time.Now().Format(time.RFC3339Nano),
-		"status": "in_progress",
+		"status": "todo",
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusCreated {
@@ -315,7 +315,7 @@ func countInboxItems(t *testing.T, recipientUserID, issueID string) int {
 // so the dedupe + readiness checks match the @-mention path users already
 // rely on.
 func TestChildDoneMentionsParentAssignee_Agent(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
+	fx := newChildDoneFixture(t, "todo")
 
 	var agentID string
 	if err := testPool.QueryRow(context.Background(),
@@ -353,7 +353,7 @@ func TestChildDoneMentionsParentAssignee_Agent(t *testing.T) {
 // assignees (see server/internal/handler/issue.go), so the fixture must
 // match or it would be exercising a state that cannot occur for real.
 func TestChildDoneSkippedWhenParentMember(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
+	fx := newChildDoneFixture(t, "todo")
 
 	var userID string
 	if err := testPool.QueryRow(context.Background(),
@@ -383,7 +383,7 @@ func TestChildDoneSkippedWhenParentMember(t *testing.T) {
 // leader receives a leader-role task. Reuses the squad fixture helper from
 // squad_comment_trigger_test.go.
 func TestChildDoneMentionsParentAssignee_Squad(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
+	fx := newChildDoneFixture(t, "todo")
 	sq := newSquadCommentTriggerFixture(t)
 
 	setIssueAssigneeDirect(t, fx.parent.ID, "squad", sq.SquadID)
@@ -414,7 +414,7 @@ func TestChildDoneMentionsParentAssignee_Squad(t *testing.T) {
 // parent; runaway re-triggering is bounded by the HasPendingTaskForIssueAndAgent
 // dedup, not by suppressing the trigger.
 func TestChildDoneTriggersParentAgentWhenSameAgentOwnsChild(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
+	fx := newChildDoneFixture(t, "todo")
 
 	var agentID string
 	if err := testPool.QueryRow(context.Background(),
@@ -455,7 +455,7 @@ func TestChildDoneTriggersParentAgentWhenSameAgentOwnsChild(t *testing.T) {
 // guards, so BOTH sides being squads that share a leader also wakes the leader
 // (see TestChildDoneWakesLeaderWhenParentAndChildSquadsShareLeader).
 func TestChildDoneTriggersParentAgentWhenChildSquadSharesLeader(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
+	fx := newChildDoneFixture(t, "todo")
 	sq := newSquadCommentTriggerFixture(t)
 
 	// Parent agent == squad leader, child assigned to the squad.
@@ -488,7 +488,7 @@ func TestChildDoneTriggersParentAgentWhenChildSquadSharesLeader(t *testing.T) {
 // leader must now be woken exactly once; runaway re-triggering is bounded by
 // the HasPendingTaskForIssueAndAgent idempotency check.
 func TestChildDoneWakesLeaderWhenParentAndChildSquadsShareLeader(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
+	fx := newChildDoneFixture(t, "todo")
 	parentSquad := newSquadCommentTriggerFixture(t)
 
 	// Spin up a SECOND squad that reuses the same leader as parentSquad.
@@ -533,7 +533,7 @@ func TestChildDoneWakesLeaderWhenParentAndChildSquadsShareLeader(t *testing.T) {
 // was never delivered to the leader and the parent silently stalled in
 // in_progress. The leader must now be woken exactly once.
 func TestChildDoneWakesLeaderWhenChildIsSameSquad(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
+	fx := newChildDoneFixture(t, "todo")
 	sq := newSquadCommentTriggerFixture(t)
 
 	setIssueAssigneeDirect(t, fx.parent.ID, "squad", sq.SquadID)
@@ -565,7 +565,7 @@ func TestStageLeaderPrepareTimeoutRetryCanAdvanceNextStage(t *testing.T) {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
-	fx := newChildDoneFixture(t, "in_progress")
+	fx := newChildDoneFixture(t, "todo")
 	sq := newSquadCommentTriggerFixture(t)
 	setIssueAssigneeDirect(t, fx.parent.ID, "squad", sq.SquadID)
 	setIssueAssigneeDirect(t, fx.child.ID, "squad", sq.SquadID)

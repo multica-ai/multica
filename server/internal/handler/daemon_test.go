@@ -172,9 +172,9 @@ func createClaimReclaimAgentAndIssue(t *testing.T, ctx context.Context, runtimeI
 
 	var issueID string
 	dbfx.QueryRow(t, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, assignee_type, assignee_id, number, position)
 		VALUES (
-			$1, $2, 'in_progress', 'none', $3, 'member',
+			$1, $2, 'in_progress', 'none', $3, 'member', 'member', $3,
 			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1),
 			0
 		)
@@ -2470,8 +2470,10 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 	setWorkspaceIssuePrefixForTest(t, "MUL")
 
 	issueID := dbfx.Issue(t, "mul-3310 agent output fixture", testutil.Cols{
-		"status": "in_progress",
-		"number": 3310,
+		"status":        "in_progress",
+		"number":        3310,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
 	})
 
 	triggerCommentID := dbfx.Comment(t, issueID, "please take a look")
@@ -2555,8 +2557,10 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
 	issueID := dbfx.Issue(t, "mul-1198 dedup fixture", testutil.Cols{
-		"status": "in_progress",
-		"number": 81199,
+		"status":        "in_progress",
+		"number":        81199,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
 	})
 
 	triggerCommentID := dbfx.Comment(t, issueID, "please take a look")
@@ -2609,8 +2613,10 @@ func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T)
 	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
 	issueID := dbfx.Issue(t, "trivial-done-suppression fixture", testutil.Cols{
-		"status": "in_progress",
-		"number": 81200,
+		"status":        "in_progress",
+		"number":        81200,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
 	})
 
 	triggerCommentID := dbfx.Comment(t, issueID, "please follow up")
@@ -2657,8 +2663,10 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
 	issueID := dbfx.Issue(t, "assignment-trivial-done fixture", testutil.Cols{
-		"status": "in_progress",
-		"number": 81201,
+		"status":        "in_progress",
+		"number":        81201,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
 	})
 
 	taskID := dbfx.Task(t, agentID, testutil.Cols{
@@ -2923,8 +2931,10 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	oldRuntimeID := createRuntimeGuardRuntime(t, ctx, "kimi")
 
 	skipIssueID := dbfx.Issue(t, "runtime-session-skip fixture", testutil.Cols{
-		"status": "in_progress",
-		"number": 81203,
+		"status":        "in_progress",
+		"number":        81203,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
 	})
 
 	dbfx.Exec(t, `
@@ -2960,8 +2970,10 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	`, skipIssueID)
 
 	resumeIssueID := dbfx.Issue(t, "runtime-session-resume fixture", testutil.Cols{
-		"status": "in_progress",
-		"number": 81204,
+		"status":        "in_progress",
+		"number":        81204,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
 	})
 
 	dbfx.Exec(t, `
@@ -2989,8 +3001,10 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	}
 
 	commentIssueID := dbfx.Issue(t, "comment-triggered-session-skip fixture", testutil.Cols{
-		"status": "in_progress",
-		"number": 81205,
+		"status":        "in_progress",
+		"number":        81205,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
 	})
 
 	triggerCommentID := dbfx.Comment(t, commentIssueID, "please follow up")
@@ -3026,8 +3040,10 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	`, commentIssueID)
 
 	freshIssueID := dbfx.Issue(t, "force-fresh-session fixture", testutil.Cols{
-		"status": "in_progress",
-		"number": 81206,
+		"status":        "in_progress",
+		"number":        81206,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
 	})
 	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
@@ -3082,8 +3098,10 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 		t.Helper()
 		issueNum++
 		issueID := dbfx.Issue(t, "manual-retry-reuse fixture", testutil.Cols{
-			"status": "in_progress",
-			"number": issueNum,
+			"status":        "in_progress",
+			"number":        issueNum,
+			"assignee_type": "agent",
+			"assignee_id":   agentID,
 		})
 		sourceID := dbfx.Task(t, agentID, testutil.Cols{
 			"runtime_id":     sourceRuntimeID,
@@ -3153,8 +3171,10 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 	t.Run("different_agent_source_starts_fresh", func(t *testing.T) {
 		issueNum++
 		issueID := dbfx.Issue(t, "manual-retry-cross-agent fixture", testutil.Cols{
-			"status": "in_progress",
-			"number": issueNum,
+			"status":        "in_progress",
+			"number":        issueNum,
+			"assignee_type": "agent",
+			"assignee_id":   agentID,
 		})
 		otherAgentID := dbfx.Agent(t, "Rerun Source Other Agent", runtimeID, testutil.Cols{})
 		sourceID := dbfx.Task(t, otherAgentID, testutil.Cols{
@@ -4513,7 +4533,14 @@ func TestBatchIssueGCCheckReadsNoCatalogForBuiltInStatuses(t *testing.T) {
 
 	ids := []string{
 		dbfx.Issue(t, "gc-batch-builtin-1", testutil.Cols{"status": "done", "priority": "medium", "number": 92611}),
-		dbfx.Issue(t, "gc-batch-builtin-2", testutil.Cols{"status": "in_progress", "priority": "medium", "number": 92612}),
+		// in_progress now requires an assignee (I4127.DP): seed one inline.
+		func() string {
+			agentID := dbfx.Agent(t, "GC Batch Builtin Agent", "", testutil.Cols{})
+			return dbfx.Issue(t, "gc-batch-builtin-2", testutil.Cols{
+				"status": "in_progress", "priority": "medium", "number": 92612,
+				"assignee_type": "agent", "assignee_id": agentID,
+			})
+		}(),
 	}
 
 	counter := withCountingCatalog(t)

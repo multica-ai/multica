@@ -64,8 +64,8 @@ func batchClaimFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (r
 	mkQueuedTask := func(agentID, runtimeID string, n int) {
 		var issueID string
 		if err := pool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-			VALUES ($1, $2, 'in_progress', 'none', $3, 'member', $4, $5)
+			INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, assignee_type, assignee_id, number, position)
+			VALUES ($1, $2, 'in_progress', 'none', $3, 'member', 'member', $3, $4, $5)
 			RETURNING id`, workspaceID, fmt.Sprintf("batch issue %d", n), userID, 800000+n, n).Scan(&issueID); err != nil {
 			t.Fatalf("create issue %d: %v", n, err)
 		}

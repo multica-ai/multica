@@ -77,7 +77,7 @@ func newVCSIssue(t *testing.T, title string) IssueResponse {
 	t.Helper()
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title": title, "status": "in_progress",
+		"title": title, "status": "todo",
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusCreated {
