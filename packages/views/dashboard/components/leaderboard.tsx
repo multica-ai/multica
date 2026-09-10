@@ -106,6 +106,22 @@ export function Leaderboard({
   const colClass = (key: LeaderboardSort) =>
     `text-right ${sortBy === key ? "text-foreground" : "text-muted-foreground"}`;
 
+  const getCoverageText = (
+    unreportedTaskCount: number,
+    totalsPending: boolean,
+  ) => {
+    if (unreportedTaskCount > 0) {
+      return totalsPending
+        ? t(($) => $.leaderboard.usage_unreported_pending, {
+            count: unreportedTaskCount,
+          })
+        : t(($) => $.leaderboard.usage_unreported, {
+            count: unreportedTaskCount,
+          });
+    }
+    return totalsPending ? t(($) => $.leaderboard.usage_totals_pending) : null;
+  };
+
   return (
     <div className="rounded-lg border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 pt-4 pb-3">
@@ -210,17 +226,10 @@ export function Leaderboard({
                 const costText = usageUnavailable
                   ? "—"
                   : `${usageIncomplete ? "≥" : ""}$${row.cost.toFixed(2)}`;
-                const coverageText = usageIncomplete && usageTotalsPending
-                  ? t(($) => $.leaderboard.usage_unreported_pending, {
-                      count: row.unreportedTaskCount,
-                    })
-                  : usageIncomplete
-                    ? t(($) => $.leaderboard.usage_unreported, {
-                        count: row.unreportedTaskCount,
-                      })
-                    : usageTotalsPending
-                      ? t(($) => $.leaderboard.usage_totals_pending)
-                      : null;
+                const coverageText = getCoverageText(
+                  row.unreportedTaskCount,
+                  usageTotalsPending,
+                );
                 return (
                   <li
                     key={row.agentId}
@@ -244,7 +253,10 @@ export function Leaderboard({
                                 : t(($) => $.leaderboard.other_agents)}
                             </span>
                             {coverageText ? (
-                              <span className="block truncate text-caption text-muted-foreground">
+                              <span
+                                className="block truncate text-caption text-muted-foreground"
+                                title={coverageText}
+                              >
                                 {coverageText}
                               </span>
                             ) : null}
@@ -263,7 +275,10 @@ export function Leaderboard({
                               {agent?.name ?? row.agentId}
                             </span>
                             {coverageText ? (
-                              <span className="block truncate text-caption text-muted-foreground">
+                              <span
+                                className="block truncate text-caption text-muted-foreground"
+                                title={coverageText}
+                              >
                                 {coverageText}
                               </span>
                             ) : null}

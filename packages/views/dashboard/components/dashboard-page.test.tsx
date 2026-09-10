@@ -441,8 +441,12 @@ describe("DashboardPage — unreported usage", () => {
 
     const list = within(screen.getByRole("list", { name: "Leaderboard" }));
     const row = list.getAllByRole("listitem")[0] as HTMLElement;
-    expect(row).toHaveTextContent(
-      "6 runs did not report usage · totals are still being processed",
+    const coverageText =
+      "6 runs did not report usage · totals are still being processed";
+    expect(row).toHaveTextContent(coverageText);
+    expect(within(row).getByText(coverageText)).toHaveAttribute(
+      "title",
+      coverageText,
     );
     expect(within(row).getAllByText("—")).toHaveLength(2);
   });
