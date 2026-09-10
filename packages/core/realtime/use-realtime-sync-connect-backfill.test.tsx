@@ -128,4 +128,41 @@ describe("timeline repair on connect", () => {
     expect(api.listTaskMessages).toHaveBeenCalledTimes(1);
     unmount(); ws.disconnect(); qc.clear();
   });
+
+  it("repairs the transcript on screen and leaves the ones nobody is watching", async () => {
+    // These keys carry no workspace and linger for a `gcTime` of ten minutes,
+    // so every run from an old page or an old workspace is still cached at the
+    // next handshake. `refetchQueries` reads everything it matches unless it is
+    // told otherwise — which would re-download all of those, unpaginated, on
+    // every connection (MUL-7227).
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const ws = new WSClient("ws://example.test/ws", { cookieAuth: true });
+    ws.connect();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+
+    // A transcript left behind by a page that has since unmounted: cached, with
+    // no observer. Fetched through the hook rather than seeded, because a
+    // `setQueryData` entry carries no `queryFn` and could never be refetched —
+    // which would make this test pass whatever the filter said.
+    const abandoned = "22222222-2222-4222-8222-222222222222";
+    vi.mocked(api.listTaskMessages).mockResolvedValue([msg(1)]);
+    const gone = renderHook(() => useTaskMessages(abandoned, false), { wrapper });
+    await waitFor(() => expect(api.listTaskMessages).toHaveBeenCalledWith(abandoned));
+    gone.unmount();
+    vi.mocked(api.listTaskMessages).mockClear();
+    const { unmount } = renderHook(
+      () => { useRealtimeSync(ws, stores); return useTaskMessages(id, true); },
+      { wrapper },
+    );
+    await waitFor(() => expect(api.listTaskMessages).toHaveBeenCalledWith(id));
+    vi.mocked(api.listTaskMessages).mockClear();
+
+    await act(async () => { FakeWebSocket.last.onopen?.(); await Promise.resolve(); });
+    await waitFor(() => expect(api.listTaskMessages).toHaveBeenCalledWith(id));
+    await new Promise((done) => setTimeout(done, 50));
+
+    expect(vi.mocked(api.listTaskMessages).mock.calls.map(([task]) => task)).toEqual([id]);
+    unmount(); ws.disconnect(); qc.clear();
+  });
 });

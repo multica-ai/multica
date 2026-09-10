@@ -12,6 +12,7 @@
 // This module owns no React and no fetching, so it is unit-testable in
 // isolation and independent of whichever list shell renders the events.
 
+import { redactSecrets } from "./redact";
 import { truncateWithEllipsis } from "@multica/core/utils";
 
 export interface TraceEvent {
@@ -126,7 +127,13 @@ export function traceToolArgSummary(
   labels?: TraceSummaryLabels,
 ): string {
   if (!input) return "";
-  const str = (v: unknown): string => (typeof v === "string" ? labels?.formatText?.(v) ?? v : "");
+  // Redacted here, and before every `clip` below. A caller cannot fix this
+  // afterwards: cutting to 120 characters first drops the tail a rule needs to
+  // match, leaving the head of a key on screen (MUL-7227 review). Only the one
+  // value that ends up displayed is scanned, so a summary never pays for the
+  // whole argument object.
+  const str = (v: unknown): string =>
+    typeof v === "string" ? redactSecrets(labels?.formatText?.(v) ?? v) : "";
   if (str(input.query)) return str(input.query);
   // A multi-file patch has no single path field; without this the row's
   // summary would fall through to the generic scan and come back empty.
@@ -163,15 +170,19 @@ function collapseWhitespace(value: string | undefined): string {
 export function traceEventSummary(event: TraceEvent, labels?: TraceSummaryLabels): string {
   switch (traceEventKind(event)) {
     case "thinking":
-      return clip(firstLine(event.content), 200);
+      return clip(redactSecrets(firstLine(event.content)), 200);
     case "tool_use":
       return traceToolArgSummary(event.input, labels);
-    case "tool_result":
+    case "tool_result": {
       // Unwrap first: the collapsed row is the one people read without
-      // clicking, so it must not show transport escaping.
-      return clip(collapseWhitespace(labels?.formatText?.(unwrapToolOutput(event.output ?? "")) ?? unwrapToolOutput(event.output ?? "")), 200);
+      // clicking, so it must not show transport escaping. Redact before the
+      // 200-character cut, never after — see `traceToolArgSummary`.
+      const output = unwrapToolOutput(event.output ?? "");
+      const shown = redactSecrets(labels?.formatText?.(output) ?? output);
+      return clip(collapseWhitespace(shown), 200);
+    }
     default:
-      return firstLine(event.content ?? event.output);
+      return redactSecrets(firstLine(event.content ?? event.output));
   }
 }
 

@@ -1774,9 +1774,18 @@ export function useRealtimeSync(
   useEffect(() => {
     if (!ws) return;
     return ws.onConnect(() => {
+      // `type: "active"` on both, and not by default: `refetchQueries` reads
+      // everything it matches, unlike `invalidateQueries`. These keys carry no
+      // workspace and sit in the cache for a `gcTime` of ten minutes, so the
+      // default would re-download the full transcript of every run left behind
+      // by an old page or an old workspace, on every connection — the
+      // unpaginated traffic this change exists to stop. A query nobody is
+      // watching needs no repair: `refetchOnMount: "always"` reads it fresh if
+      // it is ever mounted again.
+      const active = { queryKey: chatKeys.taskMessagesAll(), type: "active" } as const;
       void qc
-        .cancelQueries({ queryKey: chatKeys.taskMessagesAll() })
-        .then(() => qc.refetchQueries({ queryKey: chatKeys.taskMessagesAll() }))
+        .cancelQueries(active)
+        .then(() => qc.refetchQueries(active))
         .catch(() => {
           // a repair that could not run leaves the next mount to fetch
         });

@@ -260,4 +260,47 @@ describe("InlineCommentRun", () => {
     await waitFor(() => expect(dialogItems.current).toHaveLength(1));
     expect(dialogItems.current[0]?.content).toBe("Found [REDACTED AWS KEY] in config.");
   });
+
+  it("never walks a large tool argument for a collapsed run, and walks it once when opened", async () => {
+    // Nothing bounds a tool argument — a single patch can be megabytes — and a
+    // live run rebuilds its steps on every 100ms flush. So a collapsed row must
+    // not touch the argument object at all, and an open one must not re-walk an
+    // argument that has not changed (MUL-7227).
+    //
+    // `patch` counts reads: the summary selects `command` and returns before
+    // reaching it, so any read means something enumerated the whole object.
+    let walked = 0;
+    const input: Record<string, unknown> = { command: "pnpm test" };
+    Object.defineProperty(input, "patch", {
+      enumerable: true,
+      get() { walked += 1; return "diff --git a/x b/x\n".repeat(2_000); },
+    });
+    const live: TaskMessagePayload[] = [
+      { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "exec_command", input },
+    ];
+    vi.mocked(api.listTaskMessages).mockResolvedValue(live);
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = renderWithI18n(<QueryClientProvider client={client}>
+      <InlineCommentRun run={{ task: task(), commentId: "comment", hasReply: false }} />
+    </QueryClientProvider>);
+    await screen.findByText("pnpm test");
+    expect(walked).toBe(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    await waitFor(() => expect(walked).toBeGreaterThan(0));
+    const afterOpen = walked;
+
+    // A further flush writes a new array, so every step and row identity
+    // changes; the argument itself did not.
+    await act(async () => {
+      client.setQueryData(chatKeys.taskMessages(id), [
+        ...live,
+        { task_id: id, issue_id: "issue", seq: 2, type: "text", content: "still working" },
+      ]);
+    });
+    await waitFor(() => expect(view.container.querySelectorAll("details")).toHaveLength(2));
+    expect(walked).toBe(afterOpen);
+    client.clear();
+  });
 });

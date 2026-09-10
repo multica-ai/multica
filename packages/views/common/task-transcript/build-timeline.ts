@@ -82,7 +82,7 @@ export function redactTimelineItem(item: TimelineItem): TimelineItem {
     ...item,
     content: item.content ? redactSecrets(item.content) : item.content,
     output: item.output ? redactSecrets(item.output) : item.output,
-    input: item.input ? (redactUnknown(item.input) as Record<string, unknown>) : item.input,
+    input: item.input ? redactInput(item.input) : item.input,
   };
 }
 
@@ -108,15 +108,41 @@ function redactUnknown(value: unknown): unknown {
   }
   if (value && typeof value === "object") {
     let changed = false;
-    const next: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
+    // `Object.fromEntries`, not assignment into a literal. Tool arguments are
+    // arbitrary JSON, and `next[key] = ...` for the key `__proto__` runs the
+    // prototype setter instead of defining a property: the own key disappears
+    // and its value silently becomes the new object's prototype. Redaction is
+    // supposed to rewrite strings and leave the shape alone.
+    const entries = Object.entries(value).map(([key, entry]) => {
       const redacted = redactUnknown(entry);
       if (redacted !== entry) changed = true;
-      next[key] = redacted;
-    }
-    return changed ? next : value;
+      return [key, redacted] as const;
+    });
+    return changed ? Object.fromEntries(entries) : value;
   }
   return value;
+}
+
+/**
+ * Redacted tool arguments, keyed on the arguments themselves.
+ *
+ * A live run rebuilds its timeline on every 100ms flush and each rebuild
+ * allocates fresh `TimelineItem`s, but `input` is carried across by reference
+ * and `unionTaskMessagesBySeq` keeps a message's identity once it has landed.
+ * So the same arguments would be walked several times a second while never
+ * changing. Nothing in the pipeline bounds a tool argument — a single patch can
+ * be megabytes — and re-walking one of those on every flush is the stall this
+ * change exists to remove (MUL-7227). Weak, so arguments that leave the query
+ * cache are collectable with it.
+ */
+const redactedInputs = new WeakMap<object, Record<string, unknown>>();
+
+function redactInput(input: Record<string, unknown>): Record<string, unknown> {
+  const cached = redactedInputs.get(input);
+  if (cached) return cached;
+  const redacted = redactUnknown(input) as Record<string, unknown>;
+  redactedInputs.set(input, redacted);
+  return redacted;
 }
 
 /**

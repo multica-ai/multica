@@ -167,4 +167,34 @@ describe("tool output completeness", () => {
     ];
     expect(others.some(isOutputTruncated)).toBe(false);
   });
+
+  it("rewrites strings in tool arguments without changing their shape", () => {
+    // Arbitrary JSON, including keys that are hostile to object literals:
+    // assigning `__proto__` runs the prototype setter instead of defining a
+    // property, which drops the own key and moves its value to the prototype.
+    const input = JSON.parse(
+      '{"__proto__": {"note": "key AKIA1234567890ABCDEF here"}, "file_path": "a.ts"}',
+    ) as Record<string, unknown>;
+
+    const redacted = buildTimeline([
+      { task_id: "task-1", issue_id: "issue-1", seq: 1, type: "tool_use", tool: "Edit", input },
+    ])[0]!.input!;
+
+    expect(Object.prototype.hasOwnProperty.call(redacted, "__proto__")).toBe(true);
+    expect(JSON.stringify(redacted)).not.toContain("AKIA1234567890ABCDEF");
+    expect(JSON.stringify(redacted)).toContain("[REDACTED AWS KEY]");
+    expect(redacted.file_path).toBe("a.ts");
+  });
+
+  it("derives an unchanged argument object once, however often it is rebuilt", () => {
+    // A live run rebuilds its timeline on every flush; `input` is carried by
+    // reference, so the same megabyte-scale arguments must not be re-walked
+    // several times a second (MUL-7227).
+    const input = { command: "deploy --key AKIA1234567890ABCDEF" };
+    const msgs: TaskMessagePayload[] = [
+      { task_id: "task-1", issue_id: "issue-1", seq: 1, type: "tool_use", tool: "Bash", input },
+    ];
+
+    expect(buildTimeline(msgs)[0]!.input).toBe(buildTimeline(msgs)[0]!.input);
+  });
 });

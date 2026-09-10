@@ -35,6 +35,9 @@ import { useRunAnimationVisibility, useRunDisclosureMotion } from "./use-run-com
 /** Stable empty timeline, so a closed dialog does not re-render on every flush. */
 const NO_ITEMS: TimelineItem[] = [];
 
+/** Stable empty rows, so a collapsed disclosure does the same. */
+const NO_ROWS: TraceRow[] = [];
+
 export function useInlineCommentRunState() {
   const [expanded, setExpanded] = useState(false);
   const [fullLogOpen, setFullLogOpen] = useState(false);
@@ -96,12 +99,14 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, loadTranscript);
   const steps = useMemo(() => buildSteps(items), [items]);
   const rows = useMemo(() => groupSteps(steps), [steps]);
-  // Only the rows on screen are redacted, and they are redacted whole before
-  // anything below cuts them. That bound is the point: the transcript this
-  // slice comes from can be thousands of messages (MUL-7227).
+  // Only the rows on screen, and only once the disclosure is open. Both bounds
+  // matter: the transcript behind this slice can be thousands of messages, and
+  // a tool argument has no size limit anywhere in the pipeline, so redacting a
+  // collapsed run's rows would put megabytes back on the 100ms flush path that
+  // this change exists to clear (MUL-7227).
   const visibleRows = useMemo(
-    () => rows.slice(-visibleCount).map(redactTraceRow),
-    [rows, visibleCount],
+    () => (expanded ? rows.slice(-visibleCount).map(redactTraceRow) : NO_ROWS),
+    [expanded, rows, visibleCount],
   );
   useEffect(() => {
     if (!active) return;
@@ -118,13 +123,11 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const output = !hasReply ? commentRunOutput(task) : null;
   const latest = steps.findLast((step) => step.kind !== "text" || step.item.content?.trim());
   const pendingCall = steps.findLast((step) => isCallStep(step) && !step.result);
-  // Redacted before it is summarized, not after: `traceToolArgSummary` and
-  // friends cut to 200 characters, and a pattern spanning that cut cannot be
-  // matched once the tail is gone. One step, so this stays off the hot path.
-  const current = useMemo(() => {
-    const step = pendingCall ?? latest;
-    return step && redactTraceStep(step);
-  }, [pendingCall, latest]);
+  // Raw on purpose. Redacting the step would walk its whole argument object —
+  // unbounded, and re-walked on every flush — to produce one line. The
+  // summary below redacts what it displays instead: `traceToolArgSummary`
+  // scans only the single value it selects, and does it before the cut.
+  const current = pendingCall ?? latest;
   // Keep the last activity visible after a tool returns, until new progress arrives.
   const activitySummary = current && isCallStep(current)
     ? redactSecrets(traceToolArgSummary(current.call?.input, { formatText }) || current.tool)
