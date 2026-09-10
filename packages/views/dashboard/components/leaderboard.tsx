@@ -200,6 +200,19 @@ export function Leaderboard({
                 const agent = agents.find((a) => a.id === row.agentId);
                 const value = SORT_METRIC[sortBy](row);
                 const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
+                const usageUnavailable = !row.hasReportedUsage;
+                const usageIncomplete = row.unreportedTaskCount > 0;
+                const tokenText = usageUnavailable
+                  ? "—"
+                  : `${usageIncomplete ? "≥" : ""}${formatTokens(row.tokens)}`;
+                const costText = usageUnavailable
+                  ? "—"
+                  : `${usageIncomplete ? "≥" : ""}$${row.cost.toFixed(2)}`;
+                const coverageText = usageIncomplete
+                  ? t(($) => $.leaderboard.usage_unreported, {
+                      count: row.unreportedTaskCount,
+                    })
+                  : null;
                 return (
                   <li
                     key={row.agentId}
@@ -216,10 +229,17 @@ export function Leaderboard({
                               <EyeOff className="h-3 w-3" />
                             )}
                           </span>
-                          <span className="truncate text-body font-medium italic text-muted-foreground">
-                            {isDeletedBucket
-                              ? t(($) => $.leaderboard.deleted_agents)
-                              : t(($) => $.leaderboard.other_agents)}
+                          <span className="min-w-0">
+                            <span className="block truncate text-body font-medium italic text-muted-foreground">
+                              {isDeletedBucket
+                                ? t(($) => $.leaderboard.deleted_agents)
+                                : t(($) => $.leaderboard.other_agents)}
+                            </span>
+                            {coverageText ? (
+                              <span className="block truncate text-caption text-muted-foreground">
+                                {coverageText}
+                              </span>
+                            ) : null}
                           </span>
                         </>
                       ) : (
@@ -230,8 +250,15 @@ export function Leaderboard({
                             size="md"
                             enableHoverCard
                           />
-                          <span className="cursor-pointer truncate text-body font-medium">
-                            {agent?.name ?? row.agentId}
+                          <span className="min-w-0">
+                            <span className="block cursor-pointer truncate text-body font-medium">
+                              {agent?.name ?? row.agentId}
+                            </span>
+                            {coverageText ? (
+                              <span className="block truncate text-caption text-muted-foreground">
+                                {coverageText}
+                              </span>
+                            ) : null}
                           </span>
                         </>
                       )}
@@ -245,12 +272,12 @@ export function Leaderboard({
                     <div
                       className={`text-right text-caption tabular-nums ${sortBy === "tokens" ? "font-medium text-foreground" : "text-muted-foreground"}`}
                     >
-                      {formatTokens(row.tokens)}
+                      {tokenText}
                     </div>
                     <div
                       className={`text-right tabular-nums ${sortBy === "cost" ? "text-body font-medium" : "text-caption text-muted-foreground"}`}
                     >
-                      ${row.cost.toFixed(2)}
+                      {costText}
                     </div>
                     <div
                       className={`text-right text-caption tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}

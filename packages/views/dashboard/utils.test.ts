@@ -197,6 +197,8 @@ describe("mergeAgentDashboardRows", () => {
     expect(merged).toHaveLength(1);
     expect(merged[0]!.taskCount).toBe(1);
     expect(merged[0]!.seconds).toBe(600);
+    expect(merged[0]!.unreportedTaskCount).toBe(0);
+    expect(merged[0]!.hasReportedUsage).toBe(true);
   });
 
   it("falls back to token count when no run-time row exists (in-flight task)", () => {
@@ -223,6 +225,31 @@ describe("mergeAgentDashboardRows", () => {
     expect(merged[0]!.tokens).toBe(0);
     expect(merged[0]!.cost).toBe(0);
     expect(merged[0]!.taskCount).toBe(1);
+    expect(merged[0]!.meteredTaskCount).toBe(0);
+    expect(merged[0]!.unreportedTaskCount).toBe(1);
+    expect(merged[0]!.hasReportedUsage).toBe(false);
+  });
+
+  it("keeps the exact partial-coverage count from a current server", () => {
+    const merged = mergeAgentDashboardRows(
+      [{ agentId: "agent-d", tokens: 100, cost: 0.5, taskCount: 1 }],
+      [
+        {
+          agent_id: "agent-d",
+          total_seconds: 90,
+          task_count: 3,
+          metered_task_count: 1,
+          failed_count: 0,
+          cancelled_count: 0,
+        },
+      ],
+    );
+    expect(merged[0]).toMatchObject({
+      taskCount: 3,
+      meteredTaskCount: 1,
+      unreportedTaskCount: 2,
+      hasReportedUsage: true,
+    });
   });
 
   it("sorts by cost desc with run-time as a tiebreaker", () => {
@@ -241,13 +268,25 @@ describe("mergeAgentDashboardRows", () => {
 });
 
 describe("bucketUnknownAgentRows", () => {
-  const live = { agentId: "live", tokens: 100, cost: 1, seconds: 10, taskCount: 1 };
+  const live = {
+    agentId: "live",
+    tokens: 100,
+    cost: 1,
+    seconds: 10,
+    taskCount: 1,
+    meteredTaskCount: 1,
+    unreportedTaskCount: 0,
+    hasReportedUsage: true,
+  };
   const archived = {
     agentId: "archived",
     tokens: 80,
     cost: 0.8,
     seconds: 8,
     taskCount: 2,
+    meteredTaskCount: 2,
+    unreportedTaskCount: 0,
+    hasReportedUsage: true,
   };
   const deletedA = {
     agentId: "deleted-a",
@@ -255,6 +294,9 @@ describe("bucketUnknownAgentRows", () => {
     cost: 0.5,
     seconds: 5,
     taskCount: 1,
+    meteredTaskCount: 1,
+    unreportedTaskCount: 0,
+    hasReportedUsage: true,
   };
   const deletedB = {
     agentId: "deleted-b",
@@ -262,6 +304,9 @@ describe("bucketUnknownAgentRows", () => {
     cost: 0.25,
     seconds: 3,
     taskCount: 4,
+    meteredTaskCount: 4,
+    unreportedTaskCount: 0,
+    hasReportedUsage: true,
   };
 
   it("folds every hard-deleted agent into one aggregated bucket row", () => {
@@ -279,6 +324,7 @@ describe("bucketUnknownAgentRows", () => {
     // `agent`, so deleted agents contribute nothing to those columns.
     expect(bucket.seconds).toBe(0);
     expect(bucket.taskCount).toBe(0);
+    expect(bucket.hasReportedUsage).toBe(true);
   });
 
   it("keeps the bucket total reconciled with the top-line spend", () => {
@@ -328,6 +374,9 @@ describe("bucketUnknownAgentRows", () => {
       cost: 0.7,
       seconds: 42,
       taskCount: 3,
+      meteredTaskCount: 2,
+      unreportedTaskCount: 1,
+      hasReportedUsage: true,
     };
     const out = bucketUnknownAgentRows(
       [live, restricted, deletedA],

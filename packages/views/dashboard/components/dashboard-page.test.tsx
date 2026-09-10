@@ -382,6 +382,29 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
   });
 });
 
+describe("DashboardPage — unreported usage", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    manyAgentsRef.current = false;
+    restrictedBucketRef.current = false;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+
+  it("keeps the run visible while replacing invented token and cost zeroes", () => {
+    renderDashboard();
+
+    const list = within(screen.getByRole("list", { name: "Leaderboard" }));
+    const row = list.getAllByRole("listitem")[0] as HTMLElement;
+    expect(row).toHaveTextContent("Agent One");
+    expect(row).toHaveTextContent("12 runs did not report usage");
+    expect(within(row).getAllByText("—")).toHaveLength(2);
+    expect(row).toHaveTextContent("3h 17m");
+    expect(row).toHaveTextContent("12");
+  });
+});
+
 describe("DashboardPage — failure visibility", () => {
   beforeEach(() => {
     queryKeys.length = 0;

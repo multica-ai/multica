@@ -1585,6 +1585,7 @@ const DashboardAgentRunTimeSchema = z.object({
   agent_id: z.string().default(""),
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
+  metered_task_count: z.number().optional().catch(undefined),
   failed_count: z.number().default(0),
   cancelled_count: z.number().default(0),
 }).loose();

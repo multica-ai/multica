@@ -205,6 +205,9 @@ export interface AgentDashboardRow {
   cost: number;
   seconds: number;
   taskCount: number;
+  meteredTaskCount: number;
+  unreportedTaskCount: number;
+  hasReportedUsage: boolean;
 }
 
 // Merge per-agent token totals with per-agent run-time totals into one
@@ -226,25 +229,39 @@ export function mergeAgentDashboardRows(
   const merged = new Map<string, AgentDashboardRow>();
   for (const r of tokenRows) {
     const rt = runTimeByAgent.get(r.agentId);
+    const taskCount = rt ? rt.task_count : r.taskCount;
+    // An older server omits metered_task_count. A token row proves that some
+    // usage exists but cannot tell which of several runs produced it, so keep
+    // the old all-reported presentation until the exact coverage field is
+    // available. This avoids a new client inventing partial coverage while
+    // connected to an old backend.
+    const meteredTaskCount = rt?.metered_task_count ?? taskCount;
     merged.set(r.agentId, {
       agentId: r.agentId,
       tokens: r.tokens,
       cost: r.cost,
       seconds: rt?.total_seconds ?? 0,
-      taskCount: rt ? rt.task_count : r.taskCount,
+      taskCount,
+      meteredTaskCount,
+      unreportedTaskCount: Math.max(0, taskCount - meteredTaskCount),
+      hasReportedUsage: true,
     });
   }
   // Agents with run-time rows but zero tokens still belong on the list
-  // (a task that errored before producing usage). Their token columns
-  // stay at 0.
+  // (a task that errored before producing usage). Their numeric token totals
+  // stay at 0 for sorting, while the leaderboard renders them as unavailable.
   for (const r of runTimeRows) {
     if (merged.has(r.agent_id)) continue;
+    const meteredTaskCount = r.metered_task_count ?? 0;
     merged.set(r.agent_id, {
       agentId: r.agent_id,
       tokens: 0,
       cost: 0,
       seconds: r.total_seconds,
       taskCount: r.task_count,
+      meteredTaskCount,
+      unreportedTaskCount: Math.max(0, r.task_count - meteredTaskCount),
+      hasReportedUsage: false,
     });
   }
   return Array.from(merged.values()).toSorted((a, b) => {
@@ -305,6 +322,9 @@ export function bucketUnknownAgentRows(
     cost: 0,
     seconds: 0,
     taskCount: 0,
+    meteredTaskCount: 0,
+    unreportedTaskCount: 0,
+    hasReportedUsage: false,
   };
   let hasDeleted = false;
   for (const r of rows) {
@@ -315,6 +335,7 @@ export function bucketUnknownAgentRows(
     hasDeleted = true;
     bucket.tokens += r.tokens;
     bucket.cost += r.cost;
+    bucket.hasReportedUsage ||= r.hasReportedUsage;
   }
   return hasDeleted ? [...known, bucket] : known;
 }

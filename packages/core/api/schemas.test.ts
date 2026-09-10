@@ -1062,6 +1062,34 @@ describe("dashboard + runtime usage schema drift", () => {
     ).toBe(0);
   });
 
+  it("preserves optional usage coverage without rejecting older or malformed rows", () => {
+    const parsed = DashboardAgentRunTimeListSchema.parse([
+      {
+        agent_id: "new-server",
+        total_seconds: 42,
+        task_count: 3,
+        metered_task_count: 2,
+        failed_count: 0,
+      },
+      {
+        agent_id: "old-server",
+        total_seconds: 42,
+        task_count: 3,
+        failed_count: 0,
+      },
+      {
+        agent_id: "drifted-server",
+        total_seconds: 42,
+        task_count: 3,
+        metered_task_count: "not-a-number",
+        failed_count: 0,
+      },
+    ]);
+    expect(parsed[0]?.metered_task_count).toBe(2);
+    expect(parsed[1]?.metered_task_count).toBeUndefined();
+    expect(parsed[2]?.metered_task_count).toBeUndefined();
+  });
+
   it("coerces a missing agent_id key to \"\" for the usage-by-agent panel", () => {
     const parsed = DashboardUsageByAgentListSchema.parse([
       { model: "claude-opus-4-7", input_tokens: 7 },
