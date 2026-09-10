@@ -63,6 +63,17 @@ define REQUIRE_COMPOSE
 	esac
 endef
 
+# Both self-host recipes check the host ports before anything else costly, via
+# scripts/selfhost-preflight.sh. A busy port used to surface as Docker's own
+# "port is already allocated" after the image pull, or worse as a
+# successful-looking run (scripts/selfhost-wait.sh reports "still starting" and
+# exits 0), so the check pays for itself the first time 8080 or 3000 is taken.
+#
+# The .env bootstrap then records PORT and FRONTEND_PORT as the recipe resolved
+# them, so `make selfhost PORT=9090` is remembered. Without it the generated
+# .env always says 8080/3000 and the next bare `make selfhost` walks back into
+# the conflict the operator just worked around.
+
 # Default target changed from selfhost to help: bare `make` now prints this help
 # instead of launching a full Docker Compose build, which is safer for onboarding.
 .DEFAULT_GOAL := help
@@ -81,6 +92,7 @@ makehelp: help ## Alias for `make help`
 
 selfhost: ## Create .env if needed, then pull and start the official self-hosted images
 	$(REQUIRE_COMPOSE)
+	@bash scripts/selfhost-preflight.sh official
 	@if [ ! -f .env ]; then \
 		echo "==> Creating .env from .env.example..."; \
 		cp .env.example .env; \
@@ -92,13 +104,18 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 			sed -i '' "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$$PGPASS/" .env; \
 			sed -i '' -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$$PGPASS\2#" .env; \
 			sed -i '' "s#^MULTICA_VCS_SECRET_KEY=.*#MULTICA_VCS_SECRET_KEY=$$VCSKEY#" .env; \
+			sed -i '' "s/^PORT=.*/PORT=$(PORT)/" .env; \
+			sed -i '' "s/^FRONTEND_PORT=.*/FRONTEND_PORT=$(FRONTEND_PORT)/" .env; \
 		else \
 			sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
 			sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$$PGPASS/" .env; \
 			sed -i -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$$PGPASS\2#" .env; \
 			sed -i "s#^MULTICA_VCS_SECRET_KEY=.*#MULTICA_VCS_SECRET_KEY=$$VCSKEY#" .env; \
+			sed -i "s/^PORT=.*/PORT=$(PORT)/" .env; \
+			sed -i "s/^FRONTEND_PORT=.*/FRONTEND_PORT=$(FRONTEND_PORT)/" .env; \
 		fi; \
 		echo "==> Generated random JWT_SECRET, POSTGRES_PASSWORD, and MULTICA_VCS_SECRET_KEY"; \
+		echo "==> Recorded PORT=$(PORT) and FRONTEND_PORT=$(FRONTEND_PORT) in .env"; \
 	fi
 	@echo "==> Pulling official Multica images..."
 	@if ! $(COMPOSE) -f docker-compose.selfhost.yml pull; then \
@@ -114,6 +131,7 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 
 selfhost-build: ## Build backend/web from the current checkout and start the self-hosted stack
 	$(REQUIRE_COMPOSE)
+	@bash scripts/selfhost-preflight.sh build
 	@if [ ! -f .env ]; then \
 		echo "==> Creating .env from .env.example..."; \
 		cp .env.example .env; \
@@ -125,13 +143,18 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 			sed -i '' "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$$PGPASS/" .env; \
 			sed -i '' -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$$PGPASS\2#" .env; \
 			sed -i '' "s#^MULTICA_VCS_SECRET_KEY=.*#MULTICA_VCS_SECRET_KEY=$$VCSKEY#" .env; \
+			sed -i '' "s/^PORT=.*/PORT=$(PORT)/" .env; \
+			sed -i '' "s/^FRONTEND_PORT=.*/FRONTEND_PORT=$(FRONTEND_PORT)/" .env; \
 		else \
 			sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
 			sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$$PGPASS/" .env; \
 			sed -i -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$$PGPASS\2#" .env; \
 			sed -i "s#^MULTICA_VCS_SECRET_KEY=.*#MULTICA_VCS_SECRET_KEY=$$VCSKEY#" .env; \
+			sed -i "s/^PORT=.*/PORT=$(PORT)/" .env; \
+			sed -i "s/^FRONTEND_PORT=.*/FRONTEND_PORT=$(FRONTEND_PORT)/" .env; \
 		fi; \
 		echo "==> Generated random JWT_SECRET, POSTGRES_PASSWORD, and MULTICA_VCS_SECRET_KEY"; \
+		echo "==> Recorded PORT=$(PORT) and FRONTEND_PORT=$(FRONTEND_PORT) in .env"; \
 	fi
 	@echo "==> Building Multica from the current checkout..."
 	$(COMPOSE) -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build

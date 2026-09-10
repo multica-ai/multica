@@ -100,6 +100,7 @@ jobs:
               - 'scripts/dev-env.sh'
               - 'scripts/dev-env.test.sh'
               - 'scripts/selfhost-wait.sh'
+              - 'scripts/selfhost-preflight.sh'
               # selfhost-config.test.sh asserts on the installers' side of
               # the port contract, so a change to either must run it.
               - 'scripts/install.sh'
