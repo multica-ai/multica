@@ -899,3 +899,79 @@ func mustUUID(s string) pgtype.UUID {
 // silence the unused import warnings for the dependencies we keep
 // reaching for via reflection in future test cases.
 var _ = pgx.ErrNoRows
+
+// TestLarkOutcomeReplierRepliesNativelyInOrdinaryGroup is the outcome
+// replier's half of #8234: the /issue confirmation now attaches to the
+// message that asked for it even outside a topic. reply_in_thread stays
+// false — there is no topic to stay inside — so the reply lands in the
+// group as a native quote-reply rather than a standalone message.
+func TestLarkOutcomeReplierRepliesNativelyInOrdinaryGroup(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{configured: true}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  &BindingTokenService{},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		AppURL:      "https://multica.test",
+		Logger:      log,
+	})
+
+	rep.Reply(context.Background(), Installation{AppID: "cli_x"},
+		InboundMessage{ChatID: "oc_chat_42", ChatType: ChatTypeGroup, MessageID: "om_trigger", SenderOpenID: "ou_user"},
+		DispatchResult{
+			Outcome:         OutcomeIngested,
+			IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
+			IssueNumber:     42,
+			IssueIdentifier: "MUL-42",
+		})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.textOut) != 1 {
+		t.Fatalf("expected one send; got %d", len(stub.textOut))
+	}
+	got := stub.textOut[0].ReplyTarget
+	if got.MessageID != "om_trigger" {
+		t.Errorf("ordinary group confirmation must reply to the trigger; got %+v", got)
+	}
+	if got.InThread {
+		t.Errorf("no thread id, so reply_in_thread must be false; got %+v", got)
+	}
+}
+
+// TestLarkOutcomeReplierSendsToChatWithoutTriggerMessage keeps the only
+// remaining chat-level case honest: with no inbound message id there is
+// nothing to reply to.
+func TestLarkOutcomeReplierSendsToChatWithoutTriggerMessage(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{configured: true}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  &BindingTokenService{},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		AppURL:      "https://multica.test",
+		Logger:      log,
+	})
+
+	rep.Reply(context.Background(), Installation{AppID: "cli_x"},
+		InboundMessage{ChatID: "oc_chat_42", SenderOpenID: "ou_user"},
+		DispatchResult{
+			Outcome:         OutcomeIngested,
+			IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
+			IssueNumber:     42,
+			IssueIdentifier: "MUL-42",
+		})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.textOut) != 1 {
+		t.Fatalf("expected one send; got %d", len(stub.textOut))
+	}
+	if stub.textOut[0].ReplyTarget.IsSet() {
+		t.Errorf("no trigger message id means chat-level send; got %+v", stub.textOut[0].ReplyTarget)
+	}
+}

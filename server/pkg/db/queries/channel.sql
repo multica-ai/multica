@@ -635,8 +635,11 @@ SELECT * FROM channel_chat_session_binding
 WHERE chat_session_id = ANY(@chat_session_ids::uuid[]);
 
 -- name: UpdateChannelChatSessionBindingReplyTarget :exec
--- Records the most recent inbound trigger message + thread so the decoupled
--- outbound patcher can thread its reply back into the originating topic.
+-- Advances the session's latest-trigger cursor, which drives the history
+-- boundary bookkeeping below. NOT the outbound reply target: that is frozen
+-- per context generation (SetChannelChatContextReplyTarget), because this row
+-- only ever remembers the newest trigger and a debounced run can be enqueued
+-- after a later generation has already moved it.
 WITH current_route AS (
     SELECT current_binding.*
     FROM channel_chat_session_binding AS current_binding
@@ -763,6 +766,24 @@ WHERE chat_session_id = @chat_session_id
   AND revision = @revision
 RETURNING initiator_user_id;
 
+-- name: SetChannelChatContextReplyTarget :exec
+-- Snapshots the trigger this generation will be answered on: the message an
+-- outbound reply targets, its thread, and the channel-native id of whoever
+-- sent it. The sibling of SetChannelChatContextInitiator, and load-bearing for
+-- the same reason — a debounced run flushes against ITS generation, which may
+-- no longer be the session's newest, so reading the trigger from the session
+-- would answer one member's question quoting and @-mentioning another's.
+--
+-- All three move together in one statement: a sender or thread that described
+-- a different message than the reply targets is precisely the cross-attribution
+-- this exists to prevent.
+UPDATE channel_chat_context_generation
+SET last_message_id = sqlc.narg('last_message_id'),
+    last_thread_id  = sqlc.narg('last_thread_id'),
+    last_sender_id  = sqlc.narg('last_sender_id')
+WHERE chat_session_id = @chat_session_id
+  AND revision = @revision;
+
 -- name: ClearChannelChatContextPendingFresh :exec
 UPDATE channel_chat_context_generation
 SET pending_fresh = FALSE
@@ -819,15 +840,66 @@ WHERE binding.installation_id = sqlc.arg('installation_id')
 -- =====================
 
 -- name: CreateChannelTaskDeliveryFromSession :one
+-- Freezes one task's outbound delivery, from two different sources on purpose.
+--
+-- ROUTE — chat, type, config, revision — comes from the session binding. It is
+-- a property of the session and does not vary by generation.
+--
+-- TRIGGER — the message an answer quotes, the thread it replies into, and the
+-- account it @-mentions — comes from the generation this task answers, NOT
+-- from the binding's latest-trigger cursor, which a newer generation may
+-- already have advanced past.
+--
+-- The thread sits with the trigger rather than the route deliberately. For a
+-- thread-isolated session (Lark topic, Slack channel thread) the two coincide,
+-- so it is easy to mistake the thread for route data — but Slack DMs keep ONE
+-- binding per channel while replying into whichever thread the member used
+-- (slackSessionRouting), so the binding cursor there names the latest thread,
+-- not this run's. Taking it from the generation is correct for both shapes.
+--
+-- The one exception is the CASE below: when a generation recorded no trigger
+-- at all, a thread-isolated binding can still say which thread the session
+-- lives in, and must, or the answer surfaces in the parent channel.
+--
+-- A NULL trigger means "we cannot attribute this run": callers reply without a
+-- quote or mention rather than inventing one. INNER JOIN on the generation: a
+-- task whose generation row is missing entirely has no context to deliver
+-- against at all.
 INSERT INTO channel_task_delivery (
     task_id, binding_id, installation_id, channel_type, channel_chat_id, chat_type,
-    channel_message_id, channel_thread_id, route_revision, config
+    channel_message_id, channel_thread_id, channel_sender_id, route_revision, config
 )
 SELECT
     @task_id, binding.id, binding.installation_id, binding.channel_type,
-    binding.channel_chat_id, binding.chat_type, binding.last_message_id, binding.last_thread_id,
+    binding.channel_chat_id, binding.chat_type,
+    generation.last_message_id,
+    CASE
+        -- This generation recorded a trigger, so its thread is authoritative —
+        -- including when it is legitimately empty, which is how a Slack DM
+        -- answered at top level is distinguished from one answered inside a
+        -- thread.
+        WHEN generation.last_message_id IS NOT NULL THEN generation.last_thread_id
+        -- No trigger: pre-migration, or a generation whose only messages were
+        -- channel commands. Recover the thread ONLY for a thread-isolated
+        -- binding, where it is a stable property of the session rather than a
+        -- moving cursor. Such a binding is exactly the one whose key is the
+        -- composite "chat:thread", which is why it carries the real chat id in
+        -- its config — the marker every adapter writes (larkSessionRouting,
+        -- slackSessionRouting, telegramSessionRouting). Without this, a
+        -- recovered pre-migration run in a Slack channel thread or a Telegram
+        -- forum topic would answer in the parent conversation.
+        WHEN COALESCE(binding.config ->> 'chat_id', binding.config ->> 'channel_id', '')
+             NOT IN ('', binding.channel_chat_id) THEN binding.last_thread_id
+        -- A non-isolated binding's cursor names whichever thread spoke last,
+        -- which is not this run's. Nothing we can justify.
+        ELSE NULL
+    END,
+    generation.last_sender_id,
     binding.route_revision, binding.config
 FROM channel_chat_session_binding AS binding
+JOIN channel_chat_context_generation AS generation
+  ON generation.chat_session_id = binding.chat_session_id
+ AND generation.revision = @context_revision
 WHERE binding.chat_session_id = @chat_session_id
 RETURNING *;
 
@@ -837,11 +909,11 @@ SELECT * FROM channel_task_delivery WHERE task_id = $1;
 -- name: CopyChannelTaskDelivery :exec
 INSERT INTO channel_task_delivery (
     task_id, binding_id, installation_id, channel_type, channel_chat_id, chat_type,
-    channel_message_id, channel_thread_id, route_revision, config
+    channel_message_id, channel_thread_id, channel_sender_id, route_revision, config
 )
 SELECT
     @child_task_id, delivery.binding_id, delivery.installation_id, delivery.channel_type, delivery.channel_chat_id, delivery.chat_type,
-    delivery.channel_message_id, delivery.channel_thread_id, delivery.route_revision, delivery.config
+    delivery.channel_message_id, delivery.channel_thread_id, delivery.channel_sender_id, delivery.route_revision, delivery.config
 FROM channel_task_delivery AS delivery
 WHERE delivery.task_id = @parent_task_id;
 

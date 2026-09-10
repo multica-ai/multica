@@ -80,7 +80,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { useNewRunIds } from "./use-run-comment-motion";
 import { AgentRunComment, CommentCard } from "./comment-card";
-import { EMPTY_COMMENT_RUNS, buildCommentRunView, type CommentRun } from "./comment-runs";
+import { EMPTY_COMMENT_RUNS, buildCommentRunView, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
 import { issueTasksOptions } from "@multica/core/issues/queries";
 import { SourceContextBadge } from "./source-context-viewer";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
@@ -1508,13 +1508,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const COALESCE_MS = 2 * 60 * 1000;
     const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
     const NEVER_COALESCE_ACTIONS = new Set(["squad_leader_evaluated"]);
-    // Unanchored runs separate activity groups at their actual start position.
-    const standaloneReplyIds = new Set(standaloneRuns.filter((run) => run.hasReply).map((run) => run.commentId));
-    const chronological = [...topLevel.filter((entry) => !standaloneReplyIds.has(entry.id)), ...standaloneRuns].sort((a, b) => {
-      const left = "task" in a ? a.task : a;
-      const right = "task" in b ? b.task : b;
-      return Date.parse(left.created_at) - Date.parse(right.created_at);
-    });
+    // Unanchored runs join the timeline at the time their card shows: a
+    // published reply's own time, the live end while still working.
+    const entryById = new Map(displayTimeline.map((entry) => [entry.id, entry]));
+    const chronological = orderTimelineWithRuns(topLevel, standaloneRuns, entryById);
     const coalesced: (TimelineEntry | CommentRun)[] = [];
     for (const entry of chronological) {
       if ("task" in entry) {
@@ -1543,7 +1540,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const groups: RawTimelineGroup[] = [];
     for (const entry of coalesced) {
       if ("task" in entry) {
-        groups.push({ type: "run", run: entry, entry: entry.hasReply ? displayTimeline.find((comment) => comment.id === entry.commentId) : undefined });
+        groups.push({ type: "run", run: entry, entry: entry.hasReply && entry.commentId ? entryById.get(entry.commentId) : undefined });
       } else if (entry.type === "activity") {
         const last = groups[groups.length - 1];
         if (last?.type === "activities") {

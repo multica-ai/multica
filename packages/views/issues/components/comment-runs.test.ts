@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
-import { commentRunOutput, buildCommentRunView } from "./comment-runs";
+import { commentRunOutput, buildCommentRunView, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
 
 const groupCommentRuns = (...args: Parameters<typeof buildCommentRunView>) => buildCommentRunView(...args).runs;
 
@@ -286,5 +286,75 @@ describe("standaloneCommentRuns", () => {
     const reply = comment("answer", { actor_type: "agent", source_task_id: assigned.id });
     expect(buildCommentRunView(tasks, [...timeline, reply]).standaloneRuns)
       .toEqual([{ task: assigned, commentId: reply.id, anchorCommentId: undefined, hasReply: true }]);
+  });
+});
+
+describe("orderTimelineWithRuns", () => {
+  const order = (topLevel: TimelineEntry[], runs: CommentRun[]) =>
+    orderTimelineWithRuns(topLevel, runs, new Map(topLevel.map((entry) => [entry.id, entry])))
+      .map((item) => ("task" in item ? item.task.id : item.id));
+
+  // MUL-7211: the reply, not the enqueue, owns the slot. A run enqueued at
+  // 10:00 that replies at 10:40 must not sit above a comment written at 10:20.
+  it("places a published reply at its own time, not the run's", () => {
+    const run = task("run", { status: "completed", created_at: "2026-09-07T10:00:00Z", completed_at: "2026-09-07T10:40:00Z" });
+    const midway = comment("midway", { created_at: "2026-09-07T10:20:00Z" });
+    const reply = comment("reply", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T10:40:00Z" });
+    expect(order([midway, reply], [{ task: run, commentId: reply.id, hasReply: true }]))
+      .toEqual(["midway", "run"]);
+  });
+
+  it("keeps a queue wait from dragging the reply above earlier comments", () => {
+    // Enqueued at 10:00, but the agent's previous run held the slot until
+    // 11:00 — every comment in between still reads before this reply.
+    const run = task("run", { status: "completed", created_at: "2026-09-07T10:00:00Z",
+      started_at: "2026-09-07T11:00:00Z", completed_at: "2026-09-07T11:05:00Z" });
+    const first = comment("first", { created_at: "2026-09-07T10:30:00Z" });
+    const second = comment("second", { created_at: "2026-09-07T10:45:00Z" });
+    const reply = comment("reply", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T11:05:00Z" });
+    expect(order([first, second, reply], [{ task: run, commentId: reply.id, hasReply: true }]))
+      .toEqual(["first", "second", "run"]);
+  });
+
+  it("parks a working run at the live end and keeps live runs in enqueue order", () => {
+    const earlier = task("earlier", { status: "running", created_at: "2026-09-07T10:00:00Z" });
+    const later = task("later", { status: "queued", created_at: "2026-09-07T10:30:00Z" });
+    const posted = comment("posted", { created_at: "2026-09-07T10:45:00Z" });
+    expect(order([posted], [{ task: earlier, hasReply: false }, { task: later, hasReply: false }]))
+      .toEqual(["posted", "earlier", "later"]);
+  });
+
+  it("settles a run that ended without a reply at the time it ended", () => {
+    const failed = task("failed", { status: "failed", created_at: "2026-09-07T10:00:00Z", completed_at: "2026-09-07T10:10:00Z" });
+    const before = comment("before", { created_at: "2026-09-07T10:05:00Z" });
+    const after = comment("after", { created_at: "2026-09-07T10:20:00Z" });
+    expect(order([before, after], [{ task: failed, hasReply: false }])).toEqual(["before", "failed", "after"]);
+  });
+
+  it("replaces the reply's own slot so the comment is not rendered twice", () => {
+    const run = task("run", { status: "completed", created_at: "2026-09-07T10:00:00Z", completed_at: "2026-09-07T10:40:00Z" });
+    const reply = comment("reply", { actor_type: "agent", source_task_id: run.id, created_at: "2026-09-07T10:40:00Z" });
+    expect(order([reply], [{ task: run, commentId: reply.id, hasReply: true }])).toEqual(["run"]);
+  });
+
+  it("breaks equal timestamps with the server's created_at then id order", () => {
+    const same = "2026-09-07T10:00:00Z";
+    expect(order([comment("b", { created_at: same }), comment("a", { created_at: same })], []))
+      .toEqual(["a", "b"]);
+  });
+
+  // The API serializes timestamps to whole seconds, so a reply sharing one
+  // with a neighbouring comment is routine. The run block must tie-break on
+  // its reply's id — the row that owns the slot — not on the task behind it,
+  // which carries an unrelated enqueue time and id.
+  it("breaks a tie between a reply and a comment on the reply's own row", () => {
+    const same = "2026-09-07T10:40:00Z";
+    const run = task("zzz-task", { status: "completed", created_at: "2026-09-07T10:00:00Z", completed_at: same });
+    const reply = comment("bbb-reply", { actor_type: "agent", source_task_id: run.id, created_at: same });
+    const neighbour = comment("aaa-comment", { created_at: same });
+    const placed: CommentRun = { task: run, commentId: reply.id, hasReply: true };
+    expect(order([neighbour, reply], [placed])).toEqual(["aaa-comment", "zzz-task"]);
+    expect(order([comment("ccc-comment", { created_at: same }), reply], [placed]))
+      .toEqual(["zzz-task", "ccc-comment"]);
   });
 });
