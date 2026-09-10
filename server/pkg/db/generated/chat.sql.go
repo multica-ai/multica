@@ -85,6 +85,11 @@ WHERE t.id = $1
 // makes the late pin safe: a NEWER task on this chat that already recorded a
 // session owns the pointer, and a straggler must not drag the conversation
 // backwards onto the turn the user interrupted.
+//
+// The newer-task lookup depends on
+// idx_agent_task_queue_chat_with_session_created_at (migration 461). Neither
+// chat_pending_v3 nor chat_terminal_resume can replace it: this guard spans
+// both in-flight and terminal tasks and compares created_at.
 func (q *Queries) AdvanceCancelledChatSessionPointer(ctx context.Context, taskID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, advanceCancelledChatSessionPointer, taskID)
 	return err

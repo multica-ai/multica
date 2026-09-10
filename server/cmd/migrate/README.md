@@ -1,5 +1,53 @@
 # Migration runner operations
 
+## Prebuild the cancelled-chat session guard index
+
+Migration 461 builds `idx_agent_task_queue_chat_with_session_created_at`, which
+keeps `AdvanceCancelledChatSessionPointer` from scanning the global task queue
+while a cancel or late session pin holds the chat row lock. This is a net-new
+index on `agent_task_queue`, and most historical chat tasks may satisfy its
+predicate. Measure the eligible population before scheduling the build:
+
+```sql
+SELECT count(*) AS indexed_rows
+FROM agent_task_queue
+WHERE chat_session_id IS NOT NULL
+  AND session_id IS NOT NULL;
+```
+
+Migrations run during backend startup, whose Helm startup probe allows ten
+minutes. On a large production table, check for long-running transactions and
+prebuild the index in a low-traffic window. Run the statement by itself and
+outside a transaction:
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_agent_task_queue_chat_with_session_created_at
+ON agent_task_queue (chat_session_id, created_at DESC)
+WHERE chat_session_id IS NOT NULL
+  AND session_id IS NOT NULL;
+```
+
+Confirm the build is usable before deploying:
+
+```sql
+SELECT indexrelid::regclass AS index_name,
+       pg_size_pretty(pg_relation_size(indexrelid)) AS size,
+       indisvalid,
+       indisready,
+       indislive
+FROM pg_index
+WHERE indexrelid = to_regclass('idx_agent_task_queue_chat_with_session_created_at');
+```
+
+The migration then becomes a fast no-op. If an interrupted manual build leaves
+the index invalid, drop that invalid index concurrently and retry the standalone
+build before deploying. The migration runner also registers invalid-index
+cleanup so an interrupted startup build can recover on its next attempt.
+
+Application rollback is compatible with the extra index, so leave it in place.
+Rolling back migration 461 drops the index and is functionally safe, but restores
+the global scan and longer chat-lock hold time.
+
 ## Comment content search index retirement
 
 Migrations 454 and 455 retire both historical comment-content search indexes:
