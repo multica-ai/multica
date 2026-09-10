@@ -4891,6 +4891,46 @@ func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
 
+	// A daemon only acks after its run has stopped. If the row is still
+	// non-terminal at that point the server's view is stale and nothing else
+	// will ever fix it: FailStaleTasks skips rows whose runtime is still
+	// heartbeating, which is exactly what a healthy daemon does forever. This
+	// endpoint's original contract assumed cancellation was always
+	// server-initiated (row already terminal, only pointers left to record),
+	// which held for user cancels and left every abnormal abort stranded in
+	// 'running' — agent pinned at 'working', a concurrency slot gone for good,
+	// retry budget unreachable (GH #8272).
+	//
+	// The CAS inside ConvergeAbandonedTask is what keeps this safe: a real user
+	// cancel has already written 'cancelled' before the ack arrives, so it
+	// converges nothing and falls through to the record-only path below. A
+	// replayed ack finds a terminal row and does likewise.
+	converged, err := h.TaskService.ConvergeAbandonedTask(r.Context(), task.ID,
+		req.ErrorMessage, req.FailureReason, req.BranchName, req.DurableWorkDir)
+	if err != nil {
+		// Fail LOUD, like the pointer writes below: the daemon retries this ack,
+		// and swallowing the error here would put the row back in the exact
+		// permanent-'running' state this call exists to prevent.
+		slog.Error("cancel ack: converge abandoned task failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to finalize task")
+		return
+	}
+	if converged != nil {
+		slog.Info("cancel ack: converged abandoned task",
+			"task_id", taskID,
+			"failure_reason", converged.FailureReason.String,
+			"attempt", converged.Attempt,
+			"max_attempts", converged.MaxAttempts,
+		)
+		// The pointer writes below CAS on status='cancelled' and would all miss
+		// on the row we just failed; FinalizeAbandonedTask already persisted the
+		// branch and workdir in the same statement. Settling the deferred chat
+		// stays, so a cancelled chat still finalizes exactly as before.
+		h.TaskService.FinalizeDeferredCancelledChat(r.Context(), task.ID)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+
 	// Terminal deliveries first, failing LOUD on persistence errors: these
 	// fields are the only pointer to a cancelled task's work, and the daemon
 	// retries this ack on transient failures — a warn-and-200 would turn one

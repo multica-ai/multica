@@ -84,6 +84,16 @@ const (
 	// RecoverOrphanedTasksForRuntime at daemon startup.
 	ReasonRuntimeRecovery Reason = "runtime_recovery"
 
+	// ReasonRuntimeAbandoned: a still-live daemon reported it stopped
+	// executing a task whose row was not terminal yet — it acknowledged a
+	// cancellation it had already acted on. Distinct from
+	// ReasonRuntimeRecovery, which is specifically a daemon RESTART: here the
+	// runtime never went away, so no sweeper will ever reclaim the row
+	// (FailStaleTasks excludes rows whose runtime is still heartbeating) and
+	// the daemon's own ack is the only evidence the work stopped. Written by
+	// AckTaskCancelled when it converges an abandoned row (GH #8272).
+	ReasonRuntimeAbandoned Reason = "runtime_abandoned"
+
 	// ReasonTimeout: server-side or runtime-side hard timeout.
 	// Written by FailStaleTasks (server) and the daemon's per-task
 	// agent timeout path.
@@ -266,6 +276,7 @@ var allReasons = []Reason{
 	ReasonRuntimeOffline,
 	ReasonRuntimeReconnectTimeout,
 	ReasonRuntimeRecovery,
+	ReasonRuntimeAbandoned,
 	ReasonTimeout,
 	ReasonIterationLimit,
 	ReasonAgentBlocked,

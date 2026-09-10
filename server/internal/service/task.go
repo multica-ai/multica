@@ -2559,6 +2559,69 @@ func (s *TaskService) OpenMikaOnboardingChat(ctx context.Context, session db.Cha
 // agent stuck at status="working" indefinitely, requiring a manual
 // `multica agent update <id> --status idle` to unwedge. It now reconciles agent
 // status and broadcasts task:cancelled, matching CancelTask and RerunIssue.
+// ConvergeAbandonedTask finalizes a task its owning daemon has reported it is
+// no longer executing, when the server row never reached a terminal state.
+//
+// The daemon's acknowledgement is the evidence: it only sends one after the run
+// has stopped and its transcript is flushed. If the row is still
+// running/dispatched at that point, nothing else will ever reclaim it — the
+// stale-task sweeper deliberately skips rows whose runtime is still
+// heartbeating, and a healthy daemon heartbeats forever. Before this, such a
+// row stayed 'running' permanently: the agent showed 'working', one of its
+// max_concurrent_tasks slots was consumed for good, and the remaining retry
+// budget was unreachable because retries are gated on 'failed' (GH #8272).
+//
+// Returns (nil, nil) when the row was already terminal — a user-initiated
+// cancel, a completion that landed first, or a replayed ack. That case keeps
+// the caller's existing record-only behaviour, which is what guarantees a real
+// user cancel is never rewritten into a failure.
+func (s *TaskService) ConvergeAbandonedTask(ctx context.Context, taskID pgtype.UUID, errMsg, failureReason, branchName, durableWorkDir string) (*db.AgentTaskQueue, error) {
+	if strings.TrimSpace(failureReason) == "" {
+		failureReason = string(taskfailure.ReasonRuntimeAbandoned)
+	}
+	if strings.TrimSpace(errMsg) == "" {
+		errMsg = "runtime stopped executing this task without reporting a terminal state"
+	}
+
+	var converged *db.AgentTaskQueue
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		task, err := qtx.FinalizeAbandonedTask(ctx, db.FinalizeAbandonedTaskParams{
+			ID:             taskID,
+			Error:          pgtype.Text{String: errMsg, Valid: true},
+			FailureReason:  pgtype.Text{String: failureReason, Valid: true},
+			BranchName:     pgtype.Text{String: branchName, Valid: strings.TrimSpace(branchName) != ""},
+			DurableWorkDir: pgtype.Text{String: durableWorkDir, Valid: strings.TrimSpace(durableWorkDir) != ""},
+		})
+		if err != nil {
+			// No rows means the CAS refused: the row is already terminal.
+			// That is the expected, common case, not a failure.
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
+		converged = &task
+		// Same invariant every other terminal write obeys: the settlement must
+		// commit with the status change, or a delivered recovery comment is
+		// stranded in the partial index forever.
+		return SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, task)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if converged == nil {
+		return nil, nil
+	}
+
+	// HandleFailedTasks owns everything a newly-failed task needs: the retry
+	// (gated on retryableReasons + the attempt budget, so this spends the
+	// remaining attempt only when the reason warrants it), delegated-failure
+	// recovery, the stuck-issue reset, the task:failed broadcast, and the agent
+	// status reconcile that finally releases the concurrency slot.
+	s.HandleFailedTasks(ctx, []db.AgentTaskQueue{*converged})
+	return converged, nil
+}
+
 func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error {
 	var cancelled []db.AgentTaskQueue
 	// The cancel and its settlement commit together: a settlement that failed
@@ -5049,8 +5112,14 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // that did download is already cached on disk — a retry resumes from there
 // instead of re-fetching the whole set (MUL-5370).
 var retryableReasons = map[string]bool{
-	string(taskfailure.ReasonRuntimeOffline):         true,
-	string(taskfailure.ReasonRuntimeRecovery):        true,
+	string(taskfailure.ReasonRuntimeOffline):  true,
+	string(taskfailure.ReasonRuntimeRecovery): true,
+	// runtime_abandoned is infrastructure-shaped in exactly the way this set
+	// exists for: the run stopped for a reason unrelated to the agent's work,
+	// so the remaining max_attempts budget should be spent rather than
+	// stranding the task. This is what makes convergence a recovery instead of
+	// merely a tidier tombstone.
+	string(taskfailure.ReasonRuntimeAbandoned):       true,
 	string(taskfailure.ReasonTimeout):                true,
 	"codex_semantic_inactivity":                      true,
 	string(taskfailure.ReasonAgentProviderNetwork):   true,

@@ -482,6 +482,13 @@ type Daemon struct {
 	// (watchTaskCancellation, workspaceSyncLoop) so the WS connect/reconnect
 	// path can shrink coarse fallback reconciliation gaps to sub-second. See
 	// reconcile.go and runTaskWakeupConnection.
+	// terminalOutbox holds complete/fail reports whose in-process retry
+	// schedule was exhausted while the server was unreachable. Without it those
+	// reports are dropped and the task row stays 'running' forever, because a
+	// still-heartbeating daemon is exactly what the stale-task sweeper skips
+	// (GH #8221).
+	terminalOutbox *terminalOutbox
+
 	reconcile *reconcileBroadcaster
 	// workspaceChanges is the account-scoped server hint for membership-set
 	// changes. It stays separate from reconcile because a membership hint only
@@ -667,6 +674,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		cancelPollInterval:        5 * time.Second,
 		envRootBusyWait:           15 * time.Second,
 		taskPrepareTimeout:        defaultTaskPrepareTimeout,
+		terminalOutbox:            newTerminalOutbox(filepath.Join(cfg.WorkspacesRoot, ".terminal-outbox")),
 		reconcile:                 newReconcileBroadcaster(),
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
@@ -5067,6 +5075,13 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			return
 		}
 
+		// Replay any terminal report a previous run could not deliver. This runs
+		// before the claim, and on the same loop that proves the server is
+		// reachable, so a task finished during an outage is finalized as soon as
+		// connectivity returns instead of sitting 'running' until someone
+		// notices. Cheap when the queue is empty: one directory read.
+		d.drainTerminalOutbox(pollerCtx)
+
 		runtimeIDs := d.allRuntimeIDs()
 		if len(runtimeIDs) == 0 {
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
@@ -5917,15 +5932,18 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		// error reaching us here means the schedule was exhausted while
 		// the upstream was still 5xx / unreachable. Converting that into
 		// a fail would lose the agent's actual result and surface a
-		// misleading red badge in the UI — leave the task in running
-		// instead so a future fix (server-side stuck-task reaper, or a
-		// daemon-side persistent pending queue) can recover it. Only
-		// permanent server-side rejections (4xx other than 408/429)
-		// warrant the legacy fallback, because at that point the server
-		// has already refused this task and the only useful UI signal
-		// left is a concrete failure.
+		// misleading red badge in the UI. Only permanent server-side
+		// rejections (4xx other than 408/429) warrant the legacy
+		// fallback, because at that point the server has already refused
+		// this task and the only useful UI signal left is a concrete
+		// failure.
+		//
+		// reportTerminalTask has already queued this report durably, so the
+		// run is no longer lost when the schedule runs out: the poll loop
+		// replays it once the server is reachable. This used to be the point
+		// where a finished run became a permanently 'running' row (GH #8221).
 		if isTransientError(err) {
-			taskLog.Error("complete task failed after retries; leaving task in running rather than falling back to fail", "error", err)
+			taskLog.Error("complete task failed after retries; queued for replay rather than falling back to fail", "error", err)
 			return
 		}
 		taskLog.Error("complete task rejected by server, falling back to fail", "error", err)
@@ -6002,6 +6020,42 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 // 30-second drain, but terminal callbacks must still use that remaining window.
 // The explicit timeout keeps this detached work bounded during normal runs.
 func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTaskReport) error {
+	err := d.sendTerminalTask(parentCtx, report)
+	if err == nil {
+		// A queued copy from an earlier attempt is now redundant. Dropping it
+		// here (rather than only in the drain) keeps a report that succeeded on
+		// its second in-process attempt from being replayed later.
+		d.forgetQueuedTerminalTask(report.taskID)
+		return nil
+	}
+	if !isTransientError(err) {
+		// The server refused this report on its merits; replaying it would only
+		// reproduce the refusal. The caller handles the rejection — for a
+		// completion that means downgrading to a fail report, which arrives
+		// here as its own report and gets its own durability.
+		d.forgetQueuedTerminalTask(report.taskID)
+		return err
+	}
+	// Transient: the outcome is real and unreported. Persist before returning so
+	// it survives both the caller giving up and the daemon exiting.
+	d.queueTerminalTask(report)
+	return err
+}
+
+// queueTerminalTask persists a report for later replay. The outbox is nil only
+// in tests that build a Daemon literal; losing durability there is harmless,
+// and panicking on it would be worse than the gap this whole mechanism closes.
+func (d *Daemon) queueTerminalTask(report terminalTaskReport) {
+	if d.terminalOutbox == nil {
+		return
+	}
+	if err := d.terminalOutbox.persist(report); err != nil {
+		d.logger.Error("could not persist terminal task report; it will be lost if the daemon exits",
+			"task", report.taskID, "error", err)
+	}
+}
+
+func (d *Daemon) sendTerminalTask(parentCtx context.Context, report terminalTaskReport) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), terminalTaskReportTimeout)
 	defer cancel()
 
@@ -6012,6 +6066,62 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir)
 	default:
 		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
+	}
+}
+
+func (d *Daemon) forgetQueuedTerminalTask(taskID string) {
+	if d.terminalOutbox == nil {
+		return
+	}
+	if err := d.terminalOutbox.remove(taskID); err != nil {
+		d.logger.Warn("could not clear queued terminal task report", "task", taskID, "error", err)
+	}
+}
+
+// drainTerminalOutbox replays terminal reports whose original delivery failed.
+// Called on startup and on the poll loop's tick, so a task finished during an
+// outage is finalized as soon as the server is reachable again instead of
+// waiting for a human to notice a permanently 'running' row.
+//
+// Replay is safe because the server treats an already-finalized terminal
+// callback as idempotent success; a report that did land simply confirms.
+func (d *Daemon) drainTerminalOutbox(ctx context.Context) {
+	if d.terminalOutbox == nil {
+		return
+	}
+	pending, err := d.terminalOutbox.list()
+	if err != nil {
+		d.logger.Warn("could not read queued terminal task reports", "error", err)
+		return
+	}
+	for _, p := range pending {
+		if ctx.Err() != nil {
+			return
+		}
+		if age := time.Since(p.QueuedAt); age > terminalOutboxMaxAge {
+			d.logger.Error("abandoning queued terminal task report after repeated failures",
+				"task", p.TaskID, "age", age.Round(time.Minute), "kind", p.Kind)
+			d.forgetQueuedTerminalTask(p.TaskID)
+			continue
+		}
+		err := d.sendTerminalTask(ctx, p.report())
+		if err == nil {
+			d.logger.Info("delivered queued terminal task report",
+				"task", p.TaskID, "kind", p.Kind, "queued_for", time.Since(p.QueuedAt).Round(time.Second))
+			d.forgetQueuedTerminalTask(p.TaskID)
+			continue
+		}
+		if !isTransientError(err) {
+			d.logger.Error("server permanently rejected queued terminal task report; dropping",
+				"task", p.TaskID, "kind", p.Kind, "error", err)
+			d.forgetQueuedTerminalTask(p.TaskID)
+			continue
+		}
+		// Still unreachable. Keep it and stop for this tick — the rest of the
+		// queue is almost certainly blocked on the same outage, and hammering it
+		// adds nothing.
+		d.logger.Debug("queued terminal task report still undeliverable", "task", p.TaskID, "error", err)
+		return
 	}
 }
 

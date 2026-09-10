@@ -3842,6 +3842,122 @@ func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) 
 	return items, nil
 }
 
+const finalizeAbandonedTask = `-- name: FinalizeAbandonedTask :one
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    error = COALESCE(NULLIF(error, ''), $1),
+    failure_reason = COALESCE(failure_reason, $2),
+    branch_name = COALESCE(branch_name, $3),
+    durable_work_dir = COALESCE(durable_work_dir, $4),
+    prepare_lease_expires_at = NULL
+WHERE id = $5
+  AND status IN ('dispatched', 'running', 'waiting_local_directory')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name
+`
+
+type FinalizeAbandonedTaskParams struct {
+	Error          pgtype.Text `json:"error"`
+	FailureReason  pgtype.Text `json:"failure_reason"`
+	BranchName     pgtype.Text `json:"branch_name"`
+	DurableWorkDir pgtype.Text `json:"durable_work_dir"`
+	ID             pgtype.UUID `json:"id"`
+}
+
+// Converges a row whose owning daemon has reported it stopped executing while
+// the row was still non-terminal.
+//
+// The cancel-ack endpoint was built on the assumption that cancellation is
+// always server-initiated, so by ack time the row is already terminal and only
+// the branch / error pointers remain to be recorded. That holds for a user
+// cancel and breaks for every abnormal abort: the daemon stops first, the row
+// stays 'running', and nothing else can reclaim it — FailStaleTasks explicitly
+// excludes rows whose runtime is still heartbeating, which a healthy daemon is.
+// The result was a permanent zombie that pinned the agent at 'working' and
+// consumed one of its max_concurrent_tasks slots forever (GH #8272).
+//
+// The status CAS is the whole safety argument, in both directions:
+//   - A user cancel commits 'cancelled' BEFORE the daemon acks, so this
+//     matches nothing and the ack falls through to today's record-only path.
+//     A real cancel can never be rewritten into a failure.
+//   - A replayed or duplicated ack finds a terminal row and is a no-op, so
+//     at-least-once delivery from the daemon stays safe.
+//
+// error / failure_reason use COALESCE so a reason the daemon actually reported
+// (a preserved-worktree local_directory_error, say) wins over the generic
+// abandonment reason the caller passes as a default.
+func (q *Queries) FinalizeAbandonedTask(ctx context.Context, arg FinalizeAbandonedTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, finalizeAbandonedTask,
+		arg.Error,
+		arg.FailureReason,
+		arg.BranchName,
+		arg.DurableWorkDir,
+		arg.ID,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
+		&i.DurableWorkDir,
+		&i.ChannelContextRevision,
+		&i.CommentThreadID,
+		&i.CancelledByType,
+		&i.CancelledByID,
+		&i.CancelledByName,
+	)
+	return i, err
+}
+
 const getAgent = `-- name: GetAgent :one
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters FROM agent
 WHERE id = $1

@@ -1619,6 +1619,41 @@ SET error = sqlc.arg('error'),
     failure_reason = COALESCE(failure_reason, sqlc.arg('failure_reason'))
 WHERE id = sqlc.arg('id') AND (error IS NULL OR error = '') AND status = 'cancelled';
 
+-- name: FinalizeAbandonedTask :one
+-- Converges a row whose owning daemon has reported it stopped executing while
+-- the row was still non-terminal.
+--
+-- The cancel-ack endpoint was built on the assumption that cancellation is
+-- always server-initiated, so by ack time the row is already terminal and only
+-- the branch / error pointers remain to be recorded. That holds for a user
+-- cancel and breaks for every abnormal abort: the daemon stops first, the row
+-- stays 'running', and nothing else can reclaim it — FailStaleTasks explicitly
+-- excludes rows whose runtime is still heartbeating, which a healthy daemon is.
+-- The result was a permanent zombie that pinned the agent at 'working' and
+-- consumed one of its max_concurrent_tasks slots forever (GH #8272).
+--
+-- The status CAS is the whole safety argument, in both directions:
+--   * A user cancel commits 'cancelled' BEFORE the daemon acks, so this
+--     matches nothing and the ack falls through to today's record-only path.
+--     A real cancel can never be rewritten into a failure.
+--   * A replayed or duplicated ack finds a terminal row and is a no-op, so
+--     at-least-once delivery from the daemon stays safe.
+--
+-- error / failure_reason use COALESCE so a reason the daemon actually reported
+-- (a preserved-worktree local_directory_error, say) wins over the generic
+-- abandonment reason the caller passes as a default.
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    error = COALESCE(NULLIF(error, ''), sqlc.arg('error')),
+    failure_reason = COALESCE(failure_reason, sqlc.arg('failure_reason')),
+    branch_name = COALESCE(branch_name, sqlc.narg('branch_name')),
+    durable_work_dir = COALESCE(durable_work_dir, sqlc.narg('durable_work_dir')),
+    prepare_lease_expires_at = NULL
+WHERE id = sqlc.arg('id')
+  AND status IN ('dispatched', 'running', 'waiting_local_directory')
+RETURNING *;
+
 -- name: CancelAgentTaskWithReason :one
 -- Cancels a task AND records why, for cancellations the user did not ask for.
 --
