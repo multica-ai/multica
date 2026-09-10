@@ -10,7 +10,7 @@ import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
 import { useMarkInboxRead, useMarkInboxUnread, useUnarchiveInbox } from "./mutations";
-import { inboxKeys } from "./queries";
+import { inboxKeys, useInboxUnreadCount } from "./queries";
 
 vi.mock("../hooks", () => ({
   useWorkspaceId: () => "workspace-1",
@@ -219,94 +219,35 @@ describe("useUnarchiveInbox", () => {
 });
 
 /**
- * The unread badge reads the server-computed cross-workspace summary rather
- * than counting the inbox list (MUL-6967), so a mutation that would have moved
- * the badge through its list patch has to move the summary cache too — or the
- * number sits still until the round-trip lands.
+ * The badge reads the server's cross-workspace summary. Rows stay optimistic;
+ * the badge deliberately does NOT, so there is exactly one writer for it
+ * (MUL-6967). These pin the property that replaces the old local recompute:
+ * whatever races, the badge converges on the server's value.
  */
-describe("optimistic unread summary", () => {
+describe("unread summary is server-owned", () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
+  });
+
+  it("does not move the badge from the list patch alone", async () => {
+    // A local recompute would read the patched list and write 0 here. It must
+    // not: the list cache proves only that the list loaded once, never that it
+    // is complete or concurrent with the summary — and once the list is
+    // paginated, one page cannot produce a workspace-wide count.
     setApiInstance({
       markInboxRead: vi.fn(async (id: string) => item({ id, read: true })),
-      markInboxUnread: vi.fn(async (id: string) => item({ id, read: false })),
     } as unknown as ApiClient);
-  });
-
-  function seed(items: InboxItem[], summary: InboxWorkspaceUnread[]) {
-    queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), items);
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
+      item({ id: "inbox-1", read: false, archived: false }),
+    ]);
     queryClient.setQueryData<InboxWorkspaceUnread[]>(
       inboxKeys.unreadSummary(),
-      summary,
+      [{ workspace_id: WORKSPACE_ID, count: 1 }],
     );
-  }
-
-  it("drops the workspace entry once its last unread group is read", async () => {
-    seed(
-      [item({ id: "inbox-1", read: false, archived: false })],
-      [
-        { workspace_id: WORKSPACE_ID, count: 1 },
-        { workspace_id: "workspace-2", count: 4 },
-      ],
-    );
-
-    const { result } = renderHook(() => useMarkInboxRead(), {
-      wrapper: createWrapper(queryClient),
-    });
-    result.current.mutate("inbox-1");
-
-    // Zero is expressed as an absent entry, mirroring the server response.
-    await waitFor(() => expect(summaryCount(queryClient)).toBeUndefined());
-    // Other workspaces are untouched — this patch is scoped to one entry.
-    expect(
-      queryClient
-        .getQueryData<InboxWorkspaceUnread[]>(inboxKeys.unreadSummary())
-        ?.find((e) => e.workspace_id === "workspace-2")?.count,
-    ).toBe(4);
-  });
-
-  it("counts issue groups, not rows, like the list the user sees", async () => {
-    // Two unread notifications on one issue plus one on another: the inbox
-    // renders two rows, so the badge must read 2 — not 3.
-    seed(
-      [
-        item({ id: "a1", issue_id: "issue-1", read: false, archived: false }),
-        item({ id: "a2", issue_id: "issue-1", read: false, archived: false, created_at: "2026-06-15T09:00:00Z" }),
-        item({ id: "b1", issue_id: "issue-2", read: false, archived: false }),
-        item({ id: "c1", issue_id: "issue-3", read: false, archived: false }),
-      ],
-      [{ workspace_id: WORKSPACE_ID, count: 3 }],
-    );
-
-    const { result } = renderHook(() => useMarkInboxRead(), {
-      wrapper: createWrapper(queryClient),
-    });
-    result.current.mutate("c1");
-
-    await waitFor(() => expect(summaryCount(queryClient)).toBe(2));
-  });
-
-  it("adds the workspace back when a notification is flipped unread", async () => {
-    seed([item({ id: "inbox-1", read: true, archived: false })], []);
-
-    const { result } = renderHook(() => useMarkInboxUnread(), {
-      wrapper: createWrapper(queryClient),
-    });
-    result.current.mutate("inbox-1");
-
-    await waitFor(() => expect(summaryCount(queryClient)).toBe(1));
-  });
-
-  it("leaves the summary alone when the inbox list was never loaded", async () => {
-    // At app start only the badge is mounted, so there is no list to derive
-    // from — the server value must stand rather than being reset to zero.
-    queryClient.setQueryData<InboxWorkspaceUnread[]>(inboxKeys.unreadSummary(), [
-      { workspace_id: WORKSPACE_ID, count: 9 },
-    ]);
 
     const { result } = renderHook(() => useMarkInboxRead(), {
       wrapper: createWrapper(queryClient),
@@ -314,27 +255,49 @@ describe("optimistic unread summary", () => {
     result.current.mutate("inbox-1");
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(summaryCount(queryClient)).toBe(9);
+    // The row flipped immediately...
+    expect(listCache(queryClient)[0]?.read).toBe(true);
+    // ...and the badge was never written locally; only invalidated.
+    expect(summaryCount(queryClient)).toBe(1);
+    expect(
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: inboxKeys.unreadSummary() })?.state.isInvalidated,
+    ).toBe(true);
   });
 
-  it("restores the previous count when the request fails", async () => {
+  it("converges on the server value even when a stale summary lands mid-flight", async () => {
+    // A summary request already in flight when the user marks something read
+    // resolves AFTER the mutation. `cancelQueries` here is workspace-scoped
+    // and never covers the account-level summary key, so that stale response
+    // does land — the refetch `onSettled` triggers is what makes the badge
+    // right regardless of who won the race.
+    let serverCount = 1;
     setApiInstance({
-      markInboxRead: vi.fn().mockRejectedValue(new Error("boom")),
+      markInboxRead: vi.fn(async (id: string) => {
+        serverCount = 0;
+        return item({ id, read: true });
+      }),
+      getInboxUnreadSummary: vi.fn(async () =>
+        serverCount > 0
+          ? [{ workspace_id: WORKSPACE_ID, count: serverCount }]
+          : [],
+      ),
     } as unknown as ApiClient);
-    seed(
-      [
-        item({ id: "inbox-1", issue_id: "issue-1", read: false, archived: false }),
-        item({ id: "inbox-2", issue_id: "issue-2", read: false, archived: false }),
-      ],
-      [{ workspace_id: WORKSPACE_ID, count: 2 }],
-    );
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
+      item({ id: "inbox-1", read: false, archived: false }),
+    ]);
 
-    const { result } = renderHook(() => useMarkInboxRead(), {
+    const { result } = renderHook(() => useInboxUnreadCount(WORKSPACE_ID), {
       wrapper: createWrapper(queryClient),
     });
-    result.current.mutate("inbox-1");
+    await waitFor(() => expect(result.current).toBe(1));
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(summaryCount(queryClient)).toBe(2);
+    const { result: mutation } = renderHook(() => useMarkInboxRead(), {
+      wrapper: createWrapper(queryClient),
+    });
+    mutation.current.mutate("inbox-1");
+
+    await waitFor(() => expect(result.current).toBe(0));
   });
 });

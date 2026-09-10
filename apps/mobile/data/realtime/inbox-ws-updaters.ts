@@ -31,6 +31,11 @@ export function patchInboxIssueStatus(
   );
 }
 
+// Dropping unread rows changes the tab badge, which reads the server-side
+// unread summary rather than this list. `issue:deleted` fires no `inbox:*`
+// event, so nothing else would refresh it and the badge would stay above an
+// empty inbox — hence the invalidation lives here, not at the call site.
+// Web does the same in packages/core/inbox/ws-updaters.ts (MUL-6967).
 export function dropInboxItemsByIssue(
   qc: QueryClient,
   wsId: string,
@@ -39,4 +44,5 @@ export function dropInboxItemsByIssue(
   qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
     old?.filter((i) => i.issue_id !== issueId),
   );
+  qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
 }

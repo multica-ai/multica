@@ -76,6 +76,23 @@ describe("onInboxIssueDeleted", () => {
     expect(() => onInboxIssueDeleted(qc, wsId, "issue-a")).not.toThrow();
     expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))).toBeUndefined();
   });
+
+  it("refreshes the unread summary, which the dropped rows can change", () => {
+    // The badge reads the server summary, not these lists (MUL-6967). Deletion
+    // arrives as an `issue:*` event, so no `inbox:*` handler runs to refresh
+    // it, and the summary query is staleTime: Infinity with no refetch on
+    // focus — without this the badge stays lit over an empty inbox.
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [
+      makeItem("i1", "issue-a", { read: false }),
+    ]);
+
+    onInboxIssueDeleted(qc, wsId, "issue-a");
+
+    expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))).toEqual([]);
+    expect(spy).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() });
+  });
 });
 
 describe("onInboxInvalidate", () => {

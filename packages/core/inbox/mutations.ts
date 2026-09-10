@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { deduplicateInboxItems, inboxKeys } from "./queries";
+import { inboxKeys } from "./queries";
 import { useWorkspaceId } from "../hooks";
-import type { InboxItem, InboxWorkspaceUnread } from "../types";
+import type { InboxItem } from "../types";
 
 /**
  * Refresh the cross-workspace unread summary.
@@ -12,38 +12,21 @@ import type { InboxItem, InboxWorkspaceUnread } from "../types";
  * under its own account-level key which `inboxKeys.all(wsId)` does not reach.
  * Every mutation here can change the number it holds, so each one refreshes it
  * on settle rather than waiting for the WebSocket echo of its own action.
+ *
+ * The rows are patched optimistically but the badge is NOT: it follows the
+ * server's confirmation, which costs a round-trip of latency and buys a single
+ * writer. Deriving it locally instead — recomputing the count from the list
+ * cache and writing that back — reads as instant but is unsound: a list cache
+ * proves only that the list was loaded ONCE, never that it is complete or
+ * concurrent with the summary, and the account-level summary request is not
+ * cancelled by the workspace-scoped `cancelQueries` below, so a response
+ * already in flight lands on top of the local value anyway. Under pagination
+ * it would be wrong by construction — one loaded page cannot produce a global
+ * count. If instant feedback is wanted later, it has to be a per-group delta
+ * that handles the race, not a recomputed total.
  */
 function invalidateUnreadSummary(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
-}
-
-/**
- * Re-derive this workspace's unread count from the inbox list cache and write
- * it into the summary cache, so the badge tracks an optimistic patch instead
- * of waiting for a round-trip.
- *
- * The summary is server-computed and cannot be recalculated from nothing — but
- * every caller below has just patched the list cache, and the list holds
- * exactly the rows the count is defined over. Re-running the same
- * `deduplicateInboxItems` the inbox view uses keeps the badge in lockstep with
- * the rows on screen; `onSettled` still re-pulls the authoritative value.
- *
- * Both caches are read defensively. No list cache means no inbox surface is
- * mounted, and no summary cache means the badge has not loaded — in either
- * case there is nothing to be optimistic about, and the server value stands.
- */
-function syncUnreadSummaryFromList(qc: QueryClient, wsId: string) {
-  const items = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
-  if (!items) return;
-  const count = deduplicateInboxItems(items).filter((i) => !i.read).length;
-  qc.setQueryData<InboxWorkspaceUnread[]>(inboxKeys.unreadSummary(), (old) => {
-    if (!old) return old;
-    // Order carries no meaning here — every consumer scans by workspace id.
-    // A zero-count workspace is dropped, mirroring the server response, which
-    // omits workspaces with nothing unread.
-    const others = old.filter((entry) => entry.workspace_id !== wsId);
-    return count > 0 ? [...others, { workspace_id: wsId, count }] : others;
-  });
 }
 
 export function useMarkInboxRead() {
@@ -62,13 +45,11 @@ export function useMarkInboxRead() {
       // patch that cache as well, or its unread dot would sit there until the
       // next refetch.
       qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), markRead);
-      syncUnreadSummaryFromList(qc, wsId);
       return { prev, prevArchived };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
       if (ctx?.prevArchived) qc.setQueryData(inboxKeys.archived(wsId), ctx.prevArchived);
-      syncUnreadSummaryFromList(qc, wsId);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
@@ -97,10 +78,8 @@ export function useRetrySourceContextQuickCreate() {
  * can be actioned from either list, and leaving the other one stale would show
  * two different read states for one notification after a view switch.
  *
- * The unread badge reads the server-computed cross-workspace summary, so the
- * patch alone would not raise it — `syncUnreadSummaryFromList` re-derives that
- * workspace's entry from the freshly patched list so the badge moves without
- * waiting for the round-trip. `onSettled` still re-pulls the real value.
+ * The rows flip at once; the badge follows on settle — see
+ * {@link invalidateUnreadSummary} for why it is not patched locally.
  */
 export function useMarkInboxUnread() {
   const qc = useQueryClient();
@@ -115,13 +94,11 @@ export function useMarkInboxUnread() {
         old?.map((item) => (item.id === id ? { ...item, read: false } : item));
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), markUnread);
       qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), markUnread);
-      syncUnreadSummaryFromList(qc, wsId);
       return { prev, prevArchived };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
       if (ctx?.prevArchived) qc.setQueryData(inboxKeys.archived(wsId), ctx.prevArchived);
-      syncUnreadSummaryFromList(qc, wsId);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
@@ -150,13 +127,10 @@ export function useArchiveInbox() {
             : item,
         ),
       );
-      // Archiving an unread issue group drops it out of the badge immediately.
-      syncUnreadSummaryFromList(qc, wsId);
       return { prev };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
-      syncUnreadSummaryFromList(qc, wsId);
     },
     onSettled: () => {
       // Both lists: the item just moved from the main inbox into the archive.
@@ -223,12 +197,10 @@ export function useMarkAllInboxRead() {
           !item.archived ? { ...item, read: true } : item,
         ),
       );
-      syncUnreadSummaryFromList(qc, wsId);
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
-      syncUnreadSummaryFromList(qc, wsId);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
