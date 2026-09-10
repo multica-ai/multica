@@ -56,18 +56,34 @@ function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
 }
 
 /**
- * What this record can say about its stored output being the whole output.
+ * Whether this record's stored output is known to have dropped bytes.
  *
  * Only tool results carry the measurement, and an empty output has nothing to
  * be missing — truncation keeps the first 8 KiB, so a preview that dropped
- * bytes is never empty. `false` is a measurement and needs no remark; the two
- * cases worth a word are "bytes are known to be gone" and "nobody measured".
+ * bytes is never empty.
  */
-export function outputCompleteness(item: TimelineItem): "truncated" | "unknown" | null {
-  if (item.type !== "tool_result" || (item.output?.length ?? 0) === 0) return null;
-  if (item.output_truncated === true) return "truncated";
-  if (item.output_truncated === undefined) return "unknown";
-  return null;
+export function isOutputTruncated(item: TimelineItem): boolean {
+  return (
+    item.type === "tool_result" && (item.output?.length ?? 0) > 0 && item.output_truncated === true
+  );
+}
+
+/**
+ * Whether nobody measured this run's tool output at all — every message in a
+ * run comes from one daemon execution, so either that daemon reported the flag
+ * or it did not. That makes "unknown" a fact about the RUN, which is why the
+ * viewer states it once for the run rather than on each step the reader opens.
+ *
+ * `false` is a measurement and needs no remark; an empty output cannot have
+ * been truncated, so it says nothing either way.
+ */
+export function hasUnmeasuredOutput(items: TimelineItem[]): boolean {
+  return items.some(
+    (item) =>
+      item.type === "tool_result" &&
+      (item.output?.length ?? 0) > 0 &&
+      item.output_truncated === undefined,
+  );
 }
 
 /** Build a chronologically ordered timeline from raw task messages. */

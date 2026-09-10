@@ -5,7 +5,8 @@ import {
   appendTimelineItem,
   buildTimeline,
   coalesceTimelineItems,
-  outputCompleteness,
+  hasUnmeasuredOutput,
+  isOutputTruncated,
   type TimelineItem,
 } from "./build-timeline";
 
@@ -125,26 +126,36 @@ describe("tool output completeness", () => {
     expect(items.map((i) => i.output_truncated)).toEqual([true, false, undefined]);
   });
 
-  // false is a measurement, undefined is the absence of one. Collapsing them
-  // would let a historical row pass as one the daemon confirmed complete.
-  it("separates measured-truncated, measured-complete, and never-measured", () => {
-    expect(outputCompleteness(result("x", true))).toBe("truncated");
-    expect(outputCompleteness(result("x", false))).toBeNull();
-    expect(outputCompleteness(result("x"))).toBe("unknown");
+  // false is a measurement, undefined is the absence of one. Only a positive
+  // measurement earns the per-step remark.
+  it("marks only an output measured as truncated", () => {
+    expect(isOutputTruncated(result("x", true))).toBe(true);
+    expect(isOutputTruncated(result("x", false))).toBe(false);
+    expect(isOutputTruncated(result("x"))).toBe(false);
   });
 
   // A truncated preview keeps the first 8 KiB, so an empty output cannot be
-  // one. Remarking on these would annotate records that never lost a byte.
+  // one, either as a truncation or as an unanswered question.
   it("says nothing about an empty output", () => {
-    expect(outputCompleteness(result(""))).toBeNull();
-    expect(outputCompleteness(result(undefined))).toBeNull();
+    expect(isOutputTruncated(result(""))).toBe(false);
+    expect(hasUnmeasuredOutput([result(""), result(undefined)])).toBe(false);
+  });
+
+  // One daemon produces a whole run, so unknown-ness is a fact about the run.
+  it("reports an unmeasured run once, from any unmeasured step", () => {
+    expect(hasUnmeasuredOutput([result("a", false), result("b")])).toBe(true);
+    expect(hasUnmeasuredOutput([result("a", false), result("b", true)])).toBe(false);
   });
 
   // The flag only describes tool output; prose and thinking have no preview
   // budget to overflow.
   it("ignores message types that have no tool output", () => {
-    expect(outputCompleteness({ seq: 1, type: "text", content: "hello" })).toBeNull();
-    expect(outputCompleteness({ seq: 2, type: "thinking", content: "hmm" })).toBeNull();
-    expect(outputCompleteness({ seq: 3, type: "error", content: "boom" })).toBeNull();
+    const others: TimelineItem[] = [
+      { seq: 1, type: "text", content: "hello" },
+      { seq: 2, type: "thinking", content: "hmm" },
+      { seq: 3, type: "error", content: "boom" },
+    ];
+    expect(others.some(isOutputTruncated)).toBe(false);
+    expect(hasUnmeasuredOutput(others)).toBe(false);
   });
 });

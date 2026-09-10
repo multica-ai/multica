@@ -922,15 +922,19 @@ describe("readable issue references", () => {
   });
 });
 
-// The completeness indicator, #8182 / #8183. It lives at the end of the output
-// the reader is already looking at, not in the header: the question it answers
-// ("was that all of it?") is one you only have once you reach the bottom. The
+// The completeness indicator, #8182 / #8183. A truncation remark sits at the
+// end of the output it describes and waits for the reader to reveal that end;
+// unknown-ness belongs to the run, because one daemon produced all of it. The
 // state matrix lives in build-timeline.test.ts.
 describe("tool output completeness", () => {
-  function run(output_truncated?: boolean): TimelineItem[] {
+  const SHORT = "line one";
+  // Past ToolDetailSurface's fade threshold, so the body opens collapsed.
+  const LONG = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
+
+  function run(output: string, output_truncated?: boolean): TimelineItem[] {
     return [
       { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
-      { seq: 2, type: "tool_result", tool: "exec_command", output: "line one", output_truncated },
+      { seq: 2, type: "tool_result", tool: "exec_command", output, output_truncated },
     ];
   }
 
@@ -939,74 +943,79 @@ describe("tool output completeness", () => {
     fireEvent.click(screen.getByRole("button", { name: /cat big\.log/ }));
   }
 
-  it("marks the end of an output the record lost", () => {
-    openStep(run(true));
+  it("remarks at the end of an output the record could not keep whole", () => {
+    openStep(run(SHORT, true));
 
     expect(screen.getByText(/only the beginning was kept/i)).toBeInTheDocument();
   });
 
-  it("marks an output nobody measured as unconfirmed", () => {
-    openStep(run(undefined));
-
-    expect(screen.getByText(/whether it is complete cannot be confirmed/i)).toBeInTheDocument();
-  });
-
   it("says nothing about an output the daemon measured as complete", () => {
-    openStep(run(false));
+    openStep(run(SHORT, false));
 
-    expect(screen.queryByText(/only the beginning was kept|cannot be confirmed/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/only the beginning was kept/i)).not.toBeInTheDocument();
   });
 
-  // Regression guard for the shape this replaced: a warning badge next to the
-  // tool name announced the caveat before the reader had asked the question.
-  it("keeps the caveat out of the step header", () => {
-    openStep(run(true));
+  // The remark answers "was that all of it?", which is a question the reader
+  // only has at the bottom. Showing it over a faded, half-shown body answers
+  // ahead of the question and puts the words nowhere near the end they describe.
+  it("waits for the body to be revealed before remarking", () => {
+    openStep(run(LONG, true));
+    expect(screen.queryByText(/only the beginning was kept/i)).not.toBeInTheDocument();
 
-    // The header row is the one carrying the copy control.
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+
+    expect(screen.getByText(/only the beginning was kept/i)).toBeInTheDocument();
+  });
+
+  // Regression guard: a warning badge next to the tool name announced the
+  // caveat before the reader had asked the question.
+  it("keeps the remark out of the step header", () => {
+    openStep(run(SHORT, true));
+
     const header = screen.getByRole("button", { name: "Copy this step" }).closest("div");
     expect(header).toHaveTextContent("exec_command");
     expect(header).not.toHaveTextContent(/only the beginning was kept/i);
   });
 
   // A stored tool result is capped at 8192 bytes upstream, so the render clip
-  // must never reach it: an output the record already lost gets one remark, not
-  // a second grey line reporting a further couple of hundred characters.
+  // must never reach it: one remark, not a second reporting the rounding error.
   it("leaves a stored tool result with exactly one remark", () => {
-    openStep([
-      { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
-      { seq: 2, type: "tool_result", tool: "exec_command", output: "x".repeat(8192), output_truncated: true },
-    ]);
+    openStep(run("x".repeat(8192), true));
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
 
     expect(screen.getByText(/only the beginning was kept/i)).toBeInTheDocument();
     expect(screen.queryByText(/only the start is displayed/i)).not.toBeInTheDocument();
   });
 
-  // Tool input has no server-side budget, so it is the one body that still
-  // needs a render clip — and it never carries a completeness note, so this
-  // stays a single remark too.
-  it("still clips a tool input too large to render", () => {
+  // Tool input has no server-side budget and keeps its existing render ceiling.
+  // Nothing about how long an input renders is this change's business.
+  it("still clips a tool input at its existing length", () => {
     renderDialog([
       {
         seq: 1,
         type: "tool_use",
         tool: "exec_command",
-        input: { command: "echo", payload: "y".repeat(40000) },
+        input: { command: "echo", payload: "y".repeat(9000) },
       },
     ]);
     fireEvent.click(screen.getByRole("button", { name: /exec_command/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
 
-    // The marker describes the clip and nothing else: an earlier version
-    // promised copy would return the whole record, which read as "the full
-    // output is in the database" and is not true of a tool result.
     const body = screen.getByText(/only the start is displayed/i);
     expect(body.textContent).not.toMatch(/copy|whole record|everything that was saved/i);
   });
 
-  // The run-level banner this replaced sat above the list and spoke for steps
-  // the reader had not opened.
-  it("does not annotate the run before a step is opened", () => {
-    renderDialog(run(undefined));
+  // Unknown-ness is a property of the run: one daemon either measured its
+  // outputs or measured none of them. Stated once, not on each step opened.
+  it("states an unmeasured run once, without opening a step", () => {
+    renderDialog([...run(SHORT, undefined), ...run(SHORT, undefined).map((i) => ({ ...i, seq: i.seq + 2 }))]);
 
-    expect(screen.queryByText(/cannot be confirmed/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/whether they are complete cannot be confirmed/i)).toHaveLength(1);
+  });
+
+  it("drops the run remark once the daemon has measured the run", () => {
+    renderDialog(run(SHORT, true));
+
+    expect(screen.queryByText(/whether they are complete cannot be confirmed/i)).not.toBeInTheDocument();
   });
 });

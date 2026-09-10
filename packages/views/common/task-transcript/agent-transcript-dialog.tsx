@@ -62,7 +62,7 @@ import {
   FOLLOW_EDGE_THRESHOLD,
   LINE_SCROLL_PX,
 } from "./transcript-follow";
-import { outputCompleteness, type TimelineItem } from "./build-timeline";
+import { hasUnmeasuredOutput, isOutputTruncated, type TimelineItem } from "./build-timeline";
 import {
   buildLanes,
   buildSteps,
@@ -469,6 +469,10 @@ export function AgentTranscriptDialog({
   // One step per tool call, with its result folded in — see build-steps.ts for
   // why the pairing is positional.
   const steps = useMemo(() => buildSteps(items), [items]);
+
+  // Said once for the run: one daemon produced every message in it, so either
+  // it measured this run's outputs or it measured none of them.
+  const unmeasured = useMemo(() => hasUnmeasuredOutput(items), [items]);
 
   // A facet reads as what its rows look like: the glyph the rows carry, and the
   // name the rows print. The first step of a kind stands in for the glyph. The
@@ -1209,6 +1213,12 @@ export function AgentTranscriptDialog({
           </DropdownMenu>
         </div>
 
+        {unmeasured && (
+          <p className="shrink-0 px-4 pb-1.5 text-micro text-faint-foreground">
+            {t(($) => $.transcript.output_completeness_unknown_note)}
+          </p>
+        )}
+
         {/* ── Steps, and the inspector when one is selected ───────────── */}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
@@ -1752,42 +1762,21 @@ function InspectorSection({ label, children }: { label: string; children: React.
 }
 
 /** One payload, rendered as what it is. */
-/**
- * Ceiling for a body rendered into one <pre>. Deliberately above the daemon's
- * 8192-byte tool-result preview budget: a stored result must never be clipped
- * here, so its only remark is the completeness note. What this actually guards
- * is tool input, which is persisted whole and can be megabytes.
- */
-const RENDER_CLIP_CHARS = 20000;
+/** Pre-existing render ceiling for a body with no server-side budget. */
+const DISPLAY_CLIP_CHARS = 8000;
 
 export function StepBody({ item }: { item: TimelineItem }) {
   const { t } = useT("agents");
   const detail = useMemo(() => traceEventDetail(item), [item]);
   const image = useMemo(() => readImageResult(item.output), [item.output]);
-  // Stated where the output actually ends, in the reader's own words when they
-  // reach the bottom and wonder whether that was all of it. A header badge said
+  // Stated where the output actually ends, for a reader who has just reached
+  // the bottom and is wondering whether that was all of it. A header badge said
   // the same thing louder, before anyone had asked the question.
-  const completeness = outputCompleteness(item);
-  const footer = completeness ? (
-    <p className="px-3 pb-2 text-micro text-faint-foreground">
-      {completeness === "truncated"
-        ? t(($) => $.transcript.output_truncated_note)
-        : t(($) => $.transcript.output_completeness_unknown_note)}
-    </p>
-  ) : null;
-  const withFooter = (body: React.ReactNode) =>
-    footer ? (
-      <>
-        {body}
-        {footer}
-      </>
-    ) : (
-      body
-    );
+  const note = isOutputTruncated(item) ? t(($) => $.transcript.output_truncated_note) : undefined;
 
   // A screenshot is a picture, not a 200KB base64 string in a <pre>.
   if (image) {
-    return withFooter(
+    return (
       <figure className="px-2 py-1">
         <img
           src={`data:${image.mediaType};base64,${image.base64}`}
@@ -1797,34 +1786,37 @@ export function StepBody({ item }: { item: TimelineItem }) {
         <figcaption className="pt-1 text-micro text-faint-foreground">
           {t(($) => $.transcript.image_result)} · {formatBytes(base64ByteLength(image.base64))}
         </figcaption>
-      </figure>,
+        {note && <span className="block pt-1 text-micro text-faint-foreground">{note}</span>}
+      </figure>
     );
   }
 
   switch (detail.kind) {
     case "diff":
-      return withFooter(<DiffDetailSurface lines={detail.lines} path={detail.path} />);
+      return <DiffDetailSurface lines={detail.lines} path={detail.path} />;
     case "patch":
-      return withFooter(<PatchDetailSurface files={detail.files} truncated={detail.truncated} />);
+      return <PatchDetailSurface files={detail.files} truncated={detail.truncated} />;
     case "file":
-      return withFooter(
-        <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />,
-      );
+      return <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />;
     default: {
       const text = detail.text;
-      // Bound only what the daemon does not already bound. A stored tool result
-      // is at most 8192 BYTES, so at most 8192 characters, and clipping it here
-      // stacked a second grey line under the completeness note to report a
-      // couple of hundred more characters that were already covered by "the
-      // rest was not saved". Tool INPUT has no server-side budget, so the clip
-      // stays for it — above the source budget, where a result cannot reach it.
+      // A stored tool result is already capped at 8192 bytes by the daemon, so
+      // clipping it again could only shave a couple of hundred more characters
+      // — under a note that already reports the same loss. Tool input has no
+      // server-side budget and keeps the clip at its existing length; nothing
+      // about how long an input renders is this change's business.
+      const clip = item.type === "tool_result" ? null : DISPLAY_CLIP_CHARS;
       const clipped =
-        text.length > RENDER_CLIP_CHARS
-          ? `${redactSecrets(text.slice(0, RENDER_CLIP_CHARS))}\n${t(($) => $.transcript.display_clipped)}`
+        clip !== null && text.length > clip
+          ? `${redactSecrets(text.slice(0, clip))}\n${t(($) => $.transcript.display_clipped)}`
           : redactSecrets(text);
       const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
-      return withFooter(
-        <ToolDetailSurface text={clipped} language={path ? languageForPath(path) : undefined} />,
+      return (
+        <ToolDetailSurface
+          text={clipped}
+          language={path ? languageForPath(path) : undefined}
+          note={note}
+        />
       );
     }
   }
