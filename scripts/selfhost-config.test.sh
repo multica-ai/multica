@@ -205,7 +205,7 @@ sub=""
 subidx=0
 for ((i = 0; i < ${#args[@]}; i++)); do
   case "${args[i]}" in
-  up | pull | port | version | logs | down | build)
+  up | pull | port | version | logs | down | build | config)
     sub=${args[i]}
     subidx=$i
     break
@@ -218,6 +218,12 @@ for ((i = 0; i < ${#args[@]}; i++)); do
 done
 case "$sub" in
 version) echo "2.30.0" ;;
+config)
+  # scripts/selfhost-preflight.sh reads the ports to check from here, so the
+  # stub must answer with the real interpolation of the environment the recipe
+  # handed it — same reason `up` does below.
+  "$REAL_DOCKER" compose "${files[@]}" config
+  ;;
 up)
   "$REAL_DOCKER" compose "${files[@]}" config --format json 2>/dev/null | node -e '
 let raw = "";
@@ -259,7 +265,7 @@ chmod +x "$stub_dir/docker" "$stub_dir/curl"
 recipe_dir="$tmp_dir/recipe"
 mkdir -p "$recipe_dir/scripts"
 cp Makefile .env.example docker-compose.selfhost.yml docker-compose.selfhost.build.yml "$recipe_dir/"
-cp scripts/selfhost-wait.sh "$recipe_dir/scripts/"
+cp scripts/selfhost-wait.sh scripts/selfhost-preflight.sh "$recipe_dir/scripts/"
 
 record="$tmp_dir/published"
 curl_log="$tmp_dir/probed"
@@ -268,8 +274,33 @@ real_docker="$(command -v docker)"
 # Runs `make <target>` against the stubs after applying a sed script to .env.
 # Remaining args are passed through to make (environment assignments must be
 # given as VAR=value before the target via `env`, make variables after it).
+#
+# The host port preflight is skipped unless RECIPE_SKIP_PORT_CHECK=0: these
+# cases assert how a port is *resolved* and drive fixed numbers (9100, 8080,
+# 3000 ...) through the recipe, so they must not depend on which ports the
+# machine running the tests happens to have free. The preflight's own cases
+# below turn it back on against ports they control.
+#
+# A fifth argument of `fresh` runs the recipe with no .env at all, which is the
+# only way to reach the block that creates one.
 run_recipe() {
-  local target=$1 env_mutation=$2 shell_env=$3 make_args=$4
+  local target=$1 env_mutation=$2 shell_env=$3 make_args=$4 env_state=${5:-existing}
+
+  if [ "$env_state" = "fresh" ]; then
+    rm -f "$recipe_dir/.env"
+    : >"$record"
+    : >"$curl_log"
+    (
+      cd "$recipe_dir" || exit 1
+      eval "env PATH=\"$stub_dir:\$PATH\" \
+        REAL_DOCKER=\"$real_docker\" \
+        STUB_PUBLISHED_RECORD=\"$record\" \
+        STUB_CURL_LOG=\"$curl_log\" \
+        MULTICA_SELFHOST_SKIP_PORT_CHECK=\"${RECIPE_SKIP_PORT_CHECK:-1}\" \
+        $shell_env make $target $make_args"
+    )
+    return
+  fi
 
   cp "$recipe_dir/.env.example" "$recipe_dir/.env"
   # The Makefile includes .env and bare-`export`s every variable to the
@@ -292,6 +323,7 @@ run_recipe() {
       REAL_DOCKER=\"$real_docker\" \
       STUB_PUBLISHED_RECORD=\"$record\" \
       STUB_CURL_LOG=\"$curl_log\" \
+      MULTICA_SELFHOST_SKIP_PORT_CHECK=\"${RECIPE_SKIP_PORT_CHECK:-1}\" \
       $shell_env make $target $make_args"
   )
 }
@@ -523,6 +555,111 @@ for shadowed_alias in BACKEND_PORT API_PORT SERVER_PORT; do
   run_recipe selfhost "s/^# ${shadowed_alias}=8080/${shadowed_alias}=9700/" \
     "${shadowed_alias}=9600" '' >/dev/null
   require_consistent "env-file ${shadowed_alias} over the same shell variable" 9700
+done
+
+# ---------------------------------------------------------------------------
+# scripts/selfhost-preflight.sh: refusing a host port that is already taken
+#
+# The only cases here that run with the check enabled. They claim the ports they
+# need from the kernel rather than naming numbers, so they assert the behaviour
+# without assuming anything about what the machine running them has free.
+# ---------------------------------------------------------------------------
+
+# Three loopback ports claimed in one go: the first stays held for the conflict
+# case, the other two are handed straight back and reused as the free pair.
+# Claiming them together is what keeps the "free" pair out of the held port.
+reserved_ports="$tmp_dir/reserved-ports"
+node -e '
+const fs = require("fs");
+const net = require("net");
+const out = process.argv[1];
+const servers = [net.createServer(), net.createServer(), net.createServer()];
+let pending = servers.length;
+for (const server of servers) {
+  server.listen(0, "127.0.0.1", () => {
+    if (--pending > 0) return;
+    fs.writeFileSync(out + ".tmp", servers.map((s) => s.address().port).join("\n") + "\n");
+    fs.renameSync(out + ".tmp", out);
+    servers[1].close();
+    servers[2].close();
+  });
+}
+' "$reserved_ports" &
+held_port_pid=$!
+trap 'kill "$held_port_pid" 2>/dev/null || true; rm -f "$tmp_env"; rm -rf "$tmp_dir"' EXIT
+
+for _ in $(seq 1 100); do
+  [ -s "$reserved_ports" ] && break
+  sleep 0.1
+done
+if [ ! -s "$reserved_ports" ]; then
+  echo "could not claim loopback ports for the port preflight cases"
+  exit 1
+fi
+{
+  read -r held_port
+  read -r free_backend_port
+  read -r free_frontend_port
+} <"$reserved_ports"
+
+# From here on the recipes run with the preflight enabled.
+RECIPE_SKIP_PORT_CHECK=0
+preflight_log="$tmp_dir/preflight.log"
+
+# A taken port is refused, and refused early: nothing pulled, nothing started,
+# no .env left behind. What this replaces is a few hundred megabytes of images
+# followed by Docker's own "port is already allocated" -- or worse, a partially
+# started stack that scripts/selfhost-wait.sh reports as "Services are still
+# starting" and exits 0 on, so the conflict reads as a successful install.
+if run_recipe selfhost '' '' \
+  "PORT=$held_port FRONTEND_PORT=$free_frontend_port" fresh >"$preflight_log" 2>&1; then
+  echo "make selfhost must fail when a host port it would publish is already in use"
+  cat "$preflight_log"
+  exit 1
+fi
+if ! grep -Fq "Port $held_port (backend) is already in use" "$preflight_log"; then
+  echo "the conflict message must name the port and the service that wanted it"
+  cat "$preflight_log"
+  exit 1
+fi
+if grep -Fq 'Pulling official Multica images' "$preflight_log"; then
+  echo "the port check must run before the images are pulled"
+  cat "$preflight_log"
+  exit 1
+fi
+if [ -s "$record" ]; then
+  echo "a refused run must not start anything, but compose was asked to publish:"
+  cat "$record"
+  exit 1
+fi
+if [ -f "$recipe_dir/.env" ]; then
+  echo "a refused run must not leave a generated .env behind"
+  exit 1
+fi
+
+# Free ports chosen on the command line pass the check, and are what Compose
+# publishes for both services.
+if ! run_recipe selfhost '' '' \
+  "PORT=$free_backend_port FRONTEND_PORT=$free_frontend_port" fresh >"$preflight_log" 2>&1; then
+  echo "make selfhost must start on free ports chosen on the command line"
+  cat "$preflight_log"
+  exit 1
+fi
+require_consistent 'free ports chosen on the command line' "$free_backend_port"
+if [ "$(published_port frontend)" != "$free_frontend_port" ]; then
+  echo "expected the frontend on $free_frontend_port, got $(published_port frontend)"
+  exit 1
+fi
+
+# ...and the recipe records them in the .env it creates, so the next bare
+# `make selfhost` keeps the ports the operator picked instead of walking back
+# into the conflict they just worked around.
+for expected_line in "PORT=$free_backend_port" "FRONTEND_PORT=$free_frontend_port"; do
+  if ! grep -Fxq "$expected_line" "$recipe_dir/.env"; then
+    echo "the generated .env must record the ports the run used: $expected_line"
+    grep -nE '^(PORT|FRONTEND_PORT)=' "$recipe_dir/.env" || true
+    exit 1
+  fi
 done
 
 echo "self-host env derivation ok"
