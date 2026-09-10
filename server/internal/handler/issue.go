@@ -3682,9 +3682,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Existing issues stay pinned when a project's default changes. Resolve the
 	// project's effective workflow only for a real cross-project move; an
 	// ordinary status-node transition stays inside the issue's pinned workflow.
+	// Key-based updates of unbound issues let the transition service establish
+	// their binding in its transaction instead of requiring it before the write.
 	projectChangedForWorkflow := params.ProjectID != prevIssue.ProjectID
 	targetWorkflowID := prevIssue.WorkflowID
-	if !targetWorkflowID.Valid || projectChangedForWorkflow {
+	if projectChangedForWorkflow || (!targetWorkflowID.Valid && req.WorkflowStatusID != nil) {
 		effective, workflowErr := issueworkflow.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, params.ProjectID)
 		if workflowErr != nil {
 			slog.Warn("resolve target project workflow failed", append(logger.RequestAttrs(r), "error", workflowErr)...)
