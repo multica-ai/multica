@@ -134,11 +134,13 @@ right after a closing keyword in the body — a bare body mention does not count
 title or adding a closing keyword re-runs the scan.
 
 If the key is already written correctly and the list is still empty, stop editing
-the PR — re-triggering cannot repair a delivery that never arrives. What is left
-is on the integration side: the app may not be installed on that repository, the
-installation may be bound to a different workspace, the workspace may have
-auto-linking turned off, or the event may not have been delivered at all. Say so
-in the result comment instead of editing the PR again.
+the PR blind: another no-op edit cannot fix an integration that never received the
+event. Check the integration side instead — whether the app is installed on that
+repository, whether the installation is bound to this workspace, whether
+auto-linking is turned off for the workspace, and whether the event reached the
+platform at all. A delivery that failed is not retried on its own, but it can be
+redelivered once the receiving side is fixed. Report what you found in the result
+comment rather than repeating the edit.
 
 ## Listing and ordering issues
 

@@ -261,10 +261,15 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		reevalIssues = append(reevalIssues, issue)
 	}
 
+	// Keep the catalog local to this delivery and connection's workspace. Shared
+	// by the unlink pass and the terminal gate below.
+	resolver := issuestatus.NewResolver(conn.WorkspaceID)
+
 	// Withdrawn claims: drop every link this PR still carries for an issue it no
 	// longer claims, since a removed key leaves no trace in the payload. Frozen
-	// once the PR is terminal, like close_intent. Mirrors the GitHub path.
-	unlinkedIssues := make([]db.Issue, 0)
+	// once the PR is terminal, like close_intent. The gate runs before the delete
+	// and the delete only follows a fully applied decision, so a failure in
+	// between stays retryable. Mirrors the GitHub path (MUL-7072).
 	if !preserveCloseIntent {
 		linked, err := h.Queries.ListIssueIDsForVCSPullRequest(ctx, pr.ID)
 		if err != nil {
@@ -279,6 +284,10 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 				slog.Warn("vcs: load unlinked issue failed", "err", err, "issue_id", uuidToString(issueID))
 				continue
 			}
+			if err := h.releaseGateAfterUnlink(ctx, resolver, issue, pgtype.UUID{}, pr.ID, workspaceID); err != nil {
+				slog.Warn("vcs: gate before unlink failed", "err", err, "issue_id", uuidToString(issueID))
+				continue
+			}
 			if err := h.Queries.UnlinkIssueFromVCSPullRequest(ctx, db.UnlinkIssueFromVCSPullRequestParams{
 				IssueID:       issueID,
 				PullRequestID: pr.ID,
@@ -286,20 +295,11 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 				slog.Warn("vcs: unlink failed", "err", err)
 				continue
 			}
-			unlinkedIssues = append(unlinkedIssues, issue)
 		}
 	}
 
-	// An unlink can unblock an issue at any PR state, so those are re-checked on
-	// every event; the rest only on a terminal one (MUL-7072).
-	gateIssues := unlinkedIssues
 	if ev.State == "merged" || ev.State == "closed" {
-		gateIssues = append(gateIssues, reevalIssues...)
-	}
-	if len(gateIssues) > 0 {
-		// Keep the catalog local to this delivery and connection's workspace.
-		resolver := issuestatus.NewResolver(conn.WorkspaceID)
-		for _, issue := range gateIssues {
+		for _, issue := range reevalIssues {
 			// A custom terminal status counts as terminal here. (MUL-6243)
 			if s := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status); s == "done" || s == "cancelled" {
 				continue
@@ -310,7 +310,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 				continue
 			}
 			if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
-				h.advanceIssueToDone(ctx, issue, workspaceID)
+				_ = h.advanceIssueToDone(ctx, issue, workspaceID)
 			}
 		}
 	}

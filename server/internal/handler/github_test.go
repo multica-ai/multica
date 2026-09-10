@@ -1152,6 +1152,13 @@ func TestWebhook_MergedPR_BranchNameDoesNotClose(t *testing.T) {
 // one PR has to persist across multiple webhook events for a sibling PR.
 func firePRWebhook(t *testing.T, secret string, installationID int64, prNumber int32, title, body, branch, lifecycle string) {
 	t.Helper()
+	firePRWebhookAt(t, secret, installationID, prNumber, title, body, branch, lifecycle, "2026-04-29T00:00:00Z")
+}
+
+// firePRWebhookAt is firePRWebhook with control over the payload's updated_at,
+// for tests that need deliveries to arrive out of order.
+func firePRWebhookAt(t *testing.T, secret string, installationID int64, prNumber int32, title, body, branch, lifecycle, updatedAt string) {
+	t.Helper()
 	var action, state string
 	var merged bool
 	var mergedAt, closedAt any
@@ -1187,7 +1194,7 @@ func firePRWebhook(t *testing.T, secret string, installationID int64, prNumber i
 			"merged_at":  mergedAt,
 			"closed_at":  closedAt,
 			"created_at": "2026-04-28T00:00:00Z",
-			"updated_at": "2026-04-29T00:00:00Z",
+			"updated_at": updatedAt,
 			"head":       map[string]any{"ref": branch},
 			"user":       map[string]any{"login": "octocat"},
 		},
@@ -3514,5 +3521,189 @@ func TestWebhook_WithdrawnClaimOnOpenPRReleasesTheGate(t *testing.T) {
 	}
 	if len(listed) != 1 {
 		t.Errorf("only the merged PR should remain linked, got %d rows", len(listed))
+	}
+}
+
+// TestWebhook_StaleDeliveryDoesNotUndoANewerClaim is the GitHub out-of-order
+// guard. GitHub does not promise ordered delivery, and a withdrawn claim now
+// deletes a link, so a late older payload could drop a link the newer event
+// legitimately wrote — releasing the close gate while the PR is in fact still
+// open and claiming the issue. The self-hosted path has had this guard since it
+// shipped; GitHub needs the same one (MUL-7072).
+func TestWebhook_StaleDeliveryDoesNotUndoANewerClaim(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "stale-delivery-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "out of order deliveries",
+		"status": "in_progress",
+	})
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 30264012
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "stale-delivery-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	linkCount := func() int {
+		t.Helper()
+		var n int
+		dbfx.QueryRow(t, `SELECT count(*) FROM issue_pull_request WHERE issue_id = $1`, created.ID).Scan(&n)
+		return n
+	}
+	status := func() string {
+		t.Helper()
+		got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+		if err != nil {
+			t.Fatalf("GetIssue: %v", err)
+		}
+		return got.Status
+	}
+
+	// PR A carries the closing intent and merges; PR B claims the issue in its
+	// title and stays open, so it keeps the gate shut.
+	firePRWebhookAt(t, secret, installationID, 1, "Primary work", "Closes "+created.Identifier, "feat/primary", "opened", "2026-04-28T01:00:00Z")
+	firePRWebhookAt(t, secret, installationID, 2, created.Identifier+": follow-up", "", "feat/cleanup", "opened", "2026-04-28T02:00:00Z")
+	firePRWebhookAt(t, secret, installationID, 1, "Primary work", "Closes "+created.Identifier, "feat/primary", "merged", "2026-04-28T03:00:00Z")
+	if n := linkCount(); n != 2 {
+		t.Fatalf("both claims should be linked, got %d rows", n)
+	}
+	if s := status(); s != "in_progress" {
+		t.Fatalf("issue advanced while PR B still claimed it: %q", s)
+	}
+
+	// B's earlier "no key" edit arrives late. Acting on it would unlink B and
+	// release the gate, completing the issue while B is still open.
+	firePRWebhookAt(t, secret, installationID, 2, "follow-up", "", "feat/cleanup", "edited", "2026-04-28T01:30:00Z")
+	if n := linkCount(); n != 2 {
+		t.Errorf("stale delivery unlinked a newer claim, %d rows left", n)
+	}
+	if s := status(); s != "in_progress" {
+		t.Errorf("stale delivery released the close gate: status = %q, want in_progress", s)
+	}
+
+	// A genuinely newer withdrawal still goes through, so the guard is a clock
+	// check and not a blanket refusal.
+	firePRWebhookAt(t, secret, installationID, 2, "follow-up", "", "feat/cleanup", "edited", "2026-04-28T04:00:00Z")
+	if n := linkCount(); n != 1 {
+		t.Errorf("newer withdrawal should unlink, got %d rows", n)
+	}
+	if s := status(); s != "done" {
+		t.Errorf("newer withdrawal should release the gate: status = %q, want done", s)
+	}
+}
+
+// TestWebhook_FailedGateKeepsTheLinkForRetry covers the recovery semantics of the
+// unlink transition. The gate decision is applied before the link is deleted, so
+// a failing status write leaves the link in place: a redelivery then retries the
+// whole transition. Deleting first would strand the issue forever — the payload
+// no longer carries the key and the link table no longer carries the row, so
+// nothing could ever re-evaluate it (MUL-7072).
+func TestWebhook_FailedGateKeepsTheLinkForRetry(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "gate-failure-retry-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "gate failure must stay retryable",
+		"status": "in_progress",
+	})
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	dropTrigger := func() {
+		testPool.Exec(ctx, `DROP TRIGGER IF EXISTS mul7072_block_issue_update ON issue`)
+		testPool.Exec(ctx, `DROP FUNCTION IF EXISTS mul7072_block_issue_update()`)
+	}
+	t.Cleanup(func() {
+		dropTrigger()
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 30264013
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "gate-failure-retry-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	linkCount := func() int {
+		t.Helper()
+		var n int
+		dbfx.QueryRow(t, `SELECT count(*) FROM issue_pull_request WHERE issue_id = $1`, created.ID).Scan(&n)
+		return n
+	}
+	status := func() string {
+		t.Helper()
+		got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+		if err != nil {
+			t.Fatalf("GetIssue: %v", err)
+		}
+		return got.Status
+	}
+
+	firePRWebhookAt(t, secret, installationID, 1, "Primary work", "Closes "+created.Identifier, "feat/primary", "opened", "2026-04-28T01:00:00Z")
+	firePRWebhookAt(t, secret, installationID, 2, created.Identifier+": follow-up", "", "feat/cleanup", "opened", "2026-04-28T02:00:00Z")
+	firePRWebhookAt(t, secret, installationID, 1, "Primary work", "Closes "+created.Identifier, "feat/primary", "merged", "2026-04-28T03:00:00Z")
+
+	// Make the status write fail for this issue only, the way a transient error
+	// would, and deliver B's withdrawal.
+	if _, err := testPool.Exec(ctx, `
+		CREATE FUNCTION mul7072_block_issue_update() RETURNS trigger
+		LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'mul7072 injected failure'; END $$`); err != nil {
+		t.Fatalf("create trigger function: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		CREATE TRIGGER mul7072_block_issue_update BEFORE UPDATE ON issue
+		FOR EACH ROW WHEN (NEW.id = '`+created.ID+`') EXECUTE FUNCTION mul7072_block_issue_update()`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	firePRWebhookAt(t, secret, installationID, 2, "follow-up", "", "feat/cleanup", "edited", "2026-04-28T04:00:00Z")
+	if s := status(); s != "in_progress" {
+		t.Fatalf("status write was supposed to fail, got %q", s)
+	}
+	if n := linkCount(); n != 2 {
+		t.Errorf("a failed gate must keep the link for a retry, got %d rows", n)
+	}
+
+	// Receiving side healed; the same delivery replayed converges.
+	dropTrigger()
+	firePRWebhookAt(t, secret, installationID, 2, "follow-up", "", "feat/cleanup", "edited", "2026-04-28T04:00:00Z")
+	if s := status(); s != "done" {
+		t.Errorf("redelivery should converge: status = %q, want done", s)
+	}
+	if n := linkCount(); n != 1 {
+		t.Errorf("redelivery should unlink after the gate applied, got %d rows", n)
 	}
 }

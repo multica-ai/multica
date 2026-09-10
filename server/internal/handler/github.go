@@ -1532,6 +1532,27 @@ func (h *Handler) triggerPRRefreshFromCIEvent(ctx context.Context, body []byte) 
 // only ever narrows that verdict — it cannot grant close intent the policy
 // withheld.
 func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype.UUID, installationID int64, p *ghPullRequestPayload, closePolicy closeIntentPolicy) {
+	// Out-of-order guard. GitHub does not promise ordered delivery, and every
+	// decision below is derived from this payload: the mirrored state, the
+	// close-intent freeze, and which issues this PR still claims. Applying an
+	// older payload would roll the PR row back to a stale state and — now that a
+	// withdrawn claim unlinks — delete a link the newer event legitimately wrote,
+	// which can release the close gate while the PR is in fact still open. If the
+	// stored row is strictly newer than this event, the newer delivery already did
+	// this work. Mirrors the guard the self-hosted path has had since MUL-3772.
+	// (An event with no usable timestamp parses to now(), which is never strictly
+	// older than the stored value, so it proceeds.)
+	if stored, err := h.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: wsID,
+		RepoOwner:   p.Repository.Owner.Login,
+		RepoName:    p.Repository.Name,
+		PrNumber:    int32(p.PullRequest.Number),
+	}); err == nil {
+		evUpdatedAt := parseGHTimeRequired(p.PullRequest.UpdatedAt)
+		if stored.PrUpdatedAt.Valid && evUpdatedAt.Valid && stored.PrUpdatedAt.Time.After(evUpdatedAt.Time) {
+			return
+		}
+	}
 	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
 	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
 	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
@@ -1660,13 +1681,22 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 			reevalIssues = append(reevalIssues, issue)
 		}
 
+		// Resolve custom statuses once per delivery; built-in statuses still need
+		// no catalog read. Shared by the unlink pass and the terminal gate below.
+		resolver := issuestatus.NewResolver(wsID)
+
 		// Withdrawn claims: drop every link this PR still carries for an issue it
 		// no longer claims. The payload cannot answer that on its own — deleting
 		// a key outright leaves no trace in it — so the stored links are the
 		// source of truth, which also covers a claim downgraded to a passing
 		// mention. Frozen once the PR is terminal, by the same rule that freezes
 		// close_intent: a post-merge edit must not unlink a PR that did the work.
-		unlinkedIssues := make([]db.Issue, 0)
+		//
+		// The gate for the issue runs BEFORE its link is deleted and the delete
+		// only follows a fully applied decision. Deleting first would make the
+		// transition unrecoverable: a gate failure right after the delete leaves
+		// an issue that neither a redelivery (no key in the payload) nor the link
+		// table can point at again, so nothing would ever re-evaluate it.
 		if !preserveCloseIntent {
 			linked, err := h.Queries.ListIssueIDsForPullRequest(ctx, pr.ID)
 			if err != nil {
@@ -1681,6 +1711,10 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 					slog.Warn("github: load unlinked issue failed", "err", err, "issue_id", uuidToString(issueID))
 					continue
 				}
+				if err := h.releaseGateAfterUnlink(ctx, resolver, issue, pr.ID, pgtype.UUID{}, workspaceID); err != nil {
+					slog.Warn("github: gate before unlink failed", "err", err, "issue_id", uuidToString(issueID))
+					continue
+				}
 				if err := h.Queries.UnlinkIssueFromPullRequest(ctx, db.UnlinkIssueFromPullRequestParams{
 					IssueID:       issueID,
 					PullRequestID: pr.ID,
@@ -1688,7 +1722,6 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 					slog.Warn("github: unlink failed", "err", err)
 					continue
 				}
-				unlinkedIssues = append(unlinkedIssues, issue)
 			}
 		}
 
@@ -1706,20 +1739,9 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// also prevents an "all closed-without-merge" sequence from
 		// silently auto-closing the issue — if nothing carrying closing
 		// intent was ever delivered, the user should decide manually.
-		//
-		// Dropping a link can be the moment an issue becomes advanceable too —
-		// an open PR that withdraws its claim stops blocking the gate — and that
-		// happens at any PR state, so unlinked issues are re-checked on every
-		// event, not only terminal ones (MUL-7072).
-		gateIssues := unlinkedIssues
 		if state == "merged" || state == "closed" {
-			gateIssues = append(gateIssues, reevalIssues...)
-		}
-		if len(gateIssues) > 0 {
-			// All linked issues belong to this workspace. Resolve custom statuses
-			// once per delivery; built-in statuses still need no catalog read.
-			resolver := issuestatus.NewResolver(wsID)
-			for _, issue := range gateIssues {
+			// All linked issues belong to this workspace.
+			for _, issue := range reevalIssues {
 				// A custom terminal status counts as terminal here. (MUL-6243)
 				if s := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status); s == "done" || s == "cancelled" {
 					continue
@@ -1733,7 +1755,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 					continue
 				}
 				if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
-					h.advanceIssueToDone(ctx, issue, workspaceID)
+					_ = h.advanceIssueToDone(ctx, issue, workspaceID)
 				}
 			}
 		}
@@ -1944,7 +1966,11 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 	return issue, true
 }
 
-func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) {
+// advanceIssueToDone moves the issue to `done` and fans out the notifications
+// that transition owes. It returns the status-write error so a caller whose next
+// step is destructive — dropping the link that made this decision possible — can
+// leave a retryable state behind instead (MUL-7072).
+func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) error {
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 		ID:          issue.ID,
 		Status:      "done",
@@ -1952,7 +1978,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 	})
 	if err != nil {
 		slog.Warn("github: advance issue to done failed", "err", err)
-		return
+		return err
 	}
 
 	// Fire the platform parent-notification path on the same transition the
@@ -1974,6 +2000,32 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 		"creator_id":     uuidToString(issue.CreatorID),
 		"source":         "github_pr_merged",
 	})
+	return nil
+}
+
+// releaseGateAfterUnlink re-runs the auto-advance gate for an issue that is about
+// to lose one of its links, counting as if the link were already gone: the PR
+// that withdrew its claim may have been the last one still open, and that can
+// happen at any PR state, not only a terminal one. The caller deletes the link
+// only when this returns nil — see GetIssueCombinedCloseAggregateExcludingPR for
+// why the order matters (MUL-7072).
+func (h *Handler) releaseGateAfterUnlink(ctx context.Context, resolver *issuestatus.Resolver, issue db.Issue, excludeGitHubPR, excludeVCSPR pgtype.UUID, workspaceID string) error {
+	// A custom terminal status counts as terminal here. (MUL-6243)
+	if s := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status); s == "done" || s == "cancelled" {
+		return nil
+	}
+	counts, err := h.Queries.GetIssueCombinedCloseAggregateExcludingPR(ctx, db.GetIssueCombinedCloseAggregateExcludingPRParams{
+		IssueID:         issue.ID,
+		ExcludeGithubPr: excludeGitHubPR,
+		ExcludeVcsPr:    excludeVCSPR,
+	})
+	if err != nil {
+		return err
+	}
+	if counts.OpenCount != 0 || counts.MergedWithCloseIntentCount == 0 {
+		return nil
+	}
+	return h.advanceIssueToDone(ctx, issue, workspaceID)
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
