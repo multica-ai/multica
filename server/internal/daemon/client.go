@@ -514,6 +514,9 @@ type TaskMessageData struct {
 	Content string         `json:"content,omitempty"`
 	Input   map[string]any `json:"input,omitempty"`
 	Output  string         `json:"output,omitempty"`
+	// CreatedAt is when the daemon observed the event, before the 500ms report
+	// batch. Without it, every row in one batch gets the same database time.
+	CreatedAt time.Time `json:"created_at"`
 	// OutputTruncated reports whether Output dropped bytes to fit the preview
 	// budget. Tri-state on purpose: nil means this daemon did not measure it,
 	// which an older installed daemon talking to a newer server cannot say any

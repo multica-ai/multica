@@ -4683,6 +4683,9 @@ type TaskMessageRequest struct {
 	Content string         `json:"content,omitempty"`
 	Input   map[string]any `json:"input,omitempty"`
 	Output  string         `json:"output,omitempty"`
+	// CreatedAt is optional so installed daemons can roll forward or back
+	// independently of the server. Missing values keep the database-time fallback.
+	CreatedAt *time.Time `json:"created_at,omitempty"`
 	// OutputTruncated is absent from every older daemon's payload, so it stays
 	// a pointer all the way to the column: nil must persist as NULL (unknown),
 	// never as false. Recording an unmeasured output as complete is the one
@@ -4744,10 +4747,14 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		Contents: make([]string, 0, n),
 		Inputs:   make([]string, 0, n),
 		Outputs:  make([]string, 0, n),
+		// Optional for mixed-version rollout. Older daemons omit the event
+		// timestamp, and the query preserves the previous database-time fallback.
+		CreatedAts: make([]string, 0, n),
 		// Tri-state through a text[]: "" is NULL, matching how the query maps
 		// every other nullable column in this batch.
 		OutputTruncations: make([]string, 0, n),
 	}
+	serverNow := time.Now().UTC()
 	for _, msg := range req.Messages {
 		id, err := uuid.NewV7()
 		if err != nil {
@@ -4802,6 +4809,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		params.Contents = append(params.Contents, msg.Content)
 		params.Inputs = append(params.Inputs, inputJSON)
 		params.Outputs = append(params.Outputs, msg.Output)
+		params.CreatedAts = append(params.CreatedAts, taskMessageCreatedAt(msg.CreatedAt, serverNow))
 		params.OutputTruncations = append(params.OutputTruncations, boolArrayElement(msg.OutputTruncated))
 	}
 
@@ -4966,6 +4974,22 @@ func boolArrayElement(v *bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+const maxTaskMessageClockSkew = 2 * time.Minute
+
+// taskMessageCreatedAt encodes the daemon-observed event time for the batch
+// query's nullable text[] transport. Empty means an older daemon omitted the
+// field or its wall clock is implausibly far from the server, so PostgreSQL
+// falls back to its normal insertion time.
+func taskMessageCreatedAt(v *time.Time, serverNow time.Time) string {
+	if v == nil || v.IsZero() {
+		return ""
+	}
+	if skew := v.Sub(serverNow); skew < -maxTaskMessageClockSkew || skew > maxTaskMessageClockSkew {
+		return ""
+	}
+	return v.UTC().Format(time.RFC3339Nano)
 }
 
 // ListTaskMessages returns the persisted messages for a task (for catch-up after reconnect).

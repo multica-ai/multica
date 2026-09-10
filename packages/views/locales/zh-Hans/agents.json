@@ -893,6 +893,7 @@
     "kind_error": "错误",
     "group_calls_other": "{{count}} 次调用",
     "step_running": "进行中",
+    "step_duration_unknown": "无法确定准确耗时。",
     "step_input": "输入",
     "step_result": "结果",
     "copy_step": "复制这一步",

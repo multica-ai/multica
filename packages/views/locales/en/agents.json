@@ -911,6 +911,7 @@
     "group_calls_one": "{{count}} call",
     "group_calls_other": "{{count}} calls",
     "step_running": "Still running",
+    "step_duration_unknown": "Exact duration is unavailable.",
     "step_input": "Input",
     "step_result": "Result",
     "copy_step": "Copy this step",

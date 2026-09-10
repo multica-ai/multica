@@ -72,18 +72,20 @@ WITH incoming AS (
         unnest($5::text[]) AS content,
         unnest($6::text[]) AS input,
         unnest($7::text[]) AS output,
-        unnest($8::text[]) AS output_truncated
+        unnest($8::text[]) AS created_at,
+        unnest($9::text[]) AS output_truncated
 ), inserted AS (
-    INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output, output_truncated)
+    INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output, created_at, output_truncated)
     SELECT
         m.id,
-        $9::uuid,
+        $10::uuid,
         m.seq,
         m.type,
         NULLIF(m.tool, ''),
         NULLIF(m.content, ''),
         NULLIF(m.input, '')::jsonb,
         NULLIF(m.output, ''),
+        COALESCE(NULLIF(m.created_at, '')::timestamptz, now()),
         NULLIF(m.output_truncated, '')::bool
     FROM incoming AS m
     RETURNING id, task_id, seq, type, tool, content, input, output, created_at, output_truncated
@@ -99,6 +101,7 @@ type CreateTaskMessagesParams struct {
 	Contents          []string      `json:"contents"`
 	Inputs            []string      `json:"inputs"`
 	Outputs           []string      `json:"outputs"`
+	CreatedAts        []string      `json:"created_ats"`
 	OutputTruncations []string      `json:"output_truncations"`
 	TaskID            pgtype.UUID   `json:"task_id"`
 }
@@ -136,10 +139,11 @@ type CreateTaskMessagesRow struct {
 // `pgtype.Text{Valid: x != ""}` mapping the single-row query carries — empty
 // string means SQL NULL. input is passed as text and cast here for the same
 // reason; it is the one column that genuinely has to be parsed as JSON, because
-// it is a jsonb column. output_truncated rides the same trick for the same
-// reason: it is a genuinely tri-state boolean (NULL = the reporting daemon did
-// not measure it), and a bool[] parameter becomes a Go []bool, which has no way
-// to spell the third state.
+// it is a jsonb column. created_at also rides this transport so an older daemon
+// can omit its event time and keep the database-time fallback. output_truncated
+// uses the same trick because it is a genuinely tri-state boolean (NULL = the
+// reporting daemon did not measure it), and a bool[] parameter becomes a Go
+// []bool, which has no way to spell the third state.
 //
 // Callers MUST still run the Postgres text sanitizer first. A NUL anywhere in
 // the batch fails the whole statement (GH #7098) — that is inherent to batching
@@ -167,6 +171,7 @@ func (q *Queries) CreateTaskMessages(ctx context.Context, arg CreateTaskMessages
 		arg.Contents,
 		arg.Inputs,
 		arg.Outputs,
+		arg.CreatedAts,
 		arg.OutputTruncations,
 		arg.TaskID,
 	)

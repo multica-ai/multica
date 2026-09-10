@@ -786,6 +786,7 @@
     "kind_error": "エラー",
     "group_calls_other": "{{count}} 回の呼び出し",
     "step_running": "実行中",
+    "step_duration_unknown": "正確な所要時間は記録されていません。",
     "step_input": "入力",
     "step_result": "結果",
     "copy_step": "このステップをコピー",

@@ -24,10 +24,11 @@ RETURNING *;
 -- `pgtype.Text{Valid: x != ""}` mapping the single-row query carries — empty
 -- string means SQL NULL. input is passed as text and cast here for the same
 -- reason; it is the one column that genuinely has to be parsed as JSON, because
--- it is a jsonb column. output_truncated rides the same trick for the same
--- reason: it is a genuinely tri-state boolean (NULL = the reporting daemon did
--- not measure it), and a bool[] parameter becomes a Go []bool, which has no way
--- to spell the third state.
+-- it is a jsonb column. created_at also rides this transport so an older daemon
+-- can omit its event time and keep the database-time fallback. output_truncated
+-- uses the same trick because it is a genuinely tri-state boolean (NULL = the
+-- reporting daemon did not measure it), and a bool[] parameter becomes a Go
+-- []bool, which has no way to spell the third state.
 --
 -- Callers MUST still run the Postgres text sanitizer first. A NUL anywhere in
 -- the batch fails the whole statement (GH #7098) — that is inherent to batching
@@ -60,9 +61,10 @@ WITH incoming AS (
         unnest(sqlc.arg('contents')::text[]) AS content,
         unnest(sqlc.arg('inputs')::text[]) AS input,
         unnest(sqlc.arg('outputs')::text[]) AS output,
+        unnest(sqlc.arg('created_ats')::text[]) AS created_at,
         unnest(sqlc.arg('output_truncations')::text[]) AS output_truncated
 ), inserted AS (
-    INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output, output_truncated)
+    INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output, created_at, output_truncated)
     SELECT
         m.id,
         sqlc.arg('task_id')::uuid,
@@ -72,6 +74,7 @@ WITH incoming AS (
         NULLIF(m.content, ''),
         NULLIF(m.input, '')::jsonb,
         NULLIF(m.output, ''),
+        COALESCE(NULLIF(m.created_at, '')::timestamptz, now()),
         NULLIF(m.output_truncated, '')::bool
     FROM incoming AS m
     RETURNING *

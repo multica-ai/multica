@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -57,9 +58,18 @@ func TestReportTaskMessagesPersistsWholeBatch(t *testing.T) {
 	}
 	ctx := context.Background()
 	taskID := seedBatchTask(t, "batch-messages")
+	// PostgreSQL timestamptz preserves microseconds, so keep the fixture on that
+	// boundary while still proving daemon event precision survives.
+	observedAt := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
+	fallbackBefore := time.Now().UTC()
 
 	testutil.Call(t, testHandler.ReportTaskMessages, batchMessagesRequest(t, taskID, []any{
-		map[string]any{"seq": 1, "type": "thinking", "content": "planning"},
+		map[string]any{
+			"seq":        1,
+			"type":       "thinking",
+			"content":    "planning",
+			"created_at": observedAt.Format(time.RFC3339Nano),
+		},
 		map[string]any{
 			"seq":    2,
 			"type":   "tool_use",
@@ -69,6 +79,7 @@ func TestReportTaskMessagesPersistsWholeBatch(t *testing.T) {
 		},
 		map[string]any{"seq": 3, "type": "text", "content": "done"},
 	})).Want(http.StatusOK)
+	fallbackAfter := time.Now().UTC()
 
 	stored, err := testHandler.Queries.ListTaskMessages(ctx, util.MustParseUUID(taskID))
 	if err != nil {
@@ -85,6 +96,12 @@ func TestReportTaskMessagesPersistsWholeBatch(t *testing.T) {
 
 	if stored[0].Type != "thinking" || stored[0].Content.String != "planning" {
 		t.Fatalf("thinking row = %+v, want type=thinking content=planning", stored[0])
+	}
+	if !stored[0].CreatedAt.Time.Equal(observedAt) {
+		t.Fatalf("daemon-observed created_at = %s, want %s", stored[0].CreatedAt.Time, observedAt)
+	}
+	if got := stored[1].CreatedAt.Time; got.Before(fallbackBefore) || got.After(fallbackAfter) {
+		t.Fatalf("old-daemon created_at fallback = %s, want between %s and %s", got, fallbackBefore, fallbackAfter)
 	}
 	// Fields the daemon did not send must be NULL, not "".
 	if stored[0].Tool.Valid || stored[0].Output.Valid || stored[0].Input != nil {
@@ -199,14 +216,16 @@ func TestCreateTaskMessagesBatchIsAtomic(t *testing.T) {
 	})
 
 	_, err := testHandler.Queries.CreateTaskMessages(ctx, db.CreateTaskMessagesParams{
-		TaskID:   util.MustParseUUID(taskID),
-		Ids:      []pgtype.UUID{util.MustParseUUID("018f0000-0000-7000-8000-000000000002"), util.MustParseUUID(dupID)},
-		Seqs:     []int32{2, 3},
-		Types:    []string{"text", "text"},
-		Tools:    []string{"", ""},
-		Contents: []string{"ok", "collides"},
-		Inputs:   []string{"", ""},
-		Outputs:  []string{"", ""},
+		TaskID:            util.MustParseUUID(taskID),
+		Ids:               []pgtype.UUID{util.MustParseUUID("018f0000-0000-7000-8000-000000000002"), util.MustParseUUID(dupID)},
+		Seqs:              []int32{2, 3},
+		Types:             []string{"text", "text"},
+		Tools:             []string{"", ""},
+		Contents:          []string{"ok", "collides"},
+		Inputs:            []string{"", ""},
+		Outputs:           []string{"", ""},
+		CreatedAts:        []string{"", ""},
+		OutputTruncations: []string{"", ""},
 	})
 	if err == nil {
 		t.Fatal("CreateTaskMessages accepted a batch with a duplicate primary key")
@@ -216,5 +235,38 @@ func TestCreateTaskMessagesBatchIsAtomic(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("task_message rows after the failed batch = %d, want 1 (only the seeded row) — "+
 			"the batch persisted a prefix instead of rolling back", count)
+	}
+}
+
+func TestTaskMessageCreatedAtRejectsImplausibleClockSkew(t *testing.T) {
+	t.Parallel()
+
+	serverNow := time.Date(2026, time.September, 10, 12, 0, 0, 0, time.UTC)
+	zero := time.Time{}
+	insidePast := serverNow.Add(-maxTaskMessageClockSkew)
+	insideFuture := serverNow.Add(maxTaskMessageClockSkew)
+	outsidePast := insidePast.Add(-time.Nanosecond)
+	outsideFuture := insideFuture.Add(time.Nanosecond)
+
+	tests := []struct {
+		name string
+		at   *time.Time
+		want string
+	}{
+		{name: "missing"},
+		{name: "zero", at: &zero},
+		{name: "past boundary", at: &insidePast, want: insidePast.Format(time.RFC3339Nano)},
+		{name: "future boundary", at: &insideFuture, want: insideFuture.Format(time.RFC3339Nano)},
+		{name: "too far in the past", at: &outsidePast},
+		{name: "too far in the future", at: &outsideFuture},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := taskMessageCreatedAt(tt.at, serverNow); got != tt.want {
+				t.Fatalf("taskMessageCreatedAt() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

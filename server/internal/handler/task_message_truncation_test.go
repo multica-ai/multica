@@ -43,6 +43,7 @@ func TestCreateTaskMessagesKeepsTruncationTriState(t *testing.T) {
 		Contents:          make([]string, 0, len(messages)),
 		Inputs:            make([]string, 0, len(messages)),
 		Outputs:           make([]string, 0, len(messages)),
+		CreatedAts:        make([]string, 0, len(messages)),
 		OutputTruncations: make([]string, 0, len(messages)),
 	}
 	for _, msg := range messages {
@@ -53,6 +54,7 @@ func TestCreateTaskMessagesKeepsTruncationTriState(t *testing.T) {
 		params.Contents = append(params.Contents, msg.Content)
 		params.Inputs = append(params.Inputs, "")
 		params.Outputs = append(params.Outputs, msg.Output)
+		params.CreatedAts = append(params.CreatedAts, "")
 		params.OutputTruncations = append(params.OutputTruncations, boolArrayElement(msg.OutputTruncated))
 	}
 
