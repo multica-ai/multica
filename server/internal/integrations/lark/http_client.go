@@ -162,7 +162,7 @@ func (c HTTPClientConfig) withDefaults() HTTPClientConfig {
 // each call's InstallationCredentials parameter; tokens are cached
 // keyed by app_id so a single Multica server reuses Lark's
 // tenant_access_token across calls to the same app.
-func NewHTTPAPIClient(cfg HTTPClientConfig) APIClient {
+func NewHTTPAPIClient(cfg HTTPClientConfig) OpenPlatformClient {
 	cfg = cfg.withDefaults()
 	return &httpAPIClient{cfg: cfg, tokens: make(map[string]*cachedToken)}
 }
