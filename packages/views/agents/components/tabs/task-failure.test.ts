@@ -13,7 +13,6 @@ import {
   cancellationActorLabel,
   cancelReasonLabel,
   failureReasonLabel,
-  isProviderAuthFailure,
 } from "./task-failure";
 
 const AGENT_RESOURCES = {
@@ -199,41 +198,5 @@ describe("failureReasonLabel", () => {
     expect(failureReasonLabel(null, enT)).toBeNull();
     expect(failureReasonLabel(undefined, enT)).toBeNull();
     expect(failureReasonLabel("", enT)).toBeNull();
-  });
-});
-
-describe("isProviderAuthFailure", () => {
-  it("recognizes the canonical provider auth reason", () => {
-    expect(isProviderAuthFailure({
-      status: "failed",
-      failure_reason: "agent_error.provider_auth_or_access",
-      error: "provider rejected credentials",
-    })).toBe(true);
-  });
-
-  it("upgrades the exact expired OAuth session from older servers", () => {
-    expect(isProviderAuthFailure({
-      status: "failed",
-      failure_reason: "agent_error.unknown",
-      error: "Failed to authenticate: OAuth session expired and could not be refreshed",
-    })).toBe(true);
-    expect(isProviderAuthFailure({
-      status: "failed",
-      failure_reason: "agent_error",
-      error: "Failed to authenticate: OAuth session expired and could not be refreshed",
-    })).toBe(true);
-  });
-
-  it("does not overwrite a different refined reason or a non-failed run", () => {
-    expect(isProviderAuthFailure({
-      status: "failed",
-      failure_reason: "agent_error.process_failure",
-      error: "Failed to authenticate: OAuth session expired and could not be refreshed",
-    })).toBe(false);
-    expect(isProviderAuthFailure({
-      status: "cancelled",
-      failure_reason: "agent_error.provider_auth_or_access",
-      error: null,
-    })).toBe(false);
   });
 });

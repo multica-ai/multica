@@ -18,10 +18,7 @@
     "full_log": "完全なログを開く",
     "message": "エージェントのメッセージ",
     "error": "エラー",
-    "waiting_result": "ツールの結果を待っています...",
-    "provider_auth_guidance": "{{name}} のコーディングプロバイダーに再接続してから再試行してください。",
-    "generic_failure_guidance": "エージェントが予期せず停止しました。この実行を再試行してください。",
-    "open_agent_settings": "設定を開く"
+    "waiting_result": "ツールの結果を待っています..."
   },
   "status_catalog_error": {
     "title": "ステータス一覧を読み込めませんでした",

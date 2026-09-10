@@ -13,10 +13,9 @@ import {
   useSubIssueDisplayStore,
 } from "@multica/core/issues/stores/sub-issue-display-store";
 import enCommon from "../../locales/en/common.json";
-import enAgents from "../../locales/en/agents.json";
 import enIssues from "../../locales/en/issues.json";
 
-const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents, issues: enIssues } };
+const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 
@@ -1602,52 +1601,6 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => {
       expect(mockApiObj.rerunIssue).toHaveBeenCalledWith("issue-1", "task-failed");
     });
-  });
-
-  it("replaces a loaded provider-auth error comment with concise recovery UI", async () => {
-    const rawError = "Failed to authenticate: OAuth session expired and could not be refreshed";
-    mockApiObj.listTimeline.mockResolvedValue([
-      ...mockTimeline,
-      {
-        type: "comment",
-        id: "comment-failed-task",
-        actor_type: "agent",
-        actor_id: "agent-1",
-        content: rawError,
-        parent_id: null,
-        created_at: "2026-01-18T00:00:00Z",
-        updated_at: "2026-01-18T00:00:00Z",
-        comment_type: "system",
-        source_task_id: "task-failed",
-      },
-    ]);
-    mockApiObj.listTasksByIssue.mockResolvedValue([{
-      id: "task-failed",
-      agent_id: "agent-1",
-      runtime_id: "runtime-1",
-      issue_id: "issue-1",
-      status: "failed",
-      priority: 0,
-      created_at: "2026-01-18T00:00:00Z",
-      started_at: "2026-01-18T00:00:00Z",
-      dispatched_at: "2026-01-18T00:00:00Z",
-      completed_at: "2026-01-18T00:00:05Z",
-      result: null,
-      error: rawError,
-      failure_reason: "agent_error.provider_auth_or_access",
-    } satisfies AgentTask]);
-
-    renderIssueDetail();
-
-    await screen.findByText("Provider auth failed");
-    expect(screen.queryByText(rawError)).not.toBeInTheDocument();
-    expect(screen.getByText("Reconnect Claude Agent's coding provider before retrying.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open settings" })).toHaveAttribute(
-      "href",
-      "/test/agents/agent-1?view=general",
-    );
-    expect(screen.queryByRole("button", { name: "Retry run" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /View activity/ })).toBeInTheDocument();
   });
 
   it("does not show retry for child-done system comments", async () => {

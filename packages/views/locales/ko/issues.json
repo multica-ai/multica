@@ -18,10 +18,7 @@
     "full_log": "전체 로그 열기",
     "message": "에이전트 메시지",
     "error": "오류",
-    "waiting_result": "도구 결과를 기다리고 있습니다...",
-    "provider_auth_guidance": "{{name}}의 코딩 공급자를 다시 연결한 후 재시도하세요.",
-    "generic_failure_guidance": "에이전트가 예기치 않게 중지되었습니다. 이 실행을 다시 시도하세요.",
-    "open_agent_settings": "설정 열기"
+    "waiting_result": "도구 결과를 기다리고 있습니다..."
   },
   "status_catalog_error": {
     "title": "상태 목록을 불러오지 못했습니다",

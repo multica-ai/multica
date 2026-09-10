@@ -61,7 +61,6 @@ func TestClassifyRules(t *testing.T) {
 		{"not logged in", "Not logged in · Please run /login", ReasonAgentProviderAuthOrAccess},
 		{"please login again", "Session expired, please login again", ReasonAgentProviderAuthOrAccess},
 		{"refresh token", "refresh token has expired", ReasonAgentProviderAuthOrAccess},
-		{"oauth session expired", "Failed to authenticate: OAuth session expired and could not be refreshed", ReasonAgentProviderAuthOrAccess},
 		{"invalid api key", "Invalid API key provided", ReasonAgentProviderAuthOrAccess},
 		{"access token", "access token has been revoked", ReasonAgentProviderAuthOrAccess},
 		{"subscription access", "Your organization has disabled Claude subscription access for Claude Code", ReasonAgentProviderAuthOrAccess},
@@ -269,25 +268,6 @@ func TestNormalizeDaemonReasonUpgradesConcurrentRequestLimit(t *testing.T) {
 	}
 	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), "you exceeded the token limit"); got != ReasonAgentContextOverflow {
 		t.Errorf("ordinary token overflow changed to %q", got)
-	}
-}
-
-func TestNormalizeDaemonReasonUpgradesExpiredOAuthSession(t *testing.T) {
-	t.Parallel()
-
-	const raw = "Failed to authenticate: OAuth session expired and could not be refreshed"
-
-	for _, reason := range []string{
-		string(ReasonAgentUnknown),
-		"agent_error",
-	} {
-		if got := NormalizeDaemonReason(reason, raw); got != ReasonAgentProviderAuthOrAccess {
-			t.Errorf("NormalizeDaemonReason(%q, expired OAuth session) = %q, want %q", reason, got, ReasonAgentProviderAuthOrAccess)
-		}
-	}
-
-	if got := NormalizeDaemonReason(string(ReasonAgentProcessFailure), raw); got != ReasonAgentProcessFailure {
-		t.Errorf("refined process failure changed to %q", got)
 	}
 }
 

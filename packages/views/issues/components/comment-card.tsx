@@ -247,7 +247,7 @@ function initialStandaloneAttachmentIds(entry: TimelineEntry): Set<string> {
   );
 }
 
-function agentFailureComment(entry: TimelineEntry): entry is TimelineEntry & { source_task_id: string } {
+function retryableAgentFailureComment(entry: TimelineEntry): entry is TimelineEntry & { source_task_id: string } {
   return (
     entry.actor_type === "agent" &&
     entry.comment_type === "system" &&
@@ -604,7 +604,6 @@ function CommentRow({
   canModerate = false,
   isResolution = false,
   isHighlighted = false,
-  hideFailureContent = false,
   onEdit,
   onDelete,
   onToggleReaction,
@@ -621,8 +620,6 @@ function CommentRow({
   isResolution?: boolean;
   /** True when this row is the deep-link target currently being highlighted. */
   isHighlighted?: boolean;
-  /** A loaded failed run replaces its raw system error with recovery-oriented UI. */
-  hideFailureContent?: boolean;
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
@@ -847,11 +844,11 @@ function CommentRow({
         </div>
       ) : (
         <>
-          {!hideFailureContent && <div data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
+          <div data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-          </div>}
-          {!hideFailureContent && <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />}
-          {!hideFailureContent && agentFailureComment(entry) && (
+          </div>
+          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
+          {retryableAgentFailureComment(entry) && (
             <TaskCommentRetryButton
               issueId={issueId}
               taskId={entry.source_task_id}
@@ -894,10 +891,6 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
         <CommentRow {...commentProps}
           isHighlighted={commentProps.highlightedCommentId === reply?.id}
           isResolution={!!reply?.resolved_at}
-          hideFailureContent={run.task.status === "failed"
-            && !!reply
-            && agentFailureComment(reply)
-            && reply.source_task_id === run.task.id}
           runHeader={showCommentRunInHeader(run)
             ? <InlineCommentRun run={run} viewState={viewState} presentation="header" /> : undefined}
           runMetadata={!showCommentRunInHeader(run)
@@ -967,11 +960,6 @@ function CommentCardImpl({
     && showCommentRunInHeader(run) === (presentation === "header")
     && (!run.anchorCommentId || run.anchorCommentId === commentId || replyFolded))
     .map((run) => <InlineCommentRun key={run.task.id} run={run} presentation={presentation} viewState={run.commentId === entry.id ? runViewState : undefined} />);
-  const hideFailedRunContent = (candidate: TimelineEntry) => agentFailureComment(candidate)
-    && runs.some((run) => run.hasReply
-      && run.commentId === candidate.id
-      && run.task.id === candidate.source_task_id
-      && run.task.status === "failed");
 
   const renderAnchoredRuns = (commentId: string) => runs.filter((run) => run.anchorCommentId === commentId
     && !(replyFolded && run.hasReply))
@@ -984,10 +972,7 @@ function CommentCardImpl({
     });
 
   const replyCount = allNestedReplies.length;
-  const hideRootFailureContent = hideFailedRunContent(entry);
-  const contentPreview = hideRootFailureContent
-    ? ""
-    : (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
+  const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
   const reactions = entry.reactions ?? [];
 
   const isHighlighted = highlightedCommentId === entry.id;
@@ -1272,11 +1257,11 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
-                {!hideRootFailureContent && <div data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
+                <div data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-                </div>}
-                {!hideRootFailureContent && <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />}
-                {!hideRootFailureContent && agentFailureComment(entry) && (
+                </div>
+                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
+                {retryableAgentFailureComment(entry) && (
                   <TaskCommentRetryButton
                     issueId={issueId}
                     taskId={entry.source_task_id}
@@ -1333,7 +1318,6 @@ function CommentCardImpl({
                       canModerate={canModerate}
                       isResolution
                       isHighlighted={highlightedCommentId === resolutionReply.id}
-                      hideFailureContent={hideFailedRunContent(resolutionReply)}
                       onEdit={onEdit}
                       onDelete={onDelete}
                       onToggleReaction={onToggleReaction}
@@ -1378,7 +1362,6 @@ function CommentCardImpl({
                       canModerate={canModerate}
                       isResolution={reply.id === replyResolutionId}
                       isHighlighted={highlightedCommentId === reply.id}
-                      hideFailureContent={hideFailedRunContent(reply)}
                       onEdit={onEdit}
                       onDelete={onDelete}
                       onToggleReaction={onToggleReaction}
