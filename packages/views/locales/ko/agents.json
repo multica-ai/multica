@@ -810,6 +810,8 @@
   },
   "task_failure": {
     "cancelled_by_system": "시스템에서 취소함",
+    "cancelled_by_actor": "{{name}}이(가) 취소함",
+    "system_actor": "시스템",
     "reasons": {
       "queued_expired": "대기열에서 만료됨",
       "runtime_offline": "데몬 오프라인",

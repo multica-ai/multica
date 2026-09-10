@@ -5053,7 +5053,13 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.CancelTaskByUser(r.Context(), existing.ID)
+	workspaceID := uuidToString(issue.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	task, err := h.TaskService.CancelTaskByUser(
+		r.Context(),
+		existing.ID,
+		h.taskCancellationActor(r.Context(), actorType, actorID),
+	)
 	if err != nil {
 		slog.Warn("cancel task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -5061,7 +5067,7 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task cancelled by user", "task_id", taskID, "issue_id", uuidToString(task.IssueID))
-	resp := taskToResponse(*task, uuidToString(issue.WorkspaceID))
+	resp := taskToResponse(*task, workspaceID)
 	// Keep this issue-scoped surface consistent with the list endpoints so a
 	// cancelled row keeps its resolved "on behalf of" name in the UI.
 	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})

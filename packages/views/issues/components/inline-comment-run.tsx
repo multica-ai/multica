@@ -24,7 +24,7 @@ import { redactSecrets } from "../../common/task-transcript/redact";
 import { ReadonlyContent } from "../../editor";
 import { useT } from "../../i18n";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
-import { cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel } from "./task-run-labels";
@@ -62,6 +62,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const { getActorName } = useActorName();
   const name = getActorName("agent", task.agent_id);
   const status = useStatusLabel(task.status);
+  const statusText = cancellationActorLabel(task, tAgents) ?? status;
   const active = isActiveCommentRun(task);
   const localViewState = useInlineCommentRunState();
   const state = viewState ?? localViewState;
@@ -149,9 +150,9 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard />
           <span className="max-w-[30%] shrink-0 truncate text-body font-medium" title={name}>{name}</span>
         </>}
-        <span className={cn("flex shrink-0 items-center gap-1.5 whitespace-nowrap text-caption text-muted-foreground", showProgress && "sr-only")}
+        <span className={cn("flex min-w-0 max-w-[50%] shrink-0 items-center gap-1.5 whitespace-nowrap text-caption text-muted-foreground", showProgress && "sr-only")}
           role="status" data-run-status>
-          <TaskStatusIcon status={task.status} />{status}
+          <TaskStatusIcon status={task.status} /><span className="truncate" title={statusText}>{statusText}</span>
         </span>
         <button type="button"
           className={cn("flex min-w-0 items-center gap-1.5 rounded py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",

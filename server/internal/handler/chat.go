@@ -1801,6 +1801,7 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	var (
 		queuedOnly      bool
@@ -1857,7 +1858,6 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
 		}
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 		if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
 			writeError(w, http.StatusForbidden, "you do not have access to this agent")
 			return
@@ -1869,6 +1869,7 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		QueuedOnly:                 queuedOnly,
 		ExpectedChatSession:        expectedSession,
 		QueueAction:                queueAction,
+		CancelledBy:                h.taskCancellationActor(r.Context(), actorType, actorID),
 		UserInitiated:              true,
 	})
 	if errors.Is(err, service.ErrTaskNoLongerQueued) {

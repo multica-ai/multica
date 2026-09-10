@@ -928,6 +928,8 @@
   },
   "task_failure": {
     "cancelled_by_system": "Cancelled by the system",
+    "cancelled_by_actor": "Cancelled by {{name}}",
+    "system_actor": "System",
     "reasons": {
       "queued_expired": "Expired in queue",
       "runtime_offline": "Daemon offline",

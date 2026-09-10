@@ -219,4 +219,16 @@ describe("InlineCommentRun", () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
+
+  it("shows who cancelled the run and keeps legacy rows readable", () => {
+    const { rerender } = setup(task({
+      status: "cancelled",
+      completed_at: "2026-09-07T00:01:23Z",
+      cancelled_by: { type: "member", id: "user-1", name: "Jiayuan" },
+    }));
+    expect(screen.getByText("Cancelled by Jiayuan")).toBeInTheDocument();
+
+    rerender(task({ status: "cancelled", completed_at: "2026-09-07T00:01:23Z" }));
+    expect(screen.getByText("Cancelled")).toBeInTheDocument();
+  });
 });

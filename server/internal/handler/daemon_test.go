@@ -1444,7 +1444,11 @@ func TestCancelTask_SameIssue_Succeeds(t *testing.T) {
 
 	req := newRequest("POST", "/api/issues/"+issueID+"/tasks/"+taskID+"/cancel", nil)
 	req = withURLParams(req, "id", issueID, "taskId", taskID)
-	testutil.Call(t, testHandler.CancelTask, req).Want(http.StatusOK)
+	var response AgentTaskResponse
+	testutil.Call(t, testHandler.CancelTask, req).Want(http.StatusOK).JSON(&response)
+	if got := response.CancelledBy; got == nil || got.Type != "member" || got.ID != testUserID || got.Name != handlerTestName {
+		t.Fatalf("cancelled_by = %#v, want member %s (%s)", got, handlerTestName, testUserID)
+	}
 }
 
 // TestListTasksByIssue_CrossWorkspace_Returns404 verifies that task history

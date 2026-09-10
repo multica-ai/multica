@@ -786,7 +786,7 @@ describe("AgentTranscriptDialog — delivered branch", () => {
 // explain itself: the localized reason rides the status badge and heads the
 // "Reason" row in Run details, while the raw persisted diagnostic sits under
 // its own "Technical details" heading. A user's own cancel stays a plain
-// "Cancelled" — they know why they clicked.
+// "Cancelled" for historical rows that predate actor provenance.
 describe("AgentTranscriptDialog — cancel reason", () => {
   const gateError = "worktree mode needs daemon version 0.4.24 or newer on that machine";
 
@@ -823,13 +823,26 @@ describe("AgentTranscriptDialog — cancel reason", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps a user-initiated cancel a plain Cancelled", () => {
+  it("keeps a legacy user-initiated cancel a plain Cancelled", () => {
     renderDialog(items, {
       task: { ...baseTask, status: "cancelled", error: null },
     });
 
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
     expect(screen.queryByText(/Local directory error/)).not.toBeInTheDocument();
+  });
+
+  it("names the actor on a new user-initiated cancellation", () => {
+    renderDialog(items, {
+      task: {
+        ...baseTask,
+        status: "cancelled",
+        error: null,
+        cancelled_by: { type: "member", id: "user-1", name: "Jiayuan" },
+      },
+    });
+
+    expect(screen.getByText("Cancelled by Jiayuan")).toBeInTheDocument();
   });
 
   // #7411: the status badge used to carry the raw English error as its

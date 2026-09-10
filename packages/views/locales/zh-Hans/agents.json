@@ -909,6 +909,8 @@
   },
   "task_failure": {
     "cancelled_by_system": "系统已取消",
+    "cancelled_by_actor": "取消者：{{name}}",
+    "system_actor": "系统",
     "reasons": {
       "queued_expired": "排队已过期",
       "runtime_offline": "守护进程离线",

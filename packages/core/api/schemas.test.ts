@@ -585,6 +585,19 @@ describe("AgentTaskListSchema", () => {
     expect(parsed).toHaveLength(1);
     expect(parsed[0]?.cancelled_by_comment_change).toBe(typeof value === "boolean" ? value : undefined);
   });
+
+  it("parses cancellation actor metadata without making it required", () => {
+    const parsed = AgentTaskListSchema.parse([
+      { id: "new", cancelled_by: { type: "member", id: "user-1", name: "Jiayuan" } },
+      { id: "legacy" },
+      { id: "malformed", cancelled_by: "member" },
+    ]);
+
+    expect(parsed[0]?.cancelled_by).toEqual({ type: "member", id: "user-1", name: "Jiayuan" });
+    expect(parsed[1]?.cancelled_by).toBeUndefined();
+    expect(parsed[2]?.cancelled_by).toBeUndefined();
+  });
+
   const task = {
     id: "task-1",
     agent_id: "agent-1",

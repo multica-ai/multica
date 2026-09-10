@@ -44,7 +44,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
-import { cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { RichContent } from "../../rich-content";
 import { api } from "@multica/core/api";
 import {
@@ -762,17 +762,21 @@ export function AgentTranscriptDialog({
         // A server-cancelled run (worktree claim gate, preserved-work
         // delivery) carries a persisted reason the user must act on; surface
         // it on the badge instead of a bare "Cancelled". User-initiated
-        // cancels have no reason and keep the plain label. The badge carries
-        // no `title`: the raw `task.error` behind it is untranslated
-        // operator prose (#7411) and belongs in Run details, not in hover
-        // text on a status pill.
+        // cancels have no reason, but carry actor provenance when it was
+        // recorded. The title contains only this localized status — never the
+        // raw `task.error`, which is operator prose reserved for Run details.
         const cancelReason = cancelReasonLabel(task, t);
+        const cancelledBy = cancellationActorLabel(task, t);
+        const cancelStatus = cancelReason
+          ? `${cancelledBy ?? t(($) => $.transcript.status_cancelled)} · ${cancelReason}`
+          : cancelledBy ?? t(($) => $.transcript.status_cancelled);
         return (
-          <span className={cn(base, "bg-muted text-muted-foreground")}>
-            <XCircle className="h-3 w-3" />
-            {cancelReason
-              ? `${t(($) => $.transcript.status_cancelled)} · ${cancelReason}`
-              : t(($) => $.transcript.status_cancelled)}
+          <span
+            className={cn(base, "min-w-0 max-w-[45%] bg-muted text-muted-foreground")}
+            title={cancelStatus}
+          >
+            <XCircle className="h-3 w-3 shrink-0" />
+            <span className="truncate">{cancelStatus}</span>
           </span>
         );
       }

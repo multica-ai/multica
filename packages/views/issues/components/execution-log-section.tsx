@@ -17,7 +17,7 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
 import { TranscriptButton } from "../../common/task-transcript";
-import { cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
 import { compareActiveIssueTasks } from "./active-task-order";
 import {
@@ -431,11 +431,12 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const time = task.completed_at ? timeAgo(task.completed_at) : "—";
   // A failed run always explains itself. A cancelled one only when the SERVER
   // cancelled it for a persisted reason (worktree claim gate, preserved-work
-  // delivery) — a user-initiated cancel stays a plain "Cancelled".
+  // delivery). Actor provenance is rendered independently below.
   const failureLabel =
     task.status === "failed"
       ? failureReasonLabel(task.failure_reason, tAgents)
       : cancelReasonLabel(task, tAgents);
+  const cancellationLabel = cancellationActorLabel(task, tAgents);
   // Hovering the status mark reveals the localized reason, never the raw
   // `task.error`. That field is operator-facing English prose the daemon and
   // server write for classification and logs (#7411) — pasting it into a
@@ -443,7 +444,9 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   // something broke, and dragged absolute worktree paths and machine names
   // into hover text and screenshots. The full diagnostic stays one click away
   // in the transcript's Run details.
-  const statusTitle = failureLabel ?? label;
+  const statusTitle = cancellationLabel
+    ? [cancellationLabel, failureLabel].filter(Boolean).join(" · ")
+    : failureLabel ?? label;
 
   // What this run cost, in the slot the relative timestamp used to hold.
   //
@@ -506,7 +509,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
       <RowStatus title={statusTitle}>
         <TaskStatusIcon status={task.status} />
         <span className="sr-only">
-          {[failureLabel ?? label, time].filter(Boolean).join(" · ")}
+          {[statusTitle, time].filter(Boolean).join(" · ")}
         </span>
         {usage ? (
           <span className="tabular-nums">{formatTokens(usage.tokens)}</span>

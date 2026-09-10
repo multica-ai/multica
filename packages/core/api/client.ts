@@ -2415,9 +2415,14 @@ export class ApiClient {
   }
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
-    return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
     });
+    const task = parseWithFallback<AgentTask | null>(raw, AgentTaskSchema, null, {
+      endpoint: "POST /api/issues/:id/tasks/:taskId/cancel",
+    });
+    if (!task) throw new Error("Invalid task cancellation response");
+    return task;
   }
 
   async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {

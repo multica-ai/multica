@@ -35,7 +35,7 @@ import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
 import { AttributionBadge } from "../../../issues/components/attribution-badge";
 import { taskStatusConfig } from "../../config";
-import { cancelReasonLabel, failureReasonLabel } from "./task-failure";
+import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
 import { useT, useTimeAgo } from "../../../i18n";
 
@@ -594,6 +594,7 @@ function TaskRow({
     task.status === "failed"
       ? failureReasonLabel(task.failure_reason, t)
       : cancelReasonLabel(task, t);
+  const statusLabel = cancellationActorLabel(task, t) ?? taskStatusLabel(task.status, t);
 
   // Only show duration for terminal rows. An active row's duration is
   // inferred from the timeText already ("Started 2m ago") and adding a
@@ -669,7 +670,7 @@ function TaskRow({
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-muted-foreground">
           <span className={cfg.color}>
-            {taskStatusLabel(task.status, t)}
+            {statusLabel}
           </span>
           <Sep />
           <span>{timeText}</span>
