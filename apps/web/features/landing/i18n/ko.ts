@@ -290,6 +290,9 @@ export function createKoDict(allowSignup: boolean): LandingDict {
             "Codex 환경을 준비할 수 없을 때도 새 환경으로 태스크가 시작됩니다.",
             "Issue의 에이전트 실행 카드가 실제로 보인 시간 순서대로 놓입니다.",
             "선택지가 많은 대화 상자를 스크롤할 수 있고, 아래 저장 버튼에도 닿습니다.",
+            "머지된 PR 본문에 Closes를 추가하면 해당 Issue에 표시됩니다.",
+            "Issue를 지나가듯 언급만 한 PR은 보이지 않는 연결을 만들지 않습니다.",
+            "Issue의 PR 목록이 비어 있을 때 어디에 적어야 연결되는지 알려 줍니다.",
           ],
         },
         {

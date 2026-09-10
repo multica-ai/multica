@@ -315,6 +315,9 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "Codex 环境准备失败时会换用全新环境，任务照样能启动。",
           "Issue 里的智能体运行卡片，按它实际出现的时间排序。",
           "选项很多的弹窗可以滚动，底部的保存按钮也点得到。",
+          "给已合并的 PR 正文补上 Closes，它现在会出现在对应 Issue 上。",
+          "只是顺带提到 Issue 的 PR，不再产生你看不到的关联。",
+          "Issue 的 PR 列表为空时，会说明写在哪里才能关联。",
         ],
       },
       {

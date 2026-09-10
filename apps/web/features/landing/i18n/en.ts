@@ -315,6 +315,9 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "A task still starts when the Codex environment cannot be prepared.",
           "Agent run cards in an Issue are ordered by when they actually appeared.",
           "A dialog with many options scrolls, and its save button stays reachable.",
+          "Add a closing keyword to a merged PR's body and it now shows up on the Issue.",
+          "A PR that only mentions an Issue in passing no longer creates a link you cannot see.",
+          "An empty PR list on an Issue now names the three places a key actually counts.",
         ],
       },
       {
