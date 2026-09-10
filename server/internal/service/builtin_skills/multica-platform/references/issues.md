@@ -16,15 +16,18 @@ Product contracts the runtime brief does not fully encode.
 The GitHub webhook runs two separate scans over an incoming PR. They are not the
 same gate and they read different fields.
 
-**Linking** scans the PR **title, body, OR branch** for a routable issue key
-(`PREFIX-NUMBER`, e.g. `MUL-123`). Each match writes an issue to PR link row.
-This is the link that `multica issue pull-requests` reads back — but see the
-reference-only rule below: a key that appears **only** as a bare mention in the
-body is linked yet hidden from that list.
+**Linking** scans three places for a routable issue key (`PREFIX-NUMBER`, e.g.
+`MUL-123`): the PR **title**, the **branch name**, and the **body right after a
+closing keyword**. Each match writes an issue to PR link row — the link that
+`multica issue pull-requests` reads back. A key that appears in the body as a
+bare mention, with nothing in the title or branch and no closing keyword, is a
+passing reference and links nothing.
 
 ```text
-MUL-123: add the thing the issue asks for        # key anywhere in title → links, shown
-agent/dana/mul-123-add-the-thing             # branch ref   → links, shown
+MUL-123: add the thing the issue asks for        # key anywhere in title → links
+agent/dana/mul-123-add-the-thing             # branch ref   → links
+Closes MUL-123                                   # body + closing keyword → links
+Related to MUL-123                               # body mention only → no link
 ```
 
 **Close intent** is stricter and is a separate scan over **title or body only —
@@ -37,7 +40,7 @@ auto-advances the issue to `done` when the PR merges.
 Closes MUL-123                                    # links AND records close intent
 Fixes MUL-123
 Resolves MUL-123
-Fix login MUL-123                                 # links only — keyword not adjacent
+Fix login MUL-123                                 # in a title: links, no close intent
 ```
 
 Consequence: a bare key in the title or a branch reference links the PR but does
@@ -45,18 +48,23 @@ not close the issue on merge. A closing keyword immediately adjacent to the issu
 records close intent; on merge, that close intent can move the linked issue to
 `done`.
 
-**Reference-only links (hidden from the PR list).** A key that appears **only**
-as a bare mention in the body — no closing keyword, and not in the title or
-branch — still writes a link row, but the row is flagged `reference_only` and
-**excluded from `multica issue pull-requests`** (and the issue's right-side PR
-list in the UI). This keeps passing mentions like `Related MUL-123` or
-`Follow up in MUL-123` from surfacing an unrelated PR as if it were working on
-that issue. To make a PR show up for an issue, put the key in the title, the
-branch, or after a closing keyword in the body — not as a loose body reference.
+**Passing mentions link nothing.** A key that appears **only** as a bare mention
+in the body — no closing keyword, and not in the title or branch — does not link
+the PR at all. This keeps `Related MUL-123` or `Follow up in MUL-123` from
+surfacing an unrelated PR as if it were working on that issue. To make a PR show
+up for an issue, put the key in the title, the branch, or after a closing keyword
+in the body — not as a loose body reference.
+
+While the PR is still open the link follows the live title and body: adding a key
+links it, and withdrawing every key unlinks it again. Once the PR has merged or
+closed, existing links and their close-intent decision are frozen — but a PR that
+was never linked can still be linked by editing it, so a forgotten key is
+repairable after the fact. That late link does not move the issue to `done`;
+close intent is decided at merge time.
 
 ```text
-Closes MUL-123 in the body                        # links and shown
-Related to MUL-123 in the body (no title/branch)  # links but reference_only → hidden
+Closes MUL-123 in the body                        # links
+Related to MUL-123 in the body (no title/branch)  # no link
 ```
 
 ### Default for code-changing issue work
@@ -70,13 +78,13 @@ instead of pretending the run is complete.
 
 To make the PR show on the issue, put a routable issue key in the PR **title**
 (preferred) or the **branch**. A key that appears only as a bare mention in the
-body is reference-only and hidden from the issue PR list. Do not use a closing
-keyword (`Closes` / `Fixes` / `Resolves`) unless the issue should auto-advance
-to `done` on merge.
+body links nothing. Do not use a closing keyword (`Closes` / `Fixes` /
+`Resolves`) unless the issue should auto-advance to `done` on merge.
 
 ```text
-MUL-123: fix login redirect        # key anywhere in title → links and shown
+MUL-123: fix login redirect        # key anywhere in title → links
 Closes MUL-123                     # only when merge should mark the issue done
+Part of MUL-123                    # body mention only → no link at all
 ```
 
 In the final issue comment, include the PR URL when a PR exists. If the task did
@@ -119,10 +127,11 @@ Returns `{"pull_requests": [...]}`. Each element exposes:
 So "is it merged?" is `state == "merged"` (or `merged_at != null`); "is it still
 a draft?" is `state == "draft"`; coarse CI status is `checks_conclusion`.
 
-If the command returns no linked PRs after a PR was opened, the link scanner did
-not observe a routable issue key in the PR title/body/branch — or the only match
-was a bare body mention, which links as `reference_only` and is hidden from this
-list (see the reference-only rule above).
+If the command returns no linked PRs after a PR was opened, the link scanner saw
+no routable issue key in the PR title or branch and no key after a closing keyword
+in the body. A bare body mention does not count — see the passing-mention rule
+above. Fix it by editing the PR title (or adding a closing keyword), which
+re-runs the scan.
 
 ## Listing and ordering issues
 
@@ -368,6 +377,7 @@ PR title (link the issue):
 
 ```text
 Fix login redirect                  # incorrect — no issue key, won't link
+Body-only "Part of MUL-123"         # incorrect — passing mention, won't link
 MUL-123: fix login redirect        # correct — links the PR
 ```
 

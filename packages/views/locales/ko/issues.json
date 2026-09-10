@@ -368,7 +368,7 @@
     "quick_action_blocked_body": "“{{name}}”은(는) 트리거 권한이 없는 에이전트로 실행됩니다. 워크스페이스 관리자에게 해당 에이전트를 팀에 공개하거나 공유 에이전트로 변경해 달라고 요청하세요.",
     "quick_action_blocked_ok": "확인",
     "pull_requests_loading": "불러오는 중...",
-    "pull_requests_empty": "아직 연결된 Pull request가 없습니다. PR 브랜치 이름, 제목 또는 본문에 이 태스크 식별자를 넣으면 자동으로 연결됩니다.",
+    "pull_requests_empty": "아직 연결된 Pull request가 없습니다. 이 태스크 식별자를 PR 브랜치 이름이나 제목에 넣거나, 본문에서 Closes 바로 뒤에 적으면 자동으로 연결됩니다.",
     "pull_request_state_open": "열림",
     "pull_request_state_draft": "초안",
     "pull_request_state_merged": "병합됨",

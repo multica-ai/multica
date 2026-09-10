@@ -457,7 +457,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"open or update a PR before posting the final Multica issue comment",
 				"This is a default, not",
 				"put a routable issue key in the PR **title**",
-				"body is reference-only and hidden from the issue PR list",
+				"body links nothing",
 				"unless the issue should auto-advance",
 				"include the PR URL when a PR exists",
 				"Closes MUL-123",

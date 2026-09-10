@@ -368,7 +368,7 @@
     "quick_action_blocked_body": "\"{{name}}\"由一个你无权触发的智能体执行。可以请工作区管理员把该智能体开放给团队，或把这条操作改绑一个共享的智能体。",
     "quick_action_blocked_ok": "知道了",
     "pull_requests_loading": "加载中...",
-    "pull_requests_empty": "还没有关联的 PR。在 PR 的分支名、标题或正文里引用本任务的 identifier 即可自动关联。",
+    "pull_requests_empty": "还没有关联的 PR。把本任务的 identifier 写进 PR 的分支名或标题，或者在正文里写在 Closes 后面，即可自动关联。",
     "pull_request_state_open": "Open",
     "pull_request_state_draft": "Draft",
     "pull_request_state_merged": "Merged",
