@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { createBestEffortDevLog } from "./dev-log";

@@ -59,6 +59,10 @@ type InboundMessage struct {
 	// enricher prepends quoted/forwarded context). `/issue` is parsed from
 	// THIS, not the enriched Body.
 	CommandBody string
+
+	// HasSelectedContext is set when enrichment renders an explicitly selected
+	// quote or forward; automatic recent context does not set it.
+	HasSelectedContext bool
 }
 
 // Outcome categorizes what the inbound pipeline decided. The OutcomeReplier
@@ -72,6 +76,11 @@ const (
 	OutcomeNeedsBinding Outcome = "needs_binding"
 	// OutcomeIngested — the message landed and a run was (or will be) enqueued.
 	OutcomeIngested Outcome = "ingested"
+	// OutcomeFreshPending — a bare /clear was persisted for the next chat turn.
+	OutcomeFreshPending Outcome = "fresh_pending"
+	OutcomeChatStarted  Outcome = "chat_started"
+	// OutcomeIssueUsage — /issue was sent without its required title.
+	OutcomeIssueUsage Outcome = "issue_usage"
 	// OutcomeAgentOffline — landed, but the agent has no runtime bound.
 	OutcomeAgentOffline Outcome = "agent_offline"
 	// OutcomeAgentArchived — landed, but the agent is archived.
@@ -93,9 +102,14 @@ type DispatchResult struct {
 	// IssueIdentifier is the workspace-qualified key ("MUL-42") for the
 	// created issue, used verbatim in the confirmation message.
 	IssueIdentifier string
+	// IssueWorkspaceSlug is the workspace route segment used in deep links.
+	IssueWorkspaceSlug string
 	// IssueTitle is the title supplied on /issue, echoed in the confirmation.
 	IssueTitle string
 	// IssueDuplicate distinguishes an active-issue conflict from a successful
 	// create while carrying the existing issue fields above.
 	IssueDuplicate bool
+	// IssueUsageHadMedia asks the usage reply to tell the sender to include the
+	// current message's media again with the corrected command.
+	IssueUsageHadMedia bool
 }

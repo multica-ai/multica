@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/entitlement"
+	"github.com/multica-ai/multica/server/internal/entitlement/entitlementtest"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -178,6 +181,54 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 		}
 		if len(qc.AttachmentIDs) != 1 || qc.AttachmentIDs[0] != attachmentID {
 			t.Fatalf("expected attachment_ids=[%q] in context, got %#v", attachmentID, qc.AttachmentIDs)
+		}
+	})
+
+	t.Run("full workspace is rejected before enqueue", func(t *testing.T) {
+		before := countQuickCreateTasks(t)
+		var issueCount int
+		if err := testPool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM issue WHERE workspace_id = $1`,
+			testWorkspaceID,
+		).Scan(&issueCount); err != nil {
+			t.Fatalf("count workspace issues: %v", err)
+		}
+		if issueCount <= 0 {
+			t.Fatal("full-workspace test requires at least one seeded issue")
+		}
+		stub := entitlementtest.New()
+		stub.Set(uuid.MustParse(testWorkspaceID), entitlement.GateIssueCount, entitlement.Decision{
+			Gate:           entitlement.Gate{Action: entitlement.ActionEnforce, Limit: &issueCount},
+			PolicyRevision: 23,
+		})
+		priorProvider := testHandler.TaskService.Entitlements
+		testHandler.TaskService.Entitlements = stub
+		t.Cleanup(func() {
+			testHandler.TaskService.Entitlements = priorProvider
+		})
+
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/quick-create", map[string]any{
+			"agent_id": agentID,
+			"prompt":   "This task must not be queued when the workspace is full",
+		})
+		testHandler.QuickCreateIssue(w, req)
+		if w.Code != http.StatusPaymentRequired {
+			t.Fatalf("expected 402, got %d: %s", w.Code, w.Body.String())
+		}
+		var body struct {
+			Code           string `json:"code"`
+			Limit          int    `json:"limit"`
+			PolicyRevision int    `json:"policy_revision"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+			t.Fatalf("decode issue-limit response: %v", err)
+		}
+		if body.Code != "issue_limit_reached" || body.Limit != issueCount || body.PolicyRevision != 23 {
+			t.Fatalf("unexpected issue-limit response: %+v", body)
+		}
+		if got := countQuickCreateTasks(t); got != before {
+			t.Fatalf("full workspace must not enqueue a task: expected %d, got %d", before, got)
 		}
 	})
 

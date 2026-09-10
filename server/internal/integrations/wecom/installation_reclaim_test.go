@@ -59,17 +59,23 @@ func reclaimTestDB(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func newReclaimSvc(t *testing.T, pool *pgxpool.Pool) *InstallationService {
+// newReclaimSvc builds the service with a probe that always succeeds. The
+// probe is mandatory (see credential_probe.go) and these tests are about the
+// reclaim, not the proof of control, so the fake stands in for "the caller does
+// hold this bot's secret". The returned fake lets a test assert how many times
+// WeCom would have been contacted.
+func newReclaimSvc(t *testing.T, pool *pgxpool.Pool) (*InstallationService, *fakeProbe) {
 	t.Helper()
 	box, err := secretbox.New(make([]byte, secretbox.KeySize))
 	if err != nil {
 		t.Fatalf("secretbox.New: %v", err)
 	}
-	svc, err := NewInstallationService(db.New(pool), pool, box)
+	probe := &fakeProbe{}
+	svc, err := NewInstallationService(db.New(pool), pool, box, WithCredentialProbe(probe))
 	if err != nil {
 		t.Fatalf("NewInstallationService: %v", err)
 	}
-	return svc
+	return svc, probe
 }
 
 func seedReclaimOwners(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
@@ -130,19 +136,20 @@ func mustUUID(s string) pgtype.UUID {
 	return u
 }
 
-func setupReclaim(t *testing.T) (context.Context, *pgxpool.Pool, *InstallationService) {
+func setupReclaim(t *testing.T) (context.Context, *pgxpool.Pool, *InstallationService, *fakeProbe) {
 	t.Helper()
 	pool := reclaimTestDB(t)
 	ctx := context.Background()
 	cleanReclaim(ctx, pool)
 	seedReclaimOwners(t, ctx, pool)
 	t.Cleanup(func() { cleanReclaim(ctx, pool) })
-	return ctx, pool, newReclaimSvc(t, pool)
+	svc, probe := newReclaimSvc(t, pool)
+	return ctx, pool, svc, probe
 }
 
 // A revoked owner on a DIFFERENT agent must be reclaimed so the bot can move.
 func TestUpsert_TakesOverRevokedOwnerOnDifferentAgent(t *testing.T) {
-	ctx, pool, svc := setupReclaim(t)
+	ctx, pool, svc, probe := setupReclaim(t)
 	insertWecomInstall(t, ctx, pool, wcRclBotRevoked, wcRclAgentA, "revoked")
 
 	got, err := svc.Upsert(ctx, params(wcRclBotRevoked, wcRclAgentB))
@@ -160,36 +167,47 @@ func TestUpsert_TakesOverRevokedOwnerOnDifferentAgent(t *testing.T) {
 	if n != 1 {
 		t.Errorf("expected exactly one row for the bot after takeover, got %d", n)
 	}
+	// Taking over a revoked row hard-deletes it and every binding beneath, so
+	// it is exactly the act that has to be preceded by proof of control.
+	if n := probe.callCount(); n != 1 {
+		t.Errorf("probe called %d time(s) before reclaiming a revoked owner, want 1", n)
+	}
 }
 
 // A LIVE (active) owner on another agent must still be refused with an accurate
 // same-workspace conflict — reclaim must not steal a live slot.
 func TestUpsert_RefusesLiveOwnerOnDifferentAgent(t *testing.T) {
-	ctx, pool, svc := setupReclaim(t)
+	ctx, pool, svc, probe := setupReclaim(t)
 	insertWecomInstall(t, ctx, pool, wcRclBotLive, wcRclAgentA, "active")
 
 	_, err := svc.Upsert(ctx, params(wcRclBotLive, wcRclAgentB))
 	if !errors.Is(err, ErrBotOwnedBySameWorkspace) {
 		t.Fatalf("live owner should be refused with ErrBotOwnedBySameWorkspace, got: %v", err)
 	}
+	if n := probe.callCount(); n != 0 {
+		t.Errorf("probe called %d time(s) on a refused install; a live owner is decided from the row, without touching WeCom", n)
+	}
 }
 
 // An ARCHIVED agent is still a live owner (not dead) — reclaim leaves it, and
 // the conflict is reported as the archived-agent case.
 func TestUpsert_RefusesArchivedOwner(t *testing.T) {
-	ctx, pool, svc := setupReclaim(t)
+	ctx, pool, svc, probe := setupReclaim(t)
 	insertWecomInstall(t, ctx, pool, wcRclBotArchived, wcRclAgentArc, "active")
 
 	_, err := svc.Upsert(ctx, params(wcRclBotArchived, wcRclAgentB))
 	if !errors.Is(err, ErrBotOwnedByArchivedAgent) {
 		t.Fatalf("archived owner should be refused with ErrBotOwnedByArchivedAgent, got: %v", err)
 	}
+	if n := probe.callCount(); n != 0 {
+		t.Errorf("probe called %d time(s) on a refused install; an archived owner is decided from the row, without touching WeCom", n)
+	}
 }
 
 // Reconnecting the same bot to the SAME agent is an in-place refresh, never a
 // conflict (it hits the (workspace, agent, channel_type) ON CONFLICT).
 func TestUpsert_SameAgentReconnectInPlace(t *testing.T) {
-	ctx, pool, svc := setupReclaim(t)
+	ctx, pool, svc, probe := setupReclaim(t)
 	insertWecomInstall(t, ctx, pool, wcRclBotSame, wcRclAgentA, "revoked")
 
 	got, err := svc.Upsert(ctx, params(wcRclBotSame, wcRclAgentA))
@@ -205,5 +223,10 @@ func TestUpsert_SameAgentReconnectInPlace(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("expected one row after in-place reconnect, got %d", n)
+	}
+	// The caller's own row: still probed, because this is the secret-rotation
+	// path and the only connection a subscribe can displace is their own.
+	if n := probe.callCount(); n != 1 {
+		t.Errorf("probe called %d time(s) on a same-agent reconnect, want 1", n)
 	}
 }

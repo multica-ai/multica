@@ -66,10 +66,201 @@
     "row_meta": "{{date}} · stripe: {{checkout}}",
     "stripe_empty": "—"
   },
+  "workspace": {
+    "title": "账单与套餐",
+    "description": "管理这个工作区的套餐、限额、成员席位和 Stripe 账单。",
+    "loading": "正在加载工作区账单",
+    "plan": {
+      "free": "Free",
+      "pro": "Pro",
+      "unknown": "未知套餐"
+    },
+    "status": {
+      "inactive": "未启用",
+      "active": "活跃",
+      "trialing": "试用中",
+      "past_due": "付款逾期",
+      "canceled": "已取消",
+      "incomplete": "未完成",
+      "incomplete_expired": "开通已过期",
+      "paused": "已暂停",
+      "unpaid": "未付款",
+      "unknown": "未知状态"
+    },
+    "load_failed": {
+      "title": "账单服务暂时不可用",
+      "description": "暂时无法读取可信的订阅快照。你的套餐没有发生变化。"
+    },
+    "actions": {
+      "retry": "重试",
+      "retry_autopilots": "重试加载自动化用量",
+      "upgrade": "升级到 Pro",
+      "manage": "管理账单",
+      "add_seats": "添加席位",
+      "cancel": "取消",
+      "continue_to_stripe": "前往 Stripe"
+    },
+    "errors": {
+      "action_title": "账单操作失败",
+      "temporarily_unavailable": "账单服务暂时不可用，请稍后重试。",
+      "permission_changed": "你的工作区角色已不允许执行此操作。刷新页面可查看当前权限。",
+      "checkout_response": "服务端响应无法读取，无法打开 Checkout。请保留当前周期并重试。",
+      "already_subscribed": "这个工作区已经有订阅，当前套餐已刷新。",
+      "checkout_failed": "无法创建 Checkout，请稍后重试。",
+      "portal_response": "服务端响应无法读取，无法打开 Billing Portal。",
+      "portal_unavailable": "这个工作区暂时无法使用 Billing Portal，当前套餐已刷新。",
+      "portal_failed": "无法打开 Billing Portal，请稍后重试。"
+    },
+    "return": {
+      "cancel_title": "已取消 Checkout",
+      "cancel_description": "套餐没有发生变化。",
+      "portal_title": "账单信息已刷新",
+      "portal_description": "下方显示最新的订阅快照。",
+      "syncing_title": "正在启用订阅",
+      "syncing_description": "付款已完成，正在等待 Stripe 确认套餐变化。",
+      "timeout_description": "付款已收到，但订阅仍在同步。请稍后刷新页面。",
+      "active_title": "Pro 已启用",
+      "active_description": "这个工作区现在可以使用 Pro。"
+    },
+    "past_due": {
+      "title": "付款信息需要处理",
+      "description": "打开 Billing Portal 更新付款方式。上方的套餐徽章显示当前可用权限。",
+      "grace_description": "请在 {{date}} 前更新付款方式，以继续使用 Pro。"
+    },
+    "subscription_notice": {
+      "canceling_title": "订阅已安排取消",
+      "canceling_description": "此订阅计划于 {{date}} 取消。上方的套餐徽章显示当前实际生效的权限。",
+      "canceling_description_without_date": "这个订阅将在当前周期结束时取消。",
+      "incomplete_title": "订阅开通尚未完成",
+      "incomplete_description": "打开账单管理，完成或检查付款设置。",
+      "incomplete_expired_title": "订阅开通已过期",
+      "incomplete_expired_description": "上一次付款设置未能启用 Pro 且已过期，需要时请重新发起升级。",
+      "paused_title": "订阅已暂停",
+      "paused_description": "打开账单管理，查看暂停原因和可用的恢复方式。",
+      "unpaid_title": "订阅款项尚未支付",
+      "unpaid_description": "打开账单管理处理未支付款项。",
+      "canceled_title": "订阅已取消",
+      "canceled_description": "上方套餐徽标显示这个工作区当前实际生效的套餐。"
+    },
+    "current": {
+      "title": "当前套餐",
+      "plan": "工作区套餐",
+      "plan_description": "这个工作区当前生效的 entitlement。",
+      "members": "成员席位",
+      "members_description": "智能体和待接受的邀请不计入席位。",
+      "member_count_other": "{{count}} 位成员",
+      "billing_interval": "付款周期",
+      "billing_interval_description": "当前订阅保存的付款周期。",
+      "period_end": "当前周期结束时间",
+      "period_end_description": "当前订阅快照报告的日期。"
+    },
+    "upgrade": {
+      "title": "升级到 Pro",
+      "description": "选择付款周期，然后在 Stripe Checkout 确认当前席位和最终金额。",
+      "interval_label": "付款周期",
+      "monthly": "月付",
+      "yearly": "年付",
+      "pro_for_team_other": "为 {{count}} 个成员席位升级 Pro",
+      "price_loading": "正在加载订阅价格",
+      "unit_price": "每个成员席位 {{price}}",
+      "price_at_checkout": "购买前，服务端会重新统计成员。付款前，Stripe Checkout 会显示权威的单席位价格和总额。"
+    },
+    "management": {
+      "title": "订阅管理",
+      "description": "Stripe 会安全地管理付款方式、发票和取消订阅。",
+      "portal": "Stripe Billing Portal",
+      "portal_description": "前往 Stripe 管理这个工作区的订阅。",
+      "portal_unavailable": "这个工作区暂时没有可用的 Stripe Billing Portal。"
+    },
+    "limits": {
+      "title": "用量与限额",
+      "description": "限额和用量来自服务端当前 entitlement 与额度统计。",
+      "issues": "任务数量",
+      "issues_description": "当前任务用量和服务端返回的生效限额。",
+      "autopilots": "自动化执行",
+      "autopilots_description": "当前自动化用量和服务端返回的重置时间。",
+      "unlimited": "不限",
+      "per_month": "每月 {{count}} 次",
+      "usage_loading": "正在加载自动化用量",
+      "usage_label": "自动化额度用量",
+      "current_usage": "当前用量",
+      "reached": "已达到限额",
+      "usage_total": "{{total}} / {{limit}}",
+      "usage_breakdown": "已完成 {{used}} · 进行中 {{reserved}}",
+      "resets_at": "{{date}} 重置",
+      "usage_unavailable": "用量暂时不可用"
+    },
+    "seats": {
+      "title": "席位",
+      "description": "已购席位用于当前成员和待接受邀请，智能体不占席位。",
+      "human_members": "已用席位",
+      "human_members_description": "已确认占用已购容量的工作区成员。成员变化后可刷新对账。",
+      "billed": "已购席位",
+      "billed_description": "当前通过 Stripe 购买的席位数量。",
+      "pending_invitations": "待接受邀请",
+      "pending_invitations_description": "有效邀请在接受或过期前会预留已购席位。",
+      "available": "可用席位",
+      "available_description": "未被成员使用、也未被邀请预留的已购席位。",
+      "pending": "待生效席位",
+      "pending_description": "Cloud Billing 报告的下一周期较低席位数量。",
+      "seat_count_other": "{{count}} 个席位",
+      "pending_with_date_other": "{{date}} 起 {{count}} 个席位",
+      "none_pending": "没有待生效变更",
+      "not_subscribed": "没有有效订阅",
+      "unavailable": "不可用",
+      "summary_loading": "正在加载订阅席位详情",
+      "summary_unavailable_title": "部分席位详情不可用",
+      "summary_unavailable_description": "当前套餐仍会显示，但暂时无法加载已购席位和待生效席位。",
+      "members_over_capacity_title": "成员数超过已购席位",
+      "members_over_capacity_description": "当前工作区有 {{actual}} 名成员，但只购买了 {{purchased}} 个席位。继续邀请前，请补足席位或移除成员。",
+      "occupancy_over_capacity_description": "当前工作区已占用 {{occupied}} 个席位，但只购买了 {{purchased}} 个（{{members}} 名成员和 {{reserved}} 个待接受邀请）。继续邀请前，请补足席位、移除成员或撤销待接受邀请。",
+      "updated": "席位购买已提交"
+    },
+    "seat_purchase": {
+      "title": "添加席位",
+      "description": "输入要增加的席位数，确认前会显示最新的 Stripe 估算金额。",
+      "additional_label": "增加席位数",
+      "additional_hint": "请输入增加数量，而不是新的席位总数。",
+      "preview_loading": "正在更新估算金额...",
+      "preview_unreadable": "无法读取估算结果。请修改席位数或重试。",
+      "preview_failed": "暂时无法获取估算金额，请稍后重试。",
+      "capacity_out_of_sync": "Stripe 席位数与计费记录不一致。再次购买前，请联系支持人员。",
+      "in_progress": "另一笔席位购买正在处理中。请等待其完成；若长时间未完成，请联系支持人员。",
+      "purchase_unreadable": "无法读取购买响应。请重试当前报价；系统会复用同一购买请求。",
+      "purchase_failed": "无法添加席位。可使用同一报价重试；报价过期时请刷新。",
+      "payment_failed": "付款未能完成。请在 Stripe 更新付款方式，然后重新获取报价。",
+      "quote_changed": "席位数或估算金额已变化，请查看刷新后的报价再确认。",
+      "seats_after": "购买后席位",
+      "charge_today": "预计今日费用",
+      "next_invoice": "预计下次续费",
+      "tax_notice": "税费、抵扣和最终账单明细由 Stripe 确定。Stripe 确认订阅更新后，新席位才可用。",
+      "confirm_other": "添加 {{count}} 个席位",
+      "pending_title": "席位购买处理中",
+      "pending_description_other": "Stripe 正在确认订阅更新至 {{count}} 个席位。",
+      "delayed_title": "席位确认时间超出预期",
+      "delayed_description": "自动检查已停止，购买仍可能完成。开始另一笔购买前，请稍后再查看或联系支持人员。",
+      "delayed_description_with_expiry": "自动检查已停止。若到 {{date}} 仍在等待，请重新加载页面后再获取报价；若状态仍未更新，请联系支持人员。",
+      "submitted_other": "购买 {{count}} 个席位的请求已提交。Stripe 确认后会显示新容量。",
+      "error_title": "无法更新估算金额"
+    },
+    "confirm": {
+      "title": "前往 Stripe Checkout？",
+      "description": "付款周期：{{interval}}。当前成员：{{count}}。Stripe 会重新统计席位，并在付款前显示最终金额。"
+    }
+  },
   "shared": {
     "request_failed": "请求失败",
     "refresh": "刷新",
     "paging": "第 {{page}} / {{totalPages}} 页 · 共 {{total}} 条",
     "date_dash": "—"
+  },
+  "return_page": {
+    "redirecting": "正在返回工作区账单页…",
+    "load_failed_title": "无法打开工作区账单页",
+    "load_failed_description": "你已从 Stripe 返回，但我们无法加载工作区列表来打开对应的账单页。请到「工作区设置 → 账单」确认当前状态。",
+    "workspace_missing_title": "找不到该工作区",
+    "workspace_missing_description": "你已从 Stripe 返回，但该工作区对你已不可用——可能已被删除，或你的访问权限发生了变化。请到你预期的那个工作区的账单页确认当前状态。",
+    "retry": "重试",
+    "go_to_app": "前往 Multica"
   }
 }

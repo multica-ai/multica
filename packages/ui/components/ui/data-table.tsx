@@ -44,8 +44,10 @@ interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   // descendant — buttons / dropdowns inside cells should call
   // event.stopPropagation in their own handlers). Used to navigate to
   // a detail page on row click without nesting an <a> around <tr>,
-  // which is invalid HTML.
-  onRowClick?: (row: Row<TData>) => void;
+  // which is invalid HTML. Receives the mouse event so callers can honor
+  // modifier keys; middle clicks arrive through the same callback (the
+  // caller reads `event.button`).
+  onRowClick?: (row: Row<TData>, event: React.MouseEvent) => void;
   // Optional escape hatch for semantic rows such as collapsible group
   // headers. Return null/undefined to use the standard data row renderer.
   renderRow?: (row: Row<TData>) => React.ReactNode;
@@ -572,7 +574,7 @@ interface DataTableBodyProps<TData> {
   table: TanstackTable<TData>;
   rows: Row<TData>[];
   emptyMessage: React.ReactNode;
-  onRowClick?: (row: Row<TData>) => void;
+  onRowClick?: (row: Row<TData>, event: React.MouseEvent) => void;
   renderRow?: (row: Row<TData>) => React.ReactNode;
   hasExplicitSize: (columnId: string) => boolean;
   // The virtualizer's own measuring ref; rows report their height through it.
@@ -620,7 +622,25 @@ function DataTableBody<TData>({
         key={row.id}
         {...measured}
         data-state={row.getIsSelected() && "selected"}
-        onClick={onRowClick ? () => onRowClick(row) : undefined}
+        onClick={
+          onRowClick
+            ? (e) => {
+                if (e.defaultPrevented) return;
+                onRowClick(row, e);
+              }
+            : undefined
+        }
+        // Middle click never produces a `click` event; forward it through the
+        // same callback (button === 1 only — button 2 is the context menu).
+        onAuxClick={
+          onRowClick
+            ? (e) => {
+                if (e.defaultPrevented || e.button !== 1) return;
+                e.preventDefault();
+                onRowClick(row, e);
+              }
+            : undefined
+        }
         // `group` lets pinned cells track row hover via group-hover (their bg
         // is in className, not on the row, so they stay opaque enough to cover
         // content scrolling beneath them).

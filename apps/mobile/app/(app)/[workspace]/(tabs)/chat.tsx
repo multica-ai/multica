@@ -50,6 +50,7 @@ import {
   hideQueuedChatMessages,
   removePendingChatTask,
 } from "@multica/core/chat/pending";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { api } from "@/data/api";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -77,8 +78,8 @@ import {
   invalidatePendingTask,
   seedAcceptedPendingTask,
 } from "@/data/realtime/chat-ws-updaters";
-import { canAssignAgent } from "@/lib/can-assign-agent";
 import { useWorkspaceAgentAvailability } from "@/lib/workspace-agent-availability";
+import { sendFailureMessage } from "@/lib/dispatch-reason";
 import { useAgentPresence } from "@/lib/use-agent-presence";
 import { Header } from "@/components/ui/header";
 import { ChatTitleButton } from "@/components/chat/chat-title-button";
@@ -91,6 +92,7 @@ import { OfflineBanner } from "@/components/chat/offline-banner";
 import { RuntimeRequiredBanner } from "@/components/chat/runtime-required-banner";
 import { useChatSelectStore } from "@/data/chat-select-store";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { chatSessionDisplayTitle } from "@/lib/chat-session-title";
 
 export default function ChatTab() {
   const qc = useQueryClient();
@@ -154,14 +156,22 @@ export default function ChatTab() {
 
   // ── Derived ────────────────────────────────────────────────────────────
   const memberRole = useMemo(
-    () => members.find((m) => m.user_id === userId)?.role,
+    () => members.find((m) => m.user_id === userId)?.role ?? null,
     [members, userId],
   );
 
+  // The picker must list only agents this user can actually TRIGGER — sending
+  // a message enqueues a run, so it clears the server's invoke gate
+  // (`canInvokeAgent`), which has no admin bypass. Shared rule, not a mobile
+  // copy: a local mirror drifted from it and let admins pick a teammate's
+  // personal agent only to be 403'd on send (MUL-6380 / GH #7180).
   const availableAgents = useMemo(
     () =>
       agents.filter(
-        (a) => !a.archived_at && canAssignAgent(a, userId, memberRole),
+        (a) =>
+          !a.archived_at &&
+          canAssignAgentToIssue(a, { userId: userId ?? null, role: memberRole })
+            .allowed,
       ),
     [agents, userId, memberRole],
   );
@@ -182,6 +192,20 @@ export default function ChatTab() {
     }
     return availableAgents[0] ?? null;
   }, [selectedAgentId, availableAgents, activeSession, agents]);
+
+  // A session outlives the permission that created it: the agent can be flipped
+  // to personal, change owner, or drop this member from its allow-list, and the
+  // server then refuses every send with `invocation_not_allowed` while still
+  // serving the transcript (MUL-4525 — read uses the view gate, send re-runs the
+  // invoke gate). `currentAgent` deliberately resolves an open session's agent
+  // from the FULL list so the header stays honest, which means the picker filter
+  // above cannot cover this case — judge the bound agent too (MUL-6380).
+  const accessRevoked =
+    currentAgent !== null &&
+    !canAssignAgentToIssue(currentAgent, {
+      userId: userId ?? null,
+      role: memberRole,
+    }).allowed;
 
   const availability = useWorkspaceAgentAvailability();
   const presenceDetail = useAgentPresence(wsId, currentAgent?.id);
@@ -259,6 +283,16 @@ export default function ChatTab() {
       options: { clearDraft?: boolean } = {},
     ) => {
       if (!currentAgent) return;
+      // Invoke permission was revoked while this session was open — the server
+      // would refuse before persisting anything. The composer is disabled in
+      // this state; this is the belt-and-braces guard.
+      if (accessRevoked) {
+        Alert.alert(
+          "No permission to run this agent",
+          "You no longer have permission to run this agent, so the message was not sent. Ask its owner for access.",
+        );
+        return;
+      }
       if (!runtimeBound) {
         Alert.alert(
           "Runtime required",
@@ -268,7 +302,16 @@ export default function ChatTab() {
       }
 
       const isNewSession = !activeSessionId;
-      const sessionId = await ensureSession(content);
+      let sessionId: string | null;
+      try {
+        sessionId = await ensureSession(content);
+      } catch (err) {
+        // Session create runs the same invoke gate as a send, so a permission
+        // change refuses here too — and this is the only layer that sees the
+        // reason code (MUL-6380).
+        Alert.alert("Message not sent", sendFailureMessage(err));
+        throw err;
+      }
       if (!sessionId) return;
 
       const sentAt = new Date().toISOString();
@@ -345,12 +388,17 @@ export default function ChatTab() {
           chatKeys.pendingTask(sessionId),
           (old) => removePendingChatTask(old, optimisticTaskId),
         );
+        // The composer restores the draft on a thrown rejection but says nothing
+        // about it, so a revoked-permission 403 used to read as a silent no-op
+        // (MUL-6380). Name the cause here: only this layer sees the error body.
+        Alert.alert("Message not sent", sendFailureMessage(err));
         throw err;
       }
     },
     [
       activeSessionId,
       currentAgent,
+      accessRevoked,
       runtimeBound,
       ensureSession,
       qc,
@@ -403,7 +451,7 @@ export default function ChatTab() {
     if (!activeSession) return;
     Alert.alert(
       "Delete this chat?",
-      activeSession.title || "Untitled chat",
+      chatSessionDisplayTitle(activeSession.title),
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -423,18 +471,21 @@ export default function ChatTab() {
   // ── Composer disabled-state ────────────────────────────────────────────
   const disabled =
     !currentAgent ||
+    accessRevoked ||
     availability === "none" ||
     isArchived === true ||
     !runtimeBound;
   const disabledReason = !currentAgent
     ? "No agent selected"
-    : availability === "none"
-      ? "No agents in this workspace"
-      : isArchived
-        ? "This chat is archived"
-        : !runtimeBound
-          ? "Agent needs a runtime"
-        : undefined;
+    : accessRevoked
+      ? "You can no longer run this agent"
+      : availability === "none"
+        ? "No agents in this workspace"
+        : isArchived
+          ? "This chat is archived"
+          : !runtimeBound
+            ? "Agent needs a runtime"
+          : undefined;
 
   return (
     <View className="flex-1 bg-background">
@@ -469,7 +520,7 @@ export default function ChatTab() {
           messages={visibleMessages}
           loading={messagesLoading}
           hasSessions={sessions.length > 0}
-          agentName={currentAgent?.name}
+          agent={currentAgent}
           onPickPrompt={(text) => setDraft(draftKey, text)}
           onQuickAction={(action) =>
             handleSend(action.prompt, [], { clearDraft: false })

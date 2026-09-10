@@ -1,4 +1,12 @@
-import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
+import {
+  cloneElement,
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -7,10 +15,11 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enModals from "../locales/en/modals.json";
 import enEditor from "../locales/en/editor.json";
+import enIssues from "../locales/en/issues.json";
 
 const TEST_RESOURCES = {
   // `editor` carries the shared upload-gate copy ("Uploading…").
-  en: { common: enCommon, modals: enModals, editor: enEditor },
+  en: { common: enCommon, modals: enModals, editor: enEditor, issues: enIssues },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -23,6 +32,7 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
+const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockAttachLabel = vi.hoisted(() => vi.fn());
 const mockListProperties = vi.hoisted(() => vi.fn());
 const mockSetIssueProperty = vi.hoisted(() => vi.fn());
@@ -36,10 +46,47 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+const mockShowIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
 // mocking that call; it resolves a plain server Attachment row.
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
+
+const sourceContextPanelData = () => ({
+  anchor_comment_id: "comment-source",
+  source_context_preview: {
+    source_issue: {
+      id: "issue-source",
+      identifier: "MUL-9",
+      number: 9,
+      title: "Source",
+      description: "Historical body",
+      created_at: "2026-08-20T00:00:00Z",
+      updated_at: "2026-08-21T00:00:00Z",
+      revision: 1,
+      attachments: [],
+    },
+    comment_thread: [{
+      id: "comment-source",
+      parent_id: null,
+      type: "comment",
+      content: "Historical comment",
+      author: { type: "member", id: "user-1", name: "Alice" },
+      created_at: "2026-08-21T00:00:00Z",
+      updated_at: "2026-08-21T00:00:00Z",
+      revision: 1,
+      attachments: [],
+    }],
+    anchor_comment_id: "comment-source",
+    capture_token: "sha256:preview-token",
+    limits: {
+      comment_count: 1,
+      text_bytes: 100,
+      attachment_count: 0,
+      attachment_bytes: 0,
+    },
+  },
+});
 
 type DraftAttachment = {
   id: string;
@@ -139,7 +186,9 @@ const mockCreateSettingsStore = {
 // the same or the two records drift apart only in tests.
 let mockUploadIdSeq = 0;
 
-vi.mock("../navigation", () => ({
+// Mocked at the context module rather than the barrel so <AppLink> stays the
+// real component and its click contract is what the test exercises.
+vi.mock("../navigation/context", () => ({
   useNavigation: () => ({ push: mockPush }),
 }));
 
@@ -153,6 +202,10 @@ vi.mock("@multica/core/paths", () => ({
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
+}));
+
+vi.mock("./use-issue-limit-upgrade-prompt", () => ({
+  useIssueLimitUpgradePrompt: () => mockShowIssueLimitUpgradePrompt,
 }));
 
 vi.mock("@multica/core/issues/queries", () => ({
@@ -174,7 +227,6 @@ vi.mock("../issues/hooks/use-issue-trigger-preview", () => ({
     triggers: [],
     totalCount: 0,
     isLoading: false,
-    handoffSupported: false,
   }),
 }));
 
@@ -210,6 +262,12 @@ vi.mock("@multica/core/issues/stores/issue-create-settings-store", () => ({
 
 vi.mock("@multica/core/issues/mutations", () => ({
   useCreateIssue: () => ({ mutateAsync: mockCreateIssue }),
+  useCreateCommentSubIssue: () => ({
+    mutateAsync: ({ anchorCommentId, data }: {
+      anchorCommentId: string;
+      data: unknown;
+    }) => mockCreateCommentSubIssue(anchorCommentId, data),
+  }),
   useUpdateIssue: () => ({ mutate: vi.fn() }),
 }));
 
@@ -266,6 +324,7 @@ vi.mock("@multica/core/api", async () => {
   >("@multica/core/api/schemas");
   return {
     api: {
+      createCommentSubIssue: mockCreateCommentSubIssue,
       listProperties: mockListProperties,
       setIssueProperty: mockSetIssueProperty,
       uploadFile: mockApiUploadFile,
@@ -403,7 +462,7 @@ vi.mock("../issues/components", () => ({
       onClick={() => onOpenChange?.(false)}
     />
   ),
-  // Labels can now be hidden via Settings → Issue and revealed from the
+  // Labels can now be hidden via Settings → Preferences → Issue creation and revealed from the
   // overflow, so surface open/onOpenChange like the date pickers.
   LabelPicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
     <div
@@ -454,9 +513,23 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuItem: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
-    <button type="button" onClick={onClick}>{children}</button>
-  ),
+  // `render` mirrors Base UI: an item can BE another element (an <AppLink>).
+  // The real Item gives that element role="button", which is what the queries
+  // below match on.
+  DropdownMenuItem: ({
+    children,
+    onClick,
+    render,
+  }: {
+    children: React.ReactNode;
+    onClick?: () => void;
+    render?: ReactElement<{ role?: string; children?: ReactNode }>;
+  }) =>
+    render ? (
+      cloneElement(render, { role: "button" }, children)
+    ) : (
+      <button type="button" onClick={onClick}>{children}</button>
+    ),
   DropdownMenuSeparator: () => null,
   DropdownMenuSub: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuSubTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -514,8 +587,8 @@ vi.mock("@multica/ui/components/ui/switch", () => ({
 }));
 
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
-  FileUploadButton: ({ onSelect }: { onSelect: (file: File) => void }) => (
-    <button type="button" onClick={() => onSelect(new File(["test"], "test.txt"))}>
+  FileUploadButton: ({ onSelect, size }: { onSelect: (file: File) => void; size?: string }) => (
+    <button type="button" data-size={size} onClick={() => onSelect(new File(["test"], "test.txt"))}>
       Upload file
     </button>
   ),
@@ -533,7 +606,10 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { CreateIssueModal, ManualCreatePanel } from "./create-issue";
+import {
+  CreateIssueModal,
+  ManualCreatePanel,
+} from "./create-issue";
 
 function renderModal(element: React.ReactElement) {
   const qc = new QueryClient({
@@ -599,6 +675,13 @@ describe("CreateIssueModal", () => {
       // is that the field is present (not undefined).
       labels: [],
     });
+    mockCreateCommentSubIssue.mockResolvedValue({
+      id: "issue-source-child",
+      identifier: "TES-124",
+      title: "Create from source comment",
+      status: "todo",
+      labels: [],
+    });
     mockAttachLabel.mockResolvedValue({ labels: [] });
     mockListProperties.mockResolvedValue({
       properties: [
@@ -623,6 +706,12 @@ describe("CreateIssueModal", () => {
     mockSetIssueProperty.mockResolvedValue({
       properties: { "property-tier": "option-enterprise" },
     });
+  });
+
+  it("uses the same compact attachment control as agent mode", () => {
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Upload file" })).toHaveAttribute("data-size", "sm");
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
@@ -999,9 +1088,6 @@ describe("CreateIssueModal", () => {
     expect(onSwitchMode.mock.calls[0]?.[0]).toBeNull();
   });
 
-  // Manual → agent must forward the picked project so the new modal pins to
-  // the same target. Without this the agent panel re-seeds from its own
-  // persisted `lastProjectId` and silently routes the issue to a stale one.
   // Reporter scenario: backend rejects same-titled create with a 409 +
   // structured duplicate body. The user should land on a duplicate toast
   // pointing at the existing issue, not a generic "create failed" message.
@@ -1060,6 +1146,29 @@ describe("CreateIssueModal", () => {
     await waitFor(() => expect(mockToastError).toHaveBeenCalledTimes(1));
     expect(mockToastError).toHaveBeenCalledWith("Backend says title is taken");
     expect(mockToastCustom).not.toHaveBeenCalled();
+  });
+
+  it("offers the Cloud-authorized upgrade recovery when manual create reaches the issue limit", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    mockCreateIssue.mockRejectedValue(
+      new ApiError("workspace has reached its issue limit", 402, "Payment Required", {
+        code: "issue_limit_reached",
+        limit: 1000,
+        policy_revision: 1,
+      }),
+    );
+
+    renderModal(<CreateIssueModal onClose={onClose} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "One more issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockShowIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
+    });
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(mockClearDraft).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   // Non-409 errors with a real message: surface the backend reason rather
@@ -1175,6 +1284,98 @@ describe("CreateIssueModal", () => {
     expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
   });
 
+  it("keeps captured context separate from the upstream description scroller", () => {
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        data={sourceContextPanelData()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    const description = screen.getByPlaceholderText("Add description...").parentElement;
+    const sourceContext = document.querySelector<HTMLElement>('[data-slot="source-context-preview"]');
+
+    expect(description).toHaveClass(
+      "relative",
+      "flex",
+      "flex-1",
+      "min-h-0",
+      "overflow-y-auto",
+      "px-5",
+    );
+    expect(sourceContext).toHaveClass("shrink-0");
+    expect(description?.parentElement).toBe(sourceContext?.parentElement);
+    expect(description?.nextElementSibling).toBe(sourceContext);
+    expect(description).not.toContainElement(sourceContext);
+  });
+
+  it("locks only a source-context parent and leaves ordinary parent controls unchanged", async () => {
+    const user = userEvent.setup();
+    const contextRender = renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        data={{
+          ...sourceContextPanelData(),
+          parent_issue_id: "parent-uuid-1",
+          parent_issue_identifier: "MUL-2534",
+        }}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("manual-sub-issue-chip")).toHaveTextContent("Sub-issue of MUL-2534");
+    await user.click(screen.getByRole("button", { name: "More options" }));
+    expect(screen.queryByText("Set parent issue...")).toBeNull();
+    expect(screen.queryByText("Remove parent")).toBeNull();
+
+    contextRender.unmount();
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        data={{
+          parent_issue_id: "parent-uuid-1",
+          parent_issue_identifier: "MUL-2534",
+        }}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "More options" }));
+    expect(screen.getByText("Set parent issue...")).toBeInTheDocument();
+  });
+
+  it("submits source-context manual create through the dedicated endpoint", async () => {
+    const user = userEvent.setup();
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        data={sourceContextPanelData()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Create from source comment");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockCreateCommentSubIssue).toHaveBeenCalledWith(
+      "comment-source",
+      {
+        mode: "manual",
+        capture_token: "sha256:preview-token",
+        issue: expect.objectContaining({ title: "Create from source comment" }),
+      },
+    ));
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+  });
+
   // Start date is a low-frequency field — by default it lives behind the
   // ⋯ overflow menu and is not rendered inline. Clicking the overflow
   // entry opens it (and mounts the inline pill so the popover has an
@@ -1225,7 +1426,7 @@ describe("CreateIssueModal", () => {
     expect(screen.queryByTestId("due-date-picker")).not.toBeInTheDocument();
   });
 
-  it("hides toolbar fields turned off in Settings → Issue and re-reveals them from the overflow", async () => {
+  it("hides toolbar fields turned off in Settings → Preferences → Issue creation and re-reveals them from the overflow", async () => {
     const user = userEvent.setup();
     mockCreateSettingsStore.manualCreateFields = ["status", "priority", "assignee", "project"];
 
@@ -1253,7 +1454,7 @@ describe("CreateIssueModal", () => {
     expect(screen.queryByRole("button", { name: /Set labels/i })).not.toBeInTheDocument();
   });
 
-  it("renders due date inline when enabled in Settings → Issue", () => {
+  it("renders due date inline when enabled in Settings → Preferences → Issue creation", () => {
     mockCreateSettingsStore.manualCreateFields = [...DEFAULT_MANUAL_FIELDS, "due_date"];
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
@@ -1262,7 +1463,7 @@ describe("CreateIssueModal", () => {
     expect(screen.queryByRole("button", { name: /Set due date/i })).not.toBeInTheDocument();
   });
 
-  it("routes Customize fields to Settings → Issue and closes the dialog", async () => {
+  it("routes Customize fields to Settings → Preferences → Issue creation and closes the dialog", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
@@ -1271,7 +1472,7 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByRole("button", { name: /Customize fields/i }));
 
     expect(onClose).toHaveBeenCalled();
-    expect(mockPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/settings?tab=preferences&section=issue");
   });
 
   // MUL-5181: switching to agent must PRESERVE the manual draft. The agent
@@ -1627,18 +1828,25 @@ describe("CreateIssueModal", () => {
       createButton.focus();
       expect(createButton).toHaveFocus();
     });
+  });
 
-    it("carries its own disabled visuals, since the Button base only styles native disabled", () => {
-      renderManual();
-      const createButton = screen.getByRole("button", { name: "Create Issue" });
+  // MUL-6236 — the manual panel shares the agent panel's phone treatment; it
+  // is one tap away behind "Switch to Manual", so it hit the same bugs.
+  describe("phone layout", () => {
 
-      // Without these the control reads as a live primary button while
-      // aria-disabled. `pointer-events-none` is deliberately absent: it would
-      // kill the tooltip hover and the click that focuses the title.
-      expect(createButton.className).toContain("aria-disabled:opacity-50");
-      expect(createButton.className).toContain("aria-disabled:cursor-not-allowed");
-      expect(createButton.className).toContain("aria-disabled:active:translate-y-0");
-      expect(createButton.className).not.toContain("aria-disabled:pointer-events-none");
+    it("keeps every footer control a direct child of the grid container", () => {
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+      const switchToAgent = screen.getByRole("button", { name: /Switch to Agent/i });
+      const create = screen.getByRole("button", { name: "Create Issue" });
+
+      // Grid placement only sees direct children — re-wrapping either control
+      // collapses the 2x2 phone footer back to one jammed row.
+      const footer = switchToAgent.parentElement;
+      expect(footer?.className).toContain("grid-cols-[auto_1fr]");
+      expect(footer?.className).toContain("sm:flex");
+      expect(create.parentElement).toBe(footer);
+      expect(create.className).toContain("justify-self-end");
     });
   });
 });

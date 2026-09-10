@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { cronFields, parseCron, toCron } from "./cron-mapping";
 import type { ScheduleConfig } from "./model";

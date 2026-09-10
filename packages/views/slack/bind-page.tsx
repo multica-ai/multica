@@ -5,7 +5,7 @@ import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
-import { useNavigation } from "../navigation";
+import { AppLink } from "../navigation";
 import { useT } from "../i18n";
 
 type RedeemState =
@@ -29,7 +29,6 @@ export function SlackBindPage({ token }: { token: string | null }) {
   const { t } = useT("common");
   const user = useAuthStore((s) => s.user);
   const isAuthLoading = useAuthStore((s) => s.isLoading);
-  const navigation = useNavigation();
   const [state, setState] = useState<RedeemState>({ kind: "idle" });
 
   useEffect(() => {
@@ -75,13 +74,14 @@ export function SlackBindPage({ token }: { token: string | null }) {
               </p>
               <Button
                 size="sm"
-                onClick={() =>
-                  navigation.push(
-                    `/login?next=${encodeURIComponent(
+                render={
+                  <AppLink
+                    href={`/login?next=${encodeURIComponent(
                       `/slack/bind?token=${encodeURIComponent(token ?? "")}`,
-                    )}`,
-                  )
+                    )}`}
+                  />
                 }
+                nativeButton={false}
               >
                 {t(($) => $.slack_bind.sign_in)}
               </Button>

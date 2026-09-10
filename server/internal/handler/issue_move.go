@@ -15,13 +15,14 @@ import (
 )
 
 var issueMoveFields = map[string]struct{}{
-	"status":          {},
-	"assignee_type":   {},
-	"assignee_id":     {},
-	"parent_issue_id": {},
-	"project_id":      {},
-	"before_id":       {},
-	"after_id":        {},
+	"status":            {},
+	"assignee_type":     {},
+	"assignee_id":       {},
+	"parent_issue_id":   {},
+	"project_id":        {},
+	"before_id":         {},
+	"after_id":          {},
+	"expected_revision": {},
 }
 
 // MoveIssue accepts relative neighbors instead of a client-authored canonical

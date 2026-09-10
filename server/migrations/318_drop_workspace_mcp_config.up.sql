@@ -1,0 +1,18 @@
+-- Drops the inherit-by-default column added in 314. Its model — every agent
+-- picks the workspace document up automatically — is replaced by the explicit
+-- assignment in 315, so leaving the column would keep a second, silently
+-- inherited source of MCP servers alive.
+--
+-- No data migration, and no expand-contract window, by explicit maintainer
+-- decision (Bohan, 2026-08-14): 314 shipped and merged in this same cycle and
+-- was never deployed, so no environment has a binary that reads this column
+-- and no workspace has ever stored a document in it. There is nothing to
+-- preserve and no old instance to keep compatible.
+--
+-- If that ever stops being true — a deploy of 314 happens before this lands —
+-- this file must become the CONTRACT half of an expand-contract pair instead:
+-- convert each `mcpServers` entry into a `workspace_mcp_server` row with ZERO
+-- `agent_mcp_server` bindings (which preserves the entries without giving them
+-- to any agent, the behaviour being removed), ship the reading code first, and
+-- drop the column only after the old binaries are gone.
+ALTER TABLE workspace DROP COLUMN IF EXISTS mcp_config;

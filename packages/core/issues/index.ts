@@ -3,5 +3,18 @@ export * from "./canonical-id";
 export * from "./queries";
 export * from "./mutations";
 export * from "./ws-updaters";
+export * from "./workdir";
 export * from "./config";
 export * from "./stores";
+
+export {
+  issueBehavesAs,
+  issueBehavesAsAny,
+  issueColumnCategory,
+  issueStatusCategory,
+  statusCategoryOfKey,
+  statusFilterColumns,
+  visibleStatusCategories,
+  type StatusFilterColumnsResult,
+  normalizeStatusPatch,
+} from "./status-category";

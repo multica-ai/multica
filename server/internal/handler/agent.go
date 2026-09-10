@@ -10,7 +10,9 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -26,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 // Mirrors AGENT_DESCRIPTION_MAX_LENGTH in packages/core/agents/constants.ts
@@ -33,6 +36,17 @@ import (
 // in unicode code points (utf8.RuneCountInString), matching Postgres
 // char_length and the front-end's String.prototype.length-with-counter UX.
 const maxAgentDescriptionLength = 255
+
+const (
+	maxAgentConversationStarters      = 3
+	maxAgentConversationStarterLabel  = 80
+	maxAgentConversationStarterLength = 4000
+)
+
+type AgentConversationStarter struct {
+	Label  string `json:"label"`
+	Prompt string `json:"prompt"`
+}
 
 type AgentResponse struct {
 	ID          string `json:"id"`
@@ -46,13 +60,21 @@ type AgentResponse struct {
 	// branch on this rather than on RuntimeID being falsy, and must not confuse
 	// it with a bound-but-offline runtime (a different user story: reconnect the
 	// machine vs. pick a new one).
-	RuntimeBound bool   `json:"runtime_bound"`
-	Name         string `json:"name"`
-	Description  string `json:"description"`
+	RuntimeBound bool `json:"runtime_bound"`
+	// RuntimeAvailability is the coarse liveness projection for a runtime that
+	// may be hidden from the caller's runtime list. It deliberately carries no
+	// timestamp, device, owner, configuration, or credential fields; clients
+	// use it only when the full runtime row is unavailable.
+	RuntimeAvailability string `json:"runtime_availability,omitempty"`
+	Name                string `json:"name"`
+	Description         string `json:"description"`
 	// Instructions is what this agent's owner wrote. For a system agent it
 	// holds only the workspace's own notes — the product half lives in
 	// SystemInstructions and is never stored on the row.
 	Instructions string `json:"instructions"`
+	// ConversationStarters are optional, agent-specific first-turn suggestions. An
+	// empty list tells clients to render their localized fallback prompts.
+	ConversationStarters []AgentConversationStarter `json:"conversation_starters"`
 	// SystemKey identifies a product-defined agent (e.g. "mika"). Empty for
 	// every user- or template-created agent. The UI keys "this is maintained
 	// by Multica" off this rather than off the display name, which owners may
@@ -166,6 +188,14 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		mcpConfig = json.RawMessage(a.McpConfig)
 	}
 
+	conversationStarters := []AgentConversationStarter{}
+	if len(a.ConversationStarters) > 0 {
+		if err := json.Unmarshal(a.ConversationStarters, &conversationStarters); err != nil {
+			slog.Warn("failed to unmarshal agent conversation_starters", "agent_id", uuidToString(a.ID), "error", err)
+			conversationStarters = []AgentConversationStarter{}
+		}
+	}
+
 	// composio_toolkit_allowlist: the column is stored as TEXT[] and arrives
 	// here as a []string (sqlc). NULL and `{}` both serialize as nil through
 	// the postgres driver — both correctly mean "no toolkits", but the API
@@ -183,6 +213,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Name:                     a.Name,
 		Description:              a.Description,
 		Instructions:             a.Instructions,
+		ConversationStarters:     conversationStarters,
 		SystemKey:                a.SystemKey.String,
 		SystemInstructions:       systemInstructionsFor(a),
 		AvatarURL:                h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
@@ -293,42 +324,101 @@ type ProjectResourceData struct {
 // while sharing the canonical JSON shape with the runtime app metadata package.
 type ConnectedAppData = runtimeapps.ConnectedApp
 
+// taskIssueStatusCap bounds the custom statuses a claim payload carries. A
+// defensive ceiling, not a product limit: a real catalog holds a handful of
+// entries, and the brief must not grow without bound on a workspace that
+// scripted hundreds. Overflow is reported via IssueStatusesOmitted so the
+// brief can disclose the truncation.
+const taskIssueStatusCap = 30
+
+// TaskIssueStatusData is one active CUSTOM workspace status on the claim wire
+// (MUL-6460). Only the fields an agent needs to choose and write the status
+// travel: key is the CLI argument, name is what users call it in instructions,
+// category anchors the inherited platform behavior, and description is the
+// admin's "when to use me" guidance — the disambiguator when a category holds
+// more than one status. Color/position/id stay off the wire: they carry no
+// behavioral meaning for an agent, and the server already emits entries in
+// catalog order (category rank, then position, then key).
+type TaskIssueStatusData struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Description string `json:"description,omitempty"`
+}
+
+// TaskCancellationActor is the point-in-time actor snapshot attached to a
+// cancelled run. Type stays open for forward compatibility; current producers
+// emit member, agent, or system.
+type TaskCancellationActor struct {
+	Type string `json:"type"`
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
 type AgentTaskResponse struct {
-	ID          string `json:"id"`
-	AgentID     string `json:"agent_id"`
-	RuntimeID   string `json:"runtime_id"`
-	IssueID     string `json:"issue_id"`
-	WorkspaceID string `json:"workspace_id"`
+	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
+	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
+
+	ID                   string                 `json:"id"`
+	AgentID              string                 `json:"agent_id"`
+	RuntimeID            string                 `json:"runtime_id"`
+	IssueID              string                 `json:"issue_id"`
+	WorkspaceID          string                 `json:"workspace_id"`
+	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
+	IssueIdentifier      string                 `json:"issue_identifier,omitempty"`
+	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
+	// PluginHookTools are the workspace's agent-trigger plugin hooks, which the
+	// daemon renders as MCP tools for this task. Resolved at claim time so
+	// disabling or uninstalling a plugin takes effect on the next task rather
+	// than whenever a daemon happens to restart.
+	PluginHookTools []service.PluginHookTool `json:"plugin_hook_tools,omitempty"`
+	// RemoteMCPDaemonToken is a short-lived, workspace-and-daemon scoped
+	// credential used only by the local daemon's write-only Remote MCP broker.
+	// It is never injected into the agent process.
+	RemoteMCPDaemonToken string `json:"remote_mcp_daemon_token,omitempty"`
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
 	// as `## Workspace Context` so every agent running in this workspace —
 	// regardless of issue / chat / autopilot / quick-create — sees the same
 	// shared context. Empty when the workspace owner hasn't set it.
-	WorkspaceContext   string                `json:"workspace_context,omitempty"`
-	ThreadName         string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
-	Status             string                `json:"status"`
-	Priority           int32                 `json:"priority"`
-	DispatchedAt       *string               `json:"dispatched_at"`
-	StartedAt          *string               `json:"started_at"`
-	CompletedAt        *string               `json:"completed_at"`
-	Result             any                   `json:"result"`
-	Error              *string               `json:"error"`
-	FailureReason      string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt            int32                 `json:"attempt"`
-	MaxAttempts        int32                 `json:"max_attempts"`
-	ParentTaskID       *string               `json:"parent_task_id,omitempty"`
-	IsLeaderTask       bool                  `json:"is_leader_task,omitempty"`
-	LeaderRoleResolved bool                  `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
-	Agent              *TaskAgentData        `json:"agent,omitempty"`
-	ConnectedApps      []ConnectedAppData    `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
-	Repos              []RepoData            `json:"repos,omitempty"`
-	ProjectID          string                `json:"project_id,omitempty"`          // issue's project, when present
-	ProjectTitle       string                `json:"project_title,omitempty"`       // for surfacing in agent context
-	ProjectDescription string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
-	ProjectResources   []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
-	CreatedAt          string                `json:"created_at"`
-	PriorSessionID     string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
-	PriorWorkDir       string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	WorkspaceContext string `json:"workspace_context,omitempty"`
+	// IssueStatuses is the workspace's ACTIVE CUSTOM status catalog (MUL-6460),
+	// injected into the agent brief so agents can see and use statuses beyond
+	// the seven built-ins. Built-ins are omitted: their keys, names, and
+	// semantics are locked (is_system rows cannot be renamed or archived), so
+	// the daemon already knows them. Empty for a workspace with no custom
+	// statuses — the daemon then renders the brief exactly as before, keeping
+	// existing deployments byte-identical. Capped at taskIssueStatusCap
+	// entries; IssueStatusesOmitted carries the overflow count.
+	IssueStatuses []TaskIssueStatusData `json:"issue_statuses,omitempty"`
+	// IssueStatusesOmitted is how many active custom statuses were dropped by
+	// the cap, so the brief can say the list is incomplete instead of
+	// presenting a truncated catalog as the whole one.
+	IssueStatusesOmitted int                   `json:"issue_statuses_omitted,omitempty"`
+	ThreadName           string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	Status               string                `json:"status"`
+	Priority             int32                 `json:"priority"`
+	DispatchedAt         *string               `json:"dispatched_at"`
+	StartedAt            *string               `json:"started_at"`
+	CompletedAt          *string               `json:"completed_at"`
+	Result               any                   `json:"result"`
+	Error                *string               `json:"error"`
+	FailureReason        string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt              int32                 `json:"attempt"`
+	MaxAttempts          int32                 `json:"max_attempts"`
+	ParentTaskID         *string               `json:"parent_task_id,omitempty"`
+	IsLeaderTask         bool                  `json:"is_leader_task,omitempty"`
+	LeaderRoleResolved   bool                  `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
+	Agent                *TaskAgentData        `json:"agent,omitempty"`
+	ConnectedApps        []ConnectedAppData    `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
+	Repos                []RepoData            `json:"repos,omitempty"`
+	ProjectID            string                `json:"project_id,omitempty"`          // issue's project, when present
+	ProjectTitle         string                `json:"project_title,omitempty"`       // for surfacing in agent context
+	ProjectDescription   string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
+	ProjectResources     []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
+	CreatedAt            string                `json:"created_at"`
+	PriorSessionID       string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
+	PriorWorkDir         string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback. The daemon surfaces the continuity gap in
@@ -337,8 +427,8 @@ type AgentTaskResponse struct {
 	PriorSessionResumeUnavailable bool   `json:"prior_session_resume_unavailable,omitempty"`
 	WorkDir                       string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
 	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for
-	// the UI. For standard tasks it strips the daemon's workspaces root so
-	// the user sees `<wsUUID>/<taskShort>/workdir`; for local_directory
+	// the UI. For standard tasks it strips the daemon's workspaces root while
+	// preserving either the legacy or readable workspace/task segments; for local_directory
 	// tasks the absolute path lives outside the envRoot layout, so we strip
 	// recognised home-directory prefixes (`/Users/<name>/`, `/home/<name>/`,
 	// `<drive>:/Users/<name>/`) and otherwise fall back to the basename so
@@ -346,40 +436,64 @@ type AgentTaskResponse struct {
 	// when WorkDir is empty, or when stripping leaves nothing. See
 	// relativeWorkDir() for the full rules. Older clients can still read
 	// WorkDir directly; newer UIs should prefer RelativeWorkDir.
-	RelativeWorkDir          string                 `json:"relative_work_dir,omitempty"`
-	TriggerCommentID         *string                `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
-	CoalescedCommentIDs      []string               `json:"coalesced_comment_ids,omitempty"`       // MUL-4195: earlier comments folded into this run when it had not yet started, so a single run still covers every deliberate comment; trigger_comment_id is the newest. Surfaced so the UI can show which comments a run covered. omitempty so old clients ignore it
-	CoalescedComments        []CoalescedCommentData `json:"coalesced_comments,omitempty"`          // MUL-4195: full detail (thread_id/author/created_at/content) of the folded comments, so the daemon prompt can address each without assuming they share the triggering thread. omitempty so old clients ignore it
-	DeliveredCommentIDs      []string               `json:"delivered_comment_ids"`                 // always present: [] is an authoritative empty receipt, while field absence identifies responses from legacy servers
-	TriggerThreadID          string                 `json:"trigger_thread_id,omitempty"`           // root comment ID for the triggering thread
-	TriggerCommentContent    string                 `json:"trigger_comment_content,omitempty"`     // content of the triggering comment
-	TriggerSummary           *string                `json:"trigger_summary,omitempty"`             // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
-	TriggerAuthorType        string                 `json:"trigger_author_type,omitempty"`         // "agent" or "member" — author kind of the triggering comment
-	TriggerAuthorName        string                 `json:"trigger_author_name,omitempty"`         // display name of the triggering comment author
-	NewCommentCount          int                    `json:"new_comment_count,omitempty"`           // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
-	NewCommentsSince         string                 `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
-	ChatSessionID            string                 `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
-	ChatChannelType          string                 `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
-	ChatType                 string                 `json:"chat_type,omitempty"`                   // channel_chat_session_binding.chat_type — "group" for a shared room, "p2p" for a 1:1 with the bot. Lets the per-turn prompt tell the agent who else can read its replies; empty for a web-only chat
-	ChatInThread             bool                   `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
-	ChatMessage              string                 `json:"chat_message,omitempty"`                // user message for chat tasks
-	ChatMessageAttachments   []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
-	ChatIntro                bool                   `json:"chat_intro,omitempty"`                  // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
-	AutopilotRunID           string                 `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
-	AutopilotID              string                 `json:"autopilot_id,omitempty"`                // autopilot that spawned this task
-	AutopilotTitle           string                 `json:"autopilot_title,omitempty"`             // autopilot title used as task context
-	AutopilotDescription     string                 `json:"autopilot_description,omitempty"`       // autopilot description used as task prompt
-	AutopilotSource          string                 `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
-	AutopilotTriggerPayload  json.RawMessage        `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
-	QuickCreatePrompt        string                 `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
-	QuickCreatePriority      string                 `json:"quick_create_priority,omitempty"`       // explicit priority selected in quick-create
-	QuickCreateDueDate       string                 `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
-	QuickCreateAttachmentIDs []string               `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
-	HandoffNote              string                 `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the run's opening prompt + issue_context.md (omitempty so old daemons ignore it)
-	SquadID                  string                 `json:"squad_id,omitempty"`                    // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
-	SquadName                string                 `json:"squad_name,omitempty"`                  // display name for the picker squad
-	ParentIssueID            string                 `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier    string                 `json:"parent_issue_identifier,omitempty"`     // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	RelativeWorkDir string `json:"relative_work_dir,omitempty"`
+	// DurableWorkDir is the daemon-confirmed directory that remains usable
+	// after a disposable task worktree has been finalized and removed. It is a
+	// point-in-time task snapshot and does not follow later resource edits.
+	DurableWorkDir string `json:"durable_work_dir,omitempty"`
+	// RelativeDurableWorkDir is the privacy-safe display form. The absolute
+	// value is retained for explicit clipboard actions only.
+	RelativeDurableWorkDir string `json:"relative_durable_work_dir,omitempty"`
+	// BranchName is the git branch this run delivered its work on, set only by
+	// worktree-mode local_directory tasks. Unlike WorkDir it is safe to show
+	// verbatim: it is a ref inside the user's own repo, not a filesystem path.
+	// Populated on both terminal paths — a failed run can still have committed
+	// partial work, and that is when the pointer matters most.
+	BranchName            string                 `json:"branch_name,omitempty"`
+	TriggerCommentID      *string                `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
+	CoalescedCommentIDs   []string               `json:"coalesced_comment_ids,omitempty"`   // MUL-4195: earlier comments folded into this run when it had not yet started, so a single run still covers every deliberate comment; trigger_comment_id is the newest. Surfaced so the UI can show which comments a run covered. omitempty so old clients ignore it
+	CoalescedComments     []CoalescedCommentData `json:"coalesced_comments,omitempty"`      // MUL-4195: full detail (thread_id/author/created_at/content) of the folded comments, so the daemon prompt can address each without assuming they share the triggering thread. omitempty so old clients ignore it
+	DeliveredCommentIDs   []string               `json:"delivered_comment_ids"`             // always present: [] is an authoritative empty receipt, while field absence identifies responses from legacy servers
+	TriggerThreadID       string                 `json:"trigger_thread_id,omitempty"`       // root comment ID for the triggering thread
+	TriggerCommentContent string                 `json:"trigger_comment_content,omitempty"` // content of the triggering comment
+	TriggerSummary        *string                `json:"trigger_summary,omitempty"`         // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	TriggerAuthorType     string                 `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName     string                 `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
+	NewCommentCount       int                    `json:"new_comment_count,omitempty"`       // ISSUE-WIDE comments since this agent's last run — every thread, not just the triggering one (CountNewCommentsSince); excludes the injected trigger and the agent's own comments; omitempty so old daemons ignore it
+	NewCommentsSince      string                 `json:"new_comments_since,omitempty"`      // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it. Suppressed with the count when the delta is zero — NewCommentsDeltaKnown, not this field, is what says the server looked
+	// NewCommentsDeltaKnown reports that the issue-wide delta above was
+	// actually COMPUTED this claim — both the anchor lookup and the count
+	// query succeeded. Without it, NewCommentCount == 0 is ambiguous: a true
+	// zero, a failed anchor read, a failed count read, a cold start with no
+	// prior run, and an old server that never sends these fields all produce
+	// the same zero. Only the first of those answers "has anything else been
+	// said on this issue", so only the first may waive the workflow's comment
+	// scan. Absent on old servers, which is the safe reading (MUL-6984).
+	NewCommentsDeltaKnown    bool                 `json:"new_comments_delta_known,omitempty"`
+	ChatSessionID            string               `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
+	ChatChannelType          string               `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
+	ChatChannelDeliversFiles bool                 `json:"chat_channel_delivers_files,omitempty"` // server capability: THIS deployment can put a file the agent produced into THIS conversation — the adapter goes back for the bound attachment AND object storage exists to go back to. Absent/false on a server predating it, which is the safe reading: the agent is told to describe its file in words. Never inferred daemon-side from chat_channel_type; see handler.Handler.channelDeliversFiles
+	ChatType                 string               `json:"chat_type,omitempty"`                   // channel_chat_session_binding.chat_type — "group" for a shared room, "p2p" for a 1:1 with the bot. Lets the per-turn prompt tell the agent who else can read its replies; empty for a web-only chat
+	ChatInThread             bool                 `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
+	ChatMessage              string               `json:"chat_message,omitempty"`                // user message for chat tasks
+	ChatMessageAttachments   []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	ChatIntro                bool                 `json:"chat_intro,omitempty"`                  // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
+	AutopilotRunID           string               `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
+	AutopilotID              string               `json:"autopilot_id,omitempty"`                // autopilot that spawned this task
+	AutopilotTitle           string               `json:"autopilot_title,omitempty"`             // autopilot title used as task context
+	AutopilotDescription     string               `json:"autopilot_description,omitempty"`       // autopilot description used as task prompt
+	AutopilotSource          string               `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
+	AutopilotTriggerPayload  json.RawMessage      `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
+	QuickCreatePrompt        string               `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
+	QuickCreatePriority      string               `json:"quick_create_priority,omitempty"`       // explicit priority selected in quick-create
+	QuickCreateDueDate       string               `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
+	QuickCreateAttachmentIDs []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
+	QuickCreateSourceContext json.RawMessage      `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
+	HandoffNote              string               `json:"handoff_note,omitempty"`                // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
+	SquadID                  string               `json:"squad_id,omitempty"`                    // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
+	SquadName                string               `json:"squad_name,omitempty"`                  // display name for the picker squad
+	ParentIssueID            string               `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
+	ParentIssueIdentifier    string               `json:"parent_issue_identifier,omitempty"`     // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -405,7 +519,7 @@ type AgentTaskResponse struct {
 	InitiatorID    string `json:"initiator_id,omitempty"`    // user UUID (member) or agent UUID
 	InitiatorName  string `json:"initiator_name,omitempty"`  // display name of the initiator
 	InitiatorEmail string `json:"initiator_email,omitempty"` // member email; empty for agent initiators
-	Kind           string `json:"kind"`                      // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	Kind           string `json:"kind"`                      // source discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — quick-create remains stable after its result issue is linked
 	// Attribution is the resolved accountable-human provenance for this run
 	// (MUL-4302 §9): the source label + precise flag, the initiator (accountable)
 	// and originator refs, the evidence pointer, and lineage. Always present (the
@@ -414,9 +528,9 @@ type AgentTaskResponse struct {
 	Attribution *TaskAttribution `json:"attribution,omitempty"`
 	// Usage is this run's own token consumption, one entry per (provider, model)
 	// it used — the same grain `task_usage` stores and the same grain the client
-	// prices at. Hydrated only on the issue-facing execution-log endpoint
-	// (ListTasksByIssue); the daemon claim path leaves it nil so the claim
-	// payload does not carry accounting the agent has no use for.
+	// prices at. Hydrated on issue execution logs and explicit agent-history
+	// accounting requests; normal UI history and daemon claims leave it nil so
+	// those payloads do not carry accounting they do not use.
 	//
 	// nil and [] are both "no usage recorded" and the UI renders an em dash for
 	// them — a run that predates usage reporting, or one that died before any
@@ -644,6 +758,18 @@ type TaskAgentData struct {
 	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
 }
 
+// visibleTaskHistory omits unused assignee fallbacks created by older versions.
+// Dispatch only begins preparation, so a fallback cancelled before StartTask
+// is still unused. Keep started fallbacks and ordinary cancellations visible,
+// and retain the underlying scheduling records for audit.
+func visibleTaskHistory(tasks []db.AgentTaskQueue) []db.AgentTaskQueue {
+	return slices.DeleteFunc(tasks, func(task db.AgentTaskQueue) bool {
+		return task.EscalationForTaskID.Valid &&
+			!task.StartedAt.Valid &&
+			(task.Status == "deferred" || task.Status == "cancelled")
+	})
+}
+
 // taskToResponse maps a queue row to its wire shape. workspaceID is threaded
 // in because the row itself doesn't carry one (workspace lives on the agent
 // / issue / chat session) — we ask the caller to resolve it once and pass it
@@ -651,6 +777,10 @@ type TaskAgentData struct {
 // derivation; pass "" only on daemon-facing paths that genuinely don't have
 // it, in which case RelativeWorkDir falls back to the existing WorkDir.
 func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
+	var cancellation struct {
+		TaskID string `json:"comment_change_cancelled_task_id"`
+	}
+	_ = json.Unmarshal(t.Context, &cancellation)
 	var result any
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
@@ -663,39 +793,53 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.WorkDir.Valid {
 		workDir = t.WorkDir.String
 	}
+	durableWorkDir := ""
+	if t.DurableWorkDir.Valid {
+		durableWorkDir = t.DurableWorkDir.String
+	}
+	branchName := ""
+	if t.BranchName.Valid {
+		branchName = t.BranchName.String
+	}
 	handoffNote := ""
 	if t.HandoffNote.Valid {
 		handoffNote = t.HandoffNote.String
 	}
 	return AgentTaskResponse{
-		ID:                  uuidToString(t.ID),
-		AgentID:             uuidToString(t.AgentID),
-		RuntimeID:           uuidToString(t.RuntimeID),
-		IssueID:             uuidToString(t.IssueID),
-		WorkspaceID:         workspaceID,
-		Status:              t.Status,
-		Priority:            t.Priority,
-		DispatchedAt:        timestampToPtr(t.DispatchedAt),
-		StartedAt:           timestampToPtr(t.StartedAt),
-		CompletedAt:         timestampToPtr(t.CompletedAt),
-		Result:              result,
-		Error:               textToPtr(t.Error),
-		FailureReason:       failureReason,
-		Attempt:             t.Attempt,
-		MaxAttempts:         t.MaxAttempts,
-		ParentTaskID:        uuidToPtr(t.ParentTaskID),
-		IsLeaderTask:        t.IsLeaderTask,
-		CreatedAt:           timestampToString(t.CreatedAt),
-		TriggerCommentID:    uuidToPtr(t.TriggerCommentID),
-		CoalescedCommentIDs: uuidsToStrings(t.CoalescedCommentIds),
-		DeliveredCommentIDs: uuidStringsOrEmpty(t.DeliveredCommentIds),
-		TriggerSummary:      textToPtr(t.TriggerSummary),
-		HandoffNote:         handoffNote,
-		WorkDir:             workDir,
-		RelativeWorkDir:     relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
-		// Surface task source so the UI can distinguish issue-linked tasks
-		// from chat-spawned or autopilot-spawned ones; all three may arrive
-		// with issue_id = "" once a task has no linked issue.
+		// Task-scoped provenance must not transfer through copied retry context.
+		CancelledByCommentChange: t.Status == "cancelled" && cancellation.TaskID != "" && cancellation.TaskID == uuidToString(t.ID),
+		CancelledBy:              taskCancellationActorToResponse(t),
+
+		ID:                     uuidToString(t.ID),
+		AgentID:                uuidToString(t.AgentID),
+		RuntimeID:              uuidToString(t.RuntimeID),
+		IssueID:                uuidToString(t.IssueID),
+		WorkspaceID:            workspaceID,
+		Status:                 t.Status,
+		Priority:               t.Priority,
+		DispatchedAt:           timestampToPtr(t.DispatchedAt),
+		StartedAt:              timestampToPtr(t.StartedAt),
+		CompletedAt:            timestampToPtr(t.CompletedAt),
+		Result:                 result,
+		Error:                  textToPtr(t.Error),
+		FailureReason:          failureReason,
+		BranchName:             branchName,
+		Attempt:                t.Attempt,
+		MaxAttempts:            t.MaxAttempts,
+		ParentTaskID:           uuidToPtr(t.ParentTaskID),
+		IsLeaderTask:           t.IsLeaderTask,
+		CreatedAt:              timestampToString(t.CreatedAt),
+		TriggerCommentID:       uuidToPtr(t.TriggerCommentID),
+		CoalescedCommentIDs:    uuidsToStrings(t.CoalescedCommentIds),
+		DeliveredCommentIDs:    uuidStringsOrEmpty(t.DeliveredCommentIds),
+		TriggerSummary:         textToPtr(t.TriggerSummary),
+		HandoffNote:            handoffNote,
+		WorkDir:                workDir,
+		RelativeWorkDir:        relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
+		DurableWorkDir:         durableWorkDir,
+		RelativeDurableWorkDir: relativeWorkDir(durableWorkDir, "", ""),
+		// Surface the stable task source. A successful quick-create gains an
+		// issue link for navigation but retains its quick_create kind.
 		ChatSessionID:  uuidToString(t.ChatSessionID),
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
 		Kind:           computeTaskKind(t),
@@ -705,15 +849,31 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	}
 }
 
+func taskCancellationActorToResponse(t db.AgentTaskQueue) *TaskCancellationActor {
+	if t.Status != "cancelled" || !t.CancelledByType.Valid || t.CancelledByType.String == "" {
+		return nil
+	}
+	actor := &TaskCancellationActor{
+		Type: t.CancelledByType.String,
+		ID:   uuidToString(t.CancelledByID),
+	}
+	if t.CancelledByName.Valid {
+		actor.Name = t.CancelledByName.String
+	}
+	return actor
+}
+
 // relativeWorkDir produces a privacy-safe display form of the daemon-reported
 // absolute work_dir. The contract: the returned string must never contain
 // the user's home directory prefix or their account name. The chip is
 // rendered in transcripts that frequently end up in screen shares,
 // screenshots, and recordings, so this function is the only guard.
 //
-//   - For standard tasks (work_dir laid out as `<workspacesRoot>/<wsUUID>/
-//     <taskShort>/workdir` by execenv.Prepare), it strips everything up to and
-//     including the workspaces root, returning `<wsUUID>/<taskShort>/workdir`.
+//   - For standard tasks, it validates the adjacent workspace/task segments
+//     by their stable ID suffixes, then strips everything before them. This
+//     accepts both legacy `<wsUUID>/<taskShort>` roots and readable
+//     `<workspaceSlug>-<wsShort>/<issueKey>-<taskShort>` roots without treating
+//     the labels as identity.
 //   - For local_directory tasks the absolute path lives outside the envRoot
 //     layout. We try to recognise common home-directory prefixes
 //     (`/Users/<name>/`, `/home/<name>/`, `<drive>:/Users/<name>/`) and strip
@@ -724,10 +884,10 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 //
 // Returns empty when work_dir is empty, or when stripping leaves nothing
 // (i.e. work_dir was exactly the user's home — rendering nothing is
-// preferable to a chip that says `<name>`). shortTaskID() must stay in
-// lock-step with server/internal/daemon/execenv/git.go:shortID — both
-// consume the same task UUID; if that helper changes, this one must too
-// or the envRoot match silently degrades to the local_directory fallback.
+// preferable to a chip that says `<name>`). taskDirSegment() must stay in
+// lock-step with server/internal/daemon/execenv/git.go:taskKey — both
+// consume the same task UUID. legacyTaskDirSegment keeps privacy-safe display
+// working for pre-#7347 roots and roots created by an earlier build of this PR.
 func relativeWorkDir(workDir, workspaceID, taskID string) string {
 	if workDir == "" {
 		return ""
@@ -737,9 +897,12 @@ func relativeWorkDir(workDir, workspaceID, taskID string) string {
 	normalized := strings.ReplaceAll(workDir, "\\", "/")
 
 	if workspaceID != "" && taskID != "" {
-		envRootSuffix := workspaceID + "/" + shortTaskID(taskID)
-		if idx := strings.Index(normalized, envRootSuffix); idx >= 0 {
-			return normalized[idx:]
+		parts := strings.Split(normalized, "/")
+		for i := 0; i+1 < len(parts); i++ {
+			if matchesWorkspacePathSegment(parts[i], workspaceID) &&
+				matchesTaskPathSegment(parts[i+1], taskID) {
+				return strings.Join(parts[i:], "/")
+			}
 		}
 	}
 
@@ -750,16 +913,49 @@ func relativeWorkDir(workDir, workspaceID, taskID string) string {
 	return basename(normalized)
 }
 
-// shortTaskID mirrors execenv.shortID — first 8 hex chars of the UUID
-// with dashes stripped. Kept inline here so the agent handler has zero
-// imports from the daemon package (which would create an unwanted cycle
-// between handler and daemon).
-func shortTaskID(uuid string) string {
+func matchesWorkspacePathSegment(segment, workspaceID string) bool {
+	lower := strings.ToLower(segment)
+	legacy := legacyTaskDirSegment(workspaceID)
+	current := strings.ToLower(taskDirSegment(workspaceID))
+	return strings.EqualFold(segment, workspaceID) ||
+		strings.HasSuffix(lower, "-"+legacy) || strings.HasSuffix(lower, "-"+current)
+}
+
+func matchesTaskPathSegment(segment, taskID string) bool {
+	lower := strings.ToLower(segment)
+	legacy := legacyTaskDirSegment(taskID)
+	current := strings.ToLower(taskDirSegment(taskID))
+	return strings.EqualFold(segment, legacy) || strings.EqualFold(segment, current) ||
+		strings.HasSuffix(lower, "-"+legacy) || strings.HasSuffix(lower, "-"+current)
+}
+
+// taskDirSegmentLen and taskDirSegment mirror execenv.taskKeyLen /
+// execenv.taskKey — the LAST 12 hex chars of the task id. Kept inline here so
+// the agent handler has zero imports from the daemon package (which would
+// create an unwanted cycle between handler and daemon).
+//
+// It must keep taking the TAIL. A UUIDv7's leading hex chars are timestamp
+// bits shared by every task created within ~65.5s (#7326); the daemon stopped
+// reading from that end, and this reconstruction only matches while both sides
+// agree.
+const taskDirSegmentLen = 12
+
+func taskDirSegment(uuid string) string {
 	s := strings.ReplaceAll(uuid, "-", "")
-	if len(s) > 8 {
-		return s[:8]
+	if len(s) > taskDirSegmentLen {
+		return s[len(s)-taskDirSegmentLen:]
 	}
 	return s
+}
+
+// legacyTaskDirSegment mirrors the historical shortID layout: the first eight
+// dash-free characters. It is display compatibility only, never new identity.
+func legacyTaskDirSegment(uuid string) string {
+	s := strings.ReplaceAll(uuid, "-", "")
+	if len(s) > 8 {
+		return strings.ToLower(s[:8])
+	}
+	return strings.ToLower(s)
 }
 
 // homeDirPattern matches the well-known per-user home layouts on macOS,
@@ -804,12 +1000,10 @@ func basename(p string) string {
 	return p
 }
 
-// computeTaskKind picks the source-discriminator string the activity UI uses
-// to choose how to render a task row. Computed from the existing FK shape so
-// no extra DB lookup is needed: chat / autopilot / comment-on-issue (any
-// triggered task with both an issue_id and trigger_comment_id) / quick_create
-// (no linked source — the agent is creating the issue itself) / direct
-// (assignee-driven task on an existing issue).
+// computeTaskKind picks the stable source-discriminator string task UIs use.
+// Chat and autopilot have dedicated FKs; quick-create must inspect its context
+// because completion links the newly created issue back onto the task. The
+// remaining issue tasks split into comment-triggered and direct runs.
 func computeTaskKind(t db.AgentTaskQueue) string {
 	if uuidToString(t.ChatSessionID) != "" {
 		return "chat"
@@ -817,6 +1011,14 @@ func computeTaskKind(t db.AgentTaskQueue) string {
 	if uuidToString(t.AutopilotRunID) != "" {
 		return "autopilot"
 	}
+	var contextKind struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(t.Context, &contextKind) == nil && contextKind.Type == service.QuickCreateContextType {
+		return "quick_create"
+	}
+	// Preserve the historical classification for issue-less rows from before
+	// quick-create stored a typed context.
 	if uuidToString(t.IssueID) == "" {
 		return "quick_create"
 	}
@@ -824,6 +1026,62 @@ func computeTaskKind(t db.AgentTaskQueue) string {
 		return "comment"
 	}
 	return "direct"
+}
+
+// loadAgentRuntimeAvailability returns only a coarse liveness bucket for
+// agent presence. Runtime rows are loaded internally even when the caller is
+// not allowed to list or inspect the private runtime; no runtime fields are
+// copied onto an agent response. The existing runtime-list visibility contract
+// is mirrored so the bucket is only copied when the full row is hidden.
+func (h *Handler) loadAgentRuntimeAvailability(ctx context.Context, agents []db.Agent, workspaceID, viewerID, viewerRole string, now time.Time) (map[string]string, error) {
+	// Owner/admin runtime lists already contain every row, so their normal
+	// client-side derivation is authoritative and no projection query is needed.
+	if roleAllowed(viewerRole, "owner", "admin") {
+		return map[string]string{}, nil
+	}
+
+	runtimeIDs := make([]pgtype.UUID, 0, len(agents))
+	for _, agent := range agents {
+		// Archived presence always resolves to "archived", so its runtime state
+		// is neither user-visible nor a reason for clients to keep polling.
+		if !agent.ArchivedAt.Valid && agent.RuntimeID.Valid {
+			runtimeIDs = append(runtimeIDs, agent.RuntimeID)
+		}
+	}
+	result := make(map[string]string, len(runtimeIDs))
+	if len(runtimeIDs) == 0 {
+		return result, nil
+	}
+
+	// Read directly rather than through RuntimeLookup: this resolves rows for a
+	// list of agents instead of resolving a runtime a caller asked for, so it
+	// has no honest source label on multica_agent_runtime_lookup_total yet. See
+	// the exception noted on service.RuntimeLookup (MUL-6884).
+	runtimes, err := h.Queries.GetAgentRuntimes(ctx, runtimeIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, runtime := range runtimes {
+		// Agent/runtime workspace consistency is normally enforced at bind time;
+		// keep the projection fail-closed if a legacy row violates it.
+		if uuidToString(runtime.WorkspaceID) != workspaceID {
+			continue
+		}
+		// ListAgentRuntimes exposes every row to workspace owner/admin and only
+		// owner/public rows to regular members. Keep the coarse bridge for the
+		// rows that the viewer's runtime list cannot carry.
+		if runtime.Visibility == "public" ||
+			(runtime.OwnerID.Valid && uuidToString(runtime.OwnerID) == viewerID) {
+			continue
+		}
+		result[uuidToString(runtime.ID)] = deriveAgentRuntimeAvailability(runtime, now)
+	}
+	return result, nil
+}
+
+func deriveAgentRuntimeAvailability(runtime db.AgentRuntime, now time.Time) string {
+	status := pgtype.Text{String: runtime.Status, Valid: runtime.Status != ""}
+	return deriveRuntimeAvailability(status, runtime.LastSeenAt, now)
 }
 
 func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
@@ -843,6 +1101,11 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agents")
+		return
+	}
+	runtimeAvailabilityByID, err := h.loadAgentRuntimeAvailability(r.Context(), agents, workspaceID, userID, member.Role, time.Now())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent runtime availability")
 		return
 	}
 
@@ -896,6 +1159,12 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		resp := h.agentToResponse(a)
+		// The map is keyed by runtime, and active + archived agents may share one.
+		// Keep the archived guard here as well as in the loader so an active sibling
+		// cannot leak its projection onto an archived response.
+		if availability, ok := runtimeAvailabilityByID[resp.RuntimeID]; ok && !a.ArchivedAt.Valid {
+			resp.RuntimeAvailability = availability
+		}
 		applyInvocationTargetsToResponse(&resp, targets)
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
@@ -939,12 +1208,25 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	// render an explicit "no access" placeholder instead of a 404 — see
 	// agent-detail-page.tsx.
 	workspaceID := uuidToString(agent.WorkspaceID)
-	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}
 	resp := h.agentToResponse(agent)
+	viewerRole := ""
+	if member, ok := ctxMember(r.Context()); ok {
+		viewerRole = member.Role
+	}
+	runtimeAvailability, err := h.loadAgentRuntimeAvailability(r.Context(), []db.Agent{agent}, workspaceID, userID, viewerRole, time.Now())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent runtime availability")
+		return
+	}
+	if availability, ok := runtimeAvailability[resp.RuntimeID]; ok {
+		resp.RuntimeAvailability = availability
+	}
 	if !h.enrichAgentResponseWithTargetsHTTP(w, r, &resp, agent.ID) {
 		return
 	}
@@ -959,7 +1241,6 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 
 	// mcp_config redaction (custom_env was removed from this response shape
 	// in MUL-2600; secrets are now fetched via GET /api/agents/{id}/env).
-	userID := requestUserID(r)
 	ws, err := h.Queries.GetWorkspace(r.Context(), agent.WorkspaceID)
 	if err != nil {
 		slog.Warn("GetWorkspace failed for redact check", "workspace_id", uuidToString(agent.WorkspaceID), "error", err)
@@ -987,16 +1268,17 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
-	Name          string            `json:"name"`
-	Description   string            `json:"description"`
-	Instructions  string            `json:"instructions"`
-	AvatarURL     *string           `json:"avatar_url"`
-	RuntimeID     string            `json:"runtime_id"`
-	RuntimeConfig any               `json:"runtime_config"`
-	CustomEnv     map[string]string `json:"custom_env"`
-	CustomArgs    []string          `json:"custom_args"`
-	McpConfig     json.RawMessage   `json:"mcp_config"`
-	Visibility    string            `json:"visibility"`
+	Name                 string                     `json:"name"`
+	Description          string                     `json:"description"`
+	Instructions         string                     `json:"instructions"`
+	ConversationStarters []AgentConversationStarter `json:"conversation_starters"`
+	AvatarURL            *string                    `json:"avatar_url"`
+	RuntimeID            string                     `json:"runtime_id"`
+	RuntimeConfig        any                        `json:"runtime_config"`
+	CustomEnv            map[string]string          `json:"custom_env"`
+	CustomArgs           []string                   `json:"custom_args"`
+	McpConfig            json.RawMessage            `json:"mcp_config"`
+	Visibility           string                     `json:"visibility"`
 	// PermissionMode + InvocationTargets are the new invocation-permission
 	// inputs (MUL-3963). When permission_mode is present it is authoritative
 	// and Visibility is ignored; when absent, legacy Visibility is mapped
@@ -1015,11 +1297,9 @@ type CreateAgentRequest struct {
 	// overlay either, but the column reads as "configured" — distinct from
 	// "owner has never opened the integration").
 	ComposioToolkitAllowlist []string `json:"composio_toolkit_allowlist"`
-	// Template records which template slug was used to seed this agent
-	// (e.g. "coding" / "planning" / "writing" / "assistant"). Empty when
-	// the caller didn't come from a template picker — the `agent_created`
-	// event still fires with `template=""`, which is the correct signal
-	// for "manually authored agent".
+	// Template records the creation-source attribution used by the
+	// `agent_created` analytics event (for example, "agent_builder"). Empty
+	// identifies a manually authored agent.
 	Template string `json:"template"`
 	// SkillIDs are attached inside the same transaction as the agent row so a
 	// create never becomes visible in a partially configured state.
@@ -1047,6 +1327,32 @@ func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMe
 	return raw, nil
 }
 
+func normaliseAgentConversationStarters(starters []AgentConversationStarter) ([]AgentConversationStarter, error) {
+	if len(starters) > maxAgentConversationStarters {
+		return nil, fmt.Errorf("conversation_starters must contain at most %d items", maxAgentConversationStarters)
+	}
+
+	normalised := make([]AgentConversationStarter, 0, len(starters))
+	for i, item := range starters {
+		item.Label = strings.TrimSpace(item.Label)
+		item.Prompt = strings.TrimSpace(item.Prompt)
+		if item.Label == "" {
+			return nil, fmt.Errorf("conversation_starters[%d].label is required", i)
+		}
+		if item.Prompt == "" {
+			return nil, fmt.Errorf("conversation_starters[%d].prompt is required", i)
+		}
+		if utf8.RuneCountInString(item.Label) > maxAgentConversationStarterLabel {
+			return nil, fmt.Errorf("conversation_starters[%d].label must be %d characters or fewer", i, maxAgentConversationStarterLabel)
+		}
+		if utf8.RuneCountInString(item.Prompt) > maxAgentConversationStarterLength {
+			return nil, fmt.Errorf("conversation_starters[%d].prompt must be %d characters or fewer", i, maxAgentConversationStarterLength)
+		}
+		normalised = append(normalised, item)
+	}
+	return normalised, nil
+}
+
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
@@ -1072,6 +1378,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.RuntimeID == "" {
 		writeError(w, http.StatusBadRequest, "runtime_id is required")
+		return
+	}
+	conversationStarters, err := normaliseAgentConversationStarters(req.ConversationStarters)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.Visibility == "" {
@@ -1116,17 +1427,31 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
 		return
 	}
 
 	// thinking_level validation: fixed-enum providers reject unknown literals;
 	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
+	// Pi has a fixed token universe and a daemon-discovered per-model subset.
 	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
 	// combination-invalid values are logged and omitted from the invocation.
 	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
 		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
 		return
+	}
+	// For ACP-catalog providers the provider name is not the capability answer
+	// — this runtime's own discovered catalog is. Keeps a Hermes Agent user's
+	// clear 400 instead of accepting a level the daemon would later drop.
+	if req.ThinkingLevel != "" {
+		switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID) {
+		case acpEffortAbsent:
+			writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
+			return
+		case acpEffortUnknown:
+			writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(runtime.Provider))
+			return
+		}
 	}
 	if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtime.Provider))
@@ -1161,6 +1486,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.CustomArgs == nil {
 		ca = []byte("[]")
 	}
+
+	sp, _ := json.Marshal(conversationStarters)
 
 	var mc []byte
 	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && !bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null")) {
@@ -1224,6 +1551,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Model:                    pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:            pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
 		ServiceTier:              pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
+		ConversationStarters:     sp,
 		ComposioToolkitAllowlist: allowlist,
 	})
 	if err != nil {
@@ -1290,12 +1618,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateAgentRequest struct {
-	Name          *string `json:"name"`
-	Description   *string `json:"description"`
-	Instructions  *string `json:"instructions"`
-	AvatarURL     *string `json:"avatar_url"`
-	RuntimeID     *string `json:"runtime_id"`
-	RuntimeConfig any     `json:"runtime_config"`
+	Name                 *string                     `json:"name"`
+	Description          *string                     `json:"description"`
+	Instructions         *string                     `json:"instructions"`
+	ConversationStarters *[]AgentConversationStarter `json:"conversation_starters"`
+	AvatarURL            *string                     `json:"avatar_url"`
+	RuntimeID            *string                     `json:"runtime_id"`
+	RuntimeConfig        any                         `json:"runtime_config"`
 	// custom_env is intentionally NOT updatable through this endpoint.
 	// Use `PUT /api/agents/{id}/env` for env changes — that path admits
 	// the agent owner or a workspace owner/admin, denies agent actors,
@@ -1560,6 +1889,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Instructions != nil {
 		params.Instructions = pgtype.Text{String: *req.Instructions, Valid: true}
 	}
+	if req.ConversationStarters != nil {
+		conversationStarters, err := normaliseAgentConversationStarters(*req.ConversationStarters)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		encoded, _ := json.Marshal(conversationStarters)
+		params.ConversationStarters = encoded
+	}
 	if req.AvatarURL != nil {
 		avatarURL, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, existing.AvatarUrl.String)
 		if !ok {
@@ -1613,7 +1951,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !canUseRuntimeForAgent(member, runtime) {
-			writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can move agents onto it")
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can move agents onto it")
 			return
 		}
 		params.RuntimeID = runtime.ID
@@ -1718,6 +2056,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, thinkingLevelRejection(provider, value))
 				return
 			}
+			switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID) {
+			case acpEffortAbsent:
+				writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(provider))
+				return
+			case acpEffortUnknown:
+				writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(provider))
+				return
+			}
 			params.ThinkingLevel = pgtype.Text{String: value, Valid: true}
 		}
 	} else if req.RuntimeID != nil && existing.ThinkingLevel.Valid && existing.ThinkingLevel.String != "" {
@@ -1739,6 +2085,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		if !agent.IsKnownThinkingValue(provider, existing.ThinkingLevel.String) {
 			writeError(w, http.StatusBadRequest, existingThinkingLevelRejection(provider, existing.ThinkingLevel.String))
+			return
+		}
+		switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID) {
+		case acpEffortAbsent:
+			writeError(w, http.StatusBadRequest, existingThinkingCapabilityRejection(provider, existing.ThinkingLevel.String))
+			return
+		case acpEffortUnknown:
+			writeError(w, http.StatusBadRequest, existingThinkingCapabilityUnknownRejection(provider, existing.ThinkingLevel.String))
 			return
 		}
 	}
@@ -1970,12 +2324,114 @@ func (h *Handler) resolveAgentProvider(r *http.Request, workspaceID pgtype.UUID,
 // so it now names the capability gap instead.
 func thinkingLevelRejection(provider, value string) string {
 	if !agent.ThinkingControlSupported(provider) {
-		return fmt.Sprintf(
-			"runtime %q does not support a per-agent reasoning effort; leave thinking_level empty to use the runtime default",
-			provider,
-		)
+		return thinkingCapabilityRejection(provider)
 	}
 	return fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", value, provider)
+}
+
+// existingThinkingCapabilityRejection is the carry-over path's capability
+// sentence — same answer as thinkingCapabilityRejection, but it names the value
+// already on the agent and the escape hatch that clears it.
+func existingThinkingCapabilityRejection(provider, value string) string {
+	return fmt.Sprintf(
+		"runtime %q does not support a per-agent reasoning effort; pass thinking_level=\"\" to clear the existing %q",
+		provider, value,
+	)
+}
+
+// thinkingCapabilityUnknownRejection covers the ambiguous case: the provider
+// name does not say which binary is installed and no catalog has been reported
+// yet, so we can neither confirm nor deny the capability.
+//
+// It deliberately does NOT reuse the "does not support" sentence. That claim
+// would be actively wrong for a jcode runtime — sending its owner off to look
+// for a limitation that does not exist — whereas naming the missing evidence
+// points at the thing that resolves it.
+func thinkingCapabilityUnknownRejection(provider string) string {
+	return fmt.Sprintf(
+		"cannot confirm whether runtime %q supports a per-agent reasoning effort: it has not reported a model catalog yet. Open the model picker for this runtime to trigger discovery and retry, or leave thinking_level empty to use the runtime default",
+		provider,
+	)
+}
+
+// existingThinkingCapabilityUnknownRejection is the carry-over path's version of
+// the same answer: it names the value already on the agent and the escape hatch.
+func existingThinkingCapabilityUnknownRejection(provider, value string) string {
+	return fmt.Sprintf(
+		"cannot confirm whether runtime %q supports a per-agent reasoning effort: it has not reported a model catalog yet. Pass thinking_level=\"\" to clear the existing %q, or retry once the runtime has reported its models",
+		provider, value,
+	)
+}
+
+// thinkingCapabilityRejection is the "this runtime has no reasoning dial"
+// sentence. Split out because the same answer can now be reached two ways: from
+// the provider name alone, or — for ACP-catalog providers, where the provider
+// name is not decisive — from a discovered catalog that advertises no effort.
+func thinkingCapabilityRejection(provider string) string {
+	return fmt.Sprintf(
+		"runtime %q does not support a per-agent reasoning effort; leave thinking_level empty to use the runtime default",
+		provider,
+	)
+}
+
+// acpEffortEvidence is what the discovered model catalog says about a runtime's
+// reasoning-effort support.
+type acpEffortEvidence int
+
+const (
+	// acpEffortUnknown — no catalog has been discovered for this runtime.
+	//
+	// This is NOT a transient cold-start state. The catalog is written only by
+	// ReportModelListResult, i.e. only after a client explicitly asks for a
+	// model list, so a caller who never opens a model picker (pure CLI use) can
+	// sit here indefinitely. Treating unknown as "supported" is therefore not a
+	// brief window — it is a permanent hole for anyone who works this way.
+	acpEffortUnknown acpEffortEvidence = iota
+	// acpEffortAbsent — a catalog exists and no model in it advertises an effort.
+	acpEffortAbsent
+	// acpEffortPresent — a catalog exists and at least one model advertises one.
+	acpEffortPresent
+)
+
+// ambiguousACPEffortProviders are providers whose name does not determine which
+// binary is actually installed, so "not discovered yet" cannot be read as
+// "supported".
+//
+// `hermes` is the only one: it covers jcode (advertises an effort and applies
+// it) and Hermes Agent (advertises none). reasonix is deliberately absent — that
+// provider means one binary, which does support an effort, so an undiscovered
+// reasonix runtime is safely allowed rather than blocked before its first
+// discovery.
+var ambiguousACPEffortProviders = map[string]bool{
+	"hermes": true,
+}
+
+// acpThinkingDecision answers whether this runtime may carry a thinking level,
+// consulting the model catalog its daemon reported.
+//
+// acpEffortPresent means "allow". Providers outside the ACP-catalog set, and
+// unambiguous ACP providers with no catalog yet, are reported as present — their
+// capability is already settled by the provider name. Only an ambiguous provider
+// turns an undiscovered catalog into a refusal, because for those the name
+// genuinely does not answer the question and guessing "yes" is what let a Hermes
+// Agent user persist a level the daemon would later drop.
+func (h *Handler) acpThinkingDecision(ctx context.Context, provider string, runtimeID pgtype.UUID) acpEffortEvidence {
+	if !agent.UsesACPCatalogThinking(provider) {
+		return acpEffortPresent
+	}
+	snapshot := h.cachedModelCatalog(ctx, uuidToString(runtimeID))
+	if snapshot == nil || len(snapshot.Models) == 0 {
+		if ambiguousACPEffortProviders[provider] {
+			return acpEffortUnknown
+		}
+		return acpEffortPresent
+	}
+	for _, m := range snapshot.Models {
+		if m.Thinking != nil && len(m.Thinking.SupportedLevels) > 0 {
+			return acpEffortPresent
+		}
+	}
+	return acpEffortAbsent
 }
 
 // existingThinkingLevelRejection is thinkingLevelRejection for the carry-over
@@ -1984,10 +2440,7 @@ func thinkingLevelRejection(provider, value string) string {
 // user does not have to guess that clearing is allowed.
 func existingThinkingLevelRejection(provider, value string) string {
 	if !agent.ThinkingControlSupported(provider) {
-		return fmt.Sprintf(
-			"runtime %q does not support a per-agent reasoning effort; pass thinking_level=\"\" to clear the existing %q",
-			provider, value,
-		)
+		return existingThinkingCapabilityRejection(provider, value)
 	}
 	return fmt.Sprintf(
 		"existing thinking_level %q is not valid for runtime %q; pass thinking_level=\"\" to clear or set a value valid for the new runtime",
@@ -2030,14 +2483,13 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cancel all pending/active tasks for this agent. Discard the returned
-	// rows here — the agent:archived event below already triggers a full
-	// active-tasks invalidation on every connected client, so per-task
-	// task:cancelled events would be redundant noise.
-	if cancelled, err := h.Queries.CancelAgentTasksByAgent(r.Context(), agent.ID); err != nil {
+	// Cancel all pending/active tasks for this agent. The cancel and its
+	// delegated-failure settlement commit together — a settlement issued after
+	// the cancel committed could never be repaired. Chat tasks publish
+	// task:cancelled after commit for chat lifecycle consumers; the aggregate
+	// agent:archived event below remains unchanged.
+	if _, err := h.TaskService.CancelTasksForArchivedAgent(r.Context(), agent.ID); err != nil {
 		slog.Warn("cancel agent tasks on archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-	} else {
-		h.TaskService.CaptureCancelledTasks(r.Context(), cancelled)
 	}
 
 	wsID := uuidToString(archived.WorkspaceID)
@@ -2143,17 +2595,42 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	includeUsage := false
+	switch raw := strings.TrimSpace(r.URL.Query().Get("include_usage")); raw {
+	case "", "false":
+	case "true":
+		includeUsage = true
+	default:
+		writeError(w, http.StatusBadRequest, "include_usage must be true or false")
+		return
+	}
+
 	tasks, err := h.Queries.ListAgentTasks(r.Context(), agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
 		return
 	}
 
+	tasks = visibleTaskHistory(tasks)
 	resp := make([]AgentTaskResponse, len(tasks))
+	var taskIDs []pgtype.UUID
+	if includeUsage {
+		taskIDs = make([]pgtype.UUID, len(tasks))
+	}
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
+		if includeUsage {
+			taskIDs[i] = t.ID
+		}
 	}
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
+	if includeUsage {
+		if err := h.hydrateAgentTaskUsage(r.Context(), agent.ID, taskIDs, resp); err != nil {
+			slog.Warn("list agent task usage failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to list agent task usage")
+			return
+		}
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }

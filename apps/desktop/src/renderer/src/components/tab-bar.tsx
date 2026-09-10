@@ -34,6 +34,7 @@ import {
   ContextMenuTrigger,
 } from "@multica/ui/components/ui/context-menu";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import { SIDEBAR_WRAPPER_FILL_CLASS } from "@multica/ui/components/ui/sidebar";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabStore, useActiveGroup, type Tab } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
@@ -46,16 +47,53 @@ import { parseIssueWindowPath } from "../../../shared/issue-window";
 const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
 
-// Chrome-style merged tab: the active tab shares the content surface's fill
-// and flares into it through concave bottom corners. Each flare is a small
-// square whose radial gradient carves a quarter-circle notch (shell shows
-// through), strokes a 1px arc that continues the tab's side border into the
-// content card's top ring, and fills the rest with the surface color. The
-// 0.4px stop spread anti-aliases the arc.
+// Chrome-style merged tab: the active tab shares the content surface's fill and
+// flares into it through concave bottom corners. Each flare is a small square
+// whose radial gradient carves a quarter-circle notch (transparent, so the
+// strip behind the flare shows through), strokes a 1px arc that continues the
+// tab's side border into the content card's top ring, and fills the rest with
+// the surface colour. The 0.4px spread on either side of the --surface-border
+// pair anti-aliases that arc.
+//
+// That background-color is load-bearing, not decoration: the flare's bottom row
+// overlaps the content card's top ring, and in dark mode --surface-border is
+// translucent (oklch(1 0 0 / 10%)), so without an opaque layer beneath it the
+// arc would composite over the ring instead of replacing it and the two keylines
+// would stack into a markedly lighter line right where the straight ring meets
+// the curve. It therefore has to be the strip's real backdrop — the sidebar
+// wrapper's fill, which is conditional and not this file's to re-derive.
+// SIDEBAR_WRAPPER_FILL_CLASS reads it off the wrapper itself.
+//
+// The backing may only reach as far as it is needed, though. A flare hangs 9px
+// past the tab's edge, over the neighbouring tab, so an opaque square there
+// prints over whatever that neighbour draws: its hover pill lost the whole
+// corner it shares with the flare and read as a dark bite (MUL-6160). Masking
+// the notch away removes the backing exactly where the gradient is transparent
+// anyway, so the notch is a hole rather than a painted-on copy of the strip and
+// shows whatever is actually behind it — bare strip usually, the neighbour's
+// pill where it reaches in. The mask is opaque again by the radius where the
+// arc's anti-aliasing starts, so every pixel the arc and the canvas fill cover
+// keeps its backing.
 const TAB_FLARE_RADIUS = 10;
-const tabFlareBackground = (side: "left" | "right") => {
+const tabFlareGradient = (side: "left" | "right") => {
   const r = TAB_FLARE_RADIUS;
   return `radial-gradient(circle at top ${side}, transparent ${r - 1.2}px, var(--surface-border) ${r - 0.8}px, var(--surface-border) ${r - 0.2}px, var(--page-canvas) ${r + 0.2}px)`;
+};
+const tabFlareNotchMask = (side: "left" | "right") => {
+  const r = TAB_FLARE_RADIUS;
+  return `radial-gradient(circle at top ${side}, transparent ${r - 1.6}px, black ${r - 1.2}px)`;
+};
+// The flares are mirror images: the offset overlaps the tab edge by 1px so arc
+// and side border meet, and gradient and mask share the corner the offset picks.
+const tabFlareStyle = (side: "left" | "right"): React.CSSProperties => {
+  const overhang = -TAB_FLARE_RADIUS + 1;
+  const mask = tabFlareNotchMask(side);
+  return {
+    ...(side === "left" ? { left: overhang } : { right: overhang }),
+    backgroundImage: tabFlareGradient(side),
+    maskImage: mask,
+    WebkitMaskImage: mask,
+  };
 };
 
 type TabSnapshot = {
@@ -256,6 +294,13 @@ function SortableTabItem({
       {...attributes}
       {...listeners}
       onClick={handleClick}
+      // Browser convention: middle click closes the tab. Pinned (and sole)
+      // tabs suppress the close affordance, so middle click follows suit.
+      onAuxClick={(e) => {
+        if (e.button !== 1 || !showCloseButton) return;
+        e.preventDefault();
+        handleClose(e);
+      }}
       aria-label={tab.pinned ? `${title} (pinned)` : title}
       data-tab-active={isActive ? "true" : undefined}
       data-tab-entering={isEntering ? "true" : undefined}
@@ -331,15 +376,17 @@ function SortableTabItem({
               isDragging && "opacity-60",
             )}
           >
-            <span className="absolute inset-x-0 top-0 bottom-2.5 rounded-t-lg border border-b-0 border-surface-border bg-page-canvas" />
+            {/* Keep the fill inside the translucent keyline so it matches the
+                flare arcs and content card ring. */}
+            <span className="absolute inset-x-0 top-0 bottom-2.5 rounded-t-lg border border-b-0 border-surface-border bg-page-canvas bg-clip-padding" />
             <span className="absolute inset-x-0 bottom-0 h-2.5 bg-page-canvas" />
             <span
-              className="absolute bottom-0 size-2.5"
-              style={{ left: -TAB_FLARE_RADIUS + 1, background: tabFlareBackground("left") }}
+              className={cn("absolute bottom-0 size-2.5", SIDEBAR_WRAPPER_FILL_CLASS)}
+              style={tabFlareStyle("left")}
             />
             <span
-              className="absolute bottom-0 size-2.5"
-              style={{ right: -TAB_FLARE_RADIUS + 1, background: tabFlareBackground("right") }}
+              className={cn("absolute bottom-0 size-2.5", SIDEBAR_WRAPPER_FILL_CLASS)}
+              style={tabFlareStyle("right")}
             />
           </span>
         ) : (

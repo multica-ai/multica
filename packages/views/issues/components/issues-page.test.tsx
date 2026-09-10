@@ -51,6 +51,8 @@ vi.mock("../../navigation", () => ({
     </a>
   ),
   useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  resolveClickIntent: () => "push",
+  useIntentNavigate: () => () => {},
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -115,7 +117,9 @@ const mockListIssueTableRows = vi.hoisted(() =>
         next_cursor: null,
       };
     }
-    const status = request.group_key?.replace(/^status:/, "");
+    // Board / list surfaces page by CATEGORY since MUL-6243. This fixture
+    // holds only built-in statuses, where a key IS its own category.
+    const status = request.group_key?.replace(/^status(_category)?:/, "");
     const response = await mockListIssues({
       status,
       limit: 50,
@@ -268,8 +272,8 @@ vi.mock("@multica/core/api", () => ({
 
 // Mock issue config
 vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"],
+  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"],
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -316,6 +320,7 @@ const mockViewState = {
     { key: "labels", width: 220 },
   ],
   listCollapsedStatuses: [] as string[],
+  hiddenStatusCategories: [] as string[],
   setViewMode: vi.fn(),
   setGrouping: vi.fn(),
   toggleStatusFilter: vi.fn(),
@@ -374,6 +379,22 @@ vi.mock("@multica/core/issues/stores/view-store", () => ({
     { key: "labels", label: "Labels" },
     { key: "childProgress", label: "Sub-issue progress" },
   ],
+  cardPropertyOptionsForView: () => [
+    { key: "priority", label: "Priority" },
+    { key: "description", label: "Description" },
+    { key: "assignee", label: "Assignee" },
+    { key: "dueDate", label: "Due date" },
+    { key: "project", label: "Project" },
+    { key: "labels", label: "Labels" },
+    { key: "childProgress", label: "Sub-issue progress" },
+  ],
+  sortOptionsForView: () => [
+    { value: "position", label: "Manual" },
+    { value: "priority", label: "Priority" },
+    { value: "due_date", label: "Due date" },
+    { value: "created_at", label: "Created date" },
+    { value: "title", label: "Title" },
+  ],
 }));
 
 vi.mock("@multica/core/issues/stores/view-store-context", () => ({
@@ -387,11 +408,12 @@ let mockScope = "all";
 vi.mock("@multica/core/issues/stores/issues-scope-store", () => ({
   useIssuesScopeStore: Object.assign(
     (selector?: any) => {
-      const state = { scope: mockScope, setScope: vi.fn() };
+      const state = { scopes: { issues: mockScope }, setScope: vi.fn() };
       return selector ? selector(state) : state;
     },
-    { getState: () => ({ scope: mockScope, setScope: vi.fn() }) },
+    { getState: () => ({ scopes: { issues: mockScope }, setScope: vi.fn() }) },
   ),
+  useIssuesScope: () => mockScope,
 }));
 
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
@@ -455,6 +477,7 @@ vi.mock("@dnd-kit/core", () => {
 vi.mock("@dnd-kit/sortable", () => ({
   SortableContext: ({ children }: any) => children,
   verticalListSortingStrategy: {},
+  horizontalListSortingStrategy: {},
   arrayMove: vi.fn(),
   useSortable: () => ({
     attributes: {},
@@ -467,7 +490,10 @@ vi.mock("@dnd-kit/sortable", () => ({
 }));
 
 vi.mock("@dnd-kit/utilities", () => ({
-  CSS: { Transform: { toString: () => undefined } },
+  CSS: {
+    Transform: { toString: () => undefined },
+    Translate: { toString: () => undefined },
+  },
 }));
 
 // Mock @base-ui/react/accordion (used by ListView)

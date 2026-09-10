@@ -999,7 +999,7 @@ func TestHTTPClient_SendInteractiveCard_TokenExpired_InvalidatesCache(t *testing
 		fake.sendN.Add(1)
 		n := sendCalls.Add(1)
 		if n == 1 {
-			writeJSON(w, map[string]any{"code": codeTokenExpired, "msg": "expired"})
+			writeJSON(w, map[string]any{"code": codeTenantTokenInvalid, "msg": "expired"})
 			return
 		}
 		writeJSON(w, map[string]any{"code": 0, "data": map[string]string{"message_id": "om_ok"}})
@@ -1104,6 +1104,36 @@ func TestHTTPClient_SendBindingPromptCard_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(capturedBody["content"], "去绑定") {
 		t.Errorf("binding card should carry the localized CTA: %q", capturedBody["content"])
+	}
+}
+
+func TestHTTPClient_SendBindingPromptCard_NoAvailabilityReturnsAPIError(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_bind_no_avail", 7200)
+
+	fake.mux.HandleFunc("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		fake.bindN.Add(1)
+		writeJSON(w, map[string]any{"code": 230013, "msg": "Bot has NO availability to this user.", "data": map[string]any{}})
+	})
+
+	c := newTestClient(fake, time.Now)
+	err := c.SendBindingPromptCard(context.Background(), BindingPromptParams{
+		InstallationID: testCreds(),
+		OpenID:         OpenID("ou_user_1"),
+		BindURL:        "https://multica.test/lark/bind?token=abc",
+	})
+	if err == nil {
+		t.Fatal("expected SendBindingPromptCard to fail")
+	}
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.Code != 230013 {
+		t.Fatalf("expected code=230013, got %d", apiErr.Code)
+	}
+	if apiErr.Msg != "Bot has NO availability to this user." {
+		t.Fatalf("unexpected msg: %q", apiErr.Msg)
 	}
 }
 

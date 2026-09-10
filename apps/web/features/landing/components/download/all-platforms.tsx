@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { useLocale } from "../../i18n";
-import type { DownloadAssets } from "../../utils/parse-release-assets";
+import {
+  hasCompleteAssetSet,
+  type DownloadAssets,
+} from "../../utils/parse-release-assets";
 import { AppleIcon, LinuxIcon, WindowsIcon } from "./os-icons";
 
 interface Props {
@@ -126,7 +129,9 @@ export function AllPlatforms({
           />
         </div>
 
-        {isFallbackNeeded(assets) ? (
+        {/* Some row is missing its link — surface the GitHub fallback so
+            users on an orphaned row still have a way out. */}
+        {!hasCompleteAssetSet(assets) ? (
           <p className="mt-6 text-label text-[#0a0d12]/60">
             <Link
               href={fallbackHref}
@@ -193,13 +198,4 @@ function Row({ icon, label, formats, unavailable, isLast }: RowProps) {
       </div>
     </div>
   );
-}
-
-// Twelve desktop artifacts are expected per release (four Mac,
-// two Windows, six Linux). If any are missing, surface the GitHub
-// fallback link so users on an orphaned row have a way out.
-const EXPECTED_ASSET_COUNT = 12;
-
-function isFallbackNeeded(assets: DownloadAssets): boolean {
-  return Object.values(assets).filter(Boolean).length < EXPECTED_ASSET_COUNT;
 }

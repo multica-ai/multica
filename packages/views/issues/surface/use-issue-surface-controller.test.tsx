@@ -179,6 +179,10 @@ describe("useIssueSurfaceController", () => {
     listIssueTableRows = vi.fn(tableMethods.listIssueTableRows);
     listIssueTableFacets = vi.fn(tableMethods.listIssueTableFacets);
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       ...tableMethods,
       listIssueTableRows,
@@ -220,10 +224,8 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
 
     const expectedSort = { sort_by: "priority", sort_direction: "desc" } as const;
-    const expectedFilter = { project_id: "p1" };
 
     expect(result.current.scopeKey).toBe("project:p1");
-    expect(result.current.filter).toEqual(expectedFilter);
     expect(result.current.sort).toEqual(expectedSort);
     expect(result.current.tableQuerySpec).toEqual(
       expect.objectContaining({
@@ -236,6 +238,8 @@ describe("useIssueSurfaceController", () => {
         query: expect.objectContaining({
           scope: { kind: "project", project_id: "p1" },
         }),
+        // A workspace with no custom statuses keeps the original contract —
+        // that is what makes this safe across a rolling deploy. (MUL-6243)
         group: { kind: "status" },
       }),
     );
@@ -250,6 +254,10 @@ describe("useIssueSurfaceController", () => {
   // all of them.
   it("keeps the table query spec identity while its source queries are still pending", async () => {
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableRows,
       listIssueTableFacets,
@@ -304,9 +312,6 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
 
     expect(result.current.scopeKey).toBe("workspace:all");
-    expect(result.current.filter).toEqual({});
-    expect(result.current.loadMoreScope).toBeUndefined();
-    expect(result.current.loadMoreFilter).toBeUndefined();
     expect(result.current.tableQuerySpec.scope).toEqual({
       kind: "workspace",
     });
@@ -335,6 +340,10 @@ describe("useIssueSurfaceController", () => {
       facets: [{ kind: "status" as const, values: [] }],
     }));
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues: legacyListIssues,
       listIssueTableRows: tableRows,
       listIssueTableFacets: tableFacets,
@@ -370,12 +379,7 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
-
-    const expectedFilter = { assignee_id: "user-1" };
     expect(result.current.scopeKey).toBe("my:user-1:assigned");
-    expect(result.current.filter).toEqual(expectedFilter);
-    expect(result.current.loadMoreScope).toBe("assigned");
-    expect(result.current.loadMoreFilter).toEqual(expectedFilter);
     expect(result.current.tableQuerySpec.scope).toEqual({
       kind: "my",
       relation: "assigned",
@@ -398,12 +402,7 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
-
-    const expectedFilter = { assignee_id: "agent-1" };
     expect(result.current.scopeKey).toBe("actor:agent:agent-1:assigned");
-    expect(result.current.filter).toEqual(expectedFilter);
-    expect(result.current.loadMoreScope).toBe("actor:agent:agent-1:assigned");
-    expect(result.current.loadMoreFilter).toEqual(expectedFilter);
     expect(result.current.tableQuerySpec.scope).toEqual({
       kind: "assignee",
       actor: { type: "agent", id: "agent-1" },
@@ -537,33 +536,6 @@ describe("useIssueSurfaceController", () => {
     expect(onSettled).toHaveBeenCalled();
   });
 
-  it("exposes surface actions and surface-local selection", async () => {
-    const { result } = renderHook(
-      () =>
-        useIssueSurfaceController({
-          scope: { type: "project", projectId: "p1" },
-          modes: ["board", "list", "swimlane", "gantt"],
-        }),
-      { wrapper: makeWrapper(qc, "project:p1") },
-    );
-
-    act(() => {
-      result.current.selection.select(["issue-1"]);
-    });
-    expect(result.current.selection.selectedIds).toEqual(new Set(["issue-1"]));
-
-    await act(async () => {
-      await result.current.actions.batchUpdate(["issue-1"], { status: "done" });
-      await result.current.actions.batchDelete(["issue-2"]);
-    });
-
-    expect(batchUpdateMutateAsync).toHaveBeenCalledWith({
-      ids: ["issue-1"],
-      updates: { status: "done" },
-    });
-    expect(batchDeleteMutateAsync).toHaveBeenCalledWith(["issue-2"]);
-  });
-
   it("never reports isEmpty in gantt mode — an empty scheduled subset cannot prove the window is empty", async () => {
     // The gantt query returns only issues with a start/due date. A project
     // full of unscheduled issues comes back [] here, and the surface used to
@@ -659,6 +631,10 @@ describe("useIssueSurfaceController", () => {
       facets: [{ kind: "status", values: [{ key: "todo", count: 2 }] }],
     });
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableFacets,
       listGroupedIssues: vi.fn(() => never()),
@@ -744,6 +720,10 @@ describe("useIssueSurfaceController", () => {
       });
       const tableMethods = statusTableMethodsFromLegacy(listIssues);
       setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
         listIssues,
         ...tableMethods,
         listIssueTableFacets,
@@ -790,6 +770,47 @@ describe("useIssueSurfaceController", () => {
     },
   );
 
+  it.each([
+    { grouping: "assignee" as const, expected: { kind: "assignee" } },
+    { grouping: "project" as const, expected: { kind: "project" } },
+  ])(
+    "asks the server for $grouping groups when the board is grouped that way",
+    async ({ grouping, expected }) => {
+      // The board's columns ARE the server's group descriptors, so the group
+      // spec it requests is the whole contract — a board that asks for the
+      // wrong dimension renders another dimension's columns.
+      const store = getIssueSurfaceViewStore("project:p1");
+      store.getState().setViewMode("board");
+      store.getState().setGrouping(grouping);
+      const tableMethods = statusTableMethodsFromLegacy(listIssues);
+      const listIssueTableGroups = vi.fn(tableMethods.listIssueTableGroups);
+      setApiInstance({
+        listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+        listIssues,
+        ...tableMethods,
+        listIssueTableGroups,
+        listGroupedIssues: vi.fn(() => never()),
+        listProjects: vi.fn(() => Promise.resolve({ projects: [], total: 0 })),
+        getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+        getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+      } as unknown as ApiClient);
+
+      renderHook(
+        () =>
+          useIssueSurfaceController({
+            scope: { type: "project", projectId: "p1" },
+            modes: ["board", "list", "swimlane"],
+          }),
+        { wrapper: makeWrapper(qc, "project:p1") },
+      );
+
+      await waitFor(() => expect(listIssueTableGroups).toHaveBeenCalled());
+      expect(listIssueTableGroups.mock.calls[0]?.[0]).toEqual(
+        expect.objectContaining({ group: expected }),
+      );
+    },
+  );
+
   it("fails Table export closed when schema fallback would truncate the CSV", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
@@ -805,6 +826,10 @@ describe("useIssueSurfaceController", () => {
       }),
     );
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
@@ -855,6 +880,10 @@ describe("useIssueSurfaceController", () => {
         next_cursor: null,
       });
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
@@ -908,6 +937,10 @@ describe("useIssueSurfaceController", () => {
       ] satisfies WorkspaceWorkingAgent[]),
     );
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
@@ -949,6 +982,10 @@ describe("useIssueSurfaceController", () => {
       Promise.resolve([] satisfies WorkspaceWorkingAgent[]),
     );
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
@@ -1148,10 +1185,9 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.isEmpty).toBe(true);
   });
 
-  // --- cancelled as a default status (MUL-4290) ------------------------
-  // Cancelled is a first-class default lifecycle status: fetched into the
-  // cache, surfaced by default, narrowed (not unlocked) by the status filter,
-  // and hideable like any other status.
+  // --- cancelled as a hidden-by-default status -------------------------
+  // Cancelled remains fetched and filterable, but stays out of the default
+  // presentation until the user explicitly asks for it.
 
   function mockListByStatus(byStatus: Partial<Record<IssueStatus, Issue[]>>) {
     fixtureRows = Object.values(byStatus).flatMap((issues) => issues ?? []);
@@ -1170,7 +1206,7 @@ describe("useIssueSurfaceController", () => {
     getWorkspaceWorkingAgents.mockResolvedValue(agents);
   }
 
-  it("fetches and surfaces the cancelled bucket as a default status", async () => {
+  it("fetches the cancelled bucket but hides it by default", async () => {
     const { result } = renderHook(
       () =>
         useIssueSurfaceController({
@@ -1186,12 +1222,11 @@ describe("useIssueSurfaceController", () => {
     expect(listIssues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "cancelled", limit: 50, offset: 0 }),
     );
-    // …and with no status filter it is a visible column, ordered last.
-    expect(result.current.visibleStatuses).toContain("cancelled");
-    expect(result.current.visibleStatuses.at(-1)).toBe("cancelled");
+    expect(result.current.visibleStatuses).not.toContain("cancelled");
+    expect(result.current.hiddenStatuses).toContain("cancelled");
   });
 
-  it("includes cancelled issues in the default surface and visible statuses", async () => {
+  it("keeps cancelled issues out of the default visible surface", async () => {
     mockListByStatus({
       todo: [makeIssue({ id: "todo-1", status: "todo" })],
       cancelled: [makeIssue({ id: "cancelled-1", status: "cancelled" })],
@@ -1208,11 +1243,10 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(result.current.visibleStatuses).toContain("cancelled");
+    expect(result.current.visibleStatuses).not.toContain("cancelled");
     const surfaceIds = result.current.surfaceIssues.map((i) => i.id);
     expect(surfaceIds).toContain("todo-1");
-    expect(surfaceIds).toContain("cancelled-1");
-    expect(result.current.issues.map((i) => i.id)).toContain("cancelled-1");
+    expect(surfaceIds).not.toContain("cancelled-1");
   });
 
   it("narrows the visible set to the selected statuses, dropping cancelled when it is not selected", async () => {

@@ -42,7 +42,8 @@ import {
   CollectionPageHeaderAction,
   CollectionPageState,
 } from "../../layout/collection-page";
-import { PageHeader } from "../../layout/page-header";
+import { PAGE_GUTTER, PAGE_RAIL, PageHeader } from "../../layout/page-header";
+import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../../navigation";
 import {
   getMikaOnboarding,
@@ -178,7 +179,7 @@ export function RuntimesPage({
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-[1440px] flex-col p-4 sm:p-6">
+          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex flex-col py-4 sm:py-6")}>
             {!agentsLoading &&
               !chatSessionsLoading &&
               memberNeedsMikaSetup(agents, chatSessions) &&
@@ -480,7 +481,7 @@ function MachineRow({ machine }: { machine: RuntimeMachine }) {
                 : t(($) => $.machine.metrics.local_daemon))}
           </span>
           {machine.isCurrent && (
-            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
+            <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
               {t(($) => $.machine.this_machine)}
             </span>
           )}
@@ -538,13 +539,13 @@ function ProviderIconStack({ providers }: { providers: string[] }) {
       {visible.map((provider) => (
         <span
           key={provider}
-          className="inline-flex h-5 w-5 items-center justify-center rounded bg-background ring-1 ring-border"
+          className="inline-flex h-5 w-5 items-center justify-center rounded-xs bg-background ring-1 ring-border"
         >
           <ProviderLogo provider={provider} className="h-3.5 w-3.5" />
         </span>
       ))}
       {extra > 0 && (
-        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-muted px-1 text-micro font-medium text-muted-foreground ring-1 ring-border">
+        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground ring-1 ring-border">
           +{extra}
         </span>
       )}
@@ -572,10 +573,10 @@ function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
 function RuntimesPageSkeleton() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PageHeader className="justify-between px-5">
+      <PageHeader>
         <Skeleton className="h-4 w-24" />
       </PageHeader>
-      <div className="mx-auto w-full max-w-[1440px] p-6">
+      <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-6")}>
         <div className="overflow-hidden rounded-lg border">
           {Array.from({ length: 5 }).map((_, index) => (
             <div key={index} className="flex h-[76px] items-center gap-3 border-b px-4 last:border-b-0">

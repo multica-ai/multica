@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, ExternalLink, MessagesSquare, Trash2 } from "lucide-react";
+import { ChevronRight, ExternalLink, Trash2 } from "lucide-react";
+import { SlackMark } from "./slack-mark";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -35,7 +36,7 @@ import { api } from "@multica/core/api";
 import type { SlackInstallation } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { openExternal } from "../../platform";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 
 // SlackTab is the workspace settings panel for Slack bot installations.
 // Listing is member-visible; the disconnect action is admin-only (the backend
@@ -90,19 +91,13 @@ export function SlackTab() {
 
   return (
     <div className="space-y-8">
-      <section className="space-y-1">
-        <p className="text-body text-muted-foreground">
-          {t(($) => $.slack.page_description)}
-        </p>
-      </section>
-
       {!configured ? (
         <Card>
           <CardContent className="space-y-2">
             <p className="text-body font-medium">{t(($) => $.slack.not_enabled_title)}</p>
             <p className="text-caption text-muted-foreground">
               {t(($) => $.slack.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-micro">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_SLACK_SECRET_KEY
               </code>{" "}
               {t(($) => $.slack.not_enabled_description_suffix)}{" "}
@@ -197,6 +192,7 @@ function InstallationRow({
   onDisconnect: () => void;
 }) {
   const { t } = useT("settings");
+  const locale = useLocale();
   const { getAgentName } = useActorName();
   const isActive = installation.status === "active";
   const agentName = getAgentName(installation.agent_id);
@@ -214,14 +210,14 @@ function InstallationRow({
           <p className="text-body font-medium">
             {agentName}
             {!isActive && (
-              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.slack.revoked_badge)}
               </span>
             )}
           </p>
           <p className="text-micro text-muted-foreground">
             {t(($) => $.slack.installed_at_label, {
-              when: new Date(installation.installed_at).toLocaleString(),
+              when: new Date(installation.installed_at).toLocaleString(locale),
             })}
           </p>
         </div>
@@ -373,7 +369,7 @@ export function SlackAgentBindButton({
         }
         data-testid="slack-agent-connect"
       >
-        <MessagesSquare className="h-3 w-3" />
+        <SlackMark className="h-3 w-3" />
         {t(($) => $.slack.bind_button)}
       </Button>
 
@@ -417,6 +413,8 @@ export function SlackAgentBindButton({
                 data-testid="slack-byo-bot-token"
                 value={botToken}
                 onChange={(e) => setBotToken(e.target.value)}
+                // Slack token prefix: a format hint, not copy.
+                // eslint-disable-next-line no-restricted-syntax
                 placeholder="xoxb-…"
                 autoComplete="off"
                 spellCheck={false}
@@ -433,6 +431,8 @@ export function SlackAgentBindButton({
                 data-testid="slack-byo-app-token"
                 value={appToken}
                 onChange={(e) => setAppToken(e.target.value)}
+                // Slack token prefix: a format hint, not copy.
+                // eslint-disable-next-line no-restricted-syntax
                 placeholder="xapp-…"
                 autoComplete="off"
                 spellCheck={false}

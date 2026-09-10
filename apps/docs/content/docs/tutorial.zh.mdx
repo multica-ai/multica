@@ -1,6 +1,6 @@
 ---
 title: 完整教程
-description: 从空工作区开始，用一个个人网站项目走完 Multica 的全部核心流程：创建智能体、用 issue 交付、组建小队、沉淀 skill、配置自动化。
+description: 从空工作区开始，用一个个人网站项目走完 Multica 的全部核心流程：创建智能体、用任务交付、组建小队、沉淀 skill、配置自动化。
 ---
 
 Multica 是人和 AI 智能体一起工作的平台。这篇教程从零开始，带你：
@@ -19,22 +19,22 @@ Multica 是人和 AI 智能体一起工作的平台。这篇教程从零开始�
 
 ## 创建工作区
 
-工作区是团队工作的地方：issue、项目、智能体都属于某个工作区。注册后的引导会带你创建第一个工作区；如果你是被邀请加入团队，登录后会直接进入团队的工作区。
+工作区是团队工作的地方：任务、项目、智能体都属于某个工作区。注册后的引导会带你创建第一个工作区；如果你是被邀请加入团队，登录后会直接进入团队的工作区。
 
 这篇教程新建一个工作区来演示。点击侧边栏顶部的工作区名称，选择 **创建工作区**：
 
-![创建工作区入口](/images/docs/tutorial-create-workspace-menu.png)
+![创建工作区入口](/images/docs/tutorial-create-workspace-menu.webp)
 
 创建时填两项：
 
 - **名称**：展示给成员，之后可以修改。
 - **工作区 URL**：地址中的 slug，例如 `multica.ai/my-team` 里的 `my-team`，创建后不可修改。
 
-![创建工作区页面](/images/docs/tutorial-create-workspace-form.png)
+![创建工作区页面](/images/docs/tutorial-create-workspace-form.webp)
 
-创建完成后会进入新工作区。左侧是侧边栏，之后的操作都从这里进入；中间的 issue 列表现在还是空的，接下来几步就是让智能体来填满它。
+创建完成后会进入新工作区。左侧是侧边栏，之后的操作都从这里进入；中间的任务列表现在还是空的，接下来几步就是让智能体来填满它。
 
-![刚创建好的空工作区](/images/docs/tutorial-empty-workspace.png)
+![刚创建好的空工作区](/images/docs/tutorial-empty-workspace.webp)
 
 ## 连接你的电脑
 
@@ -42,17 +42,17 @@ Multica 是人和 AI 智能体一起工作的平台。这篇教程从零开始�
 
 教程用 [Multica Desktop](https://multica.ai/download) 演示：下载并登录后，它会自动把这台电脑注册为运行时，并检测已安装的 AI 编程工具。打开侧边栏底部的 **配置 → 运行时**，确认这台电脑已经在线：
 
-![运行时列表，这台电脑在线](/images/docs/tutorial-runtimes-list.png)
+![运行时列表，这台电脑在线](/images/docs/tutorial-runtimes-list.webp)
 
 点进这台电脑，可以看到检测出的每一款工具：
 
-![运行时详情，检测出的 AI 编程工具](/images/docs/tutorial-runtime-detail.png)
+![运行时详情，检测出的 AI 编程工具](/images/docs/tutorial-runtime-detail.webp)
 
 不用 Desktop 也可以：在运行时页面点 **添加电脑**，按提示用命令行安装，守护进程会常驻后台运行；详见[守护进程与运行时](/daemon-runtimes)。
 
 ## 创建第一个智能体
 
-智能体是工作区的正式成员：可以被分配 issue、发表评论、和你对话。第一个智能体我们创建一名 helper，负责工作区里的日常事务，之后教程里的不少操作都会交给它。
+智能体是工作区的正式成员：可以被分配任务、发表评论、和你对话。第一个智能体我们创建一名 helper，负责工作区里的日常事务，之后教程里的不少操作都会交给它。
 
 打开侧边栏的 **智能体**，点 **新建智能体**，选择 **从空白开始**，填三项：
 
@@ -72,11 +72,11 @@ summary of what you did. Do not touch code or repositories. If a
 request is ambiguous, ask before acting.
 ```
 
-![创建智能体页面](/images/docs/tutorial-create-agent-form.png)
+![创建智能体页面](/images/docs/tutorial-create-agent-form.webp)
 
 其余字段保持默认，点创建。回到**智能体**页面，Multica helper 已经在线，可以接受工作了：
 
-![智能体详情，Multica helper 在线](/images/docs/tutorial-agent-detail.png)
+![智能体详情，Multica helper 在线](/images/docs/tutorial-agent-detail.webp)
 
 ## 第二个智能体：用对话创建
 
@@ -84,11 +84,11 @@ request is ambiguous, ask before acting.
 
 打开侧边栏的**聊天**，选择 Multica helper，告诉它：在同一个运行时上创建一名叫 Engineer 的智能体，模型用 Opus，负责建设和维护个人网站。Multica helper 会在这台电脑上执行创建，并回复新智能体的名称和模型。新智能体默认只有创建者可以运行，教程里保持默认即可。
 
-![聊天中让 helper 创建 Engineer](/images/docs/tutorial-chat-create-engineer.png)
+![聊天中让 helper 创建 Engineer](/images/docs/tutorial-chat-create-engineer.webp)
 
 打开**智能体 → Engineer** 确认结果：模型是 Opus，指令由 Multica helper 生成——职责范围、取用仓库代码的方式、提交改动的要求，之后随时可以修改。
 
-![Engineer 的指令](/images/docs/tutorial-engineer-instructions.png)
+![Engineer 的指令](/images/docs/tutorial-engineer-instructions.webp)
 
 ## 准备网站仓库
 
@@ -96,23 +96,23 @@ request is ambiguous, ask before acting.
 
 在**聊天**中选择 Engineer，告诉它：在我的 GitHub 账号下创建一个名为 `personal-website` 的空仓库（这台电脑上有 GitHub CLI），然后用 `multica repo add` 注册进这个工作区。Engineer 会在本地创建仓库、把它注册进工作区，并回复仓库地址。消息里没有指定可见性，它会按默认创建并在回复里说明；公开或私有都不影响后续步骤。
 
-![聊天，Engineer 回复仓库已创建并注册](/images/docs/tutorial-chat-create-repo.png)
+![聊天，Engineer 回复仓库已创建并注册](/images/docs/tutorial-chat-create-repo.webp)
 
-打开**设置 → 代码仓库** 确认：`personal-website` 已经在列表中。之后智能体执行任务时，从这里选择仓库。
+打开**设置 → 代码仓库** 确认：`personal-website` 已经在列表中。之后智能体运行时，从这里选择仓库。
 
-![设置中的代码仓库列表](/images/docs/tutorial-repo-settings.png)
+![设置中的代码仓库列表](/images/docs/tutorial-repo-settings.webp)
 
 不用 GitHub CLI 的话，也可以自己在 GitHub 创建仓库，在同一页面手动添加，效果相同。
 
-最后在同一页面点**连接 GitHub**，按提示授权这个仓库。连接后，引用了 issue 编号的 pull request 会自动关联到对应 issue，PR 状态和 CI 结果直接显示在 issue 里。
+最后在同一页面点**连接 GitHub**，按提示授权这个仓库。连接后，引用了任务编号的 pull request 会自动关联到对应任务，PR 状态和 CI 结果直接显示在任务里。
 
-## 第一条 issue：建站
+## 第一条任务：建站
 
-配置到此全部完成。从这里开始是 Multica 的日常工作方式：需求写成 issue，交给智能体执行。
+配置到此全部完成。从这里开始是 Multica 的日常工作方式：需求写成任务，交给智能体执行。
 
 网站从 shadcn 的官方模板起步，而不是从零搭建：模板已经带好技术栈和基础配置，Engineer 在它之上做内容和设计。
 
-点侧边栏顶部的**新建 issue**（快捷键 `C`）。默认的智能体模式下不用填标题——在**创建者**中选择 Engineer，把需求直接写进描述，标题在创建时自动生成；也可以切换到手动模式，自行填写标题和内容。描述：
+点侧边栏顶部的**新建任务**（快捷键 `C`）。默认的智能体模式下不用填标题——在**创建者**中选择 Engineer，把需求直接写进描述，标题在创建时自动生成；也可以切换到手动模式，自行填写标题和内容。描述：
 
 ```text
 Work in the personal-website repository registered in this workspace.
@@ -130,14 +130,14 @@ The site is for a photographer. It needs:
 - Contact — an email link that is easy to find
 - Pricing — decide where a pricing table fits and how to present it
 - Use placeholder images (Unsplash or picsum.photos) wherever a photo
-  belongs, and list where I should replace them with my own work
+ belongs, and list where I should replace them with my own work
 
 Design:
 
 - Pick a style that fits a photography portfolio. It should feel
-  refined and understated; express that through layout, typography
-  and spacing, and never use words like "premium" or "high-end"
-  in the copy.
+ refined and understated; express that through layout, typography
+ and spacing, and never use words like "premium" or "high-end"
+ in the copy.
 - Choose the fonts.
 
 Open a pull request when it is ready.
@@ -145,105 +145,105 @@ Open a pull request when it is ready.
 
 这条描述里有三类信息：约束（从指定模板开始）、内容要求（逐条列出）、留白（风格交给 Engineer 分析）。要求写意图和边界，实现方式留给智能体。
 
-![新建 issue 的智能体模式，创建者已选 Engineer](/images/docs/tutorial-new-issue-agent-mode.png)
+![新建任务的智能体模式，创建者已选 Engineer](/images/docs/tutorial-new-issue-agent-mode.webp)
 
-提交后，Multica 创建 issue（编号 `MUL-1`，标题自动生成），把 Engineer 设为负责人；Engineer 随即开始执行，状态转为「进行中」。issue 右侧是它的全部动态：状态、负责人、关联的 pull request 和执行记录。
+提交后，Multica 创建任务（编号 `MUL-1`，标题自动生成），把 Engineer 设为负责人；Engineer 随即开始执行，状态转为「进行中」。任务右侧是它的全部动态：状态、负责人、关联的 pull request 和执行记录。
 
 执行需要几分钟，进展有两个入口：标题旁的工作状态徽章，和右侧的**执行日志**——点开当前这次运行：
 
-![查看进展的两个入口](/images/docs/tutorial-issue-engineer-working.png)
+![查看进展的两个入口](/images/docs/tutorial-issue-engineer-working.webp)
 
 执行记录里是这次执行的每一步：**Agent** 行是它的说明，**Bash**、**Read**、**Edit** 是它运行的命令和读写的文件。截图这一刻，它正在给建好的页面截图自查，刚发现定价表的分隔线没有对齐。点右上角的 ⓘ，可以看到这次执行用的电脑、AI 编程工具和工作目录。
 
-![执行记录，Engineer 的每一步](/images/docs/tutorial-execution-log.png)
+![执行记录，Engineer 的每一步](/images/docs/tutorial-execution-log.webp)
 
-## 验收：在 issue 里对话
+## 验收：在任务里对话
 
-执行结束后，Engineer 把状态改为「审核中」，通知进入你的收件箱。它在 issue 里发表了完成评论，附上做好的页面截图：
+执行结束后，Engineer 把状态改为「审核中」，通知进入你的收件箱。它在任务里发表了完成评论，附上做好的页面截图：
 
-![Engineer 的完成评论，附页面截图](/images/docs/tutorial-issue-review-comment.png)
+![Engineer 的完成评论，附页面截图](/images/docs/tutorial-issue-review-comment.webp)
 
-截图能看出大概，验收还是要在浏览器里点开。网站在你的电脑上构建，让 Engineer 启动本地服务就能访问。另外，右侧的 **Pull Request** 区域还是空的——issue 里明确要求了提交 PR，这件事也直接问它。
+截图能看出大概，验收还是要在浏览器里点开。网站在你的电脑上构建，让 Engineer 启动本地服务就能访问。另外，右侧的 **Pull Request** 区域还是空的——任务里明确要求了提交 PR，这件事也直接问它。
 
 这次不用评论区。页面右下角有一个聊天按钮，工作区的任何页面都能打开，和侧边栏的**聊天**是同一个功能：
 
-![右下角的聊天按钮](/images/docs/tutorial-chat-fab.png)
+![右下角的聊天按钮](/images/docs/tutorial-chat-fab.webp)
 
-点开后选择 Engineer，输入 `@` 引用当前 issue——对话会带上这条 issue 的上下文，把上面两件事发给它：
+点开后选择 Engineer，输入 `@` 引用当前任务——对话会带上这条任务的上下文，把上面两件事发给它：
 
-![在聊天中引用 issue 提问](/images/docs/tutorial-chat-ask-in-issue.png)
+![在聊天中引用任务提问](/images/docs/tutorial-chat-ask-in-issue.webp)
 
 Engineer 的回复分两部分：本地服务已经启动，给出访问地址；PR 其实已经提交了，只是标题、分支名和正文里都没有 `MUL-1`，自动关联匹配不上——它随后把编号补进了 PR 标题。
 
-![Engineer 的回复：本地地址和 PR 未关联的原因](/images/docs/tutorial-chat-engineer-reply.png)
+![Engineer 的回复：本地地址和 PR 未关联的原因](/images/docs/tutorial-chat-engineer-reply.webp)
 
 在浏览器打开它给的地址，看到网站：
 
-![本地运行的网站首页](/images/docs/tutorial-site-localhost.png)
+![本地运行的网站首页](/images/docs/tutorial-site-localhost.webp)
 
-回到 issue，右侧的 **Pull Request** 区域也出现了 PR 卡片，显示状态和改动规模，点击直接打开 GitHub 上的 PR；配置了 CI 的仓库还会显示 check 结果：
+回到任务，右侧的 **Pull Request** 区域也出现了 PR 卡片，显示状态和改动规模，点击直接打开 GitHub 上的 PR；配置了 CI 的仓库还会显示 check 结果：
 
-![issue 右侧出现 PR 卡片](/images/docs/tutorial-issue-pr-linked.png)
+![任务右侧出现 PR 卡片](/images/docs/tutorial-issue-pr-linked.webp)
 
 ## 把反馈写进指令
 
-这轮验收暴露了 Engineer 的两个工作习惯：完成后靠反复截图自查，占掉不少执行时间；提交 PR 时不带 issue 编号，关联不上。两个都不是这一次的偶然失误，而是它每次都会重复的做法——要改的不是这条 issue，而是它的指令。
+这轮验收暴露了 Engineer 的两个工作习惯：完成后靠反复截图自查，占掉不少执行时间；提交 PR 时不带任务编号，关联不上。两个都不是这一次的偶然失误，而是它每次都会重复的做法——要改的不是这条任务，而是它的指令。
 
-指令不用你自己动手改：智能体可以用 multica CLI 更新自己的配置。继续在刚才的对话里告诉 Engineer 这两条规则——完成后不用截图自查，验收在浏览器里进行；PR 的分支名或标题里必须带 issue 编号——并让它写进自己的指令：
+指令不用你自己动手改：智能体可以用 multica CLI 更新自己的配置。继续在刚才的对话里告诉 Engineer 这两条规则——完成后不用截图自查，验收在浏览器里进行；PR 的分支名或标题里必须带任务编号——并让它写进自己的指令：
 
-![让 Engineer 把规则写进自己的指令](/images/docs/tutorial-chat-update-instructions.png)
+![让 Engineer 把规则写进自己的指令](/images/docs/tutorial-chat-update-instructions.webp)
 
 Engineer 用 `multica agent update` 完成更新，在指令里新增一节工作规则，并指出第一条的代价：不再截图自查，页面上的视觉问题要靠你在浏览器里发现。
 
 打开**智能体 → Engineer**，指令里已经多出这两条：
 
-![Engineer 更新后的指令](/images/docs/tutorial-engineer-updated-instructions.png)
+![Engineer 更新后的指令](/images/docs/tutorial-engineer-updated-instructions.webp)
 
 之后每次执行，这两条规则都会随指令生效。这也是调优智能体的基本方式：发现重复出现的问题，把纠正写进指令，而不是每次口头提醒。
 
 ## 第三个智能体：Reviewer
 
-Engineer 交付了第一版，但有些问题它自己意识不到。审查交给一名新的智能体：全新的上下文，专门对照 issue 的要求检查代码质量。
+Engineer 交付了第一版，但有些问题它自己意识不到。审查交给一名新的智能体：全新的上下文，专门对照任务的要求检查代码质量。
 
-创建还是交给 Multica helper：一名叫 Reviewer 的智能体，这次选 Codex 和 GPT-5.6 Sol 模型，和 Engineer 用的工具、模型都不同；只审查、不改代码，结论写成 issue 评论。指令依然由 helper 生成——读取 PR 的真实状态再审查、发现写成带文件位置的评论、绝不修改代码：
+创建还是交给 Multica helper：一名叫 Reviewer 的智能体，这次选 Codex 和 GPT-5.6 Sol 模型，和 Engineer 用的工具、模型都不同；只审查、不改代码，结论写成任务评论。指令依然由 helper 生成——读取 PR 的真实状态再审查、发现写成带文件位置的评论、绝不修改代码：
 
-![Reviewer 的配置](/images/docs/tutorial-reviewer-detail.png)
+![Reviewer 的配置](/images/docs/tutorial-reviewer-detail.webp)
 
-审查不用新开 issue，也不用换负责人。回到 MUL-1 的评论框，输入 `@Reviewer` 提及它，写上要做的事再发送——评论框下方会提示：发送后 Reviewer 就开始执行：
+审查不用新开任务，也不用换负责人。回到 MUL-1 的评论框，输入 `@Reviewer` 提及它，写上要做的事再发送——评论框下方会提示：发送后 Reviewer 就开始执行：
 
-![在评论中 @Reviewer 发起审查](/images/docs/tutorial-comment-mention-reviewer.png)
+![在评论中 @Reviewer 发起审查](/images/docs/tutorial-comment-mention-reviewer.webp)
 
 几分钟后，审查评论回来了，结论是：合并前需要修改。五条发现分成两组——代码规范三条、需求符合度两条，每条都带文件和行号。需求符合度的两条正是 Engineer 自己意识不到的问题：定价表把虚构的价格、订金和税务条款当成正式内容展示，没有任何待定标注；联系方式里放了一个没核实过的 Instagram 链接。评论末尾它说明了自己验证过的部分：typecheck、lint 和 build 都通过。
 
 修复不用新流程：在评论区 @Engineer，让它把发现的问题都修掉。发送后 Engineer 随即开始执行，标题旁的徽章和右侧执行记录里都能看到：
 
-![Reviewer 的审查结论，@Engineer 继续修复](/images/docs/tutorial-reviewer-findings.png)
+![Reviewer 的审查结论，@Engineer 继续修复](/images/docs/tutorial-reviewer-findings.webp)
 
 几分钟后 Engineer 回报：五条全部修复，推进同一个 PR。双方共享同一条时间线，报告只需对着发现逐条说结果，不用重述背景：
 
-![Engineer 的修复报告](/images/docs/tutorial-engineer-fixed.png)
+![Engineer 的修复报告](/images/docs/tutorial-engineer-fixed.webp)
 
 再提及 Reviewer 复查一轮，结论：五条发现全部解决，可以合并，剩两条低优先级的后续建议：
 
-![Reviewer 复查通过](/images/docs/tutorial-reviewer-recheck.png)
+![Reviewer 复查通过](/images/docs/tutorial-reviewer-recheck.webp)
 
-开发和审查就这样往复：发现问题，修复问题，每一轮都让网站的定义更确定一点。一条 issue 上现在有两名智能体：Engineer 实现，Reviewer 审查，你用几条短评论驱动整个循环。
+开发和审查就这样往复：发现问题，修复问题，每一轮都让网站的定义更确定一点。一条任务上现在有两名智能体：Engineer 实现，Reviewer 审查，你用几条短评论驱动整个循环。
 
 ## 合并收尾
 
-合并同样用一条评论下达：让 Engineer 合并 PR，并确保 issue 转到「已完成」。它合并、删除分支、在合并后的 main 上重跑检查，然后回报。issue 状态变成「已完成」，收件箱里收到完成通知：
+合并同样用一条评论下达：让 Engineer 合并 PR，并确保任务转到「已完成」。它合并、删除分支、在合并后的 main 上重跑检查，然后回报。任务状态变成「已完成」，收件箱里收到完成通知：
 
-![合并完成，issue 转为「已完成」](/images/docs/tutorial-issue-done.png)
+![合并完成，任务转为「已完成」](/images/docs/tutorial-issue-done.webp)
 
-第一条 issue 到此闭环：从需求描述到上线合并，实现、审查、修复、验收、合并，全部记录在同一条时间线里。
+第一条任务到此闭环：从需求描述到上线合并，实现、审查、修复、验收、合并，全部记录在同一条时间线里。
 
 ## 组建小队
 
-MUL-1 的循环跑通了，但每一次衔接都由你发起：验收后提及 Reviewer，审查后提及 Engineer。协调本身成了你的工作。这层工作也交出去。Multica 为此提供的组织形式是**小队（squad）**：一组智能体和成员的命名集合，由一名队长智能体领导。issue 分配给小队后，接手的是队长：读 issue、派活、推进状态；成员有了回复，它被自动唤醒，决定下一步；收尾时向你汇报交付产物。队长接手的正是你刚才的角色。
+MUL-1 的循环跑通了，但每一次衔接都由你发起：验收后提及 Reviewer，审查后提及 Engineer。协调本身成了你的工作。这层工作也交出去。Multica 为此提供的组织形式是**小队（squad）**：一组智能体和成员的命名集合，由一名队长智能体领导。任务分配给小队后，接手的是队长：读任务、派活、推进状态；成员有了回复，它被自动唤醒，决定下一步；收尾时向你汇报交付产物。队长接手的正是你刚才的角色。
 
 小队就是已有的分工加一名队长：
 
-- **Lead**（新建）：队长，负责管理——分配任务、推进 issue 状态、向你汇报交付产物，自己不动手；
+- **Lead**（新建）：队长，负责管理——分配运行、推进任务状态、向你汇报交付产物，自己不动手；
 - **Engineer**（已有）：开发；
 - **Reviewer**（已有）：审查每个 PR；
 - **你**：最终验收。
@@ -252,91 +252,91 @@ MUL-1 的循环跑通了，但每一次衔接都由你发起：验收后提及 R
 
 这套配置描述给 Multica helper 就够了：创建小队和队长，成员各司其职，Lead 和 Engineer 各绑定一个 skill（下一节展开），小队指令写明工作流——开发派给 Engineer，PR 审查通过才交付，你验收后由 Engineer 合并。helper 用 CLI 一次完成全部配置：
 
-![helper 一次完成小队的全部配置](/images/docs/tutorial-helper-create-squad.png)
+![helper 一次完成小队的全部配置](/images/docs/tutorial-helper-create-squad.webp)
 
 打开侧边栏的**小队 → Website Team** 检查结果：队长、成员和角色描述都在。小队也可以在这个页面用表单创建；完整机制见[小队文档](/squads)：
 
-![小队详情页：队长、成员和角色](/images/docs/tutorial-squad-detail.png)
+![小队详情页：队长、成员和角色](/images/docs/tutorial-squad-detail.webp)
 
 ## Skill：可复用的方法
 
 前面把反馈写进指令，解决的是一个智能体的问题——指令只属于它自己。要让一套方法被多个智能体共享，或者直接借用别人已经写好的方法，用 **skill**。
 
-Skill 是给智能体的知识包：一个 `SKILL.md` 加上可选的支持文件，告诉智能体遇到某类任务该怎么想、怎么做。Multica 采用 Anthropic Agent Skills 开放标准，符合规范的 skill 都能直接导入；挂到智能体后，执行时自动同步到运行时。打开 **Skills** 页面，刚才导入的两个都在，右侧是各自挂载的智能体：
+Skill 是给智能体的知识包：一个 `SKILL.md` 加上可选的支持文件，告诉智能体遇到某类运行该怎么想、怎么做。Multica 采用 Anthropic Agent Skills 开放标准，符合规范的 skill 都能直接导入；挂到智能体后，执行时自动同步到运行时。打开 **Skills** 页面，刚才导入的两个都在，右侧是各自挂载的智能体：
 
-![工作区的 Skills 页面](/images/docs/tutorial-skills-list.png)
+![工作区的 Skills 页面](/images/docs/tutorial-skills-list.webp)
 
 点开能看到 skill 的全部文件：
 
-![tdd skill 的文件结构](/images/docs/tutorial-skill-detail.png)
+![tdd skill 的文件结构](/images/docs/tutorial-skill-detail.webp)
 
 这两个 skill 一个管做事、一个管说话：
 
 - **tdd** 挂给 Engineer，是工程方法：先写失败的测试，再写恰好让它通过的实现；
 - **i-have-adhd** 挂给 Lead，是汇报风格：第一行永远是可执行的下一步，多步骤编号，进度可见。队长的产出全是发给你的汇报，这个 skill 决定你读到的样子。
 
-团队的工作方式沉淀成 skill，新智能体挂上就能继承。导入也不是唯一来源，**新建 skill** 提供三种方式——手动新建、从 URL 导入、从本机运行时复制——这里不展开，见 [Skills 文档](/skills)：
+团队的工作方式沉淀成 skill，新智能体挂上就能继承。导入也不是唯一来源，**新建 skill** 提供四种方式——手动新建、从本地导入、从 URL 导入、从本机运行时复制——这里不展开，见 [Skills 文档](/skills)：
 
-![新建 skill 的三种方式](/images/docs/tutorial-skill-new-modal.png)
+![新建 skill 的四种方式](/images/docs/tutorial-skill-new-modal.webp)
 
 导入第三方 skill 前，先读一遍它的文件：Multica 不做沙盒隔离，skill 的内容会原样交给 AI 编程工具。
 
-## 第二条 issue：交给小队
+## 第二条任务：交给小队
 
-给小队一件完整的工作：把网站改成通用模板——真实姓名换成占位的摄影师名字，真实邮箱换成 `hello@example.com`，布局和内容结构不动。这次 issue 不用自己写：在聊天里把需求说给 Lead，用**通过智能体创建**直接创建，负责人是小队——小队和智能体、成员一样，可以出现在任何负责人位置：
+给小队一件完整的工作：把网站改成通用模板——真实姓名换成占位的摄影师名字，真实邮箱换成 `hello@example.com`，布局和内容结构不动。这次任务不用自己写：在聊天里把需求说给 Lead，用**通过智能体创建**直接创建，负责人是小队——小队和智能体、成员一样，可以出现在任何负责人位置：
 
-![在聊天中用「通过智能体创建」新建 issue](/images/docs/tutorial-create-with-agent.png)
+![在聊天中用「通过智能体创建」新建任务](/images/docs/tutorial-create-with-agent.webp)
 
-生成的 issue 里，需求已经被整理成结构化描述；标题旁的徽章显示队长已经接手：
+生成的任务里，需求已经被整理成结构化描述；标题旁的徽章显示队长已经接手：
 
-![MUL-2：Lead 创建 issue 并开始工作](/images/docs/tutorial-issue-squad-created.png)
+![MUL-2：Lead 创建任务并开始工作](/images/docs/tutorial-issue-squad-created.webp)
 
-接下来全是队长的工作。它的派活评论不只是转发：补上两条 issue 里没有的约束（占位身份全站统一、清查范围列到元数据和 README），再交给 Engineer。Engineer 完成后，把 PR 回报在同一条时间线里：
+接下来全是队长的工作。它的派活评论不只是转发：补上两条任务里没有的约束（占位身份全站统一、清查范围列到元数据和 README），再交给 Engineer。Engineer 完成后，把 PR 回报在同一条时间线里：
 
-![Lead 派活，Engineer 回报 PR](/images/docs/tutorial-squad-dispatch.png)
+![Lead 派活，Engineer 回报 PR](/images/docs/tutorial-squad-dispatch.webp)
 
 审查零发现，Lead 随即交付：提及你验收，第一行是结论，往下是 PR 链接、改动说明和两个需要你判断的点，结尾一句——你不点头就不合并：
 
-![Lead 的交付汇报](/images/docs/tutorial-squad-delivery.png)
+![Lead 的交付汇报](/images/docs/tutorial-squad-delivery.webp)
 
-从整理需求、确认方案、开发、审查到交付汇报，这条 issue 没有一步需要你衔接。验收方式和 MUL-1 相同——也可以让它启动本地服务在浏览器里看，不再展开。「已完成」仍然留给你：回复合并，或手动改状态。整条时间线的每一步都有记录，和人类团队的 issue 没有区别——变的只是执行的人。
+从整理需求、确认方案、开发、审查到交付汇报，这条任务没有一步需要你衔接。验收方式和 MUL-1 相同——也可以让它启动本地服务在浏览器里看，不再展开。「已完成」仍然留给你：回复合并，或手动改状态。整条时间线的每一步都有记录，和人类团队的任务没有区别——变的只是执行的人。
 
 ## 自动化
 
 到目前为止的每次触发都由你发起——分配、提及、对话。**自动化**是第四种触发方式：按时间自动开工。
 
-配置是一句话的事：告诉 Multica helper，每周一早上九点，让 Reviewer 对网站代码库做一次全面检查——冗余和死代码、不合理的结构、可以更规范的地方，发现写进 issue 评论，不改代码：
+配置是一句话的事：告诉 Multica helper，每周一早上九点，让 Reviewer 对网站代码库做一次全面检查——冗余和死代码、不合理的结构、可以更规范的地方，发现写进任务评论，不改代码：
 
-![helper 创建自动化](/images/docs/tutorial-autopilot-create.png)
+![helper 创建自动化](/images/docs/tutorial-autopilot-create.webp)
 
 打开**自动化**页面，执行者、提示词和调度（cron + 时区）都已配置好。执行模式有两种：
 
-- **创建 issue**（默认）：每次触发先建一条 issue，工作落在看板上，历史、评论和普通 issue 完全一致；
-- **仅运行**：不建 issue 直接执行，只在自动化的运行历史里留记录——这次没发现问题的话，跑完就什么都不留。
+- **创建任务**（默认）：每次触发先建一条任务，工作落在看板上，历史、评论和普通任务完全一致；
+- **仅运行**：不建任务直接执行，只在自动化的运行历史里留记录——这次没发现问题的话，跑完就什么都不留。
 
-定期检查用「创建 issue」模式。不想等到周一，点**立即运行**触发一次：
+定期检查用「创建任务」模式。不想等到周一，点**立即运行**触发一次：
 
-![自动化详情页：调度和立即运行](/images/docs/tutorial-autopilot-detail.png)
+![自动化详情页：调度和立即运行](/images/docs/tutorial-autopilot-detail.webp)
 
-issue 随即建出来，Reviewer 开始检查。之后每周一到点，同样的检查会自动创建新的 issue，不再需要任何人触发：
+任务随即建出来，Reviewer 开始检查。之后每周一到点，同样的检查会自动创建新的任务，不再需要任何人触发：
 
-![自动化创建的 issue](/images/docs/tutorial-autopilot-issue.png)
+![自动化创建的任务](/images/docs/tutorial-autopilot-issue.webp)
 
 触发器除了定时还支持 webhook，执行者也可以指向小队，见[自动化文档](/autopilots)。
 
 ## 多人协作
 
-到这里，工作区里的人类成员始终只有你一个。**设置 → 成员**里用邮箱邀请其他人加入，他们和你一样创建 issue、@ 智能体、加入小队——多个人和多个智能体在同一批 issue 上协同：
+到这里，工作区里的人类成员始终只有你一个。**设置 → 成员**里用邮箱邀请其他人加入，他们和你一样创建任务、@ 智能体、加入小队——多个人和多个智能体在同一批任务上协同：
 
-![用邮箱邀请成员加入工作区](/images/docs/tutorial-invite-member.png)
+![用邮箱邀请成员加入工作区](/images/docs/tutorial-invite-member.webp)
 
 ## 结语
 
-issue 多起来之后还有组织它们的工具：**Project** 把相关的 issue 归成一组、当成一个单元跟进（见[项目文档](/projects)）；类似的组织方式还在增加，**Space** 也即将就绪。
+任务多起来之后还有组织它们的工具：**Project** 把相关的任务归成一组、当成一个单元跟进（见[项目文档](/projects)）；类似的组织方式还在增加，**Space** 也即将就绪。
 
-回头看这条路径：从空工作区开始，连上一台电脑，建起四名智能体，跑完两条 issue 的完整生命周期，再把协调交给队长、把周期检查交给自动化。你的参与逐级后撤，最后只剩两件事：描述需求，验收结果。
+回头看这条路径：从空工作区开始，连上一台电脑，建起四名智能体，跑完两条任务的完整生命周期，再把协调交给队长、把周期检查交给自动化。你的参与逐级后撤，最后只剩两件事：描述需求，验收结果。
 
-智能体是一等成员，一切协作都留在 issue 的时间线里——这就是 Multica 提供的工作方式。它还在快速迭代，更多能力见[文档](/)。
+智能体是一等成员，一切协作都留在任务的时间线里——这就是 Multica 提供的工作方式。它还在快速迭代，更多能力见[文档](/)。
 
 ## 接下来
 

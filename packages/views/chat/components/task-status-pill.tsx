@@ -62,7 +62,12 @@ export function pickStageKeys(
   status: string | undefined,
   taskMessages: readonly TaskMessagePayload[],
   availability: AgentAvailability | undefined,
-): { stageKey: StageKey; toolKey?: ToolKey; static?: boolean } {
+): {
+  stageKey: StageKey;
+  toolKey?: ToolKey;
+  static?: boolean;
+  needsWaitReason?: boolean;
+} {
   // A deferred chat task is an older turn waiting for its retry backoff, not
   // active model work. Keep this ahead of availability hints so the specific
   // retry state never degrades to a misleading queued/thinking label.
@@ -85,7 +90,11 @@ export function pickStageKeys(
   // lock; the renderer surfaces a dedicated label so the user understands
   // why a queued task isn't moving.
   if (status === "waiting_local_directory") {
-    return { stageKey: "waiting_local_directory", static: true };
+    return {
+      stageKey: "waiting_local_directory",
+      static: true,
+      needsWaitReason: true,
+    };
   }
   if (status === "queued") return { stageKey: "queued" };
   if (status === "dispatched") return { stageKey: "starting_up" };
@@ -127,13 +136,27 @@ function useResolveStage(): (
   status: string | undefined,
   taskMessages: readonly TaskMessagePayload[],
   availability: AgentAvailability | undefined,
+  waitReason?: string,
 ) => Stage {
   const { t } = useT("chat");
-  return (status, taskMessages, availability) => {
+  return (status, taskMessages, availability, waitReason) => {
     const decision = pickStageKeys(status, taskMessages, availability);
     if (decision.toolKey) {
       return {
         label: t(($) => $.status_pill.tools[decision.toolKey!]),
+      };
+    }
+    // A parked task that names what it is parked on turns an unexplained wait
+    // into an actionable one: the user can see it is a sibling task, not a
+    // hung agent, and decide whether cancelling is worth it. Older servers send
+    // no reason, so the bare label has to stay reachable.
+    const reason = waitReason?.trim();
+    if (decision.needsWaitReason && reason) {
+      return {
+        label: t(($) => $.status_pill.stages.waiting_local_directory_reason, {
+          reason,
+        }),
+        static: decision.static,
       };
     }
     return {
@@ -174,7 +197,15 @@ export function TaskStatusPill({
   // when the server has since moved that same task into retry backoff.
   const status = effectiveTaskStatus(pendingTask.status, taskMessages);
   const elapsedSecs = Math.max(0, Math.floor((now - anchor) / 1000));
-  const stage = resolveStage(status, taskMessages, availability);
+  // Read the reason only when the effective status is still the waiting one:
+  // streamed messages can promote a cached waiting task to "running" locally
+  // before the next server payload clears the stored text.
+  const stage = resolveStage(
+    status,
+    taskMessages,
+    availability,
+    status === "waiting_local_directory" ? pendingTask.wait_reason : undefined,
+  );
 
   return (
     <div

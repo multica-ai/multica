@@ -41,8 +41,8 @@ export function CollectionPageHeader({
   className,
 }: CollectionPageHeaderProps) {
   return (
-    <PageHeader className={cn("justify-between gap-3 px-5", className)}>
-      <div className="flex min-w-0 items-center gap-2">
+    <PageHeader className={className}>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <Icon
           aria-hidden="true"
           className="size-4 shrink-0 text-muted-foreground"

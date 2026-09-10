@@ -8,8 +8,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -359,6 +361,12 @@ func notifyIssueSubscribers(
 	notified := map[string]bool{}
 	tierSuppressed := map[string]bool{}
 
+	// Normalize a custom status to the canonical status it inherits, so the
+	// delegated tier's status allowlist below keys off behavior rather than a
+	// literal. A built-in key returns itself without a query, so the common
+	// path is unchanged. (MUL-6243)
+	issueStatus = issuestatus.Effective(ctx, queries, parseUUID(workspaceID), issueStatus)
+
 	subs, err := queries.ListIssueSubscribers(ctx, parseUUID(subscriberIssueID))
 	if err != nil {
 		slog.Error("failed to list subscribers for notification",
@@ -406,6 +414,7 @@ func notifyIssueSubscribers(
 		}
 
 		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   parseUUID(workspaceID),
 			RecipientType: "member",
 			RecipientID:   sub.UserID,
@@ -471,6 +480,7 @@ func notifyDirect(
 	}
 
 	item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		ID:            dbid.NewV7(),
 		WorkspaceID:   parseUUID(workspaceID),
 		RecipientType: recipientType,
 		RecipientID:   parseUUID(recipientID),
@@ -585,6 +595,7 @@ func notifyMentionedMembers(
 			continue
 		}
 		item, err := queries.CreateInboxItem(context.Background(), db.CreateInboxItemParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   parseUUID(e.WorkspaceID),
 			RecipientType: "member",
 			RecipientID:   parseUUID(id),
@@ -755,7 +766,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			// cancelled), retire any stale task_failed inbox rows so the
 			// inbox reflects the current state of the work, not its history.
 			// The activity log keeps the full failure history for audit.
-			if terminalStatusForTaskFailedDismiss[issue.Status] {
+			if terminalStatusForTaskFailedDismiss[issuestatus.Effective(
+				ctx, queries, parseUUID(e.WorkspaceID), issue.Status,
+			)] {
 				archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
 			}
 		}

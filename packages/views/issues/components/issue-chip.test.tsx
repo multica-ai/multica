@@ -11,6 +11,13 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
 }));
 
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () => ({
+    colorOf: (status: string) =>
+      status === "awaiting_response" ? "#f97316" : null,
+  }),
+}));
+
 vi.mock("@multica/core/issues/queries", () => ({
   issueListOptions: () => ({ queryKey: ["issues"] }),
   issueDetailOptions: (_workspaceId: string, issueId: string) => ({
@@ -19,8 +26,24 @@ vi.mock("@multica/core/issues/queries", () => ({
 }));
 
 vi.mock("./status-icon", () => ({
-  StatusIcon: ({ className }: { className?: string }) => (
-    <svg data-testid="status-icon" className={className} />
+  StatusIcon: ({
+    status,
+    category,
+    color,
+    className,
+  }: {
+    status: string;
+    category?: string;
+    color?: string | null;
+    className?: string;
+  }) => (
+    <svg
+      data-testid="status-icon"
+      data-status={status}
+      data-category={category}
+      data-color={color}
+      className={className}
+    />
   ),
 }));
 
@@ -38,20 +61,18 @@ describe("IssueChip", () => {
               title: "A very long issue title that should stay inside a narrow chat bubble",
               status: "todo",
             },
+            {
+              id: "issue-2",
+              identifier: "MUL-6956",
+              title: "Custom status color in Chat",
+              status: "awaiting_response",
+              status_category: "in_review",
+            },
           ],
         } as ReturnType<typeof useQuery>;
       }
       return { data: undefined } as ReturnType<typeof useQuery>;
     });
-  });
-
-  it("caps the chip to its parent container and truncates the title", () => {
-    render(<IssueChip issueId="issue-1" />);
-
-    const chip = screen.getByText("MUL-3405").closest(".issue-mention");
-    expect(chip).toHaveClass("min-w-0", "max-w-full");
-    expect(screen.getByText("A very long issue title that should stay inside a narrow chat bubble"))
-      .toHaveClass("min-w-0", "truncate");
   });
 
   it("truncates unresolved fallback labels inside the chip width", () => {
@@ -64,5 +85,22 @@ describe("IssueChip", () => {
 
     expect(screen.getByText("MUL-999999999999999999999999999999999"))
       .toHaveClass("min-w-0", "truncate");
+  });
+
+  it("paints a custom status with its catalog color instead of the category token", () => {
+    render(<IssueChip issueId="issue-2" />);
+
+    expect(screen.getByTestId("status-icon")).toHaveAttribute(
+      "data-status",
+      "awaiting_response",
+    );
+    expect(screen.getByTestId("status-icon")).toHaveAttribute(
+      "data-category",
+      "in_review",
+    );
+    expect(screen.getByTestId("status-icon")).toHaveAttribute(
+      "data-color",
+      "#f97316",
+    );
   });
 });

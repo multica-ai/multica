@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { AgentRuntime } from "@multica/core/types";
 import {
@@ -125,6 +127,29 @@ describe("runtime machine grouping", () => {
       issues: 1,
     });
     expect(filterRuntimeMachines(machines, "", "issues")).toHaveLength(1);
+  });
+
+  it("keeps long_offline as the highest-severity machine health", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          id: "rt-offline",
+          provider: "claude",
+          status: "offline",
+          last_seen_at: new Date(NOW - 10 * 60_000).toISOString(),
+        }),
+        makeRuntime({
+          id: "rt-long-offline",
+          provider: "codex",
+          status: "offline",
+          last_seen_at: new Date(NOW - 6.5 * 24 * 60 * 60_000).toISOString(),
+        }),
+      ],
+      { now: NOW },
+    );
+
+    expect(machines).toHaveLength(1);
+    expect(machines[0]?.health).toBe("long_offline");
   });
 
   it("does not surface agent CLI version branding as the machine subtitle", () => {

@@ -1,13 +1,16 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -39,6 +42,8 @@ type fakeDedup struct {
 	mu         sync.Mutex
 	token      pgtype.UUID
 	claimErr   error
+	respectCtx bool
+	releaseErr error
 	markCalls  int
 	relCalls   int
 	claimCalls int
@@ -59,14 +64,23 @@ func (f *fakeDedup) Mark(_ context.Context, _ pgtype.UUID, _ string, _ pgtype.UU
 	f.markCalls++
 	return nil
 }
-func (f *fakeDedup) Release(_ context.Context, _ pgtype.UUID, _ string, _ pgtype.UUID) error {
+func (f *fakeDedup) Release(ctx context.Context, _ pgtype.UUID, _ string, _ pgtype.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.respectCtx && ctx.Err() != nil {
+		f.releaseErr = ctx.Err()
+		return ctx.Err()
+	}
 	f.relCalls++
 	return nil
 }
 func (f *fakeDedup) marks() int    { f.mu.Lock(); defer f.mu.Unlock(); return f.markCalls }
 func (f *fakeDedup) releases() int { f.mu.Lock(); defer f.mu.Unlock(); return f.relCalls }
+func (f *fakeDedup) releaseError() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.releaseErr
+}
 
 type fakeBinder struct {
 	mu           sync.Mutex
@@ -80,11 +94,50 @@ type fakeBinder struct {
 	lastEnsure   EnsureSessionParams
 	lastAppend   AppendParams
 	lastBind     BindMediaParams
+	pendingFresh int
+	pendingErr   error
+	ensureHook   func()
+	ensureCalls  int
+	startCalls   int
+	lastStart    StartSessionParams
+	startErr     error
+	startErrs    []error
 }
 
 func (f *fakeBinder) EnsureSession(_ context.Context, p EnsureSessionParams) (pgtype.UUID, error) {
+	f.ensureCalls++
 	f.lastEnsure = p
+	if f.ensureHook != nil {
+		f.ensureHook()
+	}
 	return f.ensureID, f.ensureErr
+}
+func (f *fakeBinder) StartSession(ctx context.Context, p StartSessionParams) (StartSessionResult, error) {
+	f.mu.Lock()
+	f.startCalls++
+	f.lastStart = p
+	f.lastAppend = AppendParams{
+		InstallationID: p.Installation.ID, SessionID: f.ensureID,
+		Sender: p.Sender, Message: p.Message, ClaimToken: p.ClaimToken,
+		MediaPendingSeconds: p.MediaPendingSeconds,
+	}
+	res, err := f.appendResult, f.startErr
+	if len(f.startErrs) >= f.startCalls {
+		err = f.startErrs[f.startCalls-1]
+	}
+	f.mu.Unlock()
+	if err == nil && p.BeforeCommit != nil {
+		err = p.BeforeCommit(ctx, nil, db.ChatSession{ID: f.ensureID})
+	}
+	return StartSessionResult{
+		SessionID: f.ensureID, BindingID: uid(80), RouteRevision: 2, Append: res,
+	}, err
+}
+func (f *fakeBinder) MarkPendingFresh(_ context.Context, _ pgtype.UUID, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pendingFresh++
+	return f.pendingErr
 }
 func (f *fakeBinder) AppendMessage(_ context.Context, p AppendParams) (AppendResult, error) {
 	f.mu.Lock()
@@ -104,11 +157,11 @@ func (f *fakeBinder) AppendMessage(_ context.Context, p AppendParams) (AppendRes
 	}
 	return res, err
 }
-func (f *fakeBinder) BindMedia(_ context.Context, p BindMediaParams) error {
+func (f *fakeBinder) BindMedia(_ context.Context, p BindMediaParams) (BindMediaResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lastBind = p
-	return f.bindErr
+	return BindMediaResult{}, f.bindErr
 }
 func (f *fakeBinder) boundMedia() BindMediaParams {
 	f.mu.Lock()
@@ -119,6 +172,11 @@ func (f *fakeBinder) appendedParams() AppendParams {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lastAppend
+}
+func (f *fakeBinder) pendingFreshCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pendingFresh
 }
 
 type fakeAuditor struct {
@@ -269,8 +327,15 @@ type fakeTasks struct {
 	promotions          int
 	issueTaskPromotions []pgtype.UUID
 	forceFresh          bool
+	forceFreshArgs      []bool
 	initiator           pgtype.UUID
+	initiators          []pgtype.UUID
+	contextRevisions    []int64
+	bindingIDs          []pgtype.UUID
+	routeRevisions      []int64
 	err                 error
+	prepared            bool
+	prepareErr          error
 }
 
 func (f *fakeTasks) PromoteChannelChatTasksIfMediaReady(_ context.Context, _ pgtype.UUID) error {
@@ -287,18 +352,49 @@ func (f *fakeTasks) PromoteDeferredChannelIssueTask(_ context.Context, taskID pg
 	return nil
 }
 
-func (f *fakeTasks) EnqueueChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool) (db.AgentTaskQueue, error) {
+func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool, contextRevision int64, bindingID pgtype.UUID, routeRevision int64) (db.AgentTaskQueue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.called = true
 	f.callCount++
 	f.forceFresh = forceFresh
+	f.forceFreshArgs = append(f.forceFreshArgs, forceFresh)
 	f.initiator = initiator
-	return db.AgentTaskQueue{}, f.err
+	f.initiators = append(f.initiators, initiator)
+	f.contextRevisions = append(f.contextRevisions, contextRevision)
+	f.bindingIDs = append(f.bindingIDs, bindingID)
+	f.routeRevisions = append(f.routeRevisions, routeRevision)
+	return db.AgentTaskQueue{ID: uid(81)}, f.err
+}
+func (f *fakeTasks) PrepareChatTaskEnqueue(context.Context, pgtype.UUID, pgtype.UUID) (service.PreparedChatTaskEnqueue, error) {
+	f.mu.Lock()
+	f.prepared = true
+	err := f.prepareErr
+	f.mu.Unlock()
+	return service.PreparedChatTaskEnqueue{}, err
+}
+func (f *fakeTasks) EnqueuePreparedChannelChatTaskInTx(ctx context.Context, _ pgx.Tx, session db.ChatSession, initiator pgtype.UUID, forceFresh bool, contextRevision int64, _ service.PreparedChatTaskEnqueue) (db.AgentTaskQueue, error) {
+	return f.EnqueueChannelChatTask(ctx, session, initiator, forceFresh, contextRevision, pgtype.UUID{}, 0)
+}
+func (f *fakeTasks) FinalizeChatTaskEnqueue(context.Context, db.AgentTaskQueue) {}
+func (f *fakeTasks) wasPrepared() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.prepared
 }
 func (f *fakeTasks) wasCalled() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.called }
 func (f *fakeTasks) freshArg() bool  { f.mu.Lock(); defer f.mu.Unlock(); return f.forceFresh }
 func (f *fakeTasks) calls() int      { f.mu.Lock(); defer f.mu.Unlock(); return f.callCount }
+func (f *fakeTasks) revisions() []int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int64(nil), f.contextRevisions...)
+}
+func (f *fakeTasks) freshArgs() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bool(nil), f.forceFreshArgs...)
+}
 func (f *fakeTasks) promotionCalls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -309,11 +405,45 @@ func (f *fakeTasks) initiatorArg() pgtype.UUID {
 	defer f.mu.Unlock()
 	return f.initiator
 }
+func (f *fakeTasks) initiatorArgs() []pgtype.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]pgtype.UUID(nil), f.initiators...)
+}
+
+func (f *fakeTasks) routeArgs() ([]pgtype.UUID, []int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]pgtype.UUID(nil), f.bindingIDs...), append([]int64(nil), f.routeRevisions...)
+}
 
 type fakeReader struct {
 	session db.ChatSession
 	ws      db.Workspace
 	sessErr error
+}
+
+type fakeChannelChatLifecycle struct {
+	mu                   sync.Mutex
+	started              []ChannelChatStartedEvent
+	generatedSourceTexts []string
+	initializedTitles    []string
+}
+
+func (f *fakeChannelChatLifecycle) ChannelChatStarted(event ChannelChatStartedEvent) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.started = append(f.started, event)
+}
+func (f *fakeChannelChatLifecycle) ChannelChatTitleInitialized(_ pgtype.UUID, _ pgtype.UUID, _ pgtype.UUID, title string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.initializedTitles = append(f.initializedTitles, title)
+}
+func (f *fakeChannelChatLifecycle) GenerateChannelChatTitle(_ pgtype.UUID, _ pgtype.UUID, _ pgtype.UUID, _ string, source string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.generatedSourceTexts = append(f.generatedSourceTexts, source)
 }
 
 func (f *fakeReader) GetChatSession(_ context.Context, _ pgtype.UUID) (db.ChatSession, error) {
@@ -351,18 +481,19 @@ func p2pMessage(t *testing.T) channel.InboundMessage {
 }
 
 type harness struct {
-	router  *Router
-	inst    *fakeInstaller
-	ident   *fakeIdentity
-	dedup   *fakeDedup
-	binder  *fakeBinder
-	audit   *fakeAuditor
-	replier *fakeReplier
-	typing  *fakeTyping
-	media   *fakeMedia
-	issues  *fakeIssues
-	tasks   *fakeTasks
-	reader  *fakeReader
+	router    *Router
+	inst      *fakeInstaller
+	ident     *fakeIdentity
+	dedup     *fakeDedup
+	binder    *fakeBinder
+	audit     *fakeAuditor
+	replier   *fakeReplier
+	typing    *fakeTyping
+	media     *fakeMedia
+	issues    *fakeIssues
+	tasks     *fakeTasks
+	reader    *fakeReader
+	lifecycle *fakeChannelChatLifecycle
 }
 
 func newHarness(t *testing.T) *harness {
@@ -374,19 +505,22 @@ func newHarness(t *testing.T) *harness {
 		binder: &fakeBinder{
 			ensureID: uuidFromString(t, "66666666-6666-6666-6666-666666666666"),
 			appendResult: AppendResult{
-				MessageID:   uuidFromString(t, "99999999-9999-4999-8999-999999999999"),
-				DedupMarked: true,
+				MessageID:     uuidFromString(t, "99999999-9999-4999-8999-999999999999"),
+				BindingID:     uid(80),
+				RouteRevision: 2,
+				DedupMarked:   true,
 			},
 		},
-		audit:   &fakeAuditor{},
-		replier: &fakeReplier{},
-		typing:  &fakeTyping{},
-		media:   &fakeMedia{},
-		issues:  &fakeIssues{},
-		tasks:   &fakeTasks{},
-		reader:  &fakeReader{ws: db.Workspace{IssuePrefix: "MUL"}},
+		audit:     &fakeAuditor{},
+		replier:   &fakeReplier{},
+		typing:    &fakeTyping{},
+		media:     &fakeMedia{},
+		issues:    &fakeIssues{},
+		tasks:     &fakeTasks{},
+		reader:    &fakeReader{ws: db.Workspace{IssuePrefix: "MUL", Slug: "demo-web"}},
+		lifecycle: &fakeChannelChatLifecycle{},
 	}
-	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{Logger: discardLogger()})
+	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{Logger: discardLogger(), Lifecycle: h.lifecycle})
 	h.router.Register(channel.TypeFeishu, ResolverSet{
 		Installation: h.inst,
 		Identity:     h.ident,
@@ -521,6 +655,25 @@ func TestRouter_EnsureSessionError_Releases(t *testing.T) {
 	}
 	if h.dedup.releases() != 1 {
 		t.Fatalf("ensure-session error must Release the claim (1), got %d", h.dedup.releases())
+	}
+}
+
+func TestRouter_CancelledRequestStillReleasesClaim(t *testing.T) {
+	h := newHarness(t)
+	h.dedup.respectCtx = true
+	ctx, cancel := context.WithCancel(context.Background())
+	h.binder.ensureHook = cancel
+	h.binder.ensureErr = errors.New("session lookup cancelled")
+
+	err := h.router.Handle(ctx, p2pMessage(t))
+	if err == nil {
+		t.Fatal("ensure-session error must surface to the caller")
+	}
+	if h.dedup.releases() != 1 {
+		t.Fatalf("cancelled request must still release its claim, got %d releases", h.dedup.releases())
+	}
+	if err := h.dedup.releaseError(); err != nil {
+		t.Fatalf("dedup Release inherited the cancelled request context: %v", err)
 	}
 }
 
@@ -774,6 +927,118 @@ func TestRouter_MediaQueuePreservesSessionOrderWithoutCancellingRunBoundary(t *t
 	}
 }
 
+func TestRouter_ContextGenerationsUseIndependentBatchWindows(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	msg := p2pMessage(t)
+	sessionID := h.binder.ensureID
+	initiator := h.ident.id.UserID
+
+	h.router.scheduleRunWithFresh(h.router.sets[channel.TypeFeishu], h.inst.inst, msg, sessionID, initiator, pgtype.UUID{}, 1, false, 1)
+	h.router.scheduleRunWithFresh(h.router.sets[channel.TypeFeishu], h.inst.inst, msg, sessionID, initiator, pgtype.UUID{}, 1, false, 2)
+	if got := h.router.batcher.pendingCount(); got != 2 {
+		t.Fatalf("pending generation windows = %d, want 2", got)
+	}
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 2 }) {
+		t.Fatalf("generation flushes = %d, want 2", h.tasks.calls())
+	}
+	revisions := h.tasks.revisions()
+	if len(revisions) != 2 || revisions[0] != 1 || revisions[1] != 2 {
+		t.Fatalf("enqueued context revisions = %v, want [1 2]", revisions)
+	}
+}
+
+func TestRouter_RearmsUnownedContextGenerationsAfterBatcherRestart(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	h.binder.appendResult.ContextRevision = 2
+	alice := uuidFromString(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	bob := h.ident.id.UserID
+	h.binder.appendResult.PendingContexts = []PendingContext{
+		{Revision: 1, InitiatorUserID: alice},
+		{Revision: 2, InitiatorUserID: bob},
+	}
+	msg := p2pMessage(t)
+	msg.ForceFresh = true
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := h.router.batcher.pendingCount(); got != 2 {
+		t.Fatalf("rearmed generation windows = %d, want 2", got)
+	}
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 2 }) {
+		t.Fatalf("generation recovery flushes = %d, want 2", h.tasks.calls())
+	}
+	if got := h.tasks.revisions(); len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("recovered context revisions = %v, want [1 2]", got)
+	}
+	if got := h.tasks.freshArgs(); len(got) != 2 || got[0] || !got[1] {
+		t.Fatalf("recovered force-fresh flags = %v, want [false true]", got)
+	}
+	if got := h.tasks.initiatorArgs(); len(got) != 2 || got[0] != alice || got[1] != bob {
+		t.Fatalf("recovered initiators = %v, want [%v %v]", got, alice, bob)
+	}
+}
+
+func TestRouter_RecoveryWithoutInitiatorFailsClosed(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	h.binder.appendResult.ContextRevision = 2
+	h.binder.appendResult.PendingContexts = []PendingContext{
+		{Revision: 1},
+		{Revision: 2, InitiatorUserID: h.ident.id.UserID},
+	}
+
+	msg := p2pMessage(t)
+	msg.ForceFresh = true
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := h.router.batcher.pendingCount(); got != 1 {
+		t.Fatalf("scheduled generation windows = %d, want 1", got)
+	}
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 1 }) {
+		t.Fatalf("generation flushes = %d, want 1", h.tasks.calls())
+	}
+	if got := h.tasks.revisions(); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("enqueued context revisions = %v, want [2]", got)
+	}
+}
+
+func TestRouter_RecoveryDoesNotDelayLiveOlderGeneration(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	msg := p2pMessage(t)
+	h.router.scheduleRunWithFresh(h.router.sets[channel.TypeFeishu], h.inst.inst, msg,
+		h.binder.ensureID, h.ident.id.UserID, pgtype.UUID{}, 1, false, 1)
+
+	h.binder.appendResult.ContextRevision = 2
+	h.binder.appendResult.PendingContexts = []PendingContext{
+		{Revision: 1, InitiatorUserID: h.ident.id.UserID},
+		{Revision: 2, InitiatorUserID: h.ident.id.UserID},
+	}
+	msg.ForceFresh = true
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := timers.createdCount(); got != 2 {
+		t.Fatalf("timers created = %d, want 2; recovery reset the live revision-1 window", got)
+	}
+
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 2 }) {
+		t.Fatalf("generation flushes = %d, want 2", h.tasks.calls())
+	}
+}
+
 func TestRouter_ClaimLost_Drops(t *testing.T) {
 	h := newHarness(t)
 	h.binder.appendErr = ErrClaimLost
@@ -809,7 +1074,7 @@ func TestRouter_IssueCommand_Creates(t *testing.T) {
 	}
 	if !waitFor(time.Second, func() bool {
 		for _, r := range h.replier.calls() {
-			if r.IssueIdentifier == "MUL-42" && r.IssueTitle == "Fix login" {
+			if r.IssueIdentifier == "MUL-42" && r.IssueWorkspaceSlug == "demo-web" && r.IssueTitle == "Fix login" {
 				return true
 			}
 		}
@@ -877,7 +1142,7 @@ func TestRouter_IssueCommand_ActiveDuplicateIsTerminalProductOutcome(t *testing.
 	}
 	if !waitFor(time.Second, func() bool {
 		for _, result := range h.replier.calls() {
-			if result.IssueDuplicate && result.IssueID == duplicate.ID && result.IssueIdentifier == "MUL-44" && result.IssueTitle == duplicate.Title {
+			if result.IssueDuplicate && result.IssueID == duplicate.ID && result.IssueIdentifier == "MUL-44" && result.IssueWorkspaceSlug == "demo-web" && result.IssueTitle == duplicate.Title {
 				return true
 			}
 		}
@@ -885,17 +1150,120 @@ func TestRouter_IssueCommand_ActiveDuplicateIsTerminalProductOutcome(t *testing.
 	}) {
 		t.Fatalf("duplicate result was not delivered to replier: %+v", h.replier.calls())
 	}
-	if !waitFor(time.Second, func() bool { return len(h.binder.boundMedia().MediaRefs) == 1 }) {
+	if !waitFor(time.Second, func() bool { return h.binder.boundMedia().MessageID.Valid }) {
 		t.Fatalf("duplicate media was not finalized: %+v", h.binder.boundMedia())
 	}
-	if got := h.binder.boundMedia().IssueID; got != duplicate.ID {
-		t.Fatalf("duplicate media target = %v, want %v", got, duplicate.ID)
+	if h.media.calls() != 0 {
+		t.Fatalf("duplicate media unexpectedly invoked resolver, calls=%d", h.media.calls())
+	}
+	if got := h.binder.boundMedia().MediaRefs; len(got) != 0 {
+		t.Fatalf("duplicate media unexpectedly persisted refs: %+v", got)
+	}
+	if got := h.binder.boundMedia().IssueID; got.Valid {
+		t.Fatalf("duplicate media unexpectedly targeted existing issue %v", got)
+	}
+	if h.issues.attachmentsChanged.Load() != 0 {
+		t.Fatalf("duplicate media published issue attachment changes = %d, want 0", h.issues.attachmentsChanged.Load())
 	}
 	h.tasks.mu.Lock()
 	issuePromotions := len(h.tasks.issueTaskPromotions)
 	h.tasks.mu.Unlock()
 	if issuePromotions != 0 {
 		t.Fatalf("duplicate media promoted a non-existent issue task, calls=%d", issuePromotions)
+	}
+}
+
+func TestRouter_IssueCommand_ActiveDuplicateFinalizesWithoutWaitingForSessionMedia(t *testing.T) {
+	h := newHarness(t)
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseFirst) }) })
+	h.media.resolve = func(_ context.Context, msg channel.InboundMessage) channel.InboundMessage {
+		if msg.MessageID == "om-first" {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		return msg
+	}
+
+	first := p2pMessage(t)
+	first.MessageID = "om-first"
+	if err := h.router.Handle(context.Background(), first); err != nil {
+		t.Fatalf("first Handle: %v", err)
+	}
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first session media job did not start")
+	}
+
+	duplicateMessageID := uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+	h.binder.appendResult = AppendResult{
+		MessageID:   duplicateMessageID,
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Existing issue",
+		},
+	}
+	duplicate := db.Issue{
+		ID:     uuidFromString(t, "88888888-8888-4888-8888-888888888888"),
+		Number: 44,
+		Title:  "Existing issue",
+	}
+	h.issues.result = service.IssueCreateResult{DuplicateIssue: &duplicate}
+	h.issues.err = service.ErrActiveDuplicate
+
+	second := p2pMessage(t)
+	second.MessageID = "om-duplicate"
+	if err := h.router.Handle(context.Background(), second); err != nil {
+		t.Fatalf("duplicate Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.binder.boundMedia().MessageID == duplicateMessageID }) {
+		t.Fatal("duplicate finalization waited behind the session's active media resolver")
+	}
+	if h.media.calls() != 1 {
+		t.Fatalf("duplicate finalization invoked media resolver, calls=%d", h.media.calls())
+	}
+	if got := h.binder.boundMedia(); len(got.MediaRefs) != 0 || got.IssueID.Valid {
+		t.Fatalf("duplicate finalization persisted media or targeted the issue: %+v", got)
+	}
+
+	releaseOnce.Do(func() { close(releaseFirst) })
+	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 2 }) {
+		t.Fatalf("session media job did not finish after release, promotions=%d", h.tasks.promotionCalls())
+	}
+}
+
+func TestRouter_MediaFinalizationExpiredDeadlineDoesNotLogResolutionFailure(t *testing.T) {
+	h := newHarness(t)
+	var logs bytes.Buffer
+	h.router.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	messageID := uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+
+	h.router.resolveAndBindMedia(
+		ResolverSet{Session: h.binder, Media: h.media},
+		h.inst.inst,
+		h.ident.id,
+		messageID,
+		p2pMessage(t),
+		h.binder.ensureID,
+		db.Issue{},
+		pgtype.Text{},
+		"",
+		pgtype.UUID{},
+		false,
+		time.Now().Add(-time.Second),
+	)
+
+	if got := h.binder.boundMedia(); got.MessageID != messageID || len(got.MediaRefs) != 0 {
+		t.Fatalf("expired finalize-only bind = %+v", got)
+	}
+	if h.media.calls() != 0 {
+		t.Fatalf("finalize-only path invoked media resolver, calls=%d", h.media.calls())
+	}
+	if bytes.Contains(logs.Bytes(), []byte("media resolution incomplete")) {
+		t.Fatalf("finalize-only path logged a media resolution failure: %s", logs.String())
 	}
 }
 
@@ -919,6 +1287,53 @@ func TestRouter_IssueCommand_InfrastructureFailureRemainsError(t *testing.T) {
 	}
 	if len(h.replier.calls()) != 0 {
 		t.Fatalf("failed issue command must not emit a success outcome: %+v", h.replier.calls())
+	}
+}
+
+func TestRouter_BareIssueReturnsUsageWithoutCreatingOrResolvingMedia(t *testing.T) {
+	h := newHarness(t)
+	h.binder.parseIssue = true
+	msg := p2pMessage(t)
+	msg.Text = "/issue"
+	msg.CommandText = "/issue"
+	msg.Type = channel.MsgTypeImage
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("bare issue must be a product outcome, got error: %v", err)
+	}
+	if h.issues.called {
+		t.Fatal("bare issue unexpectedly called IssueService.Create")
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("bare issue unexpectedly enqueued a chat task, calls=%d", h.tasks.calls())
+	}
+	if h.media.calls() != 0 {
+		t.Fatalf("bare issue unexpectedly resolved media, calls=%d", h.media.calls())
+	}
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeIssueUsage && calls[0].IssueUsageHadMedia
+	}) {
+		t.Fatalf("issue usage result was not delivered: %+v", h.replier.calls())
+	}
+}
+
+func TestRouter_BareIssueWithoutMediaDoesNotRequestMediaResend(t *testing.T) {
+	h := newHarness(t)
+	h.binder.parseIssue = true
+	h.media.noMedia = true
+	msg := p2pMessage(t)
+	msg.Text = "/issue"
+	msg.CommandText = "/issue"
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("bare issue must be a product outcome, got error: %v", err)
+	}
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeIssueUsage && !calls[0].IssueUsageHadMedia
+	}) {
+		t.Fatalf("plain issue usage result was not delivered: %+v", h.replier.calls())
 	}
 }
 
@@ -1112,6 +1527,42 @@ func TestRouter_FlushArchived_ClearsTyping(t *testing.T) {
 	}
 }
 
+// TestRouter_FlushSessionArchived_ClearsTypingAndSaysNothing pins what the
+// flush does with the refusal EnqueueChatTask returns when the session was
+// archived while the debounce window was still open. Two things have to be
+// true, and the second is the one worth a test: the typing indicator must be
+// cleared here (no task will exist, so the bus-driven clear can never fire),
+// and nothing may be posted back — the archive deleted the channel binding
+// before this flush ran, so a notice would be addressed to a room that is no
+// longer bound to this conversation. The error is not one of the two the
+// switch names, so it falls to the default log branch and says nothing, which
+// is the behaviour this test holds in place.
+func TestRouter_FlushSessionArchived_ClearsTypingAndSaysNothing(t *testing.T) {
+	h := newHarness(t)
+	h.tasks.err = service.ErrChatSessionArchived
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.typing.settledCalls() == 1 }) {
+		t.Fatalf("an archived-session flush must clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
+	}
+	// The ingest ACK is the only reply this message is entitled to; anything
+	// else came from the flush. Waiting the window out is the assertion —
+	// waitFor returns false only if it never happened.
+	spoke := func() (Result, bool) {
+		for _, r := range h.replier.calls() {
+			if r.Outcome != OutcomeIngested {
+				return r, true
+			}
+		}
+		return Result{}, false
+	}
+	if waitFor(200*time.Millisecond, func() bool { _, ok := spoke(); return ok }) {
+		reply, _ := spoke()
+		t.Fatalf("archived-session flush posted %q into a room the archive had already unbound", reply.Outcome)
+	}
+}
+
 func TestRouter_FlushSuccess_DoesNotClearTyping(t *testing.T) {
 	h := newHarness(t)
 	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
@@ -1124,6 +1575,29 @@ func TestRouter_FlushSuccess_DoesNotClearTyping(t *testing.T) {
 	// handler on chat-done / task-failed, NOT by the flush.
 	if h.typing.settledCalls() != 0 {
 		t.Fatalf("successful flush must not clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
+	}
+	bindingIDs, routeRevisions := h.tasks.routeArgs()
+	if len(bindingIDs) != 1 || bindingIDs[0] != uid(80) || len(routeRevisions) != 1 || routeRevisions[0] != 2 {
+		t.Fatalf("flush route proof = %+v/%v, want binding 80 revision 2", bindingIDs, routeRevisions)
+	}
+}
+
+func TestRouter_ImplicitFirstTurnPublishesSessionCreated(t *testing.T) {
+	h := newHarness(t)
+	h.binder.appendResult.BecameVisible = true
+	h.binder.appendResult.InitialTitle = "hello"
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	h.lifecycle.mu.Lock()
+	defer h.lifecycle.mu.Unlock()
+	if len(h.lifecycle.started) != 1 {
+		t.Fatalf("created events = %d, want 1", len(h.lifecycle.started))
+	}
+	event := h.lifecycle.started[0]
+	if event.SessionID != h.binder.ensureID || event.RouteRevision != h.binder.appendResult.RouteRevision || event.Title != "hello" {
+		t.Fatalf("created event = %+v", event)
 	}
 }
 
@@ -1139,11 +1613,11 @@ func TestRouter_ForceFresh_Propagates(t *testing.T) {
 	}
 }
 
-func TestRouter_NewCommand_ForcesFreshAndStripsDirective(t *testing.T) {
+func TestRouter_ClearCommand_ForcesFreshAndStripsDirective(t *testing.T) {
 	h := newHarness(t)
 	msg := p2pMessage(t)
 	msg.Source.ChannelType = channel.Type("test-channel")
-	msg.Text = "/new answer with the current model"
+	msg.Text = "/clear answer with the current model"
 	h.router.Register(msg.Source.ChannelType, ResolverSet{
 		Installation: h.inst,
 		Identity:     h.ident,
@@ -1157,17 +1631,183 @@ func TestRouter_NewCommand_ForcesFreshAndStripsDirective(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !h.tasks.freshArg() {
-		t.Fatal("/new must enqueue a fresh provider session")
+		t.Fatal("/clear must enqueue a fresh provider session")
 	}
 	if got := h.binder.lastAppend.Message.Text; got != "answer with the current model" {
 		t.Fatalf("appended text=%q, want command stripped", got)
 	}
-	if got := h.binder.lastAppend.Message.CommandText; got != "/new answer with the current model" {
+	if got := h.binder.lastAppend.Message.CommandText; got != "/clear answer with the current model" {
 		t.Fatalf("command text=%q, want original user text", got)
 	}
 }
 
-func TestRouter_NewCommandDoesNotReparseStrippedBodyAsIssue(t *testing.T) {
+func TestRouter_BareNewStartsExplicitSessionWithoutEmptyTurn(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+	msg := p2pMessage(t)
+	msg.Text = "/new"
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if h.binder.startCalls != 1 || h.binder.lastStart.PersistMessage {
+		t.Fatalf("start calls=%d persist=%v", h.binder.startCalls, h.binder.lastStart.PersistMessage)
+	}
+	if h.tasks.wasCalled() || h.typing.calls() != 0 {
+		t.Fatal("bare /new must not enqueue a task or start typing")
+	}
+	if len(h.lifecycle.started) != 1 || h.lifecycle.started[0].SessionID != h.binder.ensureID {
+		t.Fatalf("chat-start lifecycle events=%+v", h.lifecycle.started)
+	}
+}
+
+func TestRouter_NewBodyIsFirstOrdinaryTurnAndEnqueuedAtomically(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+	msg := p2pMessage(t)
+	msg.Text = "/new /issue investigate deploy"
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if h.binder.startCalls != 1 || !h.binder.lastStart.PersistMessage {
+		t.Fatalf("start calls=%d persist=%v", h.binder.startCalls, h.binder.lastStart.PersistMessage)
+	}
+	if got := h.binder.lastStart.Message.Text; got != "/issue investigate deploy" {
+		t.Fatalf("first turn=%q", got)
+	}
+	if h.issues.called {
+		t.Fatal("/new body must not be reparsed as an /issue command")
+	}
+	if !h.tasks.wasPrepared() || !h.tasks.wasCalled() || h.tasks.calls() != 1 {
+		t.Fatalf("prepared=%v calls=%d", h.tasks.wasPrepared(), h.tasks.calls())
+	}
+	if h.binder.lastStart.BeforeCommit == nil {
+		t.Fatal("/new task enqueue was not attached to the route-creation transaction")
+	}
+}
+
+func TestRouter_PreNormalizedMediaNewStartsSessionWithoutPersistingDirective(t *testing.T) {
+	h := newHarness(t)
+	msg := p2pMessage(t)
+	msg.Type = channel.MsgTypeImage
+	msg.Text = "[Image]\n点评一下"
+	msg.CommandText = "/new\n点评一下"
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if h.binder.startCalls != 1 || !h.binder.lastStart.PersistMessage {
+		t.Fatalf("start calls=%d persist=%v", h.binder.startCalls, h.binder.lastStart.PersistMessage)
+	}
+	if got := h.binder.lastStart.Message.Text; got != "[Image]\n点评一下" {
+		t.Fatalf("first turn=%q, want normalized rich-media body", got)
+	}
+	if got := h.binder.lastStart.Message.CommandText; got != "点评一下" {
+		t.Fatalf("command source=%q, want consumed /new body", got)
+	}
+}
+
+func TestRouter_PreNormalizedMediaBeforeBareNewStartsSession(t *testing.T) {
+	h := newHarness(t)
+	msg := p2pMessage(t)
+	msg.Type = channel.MsgTypeImage
+	msg.Text = "[Image]"
+	msg.CommandText = "/new"
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if h.binder.startCalls != 1 || !h.binder.lastStart.PersistMessage {
+		t.Fatalf("start calls=%d persist=%v, want media turn in a new Chat", h.binder.startCalls, h.binder.lastStart.PersistMessage)
+	}
+	if got := h.binder.lastStart.Message.Text; got != "[Image]" {
+		t.Fatalf("first turn=%q, want image without the consumed directive", got)
+	}
+	if got := h.binder.lastStart.Message.CommandText; got != "" {
+		t.Fatalf("command source=%q, want consumed bare /new", got)
+	}
+}
+
+func TestRouter_GroupChatKeepsInstallerAsCreatorAndSenderAsInitiator(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+	msg := p2pMessage(t)
+	msg.Source.ChatType = channel.ChatTypeGroup
+	msg.AddressedToBot = true
+	msg.Text = "/new start a group topic"
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if h.binder.lastStart.Creator != h.inst.inst.InstallerUserID {
+		t.Fatalf("group Chat creator=%v, want installer %v", h.binder.lastStart.Creator, h.inst.inst.InstallerUserID)
+	}
+	if h.binder.lastStart.Sender != h.ident.id.UserID {
+		t.Fatalf("group Chat initiator=%v, want sender %v", h.binder.lastStart.Sender, h.ident.id.UserID)
+	}
+}
+
+func TestRouter_ChatTaskPreparationFailureDoesNotStartSession(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+	h.tasks.prepareErr = service.ErrChatTaskAgentNoRuntime
+	msg := p2pMessage(t)
+	msg.Text = "/new prepare outside transaction"
+	err := h.router.Handle(context.Background(), msg)
+	if !errors.Is(err, service.ErrChatTaskAgentNoRuntime) {
+		t.Fatalf("Handle error=%v, want no-runtime rejection", err)
+	}
+	if !h.tasks.wasPrepared() || h.tasks.wasCalled() {
+		t.Fatalf("prepared=%v enqueue=%v", h.tasks.wasPrepared(), h.tasks.wasCalled())
+	}
+	if h.binder.startCalls != 0 {
+		t.Fatalf("StartSession calls=%d, want 0", h.binder.startCalls)
+	}
+}
+
+func TestRouter_ChatStartRetriesOneRouteConflictWithoutDuplicateTask(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+	h.binder.startErrs = []error{ErrRouteChanged, nil}
+	msg := p2pMessage(t)
+	msg.Text = "/new retry this turn"
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if h.binder.startCalls != 2 {
+		t.Fatalf("StartSession calls = %d, want one retry", h.binder.startCalls)
+	}
+	if h.tasks.calls() != 1 {
+		t.Fatalf("task enqueue calls = %d, want only the committed attempt", h.tasks.calls())
+	}
+	if len(h.lifecycle.started) != 1 {
+		t.Fatalf("chat-start lifecycle events = %d, want one", len(h.lifecycle.started))
+	}
+}
+
+func TestRouter_ChatStartCapsPersistentRouteConflictsAndReleasesClaim(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+	h.binder.startErr = ErrRouteChanged
+	msg := p2pMessage(t)
+	msg.Text = "/new cannot stabilize"
+
+	err := h.router.Handle(context.Background(), msg)
+	if !errors.Is(err, ErrRouteChanged) {
+		t.Fatalf("Handle error = %v, want route conflict", err)
+	}
+	if h.binder.startCalls != maxRouteChangeRetries {
+		t.Fatalf("StartSession calls = %d, want cap %d", h.binder.startCalls, maxRouteChangeRetries)
+	}
+	if h.tasks.calls() != 0 || len(h.lifecycle.started) != 0 {
+		t.Fatalf("failed route wrote side effects: tasks=%d lifecycle=%d", h.tasks.calls(), len(h.lifecycle.started))
+	}
+	if h.dedup.releases() != 1 || h.dedup.marks() != 0 {
+		t.Fatalf("dedup finalize = releases:%d marks:%d, want 1/0", h.dedup.releases(), h.dedup.marks())
+	}
+}
+
+func TestRouter_ClearCommandDoesNotReparseStrippedBodyAsIssue(t *testing.T) {
 	tests := []struct {
 		name        string
 		channelType channel.Type
@@ -1178,27 +1818,27 @@ func TestRouter_NewCommandDoesNotReparseStrippedBodyAsIssue(t *testing.T) {
 		{
 			name:        "Slack same line",
 			channelType: channel.Type("slack"),
-			text:        "/new /issue investigate deploy",
-			commandText: "/new /issue investigate deploy",
+			text:        "/clear /issue investigate deploy",
+			commandText: "/clear /issue investigate deploy",
 		},
 		{
 			name:        "Slack next line",
 			channelType: channel.Type("slack"),
-			text:        "/new\n/issue investigate deploy",
-			commandText: "/new\n/issue investigate deploy",
+			text:        "/clear\n/issue investigate deploy",
+			commandText: "/clear\n/issue investigate deploy",
 		},
 		{
 			name:        "Feishu same line",
 			channelType: channel.TypeFeishu,
 			text:        "/issue investigate deploy",
-			commandText: "/new /issue investigate deploy",
+			commandText: "/clear /issue investigate deploy",
 			forceFresh:  true,
 		},
 		{
 			name:        "Feishu next line",
 			channelType: channel.TypeFeishu,
 			text:        "/issue investigate deploy",
-			commandText: "/new\n/issue investigate deploy",
+			commandText: "/clear\n/issue investigate deploy",
 			forceFresh:  true,
 		},
 	}
@@ -1227,10 +1867,10 @@ func TestRouter_NewCommandDoesNotReparseStrippedBodyAsIssue(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if h.issues.called {
-				t.Fatal("/new must not be re-parsed as /issue after its directive is stripped")
+				t.Fatal("/clear must not be re-parsed as /issue after its directive is stripped")
 			}
 			if !h.binder.lastAppend.Message.ForceFresh {
-				t.Fatal("/new must still request a fresh provider session")
+				t.Fatal("/clear must still request a fresh provider session")
 			}
 		})
 	}
@@ -1240,8 +1880,8 @@ func TestRouter_AdapterFreshBodyIsNotParsedAgain(t *testing.T) {
 	h := newHarness(t)
 	msg := p2pMessage(t)
 	msg.ForceFresh = true
-	msg.Text = "<recent_context>\n/new from history\n</recent_context>\n\ncurrent prompt"
-	msg.CommandText = "/new current prompt"
+	msg.Text = "<recent_context>\n/clear from history\n</recent_context>\n\ncurrent prompt"
+	msg.CommandText = "/clear current prompt"
 
 	if err := h.router.Handle(context.Background(), msg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1251,12 +1891,12 @@ func TestRouter_AdapterFreshBodyIsNotParsedAgain(t *testing.T) {
 	}
 }
 
-func TestRouter_BareFreshSkipsEmptyTurnAndForcesNextRealMessage(t *testing.T) {
+func TestRouter_BareFreshPersistsIntentAndRepliesWithoutEmptyTurn(t *testing.T) {
 	h := newHarness(t)
 	h.media.noMedia = true
 
 	reset := p2pMessage(t)
-	reset.Text = "/new"
+	reset.Text = "/clear"
 	if err := h.router.Handle(context.Background(), reset); err != nil {
 		t.Fatalf("bare fresh Handle: %v", err)
 	}
@@ -1272,24 +1912,14 @@ func TestRouter_BareFreshSkipsEmptyTurnAndForcesNextRealMessage(t *testing.T) {
 	if h.dedup.marks() != 1 {
 		t.Fatalf("bare fresh dedup marks = %d, want 1", h.dedup.marks())
 	}
-
-	next := p2pMessage(t)
-	next.MessageID = "om-2"
-	next.Text = "start the new topic"
-	if err := h.router.Handle(context.Background(), next); err != nil {
-		t.Fatalf("next Handle: %v", err)
+	if h.binder.pendingFreshCalls() != 1 {
+		t.Fatalf("pending fresh writes = %d, want 1", h.binder.pendingFreshCalls())
 	}
-	if !h.tasks.freshArg() {
-		t.Fatal("the next real message must consume the pending ForceFresh intent")
-	}
-
-	again := p2pMessage(t)
-	again.MessageID = "om-3"
-	if err := h.router.Handle(context.Background(), again); err != nil {
-		t.Fatalf("again Handle: %v", err)
-	}
-	if h.tasks.freshArg() {
-		t.Fatal("the pending ForceFresh intent must be consumed exactly once")
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeFreshPending
+	}) {
+		t.Fatalf("fresh-pending result was not delivered: %+v", h.replier.calls())
 	}
 }
 
@@ -1299,7 +1929,7 @@ func TestRouter_AdapterBareFreshUsesOriginalCommandText(t *testing.T) {
 
 	reset := p2pMessage(t)
 	reset.Text = "<recent_context>old topic</recent_context>"
-	reset.CommandText = "/new"
+	reset.CommandText = "/clear"
 	reset.ForceFresh = true
 	if err := h.router.Handle(context.Background(), reset); err != nil {
 		t.Fatalf("bare fresh Handle: %v", err)
@@ -1310,38 +1940,23 @@ func TestRouter_AdapterBareFreshUsesOriginalCommandText(t *testing.T) {
 	if h.tasks.wasCalled() {
 		t.Fatal("adapter-enriched bare fresh must not schedule an empty agent run")
 	}
+	if h.binder.pendingFreshCalls() != 1 {
+		t.Fatalf("pending fresh writes = %d, want 1", h.binder.pendingFreshCalls())
+	}
 }
 
-func TestRouter_BareFreshSurvivesFailedEnqueue(t *testing.T) {
+func TestRouter_BareFreshPersistenceFailureDoesNotAcknowledge(t *testing.T) {
 	h := newHarness(t)
 	h.media.noMedia = true
+	h.binder.pendingErr = errors.New("database unavailable")
 
 	reset := p2pMessage(t)
-	reset.Text = "/new"
-	if err := h.router.Handle(context.Background(), reset); err != nil {
-		t.Fatalf("bare fresh Handle: %v", err)
+	reset.Text = "/clear"
+	if err := h.router.Handle(context.Background(), reset); err == nil {
+		t.Fatal("bare fresh must fail when its durable intent cannot be stored")
 	}
-
-	h.tasks.err = service.ErrChatTaskAgentNoRuntime
-	failed := p2pMessage(t)
-	failed.MessageID = "om-2"
-	failed.Text = "first attempt while offline"
-	if err := h.router.Handle(context.Background(), failed); err != nil {
-		t.Fatalf("failed enqueue Handle: %v", err)
-	}
-	if !h.tasks.freshArg() {
-		t.Fatal("failed enqueue must still receive the pending ForceFresh intent")
-	}
-
-	h.tasks.err = nil
-	next := p2pMessage(t)
-	next.MessageID = "om-3"
-	next.Text = "retry after runtime is available"
-	if err := h.router.Handle(context.Background(), next); err != nil {
-		t.Fatalf("retry Handle: %v", err)
-	}
-	if !h.tasks.freshArg() {
-		t.Fatal("pending ForceFresh intent must survive until a run queues")
+	if len(h.replier.calls()) != 0 {
+		t.Fatalf("failed persistence emitted a success reply: %+v", h.replier.calls())
 	}
 }
 

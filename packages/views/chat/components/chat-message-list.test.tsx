@@ -20,16 +20,21 @@ vi.mock("react-virtuoso", () => ({
     computeItemKey,
     components,
     context,
+    followOutput,
   }: {
     data: unknown[];
     itemContent: (i: number, item: unknown) => ReactElement;
     computeItemKey: (i: number, item: unknown) => string;
     components?: { Footer?: (p: { context?: unknown }) => ReactElement | null };
     context?: unknown;
+    followOutput?: (atBottom: boolean) => "smooth" | "auto" | false;
   }) => {
     const Footer = components?.Footer;
     return (
-      <div>
+      <div
+        data-follow-at-bottom={String(followOutput?.(true))}
+        data-follow-away-from-bottom={String(followOutput?.(false))}
+      >
         {data.map((item, i) => (
           <div key={computeItemKey(i, item)} data-row-key={computeItemKey(i, item)}>
             {itemContent(i, item)}
@@ -87,6 +92,46 @@ function pushTaskMessage(qc: QueryClient, msg: TaskMessagePayload) {
     );
   });
 }
+
+describe("ChatMessageList live follow (#6697)", () => {
+  it("follows appended output immediately only while Virtuoso is at the live end", () => {
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const list = container.querySelector("[data-follow-at-bottom]");
+    expect(list).toHaveAttribute("data-follow-at-bottom", "auto");
+    expect(list).toHaveAttribute("data-follow-away-from-bottom", "false");
+  });
+
+  it("does not follow while older history is being prepended", () => {
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={null}
+            availability="online"
+            isFetchingOlderMessages
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(container.querySelector("[data-follow-at-bottom]")).toHaveAttribute(
+      "data-follow-at-bottom",
+      "false",
+    );
+  });
+});
 
 describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
   // The live footer is passed to Virtuoso through `components`. If that prop
@@ -188,6 +233,35 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
 
     expect(await screen.findByText("Draft ready.")).toBeInTheDocument();
     expect(screen.queryByText(/Hidden suggestion/)).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatMessageList footer spacing", () => {
+  it("keeps the bottom inset when no task is pending", () => {
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "assistant-idle",
+                chat_session_id: "session-idle",
+                role: "assistant",
+                content: "Idle reply",
+                task_id: null,
+                created_at: "2026-08-12T00:00:00Z",
+              },
+            ]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const list = container.querySelector("[data-row-key]")?.parentElement;
+    expect(list?.lastElementChild).toHaveClass("pb-4");
+    expect(screen.queryByText(/working|queued/i)).not.toBeInTheDocument();
   });
 });
 
@@ -343,6 +417,120 @@ describe("ChatMessageList onboarding kickoff", () => {
   });
 });
 
+describe("ChatMessageList channel quote presentation", () => {
+  it("renders channel quote content semantically without exposing protocol metadata", async () => {
+    const content =
+      "> The image contains a celebration emoji.\n\n" +
+      "Can you still see this image?";
+
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "channel-user-message",
+                chat_session_id: "s1",
+                role: "user",
+                content,
+                task_id: TASK_ID,
+                created_at: new Date(0).toISOString(),
+              },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const quote = await screen.findByText("The image contains a celebration emoji.");
+    expect(quote.closest("blockquote")).not.toBeNull();
+    expect(screen.getByText("Can you still see this image?")).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("quoted_message");
+    expect(container).not.toHaveTextContent("private-message-id");
+    expect(container).not.toHaveTextContent("private-platform-id");
+  });
+
+  it("renders a structured channel quote as a semantic list", async () => {
+    const content =
+      "> Any heading:\n>\n" +
+      "> - Plain text item\n" +
+      "> - Another item\n" +
+      "> - [Labeled reference](https://example.com/reference)\n\n" +
+      "Verify this information";
+
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "channel-source-list",
+                chat_session_id: "s1",
+                role: "user",
+                content,
+                task_id: TASK_ID,
+                created_at: new Date(0).toISOString(),
+              },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const quote = container.querySelector("blockquote");
+    expect(quote).not.toBeNull();
+    expect(await screen.findByText("Any heading:")).toBeInTheDocument();
+    expect(quote?.querySelectorAll("li")).toHaveLength(3);
+    expect(quote?.querySelector('a[href="https://example.com/reference"]')).toHaveTextContent(
+      "Labeled reference",
+    );
+    expect(screen.getByText("Verify this information")).toBeInTheDocument();
+  });
+
+  it("keeps text around quoted RichText media and separates current RichText", async () => {
+    const content =
+      "> Quoted rich text before\n>\n" +
+      "> ![Quoted image](https://example.com/quoted.png)\n>\n" +
+      "> Quoted rich text after\n\n" +
+      "Current rich text\n\n" +
+      "![Current image](https://example.com/current.png)";
+
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "channel-rich-text",
+                chat_session_id: "s1",
+                role: "user",
+                content,
+                task_id: TASK_ID,
+                created_at: new Date(0).toISOString(),
+              },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const quote = container.querySelector("blockquote");
+    expect(quote).not.toBeNull();
+    expect(quote).toHaveTextContent("Quoted rich text before");
+    expect(quote).toHaveTextContent("Quoted rich text after");
+    expect(quote?.querySelector('img[alt="Quoted image"]')).not.toBeNull();
+    expect(quote?.querySelector('img[alt="Current image"]')).toBeNull();
+    expect(screen.getByText("Current rich text")).toBeInTheDocument();
+    expect(container.querySelector('img[alt="Current image"]')).not.toBeNull();
+  });
+});
+
 describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
   // The backend moved to the refined taxonomy (agent_error.*) in MUL-2946 but
   // the copy map stayed on the six coarse values, so an exact-key lookup
@@ -379,6 +567,20 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
     renderFailure("skill_bundle_unavailable");
     expect(
       await screen.findByText(enChat.message_list.failure.skill_bundle_unavailable),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
+  });
+
+  it("renders dedicated copy for a failed environment preparation", async () => {
+    // #7913. Without an entry of its own this reason has no agent_error
+    // family to degrade into, so it would land on the generic fallback —
+    // and the one thing the reader needs to know is that the problem is on
+    // the machine running the agent, which the fallback cannot say.
+    renderFailure("environment_prepare_failed");
+    expect(
+      await screen.findByText(
+        enChat.message_list.failure.environment_prepare_failed,
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });

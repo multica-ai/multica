@@ -1,11 +1,11 @@
 ---
 title: Slack Bot
-description: 为智能体创建一个 Slack Bot，在私聊、频道和 /issue 命令中使用它。
+description: 为智能体创建一个 Slack Bot，在私聊、频道以及 /issue、/new、/clear 命令中使用它。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica 使用你自己的 Slack app。连接后，团队成员可以私聊 Bot、在频道里 @ 它，或用 `/issue` 创建 issue。
+Multica 使用你自己的 Slack app。连接后，团队成员可以私聊 Bot、在频道里 @ 它、用 `/issue` 创建任务、用 `/new` 新建 Multica Chat，或用 `/clear` 重置当前 Chat 的智能体上下文。
 
 一个 Slack app 对应一个 Multica 智能体。需要接入多个智能体时，为每个智能体分别创建 app。
 
@@ -22,47 +22,62 @@ Multica 使用你自己的 Slack app。连接后，团队成员可以私聊 Bot�
 
 ```yaml
 display_information:
-  name: Multica
+ name: Multica
 features:
-  app_home:
-    home_tab_enabled: false
-    messages_tab_enabled: true
-    messages_tab_read_only_enabled: false
-  bot_user:
-    display_name: Multica
-    always_online: true
-  slash_commands:
-    - command: /issue
-      description: Create a Multica issue
-      usage_hint: "[description]"
+ app_home:
+ home_tab_enabled: false
+ messages_tab_enabled: true
+ messages_tab_read_only_enabled: false
+ bot_user:
+ display_name: Multica
+ always_online: true
+ slash_commands:
+ - command: /issue
+ description: Create a Multica issue
+ usage_hint: "[description]"
+ - command: /new
+ description: Start a new Multica chat
+ usage_hint: "[message]"
+ - command: /clear
+ description: Clear the current Multica chat context
+ usage_hint: "[message]"
 oauth_config:
-  scopes:
-    bot:
-      - app_mentions:read
-      - channels:history
-      - groups:history
-      - im:history
-      - mpim:history
-      - chat:write
-      - reactions:write
-      - users:read
-      - commands
+ scopes:
+ bot:
+ - app_mentions:read
+ - channels:history
+ - files:read
+ - groups:history
+ - im:history
+ - mpim:history
+ - chat:write
+ - reactions:write
+ - users:read
+ - commands
 settings:
-  event_subscriptions:
-    bot_events:
-      - app_mention
-      - message.im
-      - message.channels
-      - message.groups
-      - message.mpim
-  interactivity:
-    is_enabled: false
-  org_deploy_enabled: false
-  socket_mode_enabled: true
-  token_rotation_enabled: false
+ event_subscriptions:
+ bot_events:
+ - app_mention
+ - message.im
+ - message.channels
+ - message.groups
+ - message.mpim
+ interactivity:
+ is_enabled: false
+ org_deploy_enabled: false
+ socket_mode_enabled: true
+ token_rotation_enabled: false
 ```
 
-创建前可以把两个 `Multica` 改成智能体的名字。不要删除 manifest 中的权限或事件，否则私聊、频道提及、回复或 `/issue` 可能无法工作。
+创建前可以把两个 `Multica` 改成智能体的名字。不要删除 manifest 中的权限或事件，否则私聊、频道提及、回复、`/issue`、`/new` 或 `/clear` 可能无法工作。
+
+<Callout type="warning">
+Slack slash command 名称在整个 workspace 中共享。如果其他已安装 app 占用了 `/new` 或 `/clear`，Slack 会在创建或更新 app 时拒绝冲突命令。可以先解决名称冲突，也可以发送消息形式的 `@Multica /new [消息]` 或 `@Multica /clear [消息]`，绕过原生 slash command 拦截。
+</Callout>
+
+<Callout type="warning">
+如果这个 Slack app 是在附件支持上线前安装的，请添加 `files:read` Bot scope，并将 app 重新安装到 workspace。在重新安装 app 前，新增 scope 不会应用到现有 Bot token。
+</Callout>
 
 Bot 使用 Socket Mode 主动连接 Slack，不需要配置公网 Request URL 或 OAuth Redirect URL。
 
@@ -93,7 +108,7 @@ Bot 使用 Socket Mode 主动连接 Slack，不需要配置公网 Request URL �
 Multica 会验证两个 token 是否来自同一个 app。连接成功后，页面会显示 **已连接到 Slack**。
 
 <Callout type="warning">
-两个 token 会加密保存在 Multica 服务器上。Token 即凭据，不要写进 issue、评论或代码仓库。已连接到其他智能体或工作区的 app 不能直接重复使用，需先断开原连接。
+两个 token 会加密保存在 Multica 服务器上。Token 即凭据，不要写进任务、评论或代码仓库。已连接到其他智能体或工作区的 app 不能直接重复使用，需先断开原连接。
 </Callout>
 
 ## 第一次使用
@@ -116,7 +131,13 @@ Multica 会验证两个 token 是否来自同一个 app。连接成功后，页�
 
 Bot 只会响应明确 @ 它的频道消息。执行时，它会在权限允许的范围内读取该 thread 的近期上下文。
 
-### 用 `/issue` 创建 issue
+### 发送文件
+
+在私聊里，或者在 @ 提及 Bot 的频道消息里直接带上文件。文件会作为附件进入同一项工作，智能体可以结合文件和你的诉求一起处理。
+
+这需要 `files:read` 权限 —— 如果这个应用是在附件支持之前安装的，参考第 1 步的提示。单个文件不超过 20 MiB，一条消息最多带 10 个。超出大小、仍在上传，或者存放在 Slack 之外（比如 Google Drive、Dropbox 链接）的文件会被跳过，消息文本仍然会交给智能体。
+
+### 用 `/issue` 创建任务
 
 在频道或私聊中输入：
 
@@ -124,7 +145,21 @@ Bot 只会响应明确 @ 它的频道消息。执行时，它会在权限允许�
 /issue Safari 登录成功后仍然停留在登录页
 ```
 
-这条命令不需要 @ Bot。Multica 会把描述交给当前 Bot 对应的智能体，由它整理标题和正文并创建 issue。Slack 会先显示一条仅你可见的接收提示；创建完成后，你会在 Multica 收件箱中收到通知。
+这条命令不需要 @ Bot。Multica 会把描述交给当前 Bot 对应的智能体，由它整理标题和正文并创建任务。Slack 会先显示一条仅你可见的接收提示；创建完成后，你会在 Multica 收件箱中收到通知。
+
+### 用 `/new` 新建 Chat
+
+在与 Bot 的私聊中，发送 `/new` 会立即创建一个空的、可见的新 Chat；发送 `/new <消息>` 会把消息作为新 Chat 的第一轮。裸 `/new` 在第一条有效用户消息到来前显示为“新对话”，之后沿用现有的首条消息标题逻辑。
+
+旧 Chat 仍保留在 Multica 中，并可继续从 Web、桌面端或移动端发送消息；只有 Slack 这条外部会话的后续消息会切换到新 Chat。
+
+在频道或 thread 中，Slack 原生 slash command 的 payload 不包含目标 thread。请在目标 thread 里发送 `@Multica /new [消息]`。
+
+### 用 `/clear` 清空当前 Chat 上下文
+
+在与 Bot 的私聊中，`/clear` 会保留当前 Multica Chat，只重置智能体可见的上下文。完整 Chat 历史仍保存在 Multica 中。`/clear <消息>` 会把消息作为新上下文的第一轮；裸 `/clear` 会把边界应用到下一条真实消息。
+
+在频道或 thread 中，请在目标 thread 里发送 `@Multica /clear [消息]`，让 Multica 把边界应用到正确的会话。
 
 ## 管理连接
 
@@ -156,11 +191,12 @@ openssl rand -base64 32
 - **无法验证 app**：确认 manifest 包含 `users:read`，更新权限后重新安装 app。
 - **私聊没有入口**：确认 `app_home.messages_tab_enabled` 为 `true`。
 - **频道里没有回复**：确认 Bot 已被邀请进频道，并在消息中 @ 了它。
-- **`/issue` 不存在**：确认 manifest 包含 slash command 和 `commands` scope，随后重新安装 app。
+- **`/issue`、`/new` 或 `/clear` 不存在**：确认 manifest 包含这三个 slash command 和 `commands` scope，随后重新安装 app。如果 Slack 提示 `/new` 或 `/clear` 已被占用，请改用 `@Multica` 消息形式，或先解决 workspace 级命令冲突。
+- **文件没有送达智能体**：确认 manifest 里包含 `files:read`，并且在添加该权限后重新安装过应用，同时确认文件不超过 20 MiB。
 - **Bot 不执行**：检查智能体是否已归档，以及它使用的[运行时](/daemon-runtimes)是否在线。
 
 ## 接下来
 
 - [聊天集成](/channels) — 平台对比、会话隔离和账号绑定机制。
 - [与智能体对话](/chat) — Bot 背后的对话与执行模型。
-- [Issues](/issues) — `/issue` 创建的工作单位。
+- [任务](/issues) — `/issue` 创建的工作单位。

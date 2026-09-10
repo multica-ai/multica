@@ -5,6 +5,7 @@ import {
   onInboxIssueDeleted,
   onInboxIssueStatusChanged,
   onInboxSummaryInvalidate,
+  patchInboxIssueProjection,
 } from "./ws-updaters";
 import { inboxKeys } from "./queries";
 import type { InboxItem } from "../types";
@@ -153,5 +154,46 @@ describe("onInboxIssueStatusChanged", () => {
     expect(
       qc.getQueryData<InboxItem[]>(inboxKeys.archived(wsId))?.[0]?.issue_status,
     ).toBe("done");
+  });
+});
+
+describe("patchInboxIssueProjection", () => {
+  it("patches priority in both active and archived issue rows", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [
+      makeItem("i1", "issue-a", { issue_priority: "low" }),
+      makeItem("i2", "issue-b", { issue_priority: "low" }),
+    ]);
+    qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), [
+      makeItem("a1", "issue-a", {
+        archived: true,
+        issue_priority: "low",
+      }),
+    ]);
+
+    patchInboxIssueProjection(qc, wsId, "issue-a", { priority: "urgent" });
+
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.map((item) =>
+        item.issue_priority,
+      ),
+    ).toEqual(["urgent", "low"]);
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.archived(wsId))?.[0]
+        ?.issue_priority,
+    ).toBe("urgent");
+  });
+
+  it("does not manufacture priority capability for legacy Inbox rows", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [
+      makeItem("legacy", "issue-a"),
+    ]);
+
+    patchInboxIssueProjection(qc, wsId, "issue-a", { priority: "urgent" });
+
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0],
+    ).not.toHaveProperty("issue_priority");
   });
 });

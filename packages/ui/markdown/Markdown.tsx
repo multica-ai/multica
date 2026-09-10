@@ -360,7 +360,7 @@ function createComponents(
             type="checkbox"
             checked={checked}
             readOnly
-            className="mr-2 rounded border-muted-foreground"
+            className="mr-2 rounded-xs border-muted-foreground"
           />
         )
       }

@@ -25,14 +25,15 @@ func TestListIssuesSortsByStatusAndUpdatedAt(t *testing.T) {
 	})
 
 	type fixture struct {
-		title     string
-		status    string
-		updatedAt time.Time
+		title      string
+		status     string
+		updatedAt  time.Time
+		activityAt time.Time
 	}
 	fixtures := []fixture{
-		{"sort-done", "done", time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC)},
-		{"sort-backlog", "backlog", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
-		{"sort-progress", "in_progress", time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{"sort-done", "done", time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)},
+		{"sort-backlog", "backlog", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 3, 0, 0, 0, 0, time.UTC)},
+		{"sort-progress", "in_progress", time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC)},
 	}
 	for index, item := range fixtures {
 		var number int
@@ -46,10 +47,10 @@ func TestListIssuesSortsByStatusAndUpdatedAt(t *testing.T) {
 		if _, err := testPool.Exec(ctx, `
 			INSERT INTO issue (
 				workspace_id, title, status, priority, creator_type, creator_id,
-				position, number, project_id, created_at, updated_at
+				position, number, project_id, created_at, updated_at, last_activity_at
 			)
-			VALUES ($1, $2, $3, 'none', 'member', $4, $5, $6, $7, $8, $8)
-		`, testWorkspaceID, item.title, item.status, testUserID, index, number, projectID, item.updatedAt); err != nil {
+			VALUES ($1, $2, $3, 'none', 'member', $4, $5, $6, $7, $8, $8, $9)
+		`, testWorkspaceID, item.title, item.status, testUserID, index, number, projectID, item.updatedAt, item.activityAt); err != nil {
 			t.Fatalf("create issue %q: %v", item.title, err)
 		}
 	}
@@ -57,12 +58,14 @@ func TestListIssuesSortsByStatusAndUpdatedAt(t *testing.T) {
 	listTitles := func(sort, direction string) []string {
 		t.Helper()
 		path := fmt.Sprintf(
-			"/api/issues?workspace_id=%s&project_id=%s&limit=50&sort=%s&direction=%s",
+			"/api/issues?workspace_id=%s&project_id=%s&limit=50&sort=%s",
 			testWorkspaceID,
 			projectID,
 			sort,
-			direction,
 		)
+		if direction != "" {
+			path += "&direction=" + direction
+		}
 		w := httptest.NewRecorder()
 		testHandler.ListIssues(w, newRequest("GET", path, nil))
 		if w.Code != http.StatusOK {
@@ -76,6 +79,35 @@ func TestListIssuesSortsByStatusAndUpdatedAt(t *testing.T) {
 		}
 		titles := make([]string, 0, len(response.Issues))
 		for _, issue := range response.Issues {
+			titles = append(titles, issue.Title)
+		}
+		return titles
+	}
+	groupedTitles := func(sort, direction string) []string {
+		t.Helper()
+		path := fmt.Sprintf(
+			"/api/issues/grouped?workspace_id=%s&project_id=%s&limit=50&sort=%s",
+			testWorkspaceID,
+			projectID,
+			sort,
+		)
+		if direction != "" {
+			path += "&direction=" + direction
+		}
+		w := httptest.NewRecorder()
+		testHandler.ListGroupedIssues(w, newRequest("GET", path, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListGroupedIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var response GroupedIssuesResponse
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatalf("decode grouped response: %v", err)
+		}
+		if len(response.Groups) != 1 {
+			t.Fatalf("ListGroupedIssues groups = %d, want 1", len(response.Groups))
+		}
+		titles := make([]string, 0, len(response.Groups[0].Issues))
+		for _, issue := range response.Groups[0].Issues {
 			titles = append(titles, issue.Title)
 		}
 		return titles
@@ -107,5 +139,30 @@ func TestListIssuesSortsByStatusAndUpdatedAt(t *testing.T) {
 		"sort-done",
 		"sort-progress",
 		"sort-backlog",
+	})
+	assertTitles(listTitles("last_activity", "asc"), []string{
+		"sort-done",
+		"sort-progress",
+		"sort-backlog",
+	})
+	assertTitles(listTitles("last_activity", "desc"), []string{
+		"sort-backlog",
+		"sort-progress",
+		"sort-done",
+	})
+	assertTitles(listTitles("last_activity", ""), []string{
+		"sort-backlog",
+		"sort-progress",
+		"sort-done",
+	})
+	assertTitles(groupedTitles("last_activity", "asc"), []string{
+		"sort-done",
+		"sort-progress",
+		"sort-backlog",
+	})
+	assertTitles(groupedTitles("last_activity", ""), []string{
+		"sort-backlog",
+		"sort-progress",
+		"sort-done",
 	})
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { issueStatusCategory } from "@multica/core/issues";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
@@ -16,7 +17,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
+import { Layers,
   ChevronDown,
   ChevronRight,
   LogOut,
@@ -57,6 +58,11 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useAuthStore } from "@multica/core/auth";
+import { issueViewDetailOptions } from "@multica/core/issue-views/queries";
+import {
+  issueViewContainerKey,
+  useActiveIssueViewStore,
+} from "@multica/core/issue-views/active-view-store";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -100,6 +106,7 @@ const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
 const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>> = [];
+const PINNED_PREVIEW_LIMIT = 5;
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
@@ -139,24 +146,30 @@ type NavLabelKey =
 // always agree. See route-icon-components.tsx.
 const personalNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "inbox", labelKey: "inbox" },
-  { key: "chat", labelKey: "chat" },
   { key: "myIssues", labelKey: "my_issues" },
+  { key: "chat", labelKey: "chat" },
 ];
 
-const workspaceNav: { key: NavKey; labelKey: NavLabelKey }[] = [
+const workNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "issues", labelKey: "issues" },
   { key: "projects", labelKey: "projects" },
   { key: "autopilots", labelKey: "autopilots" },
-  { key: "agents", labelKey: "agents" },
-  { key: "squads", labelKey: "squads" },
-  { key: "usage", labelKey: "usage" },
 ];
 
-const configureNav: { key: NavKey; labelKey: NavLabelKey }[] = [
-  { key: "runtimes", labelKey: "runtimes" },
+const aiTeamNav: { key: NavKey; labelKey: NavLabelKey }[] = [
+  { key: "agents", labelKey: "agents" },
+  { key: "squads", labelKey: "squads" },
   { key: "skills", labelKey: "skills" },
+  { key: "runtimes", labelKey: "runtimes" },
+];
+
+const utilityNav: { key: NavKey; labelKey: NavLabelKey }[] = [
+  { key: "usage", labelKey: "usage" },
   { key: "settings", labelKey: "settings" },
 ];
+
+const NAV_ITEM_CLASS_NAME =
+  "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground";
 
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => s.hasDraft());
@@ -177,6 +190,8 @@ function SortablePinItem({
   onUnpin,
   label,
   iconNode,
+  onNavigate,
+  isActiveOverride,
 }: {
   pin: PinnedItem;
   href: string;
@@ -184,6 +199,10 @@ function SortablePinItem({
   onUnpin: () => void;
   label: string;
   iconNode: React.ReactNode;
+  /** Runs on a real click (not a drag-release) before navigation. */
+  onNavigate?: () => void;
+  /** Overrides the plain path comparison (view pins carry extra state). */
+  isActiveOverride?: boolean;
 }) {
   const { t } = useT("layout");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pin.id });
@@ -194,7 +213,7 @@ function SortablePinItem({
   }, [isDragging]);
 
   const style = { transform: CSS.Transform.toString(transform), transition };
-  const isActive = pathname === href;
+  const isActive = isActiveOverride ?? pathname === href;
 
   return (
     <SidebarMenuItem
@@ -207,13 +226,14 @@ function SortablePinItem({
       <SidebarMenuButton
         size="sm"
         isActive={isActive}
-        render={<AppLink href={href} draggable={false} />}
+        render={<AppLink href={href} newTabTitle={label} draggable={false} />}
         onClick={(event) => {
           if (wasDragged.current) {
             wasDragged.current = false;
             event.preventDefault();
             return;
           }
+          onNavigate?.();
         }}
         className={cn(
           "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
@@ -271,23 +291,80 @@ function PinRow({
   wsId: string;
 }) {
   const isIssue = pin.item_type === "issue";
+  const isView = pin.item_type === "view";
+  const p = useWorkspacePaths();
+  const setActiveView = useActiveIssueViewStore((s) => s.setActive);
   const issueQuery = useQuery({
     ...issueDetailOptions(wsId, pin.item_id),
     enabled: isIssue,
   });
   const projectQuery = useQuery({
     ...projectDetailOptions(wsId, pin.item_id),
-    enabled: !isIssue,
+    enabled: pin.item_type === "project",
+  });
+  const viewQuery = useQuery({
+    ...issueViewDetailOptions(wsId, pin.item_id),
+    enabled: isView,
   });
 
   const triggeredRef = useRef(false);
   useEffect(() => {
+    // Views are exempt from 404-auto-unpin: an installed desktop client
+    // talking to an older backend without the view endpoints sees 404 for
+    // every view pin — auto-unpinning would permanently delete them all.
+    // A deleted view's row simply hides instead.
+    if (isView) return;
     const err = isIssue ? issueQuery.error : projectQuery.error;
     if (err instanceof ApiError && err.status === 404 && !triggeredRef.current) {
       triggeredRef.current = true;
       onUnpin();
     }
-  }, [isIssue, issueQuery.error, onUnpin, projectQuery.error]);
+  }, [isIssue, isView, issueQuery.error, onUnpin, projectQuery.error]);
+
+  const activeViewByContainer = useActiveIssueViewStore((s) => s.active);
+  if (isView) {
+    if (viewQuery.isPending) return <PinSkeleton />;
+    if (viewQuery.isError || !viewQuery.data) return null;
+    const view = viewQuery.data;
+    // One resolved scope drives the path AND the container key so an
+    // unrecognised scope_type from a newer backend degrades coherently.
+    const scopeType: "workspace" | "my" | "project" =
+      view.scope_type === "my"
+        ? "my"
+        : view.scope_type === "project" && view.scope_id
+          ? "project"
+          : "workspace";
+    const viewPath =
+      scopeType === "my"
+        ? p.myIssues()
+        : scopeType === "project"
+          ? p.projectDetail(view.scope_id!)
+          : p.issues();
+    const containerKey = issueViewContainerKey(wsId, {
+      scope_type: scopeType,
+      scope_id: scopeType === "project" ? view.scope_id : null,
+    });
+    return (
+      <SortablePinItem
+        pin={pin}
+        // ?view= keeps a web reload on the view for the surfaces that mount
+        // the URL-sync hook (/issues, /my-issues). Project pages don't sync
+        // yet — there the query is inert and reload falls back to the plain
+        // page; click-through activation still works everywhere.
+        href={`${viewPath}?view=${view.id}`}
+        pathname={pathname}
+        onUnpin={onUnpin}
+        label={view.name}
+        iconNode={<Layers className="!size-3.5 shrink-0" />}
+        // Active only when this exact view is open on its surface — the
+        // path alone also matches the plain tab.
+        isActiveOverride={
+          pathname === viewPath && activeViewByContainer[containerKey] === view.id
+        }
+        onNavigate={() => setActiveView(containerKey, view.id)}
+      />
+    );
+  }
 
   if (isIssue) {
     if (issueQuery.isPending) return <PinSkeleton />;
@@ -296,7 +373,11 @@ function PinRow({
     const label = issue.title;
     const iconNode = (
       /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
-      <StatusIcon status={issue.status} className="!size-3.5 shrink-0" />
+      <StatusIcon
+        status={issue.status}
+        category={issueStatusCategory(issue) ?? undefined}
+        className="!size-3.5 shrink-0"
+      />
     );
     return (
       <SortablePinItem
@@ -331,7 +412,7 @@ function PinSkeleton() {
     <SidebarMenuItem>
       <div className="flex h-7 w-full items-center gap-2 px-2">
         <div className="size-3.5 shrink-0 rounded-sm bg-sidebar-accent/40" />
-        <div className="h-3 w-24 rounded bg-sidebar-accent/40" />
+        <div className="h-3 w-24 rounded-xs bg-sidebar-accent/40" />
       </div>
     </SidebarMenuItem>
   );
@@ -435,7 +516,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
   const getPinHref = useCallback(
-    (pin: PinnedItem) => (pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id)),
+    (pin: PinnedItem) =>
+      pin.item_type === "issue"
+        ? p.issueDetail(pin.item_id)
+        : pin.item_type === "project"
+          ? p.projectDetail(pin.item_id)
+          // Views know their target only after their detail loads — the row
+          // resolves its own href; this placeholder never renders as a link.
+          : "",
     [p],
   );
 
@@ -445,6 +533,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   // DOM under dnd-kit while its drop animation is still interpolating.
   const [localPinned, setLocalPinned] = useState<PinnedItem[]>(pinnedItems);
   const [localPinnedWsId, setLocalPinnedWsId] = useState<string | null>(wsId ?? null);
+  const [expandedPinsWorkspaceId, setExpandedPinsWorkspaceId] = useState<string | null>(null);
   const isDraggingRef = useRef(false);
   useEffect(() => {
     if (!isDraggingRef.current) {
@@ -455,7 +544,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     setLocalPinnedWsId(wsId ?? null);
   }, [wsId]);
   const visiblePinned = localPinnedWsId === (wsId ?? null) ? localPinned : EMPTY_PINS;
-  const isActivePinnedRoute = visiblePinned.some((pin) => pathname === getPinHref(pin));
+  const pinsExpanded = expandedPinsWorkspaceId === wsId;
+  const displayedPinned = pinsExpanded ? visiblePinned : visiblePinned.slice(0, PINNED_PREVIEW_LIMIT);
+  // View pins are absent here (their href resolves async): while a view
+  // pin is active the plain nav row for its surface stays highlighted too.
+  // Accepted — suppressing it would need every view detail lifted up here.
+  const isActivePinnedRoute = displayedPinned.some((pin) => pathname === getPinHref(pin));
 
   const handleDragStart = useCallback(() => {
     isDraggingRef.current = true;
@@ -606,7 +700,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <span className="flex-1 truncate text-body">{inv.workspace_name ?? t(($) => $.sidebar.invitation_workspace_fallback)}</span>
                             <button
                               type="button"
-                              className="text-caption px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                              className="text-caption px-2 py-0.5 rounded-xs bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                               disabled={acceptInvitationMut.isPending}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -617,7 +711,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             </button>
                             <button
                               type="button"
-                              className="text-caption px-2 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+                              className="text-caption px-2 py-0.5 rounded-xs bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
                               disabled={declineInvitationMut.isPending}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -680,7 +774,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        className={NAV_ITEM_CLASS_NAME}
                       >
                         <Icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
@@ -720,9 +814,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <CollapsibleContent>
                   <SidebarGroupContent>
                     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-                      <SortableContext items={visiblePinned.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+                      <SortableContext items={displayedPinned.map((p) => p.id)} strategy={verticalListSortingStrategy}>
                         <SidebarMenu className="gap-0.5">
-                          {visiblePinned.map((pin: PinnedItem) => (
+                          {displayedPinned.map((pin: PinnedItem) => (
                             <PinRow
                               key={pin.id}
                               pin={pin}
@@ -735,6 +829,20 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         </SidebarMenu>
                       </SortableContext>
                     </DndContext>
+                    {visiblePinned.length > PINNED_PREVIEW_LIMIT && (
+                      <SidebarMenuButton
+                        size="sm"
+                        aria-expanded={pinsExpanded}
+                        className="mt-0.5 pl-7 text-muted-foreground"
+                        onClick={() => setExpandedPinsWorkspaceId(pinsExpanded ? null : wsId ?? null)}
+                      >
+                        <span>
+                          {pinsExpanded
+                            ? t(($) => $.sidebar.show_fewer_pins)
+                            : t(($) => $.sidebar.show_more_pins, { count: visiblePinned.length - PINNED_PREVIEW_LIMIT })}
+                        </span>
+                      </SidebarMenuButton>
+                    )}
                   </SidebarGroupContent>
                 </CollapsibleContent>
               </SidebarGroup>
@@ -742,10 +850,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           )}
 
           <SidebarGroup>
-            <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
+            <SidebarGroupLabel>{t(($) => $.sidebar.work_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {workspaceNav.map((item) => {
+                {workNav.map((item) => {
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
                   const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
@@ -754,7 +862,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        className={NAV_ITEM_CLASS_NAME}
                       >
                         <Icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
@@ -767,10 +875,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           </SidebarGroup>
 
           <SidebarGroup>
-            <SidebarGroupLabel>{t(($) => $.sidebar.configure_group)}</SidebarGroupLabel>
+            <SidebarGroupLabel>{t(($) => $.sidebar.ai_team_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {configureNav.map((item) => {
+                {aiTeamNav.map((item) => {
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
                   const isActive = isNavActive(pathname, href);
@@ -779,7 +887,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        className={NAV_ITEM_CLASS_NAME}
                       >
                         <Icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
@@ -793,6 +901,24 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarContent>
 
         <SidebarFooter className="p-2">
+          <SidebarMenu className="gap-0.5">
+            {utilityNav.map((item) => {
+              const href = p[item.key]();
+              const Icon = routeIconForPath(href);
+              return (
+                <SidebarMenuItem key={item.key}>
+                  <SidebarMenuButton
+                    isActive={isNavActive(pathname, href)}
+                    render={<AppLink href={href} />}
+                    className={NAV_ITEM_CLASS_NAME}
+                  >
+                    <Icon />
+                    <span>{t(($) => $.nav[item.labelKey])}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
           {/* One utility strip: the Discord link takes the leading space the
               help trigger was leaving empty. `justify-end` keeps the trigger
               right-aligned once the Discord link is dismissed. */}

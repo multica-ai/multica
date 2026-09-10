@@ -73,7 +73,7 @@ function CodeBlockView({ node }: NodeViewProps) {
         <div contentEditable={false} className="mb-1">
           <CodeBlockIframe
             html={debouncedHtml}
-            title="HTML preview"
+            title={t(($) => $.code_block.html_preview)}
             heightClassName={HTML_PREVIEW_HEIGHT}
           />
         </div>
@@ -91,7 +91,7 @@ function CodeBlockView({ node }: NodeViewProps) {
           <button
             type="button"
             onClick={toggleView}
-            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             title={
               view === "preview"
                 ? t(($) => $.code_block.show_source)
@@ -113,7 +113,7 @@ function CodeBlockView({ node }: NodeViewProps) {
         <button
           type="button"
           onClick={handleCopy}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           title={t(($) => $.code_block.copy_code)}
           aria-label={t(($) => $.code_block.copy_code)}
         >

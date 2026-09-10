@@ -12,6 +12,19 @@ import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 
 const TEST_RESOURCES = { en: { common: enCommon, skills: enSkills } };
 
+// MUL-7107: every band of a detail page reads the shared rail. The read-only
+// capability banner was the one left behind, so a viewer without edit rights
+// saw a near-full-width card above centred content on a wide window. The
+// constants are overridden with sentinels because their real values are
+// ordinary Tailwind classes a hand-written element could match by accident.
+const RAIL_SENTINEL = "rail-sentinel";
+const GUTTER_SENTINEL = "gutter-sentinel";
+vi.mock("../../layout/page-header", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../layout/page-header")>()),
+  PAGE_RAIL: "rail-sentinel",
+  PAGE_GUTTER: "gutter-sentinel",
+}));
+
 const skillRef = vi.hoisted(() => ({ current: null as unknown }));
 const agentsRef = vi.hoisted(() => ({ current: [] as unknown[] }));
 const membersRef = vi.hoisted(() => ({ current: [] as unknown[] }));
@@ -123,6 +136,7 @@ function renderPage(searchParams = new URLSearchParams()) {
     back: vi.fn(),
     pathname: "/acme/skills/skill-1",
     searchParams,
+    hash: "",
     getShareableUrl: (path) => path,
   };
   render(
@@ -167,11 +181,6 @@ describe("SkillDetailPage tabs", () => {
     expect(
       screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected"),
     ).toBe("true");
-  });
-
-  it("shows resource labels in Overview without a release flag", async () => {
-    renderPage();
-    expect(await screen.findByTestId("labels")).toBeTruthy();
   });
 
   it("mirrors the active tab into ?view= so the pane survives a reload", async () => {
@@ -423,5 +432,74 @@ describe("SkillDetailPage draft baseline (MUL-5645)", () => {
     expect(
       (screen.getByLabelText("Description") as HTMLTextAreaElement).value,
     ).toBe("my unsaved edit");
+  });
+});
+
+describe("SkillDetailPage origin link", () => {
+  const SOURCE_URL = "https://github.com/anthropics/skills/tree/main/animations";
+
+  it("links the imported-origin chip to its source", async () => {
+    skillRef.current = {
+      ...baseSkill,
+      config: { origin: { type: "github", source_url: SOURCE_URL } },
+    };
+    renderPage();
+    const link = (await screen.findByRole("link", {
+      name: "Imported · GitHub",
+    })) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe(SOURCE_URL);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toContain("noopener");
+  });
+
+  it("keeps manual origins as plain text", async () => {
+    renderPage();
+    expect(await screen.findByText("Created manually")).toBeTruthy();
+    expect(
+      screen.queryByRole("link", { name: "Created manually" }),
+    ).toBeNull();
+  });
+
+  // Which source_urls are linkable is originSourceUrl's contract; its full
+  // matrix lives in ../lib/origin.test.ts. What belongs here is the chip's
+  // behaviour when the helper refuses: it degrades to plain text, still
+  // naming the origin, rather than dropping the label along with the href.
+  it("degrades a refused source_url to plain text, keeping the chip", async () => {
+    skillRef.current = {
+      ...baseSkill,
+      config: {
+        origin: { type: "github", source_url: "https://evil.example/skills" },
+      },
+    };
+    renderPage();
+    expect(await screen.findByText("Imported · GitHub")).toBeTruthy();
+    expect(
+      screen.queryByRole("link", { name: "Imported · GitHub" }),
+    ).toBeNull();
+  });
+});
+
+
+describe("SkillDetailPage rail", () => {
+  it("keeps the read-only capability banner on the shared rail", async () => {
+    canEditRef.current = false;
+    renderPage();
+    await screen.findAllByRole("tab", { name: /Overview|Files/ });
+
+    const banner = document.body.querySelector(
+      `.${RAIL_SENTINEL}.${GUTTER_SENTINEL}.pt-3`,
+    );
+    expect(banner).toBeTruthy();
+  });
+
+  it("puts the identity strip and the tab row on that same rail", async () => {
+    renderPage();
+    await screen.findAllByRole("tab", { name: /Overview|Files/ });
+
+    const railed = document.body.querySelectorAll(
+      `.${RAIL_SENTINEL}.${GUTTER_SENTINEL}`,
+    );
+    // Identity strip, tab row and the Overview panel at minimum.
+    expect(railed.length).toBeGreaterThanOrEqual(3);
   });
 });

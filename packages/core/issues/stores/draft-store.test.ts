@@ -131,6 +131,21 @@ describe("issue draft store — last assignee", () => {
     expect(useIssueDraftStore.getState().draft.manual.propertyValues).toEqual({});
   });
 
+  it("isolates a source-context create draft and restores the ordinary draft", () => {
+    const store = useIssueDraftStore.getState();
+    store.setManual({ title: "ordinary draft" });
+    const ordinary = useIssueDraftStore.getState().draft;
+
+    store.beginIsolatedDraft();
+    expect(useIssueDraftStore.getState().draft.manual.title).toBe("");
+    useIssueDraftStore.getState().setManual({ title: "source-only draft" });
+    expect(useIssueDraftStore.getState().draft.manual.title).toBe("source-only draft");
+
+    useIssueDraftStore.getState().endIsolatedDraft();
+    expect(useIssueDraftStore.getState().draft).toEqual(ordinary);
+    expect(useIssueDraftStore.getState().isolatedDraftBackup).toBeUndefined();
+  });
+
   it("clearDraft removes the persisted project selection", () => {
     const { setShared, clearDraft } = useIssueDraftStore.getState();
 

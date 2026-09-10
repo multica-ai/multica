@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 // requestError is returned by postJSON/getJSON when the server responds with an error status.
@@ -175,20 +178,39 @@ func (c *Client) setIdentityHeaders(req *http.Request) {
 	if c.os != "" {
 		req.Header.Set("X-Client-OS", c.os)
 	}
-	req.Header.Set("X-Client-Capabilities", daemonClientCapabilities())
+	req.Header.Set("X-Client-Capabilities", daemonHTTPClientCapabilities())
 }
 
 // daemonClientCapabilities is the X-Client-Capabilities value the daemon
-// advertises on BOTH the HTTP control-plane requests and the WS handshake, so a
-// claim built over WS gets the same capability gating (skill refs,
-// coalesced-comments) as the HTTP path. rpc-v1 advertises WS request/response
-// support (MUL-4257).
+// advertises on the WS handshake. A claim built over WS gets the common
+// capability gating plus WS-only scheduling metadata. rpc-v1 advertises WS
+// request/response support (MUL-4257).
 func daemonClientCapabilities() string {
-	return strings.Join([]string{
+	return strings.Join(append(daemonCommonCapabilities(),
+		protocol.DaemonCapabilityClaimPollHintsV1,
+	), ",")
+}
+
+// daemonHTTPClientCapabilities omits claim-poll-hints-v1 because HTTP fallback
+// responses cannot drive the healthy-WS scheduler. Advertising it there would
+// make the server run the deferred-task hint query only for the daemon to ignore
+// the result.
+func daemonHTTPClientCapabilities() string {
+	return strings.Join(daemonCommonCapabilities(), ",")
+}
+
+func daemonCommonCapabilities() []string {
+	return []string{
 		protocol.DaemonCapabilitySkillBundlesV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
+		protocol.DaemonCapabilityExecutionManifestV1,
+		protocol.DaemonCapabilityAgentSkillV1,
+		protocol.DaemonCapabilityRemoteMCPV1,
+		protocol.DaemonCapabilityLocalWorktreeV1,
+		protocol.DaemonCapabilitySourceContextQuickCreateV1,
 		protocol.DaemonCapabilityRPCV1,
-	}, ",")
+		protocol.DaemonCapabilityPlatformSkillV1,
+	}
 }
 
 // SetToken sets the auth token for authenticated requests.
@@ -211,6 +233,30 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 	return resp.Task, nil
 }
 
+func (c *Client) ResolveRemoteMCPCredential(ctx context.Context, daemonToken, taskID, contributionID string) (http.Header, error) {
+	var response struct {
+		CredentialHeader string `json:"credential_header"`
+		Credential       string `json:"credential"`
+	}
+	// A Plugin-contributed connection keeps its credential in the Plugin's own
+	// secret storage, which a different route serves. The marker travels on the
+	// contribution id because that is all the broker hands back at dial time.
+	route := "remote-mcp"
+	if strings.HasPrefix(contributionID, remotemcp.PluginContributionPrefix) {
+		route = "plugin-mcp"
+	}
+	path := fmt.Sprintf("/api/daemon/tasks/%s/%s/%s/credential",
+		url.PathEscape(taskID), route, url.PathEscape(contributionID))
+	if err := c.getJSONWithToken(ctx, path, daemonToken, &response); err != nil {
+		return nil, err
+	}
+	headers := make(http.Header)
+	if response.CredentialHeader != "" {
+		headers.Set(response.CredentialHeader, response.Credential)
+	}
+	return headers, nil
+}
+
 // batchClaimRequestTimeout is the short, request-scoped deadline for the
 // machine-level batch claim (MUL-4257). Unlike the per-runtime claim — which
 // gets the full 30s control-plane timeout because a stall there only blocks
@@ -223,6 +269,17 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 // comfortably above p99 claim latency so recovery stays the exception.
 const batchClaimRequestTimeout = 5 * time.Second
 
+// claimTasksResult carries optional scheduling metadata understood only by
+// daemons advertising claim-poll-hints-v1. A zero-value result is deliberately
+// conservative: it makes the poller retain PollInterval, which protects new
+// daemons talking to old servers and claims whose WS outcome was uncertain.
+type claimTasksResult struct {
+	Tasks                       []*Task `json:"tasks"`
+	ClaimPollHintSupported      bool    `json:"claim_poll_hint_supported,omitempty"`
+	NextDeferredTaskAfterMillis int64   `json:"next_deferred_task_after_ms,omitempty"`
+	ClaimedOverWS               bool    `json:"-"`
+}
+
 // ClaimTasks is the machine-level (MUL-4257) batch counterpart of ClaimTask:
 // it asks the server, in a single request, to claim up to maxTasks tasks across
 // every runtime the daemon hosts. daemonID scopes the request to this machine —
@@ -234,19 +291,22 @@ const batchClaimRequestTimeout = 5 * time.Second
 // one slow claim cannot stall the whole batch; the deadline propagates to the
 // server and cancels the in-flight query there too.
 func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	result, err := c.claimTasksWithHints(ctx, daemonID, runtimeIDs, maxTasks)
+	return result.Tasks, err
+}
+
+func (c *Client) claimTasksWithHints(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) (claimTasksResult, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, batchClaimRequestTimeout)
 	defer cancel()
-	var resp struct {
-		Tasks []*Task `json:"tasks"`
-	}
+	var resp claimTasksResult
 	if err := c.postJSON(reqCtx, "/api/daemon/tasks/claim", map[string]any{
 		"daemon_id":   daemonID,
 		"runtime_ids": runtimeIDs,
 		"max_tasks":   maxTasks,
 	}, &resp); err != nil {
-		return nil, err
+		return claimTasksResult{}, err
 	}
-	return resp.Tasks, nil
+	return resp, nil
 }
 
 // isBatchClaimUnsupported reports whether err is a 404 from the batch claim
@@ -291,6 +351,60 @@ func (c *Client) claimTasksLegacy(ctx context.Context, runtimeIDs []string, maxT
 	return out, nil
 }
 
+// TransferStats records successful HTTP response-body bytes read by a logical
+// call. For a skill-bundle download it separates "the link never produced a
+// successful response" from "a 2xx body arrived but did not finish" — a
+// distinction the failure text could not previously express, so a connectivity
+// fault read as a broken skill and sent reporters chasing the wrong thing
+// (GitHub #7386).
+//
+// Across retries the fields keep the high-water mark rather than the last
+// attempt: the question they answer is "did this link ever get anywhere", and
+// one attempt that reached the body says more than a later one that did not.
+// The zero value is usable, and every method is nil-safe so callers that do
+// not want the accounting can pass nil.
+type TransferStats struct {
+	// ResponseStarted reports whether 2xx response headers ever arrived. Error
+	// response bodies are deliberately excluded: their bytes describe a server
+	// business error, not progress downloading a skill bundle.
+	ResponseStarted bool
+	// BytesRead is the most response-body bytes any single attempt read.
+	BytesRead int64
+}
+
+func (t *TransferStats) observeResponseStarted() {
+	if t != nil {
+		t.ResponseStarted = true
+	}
+}
+
+// wrap returns r instrumented to feed this attempt's byte count back into t.
+func (t *TransferStats) wrap(r io.Reader) io.Reader {
+	if t == nil {
+		return r
+	}
+	return &countingReader{inner: r, stats: t}
+}
+
+// countingReader tallies one attempt and raises the parent high-water mark as
+// it goes, so a failure mid-body still reports how far that attempt got.
+type countingReader struct {
+	inner   io.Reader
+	stats   *TransferStats
+	attempt int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.inner.Read(p)
+	if n > 0 {
+		c.attempt += int64(n)
+		if c.attempt > c.stats.BytesRead {
+			c.stats.BytesRead = c.attempt
+		}
+	}
+	return n, err
+}
+
 // ResolveSkillBundle downloads a single skill bundle. It uses bundleClient (no
 // fixed timeout) so the deadline is governed entirely by ctx, which the daemon
 // scales to the bundle's size, and retries transient transport blips within
@@ -298,20 +412,21 @@ func (c *Client) claimTasksLegacy(ctx context.Context, runtimeIDs []string, maxT
 // agent's whole bundle in one atomic body read — lets each download fit its own
 // deadline and be cached independently, so a slow link makes incremental
 // progress instead of failing the entire set on every dispatch. (GitHub #4505)
-func (c *Client) ResolveSkillBundle(ctx context.Context, runtimeID, taskID string, ref SkillRefData) (SkillData, error) {
+func (c *Client) ResolveSkillBundle(ctx context.Context, runtimeID, taskID string, ref SkillRefData) (SkillData, TransferStats, error) {
 	var resp struct {
 		Bundles []SkillData `json:"bundles"`
 	}
+	var stats TransferStats
 	path := fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/skill-bundles/resolve", runtimeID, taskID)
 	if err := c.postJSONViaWithRetry(ctx, c.bundleClient, path, map[string]any{
 		"skills": []SkillRefData{ref},
-	}, &resp, skillBundleResolveRetrySchedule); err != nil {
-		return SkillData{}, err
+	}, &resp, skillBundleResolveRetrySchedule, &stats); err != nil {
+		return SkillData{}, stats, err
 	}
 	if len(resp.Bundles) != 1 {
-		return SkillData{}, fmt.Errorf("resolve skill bundle: expected 1 bundle, got %d", len(resp.Bundles))
+		return SkillData{}, stats, fmt.Errorf("resolve skill bundle: expected 1 bundle, got %d", len(resp.Bundles))
 	}
-	return resp.Bundles[0], nil
+	return resp.Bundles[0], stats, nil
 }
 
 func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID string) error {
@@ -337,13 +452,50 @@ func (c *Client) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID, reas
 	}, nil)
 }
 
+// TaskCancelAck is the payload of the daemon's cancel acknowledgement.
+type TaskCancelAck struct {
+	// BranchName: a cancelled worktree task has already finalized — its
+	// partial work is committed to a branch in the user's repo. The cancel
+	// path discards the rest of the result, so this ack is the only channel
+	// left to report where that work went.
+	BranchName string
+	// DurableWorkDir is the configured local_directory path that became
+	// authoritative after the disposable task worktree was removed.
+	DurableWorkDir string
+	// ErrorMessage / FailureReason: set when the cancelled run additionally
+	// FAILED to persist its work (worktree Finalize abort). There is no branch
+	// then; the error text carrying the preserved-worktree path is the only
+	// pointer to the agent's work, and without this the cancel path would
+	// swallow it entirely.
+	ErrorMessage  string
+	FailureReason string
+}
+
 // AckTaskCancelled tells the server this daemon observed the task's
 // cancellation and has finished flushing the transcript (runner.run only
 // returns after executeAndDrain's drain wait), so the server can settle its
 // deferred chat finalization now instead of waiting out the sweeper grace
 // period (#5219). Idempotent server-side.
-func (c *Client) AckTaskCancelled(ctx context.Context, taskID string) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/cancel-ack", taskID), map[string]any{}, nil)
+//
+// Retried on transient errors like the complete/fail callbacks: when the ack
+// carries a branch or an error it is a terminal delivery — the only pointer to
+// the cancelled task's work — and a single lost POST would lose it forever.
+// The server never overwrites already-recorded values, so replays are safe.
+func (c *Client) AckTaskCancelled(ctx context.Context, taskID string, ack TaskCancelAck) error {
+	body := map[string]any{}
+	if ack.BranchName != "" {
+		body["branch_name"] = ack.BranchName
+	}
+	if ack.DurableWorkDir != "" {
+		body["durable_work_dir"] = ack.DurableWorkDir
+	}
+	if ack.ErrorMessage != "" {
+		body["error_message"] = ack.ErrorMessage
+	}
+	if ack.FailureReason != "" {
+		body["failure_reason"] = ack.FailureReason
+	}
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/cancel-ack", taskID), body, nil, defaultTerminalRetrySchedule)
 }
 
 func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, step, total int) error {
@@ -362,6 +514,14 @@ type TaskMessageData struct {
 	Content string         `json:"content,omitempty"`
 	Input   map[string]any `json:"input,omitempty"`
 	Output  string         `json:"output,omitempty"`
+	// CreatedAt is when the daemon observed the event, before the 500ms report
+	// batch. Without it, every row in one batch gets the same database time.
+	CreatedAt time.Time `json:"created_at"`
+	// OutputTruncated reports whether Output dropped bytes to fit the preview
+	// budget. Tri-state on purpose: nil means this daemon did not measure it,
+	// which an older installed daemon talking to a newer server cannot say any
+	// other way, and which the server must not record as "complete".
+	OutputTruncated *bool `json:"output_truncated,omitempty"`
 }
 
 func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages []TaskMessageData) error {
@@ -370,7 +530,7 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
-func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID string) error {
+func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
 	body := map[string]any{"output": output}
 	if branchName != "" {
 		body["branch_name"] = branchName
@@ -380,6 +540,9 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	}
 	if workDir != "" {
 		body["work_dir"] = workDir
+	}
+	if durableWorkDir != "" {
+		body["durable_work_dir"] = durableWorkDir
 	}
 	if sessionRolloutMissing {
 		body["session_rollout_missing"] = true
@@ -399,13 +562,22 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
-func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string, sessionRolloutMissing bool, retiredSessionID string) error {
+func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
 	body := map[string]any{"error": errMsg}
 	if sessionID != "" {
 		body["session_id"] = sessionID
 	}
 	if workDir != "" {
 		body["work_dir"] = workDir
+	}
+	if durableWorkDir != "" {
+		body["durable_work_dir"] = durableWorkDir
+	}
+	// A failed run can still have delivered a branch: worktree mode commits
+	// whatever the agent left before removing the worktree, so partial work
+	// survives — but only if its name travels with the failure report.
+	if branchName != "" {
+		body["branch_name"] = branchName
 	}
 	if failureReason != "" {
 		body["failure_reason"] = failureReason
@@ -749,10 +921,32 @@ func (c *Client) GetTaskGCCheck(ctx context.Context, taskID string) (*TaskGCStat
 	return &resp, nil
 }
 
-func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {
-	return c.postJSON(ctx, "/api/daemon/deregister", map[string]any{
-		"runtime_ids": runtimeIDs,
-	}, nil)
+// RuntimeOfflineCodeNotExecutable marks a runtime taken offline because the OS
+// refuses to execute its agent CLI. It is the one deregistration cause that no
+// amount of waiting fixes, which is what the server needs to know: work for an
+// offline machine may queue until the machine returns, but work for this one
+// must be refused with an explanation (MUL-6164).
+const RuntimeOfflineCodeNotExecutable = "not_executable"
+
+// RuntimeOfflineReason is why a runtime went offline, in the form clients can
+// act on: a stable code they switch on and localize, and the command that
+// repairs the install. Prose stays in Detail for logs — never as the thing a
+// client parses.
+type RuntimeOfflineReason struct {
+	Code   string                  `json:"code"`
+	Detail string                  `json:"detail,omitempty"`
+	Repair *agent.ExecFormatRepair `json:"repair,omitempty"`
+}
+
+// Deregister takes runtimes offline. reasons is optional and keyed by runtime
+// id: a daemon shutting down has nothing to explain, while one that condemned a
+// broken CLI does.
+func (c *Client) Deregister(ctx context.Context, runtimeIDs []string, reasons map[string]RuntimeOfflineReason) error {
+	body := map[string]any{"runtime_ids": runtimeIDs}
+	if len(reasons) > 0 {
+		body["offline_reasons"] = reasons
+	}
+	return c.postJSON(ctx, "/api/daemon/deregister", body, nil)
 }
 
 // RegisterResponse holds the server's response to a daemon registration.
@@ -905,13 +1099,13 @@ func isTransientError(err error) bool {
 // idempotent success (see service/task.go), so a duplicate replay from a
 // retry is safe even if the server's prior response was lost in transit.
 func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any, respBody any, schedule []time.Duration) error {
-	return c.postJSONViaWithRetry(ctx, c.client, path, reqBody, respBody, schedule)
+	return c.postJSONViaWithRetry(ctx, c.client, path, reqBody, respBody, schedule, nil)
 }
 
 // postJSONViaWithRetry is postJSONWithRetry over an explicit http.Client, so
 // large-body endpoints can run on bundleClient (deadline from ctx) while the
 // control-plane keeps its fixed 30s client.
-func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any, schedule []time.Duration) error {
+func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any, schedule []time.Duration, stats *TransferStats) error {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -920,7 +1114,7 @@ func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Clie
 			}
 			return err
 		}
-		err := c.postJSONVia(ctx, httpClient, path, reqBody, respBody)
+		err := c.postJSONViaObserved(ctx, httpClient, path, reqBody, respBody, stats)
 		if err == nil {
 			return nil
 		}
@@ -945,6 +1139,14 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 // to control the timeout regime: c.client (fixed 30s) for control-plane calls,
 // c.bundleClient (deadline from ctx) for large skill-bundle downloads.
 func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any) error {
+	return c.postJSONViaObserved(ctx, httpClient, path, reqBody, respBody, nil)
+}
+
+// postJSONViaObserved is postJSONVia that additionally records what the attempt
+// moved into stats (nil to skip). Callers use it to tell "the link never
+// produced a response" apart from "the body arrived too slowly to finish" —
+// see TransferStats.
+func (c *Client) postJSONViaObserved(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any, stats *TransferStats) error {
 	var body io.Reader
 	if reqBody != nil {
 		data, err := json.Marshal(reqBody)
@@ -969,25 +1171,33 @@ func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path 
 		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
 	}
+	stats.observeResponseStarted()
+	respReader := stats.wrap(resp.Body)
 	if respBody == nil {
-		io.Copy(io.Discard, resp.Body)
+		io.Copy(io.Discard, respReader)
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(respBody)
+	return json.NewDecoder(respReader).Decode(respBody)
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
+	return c.getJSONWithToken(ctx, path, c.token, respBody)
+}
+
+// getJSONWithToken performs one GET with an explicit credential. It is used by
+// the Remote MCP broker so its short-lived daemon token cannot replace or race
+// the client's long-lived PAT used by concurrent control-plane requests.
+func (c *Client) getJSONWithToken(ctx context.Context, path, token string, respBody any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return err
 	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	c.setIdentityHeaders(req)
 
@@ -1006,4 +1216,70 @@ func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(respBody)
+}
+
+// postJSONWithToken is getJSONWithToken's write counterpart, for the daemon's
+// task-scoped calls that carry a body.
+func (c *Client) postJSONWithToken(ctx context.Context, path, token string, reqBody, respBody any) error {
+	encoded, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(encoded))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	c.setIdentityHeaders(req)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+	if respBody == nil {
+		io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(respBody)
+}
+
+// InvokeAgentPluginHook asks the server to make one agent-triggered hook call.
+//
+// The daemon deliberately does not call the plugin itself: the signing secret
+// is derived from the deployment key and stays on the server, and routing
+// through it keeps the rate limit, circuit breaker, `net:` destination check
+// and invocation record on one code path for every trigger.
+func (c *Client) InvokeAgentPluginHook(ctx context.Context, daemonToken, taskID, installationID, hookKey string, input json.RawMessage) (json.RawMessage, error) {
+	var response struct {
+		Status string          `json:"status"`
+		Output json.RawMessage `json:"output,omitempty"`
+		Error  string          `json:"error,omitempty"`
+	}
+	path := fmt.Sprintf("/api/daemon/tasks/%s/plugin-hooks", url.PathEscape(taskID))
+	body := map[string]any{"installation_id": installationID, "hook_key": hookKey}
+	if len(input) > 0 {
+		body["input"] = input
+	}
+	if err := c.postJSONWithToken(ctx, path, daemonToken, body, &response); err != nil {
+		return nil, err
+	}
+	// A refused or failed hook comes back as a 200 with a status, so that the
+	// caller can render it as a TOOL error rather than a broken transport —
+	// an unreachable plugin endpoint must not fail the agent's task.
+	if response.Status != "ok" {
+		if response.Error != "" {
+			return nil, errors.New(response.Error)
+		}
+		return nil, errors.New("the plugin hook did not succeed")
+	}
+	return response.Output, nil
 }

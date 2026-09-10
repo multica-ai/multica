@@ -49,7 +49,7 @@ func TestStageBarrierClosed_Unstaged(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// completed is one of the terminal children; identity doesn't matter
 			// for the unstaged path.
-			if got := stageBarrierClosed(tt.children, child(0, "done")); got != tt.want {
+			if got := stageBarrierClosed(tt.children, child(0, "done"), literalTerminalChild); got != tt.want {
 				t.Fatalf("stageBarrierClosed = %v, want %v", got, tt.want)
 			}
 		})
@@ -64,7 +64,7 @@ func TestStageBarrierClosed_Staged(t *testing.T) {
 			child(2, "backlog"), child(2, "backlog"),
 			child(3, "backlog"),
 		}
-		if stageBarrierClosed(children, child(1, "done")) {
+		if stageBarrierClosed(children, child(1, "done"), literalTerminalChild) {
 			t.Fatal("expected barrier not closed while stage 1 has an open child")
 		}
 	})
@@ -75,7 +75,7 @@ func TestStageBarrierClosed_Staged(t *testing.T) {
 			child(2, "backlog"), child(2, "backlog"),
 			child(3, "backlog"),
 		}
-		if !stageBarrierClosed(children, child(1, "done")) {
+		if !stageBarrierClosed(children, child(1, "done"), literalTerminalChild) {
 			t.Fatal("expected stage 1 barrier to close")
 		}
 	})
@@ -86,7 +86,7 @@ func TestStageBarrierClosed_Staged(t *testing.T) {
 			child(2, "done"), child(2, "done"),
 			child(3, "backlog"),
 		}
-		if !stageBarrierClosed(children, child(2, "done")) {
+		if !stageBarrierClosed(children, child(2, "done"), literalTerminalChild) {
 			t.Fatal("expected stage 2 barrier to close")
 		}
 	})
@@ -97,7 +97,7 @@ func TestStageBarrierClosed_Staged(t *testing.T) {
 			child(2, "done"), child(2, "done"),
 			child(3, "done"),
 		}
-		if !stageBarrierClosed(children, child(3, "done")) {
+		if !stageBarrierClosed(children, child(3, "done"), literalTerminalChild) {
 			t.Fatal("expected final stage barrier to close")
 		}
 	})
@@ -109,7 +109,7 @@ func TestStageProgressSummary(t *testing.T) {
 		child(2, "backlog"), child(2, "backlog"), child(2, "backlog"), child(2, "backlog"),
 		child(3, "backlog"), child(3, "backlog"),
 	}
-	summary, next := stageProgressSummary(children, 1)
+	summary, next := stageProgressSummary(children, 1, literalTerminalChild)
 	want := "Stage 1: 3/3 done; Stage 2: 0/4 done (next); Stage 3: 0/2 done"
 	if summary != want {
 		t.Fatalf("summary = %q, want %q", summary, want)
@@ -124,7 +124,7 @@ func TestStageProgressSummary_FinalStageNoNext(t *testing.T) {
 		child(1, "done"), child(1, "done"),
 		child(2, "done"),
 	}
-	_, next := stageProgressSummary(children, 2)
+	_, next := stageProgressSummary(children, 2, literalTerminalChild)
 	if next != 0 {
 		t.Fatalf("nextStage = %d, want 0 (no further stages)", next)
 	}
@@ -137,7 +137,7 @@ func TestStageProgressSummary_SkipsUnstaged(t *testing.T) {
 		child(1, "done"), child(1, "done"),
 		child(2, "backlog"),
 	}
-	summary, next := stageProgressSummary(children, 1)
+	summary, next := stageProgressSummary(children, 1, literalTerminalChild)
 	want := "Stage 1: 2/2 done; Stage 2: 0/1 done (next)"
 	if summary != want {
 		t.Fatalf("summary = %q, want %q", summary, want)
@@ -171,8 +171,9 @@ func TestStageAdvanceInstruction(t *testing.T) {
 		}
 		// It must make clear that finishing the stage != the whole issue is
 		// done, and hand both paths (wrap up / create the next stage) to the
-		// leader. When wrapping up, the explicit ask is in_review so the
-		// comment-triggered "only change status when asked" rule permits it.
+		// leader. The explicit in_review command marks the wrap-up moment;
+		// the write itself is authorized by the standing status-ownership
+		// grant (MUL-6300), not by this ask.
 		if !strings.Contains(got, "does not mean the whole issue is done") {
 			t.Fatalf("expected stage-done != issue-done framing, got %q", got)
 		}
@@ -193,13 +194,13 @@ func TestStageBarrierClosed_CancelledClosesStage(t *testing.T) {
 			child(1, "done"), child(1, "cancelled"),
 			child(2, "backlog"),
 		}
-		if !stageBarrierClosed(children, child(1, "cancelled")) {
+		if !stageBarrierClosed(children, child(1, "cancelled"), literalTerminalChild) {
 			t.Fatal("expected the stage to close when its last open child is cancelled")
 		}
 	})
 	t.Run("unstaged: cancel of the last open child closes the implicit stage", func(t *testing.T) {
 		children := []db.Issue{child(0, "done"), child(0, "cancelled")}
-		if !stageBarrierClosed(children, child(0, "cancelled")) {
+		if !stageBarrierClosed(children, child(0, "cancelled"), literalTerminalChild) {
 			t.Fatal("expected the implicit stage to close on cancel")
 		}
 	})
@@ -213,7 +214,7 @@ func TestStageBarrierClosed_UnstagedIgnoredInStagedSet(t *testing.T) {
 			child(1, "done"), child(1, "done"),
 			child(0, "backlog"), // unstaged, still open — must NOT block
 		}
-		if !stageBarrierClosed(children, child(1, "done")) {
+		if !stageBarrierClosed(children, child(1, "done"), literalTerminalChild) {
 			t.Fatal("expected stage 1 to close; an unstaged child must not hold it open")
 		}
 	})
@@ -222,8 +223,17 @@ func TestStageBarrierClosed_UnstagedIgnoredInStagedSet(t *testing.T) {
 			child(1, "backlog"),
 			child(0, "done"), // the just-completed unstaged child
 		}
-		if stageBarrierClosed(children, child(0, "done")) {
+		if stageBarrierClosed(children, child(0, "done"), literalTerminalChild) {
 			t.Fatal("an unstaged child's completion must not fire a stage barrier")
 		}
 	})
+}
+
+// literalTerminalChild is the pre-MUL-6243 terminal test: it reads the status
+// literal directly, with no catalog resolution. The stage-barrier logic these
+// tests cover is pure and operates on CANONICAL statuses, so pinning it with a
+// literal predicate keeps them testing the barrier itself rather than status
+// resolution (which has its own coverage in issue_status_test.go).
+func literalTerminalChild(c db.Issue) bool {
+	return isTerminalChildStatus(c.Status)
 }

@@ -1,0 +1,16 @@
+-- A plugin's `skill` resources become ordinary workspace skills.
+--
+-- Deliberately the EXISTING skill table rather than a plugin-owned copy. The
+-- previous plugin system routed skills through an artifact/digest/bundle
+-- pipeline across fourteen tables and, after all of it, delivered one SKILL.md
+-- that the skill table could already hold. A plugin skill is a skill; the only
+-- thing the platform needs to remember is who put it there.
+--
+-- That is what this column is for: uninstall has to remove exactly the skills
+-- the installation contributed, and nothing a person wrote by hand. NULL means
+-- a human made it, which is every row that exists today.
+--
+-- Nullable, no default: metadata-only, no rewrite. No FK per repository policy —
+-- uninstall deletes these explicitly, in the same transaction as the rest of the
+-- installation's cleanup.
+ALTER TABLE skill ADD COLUMN IF NOT EXISTS plugin_installation_id UUID;

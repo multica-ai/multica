@@ -9,11 +9,25 @@
     "archive_all_read": "Archive all read",
     "archive_completed": "Archive completed"
   },
+  "filters": {
+    "tooltip": "Filter inbox",
+    "active_count_one": "{{count}} active filter",
+    "active_count_other": "{{count}} active filters",
+    "status": "Status",
+    "priority": "Priority",
+    "from": "From",
+    "unread_only": "Unread only",
+    "notification_count_one": "{{count}} notification",
+    "notification_count_other": "{{count}} notifications",
+    "clear": "Clear filters",
+    "empty": "No notifications match your filters"
+  },
   "context_menu": {
     "mark_read": "Mark as read",
     "mark_unread": "Mark as unread",
     "archive": "Archive",
-    "unarchive": "Unarchive"
+    "unarchive": "Unarchive",
+    "open_in_new_tab": "Open in new tab"
   },
   "list": {
     "empty": "No notifications",
@@ -27,13 +41,17 @@
     },
     "archived_title": "Archived",
     "archived_empty": "No archived notifications",
-    "unarchive_tooltip": "Unarchive"
+    "unarchive_tooltip": "Unarchive",
+    "actions_aria": "Notification actions"
   },
   "detail": {
     "select_prompt": "Select a notification to view details",
     "empty": "Your inbox is empty",
     "original_input": "Original input",
+    "retry_with_context": "Retry with context",
     "edit_advanced": "Edit as advanced form",
+    "autopilot_quota_exceeded_body": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. Further autopilot runs will not start until the allowance resets {{resetAt}}.",
+    "autopilot_quota_upgrade": "View upgrade options",
     "archive": "Archive",
     "unarchive": "Unarchive"
   },
@@ -49,14 +67,16 @@
     "new_comment": "New comment",
     "mentioned": "Mentioned",
     "review_requested": "Review requested",
-    "task_completed": "Task completed",
-    "task_failed": "Task failed",
+    "task_completed": "Run completed",
+    "task_failed": "Run failed",
     "agent_blocked": "Agent blocked",
     "agent_completed": "Agent completed",
     "reaction_added": "Reacted",
     "quick_create_done": "Created with agent",
     "quick_create_failed": "Create with agent failed",
-    "quick_create_unconfirmed": "Create with agent unconfirmed"
+    "quick_create_unconfirmed": "Create with agent unconfirmed",
+    "autopilot_paused": "Autopilot paused",
+    "autopilot_quota_exceeded": "Autopilot run limit reached"
   },
   "labels": {
     "set_status_to": "Set status to",
@@ -69,9 +89,17 @@
     "removed_due_date": "Removed due date",
     "reacted_to_comment": "Reacted {{emoji}} to your comment",
     "created_with_agent": "Created with agent: {{identifier}}",
-    "failed_with_detail": "Failed: {{detail}}"
+    "failed_with_detail": "Failed: {{detail}}",
+    "autopilot_quota_blocked": "Run blocked because the limit was reached"
+  },
+  "toasts": {
+    "source_context_retry_started": "Retry started with the original context",
+    "archived": "Notification archived",
+    "unarchived": "Notification restored"
   },
   "errors": {
+    "source_context_retry_failed": "Could not retry with the original context",
+    "source_context_retry_unavailable": "This context can no longer be retried. Start again from the branch point.",
     "mark_read_failed": "Failed to mark as read",
     "mark_unread_failed": "Failed to mark as unread",
     "archive_failed": "Failed to archive",

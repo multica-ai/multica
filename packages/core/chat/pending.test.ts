@@ -291,3 +291,57 @@ describe("pending chat queue", () => {
     expect(result.queued_tasks?.map((item) => item.task_id)).toEqual(["next"]);
   });
 });
+
+describe("promotePendingChatTask wait_reason", () => {
+  const waiting = "waiting_local_directory";
+
+  it("keeps the reason a hold arrives with", () => {
+    const promoted = promotePendingChatTask(
+      { task_id: "t1", status: "dispatched" },
+      "t1",
+      waiting,
+      undefined,
+      "NuvioTV (held by task a1b2c3d4)",
+    );
+    expect(promoted.status).toBe(waiting);
+    expect(promoted.wait_reason).toBe("NuvioTV (held by task a1b2c3d4)");
+  });
+
+  it("carries the cached reason across repeat events for the same hold", () => {
+    // The daemon stamps wait_reason once; a later event for the same parked
+    // task may arrive without it, and the pill must not blank mid-wait.
+    const promoted = promotePendingChatTask(
+      { task_id: "t1", status: waiting, wait_reason: "NuvioTV" },
+      "t1",
+      waiting,
+    );
+    expect(promoted.wait_reason).toBe("NuvioTV");
+  });
+
+  it("drops the reason the moment the task stops waiting", () => {
+    // The server never clears the column, so a task that has been running for
+    // ten minutes would otherwise still claim to be held by another task.
+    const promoted = promotePendingChatTask(
+      { task_id: "t1", status: waiting, wait_reason: "NuvioTV" },
+      "t1",
+      "running",
+    );
+    expect(promoted.status).toBe("running");
+    expect(promoted.wait_reason).toBeUndefined();
+  });
+
+  it("does not inherit a reason when a queued follow-up is promoted", () => {
+    const promoted = promotePendingChatTask(
+      {
+        task_id: "t1",
+        status: waiting,
+        wait_reason: "NuvioTV",
+        queued_tasks: [{ task_id: "t2", status: "queued", created_at: "2026-07-01T00:00:00Z" }],
+      },
+      "t2",
+      "running",
+    );
+    expect(promoted.task_id).toBe("t2");
+    expect(promoted.wait_reason).toBeUndefined();
+  });
+});

@@ -26,8 +26,6 @@ import {
 } from "@multica/ui/components/ui/tooltip"
 import { PanelLeftIcon } from "lucide-react"
 
-const SIDEBAR_COOKIE_NAME = "sidebar_state"
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH_DEFAULT = 256
 const SIDEBAR_WIDTH_MIN = 200
 const SIDEBAR_WIDTH_MAX = 360
@@ -39,6 +37,22 @@ const SIDEBAR_DRAG_THRESHOLD = 2
 // narrow to also spend 256px on the nav. The nav starts collapsed here and the
 // header's trigger brings it back.
 const SIDEBAR_AUTO_COLLAPSE_QUERY = "(min-width: 1024px) and (max-width: 1279px)"
+
+/**
+ * Paints an element with whatever the sidebar wrapper is currently filled with.
+ *
+ * A descendant that has to lay down an opaque layer over the wrapper — rather
+ * than over its own parent — must match the wrapper's fill exactly, and that
+ * fill is conditional: `bg-sidebar` while an inset-variant sidebar is mounted,
+ * the consumer's own background otherwise. Naming a token at the descendant
+ * reproduces that condition in a second place, which then drifts (#6874). Use
+ * this class instead: the wrapper publishes its fill as `--sidebar-wrapper-fill`
+ * under the same `:has()` condition that paints it, so the two cannot disagree.
+ *
+ * Consumers that give the wrapper a background must declare the matching
+ * non-inset half, e.g. `bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]`.
+ */
+const SIDEBAR_WRAPPER_FILL_CLASS = "bg-(--sidebar-wrapper-fill)"
 
 function clampSidebarWidth(width: number) {
   return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, width))
@@ -57,6 +71,17 @@ type SidebarContextProps = {
    */
   isCompact: boolean
   toggleSidebar: () => void
+  /**
+   * The app shell keeps a `SidebarTrigger` of its own on screen, outside the
+   * page chrome — the desktop window toolbar does, beside the traffic lights.
+   *
+   * Surfaces that would otherwise supply a fallback trigger read this and
+   * supply nothing: the shell's own is always reachable, so a second one is
+   * duplicate chrome rather than a way back to a nav that had none (MUL-6218).
+   * It describes the shell, not the current viewport, so it does not track
+   * whether that trigger happens to be mounted this render.
+   */
+  hasExternalTrigger: boolean
 }
 
 type SidebarResizeContextProps = {
@@ -64,8 +89,9 @@ type SidebarResizeContextProps = {
 }
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
-// Width previews are written directly to the two layout shells during drag.
-// This context only exposes the one committed state transition on pointer-up.
+// Width previews are written directly to the layout shells and opt-in chrome
+// consumers during drag. This context only exposes the one committed state
+// transition on pointer-up.
 const SidebarResizeContext = React.createContext<SidebarResizeContextProps | null>(null)
 
 function useSidebar() {
@@ -94,6 +120,7 @@ function SidebarProvider({
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
+  hasExternalTrigger = false,
   className,
   style,
   children,
@@ -102,6 +129,15 @@ function SidebarProvider({
   defaultOpen?: boolean
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  /**
+   * Declare that this shell keeps its own always-reachable `SidebarTrigger`
+   * outside the page chrome. See `SidebarContextProps.hasExternalTrigger`.
+   *
+   * Defaults to false, and the default is the safe one: a shell that forgets
+   * to opt out shows one redundant icon, while a shell that has to opt in and
+   * forgets leaves a collapsed nav with no way back.
+   */
+  hasExternalTrigger?: boolean
 }) {
   const isCompact = useIsCompact()
   const [openMobile, setOpenMobile] = React.useState(false)
@@ -124,6 +160,15 @@ function SidebarProvider({
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
+  //
+  // Deliberately not persisted. Upstream shadcn writes a `sidebar_state` cookie
+  // here and seeds `defaultOpen` from it on the server; we dropped the write
+  // because nothing ever read it, and restoring the pair would be a bug rather
+  // than a feature: the auto-collapse below drives `setOpen(false)` from the
+  // viewport, so persisting its result would carry a collapse the user never
+  // asked for out of the `lg`–`xl` band and into their next session on a wider
+  // display. Persisting this needs a source that distinguishes a user toggle
+  // from an automated one — not a cookie on this callback.
   const [_open, _setOpen] = React.useState(defaultOpen)
   const open = openProp ?? _open
   const setOpen = React.useCallback(
@@ -134,9 +179,6 @@ function SidebarProvider({
       } else {
         _setOpen(openState)
       }
-
-      // This sets the cookie to keep the sidebar state.
-      document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
     },
     [setOpenProp, open]
   )
@@ -191,8 +233,18 @@ function SidebarProvider({
       openMobile,
       setOpenMobile,
       toggleSidebar,
+      hasExternalTrigger,
     }),
-    [state, open, setOpen, isCompact, openMobile, setOpenMobile, toggleSidebar]
+    [
+      state,
+      open,
+      setOpen,
+      isCompact,
+      openMobile,
+      setOpenMobile,
+      toggleSidebar,
+      hasExternalTrigger,
+    ]
   )
   const resizeContextValue = React.useMemo<SidebarResizeContextProps>(
     () => ({
@@ -214,7 +266,14 @@ function SidebarProvider({
             } as React.CSSProperties
           }
           className={cn(
-            "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
+            "group/sidebar-wrapper flex min-h-svh w-full",
+            // Both halves of the inset branch carry the identical :has()
+            // condition, so SIDEBAR_WRAPPER_FILL_CLASS can never name a colour
+            // this element is not actually painted with. The non-inset fill is
+            // the consumer's (this component paints nothing then), so the
+            // consumer declares that half of the variable next to its own
+            // background class.
+            "has-data-[variant=inset]:bg-sidebar has-data-[variant=inset]:[--sidebar-wrapper-fill:var(--sidebar)]",
             className
           )}
           {...props}
@@ -375,6 +434,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
     wrapperEl: HTMLElement
     gapEl: HTMLElement
     containerEl: HTMLElement
+    liveWidthConsumers: HTMLElement[]
   } | null>(null)
   const cancelActiveDragRef = React.useRef<(() => void) | null>(null)
 
@@ -392,6 +452,9 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       const gapEl = sidebarEl?.querySelector<HTMLElement>("[data-slot='sidebar-gap']")
       const containerEl = sidebarEl?.querySelector<HTMLElement>("[data-slot='sidebar-container']")
       if (!sidebarEl || !wrapperEl || !gapEl || !containerEl) return
+      const liveWidthConsumers = Array.from(
+        wrapperEl.querySelectorAll<HTMLElement>("[data-sidebar-resize-consumer]")
+      )
 
       const startWidth = clampSidebarWidth(containerEl.getBoundingClientRect().width)
       dragRef.current = {
@@ -403,6 +466,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         wrapperEl,
         gapEl,
         containerEl,
+        liveWidthConsumers,
       }
 
       wrapperEl.setAttribute("data-sidebar-resizing", "true")
@@ -430,6 +494,9 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
           }
           drag.gapEl.style.removeProperty("width")
           drag.containerEl.style.removeProperty("width")
+          for (const consumer of drag.liveWidthConsumers) {
+            consumer.style.removeProperty("--sidebar-live-width")
+          }
           drag.wrapperEl.removeAttribute("data-sidebar-resizing")
         }
 
@@ -456,11 +523,15 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         if (nextWidth === drag.latestWidth) return
 
         drag.latestWidth = nextWidth
-        // Only the two layout shells depend on the live width. Direct writes
-        // let the browser coalesce layout at paint time without a React commit
-        // or an inherited custom-property invalidation on the whole app tree.
+        // Direct writes let the browser coalesce layout at paint time without
+        // a React commit or an inherited custom-property invalidation on the
+        // whole app tree. Optional chrome consumers receive the same preview
+        // through a local custom property.
         drag.gapEl.style.width = `${nextWidth}px`
         drag.containerEl.style.width = `${nextWidth}px`
+        for (const consumer of drag.liveWidthConsumers) {
+          consumer.style.setProperty("--sidebar-live-width", `${nextWidth}px`)
+        }
       }
       const onPointerUp = (event: PointerEvent) => {
         if (event.pointerId === e.pointerId) finishDrag("commit")
@@ -904,6 +975,7 @@ function SidebarMenuSubButton({
 }
 
 export {
+  SIDEBAR_WRAPPER_FILL_CLASS,
   Sidebar,
   SidebarContent,
   SidebarFooter,

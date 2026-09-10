@@ -85,9 +85,9 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// narrows the generic auto-approval policy; --workspace-only independently
 	// keeps configured extra write roots out of unattended tasks.
 	reasonixArgs := append(reasonixACPLaunchArgs(), filterCustomArgs(opts.CustomArgs, reasonixBlockedArgs, b.cfg.Logger)...)
-	cmd := exec.CommandContext(runCtx, execPath, reasonixArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, reasonixArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", reasonixArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(reasonixArgs, trustAgentCommandPositional(0, "acp")))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -119,7 +119,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		return nil, fmt.Errorf("reasonix stderr pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start reasonix: %w", err)
 	}
@@ -235,6 +235,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			releaseProcessGroup(cmd)
 		}()
 
 		startTime := time.Now()
@@ -274,6 +275,11 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			cwd = "."
 		}
 
+		// sessionResult is whichever of session/new or session/resume produced
+		// this session. It carries the configOptions that the effort step
+		// below reads, so both branches have to keep hold of it.
+		var sessionResult json.RawMessage
+
 		if opts.ResumeSessionID != "" {
 			// Per ACP Session Setup, session/resume accepts mcpServers and
 			// the runtime re-connects them as part of the resume. Without
@@ -300,6 +306,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 				}
 				return
 			}
+			sessionResult = result
 			var changed bool
 			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
 			if changed {
@@ -319,6 +326,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
+			sessionResult = result
 			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
 				finalStatus = "failed"
@@ -348,7 +356,9 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			}); err != nil {
 				b.cfg.Logger.Warn("reasonix set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus, finalError = reasonixRequestFailure(runCtx, timeout, fmt.Sprintf("reasonix could not switch to model %q: %v", opts.Model, err))
-				if finalStatus == "failed" && opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+				if setupFailureWithholdsSessionID(opts) {
+					sessionID = ""
+				} else if finalStatus == "failed" && isACPSessionNotFound(err) {
 					// On a resumed session with a model override, the dead
 					// session surfaces here instead of at session/prompt.
 					// Same fix as the prompt path below: clear the id so
@@ -371,6 +381,19 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			}
 			b.cfg.Logger.Info("reasonix session model set", "model", opts.Model)
 		}
+
+		// 3b. Apply a persisted thinking override through whichever effort
+		// option this session advertises. Unlike set_model above this must NOT
+		// fail the task: an effort we could not apply still runs the prompt at
+		// the runtime's own default, which is a degraded result rather than a
+		// wrong one. The helper logs what actually took effect.
+		//
+		// sessionResult stops describing the live session once set_model runs
+		// above, because reasonix derives the effort catalog from the current
+		// model and returns nothing from set_model. Say so, so the helper
+		// trusts the runtime's answer over a stale advertised list.
+		applyACPEffortOption(runCtx, c.request, "reasonix", b.cfg.Logger,
+			sessionID, sessionResult, opts.ThinkingLevel, opts.Model == "")
 
 		// 4. Send the prompt and wait for PromptResponse. Reasonix loads
 		// AGENTS.md from cwd, so the daemon deliberately does not duplicate the

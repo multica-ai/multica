@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -204,6 +205,100 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("JSON missing required field %s: %s", want, raw)
 		}
+	}
+}
+
+func TestScanDiskUsage_MixedLayoutsUseMetadataIdentity(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspaceID := "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
+	readableTaskID := "22222222-ee7a-4603-a72d-b659c34a1dc3"
+	legacyTaskSegment := "a548b2390cb2"
+	readableTaskSegment := "mul-6063-b659c34a1dc3"
+
+	legacyDir := filepath.Join(root, workspaceID, legacyTaskSegment)
+	writeFile(t, filepath.Join(legacyDir, "workdir", "legacy.txt"), 10)
+	mustWriteMeta(t, legacyDir, execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     "issue-legacy",
+		WorkspaceID: workspaceID,
+		CompletedAt: time.Now().Add(-time.Hour),
+	})
+
+	readableDir := filepath.Join(root, "asset-feed-a548b2390cb2", readableTaskSegment)
+	writeFile(t, filepath.Join(readableDir, "workdir", "readable.txt"), 20)
+	mustWriteMeta(t, readableDir, execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     "issue-readable",
+		TaskID:      readableTaskID,
+		WorkspaceID: workspaceID,
+		CompletedAt: time.Now().Add(-time.Hour),
+	})
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage: %v", err)
+	}
+	if report.TotalTaskCount != 2 || report.TotalWorkspaceCount != 1 {
+		t.Fatalf("totals = tasks:%d workspaces:%d, want 2/1", report.TotalTaskCount, report.TotalWorkspaceCount)
+	}
+	for _, task := range report.Tasks {
+		if task.WorkspaceID != workspaceID {
+			t.Errorf("task %q workspace_id = %q, want metadata id %q", task.Path, task.WorkspaceID, workspaceID)
+		}
+	}
+	byShort := map[string]TaskDiskUsage{}
+	for _, task := range report.Tasks {
+		byShort[task.TaskShort] = task
+	}
+	if _, ok := byShort[legacyTaskSegment]; !ok {
+		t.Errorf("legacy task was not reported under physical directory segment %q", legacyTaskSegment)
+	}
+	if _, ok := byShort[readableTaskSegment]; !ok {
+		t.Errorf("readable task was not reported under physical directory segment %q", readableTaskSegment)
+	}
+}
+
+func TestScanDiskUsage_ReadableActiveRootUsesOwnerIdentityWithoutGCMeta(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspaceID := "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
+	taskID := "22222222-ee7a-4603-a72d-b659c34a1dc3"
+	env, err := execenv.Prepare(execenv.PrepareParams{
+		WorkspacesRoot:  root,
+		WorkspaceID:     workspaceID,
+		WorkspaceSlug:   "Asset Feed",
+		TaskID:          taskID,
+		IssueIdentifier: "MUL-6063",
+		AgentName:       "Active Task",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	defer env.Cleanup(true)
+	if _, err := os.Stat(filepath.Join(env.RootDir, ".gc_meta.json")); !os.IsNotExist(err) {
+		t.Fatalf("fixture must represent an active root without completion metadata; stat err = %v", err)
+	}
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage: %v", err)
+	}
+	if len(report.Tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(report.Tasks))
+	}
+	usage := report.Tasks[0]
+	if usage.WorkspaceID != workspaceID {
+		t.Fatalf("workspace_id = %q, want owner identity %q", usage.WorkspaceID, workspaceID)
+	}
+	wantTaskSegment := filepath.Base(env.RootDir)
+	if usage.TaskShort != wantTaskSegment {
+		t.Fatalf("task_short = %q, want physical directory segment %q", usage.TaskShort, wantTaskSegment)
+	}
+	if len(report.Workspaces) != 1 || report.Workspaces[0].WorkspaceID != workspaceID {
+		t.Fatalf("workspace aggregate = %+v, want authoritative workspace %q", report.Workspaces, workspaceID)
 	}
 }
 

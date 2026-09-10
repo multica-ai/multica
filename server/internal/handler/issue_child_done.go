@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -76,7 +78,23 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// last open child of a stage is cancelled. Keying on the transition also
 	// makes a later cancelled -> done edit a no-op (terminal -> terminal), which
 	// avoids a lagging duplicate wake.
-	if isTerminalChildStatus(prev.Status) || !isTerminalChildStatus(issue.Status) {
+	// Both sides of the transition are resolved to the canonical status they
+	// inherit, so a move into a custom done/cancelled status fires the barrier
+	// exactly like a move into Done or Cancelled. (MUL-6243)
+	effective := h.childStatusResolver(ctx)
+	prevStatus, err := effective(prev)
+	if err != nil {
+		slog.Warn("child done: failed to resolve previous child status", "error", err, "child_id", uuidToString(issue.ID))
+		return
+	}
+	nowStatus, err := effective(issue)
+	if err != nil {
+		slog.Warn("child done: failed to resolve child status", "error", err, "child_id", uuidToString(issue.ID))
+		return
+	}
+	prevTerminal := isTerminalChildStatus(prevStatus)
+	nowTerminal := isTerminalChildStatus(nowStatus)
+	if prevTerminal || !nowTerminal {
 		return
 	}
 	parent, err := h.Queries.GetIssue(ctx, issue.ParentIssueID)
@@ -87,7 +105,15 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 			"parent_id", uuidToString(issue.ParentIssueID))
 		return
 	}
-	if parent.Status == "done" || parent.Status == "cancelled" {
+	// Custom statuses inherit the canonical status they name, so a custom
+	// terminal status closes this out and a custom backlog status parks it,
+	// exactly like Done/Cancelled and Backlog do. (MUL-6243)
+	parentStatus, err := effective(parent)
+	if err != nil {
+		slog.Warn("child done: failed to resolve parent status", "error", err, "parent_id", uuidToString(parent.ID))
+		return
+	}
+	if parentStatus == "done" || parentStatus == "cancelled" {
 		return
 	}
 	// A parent parked in backlog is deliberately held for later. Posting the
@@ -95,7 +121,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// promote sibling backlog sub-issues into todo — the surprise auto-
 	// activation reported in #4320 / MUL-3497. Skip the whole notification so
 	// a backlog parent stays inert until the user explicitly promotes it.
-	if parent.Status == "backlog" {
+	if parentStatus == "backlog" {
 		return
 	}
 	// Human-assigned parents read their own timeline; an automated system
@@ -121,7 +147,12 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 			"parent_id", uuidToString(parent.ID))
 		return
 	}
-	if !stageBarrierClosed(children, issue) {
+	isTerminal, err := resolveTerminalChildren(children, effective)
+	if err != nil {
+		slog.Warn("child done: failed to resolve sibling statuses", "error", err, "parent_id", uuidToString(parent.ID))
+		return
+	}
+	if !stageBarrierClosed(children, issue, isTerminal) {
 		return
 	}
 	staged := siblingsAreStaged(children)
@@ -132,7 +163,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if staged {
 		closedStage = issue.Stage.Int32
 	}
-	h.postChildDoneComment(ctx, parent, issue, children, staged, closedStage, false)
+	h.postChildDoneComment(ctx, parent, issue, children, staged, closedStage, false, isTerminal)
 }
 
 // notifyParentsOfBatchChildDone emits child-done parent notifications for a
@@ -177,6 +208,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		g.children = append(g.children, c)
 	}
 
+	effective := h.childStatusResolver(ctx)
 	for _, g := range groups {
 		parent, err := h.Queries.GetIssue(ctx, g.parentID)
 		if err != nil {
@@ -185,10 +217,15 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			continue
 		}
 		// Same parent guards as the single path (see notifyParentOfChildDone).
-		if parent.Status == "done" || parent.Status == "cancelled" {
+		parentStatus, err := effective(parent)
+		if err != nil {
+			slog.Warn("batch child done: failed to resolve parent status", "error", err, "parent_id", uuidToString(parent.ID))
 			continue
 		}
-		if parent.Status == "backlog" {
+		if parentStatus == "done" || parentStatus == "cancelled" {
+			continue
+		}
+		if parentStatus == "backlog" {
 			continue
 		}
 		if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
@@ -202,15 +239,20 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			continue
 		}
 
+		isTerminal, err := resolveTerminalChildren(children, effective)
+		if err != nil {
+			slog.Warn("batch child done: failed to resolve sibling statuses", "error", err, "parent_id", uuidToString(parent.ID))
+			continue
+		}
 		batch := len(g.children) > 1
 		if !siblingsAreStaged(children) {
 			// Unstaged: one implicit stage. Fire once iff every child is terminal
 			// in the final state. stageBarrierClosed ignores `completed` on the
 			// unstaged path, so any completed child stands in for the barrier check.
-			if !stageBarrierClosed(children, g.children[0]) {
+			if !stageBarrierClosed(children, g.children[0], isTerminal) {
 				continue
 			}
-			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch)
+			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch, isTerminal)
 			continue
 		}
 
@@ -222,27 +264,55 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		// reality rather than a mid-batch snapshot. A lower closed stage would
 		// re-introduce the stale "advance the next stage" instruction the bug was
 		// about.
-		var rep db.Issue
-		var bestStage int32
-		found := false
-		for _, c := range g.children {
-			if !c.Stage.Valid {
-				continue // an unstaged child in a staged set closes no stage
-			}
-			if !stageBarrierClosed(children, c) {
-				continue
-			}
-			if !found || c.Stage.Int32 > bestStage {
-				found = true
-				bestStage = c.Stage.Int32
-				rep = c
-			}
-		}
+		rep, found := highestClosedBatchStage(children, g.children, isTerminal)
 		if !found {
 			continue
 		}
-		h.postChildDoneComment(ctx, parent, rep, children, true, bestStage, batch)
+		h.postChildDoneComment(ctx, parent, rep, children, true, rep.Stage.Int32, batch, isTerminal)
 	}
+}
+
+// highestClosedBatchStage selects the first completed child in the highest
+// closed stage of a staged sibling set. The terminal predicate must come from
+// resolveTerminalChildren: all required statuses must be known before selection.
+// A stage S is closed iff no non-terminal staged sibling has stage <= S, so
+// finding the earliest open stage once reduces selection from O(N*K) to O(N+K).
+func highestClosedBatchStage(children, completed []db.Issue, isTerminal func(db.Issue) bool) (db.Issue, bool) {
+	var lowestCompleted pgtype.Int4
+	for _, c := range completed {
+		if c.Stage.Valid && (!lowestCompleted.Valid || c.Stage.Int32 < lowestCompleted.Int32) {
+			lowestCompleted = c.Stage
+		}
+	}
+	if !lowestCompleted.Valid {
+		return db.Issue{}, false
+	}
+	var firstOpen pgtype.Int4
+	for _, c := range children {
+		if !c.Stage.Valid {
+			continue // Unstaged siblings were not resolved and cannot block a stage.
+		}
+		if !isTerminal(c) {
+			if c.Stage.Int32 <= lowestCompleted.Int32 {
+				return db.Issue{}, false // This sibling blocks every candidate; do not scan the rest.
+			}
+			if !firstOpen.Valid || c.Stage.Int32 < firstOpen.Int32 {
+				firstOpen = c.Stage
+			}
+		}
+	}
+	var rep db.Issue
+	found := false
+	for _, c := range completed {
+		if !c.Stage.Valid || (firstOpen.Valid && c.Stage.Int32 >= firstOpen.Int32) {
+			continue
+		}
+		if !found || c.Stage.Int32 > rep.Stage.Int32 {
+			found = true
+			rep = c
+		}
+	}
+	return rep, found
 }
 
 // postChildDoneComment builds and posts the parent's child-done system comment
@@ -256,7 +326,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 // an unstaged set). `batch` selects batch-aware wording: a single update keeps
 // its historical byte-identical copy, while a batch that finished several
 // children at once must not claim "the last sub-issue just finished".
-func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db.Issue, children []db.Issue, staged bool, closedStage int32, batch bool) {
+func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db.Issue, children []db.Issue, staged bool, closedStage int32, batch bool, isTerminal func(db.Issue) bool) {
 	prefix := h.getIssuePrefix(ctx, completed.WorkspaceID)
 	identifier := prefix + "-" + strconv.Itoa(int(completed.Number))
 	childID := uuidToString(completed.ID)
@@ -270,7 +340,7 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 
 	var content string
 	if staged {
-		summary, nextStage := stageProgressSummary(children, closedStage)
+		summary, nextStage := stageProgressSummary(children, closedStage, isTerminal)
 		advance := stageAdvanceInstruction(nextStage, parentID)
 		if batch {
 			content = fmt.Sprintf(
@@ -300,7 +370,8 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	// author_type='system', author_id=zero UUID. The zero UUID is a valid 16
 	// byte value and the column is NOT NULL; frontend code should branch on
 	// author_type === 'system' rather than on the UUID value.
-	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID:          dbid.NewV7(),
 		IssueID:     parent.ID,
 		WorkspaceID: parent.WorkspaceID,
 		AuthorType:  "system",
@@ -316,6 +387,7 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 			"parent_id", uuidToString(parent.ID))
 		return
 	}
+	comment := created.Comment()
 
 	h.publish(protocol.EventCommentCreated, uuidToString(parent.WorkspaceID), "system", "", map[string]any{
 		"comment":             commentToResponse(comment, nil, nil),
@@ -323,6 +395,7 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 		"issue_assignee_type": textToPtr(parent.AssigneeType),
 		"issue_assignee_id":   uuidToPtr(parent.AssigneeID),
 		"issue_status":        parent.Status,
+		"issue_revision":      created.IssueRevision,
 	})
 
 	// Dispatch the explicit trigger / inbox row for the parent assignee.
@@ -337,8 +410,63 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 // isTerminalChildStatus reports whether a child issue status counts as
 // "finished" for stage-barrier purposes. Cancelled counts as terminal: a
 // cancelled sibling will never complete, so it must not hold a stage open.
+//
+// Takes a CANONICAL status. Callers that hold a raw `issue.status` must pass it
+// through childStatusResolver first, so a custom status in the done or
+// cancelled category closes a stage exactly like Done and Cancelled do.
 func isTerminalChildStatus(status string) bool {
 	return status == "done" || status == "cancelled"
+}
+
+// childStatusResolver shares each workspace's catalog across the guards,
+// sibling scans and progress summary of one completion notification pass.
+// It must not outlive that pass: later notifications need a fresh catalog.
+//
+// Resolve without rewriting the issue rows, which also supply the original
+// user-selected status to downstream rendering. Built-in keys need no I/O.
+// Unlike display-oriented Resolver callers, this side-effecting path must
+// reject unresolved custom keys: parent or sibling rows can be newer than the
+// catalog snapshot. A miss must not bypass a parked/terminal parent's guard.
+func (h *Handler) childStatusResolver(ctx context.Context) func(db.Issue) (string, error) {
+	resolvers := make(map[pgtype.UUID]*issuestatus.Resolver)
+	return func(c db.Issue) (string, error) {
+		if issuestatus.IsBuiltIn(c.Status) {
+			return c.Status, nil
+		}
+		resolver := resolvers[c.WorkspaceID]
+		if resolver == nil {
+			resolver = issuestatus.NewResolver(c.WorkspaceID)
+			resolvers[c.WorkspaceID] = resolver
+		}
+		status := resolver.Effective(ctx, h.issueStatusCatalog(), c.Status)
+		if err := resolver.Err(); err != nil {
+			return "", err
+		}
+		if !issuestatus.IsCategory(status) {
+			return "", fmt.Errorf("unresolved status %q in workspace %s", c.Status, uuidToString(c.WorkspaceID))
+		}
+		return status, nil
+	}
+}
+
+// resolveTerminalChildren checks every status needed by the stage barrier and
+// progress summary before either can produce a notification. The returned
+// predicate only reads this snapshot, so a late catalog failure cannot be
+// hidden by the bool-only stage helpers. Stored status keys stay untouched.
+func resolveTerminalChildren(children []db.Issue, effective func(db.Issue) (string, error)) (func(db.Issue) bool, error) {
+	terminal := make(map[pgtype.UUID]bool, len(children))
+	staged := siblingsAreStaged(children)
+	for _, child := range children {
+		if staged && !child.Stage.Valid {
+			continue // Neither stage helper considers unstaged siblings.
+		}
+		status, err := effective(child)
+		if err != nil {
+			return nil, fmt.Errorf("resolve child %s status %q: %w", uuidToString(child.ID), child.Status, err)
+		}
+		terminal[child.ID] = isTerminalChildStatus(status)
+	}
+	return func(child db.Issue) bool { return terminal[child.ID] }, nil
 }
 
 // siblingsAreStaged reports whether any child in the set carries an explicit
@@ -367,10 +495,10 @@ func siblingsAreStaged(children []db.Issue) bool {
 //     stage <= S is terminal (frontier closure). Later stages are normally
 //     parked in `backlog`, so they cannot fire out of order; the caller's
 //     idempotency guard collapses any duplicate wake.
-func stageBarrierClosed(children []db.Issue, completed db.Issue) bool {
+func stageBarrierClosed(children []db.Issue, completed db.Issue, isTerminal func(db.Issue) bool) bool {
 	if !siblingsAreStaged(children) {
 		for _, c := range children {
-			if !isTerminalChildStatus(c.Status) {
+			if !isTerminal(c) {
 				return false
 			}
 		}
@@ -386,7 +514,7 @@ func stageBarrierClosed(children []db.Issue, completed db.Issue) bool {
 		if !c.Stage.Valid {
 			continue // unstaged children are ignored by the frontier
 		}
-		if c.Stage.Int32 <= s && !isTerminalChildStatus(c.Status) {
+		if c.Stage.Int32 <= s && !isTerminal(c) {
 			return false
 		}
 	}
@@ -399,7 +527,7 @@ func stageBarrierClosed(children []db.Issue, completed db.Issue) bool {
 // children — the next group to promote — or 0 when none remain. Unstaged
 // children are skipped (they are not part of any stage), so the breakdown
 // never renders a "Stage 0".
-func stageProgressSummary(children []db.Issue, closedStage int32) (summary string, nextStage int32) {
+func stageProgressSummary(children []db.Issue, closedStage int32, isTerminal func(db.Issue) bool) (summary string, nextStage int32) {
 	type agg struct{ total, done int }
 	byStage := map[int32]*agg{}
 	order := []int32{}
@@ -415,7 +543,7 @@ func stageProgressSummary(children []db.Issue, closedStage int32) (summary strin
 			order = append(order, s)
 		}
 		a.total++
-		if isTerminalChildStatus(c.Status) {
+		if isTerminal(c) {
 			a.done++
 		}
 	}

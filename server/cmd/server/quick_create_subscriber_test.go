@@ -75,7 +75,7 @@ func TestQuickCreateFailure_DoesNotSubscribeRequester(t *testing.T) {
 
 	// No issue with origin_type=quick_create + this task id exists. Completion
 	// hits the failure branch and writes a failure inbox; no subscriber row.
-	if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", "", false, ""); err != nil {
+	if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", "", "", false, "", ""); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 
@@ -147,7 +147,7 @@ func TestQuickCreateFailure_SurfacesAgentOutput(t *testing.T) {
 	// only output (per the quick-create prompt contract).
 	const agentErr = "Error: an active issue already exists: JKY-30 (blocked). Pass --allow-duplicate to override."
 	result, _ := json.Marshal(map[string]any{"output": agentErr})
-	if _, err := taskSvc.CompleteTask(ctx, task.ID, result, "", "", false, ""); err != nil {
+	if _, err := taskSvc.CompleteTask(ctx, task.ID, result, "", "", "", false, "", ""); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 
@@ -229,7 +229,7 @@ func TestQuickCreateLookupFault_WritesUnconfirmedInbox(t *testing.T) {
 	result, _ := json.Marshal(map[string]any{
 		"output": "Error: an active issue already exists: JKY-30 (blocked).",
 	})
-	if _, err := faulting.CompleteTask(ctx, task.ID, result, "", "", false, ""); err != nil {
+	if _, err := faulting.CompleteTask(ctx, task.ID, result, "", "", "", false, "", ""); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 
@@ -301,7 +301,7 @@ func TestQuickCreateFailure_RedactsAgentOutput(t *testing.T) {
 	result, _ := json.Marshal(map[string]any{
 		"output": "Error: create failed while authenticating with " + fakeToken,
 	})
-	if _, err := taskSvc.CompleteTask(ctx, task.ID, result, "", "", false, ""); err != nil {
+	if _, err := taskSvc.CompleteTask(ctx, task.ID, result, "", "", "", false, "", ""); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 
@@ -375,7 +375,7 @@ func TestQuickCreateLookupCancelled_StillWritesUnconfirmedInbox(t *testing.T) {
 	)
 
 	result, _ := json.Marshal(map[string]any{"output": "Error: something went wrong"})
-	if _, err := faulting.CompleteTask(ctx, task.ID, result, "", "", false, ""); err != nil {
+	if _, err := faulting.CompleteTask(ctx, task.ID, result, "", "", "", false, "", ""); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 	if ctx.Err() == nil {

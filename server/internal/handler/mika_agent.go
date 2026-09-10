@@ -9,8 +9,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"log/slog"
 	"net/http"
@@ -132,7 +134,7 @@ func (h *Handler) resolveMikaAgent(w http.ResponseWriter, r *http.Request, works
 	if !ok {
 		return db.Agent{}, false, false
 	}
-	runtime, err := h.Queries.GetAgentRuntime(r.Context(), runtimeID)
+	runtime, err := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
 	if err != nil || uuidToString(runtime.WorkspaceID) != workspaceID {
 		writeError(w, http.StatusBadRequest, "runtime not found in this workspace")
 		return db.Agent{}, false, false
@@ -296,11 +298,16 @@ func (h *Handler) getOrCreateMikaSession(ctx context.Context, agent db.Agent, wo
 	}
 
 	created, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
+		ID:          dbid.NewV7(),
 		WorkspaceID: wsUUID,
 		AgentID:     agent.ID,
 		CreatorID:   creatorUUID,
 		Title:       strings.TrimSpace(title),
 	})
+	if err != nil {
+		return db.ChatSession{}, err
+	}
+	created, err = qtx.MarkChatSessionExplicitlyCreated(ctx, created.ID)
 	if err != nil {
 		return db.ChatSession{}, err
 	}

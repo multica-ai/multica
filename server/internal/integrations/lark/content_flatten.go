@@ -95,10 +95,11 @@ type larkPostSpan struct {
 // ("Lark 集成", then a link "PR #3277") read as space-separated words.
 //
 // A link span renders as "text (href)" so the URL survives into the
-// agent's context; an `at` span renders as its @_user_N placeholder (or
-// the inline user_name when Lark already resolved it) so a downstream
-// resolveMentions pass can substitute the display name. Media spans
-// degrade to the same bracketed placeholders flattenContent uses.
+// agent's context; an `at` span renders as its @_user_N placeholder so
+// a downstream resolveMentions pass can substitute the display name
+// (falling back to the inline user_name when the placeholder is absent).
+// Media spans degrade to the same bracketed placeholders flattenContent
+// uses.
 func flattenPostContent(raw string) string {
 	if raw == "" {
 		return ""
@@ -142,14 +143,15 @@ func flattenPostParagraph(spans []larkPostSpan) string {
 				parts = append(parts, s.Href)
 			}
 		case "at":
-			// Prefer an already-resolved display name; otherwise emit
-			// the user_id, which on the receive side is the @_user_N
-			// placeholder a later resolveMentions pass maps to a name.
+			// Prefer the @_user_N placeholder so a later
+			// resolveMentions pass can map it to a display name and
+			// strip the bot's own mention; fall back to the inline
+			// user_name when the placeholder is absent.
 			switch {
-			case s.UserName != "":
-				parts = append(parts, "@"+s.UserName)
 			case s.UserID != "":
 				parts = append(parts, s.UserID)
+			case s.UserName != "":
+				parts = append(parts, "@"+s.UserName)
 			}
 		case "img":
 			parts = append(parts, "[Image]")

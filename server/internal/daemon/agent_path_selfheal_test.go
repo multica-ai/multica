@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // newSelfHealTestDaemon builds a Daemon with just the state resolveAgentEntry
@@ -28,7 +30,8 @@ func newSelfHealTestDaemon() *Daemon {
 func stubDetectVersionFromPath(t *testing.T) {
 	t.Helper()
 	orig := detectAgentVersion
-	detectAgentVersion = func(_ context.Context, path string) (string, error) {
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
+		path := runtimeCmd.Path
 		return filepath.Base(filepath.Dir(filepath.Dir(path))), nil
 	}
 	t.Cleanup(func() { detectAgentVersion = orig })

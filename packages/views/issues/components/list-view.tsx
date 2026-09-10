@@ -17,7 +17,7 @@ import {
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Virtuoso } from "react-virtuoso";
 import { Button } from "@multica/ui/components/ui/button";
-import type { Issue, IssueStatus, Project } from "@multica/core/types";
+import type { Issue, IssueStatusCategory, Project } from "@multica/core/types";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
@@ -46,6 +46,8 @@ import type {
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { useRestoredScrollRef } from "../../platform";
+import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
+import { toast } from "sonner";
 
 // List rows are a fixed 36px (h-9). Sharing the estimate between the seed's
 // trailing spacer and Virtuoso's defaultItemHeight keeps the shared
@@ -57,7 +59,7 @@ const LIST_ROW_ESTIMATED_HEIGHT = 36;
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
 
-function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
+function buildListGroups(visibleStatuses: IssueStatusCategory[]): BoardColumnGroup[] {
   return visibleStatuses.map((status) => ({
     id: statusGroupId(status),
     title: status,
@@ -69,6 +71,7 @@ function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
 function ListViewImpl({
   issues,
   visibleStatuses,
+  hiddenStatuses = [],
   childProgressMap = EMPTY_PROGRESS_MAP,
   projectMap,
   statusPagination,
@@ -77,7 +80,8 @@ function ListViewImpl({
   onCreateIssue,
 }: {
   issues: Issue[];
-  visibleStatuses: IssueStatus[];
+  visibleStatuses: IssueStatusCategory[];
+  hiddenStatuses?: IssueStatusCategory[];
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
   statusPagination: IssueStatusPagination;
@@ -257,6 +261,11 @@ function ListViewImpl({
         const currentIssue = map.get(activeId);
         if (!currentIssue || issueMatchesGroup(currentIssue, finalGroup)) {
           resetColumns();
+          if (activeId !== overId) {
+            toast.info(t(($) => $.board.manual_reorder_hint), {
+              id: "issue-manual-reorder-hint",
+            });
+          }
           return;
         }
         // Optimistically move the row into the target group *now*. Without this
@@ -278,7 +287,7 @@ function ListViewImpl({
         onMoveIssue(
           activeId,
           {
-            ...getMoveUpdates(finalGroup, currentIssue.position),
+            ...getMoveUpdates(finalGroup, currentIssue.position, currentIssue),
             ...getMoveAnchors(targetIds, activeId),
           },
           beginSettle(),
@@ -304,14 +313,29 @@ function ListViewImpl({
       onMoveIssue(
         activeId,
         {
-          ...getMoveUpdates(finalGroup, newPosition),
+          ...getMoveUpdates(finalGroup, newPosition, currentIssue),
           ...getMoveAnchors(finalIds, activeId),
         },
         beginSettle(),
       );
     },
-    [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef],
+    [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef, t],
   );
+
+  // dnd-kit fires onDragCancel — never onDragEnd — when an active drag is
+  // aborted: pointercancel, window resize, tab hide, or Escape. Touch browsers
+  // hit that path constantly, because a scroll gesture that starts on a row
+  // moves past the 5px activation distance and *then* the browser takes the
+  // gesture over for native scrolling and cancels the pointer. Without this
+  // handler `isDraggingRef` stayed true for the rest of the session, which
+  // froze the column mirror against cache updates and — because the accordion's
+  // onValueChange is guarded by the same ref — made tapping a status header a
+  // no-op, so groups could no longer be collapsed at all (MUL-6240).
+  const handleDragCancel = useCallback(() => {
+    isDraggingRef.current = false;
+    setActiveIssue(null);
+    setColumns(buildColumns(issues, groups, "status"));
+  }, [issues, groups, setColumns, isDraggingRef]);
 
   // The single scroll container is shared by every status panel's Virtuoso as
   // its customScrollParent, so a callback ref hands the element to the panels
@@ -332,42 +356,58 @@ function ListViewImpl({
   );
 
   const content = (
-    <Accordion.Root
-      multiple
-      className="space-y-1"
-      value={expandedStatuses}
-      onValueChange={(value: string[]) => {
-        if (isDraggingRef.current) return;
-        for (const status of visibleStatuses) {
-          const wasExpanded = expandedStatuses.includes(status);
-          const isExpanded = value.includes(status);
-          if (wasExpanded !== isExpanded) {
-            toggleListCollapsed(status as IssueStatus);
+    <>
+      <Accordion.Root
+        multiple
+        className="space-y-1"
+        value={expandedStatuses}
+        onValueChange={(value: string[]) => {
+          if (isDraggingRef.current) return;
+          for (const status of visibleStatuses) {
+            const wasExpanded = expandedStatuses.includes(status);
+            const isExpanded = value.includes(status);
+            if (wasExpanded !== isExpanded) {
+              toggleListCollapsed(status as IssueStatusCategory);
+            }
           }
-        }
-      }}
-    >
-      {visibleStatuses.map((status) => {
-        const isExpanded = expandedStatuses.includes(status);
-        return (
-          <StatusAccordionItem
-            key={status}
-            status={status}
-            issueIds={columns[statusGroupId(status)] ?? EMPTY_IDS}
-            issueMap={issueMapRef.current}
-            childProgressMap={childProgressMap}
-            projectMap={projectMap}
-            page={statusPagination[status]}
-            projectId={projectId}
-            onCreateIssue={onCreateIssue}
-            dragEnabled={dragEnabled}
-            isExpanded={isExpanded}
-            sortLabel={sortLabel}
-            scrollParent={scrollEl}
+        }}
+      >
+        {visibleStatuses.map((status) => {
+          const isExpanded = expandedStatuses.includes(status);
+          return (
+            <StatusAccordionItem
+              key={status}
+              status={status}
+              issueIds={columns[statusGroupId(status)] ?? EMPTY_IDS}
+              issueMap={issueMapRef.current}
+              childProgressMap={childProgressMap}
+              projectMap={projectMap}
+              page={statusPagination[status]}
+              projectId={projectId}
+              onCreateIssue={onCreateIssue}
+              dragEnabled={dragEnabled}
+              isExpanded={isExpanded}
+              sortLabel={sortLabel}
+              scrollParent={scrollEl}
+            />
+          );
+        })}
+      </Accordion.Root>
+      {hiddenStatuses.length > 0 && (
+        <div className="mt-4 px-1 pb-4">
+          <HiddenColumnsPanel
+            hiddenStatuses={hiddenStatuses}
+            renderRow={(status) => (
+              <HiddenColumnRow
+                key={status}
+                status={status}
+                total={statusPagination[status]?.total}
+              />
+            )}
           />
-        );
-      })}
-    </Accordion.Root>
+        </div>
+      )}
+    </>
   );
 
   if (!dragEnabled) {
@@ -385,6 +425,7 @@ function ListViewImpl({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
       <div ref={attachScroller} data-tab-scroll-root="list" className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
         {content}
@@ -416,7 +457,7 @@ function StatusAccordionItem({
   sortLabel,
   scrollParent,
 }: {
-  status: IssueStatus;
+  status: IssueStatusCategory;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;

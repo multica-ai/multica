@@ -315,7 +315,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         const autopilot = await createAutopilot.mutateAsync({
           title: title.trim(),
           description: description.trim() || undefined,
-          project_id: executionMode === "create_issue" ? projectId : null,
+          project_id: projectId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -368,7 +368,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           id: props.autopilotId,
           title: title.trim(),
           description: description.trim() || null,
-          project_id: executionMode === "create_issue" ? projectId : null,
+          project_id: projectId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -621,13 +621,19 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
 
-            {executionMode === "create_issue" && (
-              <ProjectSection
-                projectId={projectId}
-                selectedProject={selectedProject}
-                onChange={setProjectId}
-              />
-            )}
+            {/* Shown for BOTH output modes (MUL-6681). The project is not only
+                issue routing: for a run_only autopilot it is the ONLY source of
+                project context the daemon has (there is no issue to inherit it
+                from), so it decides whether the run gets the project's
+                repository / local_directory — and with it worktree isolation —
+                or a bare workdir. Hiding it here left run_only autopilots with
+                no way to bind one, and the save below used to send null for
+                run_only, silently clearing a binding made via the CLI. */}
+            <ProjectSection
+              projectId={projectId}
+              selectedProject={selectedProject}
+              onChange={setProjectId}
+            />
 
             {executionMode === "create_issue" && (
               <SubscribersSection
@@ -902,6 +908,9 @@ function ProjectSection({
   return (
     <div>
       <SectionLabel>{t(($) => $.dialog.section_project)}</SectionLabel>
+      <p className="mb-2 text-micro text-muted-foreground">
+        {t(($) => $.dialog.project_hint)}
+      </p>
       <ProjectPicker
         projectId={projectId}
         onUpdate={(updates) => onChange(updates.project_id ?? null)}

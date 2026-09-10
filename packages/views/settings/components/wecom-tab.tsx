@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, MessagesSquare, Trash2 } from "lucide-react";
+import { ChevronRight, Trash2 } from "lucide-react";
+import { WecomMark } from "./wecom-mark";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -31,6 +32,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { wecomInstallationsOptions, wecomKeys } from "@multica/core/wecom";
+import { errorCode } from "@multica/core/api";
 import { api } from "@multica/core/api";
 import type { WecomInstallation } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -86,19 +88,13 @@ export function WecomTab() {
 
   return (
     <div className="space-y-8">
-      <section className="space-y-1">
-        <p className="text-body text-muted-foreground">
-          {t(($) => $.wecom.page_description)}
-        </p>
-      </section>
-
       {!configured ? (
         <Card>
           <CardContent className="space-y-2">
             <p className="text-body font-medium">{t(($) => $.wecom.not_enabled_title)}</p>
             <p className="text-caption text-muted-foreground">
               {t(($) => $.wecom.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-micro">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_WECOM_SECRET_KEY
               </code>{" "}
               {t(($) => $.wecom.not_enabled_description_suffix)}{" "}
@@ -210,7 +206,7 @@ function InstallationRow({
           <p className="text-body font-medium">
             {agentName}
             {!isActive && (
-              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.wecom.revoked_badge)}
               </span>
             )}
@@ -258,6 +254,7 @@ export function WecomAgentBindButton({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [botId, setBotId] = useState("");
   const [secret, setSecret] = useState("");
+  const [botName, setBotName] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const { data: listing } = useQuery({
@@ -297,6 +294,7 @@ export function WecomAgentBindButton({
     setDialogOpen(false);
     setBotId("");
     setSecret("");
+    setBotName("");
   }
 
   async function handleSubmit() {
@@ -305,15 +303,52 @@ export function WecomAgentBindButton({
     if (submitting || !agentId || !bot_id || !secretTrimmed) return;
     setSubmitting(true);
     try {
-      await api.registerWecomBYO(wsId, agentId, { bot_id, secret: secretTrimmed });
+      await api.registerWecomBYO(wsId, agentId, {
+        bot_id,
+        secret: secretTrimmed,
+        bot_name: botName.trim() || undefined,
+      });
       await qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
       toast.success(t(($) => $.wecom.byo_success_toast));
       setDialogOpen(false);
       setBotId("");
       setSecret("");
+      setBotName("");
     } catch (e) {
+      // The server sends a stable `code` alongside the English sentence, so
+      // the admin reads the failure in their own language. The sentence is
+      // still the fallback: an older server, or a failure that has not been
+      // given a code, sends none.
+      let localized: string | undefined;
+      switch (errorCode(e)) {
+        case "wecom_bot_owned_by_same_workspace":
+          localized = t(($) => $.wecom.byo_conflict_same_workspace);
+          break;
+        case "wecom_bot_owned_by_archived_agent":
+          localized = t(($) => $.wecom.byo_conflict_archived_agent);
+          break;
+        case "wecom_bot_owned_by_another_workspace":
+          localized = t(($) => $.wecom.byo_conflict_other_workspace);
+          break;
+        case "wecom_install_rejected":
+          localized = t(($) => $.wecom.byo_rejected);
+          break;
+        // Distinct from the two above on purpose: "you left a field out",
+        // "WeCom said no" and "we couldn't ask WeCom" are three different
+        // things for the admin to do, so they get three different sentences.
+        case "wecom_credentials_rejected":
+          localized = t(($) => $.wecom.byo_credentials_rejected);
+          break;
+        case "wecom_credentials_unverifiable":
+          localized = t(($) => $.wecom.byo_credentials_unverifiable);
+          break;
+        case "wecom_install_failed":
+          localized = t(($) => $.wecom.byo_install_failed);
+          break;
+      }
       toast.error(
-        e instanceof Error ? e.message : t(($) => $.wecom.byo_failed_toast),
+        localized ??
+          (e instanceof Error ? e.message : t(($) => $.wecom.byo_failed_toast)),
       );
     } finally {
       setSubmitting(false);
@@ -340,7 +375,7 @@ export function WecomAgentBindButton({
         }
         data-testid="wecom-agent-connect"
       >
-        <MessagesSquare className="h-3 w-3" />
+        <WecomMark className="h-3 w-3" />
         {t(($) => $.wecom.bind_button)}
       </Button>
 
@@ -385,6 +420,25 @@ export function WecomAgentBindButton({
                 spellCheck={false}
                 disabled={submitting}
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="wecom-byo-bot-name">
+                {t(($) => $.wecom.byo_bot_name_label)}
+              </Label>
+              <Input
+                id="wecom-byo-bot-name"
+                data-testid="wecom-byo-bot-name"
+                value={botName}
+                onChange={(e) => setBotName(e.target.value)}
+                placeholder={t(($) => $.wecom.byo_bot_name_placeholder)}
+                autoComplete="off"
+                spellCheck={false}
+                disabled={submitting}
+              />
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.wecom.byo_bot_name_hint)}
+              </p>
             </div>
           </div>
 

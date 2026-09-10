@@ -26,17 +26,22 @@ import (
 //     page. After they bind, their next message reaches the agent.
 //   - AgentOffline / AgentArchived: a status notice so the user is not left
 //     wondering why nothing happened.
+//   - FreshPending / IssueUsage: command confirmation or corrective guidance.
 //   - Ingested with a synchronously-created /issue: a confirmation carrying the
 //     issue identifier and title. Plain chat turns stay silent.
 
 const (
-	agentOfflineText  = "⚠️ The agent is offline, so this message won't be processed automatically."
-	agentArchivedText = "⚠️ This agent has been archived and can't respond. Please contact your workspace admin."
+	agentOfflineText        = "⚠️ The agent is offline, so this message won't be processed automatically."
+	agentArchivedText       = "⚠️ This agent has been archived and can't respond. Please contact your workspace admin."
+	freshPendingText        = "✅ Fresh start ready. Your next chat message will run without previous context."
+	chatStartedText         = "✅ Started a new Multica chat. Your next message will enter it."
+	issueUsageText          = "Please include an issue title. Use:\n\n`/issue <title>`\n\n`[description]` (optional)"
+	issueUsageWithMediaText = "Please add a title and resend with the image (*image can come before or after the command*):\n\n`/issue <title>`\n\n`[description]` (optional)"
 	// Refusals for dropped /issue commands, carried over from the deleted
 	// pre-engine IssueCommandProcessor: without them the user's command
 	// vanishes with no signal that it will never be handled.
 	issueNotMemberText = "You're not a member of this Multica workspace, so I can't file an issue for you. Ask a workspace admin to invite you, then send the command again."
-	issueDisabledText  = "This DingTalk robot isn't connected to Multica (or was disconnected). Ask a workspace admin to reconnect it."
+	issueDisabledText  = "This DingTalk robot isn't connected to Multica (or was disconnected). Ask the agent owner or a workspace owner/admin to reconnect it."
 )
 
 // bindingMinter is the binding-token surface the replier needs.
@@ -57,7 +62,7 @@ type OutboundReplier struct {
 
 // OutboundReplierConfig configures the replier. Binding + AppURL are required for
 // the NeedsBinding prompt to work; without them the prompt is skipped (the
-// offline/archived/issue notices still fire).
+// status and command notices still fire).
 type OutboundReplierConfig struct {
 	Binding bindingMinter
 	Decrypt Decrypter
@@ -117,6 +122,24 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 	case engine.OutcomeAgentArchived:
 		if err := r.post(ctx, inst, msg, agentArchivedText); err != nil {
 			r.logger.WarnContext(ctx, "dingtalk replier: archived notice failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeFreshPending:
+		if err := r.post(ctx, inst, msg, freshPendingText); err != nil {
+			r.logger.WarnContext(ctx, "dingtalk replier: fresh-start confirmation failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeChatStarted:
+		if err := r.post(ctx, inst, msg, chatStartedText); err != nil {
+			r.logger.WarnContext(ctx, "dingtalk replier: new-chat confirmation failed", "installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeIssueUsage:
+		text := issueUsageText
+		if res.IssueUsageHadMedia {
+			text = issueUsageWithMediaText
+		}
+		if err := r.post(ctx, inst, msg, text); err != nil {
+			r.logger.WarnContext(ctx, "dingtalk replier: issue usage reply failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeIngested:

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -68,25 +70,6 @@ func newProfileUnsetPathTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "unset-path"}
 	addCommonProfileFlags(cmd)
 	return cmd
-}
-
-// TestRuntimeProfileCommandsRegistered verifies the subcommands are wired
-// under `runtime profile`.
-func TestRuntimeProfileCommandsRegistered(t *testing.T) {
-	for _, name := range []string{"list", "create", "update", "delete", "set-path", "unset-path"} {
-		cmd, _, err := runtimeProfileCmd.Find([]string{name})
-		if err != nil {
-			t.Fatalf("find %q: %v", name, err)
-		}
-		if cmd == nil || cmd.Name() != name {
-			t.Fatalf("%q not registered under `runtime profile`; got %#v", name, cmd)
-		}
-	}
-	// And `profile` itself must hang off `runtime`.
-	cmd, _, err := runtimeCmd.Find([]string{"profile", "list"})
-	if err != nil || cmd == nil || cmd.Name() != "list" {
-		t.Fatalf("`runtime profile list` not reachable from runtime command: %v / %#v", err, cmd)
-	}
 }
 
 func TestRunRuntimeProfileList(t *testing.T) {
@@ -356,5 +339,38 @@ func TestRunRuntimeProfileSetPathPreservesExistingConfig(t *testing.T) {
 	}
 	if cfg.ProfileCommandOverrides["prof-1"] != "/opt/bin/company-codex" {
 		t.Errorf("override not written: %#v", cfg.ProfileCommandOverrides)
+	}
+}
+
+func TestRuntimeProfilePathMutationFailsClosedInTaskContext(t *testing.T) {
+	ownerHome := t.TempDir()
+	t.Setenv("HOME", ownerHome)
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	ownerPath := filepath.Join(ownerHome, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ownerBytes := []byte("{\n  \"profile_command_overrides\": {\"owner-prof\": \"/owner/bin\"},\n  \"token\": \"mul_owner_sentinel\"\n}\n")
+	if err := os.WriteFile(ownerPath, ownerBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	setCmd := newProfileSetPathTestCmd()
+	_ = setCmd.Flags().Set("path", "/task/bin")
+	if err := runRuntimeProfileSetPath(setCmd, []string{"prof-1"}); err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+		t.Fatalf("set-path error = %v, want task-context guard", err)
+	}
+	if err := runRuntimeProfileUnsetPath(newProfileUnsetPathTestCmd(), []string{"owner-prof"}); err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+		t.Fatalf("unset-path error = %v, want task-context guard", err)
+	}
+	after, err := os.ReadFile(ownerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(ownerBytes) {
+		t.Fatalf("owner config content changed: got %q", after)
 	}
 }

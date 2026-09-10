@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * This context is attached to freeze/crash reports, which leave the machine.
  * The sanitizer is the last checkpoint before a renderer-supplied payload is

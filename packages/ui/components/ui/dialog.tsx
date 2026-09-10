@@ -53,7 +53,15 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-surface-raised p-4 text-body text-popover-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // The popup is centred by transform, so without a height bound it
+          // grows in both directions and pushes its own footer past the
+          // viewport edge — the save button of a content-driven dialog (a
+          // property with many options, say) becomes unclickable. Cap it to
+          // the viewport and let it scroll as a last resort; a dialog that
+          // fits is unaffected. `overflow-auto` shares tailwind-merge's
+          // conflict group with `overflow-hidden`, so a dialog that manages
+          // its own scrolling still opts out by passing that.
+          "fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-auto rounded-xl bg-surface-raised p-4 text-body text-popover-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}

@@ -22,9 +22,6 @@ export interface UseIssueTriggerPreviewResult {
   triggers: IssueTriggerPreviewItem[];
   totalCount: number;
   isLoading: boolean;
-  /** True when every trigger's target runtime can render a handoff note, so
-   *  the note box is safe to enable. False if any started run would drop it. */
-  handoffSupported: boolean;
 }
 
 const EMPTY: IssueTriggerPreviewItem[] = [];
@@ -90,6 +87,5 @@ export function useIssueTriggerPreview(
     // Only the first load (no prior data) is "loading"; a background/placeholder
     // refetch is not, so reveal animations gated on this never collapse mid-fetch.
     isLoading: enabled && previewQuery.isLoading,
-    handoffSupported: triggers.length > 0 && triggers.every((t) => t.handoff_supported === true),
   };
 }

@@ -24,6 +24,8 @@ const GLOBAL_ACTIONS: readonly ShortcutActionId[] = [
   "createIssue",
   "toggleSidebar",
   "toggleChat",
+  "goBack",
+  "goForward",
   "goInbox",
   "goChat",
   "goMyIssues",
@@ -105,6 +107,16 @@ export function GlobalShortcuts() {
       }
       if (actionId === "toggleSidebar") {
         toggleSidebar();
+        return;
+      }
+      if (actionId === "goBack") {
+        navigation.back();
+        return;
+      }
+      if (actionId === "goForward") {
+        // Optional on the adapter: an isolated window without a forward stack
+        // leaves it undefined, in which case the chord is simply a no-op.
+        navigation.forward?.();
         return;
       }
       if (actionId === "createIssue") {

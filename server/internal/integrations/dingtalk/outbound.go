@@ -21,7 +21,7 @@ import (
 type outboundQueries interface {
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
-	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
+	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 }
 
@@ -80,16 +80,17 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if content == "" {
 		return nil // nothing to say (empty completion, or a retry-pending failure)
 	}
-	binding, err := o.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
-		ChatSessionID: sessionID,
-		ChannelType:   string(TypeDingTalk),
-	})
+	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil // not a DingTalk session (Feishu / Slack / web-only)
+			return nil // direct Multica task or violated snapshot invariant: fail closed
 		}
-		return fmt.Errorf("lookup dingtalk chat binding: %w", err)
+		return fmt.Errorf("lookup dingtalk task delivery: %w", err)
 	}
+	if delivery.ChannelType != string(TypeDingTalk) {
+		return nil
+	}
+	binding := bindingFromTaskDelivery(delivery)
 	task, err := o.q.GetAgentTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("load agent task: %w", err)
@@ -120,6 +121,16 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("post dingtalk reply: %w", err)
 	}
 	return nil
+}
+
+func bindingFromTaskDelivery(delivery db.ChannelTaskDelivery) db.ChannelChatSessionBinding {
+	return db.ChannelChatSessionBinding{
+		ID: delivery.BindingID, InstallationID: delivery.InstallationID,
+		ChannelType: delivery.ChannelType, ChannelChatID: delivery.ChannelChatID,
+		ChatType:      delivery.ChatType,
+		LastMessageID: delivery.ChannelMessageID, LastThreadID: delivery.ChannelThreadID,
+		RouteRevision: delivery.RouteRevision, Config: delivery.Config,
+	}
 }
 
 // eventContent extracts the deliverable text from an EventChatDone payload

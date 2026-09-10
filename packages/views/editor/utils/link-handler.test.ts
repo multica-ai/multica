@@ -110,6 +110,28 @@ describe("openLink", () => {
     openLink("/other/issues/MUL-1", "acme", APP_ORIGIN);
     expect(navigatedPaths()).toEqual(["/other/issues/MUL-1"]);
   });
+
+  it("defaults the disposition to push and carries an explicit click intent through the event", () => {
+    openLink("/acme/issues/MUL-1", "acme", APP_ORIGIN);
+    openLink("/acme/issues/MUL-2", "acme", APP_ORIGIN, "background-tab");
+    const details = dispatched.map(
+      (e) => (e as CustomEvent<{ path: string; disposition: string }>).detail,
+    );
+    expect(details).toEqual([
+      { path: "/acme/issues/MUL-1", disposition: "push" },
+      { path: "/acme/issues/MUL-2", disposition: "background-tab" },
+    ]);
+  });
+
+  it("ignores the intent for an external URL — it always hands off to the browser", () => {
+    openLink("https://github.com/a/b", "acme", APP_ORIGIN, "foreground-tab");
+    expect(dispatched).toHaveLength(0);
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://github.com/a/b",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
 });
 
 describe("parseWorkspaceEntityLink", () => {

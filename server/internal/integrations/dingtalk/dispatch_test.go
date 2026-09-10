@@ -6,26 +6,25 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/multica-ai/multica/server/internal/integrations/channel"
 )
 
-func dispatchMsg(conv, id string) channel.InboundMessage {
-	return channel.InboundMessage{
-		MessageID: id,
-		Source:    channel.Source{ChatID: conv},
-	}
+func dispatchMsg(conv, id string) inboundJob {
+	return inboundJob{callback: botCallbackData{
+		ConversationId: conv, ConversationType: convTypeP2P,
+		SenderStaffId: "staff-1", MsgId: id, Msgtype: "text",
+		Text: botCallbackText{Content: "hello"},
+	}}
 }
 
 func TestDispatcher_SerialPerConversation(t *testing.T) {
 	var mu sync.Mutex
 	var got []string
 	done := make(chan struct{}, 8)
-	d := newDispatcher(func(_ context.Context, msg channel.InboundMessage) {
+	d := newDispatcher(func(_ context.Context, job inboundJob) {
 		// Jitter so an ordering bug actually reorders.
-		time.Sleep(time.Duration(len(msg.MessageID)%3) * time.Millisecond)
+		time.Sleep(time.Duration(len(job.callback.MsgId)%3) * time.Millisecond)
 		mu.Lock()
-		got = append(got, msg.MessageID)
+		got = append(got, job.callback.MsgId)
 		mu.Unlock()
 		done <- struct{}{}
 	}, nil)
@@ -55,8 +54,8 @@ func TestDispatcher_SerialPerConversation(t *testing.T) {
 func TestDispatcher_ParallelAcrossConversations(t *testing.T) {
 	blockA := make(chan struct{})
 	sawB := make(chan struct{})
-	d := newDispatcher(func(_ context.Context, msg channel.InboundMessage) {
-		switch msg.Source.ChatID {
+	d := newDispatcher(func(_ context.Context, job inboundJob) {
+		switch job.callback.ConversationId {
 		case "conv-A":
 			<-blockA
 		case "conv-B":
@@ -80,7 +79,7 @@ func TestDispatcher_OverflowDrops(t *testing.T) {
 	release := make(chan struct{})
 	var handled int
 	var mu sync.Mutex
-	d := newDispatcher(func(_ context.Context, _ channel.InboundMessage) {
+	d := newDispatcher(func(_ context.Context, _ inboundJob) {
 		<-release
 		mu.Lock()
 		handled++
@@ -116,9 +115,9 @@ func TestDispatcher_OverflowDrops(t *testing.T) {
 func TestDispatcher_GlobalPendingLimitBoundsDistinctConversations(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan string, 3)
-	d := newDispatcher(func(_ context.Context, msg channel.InboundMessage) {
+	d := newDispatcher(func(_ context.Context, job inboundJob) {
 		<-release
-		done <- msg.MessageID
+		done <- job.callback.MsgId
 	}, nil)
 	d.maxPending = 2
 
@@ -168,8 +167,8 @@ func TestDispatcher_GlobalPendingLimitBoundsDistinctConversations(t *testing.T) 
 
 func TestDispatcher_WorkerExitsAndRestarts(t *testing.T) {
 	done := make(chan string, 2)
-	d := newDispatcher(func(_ context.Context, msg channel.InboundMessage) {
-		done <- msg.MessageID
+	d := newDispatcher(func(_ context.Context, job inboundJob) {
+		done <- job.callback.MsgId
 	}, nil)
 
 	d.enqueue("conv-A", dispatchMsg("conv-A", "first"))
@@ -198,10 +197,10 @@ func TestDispatcher_DrainAndCloseFinishesAcceptedJobsAndRejectsNewOnes(t *testin
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
 	done := make(chan string, 2)
-	d := newDispatcher(func(_ context.Context, msg channel.InboundMessage) {
+	d := newDispatcher(func(_ context.Context, job inboundJob) {
 		started <- struct{}{}
 		<-release
-		done <- msg.MessageID
+		done <- job.callback.MsgId
 	}, nil)
 
 	d.enqueue("conv-A", dispatchMsg("conv-A", "first"))
@@ -257,7 +256,7 @@ func TestDispatcher_DrainAndCloseFinishesAcceptedJobsAndRejectsNewOnes(t *testin
 func TestDispatcher_CloseDeadlineCancelsInFlightJob(t *testing.T) {
 	started := make(chan struct{})
 	cancelled := make(chan struct{})
-	d := newDispatcher(func(ctx context.Context, _ channel.InboundMessage) {
+	d := newDispatcher(func(ctx context.Context, _ inboundJob) {
 		close(started)
 		<-ctx.Done()
 		close(cancelled)

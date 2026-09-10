@@ -179,4 +179,35 @@ describe("issue label mutations", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     qc.clear();
   });
+
+  it("does not drop a known revision when an older backend returns an unversioned attach response", async () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const labelKey = labelKeys.byIssue("ws-1", issue.id);
+    qc.setQueryData<IssueLabelsResponse>(labelKey, {
+      labels: [labelA],
+      issue_revision: 3,
+    });
+    qc.setQueryData<ListLabelsResponse>(labelKeys.list("ws-1"), {
+      labels: [labelA, labelB],
+      total: 2,
+    });
+    setApiInstance({
+      attachLabel: vi.fn().mockResolvedValue({ labels: [labelA, labelB] }),
+    } as unknown as ApiClient);
+    const { result } = renderHook(() => useAttachLabel(issue.id), {
+      wrapper: wrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync(labelB.id);
+    });
+
+    expect(qc.getQueryData<IssueLabelsResponse>(labelKey)?.issue_revision).toBe(
+      3,
+    );
+    expect(qc.getQueryState(labelKey)?.isInvalidated).toBe(true);
+    qc.clear();
+  });
 });

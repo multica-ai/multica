@@ -37,26 +37,30 @@ func (q *Queries) AcceptInvitation(ctx context.Context, id pgtype.UUID) (Workspa
 }
 
 const createInvitation = `-- name: CreateInvitation :one
-INSERT INTO workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO workspace_invitation (id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at
 `
 
 type CreateInvitationParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	InviterID     pgtype.UUID `json:"inviter_id"`
-	InviteeEmail  string      `json:"invitee_email"`
-	InviteeUserID pgtype.UUID `json:"invitee_user_id"`
-	Role          string      `json:"role"`
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	InviterID     pgtype.UUID        `json:"inviter_id"`
+	InviteeEmail  string             `json:"invitee_email"`
+	InviteeUserID pgtype.UUID        `json:"invitee_user_id"`
+	Role          string             `json:"role"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
 }
 
 func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) (WorkspaceInvitation, error) {
 	row := q.db.QueryRow(ctx, createInvitation,
+		arg.ID,
 		arg.WorkspaceID,
 		arg.InviterID,
 		arg.InviteeEmail,
 		arg.InviteeUserID,
 		arg.Role,
+		arg.ExpiresAt,
 	)
 	var i WorkspaceInvitation
 	err := row.Scan(
@@ -99,13 +103,14 @@ func (q *Queries) DeclineInvitation(ctx context.Context, id pgtype.UUID) (Worksp
 	return i, err
 }
 
-const expireStalePendingInvitations = `-- name: ExpireStalePendingInvitations :exec
+const expireStalePendingInvitations = `-- name: ExpireStalePendingInvitations :many
 UPDATE workspace_invitation
 SET status = 'expired', updated_at = now()
 WHERE workspace_id = $1
   AND invitee_email = $2
   AND status = 'pending'
   AND expires_at <= now()
+RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at
 `
 
 type ExpireStalePendingInvitationsParams struct {
@@ -117,9 +122,35 @@ type ExpireStalePendingInvitationsParams struct {
 // so the next CreateInvitation does not collide with the partial unique index
 // idx_invitation_unique_pending (which is WHERE status = 'pending' and cannot
 // itself reference now() in its predicate).
-func (q *Queries) ExpireStalePendingInvitations(ctx context.Context, arg ExpireStalePendingInvitationsParams) error {
-	_, err := q.db.Exec(ctx, expireStalePendingInvitations, arg.WorkspaceID, arg.InviteeEmail)
-	return err
+func (q *Queries) ExpireStalePendingInvitations(ctx context.Context, arg ExpireStalePendingInvitationsParams) ([]WorkspaceInvitation, error) {
+	rows, err := q.db.Query(ctx, expireStalePendingInvitations, arg.WorkspaceID, arg.InviteeEmail)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WorkspaceInvitation{}
+	for rows.Next() {
+		var i WorkspaceInvitation
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.InviterID,
+			&i.InviteeEmail,
+			&i.InviteeUserID,
+			&i.Role,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getInvitation = `-- name: GetInvitation :one
@@ -300,12 +331,15 @@ func (q *Queries) ListPendingInvitationsForUser(ctx context.Context, arg ListPen
 	return items, nil
 }
 
-const revokeInvitation = `-- name: RevokeInvitation :exec
+const revokeInvitation = `-- name: RevokeInvitation :execrows
 DELETE FROM workspace_invitation
 WHERE id = $1 AND status = 'pending'
 `
 
-func (q *Queries) RevokeInvitation(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, revokeInvitation, id)
-	return err
+func (q *Queries) RevokeInvitation(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeInvitation, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

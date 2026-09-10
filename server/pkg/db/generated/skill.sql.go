@@ -30,7 +30,7 @@ func (q *Queries) AddAgentSkill(ctx context.Context, arg AddAgentSkillParams) er
 const createSkill = `-- name: CreateSkill :one
 INSERT INTO skill (workspace_id, name, description, content, config, created_by)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id
 `
 
 type CreateSkillParams struct {
@@ -62,6 +62,7 @@ func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PluginInstallationID,
 	)
 	return i, err
 }
@@ -100,7 +101,7 @@ func (q *Queries) DeleteSkillFilesBySkill(ctx context.Context, skillID pgtype.UU
 }
 
 const getSkill = `-- name: GetSkill :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id FROM skill
 WHERE id = $1
 `
 
@@ -117,12 +118,13 @@ func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PluginInstallationID,
 	)
 	return i, err
 }
 
 const getSkillByWorkspaceAndName = `-- name: GetSkillByWorkspaceAndName :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id FROM skill
 WHERE workspace_id = $1 AND name = $2
 `
 
@@ -131,10 +133,8 @@ type GetSkillByWorkspaceAndNameParams struct {
 	Name        string      `json:"name"`
 }
 
-// Used by agent-template materialization to implement find-or-create: when a
-// template references a skill by name that already exists in the workspace,
-// reuse the existing skill_id rather than INSERT (which would fail the
-// UNIQUE(workspace_id, name) constraint from migration 008).
+// Used by skill import and runtime-local skill discovery to reuse a workspace
+// skill by name rather than violating UNIQUE(workspace_id, name).
 func (q *Queries) GetSkillByWorkspaceAndName(ctx context.Context, arg GetSkillByWorkspaceAndNameParams) (Skill, error) {
 	row := q.db.QueryRow(ctx, getSkillByWorkspaceAndName, arg.WorkspaceID, arg.Name)
 	var i Skill
@@ -148,6 +148,7 @@ func (q *Queries) GetSkillByWorkspaceAndName(ctx context.Context, arg GetSkillBy
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PluginInstallationID,
 	)
 	return i, err
 }
@@ -172,7 +173,7 @@ func (q *Queries) GetSkillFile(ctx context.Context, id pgtype.UUID) (SkillFile, 
 }
 
 const getSkillInWorkspace = `-- name: GetSkillInWorkspace :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id FROM skill
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -194,6 +195,7 @@ func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspa
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PluginInstallationID,
 	)
 	return i, err
 }
@@ -286,7 +288,7 @@ func (q *Queries) ListAgentSkillSummaries(ctx context.Context, agentID pgtype.UU
 
 const listAgentSkills = `-- name: ListAgentSkills :many
 
-SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at FROM skill s
+SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at, s.plugin_installation_id FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1 AND ask.enabled = TRUE
 ORDER BY s.name ASC
@@ -312,6 +314,58 @@ func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]S
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PluginInstallationID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentSkillsByIDs = `-- name: ListAgentSkillsByIDs :many
+SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at, s.plugin_installation_id FROM skill s
+JOIN agent_skill ask ON ask.skill_id = s.id
+WHERE ask.agent_id = $1
+  AND ask.enabled = TRUE
+  AND s.id = ANY($2::uuid[])
+ORDER BY s.name ASC
+`
+
+type ListAgentSkillsByIDsParams struct {
+	AgentID  pgtype.UUID   `json:"agent_id"`
+	SkillIds []pgtype.UUID `json:"skill_ids"`
+}
+
+// Scoped variant of ListAgentSkills: the same junction predicate, narrowed to
+// a set of requested skill IDs. The skill-bundle resolve path asks for one
+// skill per request, so loading the agent's whole set there costs a full read
+// and hash of every skill on every request. The junction predicate is also the
+// authorization: an ID the agent does not have enabled simply returns no row,
+// which the caller reports as not-found.
+func (q *Queries) ListAgentSkillsByIDs(ctx context.Context, arg ListAgentSkillsByIDsParams) ([]Skill, error) {
+	rows, err := q.db.Query(ctx, listAgentSkillsByIDs, arg.AgentID, arg.SkillIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Skill{}
+	for rows.Next() {
+		var i Skill
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Description,
+			&i.Content,
+			&i.Config,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PluginInstallationID,
 		); err != nil {
 			return nil, err
 		}
@@ -365,6 +419,67 @@ func (q *Queries) ListAgentSkillsByWorkspace(ctx context.Context, workspaceID pg
 	return items, nil
 }
 
+const listSkillFileMetadata = `-- name: ListSkillFileMetadata :many
+SELECT id, skill_id, path,
+       octet_length(content)::bigint AS size,
+       encode(sha256(convert_to(content, 'UTF8')), 'hex') AS content_hash,
+       created_at, updated_at
+FROM skill_file
+WHERE skill_id = $1
+ORDER BY path ASC
+`
+
+type ListSkillFileMetadataRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	SkillID     pgtype.UUID        `json:"skill_id"`
+	Path        string             `json:"path"`
+	Size        int64              `json:"size"`
+	ContentHash string             `json:"content_hash"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Metadata-only variant of ListSkillFiles: path, byte size and content hash
+// without the body. Same reason as ListSkillSummariesByWorkspace — a skill
+// whose supporting files total ~600KB cannot be listed at all when every row
+// carries its full content, and the one command that would show which file is
+// oversized was the command that timed out (GH multica-ai/multica#7498).
+// size/hash are computed in Postgres so the file bodies never leave it.
+//
+// convert_to(content, 'UTF8'), never content::bytea: the cast runs the bytea
+// INPUT parser over the text, so it reads backslash escapes instead of taking
+// the bytes. A file containing `\x41` would hash as the single byte `A`, and
+// one containing a bare backslash — a regex `\d+`, a Windows path, a LaTeX
+// snippet — fails outright with "invalid input syntax for type bytea",
+// turning an ordinary skill into a 500 on this endpoint.
+func (q *Queries) ListSkillFileMetadata(ctx context.Context, skillID pgtype.UUID) ([]ListSkillFileMetadataRow, error) {
+	rows, err := q.db.Query(ctx, listSkillFileMetadata, skillID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSkillFileMetadataRow{}
+	for rows.Next() {
+		var i ListSkillFileMetadataRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SkillID,
+			&i.Path,
+			&i.Size,
+			&i.ContentHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSkillFiles = `-- name: ListSkillFiles :many
 
 SELECT id, skill_id, path, content, created_at, updated_at FROM skill_file
@@ -375,6 +490,45 @@ ORDER BY path ASC
 // Skill File CRUD
 func (q *Queries) ListSkillFiles(ctx context.Context, skillID pgtype.UUID) ([]SkillFile, error) {
 	rows, err := q.db.Query(ctx, listSkillFiles, skillID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SkillFile{}
+	for rows.Next() {
+		var i SkillFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.SkillID,
+			&i.Path,
+			&i.Content,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSkillFilesBySkillIDs = `-- name: ListSkillFilesBySkillIDs :many
+SELECT id, skill_id, path, content, created_at, updated_at FROM skill_file
+WHERE skill_id = ANY($1::uuid[])
+ORDER BY skill_id, path ASC
+`
+
+// Batch variant of ListSkillFiles: loads every file for a set of skills in one
+// round trip so LoadAgentSkills doesn't issue one query per skill on the
+// task-claim hot path. Ordered by skill_id so the caller can group in a single
+// linear pass. Like ListSkillFiles it returns full file bodies — callers that
+// only need metadata must use ListSkillFileMetadata instead. Uses
+// idx_skill_file_skill.
+func (q *Queries) ListSkillFilesBySkillIDs(ctx context.Context, skillIds []pgtype.UUID) ([]SkillFile, error) {
+	rows, err := q.db.Query(ctx, listSkillFilesBySkillIDs, skillIds)
 	if err != nil {
 		return nil, err
 	}
@@ -453,7 +607,7 @@ func (q *Queries) ListSkillSummariesByWorkspace(ctx context.Context, workspaceID
 
 const listSkillsByWorkspace = `-- name: ListSkillsByWorkspace :many
 
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id FROM skill
 WHERE workspace_id = $1
 ORDER BY name ASC
 `
@@ -478,6 +632,7 @@ func (q *Queries) ListSkillsByWorkspace(ctx context.Context, workspaceID pgtype.
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PluginInstallationID,
 		); err != nil {
 			return nil, err
 		}
@@ -541,7 +696,7 @@ UPDATE skill SET
     config = COALESCE($5, config),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id
 `
 
 type UpdateSkillParams struct {
@@ -571,6 +726,7 @@ func (q *Queries) UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PluginInstallationID,
 	)
 	return i, err
 }

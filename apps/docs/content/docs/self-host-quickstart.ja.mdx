@@ -57,6 +57,13 @@ make selfhost
 
 <Callout type="info">
 `make selfhost` は公開済みのイメージを取得し、checkout 中のコードをビルドしません。ローカルのソースを試すには `make selfhost-build` を使ってください。
+
+公開済みのイメージは最新の **release タグ** を追跡しますが、単なる `git clone` でチェックアウトされるのは `main` で、通常リリースより先行しています。この checkout から何かをビルドする場合（CLI、または `make selfhost-build` によるイメージ）は、先に対応する release タグへ切り替えて、ビルドしたバイナリと稼働中のコンテナのバージョンを揃えてください:
+
+```bash
+git fetch --tags --depth 1
+git checkout $(git tag -l 'v*' --sort=-v:refname | head -1)
+```
 </Callout>
 
 ## 2. サービスの準備完了を確認する
@@ -131,12 +138,49 @@ api.example.com {
 }
 ```
 
+すべてのトラフィックを**単一オリジン**（1 つのドメイン、または 1 台のホストに 1 つのポートで、小規模サーバーで一般的な構成）で扱いたい場合は、デーモンが依存するパスを backend に明示的に転送し、残りを frontend に任せます:
+
+```text
+multica.example.com {
+    # CLI の到達確認: `multica setup` は <server-url>/health に GET を送り 200 を要求する。
+    # 古い frontend はこのパスを転送しないため、backend に直接ルーティングする
+    handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # ブラウザの realtime WebSocket——web イメージは WS アップグレードを proxy できないため backend へ直接
+    handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # デーモンの長時間接続: {server-url}/api/daemon/ws にダイヤルします（/ws ではない）。
+    # このルートがないとハンドシェイクが失敗し、デーモンは通知なくポーリングへフォールバックします
+    handle /api/daemon/ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # 残りのパスは frontend へ。API とログインのリクエストを転送する
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+```
+
+単一オリジンでは、2 つの URL をどちらもそこに向けます（`.env` の `FRONTEND_ORIGIN` と `MULTICA_APP_URL`、および `multica setup self-host` の `--server-url` と `--app-url`）。
+
 Caddy が TLS 証明書を取得し、WebSocket を転送します。`.env` を変更したら、`up -d` でコンテナを作り直して新しい設定を反映します。
 
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
 curl -fsS https://api.example.com/readyz
+curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
+
+最後のコマンドは `daemon_server_url`（デーモンが API に接続するための URL）を出力します: `MULTICA_DAEMON_SERVER_URL` が設定されていればそれを、次に `MULTICA_PUBLIC_URL`、どちらも未設定ならアプリ URL（`MULTICA_APP_URL`、未設定なら `FRONTEND_ORIGIN` にフォールバック）を使います。`MULTICA_APP_URL` と `FRONTEND_ORIGIN` のどちらも未設定の場合、`MULTICA_DAEMON_SERVER_URL` や `MULTICA_PUBLIC_URL` が設定されていてもこのフィールドはレスポンスから丸ごと省略されます（上の grep は何も出力しません）。`localhost` と出力される場合は `.env` がまだローカルのデフォルトのままです: `.env.example` からコピーした `${FRONTEND_PORT}` 参照に頼らず、`FRONTEND_ORIGIN` と `MULTICA_APP_URL` を公開 URL として明示的に設定し、コンテナを作り直してください。
 
 <Callout type="warning">
 `docker compose restart` は既存のコンテナを再起動するだけで、`.env` を読み直しません。設定を変更した後に `.env` を読み直すには、`docker compose -f docker-compose.selfhost.yml up -d` を実行してください。
@@ -170,7 +214,7 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 以下のコマンドは **AI コーディングツールを実行するコンピュータ**で実行します。Docker を実行しているサーバーとは限りません。
 
 <Callout type="warning">
-タスクはデーモンを実行しているユーザーの全権限で動作し、そのユーザーが読み書きできるものはすべて読み書きできます。個人アカウントではなく、専用の Unix ユーザー、コンテナ、または VM でデーモンを実行してください。[セキュリティモデル](/security-model)を参照してください。
+作業はデーモンを実行しているユーザーの全権限で動作し、そのユーザーが読み書きできるものはすべて読み書きできます。個人アカウントではなく、専用の Unix ユーザー、コンテナ、または VM でデーモンを実行してください。[セキュリティモデル](/security-model)を参照してください。
 </Callout>
 
 まず Multica CLI をインストールします。
@@ -201,7 +245,7 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-このコマンドはまず `<server-url>/health` を確認し、次にブラウザを開いてログインを完了します。ログイン後はローカルに認証情報を保存し、デーモンを起動します。
+このコマンドはまず `<server-url>/health` を確認し、次にブラウザを開いてログインを完了します。ログイン後はローカルに認証情報を保存し、デーモンを起動します。このステップで `Server not reachable` エラーが出る場合、`/health` のプローブが 200 を取得できなかったことを意味します: プロキシがすべてのトラフィックをこのパスを転送しない古い frontend に向けているか、プロキシが `/health` を backend にルーティングしていないか、あるいは DNS・TLS・ファイアウォール・タイムアウト・backend からの 5xx といったより下位の障害です。詳細は[トラブルシューティング](/troubleshooting#multica-setup-がサーバーに到達できないと報告する)を参照してください。
 
 接続状態を確認します。
 
@@ -217,7 +261,7 @@ multica daemon status
 
 ## 6. 最初の実行を完了する
 
-Multica に戻ります。ランタイム一覧にオンラインのランタイムが表示されたら、エージェントを作成し、最初のイシューを割り当てます。
+Multica に戻ります。ランタイム一覧にオンラインのランタイムが表示されたら、エージェントを作成し、最初のタスクを割り当てます。
 
 実行ログが完了になり、タイムラインにエージェントの返信が現れれば、セルフホストのサービス、実行用コンピュータ、AI コーディングツールがつながっています。詳しい手順は[クイックスタート](/cloud-quickstart)のステップ 3〜5 を参照してください。
 
@@ -299,7 +343,7 @@ docker compose -f docker-compose.selfhost.yml exec -T postgres \
 
 ### migration は自動で実行されます
 
-[ステップ1](#1-プロジェクトを取得してバックエンドを起動する)と同じく、バックエンドコンテナはトラフィックを受け付ける前に起動時に `./migrate up` を実行します（`docker/entrypoint.sh`）。個別のアップグレードコマンドはありません — 新しいイメージを立ち上げること自体が migration のステップです。様子を見るには:
+[ステップ1](#1-multica-を起動する)と同じく、バックエンドコンテナはトラフィックを受け付ける前に起動時に `./migrate up` を実行します（`docker/entrypoint.sh`）。個別のアップグレードコマンドはありません — 新しいイメージを立ち上げること自体が migration のステップです。様子を見るには:
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs -f backend
@@ -334,9 +378,9 @@ Helm には独自のアップグレード経路があります。values ファ�
 |---|---|
 | `/readyz` が `ok` を返さない | `docker compose -f docker-compose.selfhost.yml logs backend postgres` を実行する。 |
 | 認証コードが届かない | コードを一度リクエストし、backend のログで `Verification code` を探す。 |
-| `setup self-host` が server に到達できないと報告する | 実行用コンピュータから `https://api.example.com/health` をリクエストし、DNS、TLS、リバースプロキシがすべて到達可能か確認する。 |
+| `setup self-host` が server に到達できないと報告する | 実行用コンピュータから `https://api.example.com/health` をリクエストし、DNS、TLS、リバースプロキシがすべて到達可能か確認する。404 が返る場合、プロキシが `/health` をこのパスを転送しない古い web リリースに向けているため、backend へ直接ルーティングすること（[トラブルシューティング](/troubleshooting#multica-setup-がサーバーに到達できないと報告する)）。 |
 | デーモンが `Agents` を表示しない | AI コーディングツールが `PATH` にありログイン済みであることを確認し、`multica daemon restart` を実行する。 |
-| イシューがキューにとどまり続ける | `multica daemon status` を実行し、デーモンが起動していてワークスペースに接続していることを確認する。 |
+| タスクがキューにとどまり続ける | `multica daemon status` を実行し、デーモンが起動していてワークスペースに接続していることを確認する。 |
 
 その他のケースは[トラブルシューティング](/troubleshooting)を参照してください。
 

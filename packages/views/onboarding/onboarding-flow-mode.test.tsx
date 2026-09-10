@@ -33,17 +33,13 @@ vi.mock("@multica/core/auth", () => ({
   ),
 }));
 
-// The flow only queries the workspace list; returning one proves the
-// new-workspace mode does not offer to continue with it.
-vi.mock("@tanstack/react-query", async () => {
-  const actual = await vi.importActual<Record<string, unknown>>(
-    "@tanstack/react-query",
-  );
+// Returning one workspace proves new-workspace mode does not offer to
+// continue with it.
+vi.mock("@multica/core/workspace", () => {
   return {
-    ...actual,
-    useQuery: () => ({
-      data: [{ id: "ws-1", name: "Existing", slug: "existing" }],
-      isFetched: true,
+    useWorkspaceList: () => ({
+      workspaces: [{ id: "ws-1", name: "Existing", slug: "existing" }],
+      ready: true,
     }),
   };
 });

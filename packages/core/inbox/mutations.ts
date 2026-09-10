@@ -32,6 +32,17 @@ export function useMarkInboxRead() {
   });
 }
 
+export function useRetrySourceContextQuickCreate() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (taskId: string) => api.retrySourceContextQuickCreate(taskId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+    },
+  });
+}
+
 /**
  * Flip a notification back to unread — the inverse of {@link useMarkInboxRead}.
  *

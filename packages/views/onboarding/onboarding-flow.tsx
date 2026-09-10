@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import {
@@ -13,7 +12,7 @@ import {
   type OnboardingStep,
   type QuestionnaireAnswers,
 } from "@multica/core/onboarding";
-import { workspaceListOptions } from "@multica/core/workspace/queries";
+import { useWorkspaceList } from "@multica/core/workspace";
 import type { AgentRuntime, Workspace } from "@multica/core/types";
 import { StepWelcome } from "./steps/step-welcome";
 import { StepShell } from "./components/step-shell";
@@ -167,14 +166,13 @@ function OnboardingStepFlow({
   // whether to render the "I've done this before" skip button — only
   // shown when the user already has at least one workspace, otherwise
   // skipping would land them in limbo.
-  const { data: workspaces = [], isFetched: workspacesFetched } = useQuery({
-    ...workspaceListOptions(),
+  const { workspaces, ready: workspacesReady } = useWorkspaceList({
     enabled: step === "welcome" || step === "workspace",
   });
   const existingWorkspace = isNewWorkspace
     ? workspace
     : (workspace ?? workspaces[0] ?? null);
-  const canSkipWelcome = workspacesFetched && workspaces.length > 0;
+  const canSkipWelcome = workspacesReady && workspaces.length > 0;
 
   // The `runtimeInstructions` slot is only plumbed by the web shell
   // (desktop bundles a daemon, so a CLI install card would be noise

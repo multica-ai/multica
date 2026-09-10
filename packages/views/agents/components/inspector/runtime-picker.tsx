@@ -9,6 +9,7 @@ import {
   Lock,
   Monitor,
 } from "lucide-react";
+import { isRuntimeUsableForUser } from "@multica/core/runtimes";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
@@ -69,11 +70,11 @@ export function RuntimePicker({
 
   const selected = runtimes.find((r) => r.id === value) ?? null;
 
-  const isDisabled = (r: AgentRuntime): boolean => {
-    if (!currentUserId) return false;
-    if (r.owner_id === currentUserId) return false;
-    return r.visibility !== "public";
-  };
+  // Same predicate the create / duplicate / builder surfaces use, so a
+  // runtime this picker locks is exactly the one the API and CLI refuse
+  // (MUL-6126) — no workspace-role exception on either side.
+  const isDisabled = (r: AgentRuntime): boolean =>
+    !isRuntimeUsableForUser(r, currentUserId);
 
   // Machine grouping over the unfiltered list — resolves the selected
   // runtime's machine for the trigger label regardless of the Mine/All
@@ -382,12 +383,12 @@ export function RuntimePicker({
                 {label}
               </span>
               {rt.runtime_mode === "cloud" && (
-                <span className="shrink-0 rounded bg-info/10 px-1 text-micro font-medium text-info">
+                <span className="shrink-0 rounded-xs bg-info/10 px-1 text-micro font-medium text-info">
                   {t(($) => $.create_dialog.runtime_cloud_badge)}
                 </span>
               )}
               {locked && (
-                <span className="shrink-0 inline-flex items-center gap-0.5 rounded bg-muted px-1 text-micro font-medium text-muted-foreground">
+                <span className="shrink-0 inline-flex items-center gap-0.5 rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground">
                   <Lock className="h-2.5 w-2.5" />
                   {t(($) => $.create_dialog.runtime_private_badge)}
                 </span>
@@ -427,7 +428,7 @@ export function RuntimePicker({
                     {machine.title}
                   </span>
                   {machine.mode === "cloud" && (
-                    <span className="shrink-0 rounded bg-info/10 px-1 text-micro font-medium text-info">
+                    <span className="shrink-0 rounded-xs bg-info/10 px-1 text-micro font-medium text-info">
                       {t(($) => $.create_dialog.runtime_cloud_badge)}
                     </span>
                   )}
@@ -506,7 +507,7 @@ function FilterButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 rounded px-2 py-0.5 text-caption font-medium transition-colors ${
+      className={`flex-1 rounded-xs px-2 py-0.5 text-caption font-medium transition-colors ${
         active
           ? "bg-background text-foreground shadow-sm"
           : "text-muted-foreground hover:text-foreground"

@@ -31,7 +31,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import type {
   WebhookDelivery,
   WebhookDeliveryStatus,
@@ -72,9 +72,9 @@ function visualForStatus(status: string): StatusVisual {
 
 // --- Helpers --------------------------------------------------------------
 
-function formatDate(value: string): string {
+function formatDate(value: string, locale: string): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString(undefined, {
+  return new Date(value).toLocaleString(locale, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -158,6 +158,7 @@ function DeliveryRow({
   autopilotId: string;
 }) {
   const { t } = useT("autopilots");
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
 
   const visual = visualForStatus(delivery.status);
@@ -204,7 +205,7 @@ function DeliveryRow({
           </Badge>
         )}
         <span className="w-32 shrink-0 text-right text-caption text-muted-foreground tabular-nums">
-          {formatDate(delivery.received_at || delivery.created_at)}
+          {formatDate(delivery.received_at || delivery.created_at, locale)}
         </span>
       </button>
       {open && (
@@ -233,6 +234,7 @@ function DeliveryDetailDialog({
   delivery: WebhookDelivery;
 }) {
   const { t } = useT("autopilots");
+  const locale = useLocale();
   const wsId = useWorkspaceId();
   const { data: detail, isLoading } = useQuery(
     autopilotDeliveryOptions(wsId, autopilotId, delivery.id, { enabled: open }),
@@ -273,7 +275,7 @@ function DeliveryDetailDialog({
               </span>
             </div>
             <Badge variant="outline">{full.provider || "—"}</Badge>
-            <code className="rounded bg-muted px-2 py-0.5 text-caption font-mono">
+            <code className="rounded-xs bg-muted px-2 py-0.5 text-caption font-mono">
               {full.event || t(($) => $.webhook_payload.unknown_event)}
             </code>
             <SignatureBadge status={full.signature_status as WebhookSignatureStatus} />
@@ -283,11 +285,11 @@ function DeliveryDetailDialog({
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-caption">
             <MetaRow
               label={t(($) => $.deliveries.detail.received_at)}
-              value={formatDate(full.received_at)}
+              value={formatDate(full.received_at, locale)}
             />
             <MetaRow
               label={t(($) => $.deliveries.detail.last_attempt_at)}
-              value={formatDate(full.last_attempt_at)}
+              value={formatDate(full.last_attempt_at, locale)}
             />
             <MetaRow
               label={t(($) => $.deliveries.detail.attempt_count)}
@@ -300,7 +302,7 @@ function DeliveryDetailDialog({
             {full.status === "queued" && (
               <MetaRow
                 label={t(($) => $.deliveries.detail.available_at)}
-                value={formatDate(full.available_at)}
+                value={formatDate(full.available_at, locale)}
               />
             )}
             <MetaRow
@@ -469,7 +471,7 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
         <button
           type="button"
           onClick={handleCopy}
-          className="flex items-center gap-1 rounded px-2 py-0.5 hover:bg-accent transition-colors"
+          className="flex items-center gap-1 rounded-xs px-2 py-0.5 hover:bg-accent transition-colors"
         >
           {copied ? (
             <Check className="h-3 w-3 text-emerald-500" />

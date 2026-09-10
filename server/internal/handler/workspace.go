@@ -1,16 +1,22 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -18,11 +24,47 @@ import (
 )
 
 var nonAlpha = regexp.MustCompile(`[^a-zA-Z]`)
+var nonAlphanumeric = regexp.MustCompile(`[^a-zA-Z0-9]`)
 var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+var issuePrefixPattern = regexp.MustCompile(`^[A-Z0-9]{1,10}$`)
 
-// generateIssuePrefix produces a 2-5 char uppercase prefix from a workspace name.
-// Examples: "Jiayuan's Workspace" → "JIA", "My Team" → "MYT", "AB" → "AB".
-func generateIssuePrefix(name string) string {
+// defaultIssuePrefixFromSlug derives a new workspace's default issue prefix
+// from its slug: alphanumerics only, first 4 chars, uppercased.
+// Examples: "acme" → "ACME", "front-end" → "FRON", "team-2" → "TEAM".
+//
+// The slug — not the name — is the derivation source on purpose (MUL-6050).
+// Name is the one field in the create flow that accepts non-ASCII, so deriving
+// an ASCII-only prefix from it forced every CJK/emoji-named workspace onto the
+// same "WS" fallback. Slug is validated as `^[a-z0-9]+(-[a-z0-9]+)*$` and
+// required, so it always yields a non-empty, workspace-specific prefix.
+//
+// Kept byte-for-byte in sync with the client-side preview in
+// packages/views/onboarding/steps/step-workspace.tsx — what the user sees on
+// the create screen has to be what the server would derive.
+func defaultIssuePrefixFromSlug(slug string) string {
+	head := nonAlphanumeric.ReplaceAllString(slug, "")
+	if head == "" {
+		// Unreachable for a validated slug; keeps the function total so a
+		// future caller can never persist an empty prefix.
+		return "WS"
+	}
+	if len(head) > 4 {
+		head = head[:4]
+	}
+	return strings.ToUpper(head)
+}
+
+// legacyIssuePrefixFromName is the pre-MUL-6050 derivation: first 3 ASCII
+// letters of the workspace name, uppercased, "WS" when the name has none.
+//
+// FROZEN — do not "fix" this to match defaultIssuePrefixFromSlug. Its only
+// caller is getIssuePrefix's fallback for workspaces whose stored prefix is
+// empty (rows predating the column). Issue identifiers are computed at read
+// time from the current prefix, so changing what this returns would silently
+// rewrite the identifier of every historical issue in those workspaces.
+// Deliberate product decision: no backfill, existing workspaces stay as they
+// are; only newly created ones follow the slug-derived rule.
+func legacyIssuePrefixFromName(name string) string {
 	letters := nonAlpha.ReplaceAllString(name, "")
 	if len(letters) == 0 {
 		return "WS"
@@ -33,6 +75,24 @@ func generateIssuePrefix(name string) string {
 	}
 	return letters
 }
+
+// normalizeIssuePrefix trims and uppercases a client-supplied issue prefix.
+// An all-whitespace value means "not provided" and reports ("", true) so the
+// caller can fall back to its default. Anything else must be 1-10 chars of
+// A-Z0-9, mirroring the client-side guardrail in
+// packages/views/settings/components/workspace-tab.tsx.
+func normalizeIssuePrefix(raw string) (string, bool) {
+	prefix := strings.ToUpper(strings.TrimSpace(raw))
+	if prefix == "" {
+		return "", true
+	}
+	if !issuePrefixPattern.MatchString(prefix) {
+		return "", false
+	}
+	return prefix, true
+}
+
+const issuePrefixFormatError = "issue prefix must be 1-10 uppercase letters or digits"
 
 type WorkspaceResponse struct {
 	ID          string  `json:"id"`
@@ -176,17 +236,27 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the prefix before opening the transaction: an invalid one is a
+	// 400 that should never cost a connection.
+	issuePrefix := ""
+	if req.IssuePrefix != nil {
+		prefix, ok := normalizeIssuePrefix(*req.IssuePrefix)
+		if !ok {
+			writeError(w, http.StatusBadRequest, issuePrefixFormatError)
+			return
+		}
+		issuePrefix = prefix
+	}
+	if issuePrefix == "" {
+		issuePrefix = defaultIssuePrefixFromSlug(req.Slug)
+	}
+
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create workspace")
 		return
 	}
 	defer tx.Rollback(r.Context())
-
-	issuePrefix := generateIssuePrefix(req.Name)
-	if req.IssuePrefix != nil && strings.TrimSpace(*req.IssuePrefix) != "" {
-		issuePrefix = strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
-	}
 
 	qtx := h.Queries.WithTx(tx)
 	ws, err := qtx.CreateWorkspace(r.Context(), db.CreateWorkspaceParams{
@@ -212,6 +282,14 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to add owner: "+err.Error())
+		return
+	}
+
+	// Seed the 7 built-in issue statuses inside the same transaction, so a
+	// workspace is never visible without its status catalog — an issue cannot
+	// be created before its status can be resolved. (MUL-6243)
+	if err := issuestatus.Ensure(r.Context(), qtx, ws.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to seed issue statuses: "+err.Error())
 		return
 	}
 
@@ -335,7 +413,11 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Repos = reposJSON
 	}
 	if req.IssuePrefix != nil {
-		prefix := strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
+		prefix, ok := normalizeIssuePrefix(*req.IssuePrefix)
+		if !ok {
+			writeError(w, http.StatusBadRequest, issuePrefixFormatError)
+			return
+		}
 		if prefix != "" {
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
 		}
@@ -365,7 +447,11 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)
 	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": h.workspaceToResponse(ws)})
-	if req.Name != nil {
+	// A rename changes what daemons display; a settings edit changes how they
+	// behave — the GitHub master switch and the Co-authored-by toggle are read
+	// from this JSONB. Daemons cache settings and have no other way to learn
+	// they moved, so both edits have to wake every member's daemons.
+	if req.Name != nil || req.Settings != nil {
 		if members, err := h.Queries.ListMembers(r.Context(), ws.ID); err == nil {
 			userIDs := make([]string, 0, len(members))
 			for _, member := range members {
@@ -470,80 +556,6 @@ func normalizeMemberRole(role string) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
-	workspaceID := workspaceIDFromURL(r, "id")
-	requester, ok := h.workspaceMember(w, r, workspaceID)
-	if !ok {
-		return
-	}
-
-	var req CreateMemberRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	email := strings.ToLower(strings.TrimSpace(req.Email))
-	if email == "" {
-		writeError(w, http.StatusBadRequest, "email is required")
-		return
-	}
-
-	role, valid := normalizeMemberRole(req.Role)
-	if !valid {
-		writeError(w, http.StatusBadRequest, "invalid member role")
-		return
-	}
-	if role == "owner" && requester.Role != "owner" {
-		writeError(w, http.StatusForbidden, "insufficient permissions")
-		return
-	}
-
-	user, err := h.Queries.GetUserByEmail(r.Context(), email)
-	if err != nil {
-		if isNotFound(err) {
-			// Auto-create user with email so they can be invited before signing up
-			user, err = h.Queries.CreateUser(r.Context(), db.CreateUserParams{
-				Name:  email,
-				Email: email,
-			})
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to create user")
-				return
-			}
-		} else {
-			writeError(w, http.StatusInternalServerError, "failed to load user")
-			return
-		}
-	}
-
-	member, err := h.Queries.CreateMember(r.Context(), db.CreateMemberParams{
-		WorkspaceID: requester.WorkspaceID,
-		UserID:      user.ID,
-		Role:        role,
-	})
-	if err != nil {
-		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "user is already a member")
-			return
-		}
-		slog.Warn("create member failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "email", email)...)
-		writeError(w, http.StatusInternalServerError, "failed to create member")
-		return
-	}
-
-	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
-	userID := requestUserID(r)
-	eventPayload := map[string]any{"member": h.memberWithUserResponse(member, user)}
-	if ws, err := h.Queries.GetWorkspace(r.Context(), requester.WorkspaceID); err == nil {
-		eventPayload["workspace_name"] = ws.Name
-	}
-	h.publish(protocol.EventMemberAdded, uuidToString(requester.WorkspaceID), "member", userID, eventPayload)
-	h.notifyDaemonWorkspacesChanged(uuidToString(user.ID))
-
-	writeJSON(w, http.StatusCreated, h.memberWithUserResponse(member, user))
 }
 
 type UpdateMemberRequest struct {
@@ -668,6 +680,7 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete member")
 		return
 	}
+	h.settleMemberCapacityRelease(r.Context(), uuid.UUID(target.WorkspaceID.Bytes), uuid.UUID(target.ID.Bytes))
 
 	h.MembershipCache.Invalidate(r.Context(), uuidToString(target.UserID), workspaceID)
 
@@ -711,6 +724,7 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to leave workspace")
 		return
 	}
+	h.settleMemberCapacityRelease(r.Context(), uuid.UUID(member.WorkspaceID.Bytes), uuid.UUID(member.ID.Bytes))
 
 	h.MembershipCache.Invalidate(r.Context(), uuidToString(member.UserID), workspaceID)
 
@@ -727,6 +741,315 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 	h.notifyDaemonWorkspacesChanged(uuidToString(member.UserID))
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// workspaceDeleteLockTimeout bounds every lock wait inside the workspace
+// teardown transaction.
+//
+// The teardown waits on three kinds of lock: the workspace row (FOR UPDATE),
+// every chat_session row in the workspace (FOR UPDATE), and the global
+// advisory lock 4246 that serialises it against the task_usage_hourly rollup.
+// The advisory lock is the dangerous one — it is global and batch-held. A
+// rollup tick may hold it for as long as its 25 min scheduler RunTimeout, the
+// backfill commands (cmd/backfill_task_usage_hourly, cmd/backfill_codex_usage_cache)
+// hold it for an entire run, and before migration 272 a tick whose query was
+// cancelled leaked it for the remaining life of its pooled connection.
+//
+// Waiting on that lock without a cap is what the user sees as "delete does
+// nothing": the request never returns, and no layer above it times out — the
+// browser/Electron fetch in packages/core/api/client.ts has no deadline and
+// the delete dialog stays in its "Deleting…" state forever (MUL-5983). A
+// bounded wait turns the same contention into a retryable error.
+//
+// 10 s is far above the millisecond-scale waits an uncontended teardown sees,
+// and short enough to fail while the user is still watching the dialog.
+const workspaceDeleteLockTimeout = 10 * time.Second
+
+// workspaceDeleteLockTimeoutOverride, when non-zero, replaces
+// workspaceDeleteLockTimeout for the duration of a test. Never read outside
+// effectiveWorkspaceDeleteLockTimeout — see workspace_delete_lock_test.go.
+var workspaceDeleteLockTimeoutOverride time.Duration
+
+func effectiveWorkspaceDeleteLockTimeout() time.Duration {
+	if workspaceDeleteLockTimeoutOverride > 0 {
+		return workspaceDeleteLockTimeoutOverride
+	}
+	return workspaceDeleteLockTimeout
+}
+
+// isRetryableLockFailure reports whether err is one of the two transient lock
+// outcomes a teardown can hit: lock_not_available (55P03), which is what
+// `SET LOCAL lock_timeout` raises when a wait exceeds its budget, and
+// deadlock_detected (40P01), which the owner-row locks can hit against a
+// concurrent task update that takes the same locks in the opposite order (task
+// row first, then its owner). Neither says anything about the workspace itself:
+// the transaction rolled back untouched and the caller can retry.
+func isRetryableLockFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "55P03" || pgErr.Code == "40P01"
+	}
+	return false
+}
+
+// failWorkspaceDelete logs a failed teardown step and writes the response for
+// it. A lock timeout or deadlock is transient and retryable, so it answers 503
+// with a message the delete dialog can show; every other failure stays a 500.
+func failWorkspaceDelete(w http.ResponseWriter, r *http.Request, workspaceID, step string, err error) {
+	attrs := append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "step", step)
+	if isRetryableLockFailure(err) {
+		slog.Warn("workspace delete blocked by lock contention", attrs...)
+		writeError(w, http.StatusServiceUnavailable, "workspace deletion is temporarily blocked by another operation, please try again")
+		return
+	}
+	slog.Warn("workspace delete step failed", attrs...)
+	writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+}
+
+// workspaceDeleteTaskPageSize bounds one task page: the ids held in this process,
+// the array parameter sent back to Postgres, and the row count of a single
+// DELETE. A whole workspace's task set is not bounded by anything — one busy
+// agent can own millions of historical rows — so it must never be materialized at
+// once (MUL-5999 review).
+const workspaceDeleteTaskPageSize = 1000
+
+// workspaceDeleteOwnerPageSize bounds owner enumeration the same way. A workspace
+// with a very large agent or issue set must not have its whole id list held here
+// either.
+const workspaceDeleteOwnerPageSize = 500
+
+// workspaceDeleteVerifyPasses caps how many times a single owner may be swept.
+//
+// Pass 1 removes what is there; pass 2 confirms the owner came back empty. This is
+// a cheap self-check, NOT the concurrency guarantee: a task inserted after the
+// final empty scan and before COMMIT would not be caught by any number of passes.
+// What closes that window is the in-transaction fence on task writes
+// (migration 284) plus the workspace row lock teardown already holds. The passes
+// exist so that anything unexpected — a path that somehow bypassed the fence — is
+// either cleaned up or turns into a failed, rolled-back teardown rather than a
+// tenant with rows left behind.
+const workspaceDeleteVerifyPasses = 3
+
+// deleteWorkspaceTasks removes every agent_task_queue row a workspace owns,
+// together with the rows that hang off those tasks, in bounded keyset pages.
+//
+// Shape, and why:
+//
+//   - One owner key per query. agent_task_queue has no workspace_id and all three
+//     ownership paths must stay (nothing enforces that a task's agent, runtime and
+//     issue share a workspace), but combining them in one statement — as the
+//     previous three-way OR, as a UNION of joins, or as `= ANY(array)` over a
+//     whole workspace's agents — leaves the planner estimating a proportional
+//     share of the global table and choosing a Seq Scan.
+//   - Keyset pages, so the SCAN is bounded and not just the result. Each page is
+//     an index range scan that resumes where the previous one stopped. Bounding
+//     only the result (`ORDER BY id LIMIT n` with no id in the index) puts a Sort
+//     over the owner's whole task set in front of every page, which costs roughly
+//     O(N² / page) for a busy owner.
+//   - Row locks, not a read snapshot. Each page takes FOR UPDATE, so under READ
+//     COMMITTED Postgres re-checks ownership after acquiring each lock: a task a
+//     concurrent commit already moved elsewhere is skipped rather than deleted on
+//     a stale claim, and a task we locked cannot move before we delete it.
+//   - Children first, in the application layer. DetachTaskBatchReferences breaks
+//     inbound references and DeleteTaskBatch removes task_usage, task_message,
+//     task_token, the two outbound card tables and chat_draft_restore before the
+//     task rows themselves. The legacy FK cascades stay a safety net only.
+//
+// Late arrivals are handled by the fence, not here: migration 284 makes every task
+// write take FOR KEY SHARE on its owners' workspace rows, which conflicts with the
+// FOR UPDATE that LockWorkspaceForDelete holds for this whole transaction.
+func deleteWorkspaceTasks(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID) error {
+	ownerKinds := []struct {
+		label          string
+		ownerFirstPage func(context.Context, int32) ([]pgtype.UUID, error)
+		ownerPage      func(context.Context, pgtype.UUID, int32) ([]pgtype.UUID, error)
+		taskFirstPage  func(context.Context, pgtype.UUID, int32) ([]pgtype.UUID, error)
+		taskPage       func(context.Context, pgtype.UUID, pgtype.UUID, int32) ([]pgtype.UUID, error)
+		sweepAgent     bool
+	}{
+		{
+			label: "agent",
+			ownerFirstPage: func(ctx context.Context, limit int32) ([]pgtype.UUID, error) {
+				return qtx.ListWorkspaceAgentIDFirstPage(ctx, db.ListWorkspaceAgentIDFirstPageParams{
+					WorkspaceID: workspaceID, Limit: limit,
+				})
+			},
+			ownerPage: func(ctx context.Context, cursor pgtype.UUID, limit int32) ([]pgtype.UUID, error) {
+				return qtx.ListWorkspaceAgentIDPage(ctx, db.ListWorkspaceAgentIDPageParams{
+					WorkspaceID: workspaceID, ID: cursor, Limit: limit,
+				})
+			},
+			taskFirstPage: func(ctx context.Context, owner pgtype.UUID, limit int32) ([]pgtype.UUID, error) {
+				return qtx.ListTaskIDsByAgentFirstPage(ctx, db.ListTaskIDsByAgentFirstPageParams{
+					AgentID: owner, Limit: limit,
+				})
+			},
+			taskPage: func(ctx context.Context, owner, cursor pgtype.UUID, limit int32) ([]pgtype.UUID, error) {
+				return qtx.ListTaskIDsByAgentPage(ctx, db.ListTaskIDsByAgentPageParams{
+					AgentID: owner, ID: cursor, Limit: limit,
+				})
+			},
+			// The third explicit task_token path. workspace_id (leaf data) and
+			// task_id (DeleteTaskBatch) leave one shape uncovered: a token whose
+			// own workspace_id points at a neighbour while its agent lives here.
+			sweepAgent: true,
+		},
+		{
+			label: "issue",
+			ownerFirstPage: func(ctx context.Context, limit int32) ([]pgtype.UUID, error) {
+				return qtx.ListWorkspaceIssueIDFirstPage(ctx, db.ListWorkspaceIssueIDFirstPageParams{
+					WorkspaceID: workspaceID, Limit: limit,
+				})
+			},
+			ownerPage: func(ctx context.Context, cursor pgtype.UUID, limit int32) ([]pgtype.UUID, error) {
+				return qtx.ListWorkspaceIssueIDPage(ctx, db.ListWorkspaceIssueIDPageParams{
+					WorkspaceID: workspaceID, ID: cursor, Limit: limit,
+				})
+			},
+			taskFirstPage: func(ctx context.Context, owner pgtype.UUID, limit int32) ([]pgtype.UUID, error) {
+				return qtx.ListTaskIDsByIssueFirstPage(ctx, db.ListTaskIDsByIssueFirstPageParams{
+					IssueID: owner, Limit: limit,
+				})
+			},
+			taskPage: func(ctx context.Context, owner, cursor pgtype.UUID, limit int32) ([]pgtype.UUID, error) {
+				return qtx.ListTaskIDsByIssuePage(ctx, db.ListTaskIDsByIssuePageParams{
+					IssueID: owner, ID: cursor, Limit: limit,
+				})
+			},
+		},
+		{
+			label: "runtime",
+			ownerFirstPage: func(ctx context.Context, limit int32) ([]pgtype.UUID, error) {
+				return qtx.ListWorkspaceRuntimeIDFirstPage(ctx, db.ListWorkspaceRuntimeIDFirstPageParams{
+					WorkspaceID: workspaceID, Limit: limit,
+				})
+			},
+			ownerPage: func(ctx context.Context, cursor pgtype.UUID, limit int32) ([]pgtype.UUID, error) {
+				return qtx.ListWorkspaceRuntimeIDPage(ctx, db.ListWorkspaceRuntimeIDPageParams{
+					WorkspaceID: workspaceID, ID: cursor, Limit: limit,
+				})
+			},
+			taskFirstPage: func(ctx context.Context, owner pgtype.UUID, limit int32) ([]pgtype.UUID, error) {
+				return qtx.ListTaskIDsByRuntimeFirstPage(ctx, db.ListTaskIDsByRuntimeFirstPageParams{
+					RuntimeID: owner, Limit: limit,
+				})
+			},
+			taskPage: func(ctx context.Context, owner, cursor pgtype.UUID, limit int32) ([]pgtype.UUID, error) {
+				return qtx.ListTaskIDsByRuntimePage(ctx, db.ListTaskIDsByRuntimePageParams{
+					RuntimeID: owner, ID: cursor, Limit: limit,
+				})
+			},
+		},
+	}
+
+	for _, kind := range ownerKinds {
+		owners, err := kind.ownerFirstPage(ctx, workspaceDeleteOwnerPageSize)
+		if err != nil {
+			return fmt.Errorf("list workspace %ss: %w", kind.label, err)
+		}
+		for len(owners) > 0 {
+			for _, ownerID := range owners {
+				if err := sweepTasksForOwner(ctx, kind.label, ownerID,
+					kind.taskFirstPage, kind.taskPage,
+					qtx.DetachTaskBatchReferences, qtx.DeleteTaskBatch); err != nil {
+					return err
+				}
+				if kind.sweepAgent {
+					if err := qtx.DeleteTaskTokensByAgent(ctx, ownerID); err != nil {
+						return fmt.Errorf("delete task tokens by agent: %w", err)
+					}
+				}
+			}
+			if owners, err = kind.ownerPage(ctx, owners[len(owners)-1], workspaceDeleteOwnerPageSize); err != nil {
+				return fmt.Errorf("list workspace %ss: %w", kind.label, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// sweepTasksForOwner deletes one owner's tasks, then re-verifies that owner.
+//
+// Each pass walks the owner's tasks by keyset and deletes each page. A pass that
+// deletes nothing means the owner is clean. A later pass that still finds tasks
+// means something reached agent_task_queue without going through the fence, which
+// is logged and retried; exhausting the passes fails the whole teardown rather
+// than committing a workspace with tasks left behind.
+func sweepTasksForOwner(
+	ctx context.Context,
+	label string,
+	ownerID pgtype.UUID,
+	taskFirstPage func(context.Context, pgtype.UUID, int32) ([]pgtype.UUID, error),
+	taskPage func(context.Context, pgtype.UUID, pgtype.UUID, int32) ([]pgtype.UUID, error),
+	detach func(context.Context, []pgtype.UUID) error,
+	deletePage func(context.Context, []pgtype.UUID) error,
+) error {
+	for pass := 1; pass <= workspaceDeleteVerifyPasses; pass++ {
+		deleted := 0
+		taskIDs, err := taskFirstPage(ctx, ownerID, workspaceDeleteTaskPageSize)
+		if err != nil {
+			return fmt.Errorf("list tasks by %s: %w", label, err)
+		}
+		for len(taskIDs) > 0 {
+			if err := detach(ctx, taskIDs); err != nil {
+				return fmt.Errorf("detach task page references: %w", err)
+			}
+			if err := deletePage(ctx, taskIDs); err != nil {
+				return fmt.Errorf("delete task page: %w", err)
+			}
+			deleted += len(taskIDs)
+			if taskIDs, err = taskPage(ctx, ownerID, taskIDs[len(taskIDs)-1], workspaceDeleteTaskPageSize); err != nil {
+				return fmt.Errorf("list tasks by %s: %w", label, err)
+			}
+		}
+		if deleted == 0 {
+			return nil
+		}
+		if pass > 1 {
+			slog.Warn("workspace delete swept tasks that appeared after the owner was fenced",
+				"owner_kind", label, "owner_id", uuidToString(ownerID), "pass", pass, "deleted", deleted)
+		}
+	}
+	return fmt.Errorf("tasks kept appearing for %s %s after %d sweep passes; refusing to commit a partial teardown",
+		label, uuidToString(ownerID), workspaceDeleteVerifyPasses)
+}
+
+// lockWorkspaceTaskOwners locks every row through which a task can belong to this
+// workspace.
+//
+// Defence in depth on top of the real fence. The fence that closes the
+// insert-after-sweep window is migration 284's lock_task_owner_rows, a predicate
+// every ownership-writing statement calls in its own WHERE clause: it takes
+// FOR KEY SHARE on the workspace rows behind the task's owners and then on the
+// owner rows themselves, which conflicts with the FOR UPDATE that
+// LockWorkspaceForDelete holds for this whole transaction. Called from the writing
+// statement, so it is in the writer's transaction by construction, and independent
+// of the legacy foreign keys.
+//
+// These owner-row locks add a second, narrower barrier — they also block
+// ownership-changing UPDATEs of tasks that already exist — and cost nothing to
+// hold, since teardown deletes these very rows a few steps later. They are taken
+// set-based and return no ids, so a workspace with a huge owner set costs no
+// memory here.
+//
+// The wait is bounded by SET LOCAL lock_timeout, and taking these locks can
+// deadlock against a concurrent task update that locks in the opposite order
+// (task row, then owner); both outcomes surface as a retryable 503.
+func lockWorkspaceTaskOwners(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID) error {
+	if err := qtx.LockWorkspaceTaskOwnerAgents(ctx, workspaceID); err != nil {
+		return fmt.Errorf("lock workspace agents: %w", err)
+	}
+	if err := qtx.LockWorkspaceTaskOwnerIssues(ctx, workspaceID); err != nil {
+		return fmt.Errorf("lock workspace issues: %w", err)
+	}
+	if err := qtx.LockWorkspaceTaskOwnerRuntimes(ctx, workspaceID); err != nil {
+		return fmt.Errorf("lock workspace runtimes: %w", err)
+	}
+	return nil
 }
 
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -781,16 +1104,43 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+	var sourceContextAttachmentURLs []string
+	var sourceContextIntentURLs []string
+
+	// SET LOCAL is transaction-scoped, so pgxpool hands this connection back
+	// out with the default (unbounded) lock_timeout after COMMIT / ROLLBACK.
+	// It caps waiting for a lock, not the teardown work itself — deleting a
+	// large workspace is allowed to take as long as it takes.
+	lockTimeoutMs := int(effectiveWorkspaceDeleteLockTimeout() / time.Millisecond)
+	if _, err := tx.Exec(r.Context(), fmt.Sprintf("SET LOCAL lock_timeout = %d", lockTimeoutMs)); err != nil {
+		failWorkspaceDelete(w, r, workspaceID, "set lock timeout", err)
+		return
+	}
 
 	if _, err := qtx.LockWorkspaceForDelete(r.Context(), requester.WorkspaceID); err != nil {
-		slog.Warn("lock workspace for delete failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+		failWorkspaceDelete(w, r, workspaceID, "lock workspace", err)
+		return
+	}
+	// Take a best-effort snapshot for post-commit daemon invalidation. Runtime
+	// registration does not participate in the workspace delete lock protocol,
+	// so PR1 retains the heartbeat lookup as the correctness fallback for a
+	// registration that races this snapshot.
+	runtimeIDs, err := qtx.ListAgentRuntimeIDsByWorkspace(r.Context(), requester.WorkspaceID)
+	if err != nil {
+		failWorkspaceDelete(w, r, workspaceID, "list runtimes", err)
 		return
 	}
 
 	if _, err := qtx.LockChatSessionsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
-		slog.Warn("lock workspace chat sessions failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+		failWorkspaceDelete(w, r, workspaceID, "lock chat sessions", err)
+		return
+	}
+	if sourceContextAttachmentURLs, err = qtx.ListSourceContextAttachmentURLsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
+		failWorkspaceDelete(w, r, workspaceID, "list source context attachment objects", err)
+		return
+	}
+	if sourceContextIntentURLs, err = qtx.ListSourceContextObjectIntentURLsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
+		failWorkspaceDelete(w, r, workspaceID, "list source context pending objects", err)
 		return
 	}
 
@@ -807,8 +1157,36 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.SetWorkspaceTeardownMode(ctx) },
 		},
 		{
+			// Fences task enqueue / reassignment for the rest of the
+			// transaction. Must run before anything sweeps tasks — see
+			// lockWorkspaceTaskOwners.
+			name: "lock task owners",
+			run:  func() error { return lockWorkspaceTaskOwners(ctx, qtx, requester.WorkspaceID) },
+		},
+		{
 			name: "prepare relationship graph",
 			run:  func() error { return qtx.PrepareWorkspaceDeletionLinks(ctx, requester.WorkspaceID) },
+		},
+		{
+			// These FK-free intents deliberately survive the transaction so the
+			// worker can release every invitation/member seat after local rows
+			// disappear. Skipped for self-hosted/unmanaged deployments.
+			name: "prepare seat capacity release",
+			run: func() error {
+				if !h.seatCapacityEnabled() {
+					return nil
+				}
+				if err := qtx.DeleteSeatCapacityConfirmIntentsForWorkspaceDeletion(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if err := qtx.PrepareSeatCapacityOperationReleasesForWorkspaceDeletion(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if err := qtx.PrepareSeatCapacityInvitationReleasesForWorkspaceDeletion(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				return qtx.PrepareSeatCapacityMemberReleasesForWorkspaceDeletion(ctx, requester.WorkspaceID)
+			},
 		},
 		{
 			name: "delete chat pins",
@@ -817,9 +1195,18 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			// This is the first stage that touches usage rollups. Keep the
 			// global rollup lock out of relationship preparation so unrelated
-			// workspaces skip the shortest possible rollup window.
+			// workspaces skip the shortest possible rollup window. This wait
+			// is bounded by workspaceDeleteLockTimeout — 4246 is held by
+			// batch jobs, so an unbounded wait here is what hangs the delete.
 			name: "lock task usage rollup",
 			run:  func() error { return qtx.LockTaskUsageRollupForWorkspaceDelete(ctx) },
+		},
+		{
+			// Bounded batches, after the rollup lock because it deletes
+			// task_usage. Replaces both the task-keyed arms of the old leaf
+			// data statement and the separate whole-workspace task delete.
+			name: "delete tasks",
+			run:  func() error { return deleteWorkspaceTasks(ctx, qtx, requester.WorkspaceID) },
 		},
 		{
 			name: "delete leaf data",
@@ -830,8 +1217,12 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceAutopilotRuns(ctx, requester.WorkspaceID) },
 		},
 		{
-			name: "delete tasks",
-			run:  func() error { return qtx.DeleteWorkspaceTasks(ctx, requester.WorkspaceID) },
+			name: "delete autopilot quota reservations",
+			run:  func() error { return qtx.DeleteWorkspaceAutopilotQuotaReservations(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete autopilot quota periods",
+			run:  func() error { return qtx.DeleteWorkspaceAutopilotQuotaPeriods(ctx, requester.WorkspaceID) },
 		},
 		{
 			name: "delete chat messages",
@@ -845,9 +1236,36 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			name: "delete comments",
 			run:  func() error { return qtx.DeleteWorkspaceComments(ctx, requester.WorkspaceID) },
 		},
+		// Keep source-context object intents after the workspace row is gone.
+		// They are the durable retry ledger for an upload that began before the
+		// workspace lock but completed after this transaction's immediate object
+		// deletion pass. With no attachment left, the reconciler will delete the
+		// object and then the intent; deleting the ledger here would make that
+		// crash window permanently leak the late object.
+		{
+			name: "delete source context attachments",
+			run:  func() error { return qtx.DeleteSourceContextAttachmentsByWorkspace(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete source contexts",
+			run: func() error {
+				_, err := qtx.DeleteIssueSourceContextsForWorkspace(ctx, requester.WorkspaceID)
+				return err
+			},
+		},
 		{
 			name: "delete issue roots",
 			run:  func() error { return qtx.DeleteWorkspaceIssueRoots(ctx, requester.WorkspaceID) },
+		},
+		{
+			// issue_status carries no foreign key by project rule, so its rows
+			// are swept explicitly. Placed after the issue deletes so no issue
+			// row outlives the catalog its status key resolves against.
+			// (MUL-6243)
+			name: "delete issue statuses",
+			run: func() error {
+				return qtx.DeleteIssueStatusEntriesForWorkspace(ctx, requester.WorkspaceID)
+			},
 		},
 		{
 			name: "delete autopilot children",
@@ -868,6 +1286,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete squads and skills",
 			run:  func() error { return qtx.DeleteWorkspaceSquadsAndSkills(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete plugin data",
+			run:  func() error { return qtx.DeleteWorkspacePluginData(ctx, requester.WorkspaceID) },
 		},
 		{
 			name: "delete agents",
@@ -891,13 +1313,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, step := range deleteSteps {
 		if err := step.run(); err != nil {
-			slog.Warn("workspace delete step failed", append(
-				logger.RequestAttrs(r),
-				"error", err,
-				"workspace_id", workspaceID,
-				"step", step.name,
-			)...)
-			writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+			failWorkspaceDelete(w, r, workspaceID, step.name, err)
 			return
 		}
 	}
@@ -907,6 +1323,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
 		return
 	}
+	for _, runtimeID := range runtimeIDs {
+		h.NotifyRuntimeGone(uuidToString(runtimeID))
+	}
+	h.deleteS3Objects(r.Context(), append(sourceContextAttachmentURLs, sourceContextIntentURLs...))
 
 	slog.Info("workspace deleted", append(logger.RequestAttrs(r), "workspace_id", workspaceID)...)
 	h.publish(protocol.EventWorkspaceDeleted, workspaceID, "member", requestUserID(r), map[string]any{

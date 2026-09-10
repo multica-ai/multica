@@ -3,6 +3,11 @@ SELECT * FROM member
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListWorkspaceManagerUserIDs :many
+SELECT user_id FROM member
+WHERE workspace_id = $1 AND role IN ('owner', 'admin')
+ORDER BY created_at ASC;
+
 -- name: GetMember :one
 SELECT * FROM member
 WHERE id = $1;

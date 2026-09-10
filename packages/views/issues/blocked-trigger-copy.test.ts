@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import { blockedReasonLabel, blockedShortReasonLabel } from "./blocked-trigger-copy";
@@ -39,6 +40,21 @@ describe("blocked trigger copy", () => {
 
     expect(unbound).not.toBe(offline);
     expect(unbound).toBe(en.comment.trigger_blocked_short_agent_runtime_required);
+  });
+
+  // MUL-6164 adds the third member of the family: the machine is reachable and
+  // its CLI cannot run there. "Offline" copy would send the user to reconnect
+  // something that is already connected.
+  it("distinguishes an unusable runtime from an offline one", () => {
+    const unusable = blockedReasonLabel("runtime_unusable", t);
+    const offline = blockedReasonLabel("runtime_offline", t);
+
+    expect(unusable).not.toBe(offline);
+    expect(unusable).toBe(en.comment.trigger_blocked_runtime_unusable);
+    expect(unusable.toLowerCase()).not.toContain("offline");
+    expect(blockedShortReasonLabel("runtime_unusable", t)).toBe(
+      en.comment.trigger_blocked_short_runtime_unusable,
+    );
   });
 
   it("degrades an unknown code to the generic label", () => {

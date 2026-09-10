@@ -26,6 +26,10 @@ interface ChatQueueProps {
   tasks: ChatQueuedTask[];
   headStatus: string | undefined;
   onSendNow: (taskId: string) => Promise<void> | void;
+  /** Blocks "send now" independently of the head task's status — used when the
+   *  caller may no longer invoke the agent, since steering a queued task
+   *  dispatches a run the server would refuse (MUL-6380). */
+  sendNowDisabled?: boolean;
   onEdit: (taskId: string) => Promise<void> | void;
   onRemove: (taskId: string) => Promise<void> | void;
   onClear: () => Promise<void> | void;
@@ -35,16 +39,28 @@ export function ChatQueue({
   tasks,
   headStatus,
   onSendNow,
+  sendNowDisabled = false,
   onEdit,
   onRemove,
   onClear,
 }: ChatQueueProps) {
   const { t } = useT("chat");
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const canSendNow =
+  const dispatchableHead =
     headStatus === "dispatched" ||
     headStatus === "running" ||
     headStatus === "waiting_local_directory";
+  const canSendNow = !sendNowDisabled && dispatchableHead;
+  // The two blocked states need different copy: "wait for the reply to start"
+  // is actionable, "you cannot run this agent" is not — telling a user to wait
+  // for something waiting cannot fix is the bug (MUL-6380).
+  const sendNowLabel = t(($) =>
+    canSendNow
+      ? $.queue.steer
+      : sendNowDisabled
+        ? $.queue.steer_no_permission
+        : $.queue.steer_unavailable,
+  );
 
   if (tasks.length === 0) return null;
 
@@ -109,20 +125,14 @@ export function ChatQueue({
                   <div className="flex shrink-0 items-center gap-0.5">
                     <span
                       className="shrink-0"
-                      title={t(($) =>
-                        canSendNow ? $.queue.steer : $.queue.steer_unavailable
-                      )}
+                      title={sendNowLabel}
                     >
                       <Button
                         variant="ghost"
                         size="xs"
                         className="px-1.5 font-normal text-muted-foreground"
                         disabled={busyAction !== null || !canSendNow}
-                        aria-label={t(($) =>
-                          canSendNow
-                            ? $.queue.steer
-                            : $.queue.steer_unavailable
-                        )}
+                        aria-label={sendNowLabel}
                         onClick={() => void run(sendNowKey, () => onSendNow(task.task_id))}
                       >
                         {busyAction === sendNowKey ? (

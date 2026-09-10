@@ -1,4 +1,4 @@
-import type { IssueStatus } from "./issue";
+import type { IssuePriority, IssueStatus } from "./issue";
 
 export type InboxSeverity = "action_required" | "attention" | "info";
 
@@ -24,7 +24,11 @@ export type InboxItemType =
   // Quick create whose outcome could not be verified. Distinct from
   // quick_create_failed because it must NOT be rendered with failure framing:
   // the issue may actually have been created.
-  | "quick_create_unconfirmed";
+  | "quick_create_unconfirmed"
+  // System notifications are intentionally issue-less. Keep them in the
+  // same Inbox model so read/archive/realtime behavior remains consistent.
+  | "autopilot_paused"
+  | "autopilot_quota_exceeded";
 
 /**
  * One workspace's unread inbox count in the cross-workspace summary
@@ -50,6 +54,12 @@ export interface InboxItem {
   title: string;
   body: string | null;
   issue_status: IssueStatus | null;
+  /**
+   * Current priority of the linked issue. Optional so an installed Desktop
+   * client remains compatible with an older backend that predates this Inbox
+   * projection; null also covers notifications without a linked issue.
+   */
+  issue_priority?: IssuePriority | null;
   read: boolean;
   archived: boolean;
   created_at: string;

@@ -14,18 +14,20 @@ import {
 import type { DailyCostStackData } from "../../utils";
 import { useT } from "../../../i18n";
 
-// Three-segment stack (input / output / cache write) — keeps the user's
-// attention on what's actually driving spend. Cache reads are excluded
-// because their per-token rate is two orders of magnitude smaller and
-// would be visually invisible in a stack; we surface their *savings*
-// separately as a KPI.
+// Four-segment stack (input / output / cache read / cache write) — every
+// category `estimateCost` bills for, so the bars add up to the same money the
+// Cost KPI reports. The tooltip derives Total by summing the segments it can
+// see, so a category left out of this config is a category left out of the
+// user's total (MUL-6334: cache read alone was >50% of some buckets).
 //
-// Series → CSS chart token: stack reads bottom-up as chart-1 (deepest brand
-// blue, "input") → chart-2 (mid) → chart-3 (lightest, "cache write"), so the
-// visual depth maps directly to "primary cost driver → secondary".
+// Series → CSS chart token: input/output/cache-write keep chart-1/2/3, and
+// cache read takes chart-4 in the output→cache-write slot — the same colour
+// and position DailyTokensChart gives it, so the cost and token views of the
+// same day read as one chart at two scales.
 export const costStackConfig = {
   input: { label: "Input", color: "var(--chart-1)" },
   output: { label: "Output", color: "var(--chart-2)" },
+  cacheRead: { label: "Cache read", color: "var(--chart-4)" },
   cacheWrite: { label: "Cache write", color: "var(--chart-3)" },
 } satisfies ChartConfig;
 
@@ -92,6 +94,12 @@ export function DailyCostChart({ data }: { data: DailyCostStackData[] }) {
           dataKey="output"
           stackId="cost"
           fill="var(--color-output)"
+          radius={[0, 0, 0, 0]}
+        />
+        <Bar
+          dataKey="cacheRead"
+          stackId="cost"
+          fill="var(--color-cacheRead)"
           radius={[0, 0, 0, 0]}
         />
         <Bar

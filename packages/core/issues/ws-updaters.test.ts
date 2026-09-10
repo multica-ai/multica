@@ -175,6 +175,36 @@ describe("onIssueLabelsChanged", () => {
     ).toEqual({ labels: [labelB] });
   });
 
+  it("uses the picker cache revision to reject an older label snapshot", () => {
+    const labelKey = labelKeys.byIssue(WS_ID, ISSUE_ID);
+    qc.setQueryData<IssueLabelsResponse>(labelKey, {
+      labels: [labelA],
+      issue_revision: 3,
+    });
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], 2);
+
+    expect(qc.getQueryData<IssueLabelsResponse>(labelKey)).toEqual({
+      labels: [labelA],
+      issue_revision: 3,
+    });
+  });
+
+  it("advances the picker cache labels and revision together", () => {
+    const labelKey = labelKeys.byIssue(WS_ID, ISSUE_ID);
+    qc.setQueryData<IssueLabelsResponse>(labelKey, {
+      labels: [labelA],
+      issue_revision: 3,
+    });
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], 4);
+
+    expect(qc.getQueryData<IssueLabelsResponse>(labelKey)).toEqual({
+      labels: [labelB],
+      issue_revision: 4,
+    });
+  });
+
   it("leaves the per-issue label cache untouched when the picker has not fetched", () => {
     onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
 
@@ -440,6 +470,29 @@ describe("issue property snapshots", () => {
   });
 });
 
+describe("auxiliary issue activity ordering", () => {
+  it.each([
+    ["labels", (qc: QueryClient) => onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB])],
+    ["metadata", (qc: QueryClient) => onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { state: "changed" })],
+    ["properties", (qc: QueryClient) => onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, { estimate: 5 })],
+  ])("re-sorts last_activity after committed %s changes", (_kind, apply) => {
+    const qc = new QueryClient();
+    const activityKey = issueKeys.listSorted(WS_ID, {
+      sort_by: "last_activity",
+      sort_direction: "desc",
+    });
+    const positionKey = issueKeys.listSorted(WS_ID, { sort_by: "position" });
+    qc.setQueryData<ListIssuesCache>(activityKey, makeListCache(baseIssue));
+    qc.setQueryData<ListIssuesCache>(positionKey, makeListCache(baseIssue));
+
+    apply(qc);
+
+    expectInvalidated(qc, activityKey);
+    expect(qc.getQueryState(positionKey)?.isInvalidated).toBe(false);
+    qc.clear();
+  });
+});
+
 describe("project progress invalidation", () => {
   let qc: QueryClient;
 
@@ -498,6 +551,36 @@ describe("onIssueCreated — carries the label snapshot into list cache", () => 
     const cache = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
     const cached = cache?.byStatus.todo?.issues.find((i) => i.id === ISSUE_ID);
     expect(cached?.labels).toEqual([labelA, labelB]);
+  });
+});
+
+describe("onIssueUpdated — source deletion detaches sub-issues", () => {
+  it("patches the detached child and invalidates the former parent's hierarchy caches", () => {
+    const qc = new QueryClient();
+    const child: Issue = { ...parentedIssue, stage: 2, revision: 1 };
+    const oldChildrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    const batchedChildrenKey = issueKeys.childrenByParents(WS_ID, [PARENT_ISSUE_ID]);
+    qc.setQueryData(issueKeys.detail(WS_ID, ISSUE_ID), child);
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), makeListCache(child));
+    qc.setQueryData<Issue[]>(oldChildrenKey, [child]);
+    qc.setQueryData(batchedChildrenKey, new Map([[PARENT_ISSUE_ID, [child]]]));
+    qc.setQueryData(issueKeys.childProgress(WS_ID), []);
+
+    onIssueUpdated(qc, WS_ID, {
+      ...child,
+      parent_issue_id: null,
+      stage: null,
+      revision: 2,
+    });
+
+    expect(qc.getQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID))).toMatchObject({
+      parent_issue_id: null,
+      stage: null,
+      revision: 2,
+    });
+    expectInvalidated(qc, oldChildrenKey);
+    expectInvalidated(qc, batchedChildrenKey);
+    expectInvalidated(qc, issueKeys.childProgress(WS_ID));
   });
 });
 

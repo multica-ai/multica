@@ -5,6 +5,8 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 import {
+  DEFAULT_CARD_PROPERTIES,
+  DEFAULT_HIDDEN_STATUS_CATEGORIES,
   type IssueViewState,
   mergeViewStatePersisted,
   viewStorePersistOptions,
@@ -32,6 +34,61 @@ interface IssueSurfaceViewRegistryState {
 const basePersist = viewStorePersistOptions(ISSUE_SURFACE_VIEW_STORAGE_KEY);
 const surfaceStores = new Map<string, StoreApi<IssueViewState>>();
 const suppressSurfacePersist = new Set<string>();
+
+const SURFACE_DEFAULTS_VERSION = 1;
+
+function defaultsForSurface(
+  surfaceKey: string,
+  set: StoreApi<IssueViewState>["setState"],
+): IssueViewState {
+  const defaults = viewStoreSlice(set);
+  if (!surfaceKey.startsWith("project:")) return defaults;
+  return {
+    ...defaults,
+    cardProperties: { ...defaults.cardProperties, project: false },
+  };
+}
+
+function isLegacyCardDefault(cardProperties: unknown): boolean {
+  if (!cardProperties || typeof cardProperties !== "object") return true;
+  return Object.keys(DEFAULT_CARD_PROPERTIES).every(
+    (key) =>
+      (cardProperties as Partial<Record<keyof typeof DEFAULT_CARD_PROPERTIES, boolean>>)[
+        key as keyof typeof DEFAULT_CARD_PROPERTIES
+      ] !== false,
+  );
+}
+
+function migrateLegacySurfaceState(
+  surfaceKey: string,
+  state: PersistedIssueViewState,
+): PersistedIssueViewState {
+  // Saved-view definitions are explicit user-authored defaults; never rewrite
+  // their local copy as though it were an untouched built-in surface.
+  if (surfaceKey.startsWith("view:")) return state;
+
+  const next = { ...state };
+  if (
+    (state.sortBy === undefined || state.sortBy === "position") &&
+    (state.sortDirection === undefined || state.sortDirection === "asc")
+  ) {
+    next.sortBy = "created_at";
+    next.sortDirection = "desc";
+  }
+  if (isLegacyCardDefault(state.cardProperties)) {
+    next.cardProperties = {
+      ...DEFAULT_CARD_PROPERTIES,
+      ...(surfaceKey.startsWith("project:") ? { project: false } : {}),
+    };
+  }
+  if (
+    state.hiddenStatusCategories === undefined ||
+    state.hiddenStatusCategories.length === 0
+  ) {
+    next.hiddenStatusCategories = [...DEFAULT_HIDDEN_STATUS_CATEGORIES];
+  }
+  return next;
+}
 
 function persistedIssueViewState(state: IssueViewState): PersistedIssueViewState {
   return basePersist.partialize(state);
@@ -72,6 +129,23 @@ const issueSurfaceViewRegistryStore = createStore<IssueSurfaceViewRegistryState>
     {
       name: ISSUE_SURFACE_VIEW_STORAGE_KEY,
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
+      version: SURFACE_DEFAULTS_VERSION,
+      migrate: (persisted, version) => {
+        const current = (persisted ?? {}) as Partial<IssueSurfaceViewRegistryState>;
+        if (version >= SURFACE_DEFAULTS_VERSION) return current;
+        return {
+          ...current,
+          surfaces: Object.fromEntries(
+            Object.entries(current.surfaces ?? {}).map(([surfaceKey, entry]) => [
+              surfaceKey,
+              {
+                ...entry,
+                state: migrateLegacySurfaceState(surfaceKey, entry.state),
+              },
+            ]),
+          ),
+        };
+      },
       partialize: (state) => ({ surfaces: state.surfaces }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<IssueSurfaceViewRegistryState>;
@@ -87,7 +161,7 @@ const issueSurfaceViewRegistryStore = createStore<IssueSurfaceViewRegistryState>
 function resetStoreFromRegistry(surfaceKey: string, store: StoreApi<IssueViewState>) {
   const persisted =
     issueSurfaceViewRegistryStore.getState().surfaces[surfaceKey]?.state;
-  const defaults = viewStoreSlice(store.setState);
+  const defaults = defaultsForSurface(surfaceKey, store.setState);
   suppressSurfacePersist.add(surfaceKey);
   try {
     store.setState(mergeViewStatePersisted(persisted, defaults), true);
@@ -114,7 +188,9 @@ export function getIssueSurfaceViewStore(
   const existing = surfaceStores.get(surfaceKey);
   if (existing) return existing;
 
-  const store = createStore<IssueViewState>()((set) => viewStoreSlice(set));
+  const store = createStore<IssueViewState>()((set) =>
+    defaultsForSurface(surfaceKey, set),
+  );
   resetStoreFromRegistry(surfaceKey, store);
   store.subscribe((state) => {
     if (suppressSurfacePersist.has(surfaceKey)) return;
@@ -122,6 +198,29 @@ export function getIssueSurfaceViewStore(
   });
   surfaceStores.set(surfaceKey, store);
   return store;
+}
+
+/**
+ * First-open seeding for saved-view surfaces (`view:<id>` keys): apply the
+ * view's stored definition ONLY when this user has no local state for the
+ * surface yet. Later opens keep the user's own adjustments — the definition
+ * is a default, not a sync source.
+ */
+export function seedIssueSurfaceViewState(
+  surfaceKey: string,
+  definition: unknown,
+) {
+  const hasLocal =
+    issueSurfaceViewRegistryStore.getState().surfaces[surfaceKey] !== undefined;
+  if (hasLocal) return;
+  const store = getIssueSurfaceViewStore(surfaceKey);
+  // The definition is a server-owned jsonb blob — run it through the same
+  // sanitizer persisted snapshots use so a malformed field degrades to the
+  // default instead of poisoning the store. setState triggers the persist
+  // subscription, so the seed becomes the surface's local state exactly
+  // like a user-made change would.
+  const defaults = viewStoreSlice(store.setState);
+  store.setState(mergeViewStatePersisted(definition, defaults), true);
 }
 
 export function clearIssueSurfaceViewState(surfaceKey: string) {

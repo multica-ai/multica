@@ -35,7 +35,7 @@ import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
 import { AttributionBadge } from "../../../issues/components/attribution-badge";
 import { taskStatusConfig } from "../../config";
-import { failureReasonLabel } from "./task-failure";
+import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
 import { useT, useTimeAgo } from "../../../i18n";
 
@@ -429,7 +429,7 @@ function RecentWorkSection({
             <button
               type="button"
               onClick={onShowMore}
-              className="mt-2 self-start rounded text-caption text-muted-foreground transition-colors hover:text-foreground"
+              className="mt-2 self-start rounded-xs text-caption text-muted-foreground transition-colors hover:text-foreground"
             >
               {t(($) => $.tab_body.activity.show_more)}
             </button>
@@ -585,10 +585,16 @@ function TaskRow({
 
   // Failure reason. The back-end emits "" on non-failed tasks (omitempty
   // strips it on the wire) so the truthy guard is the right shape.
-  // failureReasonLabel takes the raw open string — the taxonomy has 21
-  // values and grows, so there is no enum to cast to.
+  // failureReasonLabel takes the raw open string because the taxonomy grows,
+  // so there is no enum to cast to. Cancelled rows get a
+  // label only when the SERVER cancelled them for a persisted reason
+  // (worktree claim gate, preserved-work delivery); a user's own cancel
+  // stays a plain "Cancelled".
   const failureLabel =
-    task.status === "failed" ? failureReasonLabel(task.failure_reason) : null;
+    task.status === "failed"
+      ? failureReasonLabel(task.failure_reason, t)
+      : cancelReasonLabel(task, t);
+  const statusLabel = cancellationActorLabel(task, t) ?? taskStatusLabel(task.status, t);
 
   // Only show duration for terminal rows. An active row's duration is
   // inferred from the timeText already ("Started 2m ago") and adding a
@@ -664,7 +670,7 @@ function TaskRow({
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-muted-foreground">
           <span className={cfg.color}>
-            {taskStatusLabel(task.status, t)}
+            {statusLabel}
           </span>
           <Sep />
           <span>{timeText}</span>
@@ -677,6 +683,12 @@ function TaskRow({
           {failureLabel && (
             <>
               <Sep />
+              {/* The localized reason is the whole user-facing explanation
+                  here. The raw `task.error` used to ride along as this
+                  element's `title`, which put untranslated English (and
+                  absolute paths) in front of every non-English workspace
+                  (#7411); the full diagnostic lives in the transcript's Run
+                  details instead. */}
               <span className="text-destructive">{failureLabel}</span>
             </>
           )}
@@ -708,7 +720,7 @@ function TaskRow({
             <TooltipTrigger
               render={<AppLink href={paths.issueDetail(task.issue_id)} />}
               aria-label={t(($) => $.tab_body.activity.open_issue_aria)}
-              className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+              className="flex items-center justify-center rounded-xs p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
             >
               <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
             </TooltipTrigger>
@@ -734,7 +746,7 @@ function TaskRow({
                   aria-label={t(($) => $.tab_body.activity.cancel_task_aria)}
                 />
               }
-              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center justify-center rounded-xs p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
             >
               <X className="h-3.5 w-3.5" aria-hidden="true" />
             </TooltipTrigger>

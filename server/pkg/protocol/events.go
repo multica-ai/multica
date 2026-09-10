@@ -85,6 +85,7 @@ const (
 	// draft restore (#5219). Channel outbounds (Slack/Lark) deliberately do
 	// not subscribe to it — cancellation stays silent on external channels.
 	EventChatCancelFinalized = "chat:cancel_finalized"
+	EventChatSessionCreated  = "chat:session_created"
 	EventChatSessionRead     = "chat:session_read"
 	EventChatSessionDeleted  = "chat:session_deleted"
 	EventChatSessionUpdated  = "chat:session_updated"
@@ -108,6 +109,15 @@ const (
 	EventPropertyCreated        = "property:created"
 	EventPropertyUpdated        = "property:updated"
 	EventIssuePropertiesChanged = "issue_properties:changed"
+
+	// Issue status catalog events (MUL-6243). ONE event for all four writes
+	// — create, edit, archive, reorder — rather than a verb per write, because
+	// the catalog is read as a whole table and every client answers all four
+	// the same way: re-read it. Splitting it would mint four contracts that no
+	// consumer can tell apart, and reorder has no single row to name anyway.
+	// The `action` in the payload is advisory (it makes a frame in devtools
+	// self-describing); nothing routes on it.
+	EventIssueStatusChanged = "issue_status:changed"
 
 	// Pin events
 	EventPinCreated   = "pin:created"
@@ -140,10 +150,11 @@ const (
 	EventDaemonRuntimeProfilesChanged = "daemon:runtime_profiles_changed"
 	EventDaemonWorkspacesChanged      = "daemon:workspaces_changed"
 	// EventDaemonPendingWork is a runtime-scoped hint that a heartbeat-carried
-	// request (today: model-list discovery) is queued for that runtime. Without
-	// it the daemon only learns about the request on its next scheduled
-	// heartbeat, which adds up to one HeartbeatInterval (15s by default) of
-	// dead wait to an interactive UI flow (MUL-5444). The hint carries no work
+	// request (model discovery, capability discovery, or local-skill import) is
+	// queued for that runtime. Without it the daemon only learns about the
+	// request on its next scheduled heartbeat, adding up to one HeartbeatInterval
+	// (15s by default) of dead wait to an interactive UI flow (MUL-5444). The
+	// hint carries no work
 	// itself: the daemon still pulls the request through the normal heartbeat
 	// claim, so a lost or duplicated hint is harmless.
 	EventDaemonPendingWork = "daemon:pending_work"
@@ -184,9 +195,12 @@ const (
 	EventSlackInstallationRevoked = "slack_installation:revoked"
 
 	// DingTalk installation lifecycle follows the same create/revoke semantics
-	// as Slack's BYO channel installation.
-	EventDingTalkInstallationCreated = "dingtalk_installation:created"
-	EventDingTalkInstallationRevoked = "dingtalk_installation:revoked"
+	// as Slack's BYO channel installation. BindingUpdated shares the
+	// dingtalk_installation prefix because it changes the member-scoped account
+	// identifiers returned by the installation listing.
+	EventDingTalkInstallationCreated   = "dingtalk_installation:created"
+	EventDingTalkInstallationRevoked   = "dingtalk_installation:revoked"
+	EventDingTalkAccountBindingUpdated = "dingtalk_installation:binding_updated"
 
 	// WeCom smart-bot installation lifecycle. Same semantics as Lark /
 	// Slack: `created` covers both first install and re-install via
@@ -196,4 +210,9 @@ const (
 	// installations query on either.
 	EventWecomInstallationCreated = "wecom_installation:created"
 	EventWecomInstallationRevoked = "wecom_installation:revoked"
+
+	// Telegram installation lifecycle. Same contract as the Slack pair:
+	// front-ends invalidate the Telegram installations query on either.
+	EventTelegramInstallationCreated = "telegram_installation:created"
+	EventTelegramInstallationRevoked = "telegram_installation:revoked"
 )

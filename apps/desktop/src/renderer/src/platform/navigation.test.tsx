@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { useEffect } from "react";
 
 // MUL-4741: the adapter mutates tab sessions in the REAL store (no router,
@@ -28,7 +28,7 @@ vi.mock("@multica/core/auth", () => ({
 }));
 
 import { DesktopNavigationProvider, routeContentLinkPath } from "./navigation";
-import { useNavigation } from "@multica/views/navigation";
+import { currentPath, useNavigation } from "@multica/views/navigation";
 import { useTabStore, getActiveTab } from "@/stores/tab-store";
 
 beforeEach(() => {
@@ -254,6 +254,40 @@ describe("canGoBack", () => {
     getAdapter().openInNewTab!("/acme/agents", "Agents", { activate: true });
 
     expect(getAdapter().canGoBack!()).toBe(false);
+  });
+});
+
+// MUL-6784: the tab URL is the only place the fragment survives on desktop —
+// the renderer's own `window.location` is the packaged file:// page — so a
+// share or feedback link built from this adapter depends on `hash` being here.
+describe("current location", () => {
+  it("splits the active tab URL into pathname, search and fragment", () => {
+    const getAdapter = renderProvider();
+
+    act(() => getAdapter().push("/acme/issues/MUL-1?tab=activity#comment-c1"));
+
+    expect(getAdapter().pathname).toBe("/acme/issues/MUL-1");
+    expect(getAdapter().searchParams.get("tab")).toBe("activity");
+    expect(getAdapter().hash).toBe("#comment-c1");
+  });
+
+  it('reports "" for a tab URL that carries no fragment', () => {
+    const getAdapter = renderProvider();
+
+    act(() => getAdapter().push("/acme/issues/MUL-1?tab=activity"));
+
+    expect(getAdapter().hash).toBe("");
+  });
+
+  it("rebuilds the current page as a web URL that keeps the fragment", () => {
+    const getAdapter = renderProvider();
+
+    act(() => getAdapter().push("/acme/issues/MUL-1#comment-c1"));
+
+    const adapter = getAdapter();
+    expect(adapter.getShareableUrl(currentPath(adapter))).toBe(
+      "https://app.example/acme/issues/MUL-1#comment-c1",
+    );
   });
 });
 

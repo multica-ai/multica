@@ -3,7 +3,7 @@ title: How we put a 24/7 senior data analyst into Multica
 description: db-boy is our workspace's 24/7 senior data analyst — auto-posts the weekly metrics every Monday, answers ad-hoc questions in minutes, and assigns its own tracking PRs to the frontend agent when data is missing.
 category: Automated analytics
 updated_at: 2026-05-22
-hero_image: /usecases/auto-data-analysis/hero.png
+hero_image: /usecases/auto-data-analysis/hero.webp
 ---
 
 db-boy is a 24/7 senior data analyst inside our workspace.
@@ -11,10 +11,10 @@ db-boy is a 24/7 senior data analyst inside our workspace.
 Every Monday at 9 AM he turns last week's numbers into a table, pastes them into the `#weekly-metrics` issue, and @-mentions the people who own each line.
 
 <Screenshot
-  src="/usecases/auto-data-analysis/hero.png"
+  src="/usecases/auto-data-analysis/hero.webp"
   alt="A Multica issue comment where db-boy has posted Monday's weekly metrics with @ mentions"
-  width={2098}
-  height={1548}
+  width={1600}
+  height={1181}
   caption="Monday 9:00 — db-boy drops last week's headline numbers into the issue (demo data)."
   priority
 />
@@ -44,10 +44,10 @@ The Mac mini comes pre-loaded with what db-boy needs to do his job: `kubectl` wi
 Finally, we attached a "data analytics" skill to him. The skill spells out how DAU is defined, how each funnel step is counted, that application state lives in PG while user behavior lives in PostHog, which table holds payment data, which issue gets the HTML report, who to @ when instrumentation is missing. It's written once and shared across the workspace. Change a definition by editing one line in the skill — the next run picks it up. No deploy, no code change.
 
 <Screenshot
-  src="/usecases/auto-data-analysis/db-boy-profile.png"
+  src="/usecases/auto-data-analysis/db-boy-profile.webp"
   alt="db-boy's agent profile page in Multica: runtime and skill on the left, instructions with system prompt and read-only warning on the right"
-  width={2596}
-  height={1712}
+  width={1600}
+  height={1056}
   caption="db-boy's profile — identity, data definitions, and safety guards all live in his instructions."
 />
 
@@ -62,10 +62,10 @@ You don't have to open an issue every time. @ him in any existing thread for a f
 He doesn't stop at the first blocker either. When he finds an event that isn't being tracked, he opens a new issue himself: title like `Add tracking for the X-button click on page Y`, with the fields, event name, and rationale filled in, then assigns it to @frontend-agent. The frontend agent ships the PR, an engineer reviews and merges, and the next time the same question comes up, the data is already there.
 
 <Screenshot
-  src="/usecases/auto-data-analysis/ad-hoc-question.png"
+  src="/usecases/auto-data-analysis/ad-hoc-question.webp"
   alt="@naiyuan asks db-boy a North Star question in a comment; db-boy replies with the analysis and links to a tracking PR he opened for frontend-agent"
-  width={1726}
-  height={840}
+  width={1600}
+  height={779}
   caption="naiyuan @ db-boy in a thread; db-boy answers and quietly opens a tracking follow-up assigned to the frontend agent (demo data)."
 />
 

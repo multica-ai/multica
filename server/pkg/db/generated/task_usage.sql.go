@@ -12,20 +12,40 @@ import (
 )
 
 const getIssueUsageSummary = `-- name: GetIssueUsageSummary :one
+WITH usage AS (
+    SELECT
+        COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+        COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+        COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+        COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+        COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS total_cost_usd_ticks,
+        COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+        COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+        COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+        COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens,
+        COUNT(DISTINCT tu.task_id)::int AS task_count
+    FROM task_usage tu
+    JOIN agent_task_queue atq ON atq.id = tu.task_id
+    WHERE atq.issue_id = $1
+), terminal_runs AS (
+    SELECT
+        COUNT(*)::int AS terminal_task_count,
+        COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM task_usage tu WHERE tu.task_id = atq.id
+        ))::int AS metered_task_count
+    FROM agent_task_queue atq
+    WHERE atq.issue_id = $1
+      AND atq.status IN ('completed', 'failed', 'cancelled')
+      AND atq.started_at IS NOT NULL
+      AND atq.completed_at IS NOT NULL
+)
 SELECT
-    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
-    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
-    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
-    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
-    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS total_cost_usd_ticks,
-    COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
-    COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
-    COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
-    COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens,
-    COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
-JOIN agent_task_queue atq ON atq.id = tu.task_id
-WHERE atq.issue_id = $1
+    usage.total_input_tokens, usage.total_output_tokens, usage.total_cache_read_tokens, usage.total_cache_write_tokens, usage.total_cost_usd_ticks, usage.uncosted_input_tokens, usage.uncosted_output_tokens, usage.uncosted_cache_read_tokens, usage.uncosted_cache_write_tokens, usage.task_count,
+    terminal_runs.terminal_task_count,
+    terminal_runs.metered_task_count,
+    (terminal_runs.terminal_task_count - terminal_runs.metered_task_count)::int AS unreported_task_count
+FROM usage
+CROSS JOIN terminal_runs
 `
 
 type GetIssueUsageSummaryRow struct {
@@ -39,8 +59,15 @@ type GetIssueUsageSummaryRow struct {
 	UncostedCacheReadTokens  int64 `json:"uncosted_cache_read_tokens"`
 	UncostedCacheWriteTokens int64 `json:"uncosted_cache_write_tokens"`
 	TaskCount                int32 `json:"task_count"`
+	TerminalTaskCount        int32 `json:"terminal_task_count"`
+	MeteredTaskCount         int32 `json:"metered_task_count"`
+	UnreportedTaskCount      int32 `json:"unreported_task_count"`
 }
 
+// Keep the legacy usage aggregates intact, then report coverage over finite
+// terminal runs separately. A task_usage row is the durable evidence that a
+// run reported usage even when every token counter is legitimately zero.
+// Both passes use the existing issue_id / task_id indexes (migrations 035/032).
 func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID) (GetIssueUsageSummaryRow, error) {
 	row := q.db.QueryRow(ctx, getIssueUsageSummary, issueID)
 	var i GetIssueUsageSummaryRow
@@ -55,6 +82,9 @@ func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID)
 		&i.UncostedCacheReadTokens,
 		&i.UncostedCacheWriteTokens,
 		&i.TaskCount,
+		&i.TerminalTaskCount,
+		&i.MeteredTaskCount,
+		&i.UnreportedTaskCount,
 	)
 	return i, err
 }
@@ -97,6 +127,72 @@ func (q *Queries) GetTaskUsage(ctx context.Context, taskID pgtype.UUID) ([]TaskU
 	return items, nil
 }
 
+const listAgentTaskUsage = `-- name: ListAgentTaskUsage :many
+SELECT
+    tu.task_id,
+    tu.provider,
+    tu.model,
+    tu.input_tokens,
+    tu.output_tokens,
+    tu.cache_read_tokens,
+    tu.cache_write_tokens,
+    tu.cost_usd_ticks
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.agent_id = $1
+  AND tu.task_id = ANY($2::uuid[])
+ORDER BY tu.task_id, tu.model
+`
+
+type ListAgentTaskUsageParams struct {
+	AgentID pgtype.UUID   `json:"agent_id"`
+	TaskIds []pgtype.UUID `json:"task_ids"`
+}
+
+type ListAgentTaskUsageRow struct {
+	TaskID           pgtype.UUID `json:"task_id"`
+	Provider         string      `json:"provider"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
+}
+
+// Per-(task, provider, model) usage rows for one agent's explicitly requested
+// task history. ListAgentTasks is already access-gated before this query runs;
+// the agent predicate preserves that authorization boundary, while task_ids
+// keeps hydration aligned with the exact response without an N+1 query.
+func (q *Queries) ListAgentTaskUsage(ctx context.Context, arg ListAgentTaskUsageParams) ([]ListAgentTaskUsageRow, error) {
+	rows, err := q.db.Query(ctx, listAgentTaskUsage, arg.AgentID, arg.TaskIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentTaskUsageRow{}
+	for rows.Next() {
+		var i ListAgentTaskUsageRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardAgentRunTime = `-- name: ListDashboardAgentRunTime :many
 SELECT
     atq.agent_id,
@@ -105,6 +201,9 @@ SELECT
         0
     )::bigint AS total_seconds,
     COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM task_usage tu WHERE tu.task_id = atq.id
+    ))::int AS metered_task_count,
     COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count,
     COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count
 FROM agent_task_queue atq
@@ -127,11 +226,12 @@ type ListDashboardAgentRunTimeParams struct {
 }
 
 type ListDashboardAgentRunTimeRow struct {
-	AgentID        pgtype.UUID `json:"agent_id"`
-	TotalSeconds   int64       `json:"total_seconds"`
-	TaskCount      int32       `json:"task_count"`
-	FailedCount    int32       `json:"failed_count"`
-	CancelledCount int32       `json:"cancelled_count"`
+	AgentID          pgtype.UUID `json:"agent_id"`
+	TotalSeconds     int64       `json:"total_seconds"`
+	TaskCount        int32       `json:"task_count"`
+	MeteredTaskCount int32       `json:"metered_task_count"`
+	FailedCount      int32       `json:"failed_count"`
+	CancelledCount   int32       `json:"cancelled_count"`
 }
 
 // Per-agent total task run time and task count for the workspace, optionally
@@ -142,6 +242,8 @@ type ListDashboardAgentRunTimeRow struct {
 // ~= completion time).
 //
 // See ListDashboardRunTimeDaily for why 'cancelled' belongs in the filter.
+// metered_task_count uses task_usage row existence, not token totals, so a
+// provider-reported zero stays distinct from a run that reported nothing.
 //
 // No date bucketing, so no @tz — but @since is the viewer's local
 // start-of-day for the EXACT N-day window (parseExactSinceParamInTZ), so the
@@ -161,6 +263,7 @@ func (q *Queries) ListDashboardAgentRunTime(ctx context.Context, arg ListDashboa
 			&i.AgentID,
 			&i.TotalSeconds,
 			&i.TaskCount,
+			&i.MeteredTaskCount,
 			&i.FailedCount,
 			&i.CancelledCount,
 		); err != nil {

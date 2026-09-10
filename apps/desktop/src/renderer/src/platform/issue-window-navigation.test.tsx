@@ -10,6 +10,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import {
+  currentPath,
+  useNavigation,
+  type NavigationAdapter,
+} from "@multica/views/navigation";
 
 const APP_URL = "https://app.example";
 
@@ -94,5 +99,55 @@ describe("IssueWindowNavigationProvider content links", () => {
     navigate("/acme/chat");
 
     expect(openExternal).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * MUL-6784 — an issue window is a MemoryRouter over the packaged file:// page,
+ * so `window.location` knows nothing about the route. A report or share link
+ * built from this adapter must still name the comment the user was reading.
+ */
+describe("IssueWindowNavigationProvider current location", () => {
+  function renderAdapter(entry: string): () => NavigationAdapter {
+    let adapter: NavigationAdapter | null = null;
+    function Probe() {
+      adapter = useNavigation();
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route
+            path=":workspaceSlug/issues/:id"
+            element={
+              <IssueWindowNavigationProvider>
+                <Probe />
+              </IssueWindowNavigationProvider>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    return () => adapter!;
+  }
+
+  it("reports the route's fragment, which window.location cannot", () => {
+    expect(window.location.hash).toBe("");
+
+    expect(renderAdapter("/acme/issues/MUL-1#comment-c1")().hash).toBe(
+      "#comment-c1",
+    );
+  });
+
+  it('reports "" for a route without a fragment', () => {
+    expect(renderAdapter("/acme/issues/MUL-1")().hash).toBe("");
+  });
+
+  it("rebuilds the current page as a web URL that keeps the fragment", () => {
+    const adapter = renderAdapter("/acme/issues/MUL-1#comment-c1")();
+
+    expect(adapter.getShareableUrl(currentPath(adapter))).toBe(
+      `${APP_URL}/acme/issues/MUL-1#comment-c1`,
+    );
   });
 });

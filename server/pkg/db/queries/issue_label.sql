@@ -69,36 +69,82 @@ DELETE FROM skill_to_label WHERE skill_id = $1;
 DELETE FROM agent_to_label
 WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system');
 
--- name: AttachLabelToIssue :exec
+-- name: AttachLabelToIssueOnCreate :exec
 -- Workspace-guarded INSERT: the WHERE EXISTS clauses ensure both the issue
 -- and the label belong to the given workspace. A future caller that forgets
 -- handler-level prechecks still cannot attach labels across workspaces.
+WITH touched_issue AS (
+    UPDATE issue
+    SET last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
+    WHERE issue.id = sqlc.arg('issue_id')::uuid
+      AND issue.workspace_id = sqlc.arg('workspace_id')::uuid
+      AND NOT EXISTS (
+          SELECT 1 FROM issue_to_label
+          WHERE issue_to_label.issue_id = sqlc.arg('issue_id')::uuid
+            AND issue_to_label.label_id = sqlc.arg('label_id')::uuid
+      )
+      AND EXISTS (
+          SELECT 1 FROM issue_label
+          WHERE issue_label.id = sqlc.arg('label_id')::uuid
+            AND issue_label.workspace_id = sqlc.arg('workspace_id')::uuid
+            AND issue_label.resource_type = 'issue'
+      )
+    RETURNING issue.id
+)
 INSERT INTO issue_to_label (issue_id, label_id)
 SELECT sqlc.arg('issue_id')::uuid, sqlc.arg('label_id')::uuid
-WHERE EXISTS (
-    SELECT 1 FROM issue i
-    WHERE i.id = sqlc.arg('issue_id')::uuid
-      AND i.workspace_id = sqlc.arg('workspace_id')::uuid
-)
-AND EXISTS (
-    SELECT 1 FROM issue_label l
-    WHERE l.id = sqlc.arg('label_id')::uuid
-      AND l.workspace_id = sqlc.arg('workspace_id')::uuid
-      AND l.resource_type = 'issue'
-)
+WHERE EXISTS (SELECT 1 FROM touched_issue)
 ON CONFLICT DO NOTHING;
 
--- name: DetachLabelFromIssue :exec
+-- name: AttachLabelToIssue :one
+WITH inserted AS (
+    INSERT INTO issue_to_label (issue_id, label_id)
+    SELECT sqlc.arg('issue_id')::uuid, sqlc.arg('label_id')::uuid
+    WHERE EXISTS (
+        SELECT 1 FROM issue i
+        WHERE i.id = sqlc.arg('issue_id')::uuid
+          AND i.workspace_id = sqlc.arg('workspace_id')::uuid
+    )
+      AND EXISTS (
+        SELECT 1 FROM issue_label l
+        WHERE l.id = sqlc.arg('label_id')::uuid
+          AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+          AND l.resource_type = 'issue'
+    )
+    ON CONFLICT DO NOTHING
+    RETURNING issue_id
+), bumped AS (
+    UPDATE issue
+    SET revision = revision + 1,
+        last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
+    WHERE id IN (SELECT issue_id FROM inserted)
+    RETURNING revision
+)
+SELECT EXISTS(SELECT 1 FROM inserted) AS changed,
+       COALESCE((SELECT revision FROM bumped), 0)::bigint AS issue_revision;
+
+-- name: DetachLabelFromIssue :one
 -- Workspace-guarded DELETE: only deletes if the issue is in the given
 -- workspace. Mirror of the attach query.
-DELETE FROM issue_to_label
-WHERE issue_id = sqlc.arg('issue_id')::uuid
-  AND label_id = sqlc.arg('label_id')::uuid
-  AND EXISTS (
-      SELECT 1 FROM issue i
-      WHERE i.id = sqlc.arg('issue_id')::uuid
-        AND i.workspace_id = sqlc.arg('workspace_id')::uuid
-  );
+WITH deleted AS (
+    DELETE FROM issue_to_label
+    WHERE issue_id = sqlc.arg('issue_id')::uuid
+      AND label_id = sqlc.arg('label_id')::uuid
+      AND EXISTS (
+          SELECT 1 FROM issue i
+          WHERE i.id = sqlc.arg('issue_id')::uuid
+            AND i.workspace_id = sqlc.arg('workspace_id')::uuid
+      )
+    RETURNING issue_id
+), bumped AS (
+    UPDATE issue
+    SET revision = revision + 1,
+        last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
+    WHERE id IN (SELECT issue_id FROM deleted)
+    RETURNING revision
+)
+SELECT EXISTS(SELECT 1 FROM deleted) AS changed,
+       COALESCE((SELECT revision FROM bumped), 0)::bigint AS issue_revision;
 
 -- name: ListLabelsByIssue :many
 -- Workspace filter at the SQL layer (mirrors GetProjectInWorkspace). Any caller

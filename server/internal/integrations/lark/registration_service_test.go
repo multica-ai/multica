@@ -336,3 +336,62 @@ func (c *fakeClockSvc) Now() time.Time {
 	defer c.mu.Unlock()
 	return c.now
 }
+
+// rotatingCredsAPIClient records the order of the two calls
+// finishSuccess makes before it touches the database, so the test can
+// assert the cache is dropped BEFORE a token is minted with the new
+// credentials.
+type rotatingCredsAPIClient struct {
+	APIClient // unused methods; the test only drives the two below
+
+	mu    sync.Mutex
+	calls []string
+	creds InstallationCredentials
+}
+
+func (c *rotatingCredsAPIClient) InvalidateTokenCache(appID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls = append(c.calls, "invalidate:"+appID)
+}
+
+func (c *rotatingCredsAPIClient) GetBotInfo(_ context.Context, creds InstallationCredentials) (BotInfo, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls = append(c.calls, "botinfo:"+creds.AppID)
+	c.creds = creds
+	// Fail so finishSuccess returns before the database work; the
+	// ordering assertion below is what this test is about.
+	return BotInfo{}, errors.New("bot info unavailable")
+}
+
+// TestFinishSuccess_DropsCachedTokenBeforeMintingWithRotatedCreds covers
+// credential rotation (#7611): a re-registration issues a new
+// client_secret under the SAME client_id, so Lark revokes every token
+// minted from the old one while the in-process cache — keyed by app_id —
+// keeps looking valid. Nothing recovers on its own if the stale entry
+// survives into the first call made with the new credentials.
+func TestFinishSuccess_DropsCachedTokenBeforeMintingWithRotatedCreds(t *testing.T) {
+	api := &rotatingCredsAPIClient{}
+	svc := &RegistrationService{
+		cfg:      RegistrationServiceConfig{}.withDefaults(),
+		api:      api,
+		sessions: make(map[string]*registrationSession),
+	}
+	sess := &registrationSession{id: "sess-rotate", status: RegistrationStatusPending}
+
+	svc.finishSuccess(context.Background(), sess, &PollResult{
+		ClientID:     "cli_rotated",
+		ClientSecret: "secret_new",
+	}, RegionFeishu)
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	want := []string{"invalidate:cli_rotated", "botinfo:cli_rotated"}
+	if len(api.calls) != len(want) || api.calls[0] != want[0] || api.calls[1] != want[1] {
+		t.Fatalf("call order = %v, want %v", api.calls, want)
+	}
+	if api.creds.AppSecret != "secret_new" {
+		t.Errorf("bot info credentials carried app_secret %q, want the rotated one", api.creds.AppSecret)
+	}
+}

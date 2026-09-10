@@ -9,11 +9,23 @@
     "archive_all_read": "归档全部已读",
     "archive_completed": "归档已完成"
   },
+  "filters": {
+    "tooltip": "筛选收件箱",
+    "active_count_other": "{{count}} 个筛选条件",
+    "status": "状态",
+    "priority": "优先级",
+    "from": "来自",
+    "unread_only": "只看未读",
+    "notification_count_other": "{{count}} 条通知",
+    "clear": "清除筛选",
+    "empty": "没有符合筛选条件的通知"
+  },
   "context_menu": {
     "mark_read": "标为已读",
     "mark_unread": "标为未读",
     "archive": "归档",
-    "unarchive": "取消归档"
+    "unarchive": "取消归档",
+    "open_in_new_tab": "在新标签页打开"
   },
   "list": {
     "empty": "暂无通知",
@@ -27,13 +39,17 @@
     },
     "archived_title": "已归档",
     "archived_empty": "暂无已归档通知",
-    "unarchive_tooltip": "取消归档"
+    "unarchive_tooltip": "取消归档",
+    "actions_aria": "通知操作"
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",
     "empty": "收件箱为空",
     "original_input": "原始输入",
+    "retry_with_context": "保留上下文重试",
     "edit_advanced": "在完整表单中编辑",
+    "autopilot_quota_exceeded_body": "当前周期的 {{limit}} 次自动化执行额度已用完。在 {{resetAt}} 重置前，后续自动化执行将不会启动。",
+    "autopilot_quota_upgrade": "查看升级方案",
     "archive": "归档",
     "unarchive": "取消归档"
   },
@@ -49,14 +65,16 @@
     "new_comment": "新评论",
     "mentioned": "提及了你",
     "review_requested": "请求审阅",
-    "task_completed": "task 已完成",
-    "task_failed": "task 失败",
+    "task_completed": "运行已完成",
+    "task_failed": "运行失败",
     "agent_blocked": "智能体被阻塞",
     "agent_completed": "智能体已完成",
     "reaction_added": "添加了表情反应",
     "quick_create_done": "通过智能体创建",
     "quick_create_failed": "通过智能体创建失败",
-    "quick_create_unconfirmed": "通过智能体创建结果未确认"
+    "quick_create_unconfirmed": "通过智能体创建结果未确认",
+    "autopilot_paused": "自动化已暂停",
+    "autopilot_quota_exceeded": "自动化执行次数已用完"
   },
   "labels": {
     "set_status_to": "状态设为",
@@ -69,9 +87,17 @@
     "removed_due_date": "移除了截止日期",
     "reacted_to_comment": "用 {{emoji}} 回应了你的评论",
     "created_with_agent": "通过智能体创建：{{identifier}}",
-    "failed_with_detail": "失败：{{detail}}"
+    "failed_with_detail": "失败：{{detail}}",
+    "autopilot_quota_blocked": "执行已被阻止：额度已用完"
+  },
+  "toasts": {
+    "source_context_retry_started": "已使用原始上下文开始重试",
+    "archived": "已归档通知",
+    "unarchived": "已恢复通知"
   },
   "errors": {
+    "source_context_retry_failed": "无法使用原始上下文重试",
+    "source_context_retry_unavailable": "该上下文已无法重试，请从派生起点重新发起。",
     "mark_read_failed": "标为已读失败",
     "mark_unread_failed": "标为未读失败",
     "archive_failed": "归档失败",

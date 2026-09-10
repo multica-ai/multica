@@ -249,16 +249,27 @@
 /* Sidebar resizing follows the same cursor contract as
  * react-resizable-panels: the resize cursor survives leaving the narrow rail
  * and wins over descendants with their own cursor declarations. Live width is
- * written directly to the two layout shells, so their toggle transitions must
- * stay disabled until the gesture finishes. */
+ * written directly to the layout shells and opt-in chrome consumers, so their
+ * toggle transitions must stay disabled until the gesture finishes. */
 html[data-sidebar-resizing="true"],
 html[data-sidebar-resizing="true"] * {
   cursor: ew-resize !important;
   user-select: none !important;
 }
 
+/* Row drag-and-drop shares the same cursor contract: while a dnd-kit drag
+ * is active the grabbing cursor must survive the pointer leaving the drag
+ * handle and win over descendants' own cursor declarations (including the
+ * preflight `cursor: pointer` on buttons the pointer crosses mid-drag). */
+html[data-dnd-dragging="true"],
+html[data-dnd-dragging="true"] * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
 [data-sidebar-resizing="true"] [data-slot="sidebar-gap"],
-[data-sidebar-resizing="true"] [data-slot="sidebar-container"] {
+[data-sidebar-resizing="true"] [data-slot="sidebar-container"],
+[data-sidebar-resizing="true"] [data-sidebar-resize-consumer] {
   transition: none !important;
 }
 
@@ -280,6 +291,21 @@ html[data-sidebar-resizing="true"] * {
   transition: none;
 }
 
+/* Each block owns only its own author/body, excluding nested replies.
+ * Keep space reserved and keyboard access intact when mouse actions fade out.
+ * Portaled menus hold their trigger visible even after focus leaves the block. */
+[data-comment-actions] {
+  transition: opacity 120ms ease-out;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-comment-block]:not(:hover):not(:focus-within)
+    [data-comment-actions]:not(:has([aria-haspopup][aria-expanded="true"])) {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-entrance-spin,
   .animate-onboarding-enter,
@@ -292,8 +318,24 @@ html[data-sidebar-resizing="true"] * {
     animation: none;
   }
 
+  .animate-chat-text-shimmer {
+    background-image: none;
+    color: var(--muted-foreground);
+    -webkit-text-fill-color: currentColor;
+  }
+
+  [data-comment-actions],
   [data-right-sidebar-panel] {
     transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .animate-chat-text-shimmer {
+    animation: none;
+    background-image: none;
+    color: CanvasText;
+    -webkit-text-fill-color: currentColor;
   }
 }
 

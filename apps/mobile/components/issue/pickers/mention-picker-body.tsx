@@ -33,6 +33,8 @@ import type {
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";
+import { issueColumnCategory } from "@/lib/issue-status";
+import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
@@ -70,6 +72,8 @@ interface Props {
 
 export function MentionPickerBody({ query, mode = "comment" }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  // Rows are icon-only here too — colour is what names a custom status.
+  const catalog = useIssueStatuses();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
@@ -261,7 +265,12 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
                 className="items-center justify-center"
                 style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
               >
-                <StatusIcon status={item.issue.status} size={22} />
+                <StatusIcon
+                  status={item.issue.status}
+                  category={issueColumnCategory(item.issue)}
+                  color={catalog.colorOf(item.issue.status)}
+                  size={22}
+                />
               </View>
             )}
             {item.kind === "issue" ? (

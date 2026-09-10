@@ -15,14 +15,18 @@ export {
   useViewStore,
   useViewStoreApi,
 } from "./view-store-context";
-export { useIssuesScopeStore, type IssuesScope } from "./issues-scope-store";
+export {
+  useIssuesScope,
+  useIssuesScopeStore,
+  type IssuesScope,
+  type IssuesScopePageKey,
+} from "./issues-scope-store";
 export { useCommentCollapseStore } from "./comment-collapse-store";
 export {
   useResolvedExpandStore,
   selectExpandedResolved,
 } from "./resolved-expand-store";
 export { useCommentComposerStore } from "./comment-composer-store";
-export { useIssueLinkStore } from "./issue-link-store";
 export { useCommentDraftStore, type CommentDraftKey } from "./comment-draft-store";
 export {
   myIssuesViewStore,
@@ -63,6 +67,7 @@ export {
   pruneIssueSurfaceViewStates,
   getIssueSurfaceViewStateRegistrySnapshot,
 } from "./surface-view-store";
+export { useSubIssuesCollapseStore } from "./sub-issues-collapse-store";
 export {
   useSubIssueDisplayStore,
   SUB_ISSUE_ROW_PROPERTY_KEYS,

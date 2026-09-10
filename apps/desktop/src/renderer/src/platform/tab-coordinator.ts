@@ -1,6 +1,10 @@
 import type { DataRouter } from "react-router-dom";
 import type { QueryClient } from "@tanstack/react-query";
-import type { ScrollRestorationAdapter } from "@multica/views/platform";
+import type {
+  ExternalScrollSource,
+  ScrollRestorationAdapter,
+  ScrollRestorationEntry,
+} from "@multica/views/platform";
 import { createAppRouter } from "@/routes";
 import {
   useTabStore,
@@ -46,6 +50,45 @@ let activeHostElement: HTMLElement | null = null;
 /** Query client for reload()'s current-page-scope invalidation. */
 let queryClient: QueryClient | null = null;
 
+/**
+ * Scroll sources outside the outer DOM that the Coordinator cannot scan for
+ * itself — currently the document inside a sandboxed HTML-attachment iframe
+ * (opaque origin → `contentWindow.scrollY` throws). Keyed by tab id so each
+ * tab's sources are captured only when that tab is outgoing; sources are
+ * registered/unregistered by the per-tab view via the adapter's
+ * `registerExternalSource` and vanish naturally when the tab's ActiveTabHost
+ * unmounts. We still prune on capture so a tab id is never leaked after its
+ * subtree is gone.
+ */
+const externalScrollSources = new Map<
+  string,
+  Map<string, ExternalScrollSource>
+>();
+
+/**
+ * Register (or unregister, when `source` is null) an external scroll source
+ * for a tab. The view's ScrollRestorationAdapter is per-tab, so it passes its
+ * own tabId here. Safe to call with null on cleanup.
+ */
+export function registerExternalScrollSource(
+  tabId: string,
+  containerKey: string,
+  source: ExternalScrollSource | null,
+): void {
+  let perTab = externalScrollSources.get(tabId);
+  if (!source) {
+    if (!perTab) return;
+    perTab.delete(containerKey);
+    if (perTab.size === 0) externalScrollSources.delete(tabId);
+    return;
+  }
+  if (!perTab) {
+    perTab = new Map();
+    externalScrollSources.set(tabId, perTab);
+  }
+  perTab.set(containerKey, source);
+}
+
 /** Identity of what the host currently shows: slug:tabId:generation. */
 let lastIdentity: string | null = null;
 let lastActiveTabId: string | null = null;
@@ -70,17 +113,45 @@ export function registerCoordinatorQueryClient(qc: QueryClient): void {
  * see ScrollRestorationProvider in @multica/views/platform). Offsets are
  * looked up live against the tab's memento, scoped to the route the view is
  * mounting under, so in-tab back/forward pulls each route's own offsets.
+ *
+ * The generic view-state entries ride the same channel: reads resolve
+ * against the memento's `view` map, writes commit through the store — no
+ * capture pass, the view pushes at the moment its restorable state changes.
+ *
+ * The adapter is constructed per ActiveTabHost (memoized on tabId in
+ * tab-content.tsx), so `registerExternalSource` records this tab's
+ * out-of-DOM scroll sources (iframe documents) under that tabId; the
+ * Coordinator captures them when this tab is the outgoing one.
  */
 export function createScrollRestorationAdapter(
   tabId: string,
 ): ScrollRestorationAdapter {
+  const activeRouteKey = (): string | null => {
+    const state = useTabStore.getState();
+    const active = getActiveTab(state);
+    if (!active || active.id !== tabId) return null;
+    return splitTabUrl(active.url).pathname;
+  };
   return {
     get(containerKey) {
-      const state = useTabStore.getState();
-      const active = getActiveTab(state);
-      if (!active || active.id !== tabId) return undefined;
-      const routeKey = splitTabUrl(active.url).pathname;
-      return active.memento.scroll[scrollMementoKey(routeKey, containerKey)];
+      const routeKey = activeRouteKey();
+      if (routeKey === null) return undefined;
+      const active = getActiveTab(useTabStore.getState());
+      return active?.memento.scroll[scrollMementoKey(routeKey, containerKey)];
+    },
+    getViewState(entryKey) {
+      const routeKey = activeRouteKey();
+      if (routeKey === null) return undefined;
+      const active = getActiveTab(useTabStore.getState());
+      return active?.memento.view[scrollMementoKey(routeKey, entryKey)];
+    },
+    setViewState(entryKey, value) {
+      const routeKey = activeRouteKey();
+      if (routeKey === null) return;
+      useTabStore.getState().commitViewState(tabId, routeKey, entryKey, value);
+    },
+    registerExternalSource(containerKey, source) {
+      registerExternalScrollSource(tabId, containerKey, source);
     },
   };
 }
@@ -116,22 +187,40 @@ function reconcile(): void {
  * React re-renders — so the outgoing DOM (previous tab, or previous route
  * of the same tab) is still mounted.
  *
- * Scroll containers self-mark with `data-tab-scroll-root` (the attribute
- * value is the container key, "main" when bare). Containers sitting at 0
- * are simply absent from the result — the store's per-route REPLACE
+ * Plain scroll containers self-mark with `data-tab-scroll-root` (the
+ * attribute value is the container key, "main" when bare). Containers sitting
+ * at 0 are simply absent from the result — the store's per-route REPLACE
  * semantics turn that absence into "clear the stale offset".
+ *
+ * External sources (sandboxed iframe documents) are merged in for the
+ * outgoing tab ONLY; unlike plain containers they are ALWAYS written,
+ * including at top 0, because their entry carries a `contentKey` and a
+ * top:0 write with the new key is how a content change replaces a stale
+ * positive offset rather than resurrecting it.
  */
-function captureScrollEntries(): Record<string, { top: number; height: number }> {
-  const entries: Record<string, { top: number; height: number }> = {};
-  if (!activeHostElement) return entries;
-  const els = activeHostElement.querySelectorAll<HTMLElement>(
-    "[data-tab-scroll-root]",
-  );
-  els.forEach((el) => {
-    if (el.scrollTop <= 0) return;
-    const key = el.getAttribute("data-tab-scroll-root") || "main";
-    entries[key] = { top: el.scrollTop, height: el.scrollHeight };
-  });
+function captureScrollEntries(
+  outgoingTabId: string | null,
+): Record<string, ScrollRestorationEntry> {
+  const entries: Record<string, ScrollRestorationEntry> = {};
+  if (activeHostElement) {
+    const els = activeHostElement.querySelectorAll<HTMLElement>(
+      "[data-tab-scroll-root]",
+    );
+    els.forEach((el) => {
+      if (el.scrollTop <= 0) return;
+      const key = el.getAttribute("data-tab-scroll-root") || "main";
+      entries[key] = { top: el.scrollTop, height: el.scrollHeight };
+    });
+  }
+  if (outgoingTabId) {
+    const sources = externalScrollSources.get(outgoingTabId);
+    if (sources) {
+      for (const [key, source] of sources) {
+        const entry = source.capture();
+        if (entry) entries[key] = entry;
+      }
+    }
+  }
   return entries;
 }
 
@@ -162,7 +251,19 @@ function handleStoreChange(): void {
       // scrolled back to 0; the store skips the write when nothing changed.
       useTabStore
         .getState()
-        .commitScrollMemento(outgoingTabId, routeKey, captureScrollEntries());
+        .commitScrollMemento(
+          outgoingTabId,
+          routeKey,
+          captureScrollEntries(outgoingTabId),
+        );
+    }
+    // The outgoing tab's ActiveTabHost is about to unmount; its views'
+    // cleanup will unregister their sources, but a host switch that tears
+    // down the whole tree can drop those cleanups without running them.
+    // Prune proactively so a future re-mount starts clean and a closed tab
+    // never leaks sources.
+    if (outgoingTabId && hostSwitching) {
+      externalScrollSources.delete(outgoingTabId);
     }
   }
 
@@ -250,4 +351,5 @@ export function __resetTabCoordinatorForTests(): void {
   lastIdentity = null;
   lastActiveTabId = null;
   lastActiveUrl = null;
+  externalScrollSources.clear();
 }

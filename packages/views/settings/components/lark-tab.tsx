@@ -41,7 +41,7 @@ import { larkInstallationsOptions, larkKeys } from "@multica/core/lark";
 import { api, ApiError } from "@multica/core/api";
 import type { LarkInstallation, LarkInstallStatusResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 
 // MUL-3083: the Lark (international, open.larksuite.com) "connect a Bot"
 // entry is temporarily hidden while its install → inbound pipeline is
@@ -107,19 +107,13 @@ export function LarkTab() {
 
   return (
     <div className="space-y-8">
-      <section className="space-y-1">
-        <p className="text-body text-muted-foreground">
-          {t(($) => $.lark.page_description)}
-        </p>
-      </section>
-
       {!configured ? (
         <Card>
           <CardContent className="space-y-2">
             <p className="text-body font-medium">{t(($) => $.lark.not_enabled_title)}</p>
             <p className="text-caption text-muted-foreground">
               {t(($) => $.lark.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-micro">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_LARK_SECRET_KEY
               </code>{" "}
               {t(($) => $.lark.not_enabled_description_suffix)}{" "}
@@ -220,6 +214,7 @@ function InstallationRow({
   onDisconnect: () => void;
 }) {
   const { t } = useT("settings");
+  const locale = useLocale();
   // The bot is bound 1:1 to a Multica Agent (per the (workspace_id,
   // agent_id) UNIQUE in lark_installation). Render the Multica agent's
   // identity here rather than the raw Lark app_id / bot_open_id — those
@@ -242,20 +237,20 @@ function InstallationRow({
         <div className="space-y-1">
           <p className="text-body font-medium">
             {agentName}
-            <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+            <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
               {installation.region === "lark"
                 ? t(($) => $.lark.region_lark)
                 : t(($) => $.lark.region_feishu)}
             </span>
             {!isActive && (
-              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.lark.revoked_badge)}
               </span>
             )}
           </p>
           <p className="text-micro text-muted-foreground">
             {t(($) => $.lark.installed_at_label, {
-              when: new Date(installation.installed_at).toLocaleString(),
+              when: new Date(installation.installed_at).toLocaleString(locale),
             })}
           </p>
         </div>
@@ -474,7 +469,7 @@ function LarkAgentBotStatusRow({
       data-testid="lark-agent-bot-status"
     >
       <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-      <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+      <span className="rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
         {installation.region === "lark"
           ? t(($) => $.lark.region_lark)
           : t(($) => $.lark.region_feishu)}
@@ -565,7 +560,7 @@ function LarkAgentBotConnectedBadge({
       <div className="flex items-center justify-between gap-3">
         <span className="inline-flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
           <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-          <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+          <span className="rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
             {installation.region === "lark"
               ? t(($) => $.lark.region_lark)
               : t(($) => $.lark.region_feishu)}

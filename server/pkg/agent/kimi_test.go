@@ -7,22 +7,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-)
 
-func TestNewReturnsKimiBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("kimi", Config{ExecutablePath: "/nonexistent/kimi"})
-	if err != nil {
-		t.Fatalf("New(kimi) error: %v", err)
-	}
-	if _, ok := b.(*kimiBackend); !ok {
-		t.Fatalf("expected *kimiBackend, got %T", b)
-	}
-}
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
+)
 
 func TestKimiToolNameFromTitle(t *testing.T) {
 	t.Parallel()
@@ -143,11 +135,282 @@ func TestKimiBackendSetModelFailureFailsTask(t *testing.T) {
 		if !strings.Contains(result.Error, "model not available") {
 			t.Errorf("expected error to surface upstream message, got %q", result.Error)
 		}
-		if result.SessionID != "ses_fake" {
-			t.Errorf("expected session id to be preserved on failure, got %q", result.SessionID)
+		// A fresh session that never reached session/prompt must NOT be
+		// published as a resume pointer: the runtime may never have persisted
+		// it, and a pointer to a session that does not exist wedges the whole
+		// conversation forever (GH #8116). There is no transcript behind an id
+		// that never ran a prompt, so nothing is lost by withholding it.
+		if result.SessionID != "" {
+			t.Errorf("expected the never-prompted session id to be withheld, got %q", result.SessionID)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+func fakeKimiACPThinkingScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  if [ -n "$KIMI_REQUESTS_FILE" ]; then
+    printf '%s\n' "$line" >> "$KIMI_REQUESTS_FILE"
+  fi
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_thinking"}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_thinking"}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/set_config_option"'*)
+      if [ "$KIMI_SET_CONFIG_ERROR" = "unsupported" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"Invalid params","data":{"value":"Unsupported thinking level"}}}\n' "$id"
+        continue
+      fi
+      requested=$(printf '%s' "$line" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
+      if [ "$KIMI_SET_CONFIG_RESULT" = "mismatch" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"thinking","currentValue":"low"}]}}\n' "$id"
+      elif [ "$KIMI_SET_CONFIG_RESULT" = "missing" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[]}}\n' "$id"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"thinking","currentValue":"%s"}]}}\n' "$id" "$requested"
+      fi
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_thinking","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"pong"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func runKimiThinkingTest(t *testing.T, fakePath string, env map[string]string, opts ExecOptions) Result {
+	t.Helper()
+	backend, err := New("kimi", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            env,
+	})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+	if opts.Timeout == 0 {
+		opts.Timeout = 5 * time.Second
+	}
+	session, err := backend.Execute(context.Background(), "reply with pong", opts)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		return result
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+		return Result{}
+	}
+}
+
+func TestKimiBackendSetsThinkingLevelBeforePrompt(t *testing.T) {
+	t.Parallel()
+	recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+	result := runKimiThinkingTest(t, fakePath, map[string]string{
+		"KIMI_REQUESTS_FILE": recordPath,
+	}, ExecOptions{Model: "kimi-code/k3", ThinkingLevel: "high"})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+
+	raw, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read recorded requests: %v", err)
+	}
+	var methods []string
+	var thinkingParams map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			t.Fatalf("decode recorded request: %v", err)
+		}
+		method, _ := frame["method"].(string)
+		methods = append(methods, method)
+		if method == "session/set_config_option" {
+			thinkingParams, _ = frame["params"].(map[string]any)
+		}
+	}
+	wantOrder := []string{"initialize", "session/new", "session/set_model", "session/set_config_option", "session/prompt"}
+	if !reflect.DeepEqual(methods, wantOrder) {
+		t.Fatalf("ACP method order = %v, want %v", methods, wantOrder)
+	}
+	if thinkingParams["sessionId"] != "ses_thinking" ||
+		thinkingParams["configId"] != "thinking" ||
+		thinkingParams["value"] != "high" {
+		t.Errorf("set_config_option params = %+v", thinkingParams)
+	}
+}
+
+func TestKimiBackendThinkingFailureWarnsAndContinues(t *testing.T) {
+	t.Parallel()
+	recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+	result := runKimiThinkingTest(t, fakePath, map[string]string{
+		"KIMI_REQUESTS_FILE":    recordPath,
+		"KIMI_SET_CONFIG_ERROR": "unsupported",
+	}, ExecOptions{Model: "kimi-code/k3", ThinkingLevel: "max"})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	raw, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read recorded requests: %v", err)
+	}
+	if !strings.Contains(string(raw), `"method":"session/prompt"`) {
+		t.Fatal("prompt was not sent after thinking configuration failed")
+	}
+}
+
+func TestKimiBackendThinkingConfirmationFailureWarnsAndContinues(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		result string
+	}{
+		{name: "mismatch", result: "mismatch"},
+		{name: "missing", result: "missing"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+			fakePath := filepath.Join(t.TempDir(), "kimi")
+			writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+			result := runKimiThinkingTest(t, fakePath, map[string]string{
+				"KIMI_REQUESTS_FILE":     recordPath,
+				"KIMI_SET_CONFIG_RESULT": tt.result,
+			}, ExecOptions{Model: "kimi-code/k3", ThinkingLevel: "max"})
+			if result.Status != "completed" {
+				t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+			}
+			if result.ResumeRejected {
+				t.Fatal("confirmation failure must not be classified as a rejected resume")
+			}
+			raw, err := os.ReadFile(recordPath)
+			if err != nil {
+				t.Fatalf("read recorded requests: %v", err)
+			}
+			if !strings.Contains(string(raw), `"method":"session/prompt"`) {
+				t.Fatal("prompt was not sent after thinking confirmation failed")
+			}
+		})
+	}
+}
+
+func TestKimiBackendOmitsThinkingConfigWhenUnset(t *testing.T) {
+	t.Parallel()
+	recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+	result := runKimiThinkingTest(t, fakePath, map[string]string{
+		"KIMI_REQUESTS_FILE": recordPath,
+	}, ExecOptions{Model: "kimi-code/k3"})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	raw, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read recorded requests: %v", err)
+	}
+	if strings.Contains(string(raw), `"method":"session/set_config_option"`) {
+		t.Fatal("thinking config was sent for an empty override")
+	}
+}
+
+// recordedKimiMethods returns the ACP method names the fake binary saw, in
+// order, from the file $KIMI_REQUESTS_FILE points at.
+func recordedKimiMethods(t *testing.T, recordPath string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read recorded requests: %v", err)
+	}
+	var methods []string
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			t.Fatalf("decode recorded request: %v", err)
+		}
+		method, _ := frame["method"].(string)
+		methods = append(methods, method)
+	}
+	return methods
+}
+
+// TestKimiBackendSetsThinkingLevelOnResumedSession covers the half of the
+// contract the fresh-session tests miss: a resumed session already carries
+// whatever thinking level its previous turn left behind, so the configured
+// level has to be re-applied — still before session/prompt, and without a
+// session/set_model call to piggyback on.
+func TestKimiBackendSetsThinkingLevelOnResumedSession(t *testing.T) {
+	t.Parallel()
+	recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+	result := runKimiThinkingTest(t, fakePath, map[string]string{
+		"KIMI_REQUESTS_FILE": recordPath,
+	}, ExecOptions{ResumeSessionID: "ses_thinking", ThinkingLevel: "high"})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+
+	wantOrder := []string{"initialize", "session/resume", "session/set_config_option", "session/prompt"}
+	if methods := recordedKimiMethods(t, recordPath); !reflect.DeepEqual(methods, wantOrder) {
+		t.Fatalf("ACP method order = %v, want %v", methods, wantOrder)
+	}
+}
+
+// TestKimiBackendOmitsThinkingConfigOnResumedSessionWhenUnset states the known
+// gap deliberately rather than leaving it undefined: with no configured level,
+// the backend sends nothing, so a resumed session keeps the level its previous
+// turn set. Switching an agent back to "Follow CLI config" therefore does not
+// clear a level already applied to a live session. Changing that means
+// deciding what "follow the CLI config" resolves to on the wire, which is
+// tracked separately; until then this test is what makes the behaviour visible.
+func TestKimiBackendOmitsThinkingConfigOnResumedSessionWhenUnset(t *testing.T) {
+	t.Parallel()
+	recordPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPThinkingScript()))
+
+	result := runKimiThinkingTest(t, fakePath, map[string]string{
+		"KIMI_REQUESTS_FILE": recordPath,
+	}, ExecOptions{ResumeSessionID: "ses_thinking"})
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+
+	wantOrder := []string{"initialize", "session/resume", "session/prompt"}
+	if methods := recordedKimiMethods(t, recordPath); !reflect.DeepEqual(methods, wantOrder) {
+		t.Fatalf("ACP method order = %v, want %v", methods, wantOrder)
 	}
 }
 
@@ -406,6 +669,13 @@ func TestKimiFreshSessionIncludesMcpServers(t *testing.T) {
 		t.Fatal("timeout waiting for result")
 	}
 
+	initFrame := findRecordedFrame(t, recordPath, "initialize")
+	initParams := initFrame["params"].(map[string]any)
+	capabilities := initParams["clientCapabilities"].(map[string]any)
+	if capabilities["terminal"] != true {
+		t.Fatalf("initialize.clientCapabilities.terminal = %#v, want true", capabilities["terminal"])
+	}
+
 	frame := findRecordedFrame(t, recordPath, "session/new")
 	params := frame["params"].(map[string]any)
 	servers, ok := params["mcpServers"].([]any)
@@ -418,6 +688,314 @@ func TestKimiFreshSessionIncludesMcpServers(t *testing.T) {
 	entry := servers[0].(map[string]any)
 	if entry["name"] != "fetch" || entry["command"] != "uvx" {
 		t.Fatalf("session/new.mcpServers[0]: got %v, want {name:fetch,command:uvx,...}", entry)
+	}
+}
+
+// fakeKimiPoisonedHistoryScript mimics the kimi CLI when asked to resume a
+// session whose conversation history contains an empty assistant message. The
+// adapter emits the "provider.api_error: 400 … role 'assistant' must not be
+// empty" line to stderr and returns a completed (end_turn) JSON-RPC response —
+// matching the real kimi adapter behaviour that prompted MUL-5154.
+func fakeKimiPoisonedHistoryScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_poison"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' "error: failed to run prompt: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty" >&2
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKimiBackendPoisonedHistorySetsResumeRejected verifies that when the kimi
+// backend receives the "assistant must not be empty" 400 error while resuming
+// a session, it sets ResumeRejected=true so the daemon clears the broken
+// session pointer and starts fresh on the next task.
+func TestKimiBackendPoisonedHistorySetsResumeRejected(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiPoisonedHistoryScript()))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_poison",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed for poisoned history, got %q", result.Status)
+		}
+		if !result.ResumeRejected {
+			t.Error("expected ResumeRejected=true so the daemon clears the broken session")
+		}
+		if !strings.Contains(result.Error, "must not be empty") {
+			t.Errorf("expected error to mention the poisoned-history detail, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// TestKimiBackendPoisonedHistoryFreshRunNoResumeRejected verifies that when
+// the same poisoned-history error occurs on a FRESH run (ResumeSessionID==""),
+// ResumeRejected must stay false. A fresh run cannot inherit a broken history,
+// so flagging it would incorrectly prevent the next task from resuming a good
+// session.
+func TestKimiBackendPoisonedHistoryFreshRunNoResumeRejected(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fresh"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' "error: failed to run prompt: provider.api_error: 400 the message at position 1 with role 'assistant' must not be empty" >&2
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if result.ResumeRejected {
+			t.Error("ResumeRejected must be false on a fresh run (no ResumeSessionID)")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// TestKimiBackendPoisonedHistoryTwoLineFormat verifies that the two-line kimi
+// stderr format (status on one line, detail on the next) is correctly detected
+// as a poisoned session. Both isPoisonedHistory and classifyPoisonedError must
+// fire even when "provider.api_error: 400" and "must not be empty" arrive on
+// separate lines.
+func TestKimiBackendPoisonedHistoryTwoLineFormat(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_poison_2line"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' "error: failed to run prompt: provider.api_error: 400" >&2
+      printf '%s\n' "detail: messages[43].content: content must not be empty" >&2
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_poison_2line",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("two-line: expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !result.ResumeRejected {
+			t.Error("two-line: expected ResumeRejected=true — isPoisonedHistory must detect across stderr lines")
+		}
+		if !strings.Contains(result.Error, "provider.api_error: 400") {
+			t.Errorf("two-line: expected error to contain provider.api_error: 400, got %q", result.Error)
+		}
+		if !strings.Contains(result.Error, "must not be empty") {
+			t.Errorf("two-line: expected error to contain must not be empty, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// TestKimiPoisonedHistorySurfacedErrorIsUnresumable pins the cross-package
+// contract this PR exists to satisfy: the Result.Error string the kimi sniffer
+// surfaces must be recognized by taskfailure.UnresumableHistory, the daemon's
+// backend-agnostic predicate (#6083) that retires the session so a later issue
+// mention or chat cannot resume the poisoned transcript. isPoisonedHistory now
+// delegates to that same predicate, but the daemon classifies the surfaced
+// string independently of ResumeRejected — via shouldRetryWithFreshSession and
+// GetLastTaskSession / GetLastChatTaskSession — so the string itself must carry
+// the emptiness complaint and the message locator through the sniffer's
+// extraction, for both Kimi stderr shapes. A regression that only checked
+// ResumeRejected would not catch a messageLocked change that dropped the
+// locator and silently broke the daemon-side exclusion.
+func TestKimiPoisonedHistorySurfacedErrorIsUnresumable(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		script     string
+		resumeID   string
+		wantLocate string // a token the surfaced error must retain
+	}{
+		{
+			name:       "single-line",
+			script:     fakeKimiPoisonedHistoryScript(),
+			resumeID:   "ses_poison",
+			wantLocate: "message at position",
+		},
+		{
+			name: "two-line",
+			script: `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_poison_2line"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' "error: failed to run prompt: provider.api_error: 400" >&2
+      printf '%s\n' "detail: messages[43].content: content must not be empty" >&2
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`,
+			resumeID:   "ses_poison_2line",
+			wantLocate: "messages[43",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fakePath := filepath.Join(t.TempDir(), "kimi")
+			writeTestExecutable(t, fakePath, []byte(tc.script))
+
+			backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+			if err != nil {
+				t.Fatalf("new kimi backend: %v", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+				Timeout:         5 * time.Second,
+				ResumeSessionID: tc.resumeID,
+			})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+
+			select {
+			case result, ok := <-session.Result:
+				if !ok {
+					t.Fatal("result channel closed without a value")
+				}
+				if !strings.Contains(result.Error, tc.wantLocate) {
+					t.Errorf("surfaced error dropped the history locator %q: %q", tc.wantLocate, result.Error)
+				}
+				if !taskfailure.UnresumableHistory(result.Error) {
+					t.Errorf("taskfailure.UnresumableHistory(%q) = false; the daemon would not retire the poisoned session", result.Error)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("timeout waiting for result")
+			}
+		})
 	}
 }
 

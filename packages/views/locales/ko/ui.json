@@ -1,8 +1,11 @@
 {
   "attach_file": "파일 첨부",
-  "toggle_sidebar": "사이드바 열기/닫기",
-  "pagination_previous": "이전 페이지로 이동",
-  "pagination_next": "다음 페이지로 이동",
+  "toggle_sidebar": "왼쪽 사이드바 열기/닫기",
   "copy_code": "코드 복사",
-  "plain_text": "일반 텍스트"
+  "plain_text": "일반 텍스트",
+  "error_boundary": {
+    "title": "이 섹션을 표시하는 중 문제가 발생했습니다.",
+    "description": "예기치 않은 오류가 발생했습니다.",
+    "try_again": "다시 시도"
+  }
 }

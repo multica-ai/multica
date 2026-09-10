@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import {
@@ -50,6 +51,25 @@ describe("resolveRemoteApiUrl", () => {
     ).toBeUndefined();
   });
 
+  // Same defect as the browser base, same fix: the rewrite target already
+  // appends the full incoming pathname (`/api/**`, `/uploads/**`, `/ws`), so a
+  // configured `/api` suffix would double it (MUL-5922).
+  it("strips a trailing /api from server-side rewrite targets", () => {
+    expect(
+      resolveRemoteApiUrl({ REMOTE_API_URL: "http://backend:8080/api" }),
+    ).toBe("http://backend:8080");
+    expect(
+      runtimeRewriteDestination("/api/config", {
+        NEXT_PUBLIC_API_URL: "https://app.example.com/api",
+      }),
+    ).toBe("https://app.example.com/api/config");
+    expect(
+      runtimeRewriteDestination("/uploads/workspaces/a.png", {
+        NEXT_PUBLIC_API_URL: "https://app.example.com/api",
+      }),
+    ).toBe("https://app.example.com/uploads/workspaces/a.png");
+  });
+
   it("ignores whitespace-only or invalid backend URL values", () => {
     expect(
       resolveRemoteApiUrl({
@@ -91,12 +111,85 @@ describe("browser runtime URLs", () => {
     ).toBe("https://api.example.com");
   });
 
+  // #6619: these two values used to reach the browser untouched and became the
+  // XHR base, so every request went to `/api/api/**` and every avatar to
+  // `<base>/uploads/**` — which the backend serves at the root, hence 404.
+  it("rejects a relative public API URL so the browser stays same-origin", () => {
+    expect(
+      resolveBrowserApiBaseUrl({ NEXT_PUBLIC_API_URL: "/api" }),
+    ).toBeUndefined();
+    expect(
+      resolveBrowserApiBaseUrl({ NEXT_PUBLIC_API_URL: "ftp://api.example.com" }),
+    ).toBeUndefined();
+  });
+
+  it("strips a trailing /api from an absolute public API URL", () => {
+    expect(
+      resolveBrowserApiBaseUrl({
+        NEXT_PUBLIC_API_URL: " https://app.example.com/api/ ",
+      }),
+    ).toBe("https://app.example.com");
+  });
+
+  it("keeps a non-/api path prefix so prefix-mounted backends still work", () => {
+    expect(
+      resolveBrowserApiBaseUrl({
+        NEXT_PUBLIC_API_URL: "https://app.example.com/multica",
+      }),
+    ).toBe("https://app.example.com/multica");
+  });
+
+  it("does not mistake an `api` host for an /api path suffix", () => {
+    expect(
+      resolveBrowserApiBaseUrl({ NEXT_PUBLIC_API_URL: "http://api:8080" }),
+    ).toBe("http://api:8080");
+  });
+
+  // The XHR base doubles as the base for `/uploads/**` (avatars, attachment
+  // previews) via resolvePublicFileUrlWithBase in packages/core. Assert the
+  // joined result, not just the base, because that join is what users saw fail.
+  it("produces working /api and /uploads targets for every supported value", () => {
+    const cases: Array<[string | undefined, string, string]> = [
+      [undefined, "/api/issues", "/uploads/avatars/a.png"],
+      ["/api", "/api/issues", "/uploads/avatars/a.png"],
+      [
+        "https://app.example.com/api",
+        "https://app.example.com/api/issues",
+        "https://app.example.com/uploads/avatars/a.png",
+      ],
+      [
+        "https://api.example.com",
+        "https://api.example.com/api/issues",
+        "https://api.example.com/uploads/avatars/a.png",
+      ],
+    ];
+
+    for (const [configured, expectedApi, expectedUpload] of cases) {
+      // Mirrors the browser: CoreProvider defaults an absent base to "" and the
+      // api client concatenates `${baseUrl}${path}`.
+      const base =
+        resolveBrowserApiBaseUrl({ NEXT_PUBLIC_API_URL: configured }) ?? "";
+      expect(`${base}/api/issues`).toBe(expectedApi);
+      expect(`${base}/uploads/avatars/a.png`).toBe(expectedUpload);
+    }
+  });
+
+  // Sub-path semantics are intentional, not incidental: the base is the mount
+  // prefix, so HTTP and websocket traffic must share it (see tryDeriveWsUrl).
   it("derives browser websocket URL from the public API URL", () => {
     expect(
       resolveBrowserWsUrl({
         NEXT_PUBLIC_API_URL: "https://api.example.com/base",
       }),
     ).toBe("wss://api.example.com/base/ws");
+  });
+
+  it("derives a root websocket URL once the /api suffix is stripped", () => {
+    expect(
+      resolveBrowserWsUrl({
+        NEXT_PUBLIC_API_URL: "https://app.example.com/api",
+      }),
+    ).toBe("wss://app.example.com/ws");
   });
 
   it("prefers an explicit browser websocket URL", () => {
@@ -120,6 +213,7 @@ describe("browser runtime URLs", () => {
 describe("runtimeRewriteDestination", () => {
   it("keeps same-origin fallback when no runtime upstreams are configured", () => {
     expect(runtimeRewriteDestination("/api/config", {})).toBeUndefined();
+    expect(runtimeRewriteDestination("/v1/context", {})).toBeUndefined();
     expect(runtimeRewriteDestination("/auth/send-code", {})).toBeUndefined();
     expect(
       runtimeRewriteDestination("/uploads/workspaces/a.png", {}),
@@ -151,6 +245,11 @@ describe("runtimeRewriteDestination", () => {
       }),
     ).toBe("http://backend:8080/api/config");
     expect(
+      runtimeRewriteDestination("/v1/issues/MUL-6581", {
+        REMOTE_API_URL: "http://backend:8080",
+      }),
+    ).toBe("http://backend:8080/v1/issues/MUL-6581");
+    expect(
       runtimeRewriteDestination("/auth/send-code", {
         REMOTE_API_URL: "http://backend:8080",
       }),
@@ -175,6 +274,27 @@ describe("runtimeRewriteDestination", () => {
         DOCS_URL: "http://multica-docs:3000",
       }),
     ).toBe("http://multica-docs:3000/docs/zh/agents");
+  });
+
+  it("maps the CLI health probe to the runtime API origin", () => {
+    expect(
+      runtimeRewriteDestination("/health", {
+        REMOTE_API_URL: "http://backend:8080",
+      }),
+    ).toBe("http://backend:8080/health");
+    expect(runtimeRewriteDestination("/health", {})).toBeUndefined();
+    // Probe variants stay unproxied: /healthz is the k8s alias and /readyz
+    // the deep check — both go to the backend directly in every topology.
+    expect(
+      runtimeRewriteDestination("/healthz", {
+        REMOTE_API_URL: "http://backend:8080",
+      }),
+    ).toBeUndefined();
+    expect(
+      runtimeRewriteDestination("/readyz", {
+        REMOTE_API_URL: "http://backend:8080",
+      }),
+    ).toBeUndefined();
   });
 
   it("maps websocket paths to the runtime API origin", () => {

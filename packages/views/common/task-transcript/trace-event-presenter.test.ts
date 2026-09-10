@@ -1,10 +1,12 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   collapseDiffContext,
   parseUnifiedDiff,
   stripShellWrapper,
   traceEventCopyText,
-  traceEventDefaultExpanded,
+  readImageResult,
+  base64ByteLength,
   traceEventDetail,
   traceEventHasDetail,
   traceEventKind,
@@ -13,6 +15,16 @@ import {
   traceToolArgSummary,
   unwrapToolOutput,
 } from "./trace-event-presenter";
+
+describe("traceEventSummary truncation", () => {
+  it("truncates a long summary with the single-character ellipsis", () => {
+    const summary = traceEventSummary({ type: "thinking", content: "x".repeat(300) });
+    expect(summary.endsWith("…")).toBe(true);
+    expect(summary.endsWith("...")).toBe(false);
+    // 200 content code points plus the ellipsis.
+    expect(Array.from(summary)).toHaveLength(201);
+  });
+});
 
 describe("traceEventKind / traceEventLabel", () => {
   it("maps the five persisted types and keeps unknown types as generic", () => {
@@ -113,27 +125,39 @@ describe("traceEventCopyText", () => {
   });
 });
 
-describe("traceEventDefaultExpanded", () => {
-  const agent = { type: "text", content: "hello" };
-  const error = { type: "error", content: "boom" };
-  const thinking = { type: "thinking", content: "hmm" };
-  const tool = { type: "tool_use", tool: "Bash", input: { command: "ls" } };
+describe("readImageResult", () => {
+  it("reads a base64 image block so a screenshot renders as a picture", () => {
+    const output = JSON.stringify([
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "AAAA" } },
+    ]);
 
-  it("smart: agent and error read without a click, process noise stays folded", () => {
-    expect(traceEventDefaultExpanded(agent, "smart")).toBe(true);
-    expect(traceEventDefaultExpanded(error, "smart")).toBe(true);
-    expect(traceEventDefaultExpanded(thinking, "smart")).toBe(false);
-    expect(traceEventDefaultExpanded(tool, "smart")).toBe(false);
+    expect(readImageResult(output)).toEqual({ mediaType: "image/jpeg", base64: "AAAA" });
   });
 
-  it("expanded/collapsed override the hierarchy wholesale", () => {
-    expect(traceEventDefaultExpanded(thinking, "expanded")).toBe(true);
-    expect(traceEventDefaultExpanded(agent, "collapsed")).toBe(false);
+  it("defaults the media type when the provider omits it", () => {
+    const output = JSON.stringify({ type: "image", source: { type: "base64", data: "BBBB" } });
+
+    expect(readImageResult(output)?.mediaType).toBe("image/png");
   });
 
-  it("a row without detail never expands", () => {
-    expect(traceEventDefaultExpanded({ type: "text" }, "expanded")).toBe(false);
+  it("ignores ordinary output without paying for a parse", () => {
+    expect(readImageResult('{"ok":true}')).toBeNull();
+    expect(readImageResult("plain terminal output")).toBeNull();
+    expect(readImageResult(undefined)).toBeNull();
+    // Shaped like an image block but not valid JSON.
+    expect(readImageResult('[{"type":"image","source":{"type":"base64"')).toBeNull();
+  });
+
+  it("reports the decoded size so the caption is not a base64 length", () => {
+    expect(base64ByteLength("AAAA")).toBe(3);
+    expect(base64ByteLength("AAA=")).toBe(2);
+  });
+});
+
+describe("traceEventHasDetail", () => {
+  it("is false for an empty body", () => {
     expect(traceEventHasDetail({ type: "tool_use", input: {} })).toBe(false);
+    expect(traceEventHasDetail({ type: "text" })).toBe(false);
   });
 });
 

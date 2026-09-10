@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -115,6 +116,24 @@ type failDeleteCommentDB struct {
 	delegate db.DBTX
 }
 
+type zeroDeleteCommentDB struct {
+	delegate db.DBTX
+}
+
+type deleteCommentResultRow struct {
+	changed bool
+	err     error
+}
+
+func (r deleteCommentResultRow) Scan(dest ...interface{}) error {
+	if r.err != nil {
+		return r.err
+	}
+	*(dest[0].(*bool)) = r.changed
+	*(dest[1].(*int64)) = 0
+	return nil
+}
+
 func (f *failDeleteCommentDB) Exec(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
 	if strings.Contains(query, "-- name: DeleteComment") {
 		return pgconn.CommandTag{}, errors.New("injected comment deletion failure")
@@ -127,7 +146,28 @@ func (f *failDeleteCommentDB) Query(ctx context.Context, query string, args ...i
 }
 
 func (f *failDeleteCommentDB) QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row {
+	if strings.Contains(query, "-- name: DeleteComment") {
+		return deleteCommentResultRow{err: errors.New("injected comment deletion failure")}
+	}
 	return f.delegate.QueryRow(ctx, query, args...)
+}
+
+func (z *zeroDeleteCommentDB) Exec(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
+	if strings.Contains(query, "-- name: DeleteComment") {
+		return pgconn.NewCommandTag("DELETE 0"), nil
+	}
+	return z.delegate.Exec(ctx, query, args...)
+}
+
+func (z *zeroDeleteCommentDB) Query(ctx context.Context, query string, args ...interface{}) (pgx.Rows, error) {
+	return z.delegate.Query(ctx, query, args...)
+}
+
+func (z *zeroDeleteCommentDB) QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row {
+	if strings.Contains(query, "-- name: DeleteComment") {
+		return deleteCommentResultRow{changed: false}
+	}
+	return z.delegate.QueryRow(ctx, query, args...)
 }
 
 func (f *failNthBegin) Begin(ctx context.Context) (pgx.Tx, error) {
@@ -192,6 +232,16 @@ func createCommentDeliveryFixture(t *testing.T, label string) commentDeliveryFix
 		threadID:  []string{ids[0], ids[1], ids[1]},
 		content:   contents,
 	}
+}
+
+func makeCommentDeliverySingleThread(t *testing.T, fixture commentDeliveryFixture) {
+	t.Helper()
+	root := dbfx.Comment(t, fixture.issueID, "thread root", testutil.Cols{"author_type": "agent", "author_id": fixture.agentID})
+	dbfx.Exec(t, `UPDATE comment SET created_at=now()-interval '10 minutes' WHERE id=$1`, root)
+	for _, id := range fixture.commentID {
+		dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE id=$1`, id, root)
+	}
+	dbfx.Exec(t, `UPDATE agent_task_queue SET trigger_comment_id=trigger_comment_id WHERE id=$1`, fixture.taskID)
 }
 
 func claimCommentDeliveryFixture(t *testing.T, fixture commentDeliveryFixture, capabilities string) AgentTaskResponse {
@@ -314,6 +364,7 @@ func TestClaimTaskByRuntime_CoalescedOnlyStaleTaskDoesNotReuseDeletedTriggerCapa
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Deleted trigger stale claim")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign stale-claim issue: %v", err)
 	}
@@ -347,6 +398,7 @@ func TestUpdateComment_RequeuesSurvivingCoalescedBatch(t *testing.T) {
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Edited trigger batch repair")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign edited-trigger issue: %v", err)
 	}
@@ -369,6 +421,7 @@ func TestDeleteComment_RequeuesSurvivingCoalescedBatch(t *testing.T) {
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Deleted trigger batch repair")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign deleted-trigger issue: %v", err)
 	}
@@ -396,6 +449,7 @@ func TestUpdateComment_CancelsAndRequeuesWhenEditedInputIsCoalesced(t *testing.T
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Edited coalesced input repair")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign edited-coalesced issue: %v", err)
 	}
@@ -411,6 +465,13 @@ func TestUpdateComment_CancelsAndRequeuesWhenEditedInputIsCoalesced(t *testing.T
 	}
 
 	assertRepairedCommentBatch(t, fixture, fixture.commentID[0], fixture.commentID[1:])
+	original, err := testHandler.Queries.GetAgentTask(context.Background(), parseUUID(fixture.taskID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !taskToResponse(original, testWorkspaceID).CancelledByCommentChange {
+		t.Fatal("edited input must identify the cancelled run as invalidated by a comment change")
+	}
 }
 
 func TestDeleteComment_CancelsAndRequeuesWhenDeletedInputIsCoalesced(t *testing.T) {
@@ -418,6 +479,7 @@ func TestDeleteComment_CancelsAndRequeuesWhenDeletedInputIsCoalesced(t *testing.
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Deleted coalesced input repair")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign deleted-coalesced issue: %v", err)
 	}
@@ -438,6 +500,7 @@ func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Failed deletion batch repair")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign failed-delete issue: %v", err)
 	}
@@ -459,6 +522,29 @@ func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
 	if existing != 1 {
 		t.Fatalf("failed delete unexpectedly removed trigger")
 	}
+	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[:2])
+}
+
+func TestDeleteComment_ConcurrentNoOpIsReportedAndRestoresCancelledBatch(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fixture := createCommentDeliveryFixture(t, "Concurrent deletion batch repair")
+	makeCommentDeliverySingleThread(t, fixture)
+	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
+		t.Fatalf("assign concurrent-delete issue: %v", err)
+	}
+
+	zeroHandler := *testHandler
+	zeroHandler.Queries = db.New(&zeroDeleteCommentDB{delegate: testPool})
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodDelete, "/api/comments/"+fixture.commentID[2], nil)
+	req = withURLParam(req, "commentId", fixture.commentID[2])
+	zeroHandler.DeleteComment(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("DeleteComment no-op: got %d: %s", w.Code, w.Body.String())
+	}
+
 	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[:2])
 }
 
@@ -526,6 +612,7 @@ func TestClaimTaskByRuntime_PayloadOverflowReceiptsOnlyEmbeddedPrefix(t *testing
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Comment payload overflow")
+	makeCommentDeliverySingleThread(t, fixture)
 	oversized := strings.Repeat("x", maxClaimCommentPayloadBytes+1024)
 	if _, err := testPool.Exec(context.Background(), `UPDATE comment SET content = $2 WHERE id = $1`, fixture.commentID[0], oversized); err != nil {
 		t.Fatalf("make first coalesced comment oversized: %v", err)
@@ -908,6 +995,7 @@ func TestFinalizeTaskClaim_ReceiptCASFailureRollsBackInsertedToken(t *testing.T)
 		t.Fatalf("claim fixture task: task=%v err=%v", task, err)
 	}
 	tokenHash := "rolled-back-token-" + fixture.taskID
+	daemonTokenHash := "rolled-back-daemon-token-" + fixture.taskID
 	_, err = testHandler.TaskService.FinalizeTaskClaim(ctx, *task, db.CreateTaskTokenParams{
 		TokenHash:   tokenHash,
 		TaskID:      task.ID,
@@ -915,7 +1003,12 @@ func TestFinalizeTaskClaim_ReceiptCASFailureRollsBackInsertedToken(t *testing.T)
 		WorkspaceID: parseUUID(testWorkspaceID),
 		UserID:      parseUUID(testUserID),
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
-	}, []pgtype.UUID{parseUUID("00000000-0000-0000-0000-000000000099")}, true)
+	}, []pgtype.UUID{parseUUID("00000000-0000-0000-0000-000000000099")}, true, db.CreateDaemonTokenParams{
+		TokenHash:   daemonTokenHash,
+		WorkspaceID: parseUUID(testWorkspaceID),
+		DaemonID:    "daemon-claim-rollback",
+		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+	})
 	if err == nil {
 		t.Fatalf("FinalizeTaskClaim accepted an out-of-plan receipt")
 	}
@@ -925,6 +1018,13 @@ func TestFinalizeTaskClaim_ReceiptCASFailureRollsBackInsertedToken(t *testing.T)
 	}
 	if tokenCount != 0 {
 		t.Fatalf("receipt CAS failure committed %d generated token(s)", tokenCount)
+	}
+	var daemonTokenCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM daemon_token WHERE token_hash = $1`, daemonTokenHash).Scan(&daemonTokenCount); err != nil {
+		t.Fatalf("count rolled-back daemon token: %v", err)
+	}
+	if daemonTokenCount != 0 {
+		t.Fatalf("receipt CAS failure committed %d daemon token(s)", daemonTokenCount)
 	}
 	if got := deliveredCommentIDsForTask(t, fixture.taskID); len(got) != 0 {
 		t.Fatalf("receipt CAS failure advanced receipt: %v", got)

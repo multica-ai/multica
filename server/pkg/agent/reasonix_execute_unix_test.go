@@ -362,7 +362,7 @@ done
 	fakePath := filepath.Join(tempDir, "reasonix")
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	models, err := discoverReasonixModels(context.Background(), fakePath)
+	models, err := discoverReasonixModels(context.Background(), Command{Path: fakePath})
 	if err != nil {
 		t.Fatalf("discoverReasonixModels: %v", err)
 	}

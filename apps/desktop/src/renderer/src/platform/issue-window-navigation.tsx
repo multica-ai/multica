@@ -6,6 +6,7 @@ import {
 } from "@multica/core/diagnostics";
 import {
   NavigationProvider,
+  type LinkClickIntent,
   type NavigationAdapter,
 } from "@multica/views/navigation";
 import { parseIssueWindowPath } from "../../../shared/issue-window";
@@ -29,10 +30,23 @@ function useContentLinkHandler(
 ) {
   useEffect(() => {
     const handler = (e: Event) => {
-      const path = (e as CustomEvent<{ path?: string }>).detail?.path;
+      const detail = (
+        e as CustomEvent<{ path?: string; disposition?: LinkClickIntent }>
+      ).detail;
+      const path = detail?.path;
       if (!path) return;
       const issuePath = parseIssueWindowPath(path);
       if (issuePath) {
+        if (detail?.disposition && detail.disposition !== "push") {
+          // A modifier click asks for a separate surface; this window has no
+          // tabs, so its "new tab" is a detached issue window — the same
+          // thing the adapter's openInNewTab produces.
+          void window.desktopAPI.openIssueWindow({
+            path: issuePath.path,
+            title: "Issue",
+          });
+          return;
+        }
         void navigate(issuePath.path);
         return;
       }
@@ -91,6 +105,7 @@ export function IssueWindowNavigationProvider({
       back: () => void navigate(-1),
       pathname: location.pathname,
       searchParams: new URLSearchParams(location.search),
+      hash: location.hash,
       openInNewTab: (path, title) => {
         void window.desktopAPI.openIssueWindow({
           path,
@@ -100,7 +115,13 @@ export function IssueWindowNavigationProvider({
       getShareableUrl: (path) =>
         runtimeConfig.ok ? `${runtimeConfig.config.appUrl}${path}` : path,
     };
-  }, [location.pathname, location.search, navigate, runtimeConfig]);
+  }, [
+    location.pathname,
+    location.search,
+    location.hash,
+    navigate,
+    runtimeConfig,
+  ]);
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;
 }

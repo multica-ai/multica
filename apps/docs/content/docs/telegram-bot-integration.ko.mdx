@@ -1,0 +1,80 @@
+---
+title: Telegram Bot 연동
+description: 직접 만든 Telegram Bot을 Multica 에이전트에 연결해 DM, 그룹, forum topic, /issue에서 사용합니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica는 Telegram 공식 [@BotFather](https://t.me/BotFather)에서 만든 Bot을 사용합니다. Bot 하나는 Multica 에이전트 하나에 연결됩니다.
+
+Telegram 연동은 [커뮤니티가 유지관리](/community-maintained)합니다. 매 릴리스에 포함되지만 공식 지원 SLA는 제공되지 않습니다. 문제가 있으면 [GitHub issues](https://github.com/multica-ai/multica/issues)에 보고해 주세요.
+
+## 시작하기 전에
+
+- 워크스페이스 owner 또는 admin만 Bot을 연결할 수 있습니다.
+- API 서버에서 `https://api.telegram.org`에 접속할 수 있어야 합니다.
+- @BotFather가 발급한 Bot token이 필요합니다. 비밀번호처럼 보호하세요.
+
+## 1. Bot 만들기
+
+1. [@BotFather](https://t.me/BotFather)를 열고 `/newbot`을 보냅니다.
+2. 표시 이름과 `bot`으로 끝나는 username을 정합니다.
+3. HTTP API token을 복사합니다.
+4. **Group Privacy**를 켜 둡니다. 그룹에서는 명령, 명시적 @mention, Bot 메시지에 대한 답장만 처리합니다.
+
+<Callout type="warning">
+token을 issue, 채팅, 로그, 코드 저장소에 남기지 마세요. 노출되었다면 @BotFather에서 폐기하고 새 token으로 다시 연결하세요.
+</Callout>
+
+## 2. 에이전트에 연결하기
+
+1. Multica의 **Agents**에서 에이전트를 선택하고 **Integrations**를 엽니다.
+2. **Connect Telegram**을 클릭합니다.
+3. Bot token을 붙여 넣고 **Connect**를 클릭합니다.
+
+Multica는 Telegram에서 Bot을 검증하고 long polling과 충돌하는 webhook이 없는지 확인한 뒤 token을 암호화해 저장하고 감독되는 `getUpdates` 연결을 시작합니다. 다른 에이전트나 워크스페이스에 연결된 Bot은 먼저 기존 연결을 해제해야 합니다.
+
+## 최초 사용과 계정 바인딩
+
+멤버가 처음 Bot에 메시지를 보내면 일회용 Multica 계정 바인딩 링크를 받습니다. 같은 워크스페이스의 Multica 계정으로 로그인한 뒤 Telegram으로 돌아가 메시지를 다시 보내세요. 링크는 15분 후 만료됩니다.
+
+그룹에는 bearer link를 공개하지 않습니다. Bot은 먼저 개인 채팅을 시작하라고 안내합니다. 현재 워크스페이스 멤버만 Bot을 사용할 수 있습니다.
+
+## Bot 사용하기
+
+- **개인 채팅**: @mention 없이 텍스트를 보냅니다.
+- **그룹**: Bot을 추가한 뒤 @mention하거나 Bot 메시지에 직접 답장합니다. 수락된 메시지는 이어지는 Multica 대화에 남지만 Bot을 지정하지 않은 그룹 대화는 수집하지 않습니다. 다른 사람의 메시지에 답장할 때는 Bot도 명시적으로 @mention해야 하며, 이 경우에만 인용한 발신자와 텍스트(또는 caption)가 새 지시의 맥락에 포함됩니다. Bot @mention 없이 사람에게 답장하면 Bot이 실행되지 않습니다. forum topic은 topic별로 세션이 분리됩니다.
+- **`/new` / `/new <message>`**: 비어 있는 새 Multica Chat을 만들고 해당 Telegram 대화의 이후 메시지를 새 Chat으로 라우팅합니다. 메시지를 함께 보내면 새 Chat의 첫 번째 대화가 됩니다. 다른 멤버에게 답장하면서 Bot을 명시적으로 @mention하면 선택한 인용 내용도 첫 번째 대화에 포함됩니다.
+- **`/clear` / `/clear <message>`**: 현재 Multica Chat을 유지하면서 다음 비어 있지 않은 메시지에 새 에이전트 컨텍스트를 적용합니다. 메시지를 함께 보내면 경계 이후의 첫 번째 대화가 되며 명시적으로 선택한 답장 인용도 유지됩니다.
+- **`/issue <title>`**: Multica issue를 만듭니다. 다음 줄은 선택 설명으로 사용됩니다. `/issue@your_bot` 형식도 지원합니다.
+
+Bot은 Telegram 메시지를 보내고 편집해 텍스트 응답을 스트리밍하며, 원래 메시지를 인용하고 forum topic을 유지합니다. 긴 응답은 자동으로 나뉩니다. 최종 응답은 프로세스 내에서 비동기로 전달됩니다. 일반적으로 한 채팅의 백오프 대기는 worker를 점유하지 않습니다. 캐시가 용량 한계에 도달해 백오프 상태를 압축하면 같은 Bot installation의 다른 채팅도 안전을 위해 지연될 수 있습니다. 최종 응답 큐의 용량은 고정되어 있으며 한도를 넘은 작업은 명시적으로 거부되고 오류로 기록됩니다. 큐는 서비스 재시작 후 복구되지 않습니다.
+
+현재 버전은 텍스트만 받습니다. 이미지, 파일, 영상, 음성, sticker 등은 개인 채팅 또는 Bot에게 보낸 그룹 메시지에서 명확한 미지원 안내를 반환합니다.
+
+## 관리 및 자체 호스팅
+
+**Settings → Integrations → Telegram**에서 연결된 Bot을 확인할 수 있습니다. owner와 admin은 연결을 해제할 수 있으며, 기존 대화와 감사 기록은 유지됩니다.
+
+자체 호스팅 환경에서는 API 서버 시작 전에 고정된 32-byte 암호화 키를 설정합니다.
+
+```dotenv
+MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+`openssl rand -base64 32`로 생성할 수 있습니다. 바인딩 링크는 `MULTICA_APP_URL`을 사용하며, 없으면 `FRONTEND_ORIGIN`으로 대체합니다. 서버는 `api.telegram.org`에 HTTPS로 접속할 수 있어야 하며 표준 `HTTPS_PROXY` / `NO_PROXY`를 사용할 수 있습니다.
+
+## 문제 해결
+
+- **Bot 검증 실패**: 먼저 서버 네트워크와 proxy를 확인합니다. Telegram이 token을 거부한 경우에만 재발급하세요.
+- **webhook conflict**: 연결 전에 기존 webhook을 제거합니다.
+- **409 polling conflict**: 같은 Bot을 polling하는 다른 프로세스를 중지하거나 환경별로 Bot을 분리합니다.
+- **그룹에서 답장 없음**: Bot이 그룹에 있고 메시지가 @mention 또는 Bot에 대한 답장인지 확인합니다.
+- **바인딩 링크 만료**: Bot에 새 DM을 보내 최신 링크를 사용합니다.
+- **실행되지 않음**: 에이전트의 archive 상태와 [runtime](/daemon-runtimes)을 확인합니다.
+
+## 다음 단계
+
+- [채팅 연동](/channels)
+- [채팅](/chat)
+- [Issues](/issues)

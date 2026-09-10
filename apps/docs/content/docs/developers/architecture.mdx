@@ -5,6 +5,8 @@ description: Learn how Multica's clients, Go service, execution daemon, and shar
 
 Multica consists of a Go backend, multiple clients, and a daemon that runs on execution computers. PostgreSQL stores collaboration data; the daemon claims tasks and invokes local AI coding tools.
 
+This implementation-focused page uses **task** for the internal scheduler, API, and database entity behind a product **Run**. The UI and product documentation call it a Run; identifiers such as `TaskService` and `task_id` remain unchanged for compatibility.
+
 ```text
 Web / Desktop / Mobile / CLI
              │

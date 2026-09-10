@@ -57,6 +57,13 @@ Running `make selfhost` again reuses the existing `.env` and volumes; it does no
 
 <Callout type="info">
 `make selfhost` pulls published images and does not build the code in your checkout. To test local source, use `make selfhost-build`.
+
+The published images track the newest **release tag**, while a plain `git clone` checks out `main`, which usually runs ahead. If you build anything from this checkout — the CLI, or images via `make selfhost-build` — check out the matching release tag first so built binaries and the running containers stay on the same version:
+
+```bash
+git fetch --tags --depth 1
+git checkout $(git tag -l 'v*' --sort=-v:refname | head -1)
+```
 </Callout>
 
 ## 2. Confirm the services are ready
@@ -131,12 +138,50 @@ api.example.com {
 }
 ```
 
+If you would rather serve everything on a **single origin** (one domain, or one host with one port — common on small servers), route the daemon-critical paths to the backend explicitly and let the frontend handle the rest:
+
+```text
+multica.example.com {
+    # CLI reachability probe: `multica setup` GETs <server-url>/health and
+    # needs a 200 — older web releases don't forward it, so route it directly
+    handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Browser realtime WebSocket — the web image cannot proxy WS upgrades
+    handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Daemon long-connection WebSocket: daemons dial {server-url}/api/daemon/ws
+    # (not /ws). Without this route the handshake fails and the daemon silently
+    # falls back to polling
+    handle /api/daemon/ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Everything else goes to the frontend, which forwards API and login requests
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+```
+
+With a single origin, point both URLs at it (`FRONTEND_ORIGIN` and `MULTICA_APP_URL` in `.env`, then `--server-url` and `--app-url` in `multica setup self-host`).
+
 Caddy obtains TLS certificates and forwards WebSockets. After editing `.env`, recreate the containers with `up -d` so the new configuration takes effect:
 
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
 curl -fsS https://api.example.com/readyz
+curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
+
+The last command prints `daemon_server_url`, the URL daemons use to reach the API: `MULTICA_DAEMON_SERVER_URL` when set, then `MULTICA_PUBLIC_URL`, otherwise the app URL — `MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN`. When neither `MULTICA_APP_URL` nor `FRONTEND_ORIGIN` is set, the field is omitted from the response entirely (so the grep prints nothing), even if `MULTICA_DAEMON_SERVER_URL` or `MULTICA_PUBLIC_URL` is set. If it prints a `localhost` address, `.env` still carries local defaults: set `FRONTEND_ORIGIN` and `MULTICA_APP_URL` explicitly to the public URLs instead of relying on the `${FRONTEND_PORT}` references copied from `.env.example`, then recreate the containers.
 
 <Callout type="warning">
 `docker compose restart` only restarts existing containers and does not re-read `.env`. After changing configuration, run `docker compose -f docker-compose.selfhost.yml up -d` to re-read `.env`.
@@ -170,7 +215,7 @@ Self-hosted deployments default to `APP_ENV=production`, which disables fixed ve
 Run the commands below on **the computer that runs your AI coding tools**, which is not necessarily the server running Docker.
 
 <Callout type="warning">
-Tasks run with the full permissions of the user running the daemon — they can read and write everything that user can. Run the daemon as a dedicated Unix user, in a container, or in a VM rather than under your personal account. See the [security model](/security-model).
+Runs execute with the full permissions of the user running the daemon — they can read and write everything that user can. Run the daemon as a dedicated Unix user, in a container, or in a VM rather than under your personal account. See the [security model](/security-model).
 </Callout>
 
 Install the Multica CLI first:
@@ -201,7 +246,7 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-The command first checks `<server-url>/health`, then opens a browser to complete login. After login it stores local credentials and starts the daemon.
+The command first checks `<server-url>/health`, then opens a browser to complete login. After login it stores local credentials and starts the daemon. A `Server not reachable` error at this step means the probe could not get a 200 from `/health`: the proxy forwards everything to a web release that does not forward the path, the proxy does not route `/health` to the backend at all, or a lower-level failure (DNS, TLS, firewall, timeout, 5xx from the backend) — see [Troubleshooting](/troubleshooting#multica-setup-reports-the-server-is-not-reachable).
 
 Confirm the connection:
 
@@ -299,7 +344,7 @@ Use your own `POSTGRES_USER` / `POSTGRES_DB` from `.env` if you changed them fro
 
 ### Migrations run themselves
 
-As in [Step 1](#1-pull-the-project-and-start-the-backend), the backend container runs `./migrate up` on startup (`docker/entrypoint.sh`) before serving traffic. There is no separate upgrade command — bringing up the new image *is* the migration step. Watch it happen:
+As in [Step 1](#1-start-multica), the backend container runs `./migrate up` on startup (`docker/entrypoint.sh`) before serving traffic. There is no separate upgrade command — bringing up the new image *is* the migration step. Watch it happen:
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs -f backend
@@ -334,7 +379,7 @@ Helm has its own upgrade path: set `images.backend.tag` / `images.frontend.tag` 
 |---|---|
 | `/readyz` does not return `ok` | Run `docker compose -f docker-compose.selfhost.yml logs backend postgres`. |
 | No verification code arrives | Request a code, then search the backend logs for `Verification code`. |
-| `setup self-host` reports the server is unreachable | From the computer, request `https://api.example.com/health` to confirm DNS, TLS, and the reverse proxy are all reachable. |
+| `setup self-host` reports the server is unreachable | From the computer, request `https://api.example.com/health` to confirm DNS, TLS, and the reverse proxy are all reachable. A 404 means the proxy sends `/health` to an older web release that does not forward it — route it to the backend ([Troubleshooting](/troubleshooting#multica-setup-reports-the-server-is-not-reachable)). |
 | The daemon lists no `Agents` | Confirm the AI coding tools are on `PATH` and logged in, then run `multica daemon restart`. |
 | Issues stay queued | Run `multica daemon status` to confirm the daemon is running and connected to the workspace. |
 

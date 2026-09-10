@@ -77,7 +77,7 @@ If a token may have leaked, revoke it immediately under **Settings → API Token
 
 ## Temporary tokens for agent runs
 
-When the daemon claims a task, the server creates a temporary token for that run, prefixed with `mat_`. It is bound to the current user, workspace, agent, and task, is valid for at most 24 hours, and is cleaned up when the task ends.
+When the daemon claims a run, the server creates a temporary token for that run, prefixed with `mat_`. It is bound to the current user, workspace, agent, and run, is valid for at most 24 hours, and is cleaned up when the run ends.
 
 The daemon injects this temporary token into the AI coding tool instead of handing the user's PAT to the agent. Requests made by the agent are therefore recorded as agent actions, and the token can't be used to reach sensitive operations restricted to users or owners.
 

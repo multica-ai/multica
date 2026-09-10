@@ -7,6 +7,7 @@
 
 import { isGlobalPath, isReservedSlug } from "@multica/core/paths";
 import { isIssueIdentifier } from "@multica/ui/markdown";
+import type { LinkClickIntent } from "../../navigation/click-intent";
 
 /**
  * Top-level workspace-scoped routes. Used to detect "/{route}/..." paths that
@@ -245,11 +246,17 @@ export function parseWorkspaceEntityLink(
  *
  * `appOrigin` lets absolute URLs pointing back at this deployment take the same
  * internal route as a relative path.
+ *
+ * `intent` is how the user clicked (see `resolveClickIntent`); the platform
+ * listener answering `multica:navigate` executes it — in-place navigation for
+ * "push", a new tab otherwise. External links ignore it: they always hand off
+ * to the browser / system browser.
  */
 export function openLink(
   href: string,
   currentSlug?: string | null,
   appOrigin?: string | null,
+  intent: LinkClickIntent = "push",
 ): void {
   const internalPath = href.startsWith("/")
     ? href
@@ -267,7 +274,9 @@ export function openLink(
       // the user wrote what they meant.
     }
     window.dispatchEvent(
-      new CustomEvent("multica:navigate", { detail: { path } }),
+      new CustomEvent("multica:navigate", {
+        detail: { path, disposition: intent },
+      }),
     );
   } else {
     window.open(href, "_blank", "noopener,noreferrer");

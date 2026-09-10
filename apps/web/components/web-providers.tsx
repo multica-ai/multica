@@ -7,11 +7,13 @@ import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
 import { useWelcomeStore } from "@multica/core/onboarding";
 import packageJson from "../package.json";
 import { WebNavigationProvider } from "@/platform/navigation";
+import { WebScrollRestorationProvider } from "@/platform/scroll-restoration";
 import {
   setLoggedInCookie,
   clearLoggedInCookie,
 } from "@/features/auth/auth-cookie";
 import { detectWebOS } from "@/platform/client-os";
+import { useUserLocaleSyncEnabled } from "@/platform/user-locale-sync";
 
 // Legacy token in localStorage → keep this session in token mode so users who
 // logged in before the cookie-auth migration stay authed. They migrate to
@@ -57,6 +59,7 @@ export function WebProviders({
   wsUrl?: string;
 }) {
   const cookieAuth = !hasLegacyToken();
+  const syncUserLocale = useUserLocaleSyncEnabled();
   // Stable identity reference so downstream effects keyed on it don't see a
   // new object on every parent render.
   const identity = useMemo(
@@ -84,8 +87,11 @@ export function WebProviders({
       locale={locale}
       resources={resources}
       localeAdapter={localeAdapter}
+      syncUserLocale={syncUserLocale}
     >
-      <WebNavigationProvider>{children}</WebNavigationProvider>
+      <WebNavigationProvider>
+        <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
+      </WebNavigationProvider>
     </CoreProvider>
   );
 }

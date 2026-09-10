@@ -152,13 +152,22 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 	if freshSource == "" {
 		freshSource = msg.Body
 	}
-	if body, ok := engine.ParseFreshSessionCommand(freshSource); ok {
-		msg.ForceFreshSession = true
-		msg.Body = body
+	startChat := false
+	if control, ok := engine.ParseControlCommand(freshSource); ok {
+		msg.Body = control.Body
+		switch control.Kind {
+		case engine.ControlCommandFreshSession:
+			msg.ForceFreshSession = true
+		case engine.ControlCommandNewChat:
+			// A new Chat must not inherit adapter-generated recent context from
+			// the route's previous Chat. Explicit quote/forward context is still
+			// expanded below because the user attached it to this command.
+			startChat = true
+		}
 	}
 
 	isForward := msg.MessageType == larkMsgTypeMergeForward
-	wantRecent := e.recentContextSize > 0 && msg.ChatType == ChatTypeGroup && msg.AddressedToBot
+	wantRecent := !startChat && e.recentContextSize > 0 && msg.ChatType == ChatTypeGroup && msg.AddressedToBot
 	if msg.ParentID == "" && !isForward && !wantRecent {
 		// Nothing to expand and no group prefetch wanted — no network call.
 		return msg
@@ -222,10 +231,12 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 			b.WriteString("\n\n")
 		}
 		b.WriteString(e.renderQuotedBlock(msg.ParentID, quotedItems, quotedErr, names))
+		msg.HasSelectedContext = true
 	}
 
 	var core string
 	if isForward {
+		msg.HasSelectedContext = true
 		if forwardErr != nil {
 			e.logger.Warn("lark enricher: forward fetch failed", "message_id", msg.MessageID, "err", forwardErr)
 			core = forwardedErrorBlock()
@@ -461,9 +472,17 @@ func classifyRecentContextFetchError(err error) recentContextFetchClassification
 	if errors.Is(err, errRecentContextChannelUnbound) {
 		return recentContextFetchClassification{category: recentContextFailureChannelUnbound}
 	}
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
-		return classifyRecentContextAPIError(apiErr.Code, apiErr.Msg)
+	// A Lark business code names the failure exactly, so prefer it over
+	// the text heuristics below — read through larkErrorCodeMsg it is
+	// found in either shape that carries one: the 2xx envelope a call
+	// site rejected (*APIError) and the non-2xx reply the HTTP client
+	// returns. Only a code that resolves to a real category short-
+	// circuits; anything else falls through, so a status-only signal
+	// like "http 403" still classifies on the error text.
+	if code, msg, ok := larkErrorCodeMsg(err); ok {
+		if cls := classifyRecentContextAPIError(code, msg); cls.category != recentContextFailureUnknown {
+			return cls
+		}
 	}
 	var netErr net.Error
 	if errors.Is(err, context.DeadlineExceeded) ||

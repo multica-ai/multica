@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func binderUUID(b byte) pgtype.UUID {
@@ -22,14 +24,22 @@ func binderUUID(b byte) pgtype.UUID {
 // engine.ChatSession, so the (platform-specific) mapping is unit-tested.
 type fakeChatSession struct {
 	ensureIn engine.EnsureSessionInput
+	startIn  engine.StartSessionInput
 	appendIn engine.AppendInput
 	mediaIn  engine.BindMediaInput
+}
+
+func (f *fakeChatSession) StartSession(_ context.Context, in engine.StartSessionInput) (engine.StartSessionResult, error) {
+	f.startIn = in
+	return engine.StartSessionResult{SessionID: binderUUID(43)}, nil
 }
 
 func (f *fakeChatSession) EnsureSession(_ context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error) {
 	f.ensureIn = in
 	return binderUUID(42), nil
 }
+
+func (f *fakeChatSession) MarkPendingFresh(context.Context, pgtype.UUID, string) error { return nil }
 
 func (f *fakeChatSession) AppendUserMessage(_ context.Context, in engine.AppendInput) (engine.AppendResult, error) {
 	f.appendIn = in
@@ -95,6 +105,43 @@ func TestFeishuSessionBinder_TopicMessageIsolatesByThread(t *testing.T) {
 	}
 }
 
+func TestFeishuSessionBinder_StartSessionMapping(t *testing.T) {
+	f := &fakeChatSession{}
+	b := &feishuSessionBinder{session: f}
+	beforeCommit := func(context.Context, pgx.Tx, db.ChatSession) error { return nil }
+
+	result, err := b.StartSession(context.Background(), engine.StartSessionParams{
+		Installation: engine.ResolvedInstallation{ID: binderUUID(1), WorkspaceID: binderUUID(2), AgentID: binderUUID(3)},
+		Creator:      binderUUID(6),
+		Sender:       binderUUID(7),
+		ClaimToken:   binderUUID(9),
+		Message: channel.InboundMessage{
+			MessageID: "om_1", Text: "first turn", CommandText: "current instruction",
+			Source: channel.Source{ChatID: "oc_chat", ChatType: channel.ChatTypeGroup, ThreadID: "omt_topic1"},
+		},
+		MediaPendingSeconds:    45,
+		PersistMessage:         true,
+		HistoryBoundaryPending: true,
+		BeforeCommit:           beforeCommit,
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if result.SessionID != binderUUID(43) {
+		t.Fatalf("SessionID = %+v, want shared-session result", result.SessionID)
+	}
+	got := f.startIn
+	if got.BindingKey != "oc_chat:omt_topic1" || got.ThreadID != "omt_topic1" || got.Body != "first turn" || got.CommandText != "current instruction" || got.MessageID != "om_1" {
+		t.Fatalf("start route/message mapping wrong: %+v", got)
+	}
+	if got.Sender != binderUUID(6) || got.Initiator != binderUUID(7) {
+		t.Fatalf("creator/initiator mapping wrong: %+v", got)
+	}
+	if got.ClaimToken != binderUUID(9) || got.MediaPendingSeconds != 45 || !got.PersistMessage || !got.HistoryBoundaryPending || got.BeforeCommit == nil {
+		t.Fatalf("start transaction mapping wrong: %+v", got)
+	}
+}
+
 // TestLarkSessionRouting unit-tests the pure key-derivation contract.
 func TestLarkSessionRouting(t *testing.T) {
 	cases := []struct {
@@ -137,6 +184,7 @@ func TestFeishuSessionBinder_AppendUsesUnenrichedCommandBody(t *testing.T) {
 			MessageID:   "om_1",
 			Text:        "> quoted context\n/issue Real intent",
 			CommandText: "/issue Real intent",
+			ForceFresh:  true,
 			Source:      channel.Source{ChatID: "oc", ThreadID: "th_1"},
 		},
 	}); err != nil {
@@ -150,7 +198,7 @@ func TestFeishuSessionBinder_AppendUsesUnenrichedCommandBody(t *testing.T) {
 	if got.Body != "> quoted context\n/issue Real intent" {
 		t.Errorf("Body must be the (enriched) Message.Text, got %q", got.Body)
 	}
-	if got.MessageID != "om_1" || got.ThreadID != "th_1" || got.SessionID != binderUUID(1) ||
+	if got.MessageID != "om_1" || got.ThreadID != "th_1" || !got.ForceFresh || got.SessionID != binderUUID(1) ||
 		got.Sender != binderUUID(7) || got.InstallationID != binderUUID(2) || got.ClaimToken != binderUUID(9) {
 		t.Errorf("append mapping wrong: %+v", got)
 	}
@@ -160,7 +208,7 @@ func TestFeishuSessionBinder_BindMediaMapping(t *testing.T) {
 	f := &fakeChatSession{}
 	b := &feishuSessionBinder{session: f}
 	ref := channel.MediaRef{Type: channel.MsgTypeImage, StorageURL: "https://cdn.example.test/image.png"}
-	if err := b.BindMedia(context.Background(), engine.BindMediaParams{
+	if _, err := b.BindMedia(context.Background(), engine.BindMediaParams{
 		MessageID:        binderUUID(4),
 		SessionID:        binderUUID(1),
 		WorkspaceID:      binderUUID(2),

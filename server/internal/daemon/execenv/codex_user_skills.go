@@ -2,27 +2,38 @@ package execenv
 
 import (
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// seedUserCodexSkills copies user-installed skill directories from the shared
+// seedUserCodexSkills links user-installed skill directories from the shared
 // ~/.codex/skills/ into the per-task CODEX_HOME so the codex CLI discovers
 // them natively. Codex is the only runtime whose HOME is redirected to a
 // per-task directory (via the CODEX_HOME env var), so without this step the
 // CLI never sees the user's `~/.codex/skills/` content.
 //
+// Links, never copies. A copy charges the whole skill tree to every task
+// directory — 100 MB for a user with a handful of npm-backed skills — and
+// hydrateCodexSkills re-does it on every task start, on the critical path,
+// while no GC path ever reclaims it as long as the issue stays open. The two
+// other shared resources in the same per-task home already link for the same
+// reason: sessions (linkCodexSessionsToStore) and the plugin cache
+// (exposeSharedCodexPluginCache). A skill directory is read-only input to the
+// CLI, so the write isolation a copy incidentally bought has no requester.
+//
 // Workspace-assigned skills take precedence on name conflict: any user skill
 // whose sanitized name matches a workspace skill's sanitized name is skipped
 // here, and writeSkillFiles then writes the workspace version into a clean
-// slot.
+// slot. writeSkillFiles never writes through a link it did not create:
+// allocateCollisionFreeSkillDir probes with os.Lstat, so a link left here
+// counts as occupied and the workspace skill lands in a `-multica` sibling.
 //
 // Per-skill failures are logged and skipped — a single broken user skill
 // must not prevent the task from running. Returning an error is reserved for
-// failures that prevent listing the shared skills directory at all.
+// failures that would affect every skill: listing the shared skills
+// directory, or creating the per-task skills directory.
 func seedUserCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, logger *slog.Logger) error {
 	sharedSkillsDir := filepath.Join(resolveSharedCodexHome(), "skills")
 
@@ -59,8 +70,9 @@ func seedUserCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv,
 		}
 		src := filepath.Join(sharedSkillsDir, name)
 		// Installers like lark-cli ship each skill as a symlink into a
-		// shared ~/.agents/skills/<name>/ directory. Resolve symlinks so we
-		// copy the real content into the per-task home.
+		// shared ~/.agents/skills/<name>/ directory. Resolve it so the
+		// per-task link points at the real directory instead of at another
+		// link, and so the IsDir check below sees the actual target.
 		resolved, err := filepath.EvalSymlinks(src)
 		if err != nil {
 			logger.Warn("execenv: codex user-skill resolve failed", "name", name, "error", err)
@@ -70,45 +82,25 @@ func seedUserCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv,
 		if err != nil || !fi.IsDir() {
 			continue
 		}
+		// hydrateCodexSkills wipes the skills dir before every seed, so the
+		// parent is normally absent here; createDirLink needs it to exist.
+		// Created lazily so a task with no eligible user skills still gets no
+		// skills directory at all.
+		if err := os.MkdirAll(targetSkillsDir, 0o755); err != nil {
+			return fmt.Errorf("create codex skills dir %s: %w", targetSkillsDir, err)
+		}
 		dst := filepath.Join(targetSkillsDir, name)
+		// Removes the link, never the link target: os.RemoveAll unlinks a
+		// symlink, and on Windows RemoveDirectory drops a junction while
+		// leaving the directory it points at intact.
 		if err := os.RemoveAll(dst); err != nil {
 			logger.Warn("execenv: codex user-skill clean dst failed", "name", name, "error", err)
 			continue
 		}
-		if err := copyDirTree(resolved, dst); err != nil {
-			logger.Warn("execenv: codex user-skill copy failed", "name", name, "error", err)
+		if err := createDirLink(resolved, dst); err != nil {
+			logger.Warn("execenv: codex user-skill link failed", "name", name, "error", err)
 			continue
 		}
 	}
 	return nil
-}
-
-// copyDirTree walks src recursively and copies every regular file under it
-// to the matching path under dst. Nested symlinks are ignored to keep the
-// per-task home self-contained; the caller is expected to resolve the root
-// before calling.
-func copyDirTree(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		if !d.Type().IsRegular() {
-			return nil
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		return copyFile(path, target)
-	})
 }

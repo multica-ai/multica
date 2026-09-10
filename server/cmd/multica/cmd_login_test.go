@@ -29,21 +29,40 @@ func TestResolveLoginTokenServerURLDefaultsToCloud(t *testing.T) {
 }
 
 func TestResolveLoginTokenServerURLPrefersConfiguredServer(t *testing.T) {
+	t.Chdir(t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "")
-	if err := cli.SaveCLIConfig(cli.CLIConfig{ServerURL: "https://api.example.test/"}); err != nil {
+	// A stale host/container value is not proof that this process is running
+	// inside a daemon task. Login still needs the selected human profile.
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv(cli.TaskConfigRootEnv, "")
+	t.Setenv("MULTICA_DAEMON_PORT", "20032")
+	cmd := newLoginTestCmd()
+	if err := cmd.Flags().Set("profile", "jcode"); err != nil {
+		t.Fatalf("set profile: %v", err)
+	}
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{ServerURL: "https://api.example.test/"}, "jcode"); err != nil {
 		t.Fatalf("SaveCLIConfig: %v", err)
 	}
 
-	if got := resolveLoginTokenServerURL(newLoginTestCmd()); got != "https://api.example.test" {
+	if got := resolveLoginTokenServerURL(cmd); got != "https://api.example.test" {
 		t.Fatalf("resolveLoginTokenServerURL() = %q, want configured server", got)
 	}
 }
 
 func TestRunLoginTokenAutoWatchesDiscoveredWorkspaces(t *testing.T) {
+	t.Chdir(t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "")
 	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	// Regression for #6779: older container setups may leave this daemon-
+	// injected task hint in the host environment. It must not block the
+	// explicitly human login flow or hide the profile just written by it.
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv(cli.TaskConfigRootEnv, "")
+	t.Setenv("MULTICA_DAEMON_PORT", "20032")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer mul_test_token" {
@@ -68,7 +87,12 @@ func TestRunLoginTokenAutoWatchesDiscoveredWorkspaces(t *testing.T) {
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 
 	cmd := newLoginTestCmd()
-	_ = cmd.Flags().Set("token", "mul_test_token")
+	if err := cmd.Flags().Set("token", "mul_test_token"); err != nil {
+		t.Fatalf("set token: %v", err)
+	}
+	if err := cmd.Flags().Set("profile", "jcode"); err != nil {
+		t.Fatalf("set profile: %v", err)
+	}
 
 	stderr := captureStderr(t)
 	err := runLogin(cmd, nil)
@@ -80,7 +104,7 @@ func TestRunLoginTokenAutoWatchesDiscoveredWorkspaces(t *testing.T) {
 		t.Fatalf("stderr = %q, want workspace discovery and daemon hint", errOut)
 	}
 
-	cfg, err := cli.LoadCLIConfig()
+	cfg, err := cli.LoadCLIConfigForProfile("jcode")
 	if err != nil {
 		t.Fatalf("LoadCLIConfig: %v", err)
 	}

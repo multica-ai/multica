@@ -40,6 +40,7 @@ export interface ListLabelsResponse {
 
 export interface IssueLabelsResponse {
   labels: Label[];
+  issue_revision?: number;
 }
 
 export type ResourceLabelsResponse = IssueLabelsResponse;

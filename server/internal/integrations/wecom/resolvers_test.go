@@ -26,14 +26,28 @@ import (
 // param mapping can be asserted without a database.
 type fakeSessionBinder struct {
 	ensureIn engine.EnsureSessionInput
+	startIn  engine.StartSessionInput
 	appendIn engine.AppendInput
+	bindIn   engine.BindMediaInput
+	binds    int
 	sessID   pgtype.UUID
+}
+
+func (f *fakeSessionBinder) BindMediaRefs(_ context.Context, in engine.BindMediaInput) error {
+	f.bindIn = in
+	f.binds++
+	return nil
 }
 
 func (f *fakeSessionBinder) EnsureSession(_ context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error) {
 	f.ensureIn = in
 	return f.sessID, nil
 }
+func (f *fakeSessionBinder) StartSession(_ context.Context, in engine.StartSessionInput) (engine.StartSessionResult, error) {
+	f.startIn = in
+	return engine.StartSessionResult{SessionID: f.sessID}, nil
+}
+func (f *fakeSessionBinder) MarkPendingFresh(context.Context, pgtype.UUID, string) error { return nil }
 func (f *fakeSessionBinder) AppendUserMessage(_ context.Context, in engine.AppendInput) (engine.AppendResult, error) {
 	f.appendIn = in
 	return engine.AppendResult{}, nil
@@ -61,38 +75,129 @@ func TestSessionBinder_EnsureSessionMapsGroupKey(t *testing.T) {
 	}
 }
 
+func TestSessionBinder_StartSessionMapsWeComRouteAndFirstTurn(t *testing.T) {
+	t.Parallel()
+	fb := &fakeSessionBinder{sessID: mustTestUUID(t)}
+	b := &sessionBinder{session: fb}
+	inst := engine.ResolvedInstallation{ID: mustTestUUID(t), WorkspaceID: mustTestUUID(t), AgentID: mustTestUUID(t)}
+	sender := mustTestUUID(t)
+	creator := mustTestUUID(t)
+	claim := mustTestUUID(t)
+	result, err := b.StartSession(context.Background(), engine.StartSessionParams{
+		Installation: inst,
+		Creator:      creator,
+		Sender:       sender,
+		ClaimToken:   claim,
+		Message: channel.InboundMessage{
+			MessageID: "m1", Text: "first turn", CommandText: "current instruction",
+			Source: channel.Source{ChatID: "GROUP_1", ChatType: channel.ChatTypeGroup},
+		},
+		MediaPendingSeconds: 45,
+		PersistMessage:      true,
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if result.SessionID != fb.sessID {
+		t.Fatal("StartSession lost shared-session result")
+	}
+	got := fb.startIn
+	if got.BindingKey != "GROUP_1" || got.Body != "first turn" || got.CommandText != "current instruction" || got.MessageID != "m1" || got.ClaimToken != claim || got.MediaPendingSeconds != 45 || !got.PersistMessage {
+		t.Fatalf("start mapping wrong: %+v", got)
+	}
+	if got.Sender != creator || got.Initiator != sender {
+		t.Fatalf("creator/initiator mapping wrong: %+v", got)
+	}
+}
+
 func TestSessionBinder_AppendUsesTextAsCommand(t *testing.T) {
 	t.Parallel()
 	fb := &fakeSessionBinder{}
 	b := &sessionBinder{session: fb}
 	_, err := b.AppendMessage(context.Background(), engine.AppendParams{
 		SessionID: mustTestUUID(t),
-		Message:   channel.InboundMessage{Text: "/issue do a thing", MessageID: "m9"},
+		Message:   channel.InboundMessage{Text: "/issue do a thing", MessageID: "m9", ForceFresh: true},
 	})
 	if err != nil {
 		t.Fatalf("AppendMessage: %v", err)
 	}
-	if fb.appendIn.Body != "/issue do a thing" || fb.appendIn.CommandText != "/issue do a thing" {
-		t.Errorf("append body/command = %q/%q, want both to equal the text (wecom has no enrichment)", fb.appendIn.Body, fb.appendIn.CommandText)
+	if fb.appendIn.Body != "/issue do a thing" || fb.appendIn.CommandText != "/issue do a thing" || !fb.appendIn.ForceFresh {
+		t.Errorf("append body/command/forceFresh = %q/%q/%t, want text fallback preserved with fresh intent", fb.appendIn.Body, fb.appendIn.CommandText, fb.appendIn.ForceFresh)
 	}
 }
 
-func TestSessionBinder_BindMediaIsNoop(t *testing.T) {
+// The resolver downloads, decrypts and stores an attachment; this is the step
+// that attaches it to the message. Returning nil without binding reads to the
+// Router as success, so every attachment would be fetched and then silently
+// discarded — the agent sees only "[Image]" and nothing is logged.
+func TestSessionBinder_BindMediaReachesTheSessionStore(t *testing.T) {
 	t.Parallel()
-	b := &sessionBinder{session: &fakeSessionBinder{}}
-	if err := b.BindMedia(context.Background(), engine.BindMediaParams{}); err != nil {
-		t.Errorf("BindMedia = %v, want nil (wecom resolves no media)", err)
+	fb := &fakeSessionBinder{}
+	b := &sessionBinder{session: fb}
+	refs := []channel.MediaRef{{StorageKey: "k", Filename: "photo.jpg"}}
+	issue := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
+
+	if _, err := b.BindMedia(context.Background(), engine.BindMediaParams{
+		MediaRefs: refs,
+		IssueID:   issue,
+	}); err != nil {
+		t.Fatalf("BindMedia: %v", err)
+	}
+	if fb.binds != 1 {
+		t.Fatalf("BindMediaRefs called %d times, want 1 — the refs never reached the session store", fb.binds)
+	}
+	if len(fb.bindIn.MediaRefs) != 1 {
+		t.Errorf("MediaRefs = %d, want 1", len(fb.bindIn.MediaRefs))
+	}
+	// IssueID is what makes an /issue turn's attachment belong to the issue
+	// rather than to a chat message nobody opens again.
+	if fb.bindIn.IssueID != issue {
+		t.Error("IssueID was dropped; an /issue attachment would land on the chat message instead")
+	}
+}
+
+// The media budget is how long the chat task waits before running. Dropped, the
+// run fires at once and the agent is handed the placeholder mid-download.
+func TestSessionBinder_AppendCarriesTheMediaBudget(t *testing.T) {
+	t.Parallel()
+	fb := &fakeSessionBinder{}
+	b := &sessionBinder{session: fb}
+	if _, err := b.AppendMessage(context.Background(), engine.AppendParams{
+		MediaPendingSeconds: 45,
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if fb.appendIn.MediaPendingSeconds != 45 {
+		t.Errorf("MediaPendingSeconds = %v, want 45 — the media budget never reached the append", fb.appendIn.MediaPendingSeconds)
 	}
 }
 
 func TestNewResolverSet_WiresAllResolvers(t *testing.T) {
 	t.Parallel()
-	set := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil)
+	set := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil, nil)
 	if set.Installation == nil || set.Identity == nil || set.Dedup == nil || set.Session == nil || set.Audit == nil {
 		t.Error("NewResolverSet left a required resolver nil")
 	}
 	if set.OriginType != originWecomChat {
 		t.Errorf("OriginType = %q, want %q", set.OriginType, originWecomChat)
+	}
+	// A deployment with no object store passes nil and must degrade to
+	// placeholder text, which the Router only does when Media is nil.
+	if set.Media != nil {
+		t.Error("nil media argument produced a non-nil Media resolver")
+	}
+	// And a configured one must actually reach the Router — this is the
+	// whole wiring, and a resolver built at boot and dropped here would look
+	// exactly like media ingestion never having been written.
+	media := NewMediaResolver(&fakeMediaStorage{}, newFakeMediaLedger(nil), nil, testLogger())
+	withMedia := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil, media)
+	if withMedia.Media == nil {
+		t.Fatal("a media resolver was passed and dropped")
+	}
+	if !withMedia.Media.HasMedia(mediaMessage(t, "image", map[string]any{
+		"image": map[string]any{"url": "https://cos.invalid/a", "aeskey": testAESKey},
+	})) {
+		t.Error("the wired resolver does not recognize a media message")
 	}
 }
 

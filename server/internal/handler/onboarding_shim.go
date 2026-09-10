@@ -34,7 +34,9 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -49,9 +51,9 @@ const runtimeBootstrapBodyLimit = 8 * 1024
 const maxStarterPromptLen = 2 * 1024
 
 const (
-	onboardingAssistantName = "Multica Helper"
-	onboardingIssueTitle    = "Start here: learn Multica with Multica Helper"
-	onboardingAgentTemplate = "multica_helper"
+	onboardingAssistantName       = "Multica Helper"
+	onboardingIssueTitle          = "Start here: learn Multica with Multica Helper"
+	onboardingAgentCreationSource = "multica_helper"
 
 	// noRuntimeIssueTitle MUST match the pre-v3 service constant so
 	// LockAndFindActiveDuplicate dedupes correctly across desktop versions.
@@ -162,6 +164,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	req.WorkspaceID = uuidToString(wsUUID)
+	issueCountPolicy := service.ResolveIssueCountPolicy(r.Context(), h.Entitlements, wsUUID)
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -189,7 +192,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
 		return
 	}
 
@@ -245,8 +248,11 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 	issueCreated := false
 	if !foundIssue {
-		issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
+		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, issueCountPolicy)
 		if err != nil {
+			if writeIssueLimitReached(w, err) {
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 			return
 		}
@@ -255,6 +261,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			description = req.StarterPrompt
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   wsUUID,
 			Title:         onboardingIssueTitle,
 			Description:   strOrNullText(description),
@@ -308,12 +315,13 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		h.publish(protocol.EventAgentCreated, req.WorkspaceID, "member", userID, map[string]any{"agent": resp})
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(
 			userID, req.WorkspaceID, uuidToString(assistant.ID),
-			runtime.Provider, runtime.RuntimeMode, onboardingAgentTemplate, isFirstAgent,
+			runtime.Provider, runtime.RuntimeMode, onboardingAgentCreationSource, isFirstAgent,
 		))
 	}
 	if issueCreated {
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
+		h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.IssueCreated(
@@ -369,6 +377,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 		return
 	}
 	req.WorkspaceID = uuidToString(wsUUID)
+	issueCountPolicy := service.ResolveIssueCountPolicy(r.Context(), h.Entitlements, wsUUID)
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -407,12 +416,16 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	if foundIssue {
 		issue = existing
 	} else {
-		issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
+		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, issueCountPolicy)
 		if err != nil {
+			if writeIssueLimitReached(w, err) {
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 			return
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   wsUUID,
 			Title:         noRuntimeIssueTitle,
 			Description:   strOrNullText(noRuntimeIssueDescription(userBefore.Language)),
@@ -454,6 +467,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	if issueCreated {
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
+		h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform2, _, _ := middleware.ClientMetadataFromContext(r.Context())
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.IssueCreated(

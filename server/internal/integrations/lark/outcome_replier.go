@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -17,15 +18,14 @@ import (
 // appropriate Lark-side reply card. This is the outbound half of the
 // `EventEmitter` contract in hub.go: NeedsBinding sends the binding
 // prompt to the sender's open_id, AgentOffline / AgentArchived send
-// a status notice into the chat. OutcomeIngested is owned by the
-// Patcher (task lifecycle); OutcomeDropped is silent.
+// a status notice into the chat, and FreshPending / IssueUsage send
+// command guidance. OutcomeIngested is owned by the Patcher (task
+// lifecycle); OutcomeDropped is silent.
 //
 // Reply is best-effort by design: a transient Lark outage MUST NOT
-// fail the inbound pipeline (the message is already durable in
-// chat_session by the time we get here for OutcomeIngested, and for
-// the other outcomes there is no durable side effect to undo). Errors
-// are logged and swallowed; the next inbound message for the same
-// user retries the reply on its own.
+// fail the inbound pipeline. Any command state or chat message is already
+// durable by the time we get here, so a reply failure cannot roll it back.
+// Errors are logged and swallowed.
 type OutcomeReplier interface {
 	Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult)
 }
@@ -53,7 +53,7 @@ type noopReplier struct {
 
 func (n *noopReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
-	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived:
+	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived, OutcomeFreshPending, OutcomeChatStarted, OutcomeIssueUsage:
 		n.log.Warn("lark outcome replier: outbound reply skipped (replier not wired)",
 			"outcome", string(res.Outcome),
 			"installation_id", uuidString(inst.ID),
@@ -157,7 +157,7 @@ func NewLarkOutcomeReplier(cfg OutcomeReplierConfig) OutcomeReplier {
 func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
 	case OutcomeNeedsBinding:
-		if err := r.sendBindingPrompt(ctx, inst, res); err != nil {
+		if err := r.sendBindingPrompt(ctx, inst, msg, res); err != nil {
 			r.log.Warn("lark outcome replier: binding prompt failed",
 				"installation_id", uuidString(inst.ID),
 				"open_id", string(res.SenderOpenID),
@@ -175,6 +175,30 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 	case OutcomeAgentArchived:
 		if err := r.sendChatNotice(ctx, inst, msg, agentArchivedCopy); err != nil {
 			r.log.Warn("lark outcome replier: archived notice failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"err", err.Error(),
+			)
+		}
+	case OutcomeFreshPending:
+		if err := r.sendChatNotice(ctx, inst, msg, freshPendingCopy); err != nil {
+			r.log.Warn("lark outcome replier: fresh-start confirmation failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"err", err.Error(),
+			)
+		}
+	case OutcomeChatStarted:
+		if err := r.sendChatNotice(ctx, inst, msg, chatStartedCopy); err != nil {
+			r.log.Warn("lark outcome replier: new-chat confirmation failed", "installation_id", uuidString(inst.ID), "chat_id", string(msg.ChatID), "err", err.Error())
+		}
+	case OutcomeIssueUsage:
+		copy := issueUsageCopy
+		if res.IssueUsageHadMedia {
+			copy = issueUsageWithMediaCopy
+		}
+		if err := r.sendChatNotice(ctx, inst, msg, copy); err != nil {
+			r.log.Warn("lark outcome replier: issue usage reply failed",
 				"installation_id", uuidString(inst.ID),
 				"chat_id", string(msg.ChatID),
 				"err", err.Error(),
@@ -200,7 +224,7 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 	}
 }
 
-func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Installation, res DispatchResult) error {
+func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) error {
 	if res.SenderOpenID == "" {
 		return errors.New("missing sender open_id")
 	}
@@ -216,11 +240,24 @@ func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Install
 	if err != nil {
 		return err
 	}
-	return r.client.SendBindingPromptCard(ctx, BindingPromptParams{
+	if err := r.client.SendBindingPromptCard(ctx, BindingPromptParams{
 		InstallationID: creds,
 		OpenID:         res.SenderOpenID,
 		BindURL:        bindURL,
-	})
+	}); err != nil {
+		if msg.ChatType == ChatTypeGroup && isBindingPromptUnavailable(err) {
+			if fallbackErr := r.sendChatNotice(ctx, inst, msg, bindingPromptUnavailableCopy); fallbackErr != nil {
+				return fmt.Errorf("send binding prompt fallback failed after private prompt unavailable: %v: %w", err, fallbackErr)
+			}
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func isBindingPromptUnavailable(err error) bool {
+	return larkErrorCode(err) == codeNoAvailability
 }
 
 // sendIssueOutcome posts either the created confirmation or active-duplicate
@@ -242,7 +279,7 @@ func (r *LarkOutcomeReplier) sendIssueOutcome(ctx context.Context, inst Installa
 	// topics disabled, aggregated message) falls back to a chat-level
 	// send so the product result is not lost; transport/5xx/rate-limit
 	// failures stay failures rather than leaking into the group chat.
-	return sendWithThreadFallback(r.log, "send issue outcome text", inboundReplyTarget(msg), func(t ReplyTarget) error {
+	return sendWithReplyFallback(r.log, "send issue outcome text", inboundReplyTarget(msg), func(t ReplyTarget) error {
 		_, err := r.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
 			ChatID:         msg.ChatID,
@@ -253,17 +290,24 @@ func (r *LarkOutcomeReplier) sendIssueOutcome(ctx context.Context, inst Installa
 	})
 }
 
-// inboundReplyTarget threads an outbound reply off the inbound trigger
-// message when that message lived inside a Lark topic (话题). It mirrors
-// threadReplyTarget (used by the event-driven Patcher) but reads the
-// live InboundMessage the replier already holds, so it needs no DB
-// round-trip. An empty thread_id yields the zero ReplyTarget — a
-// chat-level send, i.e. the unchanged behavior for non-thread messages.
+// inboundReplyTarget mirrors threadReplyTarget (used by the event-driven
+// Patcher) case for case — topic trigger threads, ordinary group trigger
+// replies natively, p2p and untriggered sends stay chat-level — but
+// reads the live InboundMessage the replier already holds, so it needs
+// no DB round-trip. Keep the two in lockstep: a user cannot tell whether
+// an answer came from the synchronous replier or the task patcher, so
+// they must not place their replies differently.
 func inboundReplyTarget(msg InboundMessage) ReplyTarget {
-	if msg.ThreadID != "" && msg.MessageID != "" {
+	if msg.MessageID == "" {
+		return ReplyTarget{}
+	}
+	if msg.ThreadID != "" {
 		return ReplyTarget{MessageID: msg.MessageID, InThread: true}
 	}
-	return ReplyTarget{}
+	if msg.ChatType != ChatTypeGroup {
+		return ReplyTarget{}
+	}
+	return ReplyTarget{MessageID: msg.MessageID}
 }
 
 // issueCreatedText composes the user-facing confirmation. Identifier
@@ -283,10 +327,12 @@ func issueCreatedText(res DispatchResult, appURL string) string {
 	} else {
 		line = fmt.Sprintf("Created %s — %s", identifier, title)
 	}
-	if appURL == "" {
-		return line
+	// Link off IssueIdentifier, not the local display value: the "#42" fallback
+	// above is a degraded label, never a routable identifier.
+	if link := channel.IssueWebLink(appURL, res.IssueWorkspaceSlug, res.IssueIdentifier); link != "" {
+		return line + "\n" + link
 	}
-	return line + "\n" + strings.TrimRight(appURL, "/") + "/issues/" + identifier
+	return line
 }
 
 func issueDuplicateText(res DispatchResult, appURL string) string {
@@ -301,10 +347,12 @@ func issueDuplicateText(res DispatchResult, appURL string) string {
 	} else {
 		line = fmt.Sprintf("Not created — active issue %s already exists: %s", identifier, title)
 	}
-	if appURL == "" {
-		return line
+	// Link off IssueIdentifier, not the local display value: the "#42" fallback
+	// above is a degraded label, never a routable identifier.
+	if link := channel.IssueWebLink(appURL, res.IssueWorkspaceSlug, res.IssueIdentifier); link != "" {
+		return line + "\n" + link
 	}
-	return line + "\n" + strings.TrimRight(appURL, "/") + "/issues/" + identifier
+	return line
 }
 
 func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installation, msg InboundMessage, body string) error {
@@ -326,7 +374,7 @@ func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installati
 	// Same classified fallback as sendIssueOutcome: only thread-reply
 	// failures that mean the topic cannot receive the message fall back
 	// to a chat-level send; ambiguous/transport failures stay failures.
-	return sendWithThreadFallback(r.log, "send notice card", inboundReplyTarget(msg), func(t ReplyTarget) error {
+	return sendWithReplyFallback(r.log, "send notice card", inboundReplyTarget(msg), func(t ReplyTarget) error {
 		_, err := r.client.SendInteractiveCard(ctx, SendCardParams{
 			InstallationID: creds,
 			ChatID:         msg.ChatID,
@@ -388,6 +436,11 @@ func renderNoticeCard(header, body string) (string, error) {
 // match the §4.6 design: an offline agent will run when the daemon
 // comes back; an archived agent needs operator action.
 const (
-	agentOfflineCopy  = "Agent 当前离线，消息已记录。下次 daemon 上线后会自动继续处理。"
-	agentArchivedCopy = "这个 Agent 已被归档，无法继续处理消息。请联系工作区管理员恢复或重新绑定。"
+	agentOfflineCopy             = "Agent 当前离线，消息已记录。下次 daemon 上线后会自动继续处理。"
+	agentArchivedCopy            = "这个 Agent 已被归档，无法继续处理消息。请联系工作区管理员恢复或重新绑定。"
+	freshPendingCopy             = "✅ 已准备从空上下文运行。你的下一条聊天消息仍会进入当前对话，但不会带上之前的上下文。"
+	chatStartedCopy              = "✅ 已新建 Multica 对话。你的下一条消息会进入该对话。"
+	issueUsageCopy               = "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）"
+	issueUsageWithMediaCopy      = "请添加标题，并与图片或视频一起重新发送（*图片或视频可以位于命令之前或之后*）：\n\n`/issue <标题>`\n`[描述]`（可选）"
+	bindingPromptUnavailableCopy = "你还未绑定 Multica 账户，绑定卡片未能发送到你的私聊。\n请先打开机器人对话并发送一条消息，再回到群里重试；仍失败请联系管理员检查应用可用范围。"
 )

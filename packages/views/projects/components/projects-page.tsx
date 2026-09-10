@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
+  ExternalLink,
   Filter,
   FolderKanban,
   LayoutGrid,
@@ -40,7 +41,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useModalStore } from "@multica/core/modals";
-import { AppLink, useRowLink } from "../../navigation";
+import { AppLink, useIntentNavigate, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -108,6 +109,8 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
+import { PAGE_GUTTER, PAGE_TOOLBAR } from "../../layout/page-header";
+import { cn } from "@multica/ui/lib/utils";
 
 // Sort order maps for the enum columns (header sort needs a total order).
 const PRIORITY_ORDER: Record<ProjectPriority, number> = {
@@ -228,6 +231,9 @@ function ProjectRowActions({
   canDelete: boolean;
 }) {
   const { t } = useT("projects");
+  const { t: tCommon } = useT("common");
+  const wsPaths = useWorkspacePaths();
+  const intentNavigate = useIntentNavigate();
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
   const deleteProject = useDeleteProject();
@@ -253,6 +259,19 @@ function ProjectRowActions({
           }
         />
         <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem
+            onClick={() =>
+              intentNavigate(
+                wsPaths.projectDetail(project.id),
+                "foreground-tab",
+                project.title,
+              )
+            }
+          >
+            <ExternalLink className="size-3.5" />
+            {tCommon(($) => $.navigation.open_in_new_tab)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onClick={togglePin}>
             {pinned ? (
               <PinOff className="size-3.5" />
@@ -372,7 +391,7 @@ function ProjectTableRow({
   return (
     <ListGridRow
       className={`h-11 cursor-pointer ${selected ? "bg-accent/30" : ""}`}
-      {...rowLink(rowHref)}
+      {...rowLink(rowHref, project.title)}
     >
       <CheckboxCell checked={selected} onToggle={onToggleSelect} />
       <ListGridCell className="gap-2">
@@ -412,7 +431,7 @@ function ProjectTableRow({
             renderTrigger={(leadName) => (
               <button
                 type="button"
-                className="flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 transition-colors hover:bg-accent/60"
+                className="flex min-w-0 items-center gap-1.5 rounded-xs px-1 py-0.5 transition-colors hover:bg-accent/60"
               >
                 {project.lead_type && project.lead_id ? (
                   <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
@@ -628,7 +647,7 @@ function ProjectCard({
           project={project}
           handleUpdate={handleUpdate}
           renderTrigger={(leadName) => (
-            <button type="button" className="-mx-1.5 flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors hover:bg-accent/60">
+            <button type="button" className="-mx-1.5 flex items-center gap-1.5 rounded-xs px-1.5 py-0.5 transition-colors hover:bg-accent/60">
               {project.lead_type && project.lead_id ? (
                 <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
               ) : (
@@ -707,7 +726,7 @@ function ProjectBatchToolbar({
             type="button"
             aria-label={t(($) => $.page.clear_selection)}
             onClick={onClear}
-            className="rounded p-0.5 transition-colors hover:bg-accent"
+            className="rounded-xs p-0.5 transition-colors hover:bg-accent"
           >
             <X className="size-3.5 text-muted-foreground" />
           </button>
@@ -946,7 +965,7 @@ export function ProjectsPage() {
       ) : (
         <>
           {/* Toolbar */}
-          <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
+          <div className={PAGE_TOOLBAR}>
             <div className="flex min-w-0 items-center gap-2">
               <div className="relative hidden md:block">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -1247,7 +1266,7 @@ export function ProjectsPage() {
               </ListGrid>
             </div>
           ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-4">
+            <div className={cn("min-h-0 flex-1 overflow-y-auto pt-4", PAGE_GUTTER)}>
               <div
                 className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
                 style={{ paddingBottom: LIST_GRID_BOTTOM_CLEARANCE }}
@@ -1279,7 +1298,7 @@ export function ProjectsPage() {
 function LoadingState({ isCompact }: { isCompact: boolean }) {
   if (isCompact) {
     return (
-      <div className="min-h-0 flex-1 overflow-auto px-5 pt-4">
+      <div className={cn("min-h-0 flex-1 overflow-auto pt-4", PAGE_GUTTER)}>
         <div className="space-y-2">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-11 w-full rounded-md" />
@@ -1289,16 +1308,16 @@ function LoadingState({ isCompact }: { isCompact: boolean }) {
     );
   }
   return (
-    <div className="grid grid-cols-1 gap-3 px-5 pt-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className={cn("grid grid-cols-1 gap-3 pt-4 sm:grid-cols-2 lg:grid-cols-4", PAGE_GUTTER)}>
       {Array.from({ length: 8 }).map((_, i) => (
         <div key={i} className="flex flex-col gap-2 rounded-md border p-3">
           <div className="flex items-center gap-2">
-            <Skeleton className="h-8 w-8 rounded" />
+            <Skeleton className="h-8 w-8 rounded-xs" />
             <Skeleton className="h-4 w-3/4" />
           </div>
           <div className="flex gap-1.5">
-            <Skeleton className="h-5 w-16 rounded" />
-            <Skeleton className="h-5 w-20 rounded" />
+            <Skeleton className="h-5 w-16 rounded-xs" />
+            <Skeleton className="h-5 w-20 rounded-xs" />
           </div>
         </div>
       ))}

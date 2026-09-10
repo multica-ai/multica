@@ -547,9 +547,8 @@ func OnboardingSourceSubmitted(userID string, source []string, skipped, hasOther
 // just inside onboarding. `isFirstAgentInWorkspace` lets the funnel
 // isolate the Step 4 signal from later agent additions.
 //
-// template is the template slug the frontend used to seed the agent
-// (e.g. "coding", "planning", "writing", "assistant") — empty when the
-// caller didn't come from a template picker.
+// template is the creation-source attribution supplied by the caller (for
+// example, "agent_builder"); empty identifies a manually authored agent.
 func AgentCreated(actorID, workspaceID, agentID, provider, runtimeMode, template string, isFirstAgentInWorkspace bool) Event {
 	return Event{
 		Name:        EventAgentCreated,

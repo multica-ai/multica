@@ -136,6 +136,16 @@ func setupDiskUsageProfile(t *testing.T, home, profile, token, serverURL, wsID, 
 	}
 }
 
+// pinHumanCLIContext puts a test on the human side of the task boundary. The
+// CLI infers task context partly from a daemon marker in an ancestor directory,
+// so a checkout that happens to live under a daemon workspaces root would
+// otherwise make these human-path tests exercise the task path instead.
+func pinHumanCLIContext(t *testing.T) {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	clearDaemonTaskEnv(t)
+}
+
 // TestDiskUsageNeedsParentStatus pins the gate itself: the per-task table and
 // any JSON output need statuses; the --by-workspace table has no STATUS column
 // and must not trigger a request.
@@ -163,6 +173,7 @@ func TestDiskUsageNeedsParentStatus(t *testing.T) {
 // guard: with valid credentials on disk, the --by-workspace table must still
 // resolve nothing, so an unreachable server cannot make a local diagnostic hang.
 func TestRunDaemonDiskUsageByWorkspaceTableMakesNoRequest(t *testing.T) {
+	pinHumanCLIContext(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
@@ -193,6 +204,7 @@ func TestRunDaemonDiskUsageByWorkspaceTableMakesNoRequest(t *testing.T) {
 // TestRunDaemonDiskUsageTaskTableResolvesStatus is the positive half: the
 // default per-task view does resolve, and the status reaches the rendered table.
 func TestRunDaemonDiskUsageTaskTableResolvesStatus(t *testing.T) {
+	pinHumanCLIContext(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
@@ -219,6 +231,7 @@ func TestRunDaemonDiskUsageTaskTableResolvesStatus(t *testing.T) {
 // contract: a failing server must not fail the command or corrupt stdout, so
 // scripts consuming --output json keep working when the API is down.
 func TestRunDaemonDiskUsageJSONSurvivesServerFailure(t *testing.T) {
+	pinHumanCLIContext(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
@@ -263,6 +276,7 @@ func TestRunDaemonDiskUsageJSONSurvivesServerFailure(t *testing.T) {
 // wiring in aggregate mode: each root must be resolved with its own profile's
 // token, not whichever one happened to be loaded first.
 func TestRunDaemonDiskUsageAllProfilesUsesPerProfileToken(t *testing.T) {
+	pinHumanCLIContext(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
@@ -353,5 +367,228 @@ func TestPrintRepoCacheLineSilentWhenEmpty(t *testing.T) {
 	})
 	if strings.Contains(buf.String(), "Repo cache") {
 		t.Errorf("empty repo cache must not print a line:\n%s", buf.String())
+	}
+}
+
+// setupTaskDiskUsageContext puts the caller inside a managed task whose daemon
+// injected workspacesRoot, and seeds an Owner profile (token + its own task
+// tree under HOME) that the task must not touch. It returns the injected root.
+func setupTaskDiskUsageContext(t *testing.T, home, ownerServerURL string) string {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+	t.Setenv("MULTICA_SERVER_URL", "")
+
+	// Owner profile: a real token plus a task dir under the HOME-derived root.
+	setupDiskUsageProfile(t, home, "", "token-owner", ownerServerURL,
+		"11111111-1111-1111-1111-111111111111", "0wner000", "issue-owner")
+
+	injectedRoot := filepath.Join(t.TempDir(), "daemon-workspaces")
+	writeDiskUsageIssueTask(t, injectedRoot,
+		"22222222-2222-2222-2222-222222222222", "7a5c0000", "issue-task")
+
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+	t.Setenv(daemon.TaskWorkspacesRootEnv, injectedRoot)
+	return injectedRoot
+}
+
+// A task may see its own daemon's disk usage, but the report must come from the
+// daemon-injected root and must never be enriched with the Owner's credential:
+// fillDiskUsageParentStatuses authenticates with the Owner profile token, which
+// is precisely the implicit identity reuse the task boundary exists to stop.
+func TestRunDaemonDiskUsageTaskContextScansInjectedRootWithoutOwnerToken(t *testing.T) {
+	home := t.TempDir()
+	rec := &gcCheckRecorder{}
+	srv := newGCCheckServer(t, rec)
+	injectedRoot := setupTaskDiskUsageContext(t, home, srv.URL)
+
+	out, err := captureStdout(t, func() error { return runDaemonDiskUsage(newDiskUsageTestCmd(t), nil) })
+	if err != nil {
+		t.Fatalf("runDaemonDiskUsage: %v", err)
+	}
+	if rec.callCount() != 0 {
+		t.Errorf("gc-check calls = %d, want 0: a task must not spend the Owner token", rec.callCount())
+	}
+	if !strings.Contains(out, "7a5c0000") {
+		t.Errorf("report missing the injected root's task, got:\n%s", out)
+	}
+	if strings.Contains(out, "0wner000") {
+		t.Errorf("report leaked a task from the Owner's workspaces root, got:\n%s", out)
+	}
+	if !strings.Contains(out, injectedRoot) {
+		t.Errorf("report did not name the injected root %q, got:\n%s", injectedRoot, out)
+	}
+	// The hint enumerates ~/.multica/profiles, so it must stay out of a task.
+	if strings.Contains(out, "Other workspace roots") {
+		t.Errorf("report disclosed other workspace roots inside a task, got:\n%s", out)
+	}
+}
+
+// Every flag rejected here would move the scan outside the daemon root that
+// hosts this task: --all-profiles enumerates the Owner's profiles, and the two
+// overrides aim the scan at a tree this daemon does not manage.
+func TestRunDaemonDiskUsageTaskContextRejectsWideningFlags(t *testing.T) {
+	for name, flag := range map[string]struct{ key, value string }{
+		"all-profiles":    {"all-profiles", "true"},
+		"workspaces-root": {"workspaces-root", "/somewhere/else"},
+		"profile":         {"profile", "staging"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			rec := &gcCheckRecorder{}
+			srv := newGCCheckServer(t, rec)
+			setupTaskDiskUsageContext(t, home, srv.URL)
+
+			cmd := newDiskUsageTestCmd(t)
+			if err := cmd.Flags().Set(flag.key, flag.value); err != nil {
+				t.Fatalf("set --%s: %v", flag.key, err)
+			}
+			err := runDaemonDiskUsage(cmd, nil)
+			if err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+				t.Fatalf("--%s error = %v, want a task-scope rejection", flag.key, err)
+			}
+		})
+	}
+}
+
+// Without the injected root the command has no way to know which tree belongs
+// to this task: ResolveWorkspacesRoot would fall back to $HOME and report the
+// default root, which for a named-profile daemon is somebody else's tree.
+func TestResolveDiskUsageRootTaskContext(t *testing.T) {
+	t.Run("uses the injected root", func(t *testing.T) {
+		injected := filepath.Join(t.TempDir(), "daemon-workspaces")
+		t.Setenv(daemon.TaskWorkspacesRootEnv, injected+string(filepath.Separator))
+
+		got, err := resolveDiskUsageRoot(true, "", "")
+		if err != nil {
+			t.Fatalf("resolveDiskUsageRoot: %v", err)
+		}
+		if got != injected {
+			t.Fatalf("root = %q, want the cleaned injected root %q", got, injected)
+		}
+	})
+
+	for name, value := range map[string]string{"missing": "", "relative": "relative/workspaces"} {
+		t.Run("fails closed on a "+name+" root", func(t *testing.T) {
+			t.Setenv(daemon.TaskWorkspacesRootEnv, value)
+			if _, err := resolveDiskUsageRoot(true, "", ""); err == nil {
+				t.Fatalf("%s=%q resolved a root, want fail closed", daemon.TaskWorkspacesRootEnv, value)
+			}
+		})
+	}
+
+	t.Run("outside a task keeps profile resolution", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+		t.Setenv(daemon.TaskWorkspacesRootEnv, filepath.Join(t.TempDir(), "ignored"))
+
+		got, err := resolveDiskUsageRoot(false, "staging", "")
+		if err != nil {
+			t.Fatalf("resolveDiskUsageRoot: %v", err)
+		}
+		if want := filepath.Join(home, "multica_workspaces_staging"); got != want {
+			t.Fatalf("root = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestRunDaemonDiskUsageHonorsProfileWorkspacesRoot(t *testing.T) {
+	pinHumanCLIContext(t)
+	home := t.TempDir()
+	customRoot := filepath.Join(t.TempDir(), "configured-workspaces")
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+	if err := cli.SaveCLIConfig(cli.CLIConfig{WorkspacesRoot: customRoot}); err != nil {
+		t.Fatalf("SaveCLIConfig: %v", err)
+	}
+
+	cmd := newDiskUsageTestCmd(t)
+	if err := cmd.Flags().Set("output", "json"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureStdout(t, func() error { return runDaemonDiskUsage(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runDaemonDiskUsage: %v", err)
+	}
+	var report daemon.DiskUsageReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, out)
+	}
+	if report.WorkspacesRoot != customRoot {
+		t.Fatalf("WorkspacesRoot = %q, want configured root %q", report.WorkspacesRoot, customRoot)
+	}
+}
+
+func TestResolveDiskUsageRootEnvOverridesProfileConfig(t *testing.T) {
+	pinHumanCLIContext(t)
+	home := t.TempDir()
+	configRoot := filepath.Join(t.TempDir(), "configured-workspaces")
+	envRoot := filepath.Join(t.TempDir(), "env-workspaces")
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", envRoot)
+	if err := cli.SaveCLIConfig(cli.CLIConfig{WorkspacesRoot: configRoot}); err != nil {
+		t.Fatalf("SaveCLIConfig: %v", err)
+	}
+
+	got, err := resolveDiskUsageRoot(false, "", "")
+	if err != nil {
+		t.Fatalf("resolveDiskUsageRoot: %v", err)
+	}
+	if got != envRoot {
+		t.Fatalf("root = %q, want env root %q", got, envRoot)
+	}
+}
+
+func TestEnumerateDiskUsageRootsUsesAndDeduplicatesProfileConfig(t *testing.T) {
+	pinHumanCLIContext(t)
+	home := t.TempDir()
+	defaultRoot := filepath.Join(t.TempDir(), "default-root")
+	sharedRoot := filepath.Join(t.TempDir(), "shared-root")
+	uniqueRoot := filepath.Join(t.TempDir(), "unique-root")
+	neverRanRoot := filepath.Join(t.TempDir(), "never-ran-root")
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+
+	configs := []struct {
+		profile string
+		root    string
+	}{
+		{"", defaultRoot},
+		{"alpha", sharedRoot},
+		{"beta", sharedRoot},
+		{"gamma", uniqueRoot},
+		{"never-ran", neverRanRoot},
+	}
+	for _, item := range configs {
+		if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{WorkspacesRoot: item.root}, item.profile); err != nil {
+			t.Fatalf("save profile %q: %v", item.profile, err)
+		}
+	}
+	for _, root := range []string{defaultRoot, sharedRoot, uniqueRoot} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	roots, err := enumerateDiskUsageRoots()
+	if err != nil {
+		t.Fatalf("enumerateDiskUsageRoots: %v", err)
+	}
+	want := []daemon.DiskUsageRoot{
+		{Profile: "", Root: defaultRoot},
+		{Profile: "alpha", Root: sharedRoot},
+		{Profile: "gamma", Root: uniqueRoot},
+	}
+	if len(roots) != len(want) {
+		t.Fatalf("roots = %+v, want %+v", roots, want)
+	}
+	for i := range want {
+		if roots[i] != want[i] {
+			t.Fatalf("roots[%d] = %+v, want %+v", i, roots[i], want[i])
+		}
 	}
 }

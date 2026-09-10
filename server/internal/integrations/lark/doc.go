@@ -13,8 +13,9 @@
 //  5. Dispatcher (inbound pipeline: installation route → top-level
 //     message_id dedup → group filter → identity check → ensure
 //     session → append → /issue → enqueue chat task; typed outcomes
-//     for offline / archived; emit returns DispatchResult + error so
-//     the connector can post the matching Lark-side reply card)
+//     for offline / archived / command guidance; emit returns
+//     DispatchResult + error so the connector can post the matching
+//     Lark-side reply card)
 //  6. AuditLogger (lark_inbound_audit; deliberately no body column)
 //  7. APIClient interface + http_client.go (real Lark Open Platform
 //     transport for IM v1 send/patch + binding prompt + bot info;
@@ -35,7 +36,8 @@
 //  11. OutcomeReplier (outbound side of the EventEmitter contract:
 //     NeedsBinding mints a token + sends the binding prompt;
 //     AgentOffline / AgentArchived push status notice cards into the
-//     chat; Ingested is owned by the Patcher; Dropped is silent)
+//     chat; FreshPending / IssueUsage push command guidance; Ingested
+//     is owned by the Patcher; Dropped is silent)
 //  12. RegistrationService (RFC 8628 device-flow scan-to-install: opens
 //     a session against accounts.feishu.cn, polls in the background,
 //     and on success writes through InstallationService + auto-binds

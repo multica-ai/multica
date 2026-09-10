@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { Archive, ChevronRight, Inbox } from "lucide-react";
 import { isEditableShortcutTarget } from "@multica/core/shortcuts";
@@ -9,7 +16,14 @@ import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
 import { InboxListItem } from "./inbox-list-item";
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
+import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { useT } from "../../i18n";
+
+// Sizing only (like the board's card estimate): the seed's trailing spacer
+// and Virtuoso's defaultItemHeight share this value so the scroller's height
+// is truthful from the first frame and a restored offset sticks. A row is
+// two text lines (body + caption) plus py-2.5.
+const INBOX_ROW_ESTIMATED_HEIGHT = 58;
 
 /**
  * Scrollable, virtualized inbox notification list.
@@ -40,6 +54,8 @@ export function InboxList({
   onSelect,
   onAction,
   onOpenArchived,
+  emptyLabel,
+  emptyAction,
 }: {
   items: InboxItem[];
   view: InboxView;
@@ -50,12 +66,27 @@ export function InboxList({
   onSelect: (item: InboxItem) => void;
   onAction: (id: string) => void;
   onOpenArchived: () => void;
+  emptyLabel?: string;
+  emptyAction?: ReactNode;
 }) {
   const { t } = useT("inbox");
   // Virtuoso's `customScrollParent` wants the actual HTMLElement, not a ref.
   // A callback ref into state hands the element over once it mounts and
   // triggers the re-render that lets Virtuoso attach to it.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  // Pull-based scroll restoration (MUL-4741): assign the saved offset at
+  // ref-attach (the seed's estimate spacer gives the container a truthful
+  // height on the first commit, so the assignment sticks pre-paint) and feed
+  // the same offset into the Virtuoso as its initial position.
+  const restoredScrollTop = useRestoredScrollOffset("list");
+  const restoreScrollRef = useRestoredScrollRef("list");
+  const attachScrollEl = useCallback(
+    (el: HTMLDivElement | null) => {
+      setScrollEl(el);
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isArchivedView = view === "archived";
 
@@ -71,8 +102,8 @@ export function InboxList({
 
   const selectItem = useCallback(
     (item: InboxItem) => {
-      // Safari does not focus a <button> on click, so the container has to be
-      // focused explicitly or the arrow keys would stay dead after a click.
+      // Safari does not focus a clicked row control, so the container has to
+      // be focused explicitly or the arrow keys would stay dead after a click.
       focusList();
       onSelect(item);
     },
@@ -156,10 +187,12 @@ export function InboxList({
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <Inbox className="mb-3 h-8 w-8 text-faint-foreground" />
           <p className="text-body">
-            {isArchivedView
-              ? t(($) => $.list.archived_empty)
-              : t(($) => $.list.empty)}
+            {emptyLabel ??
+              (isArchivedView
+                ? t(($) => $.list.archived_empty)
+                : t(($) => $.list.empty))}
           </p>
+          {emptyAction && <div className="mt-3">{emptyAction}</div>}
         </div>
         {/* Still offer the archive when the main list is empty — that is
             exactly when a user goes looking for what they filed away. */}
@@ -185,10 +218,10 @@ export function InboxList({
   // `initialItemCount` so the measurement frame keeps those rows (MUL-4750).
   return (
     <div
-      ref={setScrollEl}
-      // Programmatically focusable only: the rows are buttons and already
-      // carry their own tab stops, so a tabbable container would just add a
-      // redundant one.
+      ref={attachScrollEl}
+      data-tab-scroll-root="list"
+      // Programmatically focusable only: the rows already carry their own tab
+      // stops, so a tabbable container would just add a redundant one.
       tabIndex={-1}
       onKeyDown={handleKeyDown}
       className="flex-1 min-h-0 overflow-y-auto outline-none"
@@ -200,7 +233,9 @@ export function InboxList({
             customScrollParent={scrollEl}
             data={items}
             computeItemKey={computeItemKey}
+            initialScrollTop={restoredScrollTop}
             initialItemCount={Math.min(items.length, VIRTUOSO_SEED_COUNT)}
+            defaultItemHeight={INBOX_ROW_ESTIMATED_HEIGHT}
             increaseViewportBy={{ top: 400, bottom: 400 }}
             itemContent={itemContent}
             components={{ Footer }}
@@ -211,6 +246,7 @@ export function InboxList({
               data={items}
               itemContent={itemContent}
               computeItemKey={computeItemKey}
+              estimatedItemHeight={INBOX_ROW_ESTIMATED_HEIGHT}
             />
             {/* The seed frame renders a bounded slice, so the entry would be
                 mid-list rather than after the last row — only show it once the

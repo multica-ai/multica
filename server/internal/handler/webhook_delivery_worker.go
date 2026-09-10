@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -122,7 +123,7 @@ func (w *WebhookDeliveryWorker) ProcessNext(ctx context.Context) (bool, error) {
 		key := uuidToString(delivery.TriggerID)
 		if !w.h.WebhookRateLimiter.Allow(ctx, key) {
 			w.h.Metrics.RecordWebhookRateLimited("worker_trigger")
-			retryAfter := webhookLimiterRetryAfter(ctx, w.h.WebhookRateLimiter, key)
+			retryAfter := slidingWindowLimiterRetryAfter(ctx, w.h.WebhookRateLimiter, key)
 			if retryAfter <= 0 {
 				retryAfter = time.Second
 			}
@@ -195,6 +196,10 @@ func (w *WebhookDeliveryWorker) ProcessNext(ctx context.Context) (bool, error) {
 		delivery.ID,
 	)
 	if dispatchErr != nil {
+		var quotaErr *service.AutopilotQuotaExceededError
+		if errors.As(dispatchErr, &quotaErr) {
+			return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, quotaErr.Error(), "quota_exceeded")
+		}
 		if run != nil {
 			return true, w.complete(ctx, delivery, deliveryStatusFailed, run.ID, dispatchErr.Error())
 		}
@@ -224,6 +229,7 @@ func (w *WebhookDeliveryWorker) complete(
 	status string,
 	runID pgtype.UUID,
 	reason string,
+	reasonCode ...string,
 ) error {
 	params := db.CompleteClaimedWebhookDeliveryParams{
 		ID:             delivery.ID,
@@ -233,6 +239,9 @@ func (w *WebhookDeliveryWorker) complete(
 	}
 	if reason != "" {
 		params.Error = pgtype.Text{String: reason, Valid: true}
+	}
+	if len(reasonCode) > 0 && reasonCode[0] != "" {
+		params.ReasonCode = pgtype.Text{String: reasonCode[0], Valid: true}
 	}
 	_, err := w.h.Queries.CompleteClaimedWebhookDelivery(ctx, params)
 	lost, err := handleWebhookLeaseMutation("complete", delivery, err)

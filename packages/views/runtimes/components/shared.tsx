@@ -27,13 +27,12 @@ export function ProviderChip({ provider }: { provider: string }) {
 // The mapping intentionally reuses our existing tokens (success/warning/
 // muted-foreground/destructive) instead of introducing runtime-specific
 // colours — keeps the palette small and consistent with Skills.
-// Maps each derived 4-state runtime health to a semantic colour class.
 // Labels flow through useT — see useHealthLabel below.
 const HEALTH_VISUAL: Record<RuntimeHealth, { dot: string; tone: string }> = {
   online: { dot: "bg-success", tone: "bg-success/10 text-success" },
   recently_lost: { dot: "bg-warning", tone: "bg-warning/10 text-warning" },
   offline: { dot: "bg-muted-foreground/40", tone: "bg-muted text-muted-foreground" },
-  about_to_gc: { dot: "bg-destructive", tone: "bg-destructive/10 text-destructive" },
+  long_offline: { dot: "bg-destructive", tone: "bg-destructive/10 text-destructive" },
 };
 
 export function HealthDot({
@@ -65,7 +64,7 @@ export function HealthDot({
 //   online        → Wifi (full bars, success)
 //   recently_lost → WifiHigh (fewer bars, warning) — transient hiccup
 //   offline       → WifiOff (slashed, muted) — long unreachable
-//   about_to_gc   → WifiOff (slashed, destructive) — sweeper coming
+//   long_offline  → WifiOff (slashed, destructive) — prolonged outage
 const HEALTH_ICON: Record<
   RuntimeHealth,
   { Icon: typeof Wifi; tone: string }
@@ -73,7 +72,7 @@ const HEALTH_ICON: Record<
   online: { Icon: Wifi, tone: "text-success" },
   recently_lost: { Icon: WifiHigh, tone: "text-warning" },
   offline: { Icon: WifiOff, tone: "text-muted-foreground" },
-  about_to_gc: { Icon: WifiOff, tone: "text-destructive" },
+  long_offline: { Icon: WifiOff, tone: "text-destructive" },
 };
 
 export function HealthIcon({
@@ -97,7 +96,7 @@ const HEALTH_LABEL_EN: Record<RuntimeHealth, string> = {
   online: "Online",
   recently_lost: "Recently lost",
   offline: "Offline",
-  about_to_gc: "About to GC",
+  long_offline: "Long offline",
 };
 
 export function healthLabel(health: RuntimeHealth | "loading"): string {

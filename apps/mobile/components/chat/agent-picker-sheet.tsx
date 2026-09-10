@@ -5,8 +5,8 @@
  * sheet and goes straight to the blank state for that agent.
  *
  * Filtering is delegated to the caller (the screen passes a pre-filtered
- * `agents` list) so the same filter logic — archived + canAssignAgent +
- * order — stays in one place.
+ * `agents` list) so the same filter logic — archived + canAssignAgentToIssue
+ * + order — stays in one place.
  *
  * Layout mirrors `components/issue/my-issues-filter-sheet.tsx`: transparent
  * Modal + dimmed backdrop + centered card. Bottom-sheet anchoring would be
@@ -19,6 +19,7 @@ import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { cn } from "@/lib/utils";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { continuousCorners } from "@/lib/radius";
 
 interface Props {
   visible: boolean;
@@ -45,7 +46,10 @@ export function AgentPickerSheet({
       <Pressable className="flex-1 bg-black/40" onPress={onClose}>
         <View className="flex-1 items-center justify-center px-6">
           <Pressable onPress={() => {}} className="w-full max-w-sm">
-            <View className="bg-popover rounded-2xl overflow-hidden">
+            <View
+              className="bg-popover rounded-xl overflow-hidden"
+              style={continuousCorners}
+            >
               <View className="px-4 py-3 border-b border-border">
                 <Text className="text-base font-semibold text-foreground">
                   Choose an agent

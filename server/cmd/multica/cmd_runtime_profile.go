@@ -287,6 +287,9 @@ func runRuntimeProfileDelete(cmd *cobra.Command, args []string) error {
 }
 
 func runRuntimeProfileSetPath(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("runtime profile set-path"); err != nil {
+		return err
+	}
 	profileID := args[0]
 	path, _ := cmd.Flags().GetString("path")
 	path = strings.TrimSpace(path)
@@ -315,6 +318,9 @@ func runRuntimeProfileSetPath(cmd *cobra.Command, args []string) error {
 }
 
 func runRuntimeProfileUnsetPath(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("runtime profile unset-path"); err != nil {
+		return err
+	}
 	profileID := args[0]
 
 	profile := resolveProfile(cmd)

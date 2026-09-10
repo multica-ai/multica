@@ -15,13 +15,14 @@ import {
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
 import { DeferredPopup } from "./deferred-popup";
+import { useLocale } from "../i18n";
 
 /**
  * Default class of the date pill trigger — shared with the deferred lookalike
  * trigger so the swap on first interaction is pixel-identical.
  */
 const DATE_TRIGGER_CLASS =
-  "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors";
+  "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors";
 
 interface DateOnlyPickerProps {
   /** Selected calendar day ("YYYY-MM-DD") or null. */
@@ -90,6 +91,7 @@ function DateTriggerContent({
   placeholder,
   highlightOverdue = false,
 }: Pick<DateOnlyPickerProps, "value" | "icon" | "placeholder" | "highlightOverdue">) {
+  const locale = useLocale();
   const date = dateOnlyToLocalDate(value);
   const overdue = highlightOverdue && isPastDateOnly(value);
   return (
@@ -97,7 +99,7 @@ function DateTriggerContent({
       {icon}
       {date ? (
         <span className={overdue ? "text-destructive" : ""}>
-          {formatDateOnly(value, { month: "short", day: "numeric" }, "en-US")}
+          {formatDateOnly(value, { month: "short", day: "numeric" }, locale)}
         </span>
       ) : (
         <span className="text-muted-foreground">{placeholder}</span>

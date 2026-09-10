@@ -5,7 +5,7 @@ description: 把智能体接入飞书，在私聊或群聊中直接交代工作�
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-把一个 Multica 智能体连接成飞书 Bot 后，团队成员可以在飞书里私聊它、在群里 @ 它，也可以用 `/issue` 创建 issue。对话和执行记录仍会保存到 Multica 工作区。
+把一个 Multica 智能体连接成飞书 Bot 后，团队成员可以在飞书里私聊它、在群里 @ 它，也可以用 `/issue` 创建任务。对话和执行记录仍会保存到 Multica 工作区。
 
 每个 Bot 只对应一个智能体。需要在飞书中使用多个智能体时，分别为它们连接 Bot。
 
@@ -45,7 +45,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 先把 Bot 加入群聊，再 `@Bot` 并写下要求。Bot 只会响应明确 @ 它的消息；执行时会结合当前会话中可读取的近期上下文。
 
-### 创建 issue
+### 创建任务
 
 发送：
 
@@ -54,7 +54,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 Safari 登录成功后仍然停留在登录页。
 ```
 
-第一行成为标题，后面的内容成为描述。只发送 `/issue` 时，Multica 会尝试使用上一条消息作为标题。
+第一行作为标题，其余内容作为描述。只发送 `/issue` 不会创建任务；Bot 会回复用法提示。
 
 ## 管理连接
 
@@ -91,4 +91,4 @@ openssl rand -base64 32
 
 - [聊天集成](/channels) — 平台对比、会话隔离和账号绑定机制。
 - [与智能体对话](/chat) — Bot 背后的对话与执行模型。
-- [Issues](/issues) — `/issue` 创建的工作单位。
+- [任务](/issues) — `/issue` 创建的工作单位。

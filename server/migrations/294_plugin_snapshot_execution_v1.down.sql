@@ -1,0 +1,12 @@
+DROP TRIGGER IF EXISTS trg_agent_task_queue_plugin_execution_manifest ON agent_task_queue;
+DROP FUNCTION IF EXISTS pin_plugin_execution_manifest();
+ALTER TABLE agent_task_queue DROP COLUMN IF EXISTS plugin_execution_manifest_id;
+DROP TRIGGER IF EXISTS trg_plugin_health_append_only ON plugin_health;
+DROP TRIGGER IF EXISTS trg_plugin_execution_manifest_append_only ON plugin_execution_manifest;
+DROP TRIGGER IF EXISTS trg_plugin_capability_snapshot_append_only ON plugin_capability_snapshot;
+DROP TRIGGER IF EXISTS trg_plugin_artifact_file_append_only ON plugin_artifact_file;
+DROP TABLE IF EXISTS plugin_health;
+DROP TABLE IF EXISTS plugin_execution_manifest;
+DROP TABLE IF EXISTS plugin_capability_snapshot;
+DROP TABLE IF EXISTS plugin_workspace_capability_state;
+DROP TABLE IF EXISTS plugin_artifact_file;

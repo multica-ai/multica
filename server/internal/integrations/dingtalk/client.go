@@ -43,6 +43,22 @@ type apiError struct {
 	Message string `json:"message"`
 }
 
+// apiRequestError preserves DingTalk's machine-readable error code so callers
+// can distinguish an actionable permission problem from a transient failure.
+type apiRequestError struct {
+	Path       string
+	StatusCode int
+	Code       string
+	Message    string
+}
+
+func (e *apiRequestError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("dingtalk: %s: code=%q message=%q", e.Path, e.Code, e.Message)
+	}
+	return fmt.Sprintf("dingtalk: %s: http %d", e.Path, e.StatusCode)
+}
+
 // messageFilesDownloadPath resolves a robot message downloadCode to a
 // short-lived download URL. Both the code and the returned URL are temporary
 // (DingTalk documents no exact TTL) — resolve and fetch immediately, and never
