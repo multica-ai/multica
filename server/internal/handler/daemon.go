@@ -4748,14 +4748,15 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		Inputs:   make([]string, 0, n),
 		Outputs:  make([]string, 0, n),
 		// Optional for mixed-version rollout. Older daemons omit the event
-		// timestamp, and the query preserves the previous database-time fallback.
+		// timestamp, and one missing or implausible value makes the whole batch
+		// use database time so paired events never mix clocks.
 		CreatedAts: make([]string, 0, n),
 		// Tri-state through a text[]: "" is NULL, matching how the query maps
 		// every other nullable column in this batch.
 		OutputTruncations: make([]string, 0, n),
 	}
-	serverNow := time.Now().UTC()
-	for _, msg := range req.Messages {
+	createdAts := taskMessageCreatedAts(req.Messages, time.Now().UTC())
+	for i, msg := range req.Messages {
 		id, err := uuid.NewV7()
 		if err != nil {
 			slog.Error("failed to generate task message id", "task_id", taskID, "error", err)
@@ -4809,7 +4810,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		params.Contents = append(params.Contents, msg.Content)
 		params.Inputs = append(params.Inputs, inputJSON)
 		params.Outputs = append(params.Outputs, msg.Output)
-		params.CreatedAts = append(params.CreatedAts, taskMessageCreatedAt(msg.CreatedAt, serverNow))
+		params.CreatedAts = append(params.CreatedAts, createdAts[i])
 		params.OutputTruncations = append(params.OutputTruncations, boolArrayElement(msg.OutputTruncated))
 	}
 
@@ -4990,6 +4991,21 @@ func taskMessageCreatedAt(v *time.Time, serverNow time.Time) string {
 		return ""
 	}
 	return v.UTC().Format(time.RFC3339Nano)
+}
+
+// taskMessageCreatedAts keeps every timestamp in a report batch on the same
+// clock. If any event lacks a plausible daemon timestamp, returning all empty
+// values makes PostgreSQL assign one database timestamp to the whole batch.
+func taskMessageCreatedAts(messages []TaskMessageRequest, serverNow time.Time) []string {
+	createdAts := make([]string, len(messages))
+	for i := range messages {
+		createdAts[i] = taskMessageCreatedAt(messages[i].CreatedAt, serverNow)
+		if createdAts[i] == "" {
+			clear(createdAts)
+			return createdAts
+		}
+	}
+	return createdAts
 }
 
 // ListTaskMessages returns the persisted messages for a task (for catch-up after reconnect).

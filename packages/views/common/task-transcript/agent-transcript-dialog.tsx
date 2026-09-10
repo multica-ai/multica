@@ -1420,14 +1420,29 @@ function DurationCell({ ms, pending }: { ms?: number; pending?: boolean }) {
     );
   }
   if (ms === undefined) return <span className="w-12 shrink-0" />;
-  const unknownLabel = ms <= 0 ? t(($) => $.transcript.step_duration_unknown) : undefined;
   return (
-    <span
+    <StepDuration
+      ms={ms}
+      unknownLabel={t(($) => $.transcript.step_duration_unknown)}
       className="w-12 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
-      title={unknownLabel}
-      aria-label={unknownLabel}
-    >
-      {formatStepDuration(ms)}
+    />
+  );
+}
+
+function StepDuration({
+  ms,
+  unknownLabel,
+  className,
+}: {
+  ms: number;
+  unknownLabel: string;
+  className?: string;
+}) {
+  const unknown = ms <= 0;
+  return (
+    <span className={className} title={unknown ? unknownLabel : undefined}>
+      <span aria-hidden={unknown || undefined}>{formatStepDuration(ms)}</span>
+      {unknown && <span className="sr-only">{unknownLabel}</span>}
     </span>
   );
 }
@@ -1614,21 +1629,15 @@ function GroupRow({
               <span className="truncate font-mono text-muted-foreground">
                 {callSummary(step, summaryLabels) || step.tool}
               </span>
-              <span
-                className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground"
-                title={
-                  step.durationMs !== undefined && step.durationMs <= 0
-                    ? t(($) => $.transcript.step_duration_unknown)
-                    : undefined
-                }
-                aria-label={
-                  step.durationMs !== undefined && step.durationMs <= 0
-                    ? t(($) => $.transcript.step_duration_unknown)
-                    : undefined
-                }
-              >
-                {step.durationMs === undefined ? "" : formatStepDuration(step.durationMs)}
-              </span>
+              {step.durationMs === undefined ? (
+                <span className="ml-auto shrink-0" />
+              ) : (
+                <StepDuration
+                  ms={step.durationMs}
+                  unknownLabel={t(($) => $.transcript.step_duration_unknown)}
+                  className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground"
+                />
+              )}
             </button>
           ))}
         </div>
@@ -1715,13 +1724,11 @@ function StepInspector({
           {call?.durationMs !== undefined && (
             <>
               <FactDot />
-              <span
+              <StepDuration
+                ms={call.durationMs}
+                unknownLabel={t(($) => $.transcript.step_duration_unknown)}
                 className="font-mono tabular-nums"
-                title={call.durationMs <= 0 ? t(($) => $.transcript.step_duration_unknown) : undefined}
-                aria-label={call.durationMs <= 0 ? t(($) => $.transcript.step_duration_unknown) : undefined}
-              >
-                {formatStepDuration(call.durationMs)}
-              </span>
+              />
             </>
           )}
         </span>

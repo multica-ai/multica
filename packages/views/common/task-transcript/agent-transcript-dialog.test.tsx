@@ -425,8 +425,13 @@ describe("AgentTranscriptDialog", () => {
     ]);
 
     const unknownDuration = screen.getByText("—");
-    expect(unknownDuration).toHaveAttribute("title", "Exact duration is unavailable.");
-    expect(unknownDuration).toHaveAttribute("aria-label", "Exact duration is unavailable.");
+    expect(unknownDuration).toHaveAttribute("aria-hidden", "true");
+    expect(unknownDuration.parentElement).toHaveAttribute("title", "Exact duration is unavailable.");
+    expect(unknownDuration.parentElement).not.toHaveAttribute("aria-label");
+    expect(screen.getByText("Exact duration is unavailable.")).toHaveClass("sr-only");
+    const row = screen.getByRole("button", { name: /Exact duration is unavailable\./ });
+    fireEvent.click(row);
+    expect(screen.getAllByText("Exact duration is unavailable.")).toHaveLength(2);
     expect(screen.queryByText("0.0s")).not.toBeInTheDocument();
   });
 

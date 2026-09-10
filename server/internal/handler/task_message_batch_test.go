@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -61,7 +62,6 @@ func TestReportTaskMessagesPersistsWholeBatch(t *testing.T) {
 	// PostgreSQL timestamptz preserves microseconds, so keep the fixture on that
 	// boundary while still proving daemon event precision survives.
 	observedAt := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
-	fallbackBefore := time.Now().UTC()
 
 	testutil.Call(t, testHandler.ReportTaskMessages, batchMessagesRequest(t, taskID, []any{
 		map[string]any{
@@ -71,15 +71,20 @@ func TestReportTaskMessagesPersistsWholeBatch(t *testing.T) {
 			"created_at": observedAt.Format(time.RFC3339Nano),
 		},
 		map[string]any{
-			"seq":    2,
-			"type":   "tool_use",
-			"tool":   "fs_read",
-			"input":  map[string]any{"path": "/etc/hosts", "nested": map[string]any{"depth": 2}},
-			"output": "127.0.0.1 localhost",
+			"seq":        2,
+			"type":       "tool_use",
+			"tool":       "fs_read",
+			"input":      map[string]any{"path": "/etc/hosts", "nested": map[string]any{"depth": 2}},
+			"output":     "127.0.0.1 localhost",
+			"created_at": observedAt.Add(10 * time.Millisecond).Format(time.RFC3339Nano),
 		},
-		map[string]any{"seq": 3, "type": "text", "content": "done"},
+		map[string]any{
+			"seq":        3,
+			"type":       "text",
+			"content":    "done",
+			"created_at": observedAt.Add(20 * time.Millisecond).Format(time.RFC3339Nano),
+		},
 	})).Want(http.StatusOK)
-	fallbackAfter := time.Now().UTC()
 
 	stored, err := testHandler.Queries.ListTaskMessages(ctx, util.MustParseUUID(taskID))
 	if err != nil {
@@ -100,8 +105,8 @@ func TestReportTaskMessagesPersistsWholeBatch(t *testing.T) {
 	if !stored[0].CreatedAt.Time.Equal(observedAt) {
 		t.Fatalf("daemon-observed created_at = %s, want %s", stored[0].CreatedAt.Time, observedAt)
 	}
-	if got := stored[1].CreatedAt.Time; got.Before(fallbackBefore) || got.After(fallbackAfter) {
-		t.Fatalf("old-daemon created_at fallback = %s, want between %s and %s", got, fallbackBefore, fallbackAfter)
+	if want := observedAt.Add(10 * time.Millisecond); !stored[1].CreatedAt.Time.Equal(want) {
+		t.Fatalf("second daemon-observed created_at = %s, want %s", stored[1].CreatedAt.Time, want)
 	}
 	// Fields the daemon did not send must be NULL, not "".
 	if stored[0].Tool.Valid || stored[0].Output.Valid || stored[0].Input != nil {
@@ -127,6 +132,45 @@ func TestReportTaskMessagesPersistsWholeBatch(t *testing.T) {
 	}
 	if stored[2].Type != "text" || stored[2].Content.String != "done" {
 		t.Fatalf("text row = %+v, want type=text content=done", stored[2])
+	}
+}
+
+func TestReportTaskMessagesFallsBackWholeBatchForClockSkew(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	taskID := seedBatchTask(t, "batch-clock-skew")
+	validAt := time.Now().UTC().Add(-time.Second)
+	invalidAt := validAt.Add(-maxTaskMessageClockSkew - time.Minute)
+	fallbackBefore := time.Now().UTC()
+
+	testutil.Call(t, testHandler.ReportTaskMessages, batchMessagesRequest(t, taskID, []any{
+		map[string]any{
+			"seq":        1,
+			"type":       "tool_use",
+			"tool":       "bash",
+			"created_at": validAt.Format(time.RFC3339Nano),
+		},
+		map[string]any{
+			"seq":        2,
+			"type":       "tool_result",
+			"tool":       "bash",
+			"created_at": invalidAt.Format(time.RFC3339Nano),
+		},
+	})).Want(http.StatusOK)
+	fallbackAfter := time.Now().UTC()
+
+	stored, err := testHandler.Queries.ListTaskMessages(context.Background(), util.MustParseUUID(taskID))
+	if err != nil {
+		t.Fatalf("list persisted task messages: %v", err)
+	}
+	if len(stored) != 2 {
+		t.Fatalf("persisted %d task messages, want 2", len(stored))
+	}
+	for _, row := range stored {
+		if got := row.CreatedAt.Time; got.Before(fallbackBefore) || got.After(fallbackAfter) {
+			t.Fatalf("seq %d created_at = %s, want database fallback between %s and %s", row.Seq, got, fallbackBefore, fallbackAfter)
+		}
 	}
 }
 
@@ -268,5 +312,29 @@ func TestTaskMessageCreatedAtRejectsImplausibleClockSkew(t *testing.T) {
 				t.Fatalf("taskMessageCreatedAt() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTaskMessageCreatedAtsFallsBackWholeBatch(t *testing.T) {
+	t.Parallel()
+
+	serverNow := time.Date(2026, time.September, 10, 12, 0, 0, 0, time.UTC)
+	valid := serverNow.Add(-time.Second)
+	invalid := serverNow.Add(-maxTaskMessageClockSkew - time.Nanosecond)
+
+	got := taskMessageCreatedAts([]TaskMessageRequest{
+		{CreatedAt: &valid},
+		{CreatedAt: &invalid},
+	}, serverNow)
+	if want := []string{"", ""}; !slices.Equal(got, want) {
+		t.Fatalf("taskMessageCreatedAts() = %q, want whole-batch fallback %q", got, want)
+	}
+
+	got = taskMessageCreatedAts([]TaskMessageRequest{
+		{CreatedAt: &valid},
+		{CreatedAt: &serverNow},
+	}, serverNow)
+	if want := []string{valid.Format(time.RFC3339Nano), serverNow.Format(time.RFC3339Nano)}; !slices.Equal(got, want) {
+		t.Fatalf("taskMessageCreatedAts() = %q, want %q", got, want)
 	}
 }
