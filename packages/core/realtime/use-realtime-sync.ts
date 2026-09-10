@@ -17,6 +17,7 @@ import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
 import { propertyKeys } from "../properties/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
+import { issueLifecycleKeys } from "../issue-lifecycles/queries";
 import {
   agentTaskSnapshotKeys,
   workspaceWorkingAgentsKeys,
@@ -827,7 +828,10 @@ export function useRealtimeSync(
       // client. (MUL-6458)
       issue_status: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: issueLifecycleKeys.all(wsId) });
+        }
       },
       pin: () => {
         const wsId = getCurrentWsId();

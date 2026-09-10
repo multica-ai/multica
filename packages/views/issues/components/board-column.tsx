@@ -75,8 +75,17 @@ const EMPTY_VIRTUOSO_COMPONENTS = {};
 export interface BoardColumnGroup {
   id: string;
   title: string;
-  /** Board columns are CATEGORIES, never raw status keys. (MUL-6243) */
+  /** Workspace-wide boards use categories; project boards use Status Nodes. */
   status?: IssueStatusCategory;
+  /** Stable project lifecycle node. `null` is a legacy unbound fallback
+   * bucket; `undefined` means this is not a lifecycle-status column. */
+  lifecycleStatusId?: string | null;
+  lifecycleId?: string;
+  lifecycleStatusLegacyKey?: string;
+  lifecycleStatusColor?: string;
+  lifecycleStatusPosition?: number;
+  lifecycleStatusArchived?: boolean;
+  lifecycleStatusHistorical?: boolean;
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
   /** Project id for this column; null = the "No project" column. Set only
@@ -228,27 +237,29 @@ export const BoardColumn = memo(function BoardColumn({
               )}
             </DeferredPopup>
           )}
-          {onCreateIssue && (
-            <DeferredTooltip
-              content={t(($) => $.board.add_issue_tooltip)}
-              trigger={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="rounded-full text-muted-foreground"
-                  onClick={() => {
-                    const data = {
-                      ...(group.createData ?? {}),
-                      ...(projectId ? { project_id: projectId } : {}),
-                    };
-                    onCreateIssue(data);
-                  }}
-                >
-                  <Plus className="size-3.5" />
-                </Button>
-              }
-            />
-          )}
+          {onCreateIssue &&
+            (group.lifecycleStatusId === undefined ||
+              group.createData !== undefined) && (
+              <DeferredTooltip
+                content={t(($) => $.board.add_issue_tooltip)}
+                trigger={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="rounded-full text-muted-foreground"
+                    onClick={() => {
+                      const data = {
+                        ...(group.createData ?? {}),
+                        ...(projectId ? { project_id: projectId } : {}),
+                      };
+                      onCreateIssue(data);
+                    }}
+                  >
+                    <Plus className="size-3.5" />
+                  </Button>
+                }
+              />
+            )}
         </div>
       </div>
       <div className="relative min-h-[200px] flex-1 rounded-lg">
@@ -342,6 +353,23 @@ function BoardGroupHeading({
   group: BoardColumnGroup;
   count: number;
 }) {
+  if (group.lifecycleStatusId !== undefined) {
+    return (
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          className="size-2.5 shrink-0 rounded-full bg-muted-foreground/30"
+          style={group.lifecycleStatusColor ? { backgroundColor: group.lifecycleStatusColor } : undefined}
+        />
+        <span className="truncate text-body font-medium" title={group.title}>
+          {group.title}
+        </span>
+        <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-micro font-medium tabular-nums text-muted-foreground">
+          {count}
+        </span>
+      </div>
+    );
+  }
+
   if (group.status) {
     return <StatusHeading status={group.status} count={count} />;
   }

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY idx_issue_lifecycle_status_spec_key ON issue_lifecycle_status(lifecycle_id, spec_key);

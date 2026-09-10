@@ -3,7 +3,12 @@ import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { Issue, IssueStatus, IssueStatusCategory } from "@multica/core/types";
+import type {
+  Issue,
+  IssueLifecycleStatusNode,
+  IssueStatus,
+  IssueStatusCategory,
+} from "@multica/core/types";
 import { ListView } from "./list-view";
 import { IssueContextMenuProvider } from "../actions";
 import { ScrollRestorationProvider } from "../../platform";
@@ -193,6 +198,7 @@ const PAGINATION = {
 function renderListView(
   issues: Issue[] = ISSUES,
   visibleStatuses: IssueStatusCategory[] = ["todo"],
+  extraProps: Partial<React.ComponentProps<typeof ListView>> = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -207,6 +213,7 @@ function renderListView(
               visibleStatuses={visibleStatuses}
               statusPagination={PAGINATION}
               onMoveIssue={vi.fn()}
+              {...extraProps}
             />
           </ScrollRestorationProvider>
         </IssueContextMenuProvider>
@@ -252,6 +259,77 @@ describe("ListView status header collapse", () => {
     await user.click(trigger);
 
     expect(mockViewState.listCollapsedStatuses).toEqual(["todo"]);
+  });
+});
+
+describe("ListView project lifecycle status nodes", () => {
+  it("renders the concrete node name and rows from its stable-id branch", () => {
+    const lifecycleIssue = {
+      ...ISSUES[0],
+      lifecycle_id: "lifecycle-1",
+      lifecycle_status_id: "node-implementation",
+    } as Issue;
+    const lifecycleStatus = {
+      id: "node-implementation",
+      lifecycle_id: "lifecycle-1",
+      legacy_status_key: "todo",
+      spec_key: "implementation",
+      name: "Implementation",
+      description: "",
+      color: "#2563eb",
+      position: 1,
+      phase: "unstarted",
+      outcome: null,
+      entry_policy: {
+        assignee: { type: "keep" },
+        executor: { type: "none" },
+        instructions: "",
+        advance: "human_confirms",
+      },
+      entry_policy_revision: 1,
+      archived_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    } satisfies IssueLifecycleStatusNode;
+    const page = { ...emptyPage, loaded: 1, total: 1 };
+
+    renderListView([lifecycleIssue], ["todo"], {
+      lifecycleStatuses: [lifecycleStatus],
+      groupBranches: {
+        enabled: true,
+        descriptors: [
+          {
+            key: "lifecycle_status:node-implementation",
+            value: {
+              kind: "lifecycle_status",
+              lifecycle_id: "lifecycle-1",
+              lifecycle_status_id: "node-implementation",
+              status: "todo",
+              name: "Implementation",
+              color: "#2563eb",
+              position: 1,
+            },
+            count: 1,
+          },
+        ],
+        issues: [lifecycleIssue],
+        pagination: {
+          "lifecycle_status:node-implementation": page,
+        },
+        total: 1,
+        isLoading: false,
+        isRefreshing: false,
+        isError: false,
+        hasMoreGroups: false,
+        isLoadingMoreGroups: false,
+        loadMoreGroups: vi.fn(),
+        retryGroups: vi.fn(),
+      },
+    });
+
+    expect(screen.getByText("Implementation")).toBeInTheDocument();
+    expect(screen.getByText("First todo issue")).toBeInTheDocument();
+    expect(screen.queryByText("Todo")).not.toBeInTheDocument();
   });
 });
 

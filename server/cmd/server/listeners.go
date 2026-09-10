@@ -77,6 +77,11 @@ func projectOutbound(eventType string, payload any) any {
 // without touching any of the event listeners below. This is Phase 0 of the
 // horizontal-scaling plan tracked in MUL-1138.
 func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
+	internalEvents := map[string]bool{
+		// The installed-client contract remains issue:updated. Transitioned is
+		// an in-process domain event until the lifecycle feature rolls out.
+		protocol.EventIssueTransitioned: true,
+	}
 	// Personal events should NOT be broadcast to the whole workspace.
 	personalEvents := map[string]bool{
 		protocol.EventInboxNew:           true,
@@ -217,6 +222,9 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 
 	// SubscribeAll handles workspace-broadcast for non-personal events.
 	bus.SubscribeAll(func(e events.Event) {
+		if internalEvents[e.Type] {
+			return
+		}
 		// Skip personal events — they are handled by type-specific listeners above.
 		if personalEvents[e.Type] {
 			return

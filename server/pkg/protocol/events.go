@@ -3,8 +3,12 @@ package protocol
 // Event types for WebSocket communication between server, web clients, and daemon.
 const (
 	// Issue events
-	EventIssueCreated            = "issue:created"
-	EventIssueUpdated            = "issue:updated"
+	EventIssueCreated = "issue:created"
+	EventIssueUpdated = "issue:updated"
+	// EventIssueTransitioned is the internal domain event emitted after an
+	// immutable Issue Transition commits. The legacy issue:updated event remains
+	// the realtime compatibility contract for installed clients.
+	EventIssueTransitioned       = "issue:transitioned"
 	EventIssueDeleted            = "issue:deleted"
 	EventIssueMetadataChanged    = "issue_metadata:changed"
 	EventIssueAttachmentsChanged = "issue_attachments:changed"

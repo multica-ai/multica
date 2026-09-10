@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -194,19 +195,6 @@ func loadUserPrefs(
 		result[util.UUIDToString(row.UserID)] = prefs
 	}
 	return result
-}
-
-// terminalStatusForTaskFailedDismiss is the set of issue statuses that mark
-// the issue as "the user no longer needs to triage past failures." When a
-// status change lands on one of these, any pre-existing task_failed inbox
-// rows for the issue are archived so the inbox stays a fresh-signal surface.
-// `in_review` is included because in Multica's agent flow that's the most
-// reliable "work delivered" handoff — and a status flip back to in_progress
-// will simply produce new task_failed rows that surface normally.
-var terminalStatusForTaskFailedDismiss = map[string]bool{
-	"in_review": true,
-	"done":      true,
-	"cancelled": true,
 }
 
 // archiveStaleTaskFailedInbox archives all task_failed inbox rows for the
@@ -668,7 +656,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 	})
 
-	// issue:updated — handle assignee changes, status changes, priority, due date
+	// issue:updated — handle field changes. Status changes have their own
+	// issue:transitioned subscription below.
 	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
 		if !ok {
@@ -679,7 +668,6 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 		assigneeChanged, _ := payload["assignee_changed"].(bool)
-		statusChanged, _ := payload["status_changed"].(bool)
 		descriptionChanged, _ := payload["description_changed"].(bool)
 		prevAssigneeType, _ := payload["prev_assignee_type"].(*string)
 		prevAssigneeID, _ := payload["prev_assignee_id"].(*string)
@@ -749,28 +737,6 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				exclude, "assignee_changed", "info",
 				issue.Title, "",
 				assigneeDetails)
-		}
-
-		if statusChanged {
-			prevStatus, _ := payload["prev_status"].(string)
-			statusDetails, _ := json.Marshal(map[string]string{
-				"from": prevStatus,
-				"to":   issue.Status,
-			})
-			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
-				nil, "status_changed", "info",
-				issue.Title, "",
-				statusDetails)
-
-			// When the issue progresses past the failure (in_review / done /
-			// cancelled), retire any stale task_failed inbox rows so the
-			// inbox reflects the current state of the work, not its history.
-			// The activity log keeps the full failure history for audit.
-			if terminalStatusForTaskFailedDismiss[issuestatus.Effective(
-				ctx, queries, parseUUID(e.WorkspaceID), issue.Status,
-			)] {
-				archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
-			}
 		}
 
 		if priorityChanged, _ := payload["priority_changed"].(bool); priorityChanged {
@@ -843,6 +809,28 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Title, issue.Status,
 					issue.Title, skip, emptyDetails)
 			}
+		}
+	})
+
+	bus.Subscribe(protocol.EventIssueTransitioned, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		issue, ok := payload["issue"].(handler.IssueResponse)
+		if !ok {
+			return
+		}
+		prevStatus, _ := payload["prev_status"].(string)
+		statusDetails, _ := json.Marshal(map[string]string{"from": prevStatus, "to": issue.Status})
+		notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
+			nil, "status_changed", "info", issue.Title, "", statusDetails)
+
+		state := issuepolicy.FromLegacyCategory(issuestatus.Effective(
+			ctx, queries, parseUUID(e.WorkspaceID), issue.Status,
+		))
+		if state.DismissesTaskFailure() {
+			archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
 		}
 	})
 

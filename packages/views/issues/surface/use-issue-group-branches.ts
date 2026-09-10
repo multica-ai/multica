@@ -108,6 +108,14 @@ function issueMatchesDescriptor(
       : issue.status;
     if (resolved !== value.status) return false;
   }
+  if (
+    value.kind === "lifecycle_status" &&
+    (value.lifecycle_status_id
+      ? issue.lifecycle_status_id !== value.lifecycle_status_id
+      : issue.lifecycle_status_id != null || issue.status !== value.status)
+  ) {
+    return false;
+  }
   const owner = primary?.value ?? value;
   switch (owner.kind) {
     case "assignee":
@@ -129,6 +137,10 @@ function issueMatchesDescriptor(
     }
     case "status":
       return issue.status === owner.status;
+    case "lifecycle_status":
+      return owner.lifecycle_status_id
+        ? issue.lifecycle_status_id === owner.lifecycle_status_id
+        : issue.lifecycle_status_id == null && issue.status === owner.status;
   }
 }
 
@@ -143,6 +155,7 @@ export function useIssueGroupBranches({
   group,
   secondaryValues,
   observeEmptyBranches = false,
+  eagerBranches = false,
   enabled,
 }: {
   wsId: string;
@@ -155,6 +168,9 @@ export function useIssueGroupBranches({
    * Activate those when their mounted sentinel becomes visible so drag
    * targets have live heads. */
   observeEmptyBranches?: boolean;
+  /** Fixed, bounded catalogs (for example one project's lifecycle nodes) can
+   * load every branch head immediately instead of waiting for a sentinel. */
+  eagerBranches?: boolean;
   enabled: boolean;
 }): IssueGroupBranches {
   const queryClient = useQueryClient();
@@ -195,6 +211,22 @@ export function useIssueGroupBranches({
       setCursorState(activeCursorState);
     }
   }, [activeCursorState, cursorState]);
+  useEffect(() => {
+    if (!enabled || !eagerBranches || branchKeys.length === 0) return;
+    setCursorState((previous) => {
+      const current = previous.identity === identity
+        ? previous
+        : { identity, cursors: {} };
+      let changed = previous.identity !== identity;
+      const cursors = { ...current.cursors };
+      for (const key of branchKeys) {
+        if ((cursors[key]?.length ?? 0) > 0) continue;
+        cursors[key] = [null];
+        changed = true;
+      }
+      return changed ? { identity, cursors } : previous;
+    });
+  }, [branchKeys, eagerBranches, enabled, identity]);
 
   const pageTargets = useMemo<PageTarget[]>(
     () =>
@@ -335,6 +367,7 @@ export function useIssueGroupBranches({
     pageResults,
     pageTargets,
     primaryByBranch,
+    secondaryIsCategory,
   ]);
 
   const headRevisionRef = useRef<{

@@ -84,7 +84,7 @@ func TestActivityIssueUpdated_StatusChanged(t *testing.T) {
 	})
 
 	bus.Publish(events.Event{
-		Type:        protocol.EventIssueUpdated,
+		Type:        protocol.EventIssueTransitioned,
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
@@ -98,8 +98,10 @@ func TestActivityIssueUpdated_StatusChanged(t *testing.T) {
 				CreatorType: "member",
 				CreatorID:   testUserID,
 			},
-			"status_changed": true,
-			"prev_status":    "todo",
+			"status_changed":   true,
+			"prev_status":      "todo",
+			"prev_status_name": "Ready for Agent",
+			"status_name":      "Squad Build",
 		},
 	})
 
@@ -120,6 +122,9 @@ func TestActivityIssueUpdated_StatusChanged(t *testing.T) {
 	}
 	if details["to"] != "in_progress" {
 		t.Fatalf("expected to 'in_progress', got %q", details["to"])
+	}
+	if details["from_name"] != "Ready for Agent" || details["to_name"] != "Squad Build" {
+		t.Fatalf("expected lifecycle names in activity details, got %#v", details)
 	}
 }
 

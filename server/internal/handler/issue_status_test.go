@@ -517,20 +517,23 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 			"status":       "todo",
 		})
 
-		stats, err := testHandler.Queries.GetProjectIssueStats(ctx, db.GetProjectIssueStatsParams{
-			WorkspaceID:        parseUUID(testWorkspaceID),
-			ProjectIds:         []pgtype.UUID{projectID},
-			TerminalStatusKeys: terminalStatusKeys,
-		})
-		if err != nil {
-			t.Fatalf("GetProjectIssueStats: %v", err)
-		}
-		if len(stats) != 1 {
-			t.Fatalf("expected stats for one project, got %d", len(stats))
-		}
-		if stats[0].TotalCount != 2 || stats[0].DoneCount != 1 {
-			t.Errorf("project stats = %d done / %d total, want 1/2 (the custom done status must count)",
-				stats[0].DoneCount, stats[0].TotalCount)
+		for _, lifecycleEnabled := range []bool{false, true} {
+			stats, err := testHandler.Queries.GetProjectIssueStats(ctx, db.GetProjectIssueStatsParams{
+				WorkspaceID:        parseUUID(testWorkspaceID),
+				ProjectIds:         []pgtype.UUID{projectID},
+				TerminalStatusKeys: terminalStatusKeys,
+				LifecycleEnabled:   lifecycleEnabled,
+			})
+			if err != nil {
+				t.Fatalf("GetProjectIssueStats lifecycle=%v: %v", lifecycleEnabled, err)
+			}
+			if len(stats) != 1 {
+				t.Fatalf("expected stats for one project, got %d", len(stats))
+			}
+			if stats[0].TotalCount != 2 || stats[0].DoneCount != 1 {
+				t.Errorf("project stats lifecycle=%v = %d done / %d total, want 1/2 (the custom done status must count)",
+					lifecycleEnabled, stats[0].DoneCount, stats[0].TotalCount)
+			}
 		}
 	})
 
@@ -545,23 +548,29 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 			}
 		}
 
-		rows, err := testHandler.Queries.ChildIssueProgress(ctx, db.ChildIssueProgressParams{
-			WorkspaceID:        parseUUID(testWorkspaceID),
-			TerminalStatusKeys: terminalStatusKeys,
-		})
-		if err != nil {
-			t.Fatalf("ChildIssueProgress: %v", err)
-		}
-		for _, row := range rows {
-			if row.ParentIssueID == parent {
-				if row.Total != 2 || row.Done != 1 {
-					t.Errorf("child progress = %d done / %d total, want 1/2 (the custom done status must count)",
-						row.Done, row.Total)
+		for _, lifecycleEnabled := range []bool{false, true} {
+			rows, err := testHandler.Queries.ChildIssueProgress(ctx, db.ChildIssueProgressParams{
+				WorkspaceID:        parseUUID(testWorkspaceID),
+				TerminalStatusKeys: terminalStatusKeys,
+				LifecycleEnabled:   lifecycleEnabled,
+			})
+			if err != nil {
+				t.Fatalf("ChildIssueProgress lifecycle=%v: %v", lifecycleEnabled, err)
+			}
+			matched := false
+			for _, row := range rows {
+				if row.ParentIssueID == parent {
+					matched = true
+					if row.Total != 2 || row.Done != 1 {
+						t.Errorf("child progress lifecycle=%v = %d done / %d total, want 1/2 (the custom done status must count)",
+							lifecycleEnabled, row.Done, row.Total)
+					}
 				}
-				return
+			}
+			if !matched {
+				t.Error("no progress row for the parent issue")
 			}
 		}
-		t.Error("no progress row for the parent issue")
 	})
 }
 

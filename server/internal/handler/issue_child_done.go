@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -429,21 +431,33 @@ func isTerminalChildStatus(status string) bool {
 // catalog snapshot. A miss must not bypass a parked/terminal parent's guard.
 func (h *Handler) childStatusResolver(ctx context.Context) func(db.Issue) (string, error) {
 	resolvers := make(map[pgtype.UUID]*issuestatus.Resolver)
+	lifecycleEnabled := featureflags.IssueLifecycleV1Enabled(ctx, h.FeatureFlags)
 	return func(c db.Issue) (string, error) {
-		if issuestatus.IsBuiltIn(c.Status) {
-			return c.Status, nil
+		status := c.Status
+		if !issuestatus.IsBuiltIn(c.Status) {
+			resolver := resolvers[c.WorkspaceID]
+			if resolver == nil {
+				resolver = issuestatus.NewResolver(c.WorkspaceID)
+				resolvers[c.WorkspaceID] = resolver
+			}
+			status = resolver.Effective(ctx, h.issueStatusCatalog(), c.Status)
+			if err := resolver.Err(); err != nil {
+				return "", err
+			}
+			if !issuestatus.IsCategory(status) {
+				return "", fmt.Errorf("unresolved status %q in workspace %s", c.Status, uuidToString(c.WorkspaceID))
+			}
 		}
-		resolver := resolvers[c.WorkspaceID]
-		if resolver == nil {
-			resolver = issuestatus.NewResolver(c.WorkspaceID)
-			resolvers[c.WorkspaceID] = resolver
+
+		state := issuepolicy.ResolveIssue(ctx, h.Queries, c, lifecycleEnabled)
+		switch state.Outcome {
+		case "completed":
+			return "done", nil
+		case "cancelled":
+			return "cancelled", nil
 		}
-		status := resolver.Effective(ctx, h.issueStatusCatalog(), c.Status)
-		if err := resolver.Err(); err != nil {
-			return "", err
-		}
-		if !issuestatus.IsCategory(status) {
-			return "", fmt.Errorf("unresolved status %q in workspace %s", c.Status, uuidToString(c.WorkspaceID))
+		if state.IsParked() {
+			return "backlog", nil
 		}
 		return status, nil
 	}

@@ -3,6 +3,7 @@ import { hashKey, useMutation, useQueryClient, type QueryKey } from "@tanstack/r
 import { api } from "../api";
 import { issueKeys } from "./queries";
 import { projectKeys } from "../projects/queries";
+import { issueLifecycleKeys } from "../issue-lifecycles/queries";
 import { inboxKeys } from "../inbox/queries";
 import {
   applyIssueChange,
@@ -33,6 +34,7 @@ import type {
   CreateIssueRequest,
   ListIssuesCache,
   MoveIssueRequest,
+  TransitionIssueStatusNodeRequest,
   UpdateIssueRequest,
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
@@ -333,6 +335,44 @@ export function useUpdateIssue() {
       if (ctx?.parentId || newParentId) {
         qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
       }
+    },
+  });
+}
+
+/**
+ * Canonical lifecycle-native status transition. The server returns both the
+ * committed issue snapshot and immutable transition record, so the cache can
+ * converge without translating the stable node id back through the legacy
+ * workspace status catalog.
+ */
+export function useTransitionIssueStatusNode() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      id,
+      ...request
+    }: { id: string } & TransitionIssueStatusNodeRequest) =>
+      api.transitionIssueStatusNode(id, request),
+    onSuccess: ({ issue }) => {
+      const previous = qc.getQueryData<Issue>(issueKeys.detail(wsId, issue.id));
+      const change = applyIssueChange(qc, wsId, issue.id, issue, {
+        changed: issueChangedDims(issue, previous),
+        baseIssue: previous,
+        acceptCurrent: (current) =>
+          current.revision === undefined ||
+          (issue.revision !== undefined && issue.revision >= current.revision),
+      });
+      reconcileIssueFullSnapshotRevision(qc, wsId, issue.id, issue.revision);
+      invalidateStaleListKeys(qc, change.staleKeys);
+      invalidateIssueDerivatives(qc, wsId, { statusOrProjectChanged: true });
+      qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueLifecycleKeys.executions(wsId, issue.id) });
+    },
+    onError: (_error, { id }) => {
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, id) });
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
     },
   });
 }

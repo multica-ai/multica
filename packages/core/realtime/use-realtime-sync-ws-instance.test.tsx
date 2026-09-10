@@ -13,6 +13,7 @@ import { runtimeKeys } from "../runtimes/queries";
 import { workspaceWorkingAgentsKeys } from "../agents/queries";
 import { workspaceKeys } from "../workspace/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
+import { issueLifecycleKeys } from "../issue-lifecycles/queries";
 import {
   markWorkspaceDeletePending,
   unmarkWorkspaceDeletePending,
@@ -278,6 +279,9 @@ describe("useRealtimeSync — ws instance change", () => {
 
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: issueStatusKeys.all("ws-1"),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: issueLifecycleKeys.all("ws-1"),
     });
     // Deliberately NOT the issue caches. A row stores the status KEY; its name,
     // color and category are resolved from the catalog at render time, so no

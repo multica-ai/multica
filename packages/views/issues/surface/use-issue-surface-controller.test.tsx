@@ -245,6 +245,120 @@ describe("useIssueSurfaceController", () => {
     );
   });
 
+  it("uses lifecycle status-node branches for a project Board", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("board");
+    store.getState().setGrouping("status");
+    const lifecycleIssue = makeIssue({
+      id: "issue-lifecycle",
+      status: "todo",
+      lifecycle_id: "lifecycle-1",
+      lifecycle_status_id: "node-implementation",
+    });
+    const listIssueTableGroups = vi.fn(async () => ({
+      query_fingerprint: "test",
+      total: 1,
+      groups: [
+        {
+          key: "lifecycle_status:node-implementation",
+          value: {
+            kind: "lifecycle_status" as const,
+            lifecycle_id: "lifecycle-1",
+            lifecycle_status_id: "node-implementation",
+            status: "todo",
+            name: "Implementation",
+            color: "#2563eb",
+            position: 1,
+          },
+          count: 1,
+        },
+      ],
+      next_cursor: null,
+    }));
+    const lifecycleRows = vi.fn(async () => ({
+      query_fingerprint: "test",
+      group_key: "lifecycle_status:node-implementation",
+      parent_id: null,
+      total: 1,
+      branch_total: 1,
+      rows: [{ issue: lifecycleIssue, has_children: false }],
+      next_cursor: null,
+    }));
+    setApiInstance({
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+      getEffectiveIssueLifecycle: async () => ({
+        lifecycle: {
+          id: "lifecycle-1",
+          workspace_id: "ws-1",
+          scope_type: "project",
+          scope_id: "p1",
+          name: "SDLC",
+          revision: 1,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+        statuses: [
+          {
+            id: "node-implementation",
+            lifecycle_id: "lifecycle-1",
+            legacy_status_key: "todo",
+            name: "Implementation",
+            description: "",
+            color: "#2563eb",
+            position: 1,
+            phase: "unstarted",
+            outcome: null,
+            entry_policy: {
+              assignee: { type: "keep" },
+              executor: { type: "none" },
+              instructions: "",
+              advance: "human_confirms",
+            },
+            entry_policy_revision: 1,
+            archived_at: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        mode: "custom",
+      }),
+      listIssueTableGroups,
+      listIssueTableRows: lifecycleRows,
+      listIssueTableFacets: async () => ({
+        query_fingerprint: "test",
+        total: 1,
+        facets: [{ kind: "working_agents" as const, values: [] }],
+      }),
+      listProjects: async () => ({ projects: [], total: 0 }),
+      getWorkspaceWorkingAgents: async () => [],
+      getChildIssueProgress: async () => new Map(),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["board", "list"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(listIssueTableGroups).toHaveBeenCalled());
+    expect(listIssueTableGroups).toHaveBeenCalledWith(
+      expect.objectContaining({ group: { kind: "lifecycle_status" } }),
+    );
+    await waitFor(() => expect(lifecycleRows).toHaveBeenCalled());
+    expect(lifecycleRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        group: { kind: "lifecycle_status" },
+        group_key: "lifecycle_status:node-implementation",
+      }),
+    );
+    expect(result.current.lifecycleStatuses?.map((status) => status.name)).toEqual([
+      "Implementation",
+    ]);
+  });
+
   // MUL-5477. `tableQuerySpec` is the identity every downstream consumer keys
   // off: the facet request, the status/group branch hooks, and — the expensive
   // one — the Table's `useQueries` branch list, which is rebuilt whenever this

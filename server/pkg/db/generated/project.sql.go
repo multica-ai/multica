@@ -29,7 +29,7 @@ INSERT INTO project (
     lead_type, lead_id, priority, start_date, due_date
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, default_issue_lifecycle_id
 `
 
 type CreateProjectParams struct {
@@ -73,6 +73,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.DefaultIssueLifecycleID,
 	)
 	return i, err
 }
@@ -93,7 +94,7 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, default_issue_lifecycle_id FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -119,6 +120,7 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.DefaultIssueLifecycleID,
 	)
 	return i, err
 }
@@ -126,14 +128,29 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 const getProjectIssueStats = `-- name: GetProjectIssueStats :many
 SELECT project_id,
        count(*)::bigint AS total_count,
-       count(*) FILTER (WHERE status = ANY($1::text[]))::bigint AS done_count
-FROM issue
-WHERE workspace_id = $2::uuid
-  AND project_id = ANY($3::uuid[])
+       count(*) FILTER (WHERE
+           CASE WHEN $1::bool THEN
+               CASE WHEN EXISTS (
+                   SELECT 1 FROM issue_lifecycle_status AS coherent
+                   WHERE coherent.id = i.lifecycle_status_id
+                     AND coherent.lifecycle_id = i.lifecycle_id
+                     AND coherent.workspace_id = i.workspace_id
+                     AND coherent.legacy_status_key = i.status
+               ) THEN EXISTS (
+                   SELECT 1 FROM issue_lifecycle_status AS terminal
+                   WHERE terminal.id = i.lifecycle_status_id
+                     AND terminal.outcome IN ('completed', 'cancelled')
+               ) ELSE i.status = ANY($2::text[]) END
+           ELSE i.status = ANY($2::text[]) END
+       )::bigint AS done_count
+FROM issue AS i
+WHERE i.workspace_id = $3::uuid
+  AND i.project_id = ANY($4::uuid[])
 GROUP BY project_id
 `
 
 type GetProjectIssueStatsParams struct {
+	LifecycleEnabled   bool          `json:"lifecycle_enabled"`
 	TerminalStatusKeys []string      `json:"terminal_status_keys"`
 	WorkspaceID        pgtype.UUID   `json:"workspace_id"`
 	ProjectIds         []pgtype.UUID `json:"project_ids"`
@@ -146,7 +163,12 @@ type GetProjectIssueStatsRow struct {
 }
 
 func (q *Queries) GetProjectIssueStats(ctx context.Context, arg GetProjectIssueStatsParams) ([]GetProjectIssueStatsRow, error) {
-	rows, err := q.db.Query(ctx, getProjectIssueStats, arg.TerminalStatusKeys, arg.WorkspaceID, arg.ProjectIds)
+	rows, err := q.db.Query(ctx, getProjectIssueStats,
+		arg.LifecycleEnabled,
+		arg.TerminalStatusKeys,
+		arg.WorkspaceID,
+		arg.ProjectIds,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +188,7 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, arg GetProjectIssueS
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, default_issue_lifecycle_id FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -202,6 +224,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.Priority,
 			&i.StartDate,
 			&i.DueDate,
+			&i.DefaultIssueLifecycleID,
 		); err != nil {
 			return nil, err
 		}
@@ -266,7 +289,7 @@ UPDATE project SET
     due_date = $10,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, default_issue_lifecycle_id
 `
 
 type UpdateProjectParams struct {
@@ -310,6 +333,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.DefaultIssueLifecycleID,
 	)
 	return i, err
 }

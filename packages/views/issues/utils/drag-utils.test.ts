@@ -156,6 +156,48 @@ describe("status grouping with custom statuses", () => {
   });
 });
 
+describe("project lifecycle status-node grouping", () => {
+  const first = {
+    ...mk("first", 1),
+    lifecycle_id: "lifecycle-a",
+    lifecycle_status_id: "node-a",
+  } as Issue;
+  const second = {
+    ...mk("second", 2),
+    lifecycle_id: "lifecycle-b",
+    lifecycle_status_id: "node-b",
+  } as Issue;
+  const firstColumn: BoardColumnGroup = {
+    id: "lifecycle_status:node-a",
+    title: "Implementation",
+    lifecycleStatusId: "node-a",
+    lifecycleStatusLegacyKey: "todo",
+  };
+  const secondColumn: BoardColumnGroup = {
+    id: "lifecycle_status:node-b",
+    title: "Implementation",
+    lifecycleStatusId: "node-b",
+    lifecycleStatusLegacyKey: "todo",
+  };
+
+  it("keeps same-name nodes isolated by stable id", () => {
+    expect(buildColumns([first, second], [firstColumn, secondColumn], "status")).toEqual({
+      "lifecycle_status:node-a": ["first"],
+      "lifecycle_status:node-b": ["second"],
+    });
+  });
+
+  it("moves with lifecycle_status_id and recognizes a same-node reorder", () => {
+    expect(issueMatchesGroup(first, firstColumn)).toBe(true);
+    expect(issueMatchesGroup(first, secondColumn)).toBe(false);
+    expect(getMoveUpdates(firstColumn, 3, first)).toEqual({ position: 3 });
+    expect(getMoveUpdates(secondColumn, 3, first)).toEqual({
+      lifecycle_status_id: "node-b",
+      position: 3,
+    });
+  });
+});
+
 describe("property grouping", () => {
   const propertyId = "prop-env";
   const withValue = { id: "A", properties: { [propertyId]: "opt-staging" } } as unknown as Issue;

@@ -6,6 +6,7 @@ display metadata; it is context later injected into task briefs and
 
 - [Core model](#core-model)
 - [CLI](#cli)
+- [Lifecycle as code](#lifecycle-as-code)
 - [local_directory execution modes](#local_directory-execution-modes)
 - [Referring to a project in a comment](#referring-to-a-project-in-a-comment)
 - [When to add a resource](#when-to-add-a-resource)
@@ -46,6 +47,7 @@ Common resource types:
 multica project list --output json
 multica project get <project-id> --output json
 multica project create --title "<title>" --repo <github-url> --output json
+multica project create --title "<title>" --repo <github-url> --lifecycle-file ./lifecycle.yml --output json
 multica project create --title "<title>" --start-date 2026-03-01 --due-date 2026-03-31 --output json
 multica project update <project-id> --title "<title>" --output json
 multica project update <project-id> --due-date 2026-04-15 --output json
@@ -60,6 +62,12 @@ multica project resource update <project-id> <resource-id> --execution-mode in_p
 multica project resource update <project-id> <resource-id> --url <new-github-url> --output json
 multica project resource update <project-id> <resource-id> --ref <branch-or-sha> --output json
 multica project resource remove <project-id> <resource-id> --output json
+multica project lifecycle get <project-id> --output yaml
+multica project lifecycle apply <project-id> --file ./lifecycle.yml --dry-run
+multica project lifecycle apply <project-id> --file ./lifecycle.yml --expected-revision <revision>
+multica project lifecycle use-default <project-id>
+multica issue create --title "<title>" --project <project-id> --lifecycle-status <stable-key>
+multica issue lifecycle-status <issue-id> <stable-key>
 ```
 
 For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default
@@ -71,6 +79,44 @@ shortcuts. `project resource update` merges shortcut edits with the existing
 `--start-date` / `--due-date` are optional calendar days (`YYYY-MM-DD`, like
 issue dates). On `project update`, pass an empty string (`--start-date ""`) to
 clear a date; an unset flag leaves it untouched.
+
+## Lifecycle as code
+
+A project can inherit the workspace lifecycle or materialize a project-owned
+definition from YAML/JSON. The file is declarative: `key` is the immutable
+configuration identity, order is significant, and statuses omitted by a later
+apply are rejected unless `--allow-archive` is explicit. Use `--dry-run` first
+and pass `--expected-revision` on the real apply when replacing a definition
+you previously read.
+
+```yaml
+api_version: 1
+name: SDLC
+initial_status: technical_spec
+statuses:
+  - key: technical_spec
+    name: Technical Spec
+    color: "#8b5cf6"
+    phase: unstarted
+  - key: implementation
+    name: Implementation
+    color: "#2563eb"
+    phase: started
+    entry_policy:
+      assignee: { type: agent, ref: Architect }
+      executor: { type: agent, ref: Architect }
+      instructions: Implement the approved technical spec and report evidence.
+      advance: executor_may_transition
+  - key: shipped
+    name: Shipped
+    color: "#16a34a"
+    phase: completed
+```
+
+Actor `ref` values accept the same names, IDs, emails, and unambiguous short
+IDs as assignee flags. Project creation applies its lifecycle in the same
+server transaction as the project and bundled resources. `get --output yaml`
+exports an applyable definition (actor refs are emitted as stable IDs).
 
 ## local_directory execution modes
 
@@ -150,6 +196,7 @@ is task-local checkout state.
 
 ## Side effects
 
-Project create/update/delete/status and project resource add/update/remove
-mutate durable workspace state and affect future tasks. Ask before changing
-`local_directory` unless the user explicitly requested that exact local path.
+Project create/update/delete/status, lifecycle apply/use-default, and project
+resource add/update/remove mutate durable workspace state and affect future
+tasks. Ask before changing `local_directory` unless the user explicitly
+requested that exact local path.

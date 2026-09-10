@@ -17,7 +17,7 @@ import {
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Virtuoso } from "react-virtuoso";
 import { Button } from "@multica/ui/components/ui/button";
-import type { Issue, IssueStatusCategory, Project } from "@multica/core/types";
+import type { Issue, IssueLifecycleStatusNode, IssueStatusCategory, Project } from "@multica/core/types";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
@@ -43,6 +43,8 @@ import type {
   IssueStatusPageState,
   IssueStatusPagination,
 } from "../surface/use-issue-status-branches";
+import type { IssueGroupBranches } from "../surface/use-issue-group-branches";
+import { buildLifecycleStatusGroups } from "../utils/lifecycle-status-groups";
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { useRestoredScrollRef } from "../../platform";
@@ -56,6 +58,16 @@ const LIST_ROW_ESTIMATED_HEIGHT = 36;
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
+const EMPTY_PAGE: IssueStatusPageState = {
+  total: 0,
+  loaded: 0,
+  hasMore: false,
+  isLoading: false,
+  isFetching: false,
+  isError: false,
+  loadMore: () => {},
+  retry: () => {},
+};
 
 function buildListGroups(visibleStatuses: IssueStatusCategory[]): BoardColumnGroup[] {
   return visibleStatuses.map((status) => ({
@@ -72,6 +84,8 @@ function ListViewImpl({
   childProgressMap = EMPTY_PROGRESS_MAP,
   projectMap,
   statusPagination,
+  groupBranches,
+  lifecycleStatuses,
   projectId,
   onMoveIssue,
   onCreateIssue,
@@ -80,7 +94,9 @@ function ListViewImpl({
   visibleStatuses: IssueStatusCategory[];
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
-  statusPagination: IssueStatusPagination;
+  statusPagination?: IssueStatusPagination;
+  groupBranches?: IssueGroupBranches;
+  lifecycleStatuses?: IssueLifecycleStatusNode[];
   projectId?: string;
   onMoveIssue?: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
@@ -93,25 +109,39 @@ function ListViewImpl({
   );
   const sortBy = useViewStore((s) => s.sortBy);
   const { t } = useT("issues");
+  const [collapsedLifecycleStatuses, setCollapsedLifecycleStatuses] = useState<string[]>([]);
 
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
   const sortLabel = sortBy !== "position"
     ? t(($) => $.board.ordered_by, { field: t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]) })
     : null;
 
-  const expandedStatuses = useMemo(
-    () =>
-      visibleStatuses.filter(
-        (s) => !listCollapsedStatuses.includes(s)
-      ),
-    [visibleStatuses, listCollapsedStatuses]
-  );
-
   const dragEnabled = !!onMoveIssue;
 
   const groups = useMemo(
-    () => buildListGroups(visibleStatuses),
-    [visibleStatuses],
+    () =>
+      lifecycleStatuses === undefined
+        ? buildListGroups(visibleStatuses)
+        : buildLifecycleStatusGroups(
+            lifecycleStatuses,
+            groupBranches?.descriptors ?? [],
+          ),
+    [groupBranches?.descriptors, lifecycleStatuses, visibleStatuses],
+  );
+  const groupedIssues = useMemo(
+    () => (groupBranches?.enabled ? groupBranches.issues : issues),
+    [groupBranches, issues],
+  );
+  const expandedGroupIds = useMemo(
+    () =>
+      groups
+        .filter((group) =>
+          lifecycleStatuses === undefined
+            ? group.status != null && !listCollapsedStatuses.includes(group.status)
+            : !collapsedLifecycleStatuses.includes(group.id),
+        )
+        .map((group) => group.id),
+    [collapsedLifecycleStatuses, groups, lifecycleStatuses, listCollapsedStatuses],
   );
   const groupIds = useMemo(
     () => new Set(groups.map((g) => g.id)),
@@ -135,19 +165,19 @@ function ListViewImpl({
     recentlyMovedRef,
     settleVersion,
     beginSettle,
-  } = useDragSettle(() => buildColumns(issues, groups, "status"));
+  } = useDragSettle(() => buildColumns(groupedIssues, groups, "status"));
 
   useEffect(() => {
     if (!isDraggingRef.current && !isSettlingRef.current) {
-      setColumns(buildColumns(issues, groups, "status"));
+      setColumns(buildColumns(groupedIssues, groups, "status"));
     }
-  }, [issues, groups, settleVersion, setColumns, isDraggingRef, isSettlingRef]);
+  }, [groupedIssues, groups, settleVersion, setColumns, isDraggingRef, isSettlingRef]);
 
   const issueMap = useMemo(() => {
     const map = new Map<string, Issue>();
-    for (const issue of issues) map.set(issue.id, issue);
+    for (const issue of groupedIssues) map.set(issue.id, issue);
     return map;
-  }, [issues]);
+  }, [groupedIssues]);
 
   const issueMapRef = useRef(issueMap);
   if (!isDraggingRef.current && !isSettlingRef.current) {
@@ -208,7 +238,7 @@ function ListViewImpl({
       setActiveIssue(null);
 
       const resetColumns = () =>
-        setColumns(buildColumns(issues, groups, "status"));
+        setColumns(buildColumns(groupedIssues, groups, "status"));
 
       if (!over || !onMoveIssue) {
         resetColumns();
@@ -310,7 +340,7 @@ function ListViewImpl({
         beginSettle(),
       );
     },
-    [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef],
+    [groupedIssues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef],
   );
 
   // dnd-kit fires onDragCancel — never onDragEnd — when an active drag is
@@ -325,8 +355,8 @@ function ListViewImpl({
   const handleDragCancel = useCallback(() => {
     isDraggingRef.current = false;
     setActiveIssue(null);
-    setColumns(buildColumns(issues, groups, "status"));
-  }, [issues, groups, setColumns, isDraggingRef]);
+    setColumns(buildColumns(groupedIssues, groups, "status"));
+  }, [groupedIssues, groups, setColumns, isDraggingRef]);
 
   // The single scroll container is shared by every status panel's Virtuoso as
   // its customScrollParent, so a callback ref hands the element to the panels
@@ -350,29 +380,44 @@ function ListViewImpl({
     <Accordion.Root
       multiple
       className="space-y-1"
-      value={expandedStatuses}
+      value={expandedGroupIds}
       onValueChange={(value: string[]) => {
         if (isDraggingRef.current) return;
-        for (const status of visibleStatuses) {
-          const wasExpanded = expandedStatuses.includes(status);
-          const isExpanded = value.includes(status);
+        for (const group of groups) {
+          const wasExpanded = expandedGroupIds.includes(group.id);
+          const isExpanded = value.includes(group.id);
           if (wasExpanded !== isExpanded) {
-            toggleListCollapsed(status as IssueStatusCategory);
+            if (lifecycleStatuses === undefined && group.status) {
+              toggleListCollapsed(group.status);
+            } else {
+              setCollapsedLifecycleStatuses((current) =>
+                isExpanded
+                  ? current.filter((id) => id !== group.id)
+                  : current.includes(group.id)
+                    ? current
+                    : [...current, group.id],
+              );
+            }
           }
         }
       }}
     >
-      {visibleStatuses.map((status) => {
-        const isExpanded = expandedStatuses.includes(status);
+      {groups.map((group) => {
+        const isExpanded = expandedGroupIds.includes(group.id);
+        const page = group.lifecycleStatusId !== undefined
+          ? groupBranches?.pagination[group.id]
+          : group.status
+            ? statusPagination?.[group.status]
+            : undefined;
         return (
           <StatusAccordionItem
-            key={status}
-            status={status}
-            issueIds={columns[statusGroupId(status)] ?? EMPTY_IDS}
+            key={group.id}
+            group={group}
+            issueIds={columns[group.id] ?? EMPTY_IDS}
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
             projectMap={projectMap}
-            page={statusPagination[status]}
+            page={page ?? { ...EMPTY_PAGE, total: group.totalCount ?? 0 }}
             projectId={projectId}
             onCreateIssue={onCreateIssue}
             dragEnabled={dragEnabled}
@@ -419,7 +464,7 @@ function ListViewImpl({
 }
 
 function StatusAccordionItem({
-  status,
+  group,
   issueIds,
   issueMap,
   childProgressMap,
@@ -432,7 +477,7 @@ function StatusAccordionItem({
   sortLabel,
   scrollParent,
 }: {
-  status: IssueStatusCategory;
+  group: BoardColumnGroup;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
@@ -464,7 +509,7 @@ function StatusAccordionItem({
   const someSelected = selectedCount > 0;
 
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
-    id: statusGroupId(status),
+    id: group.id,
     disabled: !dragEnabled,
   });
 
@@ -545,7 +590,7 @@ function StatusAccordionItem({
     ) : null;
 
   return (
-    <Accordion.Item value={status} ref={dragEnabled ? setDroppableRef : undefined}>
+    <Accordion.Item value={group.id} ref={dragEnabled ? setDroppableRef : undefined}>
       <Accordion.Header
         className={`group/header sticky top-0 z-10 flex h-10 items-center rounded-lg bg-muted transition-colors hover:bg-accent ${
           isOver && !isExpanded
@@ -572,32 +617,49 @@ function StatusAccordionItem({
         </div>
         <Accordion.Trigger className="group/trigger flex flex-1 items-center gap-2 px-2 h-full text-left outline-none cursor-pointer">
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
-          <StatusHeading status={status} count={page.total} />
+          {group.lifecycleStatusId !== undefined ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                className="size-2.5 shrink-0 rounded-full bg-muted-foreground/30"
+                style={group.lifecycleStatusColor ? { backgroundColor: group.lifecycleStatusColor } : undefined}
+              />
+              <span className="truncate text-body font-medium" title={group.title}>
+                {group.title}
+              </span>
+              <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-micro font-medium tabular-nums text-muted-foreground">
+                {page.total}
+              </span>
+            </div>
+          ) : group.status ? (
+            <StatusHeading status={group.status} count={page.total} />
+          ) : null}
         </Accordion.Trigger>
-        {onCreateIssue && (
-          <div className="pr-2">
-            {/* Lazy-mounted tooltip machinery — see DeferredTooltip. */}
-            <DeferredTooltip
-              content={t(($) => $.list.add_issue_tooltip)}
-              trigger={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
-                  onClick={() => {
-                    const defaults = {
-                      status,
-                      ...(projectId ? { project_id: projectId } : {}),
-                    };
-                    onCreateIssue(defaults);
-                  }}
-                >
-                  <Plus className="size-3.5" />
-                </Button>
-              }
-            />
-          </div>
-        )}
+        {onCreateIssue &&
+          (group.lifecycleStatusId === undefined ||
+            group.createData !== undefined) && (
+            <div className="pr-2">
+              {/* Lazy-mounted tooltip machinery — see DeferredTooltip. */}
+              <DeferredTooltip
+                content={t(($) => $.list.add_issue_tooltip)}
+                trigger={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                    onClick={() => {
+                      const defaults = {
+                        ...(group.createData ?? {}),
+                        ...(projectId ? { project_id: projectId } : {}),
+                      };
+                      onCreateIssue(defaults);
+                    }}
+                  >
+                    <Plus className="size-3.5" />
+                  </Button>
+                }
+              />
+            </div>
+          )}
       </Accordion.Header>
       <Accordion.Panel>
         {issues.length > 0 ? (

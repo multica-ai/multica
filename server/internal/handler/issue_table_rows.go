@@ -369,7 +369,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at,
 	       i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-	       i.revision,
+	       i.revision, i.lifecycle_id, i.lifecycle_status_id, i.last_transition_id,
 	       %s AS direct_child_count, i.table_sort_key
 	FROM page i
 	ORDER BY %s`, cte, childCountExpr, resolvedSort.orderBy())
@@ -414,6 +414,9 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 			&row.issue.Stage,
 			&row.issue.Properties,
 			&row.issue.Revision,
+			&row.issue.LifecycleID,
+			&row.issue.LifecycleStatusID,
+			&row.issue.LastTransitionID,
 			&row.childCount,
 			&row.sortKey,
 		); err != nil {

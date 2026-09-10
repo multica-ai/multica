@@ -314,6 +314,7 @@ function IssueSurfaceContent({
                 onCreateIssue={openCreateIssue}
                 statusPagination={controller.statusPagination}
                 groupBranches={controller.groupBranches}
+                lifecycleStatuses={controller.lifecycleStatuses}
               />
             )}
             {controller.viewMode === "list" && (
@@ -326,6 +327,8 @@ function IssueSurfaceContent({
                 onMoveIssue={controller.moveIssue}
                 onCreateIssue={openCreateIssue}
                 statusPagination={controller.statusPagination!}
+                groupBranches={controller.groupBranches}
+                lifecycleStatuses={controller.lifecycleStatuses}
               />
             )}
             {controller.viewMode === "table" && (

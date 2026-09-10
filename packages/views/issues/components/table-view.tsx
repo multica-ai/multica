@@ -1785,6 +1785,7 @@ export function TableView({
         // of collapsing to the schema fallback or an empty label. (MUL-6243)
         return resolveStatusLabel(value.status);
       }
+      if (value.kind === "lifecycle_status") return value.name;
       if (value.kind === "assignee") {
         return value.actor
           ? getActorName(value.actor.type, value.actor.id)
@@ -1820,7 +1821,7 @@ export function TableView({
           ?.name ?? String(value.value ?? "")
       );
     },
-    [getActorName, groupProjectMap, propertyById, t],
+    [getActorName, groupProjectMap, propertyById, resolveStatusLabel, t],
   );
 
   const serverDisplayRows = useMemo<IssueTableDisplayRow[]>(() => {
