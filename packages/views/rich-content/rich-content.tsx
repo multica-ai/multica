@@ -66,7 +66,10 @@ import {
 } from "../editor/utils/link-handler";
 import { preprocessMarkdown } from "../editor/utils/preprocess";
 import { highlightToHtml } from "../editor/utils/highlight-markdown";
-import { AttachmentDownloadProvider } from "../editor/attachment-download-context";
+import {
+  AttachmentDownloadProvider,
+  useAttachmentDownloadResolver,
+} from "../editor/attachment-download-context";
 import { Attachment as AttachmentRenderer } from "../editor/attachment";
 import { computeClosedFenceOffsets } from "./streaming-fence";
 import { remarkRepairCjkStrongTrailingWhitespace } from "./cjk-emphasis";
@@ -211,6 +214,9 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   // (web), modified clicks are left to the browser — the only way to get a
   // real background tab.
   const desktopTabs = !!useOptionalNavigation()?.openInNewTab;
+  const { resolveAttachmentId, openByUrl: openAttachmentByUrl } =
+    useAttachmentDownloadResolver();
+  const attachmentId = href ? resolveAttachmentId(href) : undefined;
 
   if (href?.startsWith("slash://skill/")) {
     return <span className="slash-command">{children}</span>;
@@ -250,12 +256,22 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
           e.preventDefault();
           return;
         }
+        if (attachmentId) {
+          e.preventDefault();
+          openAttachmentByUrl(href);
+          return;
+        }
         if (!desktopTabs && (e.metaKey || e.ctrlKey || e.shiftKey)) return;
         e.preventDefault();
         openLink(href, slug, appOrigin, resolveClickIntent(e));
       }}
       onAuxClick={(e) => {
         if (e.button !== 1 || !href) return;
+        if (attachmentId) {
+          e.preventDefault();
+          openAttachmentByUrl(href);
+          return;
+        }
         // Web: native middle click on a real anchor already opens a
         // background tab. Desktop: the native window-open request dead-ends
         // (denied, then dropped by the http/https allowlist), so route it.

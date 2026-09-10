@@ -12,8 +12,13 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { Attachment } from "@multica/core/types";
 
 const APP_ORIGIN = "https://app.example";
+
+const { downloadAttachmentMock } = vi.hoisted(() => ({
+  downloadAttachmentMock: vi.fn(),
+}));
 
 vi.mock("../issues/hooks", () => ({
   useResolveIssueIdentifier: () => null,
@@ -45,6 +50,10 @@ vi.mock("../editor/link-hover-card", () => ({
   LinkHoverCard: () => null,
 }));
 
+vi.mock("../editor/use-download-attachment", () => ({
+  useDownloadAttachment: () => downloadAttachmentMock,
+}));
+
 vi.mock("mermaid", () => ({
   default: { initialize: vi.fn(), render: vi.fn() },
 }));
@@ -56,6 +65,7 @@ let openSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   navigatedPaths = [];
+  downloadAttachmentMock.mockReset();
   window.addEventListener("multica:navigate", captureNavigate);
   openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
 });
@@ -70,13 +80,13 @@ function captureNavigate(e: Event) {
   if (path) navigatedPaths.push(path);
 }
 
-function renderContent(content: string) {
+function renderContent(content: string, attachments?: Attachment[]) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <RichContent content={content} />
+      <RichContent content={content} attachments={attachments} />
     </QueryClientProvider>,
   );
 }
@@ -117,6 +127,35 @@ describe("RichContent link routing", () => {
       "_blank",
       "noopener,noreferrer",
     );
+  });
+
+  it("downloads an associated attachment link instead of opening its protected API URL", () => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const download = `${APP_ORIGIN}/api/attachments/${id}/download`;
+    const attachment: Attachment = {
+      id,
+      workspace_id: "22222222-3333-4444-5555-666666666666",
+      issue_id: null,
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "member",
+      uploader_id: "33333333-4444-5555-6666-777777777777",
+      filename: "report.pdf",
+      url: download,
+      download_url: download,
+      markdown_url: download,
+      content_type: "application/pdf",
+      size_bytes: 1,
+      created_at: "2026-09-11T00:00:00Z",
+    };
+    renderContent(`[report.pdf](${download})`, [attachment]);
+
+    screen.getByText("report.pdf").click();
+
+    expect(downloadAttachmentMock).toHaveBeenCalledWith(id);
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(navigatedPaths).toEqual([]);
   });
 
   it("keeps a same-origin /uploads file external — the backend serves it, not the router", () => {
