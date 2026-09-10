@@ -554,7 +554,26 @@
     }
   },
   "reply": {
-    "placeholder": "回复..."
+    "placeholder": "回复...",
+    "annotations": {
+      "add": "加入回复",
+      "added": "已加入回复",
+      "note_label": "批注（可选）",
+      "saved": "已保存在此设备",
+      "done": "完成",
+      "count": "{{count}} 条批注",
+      "count_other": "{{count}} 条批注",
+      "quote_limit": "每次最多选择 {{count}} 个字符。",
+      "count_limit": "一条回复最多包含 {{count}} 条批注。",
+      "view_source": "查看原文",
+      "remove": "移除第 {{number}} 条批注",
+      "source_changed": "原文已更改或不可用，已保留你保存的引用。",
+      "preview": "预览回复",
+      "hide_preview": "收起预览",
+      "intent_hint": "请添加至少一条批注内容或整体回复后再发送。",
+      "replying_to": "回复至 {{name}}",
+      "target_deleted": "回复目标已删除。请移除这些批注并重新选择回复目标。"
+    }
   },
   "agent_activity": {
     "hover_header_other": "{{count}} 个智能体工作中",

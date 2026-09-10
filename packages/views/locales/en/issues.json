@@ -569,7 +569,27 @@
     }
   },
   "reply": {
-    "placeholder": "Leave a reply..."
+    "placeholder": "Leave a reply...",
+    "annotations": {
+      "add": "Add to reply",
+      "added": "Added to reply",
+      "note_label": "Comment (optional)",
+      "saved": "Saved on this device",
+      "done": "Done",
+      "count": "{{count}} annotations",
+      "count_one": "{{count}} annotation",
+      "count_other": "{{count}} annotations",
+      "quote_limit": "Select up to {{count}} characters at a time.",
+      "count_limit": "A reply can contain up to {{count}} annotations.",
+      "view_source": "View source",
+      "remove": "Remove annotation {{number}}",
+      "source_changed": "The source changed or is unavailable. Your saved quote is kept.",
+      "preview": "Preview reply",
+      "hide_preview": "Hide preview",
+      "intent_hint": "Add a comment to an annotation or write an overall reply before sending.",
+      "replying_to": "Replying to {{name}}",
+      "target_deleted": "The reply target was deleted. Remove these annotations and select a new reply target."
+    }
   },
   "agent_activity": {
     "hover_header_one": "{{count}} active agent",

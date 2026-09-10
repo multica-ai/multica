@@ -328,3 +328,80 @@ describe("comment draft store — upload lifecycle", () => {
     expect(first).toBe(second);
   });
 });
+
+describe("reply annotations", () => {
+  const key = "reply:issue-1:root" as const;
+  const annotation = { id: "a", sourceCommentId: "nested-agent", sourceActorName: "Emacs", quote: "Selected text", note: "", start: 0, prefix: "", suffix: "" };
+  beforeEach(async () => {
+    setCurrentWorkspace("annotation-tests", "ws_annotations");
+    await flush();
+    useCommentDraftStore.setState({ drafts: {} });
+  });
+  afterEach(() => setCurrentWorkspace(null, null));
+
+  it("keeps annotation-only drafts through text/upload changes and preserves the first exact reply target", () => {
+    const store = useCommentDraftStore.getState();
+    store.addAnnotation(key, annotation);
+    store.setDraft(key, "");
+    store.setAttachments(key, [makeAttachment("att")]);
+    store.appendToDraftContent(key, "uploaded link");
+    store.setAttachments(key, []);
+    store.setDraft(key, "");
+    store.addAnnotation(key, { ...annotation, id: "b", sourceCommentId: "another-agent" });
+    store.removeAnnotation(key, "a");
+    expect(store.getAnnotations(key)).toHaveLength(1);
+    expect(useCommentDraftStore.getState().drafts[key]?.replyTarget?.commentId).toBe("nested-agent");
+    store.removeAnnotation(key, "b");
+    expect(store.getDraft(key)).toBeUndefined();
+  });
+
+  it("reopens duplicate ranges, bounds collection, and changes identity only on actual edits", () => {
+    const store = useCommentDraftStore.getState();
+    expect(store.addAnnotation(key, annotation)).toBe("a");
+    const snapshot = useCommentDraftStore.getState().drafts[key];
+    expect(store.addAnnotation(key, { ...annotation, id: "duplicate" })).toBe("a");
+    store.updateAnnotation(key, "a", "");
+    store.setDraft(key, "");
+    expect(useCommentDraftStore.getState().drafts[key]).toBe(snapshot);
+    store.updateAnnotation(key, "a", "New intent");
+    expect(useCommentDraftStore.getState().drafts[key]).not.toBe(snapshot);
+    for (let i = 1; i < 20; i++) store.addAnnotation(key, { ...annotation, id: `a${i}`, start: i });
+    expect(store.addAnnotation(key, { ...annotation, id: "overflow", start: 21 })).toBeUndefined();
+    expect(store.addAnnotation("reply:other:root", { ...annotation, quote: "x".repeat(4001) })).toBeUndefined();
+    expect(store.getAnnotations(key)).toHaveLength(20);
+    expect(store.getAnnotations("reply:other:root")).toHaveLength(0);
+  });
+
+  it("restores annotation-only drafts and targets across rehydration", async () => {
+    const store = useCommentDraftStore.getState();
+    store.addAnnotation(key, annotation);
+    store.updateAnnotation(key, "a", "Saved note");
+    await flush();
+    useCommentDraftStore.getState().drafts = {};
+    await useCommentDraftStore.persist.rehydrate();
+    expect(useCommentDraftStore.getState().getAnnotations(key)[0]?.note).toBe("Saved note");
+    expect(useCommentDraftStore.getState().drafts[key]?.replyTarget?.commentId).toBe("nested-agent");
+  });
+  it("isolates annotations by workspace, expires old entries, and clears them on logout", async () => {
+    const { resetAllRegisteredDrafts } = await import("../../drafts/cleanup-registry");
+    setCurrentWorkspace("annotations-a", "ws_a");
+    await flush();
+    useCommentDraftStore.getState().addAnnotation(key, annotation);
+    setCurrentWorkspace("annotations-b", "ws_b");
+    await flush();
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(0);
+    setCurrentWorkspace("annotations-a", "ws_a");
+    await flush();
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(1);
+    const saved = JSON.parse(localStorage.getItem("multica_comment_drafts:annotations-a")!);
+    saved.state.drafts[key].updatedAt = Date.now() - 31 * DAY_MS;
+    localStorage.setItem("multica_comment_drafts:annotations-a", JSON.stringify(saved));
+    await useCommentDraftStore.persist.rehydrate();
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(0);
+    useCommentDraftStore.getState().addAnnotation(key, annotation);
+    resetAllRegisteredDrafts();
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(0);
+    setCurrentWorkspace(null, null);
+  });
+
+});

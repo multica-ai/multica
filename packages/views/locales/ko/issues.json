@@ -554,7 +554,26 @@
     }
   },
   "reply": {
-    "placeholder": "답글 남기기..."
+    "placeholder": "답글 남기기...",
+    "annotations": {
+      "add": "답글에 추가",
+      "added": "답글에 추가됨",
+      "note_label": "코멘트 (선택 사항)",
+      "saved": "이 기기에 저장됨",
+      "done": "완료",
+      "count": "주석 {{count}}개",
+      "count_other": "주석 {{count}}개",
+      "quote_limit": "한 번에 최대 {{count}}자까지 선택할 수 있습니다.",
+      "count_limit": "답글에 주석을 최대 {{count}}개까지 추가할 수 있습니다.",
+      "view_source": "원문 보기",
+      "remove": "주석 {{number}} 삭제",
+      "source_changed": "원문이 변경되었거나 사용할 수 없습니다. 저장한 인용문은 유지됩니다.",
+      "preview": "답글 미리보기",
+      "hide_preview": "미리보기 닫기",
+      "intent_hint": "주석에 코멘트를 추가하거나 전체 답글을 작성한 후 전송하세요.",
+      "replying_to": "{{name}}에게 답글",
+      "target_deleted": "답글 대상이 삭제되었습니다. 주석을 삭제하고 새 답글 대상을 선택하세요."
+    }
   },
   "agent_activity": {
     "hover_header_other": "작업 중인 에이전트 {{count}}개",
