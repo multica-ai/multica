@@ -77,7 +77,15 @@ func (d *Daemon) agentDiscoveryLoop(ctx context.Context) {
 		case <-versionTicker.C:
 			d.refreshAgentVersions(ctx)
 		case now := <-ticker.C:
-			d.convergeAgentRuntimes(ctx, &backoff, &nextRetry, now, false)
+			// Forced by inconsistency, not by change. Two states have to agree —
+			// the profile is installed, and a dsh runtime is registered — and
+			// comparing them catches both directions no matter when the daemon
+			// last looked. A change detector misses a profile deleted between
+			// two observations, or before the first one, which is what a restart
+			// produces: observed in practice, a profile removed a minute after
+			// startup stayed live for three minutes and the server routed a chat
+			// task straight into it.
+			d.convergeAgentRuntimes(ctx, &backoff, &nextRetry, now, d.dshRuntimeProfileInconsistent())
 		case <-d.agentDiscoveryKick:
 			// A local state change (the DSH runtime profile appearing) makes a
 			// provider registrable right now. Wait for nothing: the scheduled
@@ -92,9 +100,10 @@ func (d *Daemon) agentDiscoveryLoop(ctx context.Context) {
 // still missing a runtime.
 //
 // force ignores the backoff earned by previous failures, for a caller that
-// knows the reason a provider could not register has just gone away. backoff
-// and nextRetry are the loop's scheduling state, threaded through rather than
-// owned here so the ticker and the kick share one backoff.
+// knows the reason a provider could not register has just gone away — and, in
+// the other direction, for one that knows a registered provider may just have
+// gone bad. backoff and nextRetry are the loop's scheduling state, threaded
+// through rather than owned here so the ticker and the kick share one backoff.
 func (d *Daemon) convergeAgentRuntimes(
 	ctx context.Context,
 	backoff *time.Duration,
@@ -104,7 +113,10 @@ func (d *Daemon) convergeAgentRuntimes(
 ) {
 	gained := d.refreshAgentAvailability()
 	missing := d.providersMissingRuntimes()
-	if len(missing) == 0 {
+	// A forced round runs even with nothing missing: that is the shape of "a
+	// registered provider just became unusable", which is exactly what the
+	// verdict layer needs a round to notice.
+	if len(missing) == 0 && !force {
 		*backoff = 0
 		return
 	}
@@ -117,12 +129,67 @@ func (d *Daemon) convergeAgentRuntimes(
 	before := len(missing)
 	d.convergeRuntimeRegistrations(ctx)
 	after := len(d.providersMissingRuntimes())
-	if after < before {
+	// backoff is earned by registration that keeps failing. A round that leaves
+	// nothing missing has nothing to back off from — including a forced round
+	// that only came here to condemn a registered provider, where before and
+	// after are both zero.
+	if after == 0 || after < before {
 		*backoff = 0
 	} else {
 		*backoff = nextConvergeBackoff(*backoff)
 	}
 	*nextRetry = now.Add(*backoff)
+}
+
+// dshRuntimeProfileInconsistent reports a disagreement between the two states
+// the daemon has to keep aligned: whether the Multica runtime profile is
+// installed, and whether a dsh runtime is registered.
+//
+// Both disagreements need a round. A registered dsh whose profile was removed
+// is still "available" — it is discovered, and it holds a runtime — so nothing
+// else in the loop looks at it, and the server keeps routing work into a CLI
+// that cannot start. A profile with no runtime is the mirror image, and is what
+// a manual `dsh plugin --profile multica add` produces.
+//
+// Deliberately not a change detector: this is compared on every tick against
+// live state, so a profile removed before the daemon's first look — or while it
+// was not looking — is caught on the very next tick rather than never.
+func (d *Daemon) dshRuntimeProfileInconsistent() bool {
+	registered := d.dshRuntimeRegistered()
+	if registered == dshMulticaProfilePresent() {
+		return false
+	}
+	if registered {
+		// A live runtime whose CLI can no longer start. Demoting it is always
+		// actionable, so this direction always earns a round.
+		return true
+	}
+	// The mirror image — a profile with no built-in runtime. Only worth a round
+	// if there is a dsh CLI to register: without one nothing this round does
+	// can resolve the mismatch, and forcing anyway would spend a full probe of
+	// every provider on every tick forever.
+	_, discovered := d.agents()["dsh"]
+	return discovered
+}
+
+// dshRuntimeRegistered reports whether any tracked workspace still holds a
+// built-in dsh runtime. Custom runtime profiles are excluded: they carry a
+// ProfileID and are owned by the drift path, not by the built-in set.
+func (d *Daemon) dshRuntimeRegistered() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, ws := range d.workspaces {
+		for _, id := range ws.runtimeIDs {
+			rt, ok := d.runtimeIndex[id]
+			if !ok || rt.ProfileID != "" {
+				continue
+			}
+			if rt.Provider == "dsh" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // kickAgentDiscovery asks the discovery loop for an immediate convergence
@@ -635,7 +702,17 @@ func (d *Daemon) convergeRuntimeRegistrations(ctx context.Context) {
 	// detectBuiltinRuntimes version-gates the availability set and publishes
 	// this round's drops for /health, so a provider that cannot register still
 	// gets a visible reason even though registration is skipped.
-	builtins, _, _ := d.detectBuiltinRuntimes(ctx)
+	builtins, demotable, _ := d.detectBuiltinRuntimes(ctx)
+	// Condemned providers drop out of builtins entirely, so acting on them
+	// before the early return is what keeps a provider that goes bad mid-flight
+	// from staying online: the DSH profile removed while dsh is registered
+	// leaves nothing missing a runtime, and a round reached only for that has
+	// no registration left to do. demoteUnusableRuntimes owns the claim barrier
+	// and the seq-stamped hold, so running it here is safe — the version
+	// refresh is simply no longer the only tick that reaches it.
+	if len(demotable) > 0 {
+		d.demoteUnusableRuntimes(ctx, demotable)
+	}
 	if len(builtins) == 0 {
 		return
 	}

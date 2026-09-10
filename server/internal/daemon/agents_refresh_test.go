@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"testing"
@@ -53,6 +55,104 @@ func TestConvergeAgentRuntimes_ForceIgnoresThePendingBackoff(t *testing.T) {
 	d.convergeAgentRuntimes(context.Background(), &backoff, &nextRetry, now, true)
 	if nextRetry.Equal(pending) {
 		t.Fatal("force did not bypass the pending backoff, so a finished DSH install would wait for it")
+	}
+}
+
+// The other direction force exists for: a registered provider whose runtime
+// profile was removed leaves nothing missing a runtime, so its round runs only
+// because it was forced — and it must not earn a backoff, because no
+// registration failed. Earning one would push the very demotion that round just
+// performed out to agentConvergeMaxBackoff.
+func TestConvergeAgentRuntimes_ForcedRoundWithNothingMissingKeepsTheBackoffClear(t *testing.T) {
+	t.Setenv(dshProfileBundleEnv, "")
+	stubAgentProbe(t, map[string]AgentEntry{"dsh": {Path: "/nonexistent/dsh"}})
+
+	d := &Daemon{
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:    map[string]*workspaceState{},
+		runtimeIndex:  map[string]Runtime{},
+		agentVersions: map[string]string{},
+	}
+	d.cfg.Agents = map[string]AgentEntry{"dsh": {Path: "/nonexistent/dsh"}}
+
+	now := time.Now()
+	backoff, nextRetry := time.Duration(0), now.Add(30*time.Minute)
+	d.convergeAgentRuntimes(context.Background(), &backoff, &nextRetry, now, true)
+
+	if backoff != 0 {
+		t.Fatalf("backoff = %v after a round that left nothing missing, want 0", backoff)
+	}
+	if nextRetry.After(now.Add(agentDiscoveryInterval)) {
+		t.Fatalf("nextRetry = %v, want the next discovery tick", nextRetry)
+	}
+}
+
+// The failure observed in the field: the profile is removed while dsh is
+// registered, and nothing takes the runtime offline — dsh is discovered and
+// holds a runtime, so no other part of the loop looks at it, and the server
+// routes the next chat task into a CLI that cannot start.
+//
+// The mismatch must be judged from live state rather than from a change since
+// the last look: the daemon that hit this had started a minute before the
+// removal, so its first observation was already "no profile".
+func TestDshRuntimeProfileInconsistent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("DSH_HOME", home)
+
+	registered := func() *Daemon {
+		d := &Daemon{
+			logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+			workspaces:   map[string]*workspaceState{"ws-1": {runtimeIDs: []string{"rt-dsh"}}},
+			runtimeIndex: map[string]Runtime{"rt-dsh": {ID: "rt-dsh", Provider: "dsh"}},
+		}
+		// A daemon that has discovered dsh, which is the only situation in
+		// which registering one is possible at all.
+		d.cfg.Agents = map[string]AgentEntry{"dsh": {Path: "/somewhere/dsh"}}
+		return d
+	}
+
+	// A registered dsh runtime with no profile on disk: the state that has to
+	// bring a round.
+	d := registered()
+	if !d.dshRuntimeProfileInconsistent() {
+		t.Fatal("a registered dsh with no profile was judged consistent; the runtime keeps taking work")
+	}
+
+	// Installing the profile makes the two agree.
+	dir := filepath.Join(home, "profiles", dshMulticaProfileName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if d.dshRuntimeProfileInconsistent() {
+		t.Fatal("a registered dsh with its profile installed was judged inconsistent")
+	}
+
+	// The mirror image: a profile with nothing registered, which is what a
+	// manual install produces.
+	d = registered()
+	d.runtimeIndex = map[string]Runtime{}
+	if !d.dshRuntimeProfileInconsistent() {
+		t.Fatal("an installed profile with no dsh runtime was judged consistent; it would never register")
+	}
+
+	// A custom runtime profile carrying the dsh provider is not the built-in
+	// one. With no dsh CLI discovered there is nothing a round could register,
+	// so the mismatch must not buy a full probe of every provider on every tick.
+	d = registered()
+	d.runtimeIndex = map[string]Runtime{"rt-dsh": {ID: "rt-dsh", Provider: "dsh", ProfileID: "prof-1"}}
+	d.cfg.Agents = map[string]AgentEntry{}
+	if d.dshRuntimeProfileInconsistent() {
+		t.Fatal("a mismatch no round could resolve was reported as inconsistent")
+	}
+
+	// With a dsh CLI present it is actionable again: the profile is installed
+	// and the built-in runtime is genuinely missing.
+	d.cfg.Agents = map[string]AgentEntry{"dsh": {Path: "/somewhere/dsh"}}
+	if !d.dshRuntimeProfileInconsistent() {
+		t.Fatal("an installed profile plus a discovered dsh should earn a registration round")
 	}
 }
 
