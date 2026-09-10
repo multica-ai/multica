@@ -754,7 +754,7 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
       byStatus: {
         started: { issues: [], total: 1 },
-        completed: { issues: [], total: 60 },
+        done: { issues: [], total: 60 },
       },
     });
 
@@ -770,7 +770,7 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
 
   it("refetches the filtered myAll list under the same condition", () => {
     qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), {
-      byStatus: { completed: { issues: [], total: 60 } },
+      byStatus: { done: { issues: [], total: 60 } },
     });
 
     onIssueUpdated(
@@ -796,7 +796,7 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
       byStatus: {
         started: { issues: [], total: 1 },
-        completed: { issues: [], total: 60 },
+        done: { issues: [], total: 60 },
       },
     });
 
@@ -809,7 +809,7 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
 
     const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
     expect(list?.byStatus.started?.total).toBe(0);
-    expect(list?.byStatus.completed?.total).toBe(61);
+    expect(list?.byStatus.done?.total).toBe(61);
     expectInvalidated(qc, issueKeys.list(WS_ID));
   });
 
@@ -818,7 +818,7 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
       byStatus: {
         started: { issues: [loaded], total: 1 },
-        completed: { issues: [], total: 60 },
+        done: { issues: [], total: 60 },
       },
     });
 
@@ -831,7 +831,7 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
 
     const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
     expect(list?.byStatus.started?.total).toBe(0);
-    expect(list?.byStatus.completed?.total).toBe(61);
+    expect(list?.byStatus.done?.total).toBe(61);
     // Reconciled in place — the no-flicker fast path from #4415 must hold.
     expect(qc.getQueryState(issueKeys.list(WS_ID))?.isInvalidated).toBe(false);
   });
@@ -840,7 +840,7 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
     // A title/label edit of an off-screen issue cannot affect any count, so it
     // must not trigger a fallback refetch.
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
-      byStatus: { completed: { issues: [], total: 60 } },
+      byStatus: { done: { issues: [], total: 60 } },
     });
 
     onIssueUpdated(qc, WS_ID, { id: "off-screen", title: "renamed" });

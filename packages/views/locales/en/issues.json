@@ -114,11 +114,10 @@
     "cancelled": "Cancelled"
   },
   "status_category": {
-    "backlog": "Backlog",
     "unstarted": "Unstarted",
     "started": "Started",
-    "completed": "Completed",
-    "canceled": "Canceled"
+    "done": "Done",
+    "closed": "Closed"
   },
   "priority": {
     "urgent": "Urgent",

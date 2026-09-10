@@ -1,17 +1,13 @@
 // Package issuestatus owns the per-workspace issue status catalog (MUL-6243).
 //
-// MODEL. Seven concrete built-in statuses are grouped into five user-facing
-// lifecycle categories. The database keeps the historical seven-value
-// `issue_status.category` as an internal behavior projection so custom statuses
-// still inherit exact platform semantics during a rolling deploy. API and UI
-// boundaries translate that projection to backlog, unstarted, started,
-// completed, or canceled.
+// MODEL. Seven fixed built-in statuses belong to four stored lifecycle
+// categories: unstarted, started, done, closed. Custom statuses inherit only
+// lifecycle, not built-in parking, review, failure, or recovery behavior.
 //
-// CONSEQUENCES. Effective continues to return the exact behavior key used by
-// automation and side-effecting code. Category returns the coarser lifecycle
-// value used for grouping and presentation. Existing rows need no migration,
-// issue.status stays authoritative, and old pods can safely read rows written
-// by new pods.
+// Effective preserves built-in identity and projects custom terminal statuses
+// to done/cancelled; nonterminal custom keys remain distinct. Category resolves
+// lifecycle independently. WireCategory adapts response enums for installed
+// clients without persisting or granting legacy behavior.
 package issuestatus
 
 import (
@@ -38,18 +34,17 @@ const (
 	Cancelled  = "cancelled"
 )
 
-// The five public lifecycle categories.
+// The four stored lifecycle categories.
 const (
-	CategoryBacklog   = "backlog"
 	CategoryUnstarted = "unstarted"
 	CategoryStarted   = "started"
-	CategoryCompleted = "completed"
-	CategoryCanceled  = "canceled"
+	CategoryDone      = "done"
+	CategoryClosed    = "closed"
 )
 
-// canonicalOrder keeps concrete built-ins grouped under the five lifecycle
+// canonicalOrder keeps concrete built-ins grouped under the four lifecycle
 // categories. In Progress, In Review, and Blocked remain distinct entries in
-// the Started group; Done begins the Completed group.
+// the Started group; Done belongs to Done, Cancelled to Closed.
 var canonicalOrder = []string{
 	Backlog,
 	Todo,
@@ -69,11 +64,10 @@ var canonicalRank = func() map[string]int {
 }()
 
 var categoryOrder = []string{
-	CategoryBacklog,
 	CategoryUnstarted,
 	CategoryStarted,
-	CategoryCompleted,
-	CategoryCanceled,
+	CategoryDone,
+	CategoryClosed,
 }
 
 var categoryRank = func() map[string]int {
@@ -114,7 +108,7 @@ func IsBuiltIn(key string) bool {
 	return ok
 }
 
-// Categories returns the five public lifecycle categories in display order.
+// Categories returns the four lifecycle categories in display order.
 func Categories() []string {
 	out := make([]string, len(categoryOrder))
 	copy(out, categoryOrder)
@@ -140,16 +134,14 @@ func CategoryRank(category string) int {
 // lifecycle category.
 func CategoryForBehavior(behavior string) (string, bool) {
 	switch behavior {
-	case Backlog:
-		return CategoryBacklog, true
-	case Todo:
+	case Backlog, Todo:
 		return CategoryUnstarted, true
 	case InProgress, InReview, Blocked:
 		return CategoryStarted, true
 	case Done:
-		return CategoryCompleted, true
+		return CategoryDone, true
 	case Cancelled:
-		return CategoryCanceled, true
+		return CategoryClosed, true
 	default:
 		return "", false
 	}
@@ -159,30 +151,66 @@ func CategoryForBehavior(behavior string) (string, bool) {
 // lifecycle category.
 func BehaviorsForCategory(category string) []string {
 	switch category {
-	case CategoryBacklog:
-		return []string{Backlog}
 	case CategoryUnstarted:
-		return []string{Todo}
+		return []string{Backlog, Todo}
 	case CategoryStarted:
 		return []string{InProgress, InReview, Blocked}
-	case CategoryCompleted:
+	case CategoryDone:
 		return []string{Done}
-	case CategoryCanceled:
+	case CategoryClosed:
 		return []string{Cancelled}
 	default:
 		return nil
 	}
 }
 
-// DefaultBehaviorForCategory chooses the behavior a newly created custom
-// status inherits. The three Started built-ins retain distinct behavior, while
-// a new Started status defaults to ordinary in-progress behavior.
-func DefaultBehaviorForCategory(category string) (string, bool) {
-	behaviors := BehaviorsForCategory(category)
-	if len(behaviors) == 0 {
-		return "", false
+// ParseCategory accepts previous API enum spellings at the boundary only.
+func ParseCategory(value string) (string, bool) {
+	if IsCategory(value) {
+		return value, true
 	}
-	return behaviors[0], true
+	switch value {
+	case "completed":
+		return CategoryDone, true
+	case "canceled":
+		return CategoryClosed, true
+	default:
+		return CategoryForBehavior(value)
+	}
+}
+
+// WireCategory preserves the seven-value response enum understood by installed
+// clients. This is a presentation adapter, NEVER an execution policy. New clients
+// normalize it into four lifecycle categories. No legacy behavior is persisted.
+func WireCategory(status, category string) string {
+	if IsBuiltIn(status) {
+		return status
+	}
+	switch category {
+	case CategoryUnstarted:
+		return Todo
+	case CategoryStarted:
+		return InProgress
+	case CategoryDone:
+		return Done
+	case CategoryClosed:
+		return Cancelled
+	default:
+		return category
+	}
+}
+
+// Custom statuses inherit only terminal lifecycle semantics, not parked, review,
+// blocked or active-agent recovery behavior. Nonterminal keys stay distinct.
+func customBehavior(status, category string) string {
+	switch category {
+	case CategoryDone:
+		return Done
+	case CategoryClosed:
+		return Cancelled
+	default:
+		return status
+	}
 }
 
 // ValidateKey checks a proposed custom status key against the storage
@@ -342,7 +370,7 @@ func Ensure(ctx context.Context, q Querier, workspaceID pgtype.UUID) error {
 //
 //   - a built-in key returns itself, unchanged, WITHOUT touching the database,
 //     so no existing code path gains a query or changes behavior;
-//   - a custom key returns its category, i.e. the canonical status it inherits.
+//   - a custom terminal key returns done/cancelled; other custom keys stay raw.
 //
 // On an unresolvable key it returns the key unchanged. That is the fail-safe
 // direction: an unrecognized status matches none of the canonical comparisons,
@@ -359,13 +387,10 @@ func Effective(ctx context.Context, q Querier, workspaceID pgtype.UUID, status s
 	if err != nil {
 		return status
 	}
-	if !IsBuiltIn(entry.Category) {
-		return status
-	}
-	return entry.Category
+	return customBehavior(status, entry.Category)
 }
 
-// EffectiveAndName resolves a status to BOTH its category and its display name
+// EffectiveAndName resolves a status to BOTH its behavior and its display name
 // in one catalog read, for payload builders that need the pair.
 //
 // Two separate calls would double the query on every background event carrying
@@ -386,32 +411,32 @@ func EffectiveAndName(ctx context.Context, q Querier, workspaceID pgtype.UUID, s
 	if err != nil {
 		return status, ""
 	}
-	if !IsBuiltIn(entry.Category) {
-		return status, entry.Name
-	}
-	return entry.Category, entry.Name
+	return customBehavior(status, entry.Category), entry.Name
 }
 
-// Category resolves a status to its five-value public lifecycle category.
-// Unknown keys are returned unchanged so callers never guess at lifecycle
+// Category resolves a status to its four-value lifecycle category.
+// Unknown keys return empty so callers never guess at lifecycle
 // behavior when a catalog read fails.
 func Category(ctx context.Context, q Querier, workspaceID pgtype.UUID, status string) string {
-	behavior := Effective(ctx, q, workspaceID, status)
-	if category, ok := CategoryForBehavior(behavior); ok {
-		return category
-	}
-	return status
+	category, _ := CategoryAndName(ctx, q, workspaceID, status)
+	return category
 }
 
 // CategoryAndName is the payload-oriented counterpart to EffectiveAndName.
 // It shares one catalog read while returning the public category rather than
 // the internal behavior projection.
 func CategoryAndName(ctx context.Context, q Querier, workspaceID pgtype.UUID, status string) (string, string) {
-	behavior, name := EffectiveAndName(ctx, q, workspaceID, status)
-	if category, ok := CategoryForBehavior(behavior); ok {
-		return category, name
+	if category, ok := CategoryForBehavior(status); ok {
+		return category, ""
 	}
-	return status, name
+	entry, err := q.GetIssueStatusEntryByKey(ctx, db.GetIssueStatusEntryByKeyParams{WorkspaceID: workspaceID, Key: status})
+	if err != nil {
+		return "", ""
+	}
+	if !IsCategory(entry.Category) {
+		return "", entry.Name
+	}
+	return entry.Category, entry.Name
 }
 
 // Resolve validates that status is usable in this workspace, returning the
@@ -456,10 +481,11 @@ func Resolve(ctx context.Context, q Querier, workspaceID pgtype.UUID, status str
 // and category, which are equal by construction — and is deliberately not
 // persisted: Ensure owns seeding.
 func builtInEntry(workspaceID pgtype.UUID, key string) db.IssueStatus {
+	category, _ := CategoryForBehavior(key)
 	return db.IssueStatus{
 		WorkspaceID: workspaceID,
 		Key:         key,
-		Category:    key,
+		Category:    category,
 		IsSystem:    true,
 	}
 }
@@ -591,20 +617,24 @@ func (r *Resolver) Effective(ctx context.Context, q Querier, status string) stri
 	}
 	r.load(ctx, q)
 	category, ok := r.categories[status]
-	if !ok || !IsBuiltIn(category) {
+	if !ok || !IsCategory(category) {
 		return status
 	}
-	return category
+	return customBehavior(status, category)
 }
 
 // Category mirrors the package-level Category while sharing the Resolver's
 // single catalog read across a response page.
 func (r *Resolver) Category(ctx context.Context, q Querier, status string) string {
-	behavior := r.Effective(ctx, q, status)
-	if category, ok := CategoryForBehavior(behavior); ok {
+	if category, ok := CategoryForBehavior(status); ok {
 		return category
 	}
-	return status
+	r.load(ctx, q)
+	category := r.categories[status]
+	if !IsCategory(category) {
+		return ""
+	}
+	return category
 }
 
 // Name returns a CUSTOM status's display name, or "" for a built-in and for a
@@ -646,14 +676,14 @@ func ExpandCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID, c
 	behaviors := make([]string, 0, len(categories)*2)
 	for _, c := range categories {
 		if IsCategory(c) {
-			behaviors = append(behaviors, BehaviorsForCategory(c)...)
+			behaviors = append(behaviors, c)
 			continue
 		}
 		// Accept the legacy behavior vocabulary during rolling deploys. New
 		// callers send lifecycle categories, but an old client may still send
 		// `in_review` or `done` to a new server.
-		if IsBuiltIn(c) {
-			behaviors = append(behaviors, c)
+		if category, ok := ParseCategory(c); ok {
+			behaviors = append(behaviors, category)
 		}
 	}
 	if len(behaviors) == 0 {
@@ -684,10 +714,12 @@ func ExpandCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID, c
 	}
 	// Every behavior contributes its concrete built-in key even if the catalog
 	// row is missing (unseeded workspace, mid-rollout).
-	for _, behavior := range valid {
-		if !seen[behavior] {
-			seen[behavior] = true
-			out = append(out, behavior)
+	for _, category := range valid {
+		for _, key := range BehaviorsForCategory(category) {
+			if !seen[key] {
+				seen[key] = true
+				out = append(out, key)
+			}
 		}
 	}
 	return out, nil
@@ -715,14 +747,10 @@ func CustomKeyCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID
 	}
 	out := make(map[string]string, len(entries))
 	for _, e := range entries {
-		if IsBuiltIn(e.Key) || !IsBuiltIn(e.Category) {
+		if IsBuiltIn(e.Key) || !IsCategory(e.Category) {
 			continue
 		}
-		category, ok := CategoryForBehavior(e.Category)
-		if !ok {
-			continue
-		}
-		out[e.Key] = category
+		out[e.Key] = e.Category
 	}
 	return out, nil
 }

@@ -30,7 +30,7 @@ export function issueStatusCategory(
 /**
  * Category for a bare status KEY, for render paths that hold only the string.
  *
- * Exact for the seven built-ins and the five categories. A custom key returns
+ * Exact for the seven built-ins and the four categories. A custom key returns
  * `unstarted` so presentation lookups always resolve to something renderable;
  * surfaces that must show the real status use the catalog
  * (`useIssueStatuses`) instead. (MUL-6243)
@@ -45,15 +45,13 @@ export function defaultStatusForCategory(
   category: IssueStatusCategory,
 ): BuiltInIssueStatus {
   switch (category) {
-    case "backlog":
-      return "backlog";
     case "unstarted":
       return "todo";
     case "started":
       return "in_progress";
-    case "completed":
+    case "done":
       return "done";
-    case "canceled":
+    case "closed":
       return "cancelled";
   }
 }

@@ -315,7 +315,7 @@ describe("useIssueSurfaceController", () => {
     });
     expect(listIssueTableRows).toHaveBeenCalledWith(
       expect.objectContaining({
-        group_key: "status_category:backlog",
+        group_key: "status_category:unstarted",
         page: { limit: 50, cursor: null },
       }),
     );
@@ -1222,8 +1222,8 @@ describe("useIssueSurfaceController", () => {
       expect.objectContaining({ status: "cancelled", limit: 50, offset: 0 }),
     );
     // …and with no status filter it is a visible column, ordered last.
-    expect(result.current.visibleStatuses).toContain("canceled");
-    expect(result.current.visibleStatuses.at(-1)).toBe("canceled");
+    expect(result.current.visibleStatuses).toContain("closed");
+    expect(result.current.visibleStatuses.at(-1)).toBe("closed");
   });
 
   it("includes cancelled issues in the default surface and visible statuses", async () => {
@@ -1243,7 +1243,7 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(result.current.visibleStatuses).toContain("canceled");
+    expect(result.current.visibleStatuses).toContain("closed");
     const surfaceIds = result.current.surfaceIssues.map((i) => i.id);
     expect(surfaceIds).toContain("todo-1");
     expect(surfaceIds).toContain("cancelled-1");
@@ -1276,7 +1276,7 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.issues.map((i) => i.id)).toEqual(["todo-1"]);
     // cancelled participates in show/hide like the rest — hidden here because
     // the active filter excludes it.
-    expect(result.current.hiddenStatuses).toContain("canceled");
+    expect(result.current.hiddenStatuses).toContain("closed");
   });
 
   it("treats a cancelled-only filter like any other narrowing status filter", async () => {
@@ -1300,7 +1300,7 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     // Cancelled becomes the sole visible column and the surface narrows to it.
-    expect(result.current.visibleStatuses).toEqual(["canceled"]);
+    expect(result.current.visibleStatuses).toEqual(["closed"]);
     expect(result.current.issues.map((i) => i.id)).toEqual(["cancelled-1"]);
     expect(result.current.surfaceIssues.map((i) => i.id)).toContain(
       "cancelled-1",

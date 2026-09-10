@@ -160,11 +160,10 @@ const STATUS_RENDERERS: Record<BuiltInIssueStatus, () => React.ReactNode> = {
 };
 
 const CATEGORY_RENDERER: Record<IssueStatusCategory, BuiltInIssueStatus> = {
-  backlog: "backlog",
   unstarted: "todo",
   started: "in_progress",
-  completed: "done",
-  canceled: "cancelled",
+  done: "done",
+  closed: "cancelled",
 };
 
 const BUILT_IN_ICON_COLOR: Record<BuiltInIssueStatus, string> = {

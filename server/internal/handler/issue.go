@@ -276,7 +276,7 @@ func (h *Handler) newStatusCategoryFiller(ctx context.Context, wsID pgtype.UUID)
 		if resp == nil || resp.StatusCategory != "" {
 			return
 		}
-		resp.StatusCategory = resolver.Category(ctx, h.Queries, resp.Status)
+		resp.StatusCategory = issuestatus.WireCategory(resp.Status, resolver.Category(ctx, h.Queries, resp.Status))
 		// Same Resolver, same single catalog read, so the name rides along for
 		// free. Built-ins return "" and stay omitted. (MUL-6749)
 		resp.StatusName = resolver.Name(ctx, h.Queries, resp.Status)
@@ -295,7 +295,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 	// status is filled by endpoints that resolve the workspace catalog.
 	statusCategory := ""
 	if issuestatus.IsBuiltIn(i.Status) {
-		statusCategory, _ = issuestatus.CategoryForBehavior(i.Status)
+		statusCategory = i.Status
 	}
 	return IssueResponse{
 		ID:             uuidToString(i.ID),
@@ -331,7 +331,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 	// Same pure built-in resolution as issueToResponse. (MUL-6243)
 	statusCategory := ""
 	if issuestatus.IsBuiltIn(i.Status) {
-		statusCategory, _ = issuestatus.CategoryForBehavior(i.Status)
+		statusCategory = i.Status
 	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
@@ -400,7 +400,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 	// Same pure built-in resolution as issueToResponse. (MUL-6243)
 	statusCategory := ""
 	if issuestatus.IsBuiltIn(i.Status) {
-		statusCategory, _ = issuestatus.CategoryForBehavior(i.Status)
+		statusCategory = i.Status
 	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
@@ -2327,7 +2327,7 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
-		resp[i].StatusCategory = statusResolver.Category(r.Context(), h.Queries, child.Status)
+		resp[i].StatusCategory = issuestatus.WireCategory(child.Status, statusResolver.Category(r.Context(), h.Queries, child.Status))
 		labels := labelsMap[resp[i].ID]
 		if labels == nil {
 			labels = []LabelResponse{}
@@ -2413,7 +2413,7 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
-		resp[i].StatusCategory = statusResolver.Category(r.Context(), h.Queries, child.Status)
+		resp[i].StatusCategory = issuestatus.WireCategory(child.Status, statusResolver.Category(r.Context(), h.Queries, child.Status))
 		labels := labelsMap[resp[i].ID]
 		if labels == nil {
 			labels = []LabelResponse{}

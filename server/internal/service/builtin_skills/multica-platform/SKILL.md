@@ -66,12 +66,13 @@ normally enqueue a run. When the work is already underway and the write merely
 records ownership or progress, pass `--no-start` on EVERY command in that flow —
 suppressing the assignment alone does not suppress a later status update.
 
-**Status is a category, not a literal.** More precisely, `status` is a key and
-`status_category` is lifecycle. A workspace may define
-custom statuses beyond the built-ins. Read `status_category` for broad
-lifecycle decisions (`backlog`, `unstarted`, `started`, `completed`,
-`canceled`) rather than matching `status` against built-in names. Use the
-concrete catalog entry when exact status behavior matters.
+**Lifecycle and built-in behavior are different.** The four categories are
+`unstarted`, `started`, `done` (successful terminal), and `closed` (cancelled).
+The seven built-in status keys are fixed. Only built-in `backlog` parks on
+assignment; custom statuses do not inherit review, failure or recovery rules.
+Existing API fields retain their seven-value wire enum: normalize `backlog` /
+`todo` to unstarted, `in_progress` / `in_review` / `blocked` to started, `done`
+to done, and `cancelled` to closed. Wire values are NOT behavior inheritance.
 
 **Comment reads stay bounded.** Scan the threads cheaply
 (`--roots-only --summary --compact`), then expand only what matters

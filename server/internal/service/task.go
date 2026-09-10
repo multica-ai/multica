@@ -7220,7 +7220,7 @@ func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db
 // can be known without a catalog read.
 func builtInStatusCategory(status string) string {
 	if category, ok := issuestatus.CategoryForBehavior(status); ok {
-		return category
+		return issuestatus.WireCategory(status, category)
 	}
 	return ""
 }
@@ -7236,7 +7236,7 @@ func builtInStatusCategory(status string) string {
 func IssueToMapResolved(ctx context.Context, q issuestatus.Querier, issue db.Issue, issuePrefix string) map[string]any {
 	m := IssueToMap(issue, issuePrefix)
 	category, name := issuestatus.CategoryAndName(ctx, q, issue.WorkspaceID, issue.Status)
-	m["status_category"] = category
+	m["status_category"] = issuestatus.WireCategory(issue.Status, category)
 	m["status_name"] = name
 	return m
 }

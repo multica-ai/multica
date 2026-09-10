@@ -1,7 +1,7 @@
 {
   "issue_statuses": {
     "title": "任务状态",
-    "description": "用五个生命周期分类组织任务状态。",
+    "description": "用四个生命周期分类组织任务状态。",
     "loading": "正在加载状态…",
     "add": "添加状态",
     "show_archived": "显示已归档（{{count}}）",
@@ -17,7 +17,7 @@
     "editor": {
       "create_title": "新建状态",
       "edit_title": "编辑状态",
-      "behavior_hint": "该状态将显示在「{{category}}」中。",
+      "behavior_hint": "此状态属于 {{category}}，不继承内置状态的停放、验收或失败恢复行为。",
       "name": "名称",
       "name_placeholder": "例如：Code Review",
       "key_hint": "API 和 CLI 中通过 {{key}} 引用。",
@@ -40,18 +40,16 @@
       "failed": "归档失败。"
     },
     "category_labels": {
-      "backlog": "待规划",
       "unstarted": "未开始",
       "started": "已开始",
-      "completed": "已完成",
-      "canceled": "已取消"
+      "done": "已完成",
+      "closed": "已关闭"
     },
     "categories": {
-      "backlog": "当前不在计划中的工作。",
-      "unstarted": "已规划但尚未开始的工作。",
+      "unstarted": "尚未开始的工作，包括待规划和已规划的任务。",
       "started": "正在进行、审核中或已阻塞的工作。",
-      "completed": "已经完成的工作。",
-      "canceled": "不再继续的工作。"
+      "done": "已经完成的工作。",
+      "closed": "不再继续的工作。"
     },
     "built_in_descriptions": {
       "backlog": "搁置。把任务移到这里不会启动智能体。",

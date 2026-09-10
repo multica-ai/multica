@@ -2,7 +2,7 @@
  * Issue status resolution for mobile (MUL-6243).
  *
  * A workspace always has seven built-in status keys and may define custom
- * ones. Every status belongs to one of five lifecycle categories. Concrete
+ * ones. Every status belongs to one of four lifecycle categories. Concrete
  * built-ins keep distinct behavior and glyphs inside those groups.
  *
  * Mirrored from `packages/core/issues/status-category.ts` and
@@ -27,11 +27,10 @@ import type {
  * packages/core/issues/config/status.ts.
  */
 export const STATUS_CATEGORIES: IssueStatusCategory[] = [
-  "backlog",
   "unstarted",
   "started",
-  "completed",
-  "canceled",
+  "done",
+  "closed",
 ];
 
 export const BUILT_IN_STATUS_ORDER: BuiltInIssueStatus[] = [
@@ -45,13 +44,13 @@ export const BUILT_IN_STATUS_ORDER: BuiltInIssueStatus[] = [
 ];
 
 export const BUILT_IN_STATUS_CATEGORY: Record<BuiltInIssueStatus, IssueStatusCategory> = {
-  backlog: "backlog",
+  backlog: "unstarted",
   todo: "unstarted",
   in_progress: "started",
   in_review: "started",
   blocked: "started",
-  done: "completed",
-  cancelled: "canceled",
+  done: "done",
+  cancelled: "closed",
 };
 
 /**
@@ -65,7 +64,7 @@ export const BUILT_IN_STATUS_CATEGORY: Record<BuiltInIssueStatus, IssueStatusCat
  * the bucket existed but no section ever read it.
  */
 export const BOARD_CATEGORIES: IssueStatusCategory[] = STATUS_CATEGORIES.filter(
-  (category) => category !== "canceled",
+  (category) => category !== "closed",
 );
 
 /**
@@ -85,11 +84,10 @@ export const STATUS_LABEL: Record<BuiltInIssueStatus, string> = {
 };
 
 export const CATEGORY_LABEL: Record<IssueStatusCategory, string> = {
-  backlog: "Backlog",
   unstarted: "Unstarted",
   started: "Started",
-  completed: "Completed",
-  canceled: "Canceled",
+  done: "Done",
+  closed: "Closed",
 };
 
 export const PRIORITY_LABEL: Record<IssuePriority, string> = {
@@ -111,8 +109,10 @@ export function isBuiltInIssueStatus(value: string): value is BuiltInIssueStatus
   return BUILT_IN_SET.has(value);
 }
 
-/** Accepts both the five-category API and the legacy seven-value response. */
+/** Accepts current categories and previous API response spellings. */
 export function normalizeIssueStatusCategory(value: string): IssueStatusCategory | null {
+  if (value === "completed") return "done";
+  if (value === "canceled") return "closed";
   if (isIssueStatusCategory(value)) return value;
   return isBuiltInIssueStatus(value) ? BUILT_IN_STATUS_CATEGORY[value] : null;
 }
@@ -193,7 +193,7 @@ export function issueBehavesAsAny(
 }
 
 /** The categories that mean "this issue is closed" — done or cancelled. */
-export const CLOSED_CATEGORIES: readonly IssueStatusCategory[] = ["completed", "canceled"];
+export const CLOSED_CATEGORIES: readonly IssueStatusCategory[] = ["done", "closed"];
 
 /**
  * The `#rrggbb` a surface must paint one catalog entry with, or null when it

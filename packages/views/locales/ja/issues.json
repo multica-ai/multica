@@ -112,11 +112,10 @@
     "cancelled": "キャンセル済み"
   },
   "status_category": {
-    "backlog": "バックログ",
     "unstarted": "未着手",
     "started": "開始済み",
-    "completed": "完了",
-    "canceled": "キャンセル"
+    "done": "完了",
+    "closed": "終了"
   },
   "priority": {
     "urgent": "緊急",

@@ -7,13 +7,14 @@ import {
   STATUS_CONFIG,
   STATUS_ORDER,
 } from "../issues/config";
+import { normalizeIssueStatusCategory } from "../issues/config/status";
 import type { BuiltInIssueStatus, IssueStatusCategory, IssueStatusEntry } from "../types";
 
 /**
  * The workspace issue status catalog (MUL-6243).
  *
  * A workspace always has seven built-in statuses and may define custom ones.
- * Every status belongs to one of five lifecycle categories used for grouping
+ * Every status belongs to one of four lifecycle categories used for grouping
  * and presentation. Concrete status behavior remains keyed by status on the
  * server and is deliberately not inferred from the category.
  */
@@ -158,12 +159,7 @@ export function isBuiltInIssueStatus(value: string): value is BuiltInIssueStatus
   return BUILT_IN.has(value);
 }
 
-/** Normalize the previous seven-category API into the five-category model. */
-export function normalizeIssueStatusCategory(value: string): IssueStatusCategory | null {
-  if (isIssueStatusCategory(value)) return value;
-  if (isBuiltInIssueStatus(value)) return BUILT_IN_STATUS_CATEGORY[value];
-  return null;
-}
+export { normalizeIssueStatusCategory } from "../issues/config/status";
 
 /**
  * The color to paint one catalog entry with — its own hex for a custom status,

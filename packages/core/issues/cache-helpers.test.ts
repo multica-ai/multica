@@ -108,16 +108,16 @@ describe("patchIssueInBuckets — cross-status move", () => {
   it("rebuckets a cancelled issue and keeps it locatable", () => {
     const c0 = cache({
       unstarted: { issues: [mk("a", "todo", 1)], total: 1 },
-      canceled: { issues: [], total: 0 },
+      closed: { issues: [], total: 0 },
     });
     const cancelled = patchIssueInBuckets(c0, "a", { status: "cancelled" });
     expect(ids(cancelled, "unstarted")).toEqual([]);
-    expect(ids(cancelled, "canceled")).toEqual(["a"]);
-    expect(cancelled.byStatus.canceled?.total).toBe(1);
+    expect(ids(cancelled, "closed")).toEqual(["a"]);
+    expect(cancelled.byStatus.closed?.total).toBe(1);
 
     // A follow-up edit still finds the card in the cancelled bucket.
     const renamed = patchIssueInBuckets(cancelled, "a", { title: "renamed" });
-    expect(renamed.byStatus.canceled?.issues[0]?.title).toBe("renamed");
+    expect(renamed.byStatus.closed?.issues[0]?.title).toBe("renamed");
   });
 });
 
@@ -199,12 +199,12 @@ describe("patchIssueInBuckets — status key changes within a category", () => {
   it("custom cross-category move updates both buckets exactly once", () => {
     const next = patchIssueInBuckets(inReviewCache(), "a", {
       status: key("gate_approved"),
-      status_category: cat("completed"),
+      status_category: cat("done"),
     });
     expect(ids(next, "started")).toEqual(["b"]);
     expect(next.byStatus.started?.total).toBe(1);
-    expect(ids(next, "completed")).toEqual(["a"]);
-    expect(next.byStatus.completed?.total).toBe(1);
+    expect(ids(next, "done")).toEqual(["a"]);
+    expect(next.byStatus.done?.total).toBe(1);
   });
 
   // merged inherits the PREVIOUS issue's status_category, so resolving from it
@@ -215,7 +215,7 @@ describe("patchIssueInBuckets — status key changes within a category", () => {
     });
     const next = patchIssueInBuckets(start, "a", { status: "done" });
     expect(ids(next, "started")).toEqual([]);
-    expect(ids(next, "completed")).toEqual(["a"]);
+    expect(ids(next, "done")).toEqual(["a"]);
   });
 
   it("no-ops on an unresolvable custom status, and flags it for invalidation", () => {
@@ -225,7 +225,7 @@ describe("patchIssueInBuckets — status key changes within a category", () => {
     expect(patchNeedsInvalidation({ status: key("mystery_status") })).toBe(true);
     expect(patchNeedsInvalidation({ status: "done" })).toBe(false);
     expect(patchNeedsInvalidation({ title: "no status change" })).toBe(false);
-    expect(patchNeedsInvalidation({ status: key("x"), status_category: cat("completed") })).toBe(false);
+    expect(patchNeedsInvalidation({ status: key("x"), status_category: cat("done") })).toBe(false);
   });
 });
 
@@ -240,9 +240,9 @@ describe("patchIssueInBuckets — status_category follows status", () => {
     expect(start.byStatus.unstarted?.issues[0]?.status_category).toBe("unstarted");
 
     const next = patchIssueInBuckets(start, "a", { status: "done" });
-    const moved = next.byStatus.completed?.issues[0];
+    const moved = next.byStatus.done?.issues[0];
     expect(moved?.status).toBe("done");
-    expect(moved?.status_category).toBe("completed");
+    expect(moved?.status_category).toBe("done");
     expect(ids(next, "unstarted")).toEqual([]);
   });
 
@@ -259,7 +259,7 @@ describe("patchIssueInBuckets — status_category follows status", () => {
 
   it("never leaves the previous category on an unresolvable status", () => {
     expect(normalizeStatusPatch({ status: key("mystery") }).status_category).toBeUndefined();
-    expect(normalizeStatusPatch({ status: "done" }).status_category).toBe("completed");
+    expect(normalizeStatusPatch({ status: "done" }).status_category).toBe("done");
     // A patch that does not touch status is passed through untouched.
     const untouched = { title: "renamed" };
     expect(normalizeStatusPatch(untouched)).toBe(untouched);

@@ -129,7 +129,7 @@ function issueIconColor(category: IssueStatusCategory): string {
   switch (category) {
     case "started":
       return "text-warning";
-    case "completed":
+    case "done":
       return "text-info";
     default:
       return "text-muted-foreground";

@@ -296,11 +296,10 @@ function BackgroundLayer({
 // lookup `undefined` for every custom key, so the bar lost its color entirely.
 // (MUL-6243)
 const STATUS_BAR_BG: Record<IssueStatusCategory, string> = {
-  backlog: "bg-muted-foreground/60",
   unstarted: "bg-muted-foreground/70",
   started: "bg-warning",
-  completed: "bg-info",
-  canceled: "bg-muted-foreground/40",
+  done: "bg-info",
+  closed: "bg-muted-foreground/40",
 };
 
 // ---------------------------------------------------------------------------

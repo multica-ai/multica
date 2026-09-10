@@ -25,13 +25,13 @@ describe("buildIssueStatusCatalog", () => {
   it("resolves every built-in with no catalog loaded", () => {
     const c = buildIssueStatusCatalog(undefined);
     expect(c.isLoaded).toBe(false);
-    expect(c.categoryOf("backlog")).toBe("backlog");
+    expect(c.categoryOf("backlog")).toBe("unstarted");
     expect(c.categoryOf("todo")).toBe("unstarted");
     expect(c.categoryOf("in_progress")).toBe("started");
     expect(c.categoryOf("in_review")).toBe("started");
     expect(c.categoryOf("blocked")).toBe("started");
-    expect(c.categoryOf("done")).toBe("completed");
-    expect(c.categoryOf("cancelled")).toBe("canceled");
+    expect(c.categoryOf("done")).toBe("done");
+    expect(c.categoryOf("cancelled")).toBe("closed");
     expect(c.labelOf("in_review")).toBe("In Review");
   });
 
@@ -85,7 +85,7 @@ describe("buildIssueStatusCatalog", () => {
       entry("gate_approved", "done"),
     ]);
     expect(c.inCategory("started").map((e) => e.key)).toEqual(["human_review"]);
-    expect(c.inCategory("backlog")).toEqual([]);
+    expect(c.inCategory("unstarted")).toEqual([]);
   });
 
   it("isIssueStatusCategory accepts exactly the 5", () => {
@@ -106,7 +106,7 @@ describe("archived statuses stay resolvable", () => {
 
   it("keeps name and category for an issue left on an archived status", () => {
     expect(c.labelOf("gate_approved")).toBe("Gate Approved");
-    expect(c.categoryOf("gate_approved")).toBe("completed");
+    expect(c.categoryOf("gate_approved")).toBe("done");
     expect(c.entryOf("gate_approved")?.color).toBe("#123456");
   });
 
@@ -116,7 +116,7 @@ describe("archived statuses stay resolvable", () => {
   });
 
   it("excludes archived from a category's pickable list", () => {
-    expect(c.inCategory("completed")).toEqual([]);
+    expect(c.inCategory("done")).toEqual([]);
     expect(c.inCategory("started").map((e) => e.key)).toEqual(["human_review"]);
   });
 });

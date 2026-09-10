@@ -17,7 +17,7 @@
     "editor": {
       "create_title": "새 상태",
       "edit_title": "상태 편집",
-      "behavior_hint": "이 상태는 \"{{category}}\"에 표시됩니다.",
+      "behavior_hint": "{{category}}에 속합니다. 기본 상태의 보류, 검토 또는 실패 복구 동작은 상속하지 않습니다.",
       "name": "이름",
       "name_placeholder": "예: Code Review",
       "key_hint": "API와 CLI에서는 {{key}}로 참조합니다.",
@@ -40,18 +40,16 @@
       "failed": "보관하지 못했습니다."
     },
     "category_labels": {
-      "backlog": "백로그",
       "unstarted": "시작 전",
       "started": "시작됨",
-      "completed": "완료",
-      "canceled": "취소"
+      "done": "완료",
+      "closed": "종료"
     },
     "categories": {
-      "backlog": "현재 계획되지 않은 작업입니다.",
-      "unstarted": "계획되었지만 아직 시작하지 않은 작업입니다.",
+      "unstarted": "백로그와 계획된 작업을 포함하여 아직 시작하지 않은 작업입니다.",
       "started": "진행 중이거나 리뷰 또는 차단 상태인 작업입니다.",
-      "completed": "완료된 작업입니다.",
-      "canceled": "완료하지 않기로 한 작업입니다."
+      "done": "완료된 작업입니다.",
+      "closed": "완료하지 않기로 한 작업입니다."
     },
     "built_in_descriptions": {
       "backlog": "보류. 여기로 옮겨도 에이전트가 시작되지 않습니다.",

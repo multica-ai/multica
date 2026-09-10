@@ -80,6 +80,9 @@ func (f *fakeQuerier) ListIssueStatusKeysByCategories(_ context.Context, arg db.
 }
 
 func custom(key, category string) db.IssueStatus {
+	if normalized, ok := ParseCategory(category); ok {
+		category = normalized
+	}
 	return db.IssueStatus{Key: key, Category: category, WorkspaceID: testWorkspace}
 }
 
@@ -107,10 +110,10 @@ func TestEffectiveMapsCustomStatusToItsCategory(t *testing.T) {
 	)
 
 	cases := map[string]string{
-		"human_review":        InReview,
-		"rework":              Todo,
+		"human_review":        "human_review",
+		"rework":              "rework",
 		"gate_approved":       Done,
-		"waiting_on_customer": Blocked,
+		"waiting_on_customer": "waiting_on_customer",
 	}
 	for key, want := range cases {
 		if got := Effective(context.Background(), q, testWorkspace, key); got != want {
@@ -158,7 +161,8 @@ func TestResolveAcceptsBuiltInsWithoutACatalogRow(t *testing.T) {
 			t.Errorf("Resolve(%q) with an empty catalog failed: %v", key, err)
 			continue
 		}
-		if entry.Key != key || entry.Category != key {
+		category, _ := CategoryForBehavior(key)
+		if entry.Key != key || entry.Category != category {
 			t.Errorf("synthesized entry for %q = {key:%q category:%q}, want both %q",
 				key, entry.Key, entry.Category, key)
 		}
@@ -188,14 +192,14 @@ func TestResolveRejectsUnknownAndArchived(t *testing.T) {
 	}
 }
 
-func TestCategoriesCollapseBuiltInsIntoFiveLifecycleGroups(t *testing.T) {
+func TestCategoriesCollapseBuiltInsIntoFourLifecycleGroups(t *testing.T) {
 	if len(Canonical()) != 7 {
 		t.Fatalf("expected 7 canonical statuses, got %d", len(Canonical()))
 	}
 	want := map[string]string{
-		Backlog: CategoryBacklog, Todo: CategoryUnstarted,
+		Backlog: CategoryUnstarted, Todo: CategoryUnstarted,
 		InProgress: CategoryStarted, InReview: CategoryStarted, Blocked: CategoryStarted,
-		Done: CategoryCompleted, Cancelled: CategoryCanceled,
+		Done: CategoryDone, Cancelled: CategoryClosed,
 	}
 	for status, category := range want {
 		if got, ok := CategoryForBehavior(status); !ok || got != category {
@@ -204,8 +208,8 @@ func TestCategoriesCollapseBuiltInsIntoFiveLifecycleGroups(t *testing.T) {
 	}
 }
 
-func TestCategoryRankUsesFiveLifecycleOrder(t *testing.T) {
-	want := []string{"backlog", "unstarted", "started", "completed", "canceled"}
+func TestCategoryRankUsesFourLifecycleOrder(t *testing.T) {
+	want := []string{"unstarted", "started", "done", "closed"}
 	got := Categories()
 	for i := range want {
 		if got[i] != want[i] {
@@ -477,7 +481,7 @@ func TestResolverAmortizesTheCatalogRead(t *testing.T) {
 
 	// Custom keys: the catalog is read once and reused.
 	for range 50 {
-		if got := r.Effective(ctx, q, "human_review"); got != InReview {
+		if got := r.Effective(ctx, q, "human_review"); got != "human_review" {
 			t.Fatalf("Effective(human_review) = %q, want %q", got, InReview)
 		}
 		if got := r.Effective(ctx, q, "gate_approved"); got != Done {
@@ -531,7 +535,7 @@ func TestResolverReportsCachedLoadFailure(t *testing.T) {
 		t.Fatalf("failure was not cached: status=%q, err=%v, reads=%d", got, r.Err(), q.lists)
 	}
 	fresh := NewResolver(testWorkspace)
-	if got := fresh.Effective(ctx, q, "parked"); got != Backlog || fresh.Err() != nil || q.lists != 2 {
+	if got := fresh.Effective(ctx, q, "parked"); got != "parked" || fresh.Err() != nil || q.lists != 2 {
 		t.Fatalf("fresh resolver did not recover: status=%q, err=%v, reads=%d", got, fresh.Err(), q.lists)
 	}
 	if got := fresh.Effective(ctx, q, "unknown"); got != "unknown" || fresh.Err() != nil || q.lists != 2 {

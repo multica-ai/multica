@@ -2,6 +2,7 @@ package execenv
 
 import (
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -294,7 +295,7 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 // the static line's historical enumeration order. Local to the brief on
 // purpose — importing the issuestatus package would pull the db package into
 // execenv for a 7-element constant.
-var briefStatusCategoryOrder = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
+var briefStatusCategoryOrder = issuestatus.Categories()
 
 // writeIssueStatusCommand emits the `multica issue status` bullet.
 //
@@ -303,10 +304,9 @@ var briefStatusCategoryOrder = []string{"backlog", "todo", "in_progress", "in_re
 // so existing deployments see no brief change and no prompt-cache loss.
 //
 // With custom statuses it replaces the seven-value enumeration with the
-// workspace's catalog, grouped by category. Category is the anchor an agent
-// reasons from — the semantic rules in `## Workflow` are category rules, and a
-// custom status inherits its category's platform behavior in full — so each
-// line leads with the category key, then the statuses inside it. Name and
+// workspace's catalog, grouped by lifecycle category. Special workflow rules
+// still name fixed built-in keys; a custom status inherits only lifecycle.
+// Each line leads with the category key, then the statuses inside it. Name and
 // description ride along because instructions and users refer to statuses by
 // display name ("move it to Human Review"), and the description is the
 // admin's disambiguator when a category holds more than one status.
@@ -326,17 +326,16 @@ func writeIssueStatusCommand(b *strings.Builder, ctx TaskContextForEnv) {
 		if sanitizeBriefCodeToken(s.Key) == "" {
 			continue
 		}
-		byCategory[s.Category] = append(byCategory[s.Category], s)
-	}
-	b.WriteString("- `multica issue status <id> <status> [--no-start]` — flip status. This workspace's statuses by category — a custom status inherits its category's platform behavior in full:\n")
-	builtInOnly := make([]string, 0, len(briefStatusCategoryOrder))
-	for _, category := range briefStatusCategoryOrder {
-		customs := byCategory[category]
-		if len(customs) == 0 {
-			builtInOnly = append(builtInOnly, "`"+category+"`")
+		category, ok := issuestatus.ParseCategory(s.Category)
+		if !ok {
 			continue
 		}
-		fmt.Fprintf(b, "  - `%s`: `%s` (built-in)", category, category)
+		byCategory[category] = append(byCategory[category], s)
+	}
+	b.WriteString("- `multica issue status <id> <status> [--no-start]` — flip status. Categories describe lifecycle only; custom statuses do not inherit built-in parking, review, failure, or recovery behavior. Built-in status keys are fixed:\n")
+	for _, category := range briefStatusCategoryOrder {
+		customs := byCategory[category]
+		fmt.Fprintf(b, "  - `%s`: `%s` (built-in)", category, strings.Join(issuestatus.BehaviorsForCategory(category), "`, `"))
 		for _, s := range customs {
 			name := sanitizeNameForBriefMarkdown(s.Name)
 			desc := sanitizeNameForBriefMarkdown(s.Description)
@@ -349,9 +348,6 @@ func writeIssueStatusCommand(b *strings.Builder, ctx TaskContextForEnv) {
 			}
 		}
 		b.WriteString("\n")
-	}
-	if len(builtInOnly) > 0 {
-		fmt.Fprintf(b, "  - Built-in key only: %s.\n", strings.Join(builtInOnly, ", "))
 	}
 	if ctx.IssueStatusesOmitted > 0 {
 		fmt.Fprintf(b, "  - …and %d more custom statuses not listed; an invalid status errors with the full valid list.\n", ctx.IssueStatusesOmitted)
@@ -717,7 +713,7 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 	// needs the bridge from "category rule" to "which specific status key to
 	// write" when a category holds more than one.
 	if len(ctx.IssueStatuses) > 0 {
-		b.WriteString("- The status rules above are category rules — every status in this workspace's catalog (`## Available Commands`) inherits them from its category. When a category holds more than one status, pick the specific one by its name/description or your instructions.\n")
+		b.WriteString("- The workflow rules above name fixed built-in statuses, not categories. Custom statuses inherit only lifecycle semantics: done is successful completion; closed is cancellation. A custom started status does not replace in_review or blocked. Use the built-in key when its special workflow behavior is required.\n")
 	}
 	b.WriteString("- Your turn produced none of the issue's own deliverable — you answered a question or consulted on work owned elsewhere → write nothing, at any point; questions, discussion, and acknowledgements never touch status. This no-write default is what keeps concurrent runs from flapping the board.\n\n")
 }

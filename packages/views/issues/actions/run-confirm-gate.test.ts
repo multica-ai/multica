@@ -49,11 +49,11 @@ describe("resolveStatusCategory", () => {
   });
 
   it("resolves a built-in key without a catalog", () => {
-    expect(resolveStatusCategory("backlog", undefined, COLD)).toBe("backlog");
+    expect(resolveStatusCategory("backlog", undefined, COLD)).toBe("unstarted");
   });
 
   it("resolves a custom key through the catalog", () => {
-    expect(resolveStatusCategory("later", undefined, CATALOG)).toBe("backlog");
+    expect(resolveStatusCategory("later", undefined, CATALOG)).toBe("unstarted");
   });
 
   it("answers null — never a guess — for a custom key nothing can resolve", () => {
@@ -74,8 +74,6 @@ describe("runConfirmIntent — assign", () => {
 
   it.each([
     ["built-in backlog", "backlog", undefined],
-    ["custom backlog-category status", "later", undefined],
-    ["custom key resolved by the payload", "anything", "backlog" as const],
   ])("applies directly for a parked issue (%s) — assigning there never starts a run", (_label, status, carried) => {
     expect(
       runConfirmIntent(
@@ -105,7 +103,7 @@ describe("runConfirmIntent — promote", () => {
   it.each([
     ["built-in todo", "backlog", "todo"],
     ["custom Todo-category status", "backlog", "rework"],
-    ["custom backlog-category origin", "later", "rework"],
+    ["custom unstarted target is not parked", "backlog", "later"],
     ["a non-todo target that still starts a run", "backlog", "in_progress"],
     ["a custom in_review target", "backlog", "qa"],
   ])("confirms the promotion (%s)", (_label, from, to) => {
@@ -131,7 +129,7 @@ describe("runConfirmIntent — promote", () => {
     ["already active", { status: "todo" }, "in_progress"],
     ["closing the issue", { status: "backlog" }, "done"],
     ["cancelling the issue", { status: "backlog" }, "cancelled"],
-    ["re-parking inside backlog", { status: "backlog" }, "later"],
+    ["custom unstarted origin has no promotion trigger", { status: "later" }, "rework"],
     ["the same status again", { status: "backlog" }, "backlog"],
   ])("applies directly when no run starts (%s)", (_label, from, to) => {
     expect(runConfirmIntent(issue(from as Partial<GateIssue>), { status: to }, CATALOG)).toBeNull();

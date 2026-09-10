@@ -212,10 +212,16 @@ multica issue get <issue-id> --resolve-properties
 A status change is not cosmetic — the server enqueues or skips agent work based
 on it. These are the contracts, not advice.
 
-Read them as category rules: a custom status inherits its category's behavior in
-full. Two writes are literal-key exceptions, not category rules — the failed-task
-rollback below writes the literal `todo` key, and a merged PR with close intent
-writes the literal `done` key.
+The rules below name fixed built-in status keys, not category-wide behaviors.
+Custom statuses have only lifecycle semantics: unstarted, started, done
+(successful terminal), or closed (cancelled terminal). They do not inherit
+Backlog parking, In Review completion, Blocked failure, or In Progress recovery.
+Use the built-in key when its special behavior is needed. Historical custom
+statuses follow the same rules as new ones after the category migration.
+The API retains its seven-value wire enum for installed clients: todo means
+unstarted, in_progress means started, done means done, cancelled means closed
+for custom statuses. This encoding does not grant the corresponding built-in
+behavior. Built-in keys themselves are unchanged.
 
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues

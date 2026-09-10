@@ -49,7 +49,7 @@ export function resolveStatusCategory(
 }
 
 /** Categories a promotion can land in without starting a run. */
-const NEVER_STARTS: IssueStatusCategory[] = ["backlog", "completed", "canceled"];
+const NEVER_STARTS: IssueStatusCategory[] = ["done", "closed"];
 
 /**
  * Which confirmation, if any, an issue write needs before it is applied.
@@ -76,7 +76,7 @@ export function runConfirmIntent(
   catalog: Pick<IssueStatusCatalog, "entryOf">,
 ): RunConfirmIntent | null {
   const issueCategory = resolveStatusCategory(issue.status, issue.status_category, catalog);
-  const parked = issueCategory === "backlog";
+  const parked = issue.status === "backlog";
 
   if (
     (updates.assignee_type === "agent" || updates.assignee_type === "squad") &&
@@ -102,7 +102,7 @@ export function runConfirmIntent(
   ) {
     const target = resolveStatusCategory(updates.status, undefined, catalog);
     // An unresolvable TARGET is possibly-active for the same reason.
-    if (target === null || !NEVER_STARTS.includes(target)) {
+    if (updates.status !== "backlog" && (target === null || !NEVER_STARTS.includes(target))) {
       return {
         issueIds: [issue.id],
         mode: "promote",

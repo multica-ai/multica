@@ -112,11 +112,10 @@
     "cancelled": "취소됨"
   },
   "status_category": {
-    "backlog": "백로그",
     "unstarted": "시작 전",
     "started": "시작됨",
-    "completed": "완료",
-    "canceled": "취소"
+    "done": "완료",
+    "closed": "종료"
   },
   "priority": {
     "urgent": "긴급",

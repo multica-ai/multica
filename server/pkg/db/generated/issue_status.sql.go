@@ -86,23 +86,7 @@ VALUES (
     COALESCE(
         (SELECT MAX(position) + 1 FROM issue_status
          WHERE workspace_id = $1::uuid
-		   AND CASE category
-			   WHEN 'backlog' THEN 'backlog'
-			   WHEN 'todo' THEN 'unstarted'
-			   WHEN 'in_progress' THEN 'started'
-			   WHEN 'in_review' THEN 'started'
-			   WHEN 'blocked' THEN 'started'
-			   WHEN 'done' THEN 'completed'
-			   WHEN 'cancelled' THEN 'canceled'
-		   END = CASE $5::text
-			   WHEN 'backlog' THEN 'backlog'
-			   WHEN 'todo' THEN 'unstarted'
-			   WHEN 'in_progress' THEN 'started'
-			   WHEN 'in_review' THEN 'started'
-			   WHEN 'blocked' THEN 'started'
-			   WHEN 'done' THEN 'completed'
-			   WHEN 'cancelled' THEN 'canceled'
-		   END),
+		   AND category = $5::text),
         0
     )
 )
@@ -222,15 +206,7 @@ func (q *Queries) GetIssueStatusEntryByKey(ctx context.Context, arg GetIssueStat
 const listActiveCustomIssueStatusEntries = `-- name: ListActiveCustomIssueStatusEntries :many
 SELECT id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at FROM issue_status
 WHERE workspace_id = $1::uuid
-  AND CASE category
-      WHEN 'backlog' THEN 'backlog'
-      WHEN 'todo' THEN 'unstarted'
-      WHEN 'in_progress' THEN 'started'
-      WHEN 'in_review' THEN 'started'
-      WHEN 'blocked' THEN 'started'
-      WHEN 'done' THEN 'completed'
-      WHEN 'cancelled' THEN 'canceled'
-  END = $2::text
+  AND category = $2::text
   AND is_system = FALSE
   AND archived_at IS NULL
 ORDER BY position, key
@@ -282,16 +258,7 @@ SELECT id, workspace_id, key, name, description, category, color, is_system, pos
 WHERE workspace_id = $1::uuid
   AND ($2::bool OR archived_at IS NULL)
 ORDER BY
-    CASE category
-        WHEN 'backlog' THEN 0
-        WHEN 'todo' THEN 1
-        WHEN 'in_progress' THEN 2
-        WHEN 'in_review' THEN 2
-        WHEN 'blocked' THEN 2
-        WHEN 'done' THEN 3
-        WHEN 'cancelled' THEN 4
-        ELSE 5
-    END,
+    CASE category WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
 	CASE WHEN is_system THEN 0 ELSE 1 END,
 	CASE key
 		WHEN 'backlog' THEN 0
@@ -312,7 +279,7 @@ type ListIssueStatusEntriesParams struct {
 	IncludeArchived bool        `json:"include_archived"`
 }
 
-// Ordered by the five public lifecycle groups, then built-ins before custom
+// Ordered by the four lifecycle groups, then built-ins before custom
 // rows, then stable concrete-status order / custom position.
 func (q *Queries) ListIssueStatusEntries(ctx context.Context, arg ListIssueStatusEntriesParams) ([]IssueStatus, error) {
 	rows, err := q.db.Query(ctx, listIssueStatusEntries, arg.WorkspaceID, arg.IncludeArchived)
@@ -451,19 +418,18 @@ const seedIssueStatusEntries = `-- name: SeedIssueStatusEntries :exec
 
 INSERT INTO issue_status (workspace_id, key, name, description, category, color, is_system, position)
 VALUES
-    ($1::uuid, 'backlog', 'Backlog', 'Parked. Assigning an issue here never starts an agent run.', 'backlog', '#6b7280', TRUE, 0),
-    ($1::uuid, 'todo', 'Todo', 'Queued for work. Moving an issue here starts the assigned agent.', 'todo', '#6b7280', TRUE, 0),
-    ($1::uuid, 'in_progress', 'In Progress', 'Actively being worked on.', 'in_progress', '#f59e0b', TRUE, 0),
-    ($1::uuid, 'in_review', 'In Review', 'Work delivered, waiting on human review. Finalizes the autopilot run.', 'in_review', '#22c55e', TRUE, 0),
+    ($1::uuid, 'backlog', 'Backlog', 'Parked. Assigning an issue here never starts an agent run.', 'unstarted', '#6b7280', TRUE, 0),
+    ($1::uuid, 'todo', 'Todo', 'Queued for work. Moving an issue here starts the assigned agent.', 'unstarted', '#6b7280', TRUE, 0),
+    ($1::uuid, 'in_progress', 'In Progress', 'Actively being worked on.', 'started', '#f59e0b', TRUE, 0),
+    ($1::uuid, 'in_review', 'In Review', 'Work delivered, waiting on human review. Finalizes the autopilot run.', 'started', '#22c55e', TRUE, 0),
     ($1::uuid, 'done', 'Done', 'Completed.', 'done', '#3b82f6', TRUE, 0),
-    ($1::uuid, 'blocked', 'Blocked', 'Stalled on an external dependency.', 'blocked', '#ef4444', TRUE, 0),
-    ($1::uuid, 'cancelled', 'Cancelled', 'Decided not to do.', 'cancelled', '#6b7280', TRUE, 0)
+    ($1::uuid, 'blocked', 'Blocked', 'Stalled on an external dependency.', 'started', '#ef4444', TRUE, 0),
+    ($1::uuid, 'cancelled', 'Cancelled', 'Decided not to do.', 'closed', '#6b7280', TRUE, 0)
 ON CONFLICT DO NOTHING
 `
 
 // Issue status catalog (MUL-6243). Each workspace holds the 7 built-in
-// statuses plus any custom ones. The stored category is the legacy exact
-// behavior projection; API boundaries collapse it into five lifecycle groups.
+// statuses plus custom ones, all stored in four lifecycle categories.
 // Idempotent seed of the 7 built-ins. Safe to call concurrently from multiple
 // pods during a rolling deploy: the unique (workspace_id, key) index makes a
 // losing racer a no-op rather than an error. Positions are intra-category, and

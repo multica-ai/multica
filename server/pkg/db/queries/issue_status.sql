@@ -1,6 +1,5 @@
 -- Issue status catalog (MUL-6243). Each workspace holds the 7 built-in
--- statuses plus any custom ones. The stored category is the legacy exact
--- behavior projection; API boundaries collapse it into five lifecycle groups.
+-- statuses plus custom ones, all stored in four lifecycle categories.
 
 -- name: SeedIssueStatusEntries :exec
 -- Idempotent seed of the 7 built-ins. Safe to call concurrently from multiple
@@ -9,32 +8,23 @@
 -- each built-in is the only member of its category at seed time, so all 0.
 INSERT INTO issue_status (workspace_id, key, name, description, category, color, is_system, position)
 VALUES
-    (sqlc.arg('workspace_id')::uuid, 'backlog', 'Backlog', 'Parked. Assigning an issue here never starts an agent run.', 'backlog', '#6b7280', TRUE, 0),
-    (sqlc.arg('workspace_id')::uuid, 'todo', 'Todo', 'Queued for work. Moving an issue here starts the assigned agent.', 'todo', '#6b7280', TRUE, 0),
-    (sqlc.arg('workspace_id')::uuid, 'in_progress', 'In Progress', 'Actively being worked on.', 'in_progress', '#f59e0b', TRUE, 0),
-    (sqlc.arg('workspace_id')::uuid, 'in_review', 'In Review', 'Work delivered, waiting on human review. Finalizes the autopilot run.', 'in_review', '#22c55e', TRUE, 0),
+    (sqlc.arg('workspace_id')::uuid, 'backlog', 'Backlog', 'Parked. Assigning an issue here never starts an agent run.', 'unstarted', '#6b7280', TRUE, 0),
+    (sqlc.arg('workspace_id')::uuid, 'todo', 'Todo', 'Queued for work. Moving an issue here starts the assigned agent.', 'unstarted', '#6b7280', TRUE, 0),
+    (sqlc.arg('workspace_id')::uuid, 'in_progress', 'In Progress', 'Actively being worked on.', 'started', '#f59e0b', TRUE, 0),
+    (sqlc.arg('workspace_id')::uuid, 'in_review', 'In Review', 'Work delivered, waiting on human review. Finalizes the autopilot run.', 'started', '#22c55e', TRUE, 0),
     (sqlc.arg('workspace_id')::uuid, 'done', 'Done', 'Completed.', 'done', '#3b82f6', TRUE, 0),
-    (sqlc.arg('workspace_id')::uuid, 'blocked', 'Blocked', 'Stalled on an external dependency.', 'blocked', '#ef4444', TRUE, 0),
-    (sqlc.arg('workspace_id')::uuid, 'cancelled', 'Cancelled', 'Decided not to do.', 'cancelled', '#6b7280', TRUE, 0)
+    (sqlc.arg('workspace_id')::uuid, 'blocked', 'Blocked', 'Stalled on an external dependency.', 'started', '#ef4444', TRUE, 0),
+    (sqlc.arg('workspace_id')::uuid, 'cancelled', 'Cancelled', 'Decided not to do.', 'closed', '#6b7280', TRUE, 0)
 ON CONFLICT DO NOTHING;
 
 -- name: ListIssueStatusEntries :many
--- Ordered by the five public lifecycle groups, then built-ins before custom
+-- Ordered by the four lifecycle groups, then built-ins before custom
 -- rows, then stable concrete-status order / custom position.
 SELECT * FROM issue_status
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND (sqlc.arg('include_archived')::bool OR archived_at IS NULL)
 ORDER BY
-    CASE category
-        WHEN 'backlog' THEN 0
-        WHEN 'todo' THEN 1
-        WHEN 'in_progress' THEN 2
-        WHEN 'in_review' THEN 2
-        WHEN 'blocked' THEN 2
-        WHEN 'done' THEN 3
-        WHEN 'cancelled' THEN 4
-        ELSE 5
-    END,
+    CASE category WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
 	CASE WHEN is_system THEN 0 ELSE 1 END,
 	CASE key
 		WHEN 'backlog' THEN 0
@@ -73,23 +63,7 @@ VALUES (
     COALESCE(
         (SELECT MAX(position) + 1 FROM issue_status
          WHERE workspace_id = sqlc.arg('workspace_id')::uuid
-		   AND CASE category
-			   WHEN 'backlog' THEN 'backlog'
-			   WHEN 'todo' THEN 'unstarted'
-			   WHEN 'in_progress' THEN 'started'
-			   WHEN 'in_review' THEN 'started'
-			   WHEN 'blocked' THEN 'started'
-			   WHEN 'done' THEN 'completed'
-			   WHEN 'cancelled' THEN 'canceled'
-		   END = CASE sqlc.arg('category')::text
-			   WHEN 'backlog' THEN 'backlog'
-			   WHEN 'todo' THEN 'unstarted'
-			   WHEN 'in_progress' THEN 'started'
-			   WHEN 'in_review' THEN 'started'
-			   WHEN 'blocked' THEN 'started'
-			   WHEN 'done' THEN 'completed'
-			   WHEN 'cancelled' THEN 'canceled'
-		   END),
+		   AND category = sqlc.arg('category')::text),
         0
     )
 )
@@ -175,15 +149,7 @@ WHERE workspace_id = sqlc.arg('workspace_id')::uuid
 -- archived concurrently cannot slip in or out between validation and write.
 SELECT * FROM issue_status
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
-  AND CASE category
-      WHEN 'backlog' THEN 'backlog'
-      WHEN 'todo' THEN 'unstarted'
-      WHEN 'in_progress' THEN 'started'
-      WHEN 'in_review' THEN 'started'
-      WHEN 'blocked' THEN 'started'
-      WHEN 'done' THEN 'completed'
-      WHEN 'cancelled' THEN 'canceled'
-  END = sqlc.arg('category')::text
+  AND category = sqlc.arg('category')::text
   AND is_system = FALSE
   AND archived_at IS NULL
 ORDER BY position, key;

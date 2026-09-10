@@ -112,11 +112,10 @@
     "cancelled": "已取消"
   },
   "status_category": {
-    "backlog": "待规划",
     "unstarted": "未开始",
     "started": "已开始",
-    "completed": "已完成",
-    "canceled": "已取消"
+    "done": "已完成",
+    "closed": "已关闭"
   },
   "priority": {
     "urgent": "紧急",

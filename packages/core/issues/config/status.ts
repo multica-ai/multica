@@ -6,14 +6,21 @@ import type { BuiltInIssueStatus, IssueStatusCategory } from "../../types";
 // separate seven-value compatibility surface. (MUL-6243, MUL-7240)
 
 export const STATUS_ORDER: IssueStatusCategory[] = [
-  "backlog",
   "unstarted",
   "started",
-  "completed",
-  "canceled",
+  "done",
+  "closed",
 ];
 
 export const ALL_STATUSES: IssueStatusCategory[] = [...STATUS_ORDER];
+
+/** API boundary: accept the installed seven-value and interim five-value enums. */
+export function normalizeIssueStatusCategory(value: string): IssueStatusCategory | null {
+  if (value === "completed") return "done";
+  if (value === "canceled") return "closed";
+  if (STATUS_ORDER.includes(value as IssueStatusCategory)) return value as IssueStatusCategory;
+  return Object.hasOwn(BUILT_IN_STATUS_CATEGORY, value) ? BUILT_IN_STATUS_CATEGORY[value as BuiltInIssueStatus] : null;
+}
 
 export const BUILT_IN_STATUS_ORDER: BuiltInIssueStatus[] = [
   "backlog",
@@ -26,13 +33,13 @@ export const BUILT_IN_STATUS_ORDER: BuiltInIssueStatus[] = [
 ];
 
 export const BUILT_IN_STATUS_CATEGORY: Record<BuiltInIssueStatus, IssueStatusCategory> = {
-  backlog: "backlog",
+  backlog: "unstarted",
   todo: "unstarted",
   in_progress: "started",
   in_review: "started",
   blocked: "started",
-  done: "completed",
-  cancelled: "canceled",
+  done: "done",
+  cancelled: "closed",
 };
 
 export const BUILT_IN_STATUS_LABEL: Record<BuiltInIssueStatus, string> = {
@@ -55,9 +62,8 @@ export const STATUS_CONFIG: Record<
     columnBg: string;
   }
 > = {
-  backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
   unstarted: { label: "Unstarted", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
   started: { label: "Started", iconColor: "text-warning", hoverBg: "hover:bg-warning/10", dividerColor: "bg-warning", columnBg: "bg-warning/5" },
-  completed: { label: "Completed", iconColor: "text-info", hoverBg: "hover:bg-info/10", dividerColor: "bg-info", columnBg: "bg-info/5" },
-  canceled: { label: "Canceled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
+  done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10", dividerColor: "bg-info", columnBg: "bg-info/5" },
+  closed: { label: "Closed", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
 };

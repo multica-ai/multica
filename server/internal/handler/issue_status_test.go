@@ -37,6 +37,9 @@ func seedTestCatalog(t *testing.T) {
 // the test, so catalog state cannot leak between tests in the shared workspace.
 func createTestCustomStatus(t *testing.T, key, category string) db.IssueStatus {
 	t.Helper()
+	if normalized, ok := issuestatus.ParseCategory(category); ok {
+		category = normalized
+	}
 	seedTestCatalog(t)
 	entry, err := testHandler.Queries.CreateIssueStatusEntry(context.Background(), db.CreateIssueStatusEntryParams{
 		WorkspaceID: parseUUID(testWorkspaceID),
@@ -83,7 +86,8 @@ func TestEnsureIsIdempotent(t *testing.T) {
 	// Every built-in must be its own category's canonical — the invariant that
 	// makes Effective an identity function on built-in keys.
 	for key, entry := range systemByKey {
-		if entry.Category != key {
+		category, _ := issuestatus.CategoryForBehavior(key)
+		if entry.Category != category {
 			t.Errorf("built-in %q has category %q; a built-in must be its own category's canonical", key, entry.Category)
 		}
 	}
@@ -114,7 +118,7 @@ func TestCatalogOrderMatchesLifecycleGroups(t *testing.T) {
 	}
 }
 
-func TestListIssueStatusesExposesFiveLifecycleCategories(t *testing.T) {
+func TestListIssueStatusesPreservesLegacyWireCategories(t *testing.T) {
 	seedTestCatalog(t)
 	rec := httptest.NewRecorder()
 	testHandler.ListIssueStatuses(rec, newRequest(http.MethodGet, "/api/issue-statuses", nil))
@@ -129,15 +133,15 @@ func TestListIssueStatusesExposesFiveLifecycleCategories(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	wantCategories := []string{"backlog", "unstarted", "started", "completed", "canceled"}
+	wantCategories := issuestatus.Canonical()
 	if !slices.Equal(resp.Categories, wantCategories) {
 		t.Fatalf("categories = %v, want %v", resp.Categories, wantCategories)
 	}
 
 	wantSystemCategories := map[string]string{
-		"backlog": "backlog", "todo": "unstarted",
-		"in_progress": "started", "in_review": "started", "blocked": "started",
-		"done": "completed", "cancelled": "canceled",
+		"backlog": "backlog", "todo": "todo",
+		"in_progress": "in_progress", "in_review": "in_review", "blocked": "blocked",
+		"done": "done", "cancelled": "cancelled",
 	}
 	gotSystemCategories := make(map[string]string, len(wantSystemCategories))
 	for _, status := range resp.Statuses {
@@ -207,8 +211,12 @@ func TestCustomStatusInheritsItsCategoryBehavior(t *testing.T) {
 	for _, tc := range cases {
 		createTestCustomStatus(t, tc.key, tc.category)
 		got := issuestatus.Effective(ctx, testHandler.Queries, parseUUID(testWorkspaceID), tc.key)
-		if got != tc.category {
-			t.Errorf("Effective(%q) = %q, want %q", tc.key, got, tc.category)
+		want := tc.key
+		if tc.category == issuestatus.Done {
+			want = issuestatus.Done
+		}
+		if got != want {
+			t.Errorf("Effective(%q) = %q, want %q", tc.key, got, want)
 		}
 	}
 }
@@ -354,8 +362,8 @@ func TestArchiveRetiresStatusWithoutTouchingExistingIssues(t *testing.T) {
 
 	// And it still resolves to its category, so its platform behavior is
 	// unchanged — Effective deliberately ignores archived_at.
-	if got := issuestatus.Effective(ctx, testHandler.Queries, parseUUID(testWorkspaceID), "in_use_a"); got != issuestatus.InProgress {
-		t.Errorf("Effective on an archived status = %q, want %q", got, issuestatus.InProgress)
+	if got := issuestatus.Effective(ctx, testHandler.Queries, parseUUID(testWorkspaceID), "in_use_a"); got != "in_use_a" {
+		t.Errorf("Effective on an archived status = %q, want in_use_a", got)
 	}
 
 	// But nothing NEW can be assigned to it.
@@ -470,7 +478,7 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 		ctx,
 		testHandler.Queries,
 		parseUUID(testWorkspaceID),
-		[]string{issuestatus.CategoryCompleted, issuestatus.CategoryCanceled},
+		[]string{issuestatus.CategoryDone, issuestatus.CategoryClosed},
 	)
 	if err != nil {
 		t.Fatalf("expand terminal status categories: %v", err)
@@ -1049,8 +1057,8 @@ func TestChildrenResponseCarriesStatusCategory(t *testing.T) {
 	if payload.Issues[0].Status != "children_done_s" {
 		t.Errorf("status = %q, want the custom key", payload.Issues[0].Status)
 	}
-	if payload.Issues[0].StatusCategory != issuestatus.CategoryCompleted {
-		t.Errorf("status_category = %q, want %q", payload.Issues[0].StatusCategory, issuestatus.CategoryCompleted)
+	if payload.Issues[0].StatusCategory != issuestatus.CategoryDone {
+		t.Errorf("status_category = %q, want %q", payload.Issues[0].StatusCategory, issuestatus.CategoryDone)
 	}
 }
 
@@ -1094,7 +1102,7 @@ func TestCategoryFilterExpandsToIndexedStatusKeys(t *testing.T) {
 		if code := archiveStatusVia(t, entry); code != http.StatusOK {
 			t.Fatalf("archive: %d", code)
 		}
-		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{issuestatus.CategoryCompleted})
+		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{issuestatus.CategoryDone})
 		if err != nil {
 			t.Fatalf("expand: %v", err)
 		}
@@ -1110,12 +1118,12 @@ func TestCategoryFilterExpandsToIndexedStatusKeys(t *testing.T) {
 			t.Fatalf("clear catalog: %v", err)
 		}
 		t.Cleanup(func() { seedTestCatalog(t) })
-		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{issuestatus.CategoryUnstarted, issuestatus.CategoryCompleted})
+		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{issuestatus.CategoryUnstarted, issuestatus.CategoryDone})
 		if err != nil {
 			t.Fatalf("expand: %v", err)
 		}
-		if len(keys) != 2 || !slices.Contains(keys, "todo") || !slices.Contains(keys, "done") {
-			t.Errorf("expand on an unseeded workspace = %v, want [todo done]", keys)
+		if len(keys) != 3 || !slices.Contains(keys, "backlog") || !slices.Contains(keys, "todo") || !slices.Contains(keys, "done") {
+			t.Errorf("expand on an unseeded workspace = %v, want [backlog todo done]", keys)
 		}
 	})
 }
@@ -1159,8 +1167,8 @@ func TestListFilterByCategoryReturnsCustomStatusIssues(t *testing.T) {
 	}
 	// Every row carries an authoritative category, custom statuses included —
 	// this is what the client buckets and caches by.
-	if c := got[uuidToString(customID)]; c != issuestatus.CategoryStarted {
-		t.Errorf("custom-status row status_category = %q, want %q", c, issuestatus.CategoryStarted)
+	if c := got[uuidToString(customID)]; c != issuestatus.InProgress {
+		t.Errorf("custom-status row status_category = %q, want %q", c, issuestatus.InProgress)
 	}
 }
 
@@ -1194,8 +1202,8 @@ func TestCreateEventCarriesCustomStatusCategory(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, parseUUID(created.ID))
 	})
-	if created.StatusCategory != issuestatus.CategoryStarted {
-		t.Errorf("HTTP response status_category = %q, want started", created.StatusCategory)
+	if created.StatusCategory != issuestatus.InProgress {
+		t.Errorf("HTTP response status_category = %q, want in_progress (wire)", created.StatusCategory)
 	}
 
 	select {
@@ -1208,8 +1216,8 @@ func TestCreateEventCarriesCustomStatusCategory(t *testing.T) {
 		if !ok {
 			t.Fatalf("event issue shape: %T", payload["issue"])
 		}
-		if issue.StatusCategory != issuestatus.CategoryStarted {
-			t.Errorf("event status_category = %q, want started — other tabs cannot "+
+		if issue.StatusCategory != issuestatus.InProgress {
+			t.Errorf("event status_category = %q, want in_progress (wire) — other tabs cannot "+
 				"bucket the new issue without it", issue.StatusCategory)
 		}
 	case <-time.After(3 * time.Second):
@@ -1244,8 +1252,8 @@ func TestListEndpointsCarryStatusCategory(t *testing.T) {
 		for _, i := range payload.Issues {
 			if i.Status == "human_review_n" {
 				seen++
-				if i.StatusCategory != issuestatus.CategoryStarted {
-					t.Errorf("custom row status_category = %q, want started", i.StatusCategory)
+				if i.StatusCategory != issuestatus.InProgress {
+					t.Errorf("custom row status_category = %q, want in_progress (wire)", i.StatusCategory)
 				}
 			}
 		}
@@ -1269,8 +1277,8 @@ func TestListEndpointsCarryStatusCategory(t *testing.T) {
 		r := issuestatus.NewResolver(parseUUID(testWorkspaceID))
 		ctx := context.Background()
 		for range 10 {
-			if got := r.Effective(ctx, testHandler.Queries, "human_review_n"); got != "in_review" {
-				t.Fatalf("Effective = %q, want in_review", got)
+			if got := r.Effective(ctx, testHandler.Queries, "human_review_n"); got != "human_review_n" {
+				t.Fatalf("Effective = %q, want human_review_n", got)
 			}
 		}
 	})
@@ -1287,8 +1295,8 @@ func TestListEndpointsCarryStatusCategory(t *testing.T) {
 			StatusCategory string `json:"status_category"`
 		}
 		json.Unmarshal(rec.Body.Bytes(), &got)
-		if got.StatusCategory != issuestatus.CategoryStarted {
-			t.Errorf("GetIssue status_category = %q, want started", got.StatusCategory)
+		if got.StatusCategory != issuestatus.InProgress {
+			t.Errorf("GetIssue status_category = %q, want in_progress (wire)", got.StatusCategory)
 		}
 	})
 }
@@ -1316,8 +1324,8 @@ func TestBackgroundEventCarriesCustomStatusCategory(t *testing.T) {
 	}
 
 	authoritative := service.IssueToMapResolved(ctx, testHandler.Queries, issue, "MUL")
-	if authoritative["status_category"] != issuestatus.CategoryStarted {
-		t.Errorf("IssueToMapResolved status_category = %v, want started",
+	if authoritative["status_category"] != issuestatus.InProgress {
+		t.Errorf("IssueToMapResolved status_category = %v, want in_progress (wire)",
 			authoritative["status_category"])
 	}
 	if authoritative["status"] != "human_review_bg" {
@@ -1543,7 +1551,7 @@ func TestUnknownStatusErrorNamesCustomStatuses(t *testing.T) {
 		Key:         "in_review_9",
 		Name:        "客户确认",
 		Description: "",
-		Category:    issuestatus.InReview,
+		Category:    issuestatus.CategoryStarted,
 		Color:       "#123456",
 	})
 	if err != nil {
@@ -1582,7 +1590,7 @@ func TestIssueResponseCarriesCustomStatusName(t *testing.T) {
 		Key:         "in_review_8",
 		Name:        "客户确认",
 		Description: "",
-		Category:    issuestatus.InReview,
+		Category:    issuestatus.CategoryStarted,
 		Color:       "#123456",
 	})
 	if err != nil {
@@ -1603,8 +1611,8 @@ func TestIssueResponseCarriesCustomStatusName(t *testing.T) {
 	if custom.StatusName != "客户确认" {
 		t.Errorf("status_name = %q, want %q", custom.StatusName, "客户确认")
 	}
-	if custom.StatusCategory != issuestatus.CategoryStarted {
-		t.Errorf("status_category = %q, want %q", custom.StatusCategory, issuestatus.CategoryStarted)
+	if custom.StatusCategory != issuestatus.InProgress {
+		t.Errorf("status_category = %q, want %q", custom.StatusCategory, issuestatus.InProgress)
 	}
 
 	// A built-in carries no name: every client renders those from the key
@@ -1763,7 +1771,7 @@ func TestConcurrentDerivedCreatesNeverConflict(t *testing.T) {
 
 			t.Cleanup(func() {
 				testPool.Exec(context.Background(),
-					`DELETE FROM issue_status WHERE workspace_id = $1 AND category = 'in_progress' AND is_system = FALSE`,
+					`DELETE FROM issue_status WHERE workspace_id = $1 AND category = 'started' AND is_system = FALSE`,
 					parseUUID(testWorkspaceID))
 			})
 
@@ -1827,7 +1835,7 @@ func TestCustomStatusPayloadsAgreeAcrossRenderings(t *testing.T) {
 		Key:         "in_review_7",
 		Name:        "客户确认",
 		Description: "",
-		Category:    issuestatus.InReview,
+		Category:    issuestatus.CategoryStarted,
 		Color:       "#123456",
 	})
 	if err != nil {
@@ -1854,7 +1862,7 @@ func TestCustomStatusPayloadsAgreeAcrossRenderings(t *testing.T) {
 
 	for field, want := range map[string]string{
 		"status":          "in_review_7",
-		"status_category": issuestatus.CategoryStarted,
+		"status_category": issuestatus.InProgress,
 		"status_name":     "客户确认",
 	} {
 		got, ok := fromEvent[field].(string)

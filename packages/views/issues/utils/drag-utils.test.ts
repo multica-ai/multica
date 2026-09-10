@@ -120,9 +120,9 @@ describe("status grouping with custom statuses", () => {
     status: "unstarted",
   };
   const doneColumn: BoardColumnGroup = {
-    id: "status:completed",
+    id: "status:done",
     title: "Completed",
-    status: "completed",
+    status: "done",
   };
 
   it("buckets a custom status into its category's column", () => {

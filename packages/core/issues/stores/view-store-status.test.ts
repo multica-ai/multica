@@ -19,38 +19,38 @@ describe("column visibility vs status filter", () => {
   // statusFilters, so the query then excluded every custom status too — hiding
   // Backlog silently dropped a QA card sitting in the Started column.
   it("hiding a column does not touch the status filter", () => {
-    store.getState().hideStatus("backlog");
+    store.getState().hideStatus("unstarted");
 
-    expect(store.getState().hiddenStatusCategories).toEqual(["backlog"]);
+    expect(store.getState().hiddenStatusCategories).toEqual(["unstarted"]);
     expect(store.getState().statusFilters).toEqual([]);
   });
 
   it("showing a column restores it without inventing a filter", () => {
-    store.getState().hideStatus("backlog");
-    store.getState().hideStatus("completed");
-    store.getState().showStatus("backlog");
+    store.getState().hideStatus("unstarted");
+    store.getState().hideStatus("done");
+    store.getState().showStatus("unstarted");
 
-    expect(store.getState().hiddenStatusCategories).toEqual(["completed"]);
+    expect(store.getState().hiddenStatusCategories).toEqual(["done"]);
     expect(store.getState().statusFilters).toEqual([]);
   });
 
   it("hiding the same column twice is idempotent", () => {
-    store.getState().hideStatus("backlog");
-    store.getState().hideStatus("backlog");
+    store.getState().hideStatus("unstarted");
+    store.getState().hideStatus("unstarted");
 
-    expect(store.getState().hiddenStatusCategories).toEqual(["backlog"]);
+    expect(store.getState().hiddenStatusCategories).toEqual(["unstarted"]);
   });
 
   it("a custom status filter survives hiding and showing a column", () => {
     store.getState().toggleStatusFilter("qa");
-    store.getState().hideStatus("backlog");
-    store.getState().showStatus("backlog");
+    store.getState().hideStatus("unstarted");
+    store.getState().showStatus("unstarted");
 
     expect(store.getState().statusFilters).toEqual(["qa"]);
   });
 
   it("reset restores every column", () => {
-    store.getState().hideStatus("backlog");
+    store.getState().hideStatus("unstarted");
     store.getState().clearFilters();
 
     expect(store.getState().hiddenStatusCategories).toEqual([]);

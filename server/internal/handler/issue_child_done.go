@@ -105,8 +105,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 			"parent_id", uuidToString(issue.ParentIssueID))
 		return
 	}
-	// Custom statuses inherit the canonical status they name, so a custom
-	// terminal status closes this out and a custom backlog status parks it,
+	// Custom terminal statuses close this out. Only the fixed backlog key parks it,
 	// exactly like Done/Cancelled and Backlog do. (MUL-6243)
 	parentStatus, err := effective(parent)
 	if err != nil {
@@ -442,7 +441,7 @@ func (h *Handler) childStatusResolver(ctx context.Context) func(db.Issue) (strin
 		if err := resolver.Err(); err != nil {
 			return "", err
 		}
-		if !issuestatus.IsBuiltIn(status) {
+		if !issuestatus.IsCategory(resolver.Category(ctx, h.issueStatusCatalog(), c.Status)) {
 			return "", fmt.Errorf("unresolved status %q in workspace %s", c.Status, uuidToString(c.WorkspaceID))
 		}
 		return status, nil

@@ -2071,12 +2071,12 @@ describe("issue status catalog schemas", () => {
   it("parses a full catalog response", () => {
     const parsed = ListIssueStatusesResponseSchema.parse({
       statuses: [baseStatus],
-      categories: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+      categories: ["unstarted", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
       total: 1,
     });
     expect(parsed.statuses[0]?.key).toBe("human_review");
-    expect(parsed.statuses[0]?.category).toBe("in_review");
-    expect(parsed.categories).toHaveLength(7);
+    expect(parsed.statuses[0]?.category).toBe("started");
+    expect(parsed.categories).toHaveLength(4);
   });
 
   it("falls back to the built-in categories on a malformed response", () => {
@@ -2089,7 +2089,7 @@ describe("issue status catalog schemas", () => {
     expect(parsed).toEqual(EMPTY_LIST_ISSUE_STATUSES_RESPONSE);
     // The fallback still names all 5 lifecycle categories, so a malformed
     // response cannot leave grouped issue surfaces without columns.
-    expect(parsed.categories).toHaveLength(5);
+    expect(parsed.categories).toHaveLength(4);
     expect(parsed.statuses).toEqual([]);
   });
 

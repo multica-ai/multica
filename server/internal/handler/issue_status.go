@@ -45,16 +45,13 @@ type IssueStatusResponse struct {
 // predicates instead of resolving the category once per issue row.
 func (h *Handler) terminalIssueStatusKeys(ctx context.Context, workspaceID pgtype.UUID) ([]string, error) {
 	return issuestatus.ExpandCategories(ctx, h.Queries, workspaceID, []string{
-		issuestatus.CategoryCompleted,
-		issuestatus.CategoryCanceled,
+		issuestatus.CategoryDone,
+		issuestatus.CategoryClosed,
 	})
 }
 
 func issueStatusToResponse(s db.IssueStatus) IssueStatusResponse {
-	category, ok := issuestatus.CategoryForBehavior(s.Category)
-	if !ok {
-		category = s.Category
-	}
+	category := issuestatus.WireCategory(s.Key, s.Category)
 	return IssueStatusResponse{
 		ID:          uuidToString(s.ID),
 		WorkspaceID: uuidToString(s.WorkspaceID),
@@ -128,7 +125,7 @@ func (h *Handler) ListIssueStatuses(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"statuses":   resp,
-		"categories": issuestatus.Categories(),
+		"categories": issuestatus.Canonical(),
 		"total":      len(resp),
 	})
 }
@@ -160,11 +157,12 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "description must be at most 256 characters")
 		return
 	}
-	if !issuestatus.IsCategory(req.Category) {
+	category, validCategory := issuestatus.ParseCategory(req.Category)
+	if !validCategory {
 		writeError(w, http.StatusBadRequest, "category must be one of: "+strings.Join(issuestatus.Categories(), ", "))
 		return
 	}
-	behavior, _ := issuestatus.DefaultBehaviorForCategory(req.Category)
+	req.Category = category
 	color, err := normalizeColor(req.Color)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -189,7 +187,7 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		Key:         explicitKey,
 		Name:        name,
 		Description: req.Description,
-		Category:    behavior,
+		Category:    category,
 		Color:       strings.ToLower(color),
 	})
 	if badRequest != "" {
@@ -512,7 +510,8 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if !issuestatus.IsCategory(req.Category) {
+	category, validCategory := issuestatus.ParseCategory(req.Category)
+	if !validCategory {
 		writeError(w, http.StatusBadRequest, "category must be one of: "+strings.Join(issuestatus.Categories(), ", "))
 		return
 	}
@@ -560,7 +559,7 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 	// per-id check misses — an active status the payload simply left out.
 	active, err := qtx.ListActiveCustomIssueStatusEntries(r.Context(), db.ListActiveCustomIssueStatusEntriesParams{
 		WorkspaceID: wsUUID,
-		Category:    req.Category,
+		Category:    category,
 	})
 	if err != nil {
 		slog.Warn("ReorderIssueStatuses list failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -593,10 +592,7 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "built-in statuses cannot be reordered")
 		case entry.ArchivedAt.Valid:
 			writeError(w, http.StatusConflict, "archived statuses cannot be reordered")
-		case func() bool {
-			category, ok := issuestatus.CategoryForBehavior(entry.Category)
-			return !ok || category != req.Category
-		}():
+		case entry.Category != category:
 			writeError(w, http.StatusBadRequest, "ids must all belong to the requested category")
 		default:
 			writeError(w, http.StatusConflict, "issue status catalog changed during reorder")
@@ -651,7 +647,7 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"statuses":   resp,
-		"categories": issuestatus.Categories(),
+		"categories": issuestatus.Canonical(),
 		"total":      len(resp),
 	})
 }

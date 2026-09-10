@@ -57,12 +57,12 @@ func TestClaimTaskByRuntime_PopulatesIssueStatusCatalog(t *testing.T) {
 	if got := len(resp.Task.IssueStatuses); got != 2 {
 		t.Fatalf("issue_statuses count = %d, want 2 (active customs only): %+v", got, resp.Task.IssueStatuses)
 	}
-	// Catalog order: backlog (rank 0) precedes todo (rank 1).
-	if resp.Task.IssueStatuses[0].Key != "later" || resp.Task.IssueStatuses[0].Category != "backlog" {
-		t.Errorf("issue_statuses[0] = %+v, want key=later category=backlog first by category rank", resp.Task.IssueStatuses[0])
+	// Both statuses share unstarted; insertion position determines their order.
+	if resp.Task.IssueStatuses[1].Key != "later" || resp.Task.IssueStatuses[1].Category != "unstarted" {
+		t.Errorf("issue_statuses[1] = %+v, want key=later category=unstarted", resp.Task.IssueStatuses[1])
 	}
-	second := resp.Task.IssueStatuses[1]
-	if second.Key != "rework" || second.Category != "todo" || second.Name != "Rework" || second.Description != "Sent back by review" {
+	second := resp.Task.IssueStatuses[0]
+	if second.Key != "rework" || second.Category != "unstarted" || second.Name != "Rework" || second.Description != "Sent back by review" {
 		t.Errorf("issue_statuses[1] = %+v, want the full rework entry (key/name/category/description)", second)
 	}
 	if resp.Task.IssueStatusesOmitted != 0 {

@@ -62,8 +62,8 @@ func LockAndFindActiveDuplicate(
 		return db.Issue{}, false, nil
 	}
 	terminalStatusKeys, err := issuestatus.ExpandCategories(ctx, q, workspaceID, []string{
-		issuestatus.CategoryCompleted,
-		issuestatus.CategoryCanceled,
+		issuestatus.CategoryDone,
+		issuestatus.CategoryClosed,
 	})
 	if err != nil {
 		return db.Issue{}, false, err
@@ -102,8 +102,8 @@ func LockAndFindRecentAutopilotDuplicate(
 		return db.Issue{}, false, err
 	}
 	terminalStatusKeys, err := issuestatus.ExpandCategories(ctx, q, workspaceID, []string{
-		issuestatus.CategoryCompleted,
-		issuestatus.CategoryCanceled,
+		issuestatus.CategoryDone,
+		issuestatus.CategoryClosed,
 	})
 	if err != nil {
 		return db.Issue{}, false, err

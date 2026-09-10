@@ -21,11 +21,10 @@ import { issueStatusKeys } from "./queries";
 vi.mock("../hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
 const CATEGORIES = [
-  "backlog",
   "unstarted",
   "started",
-  "completed",
-  "canceled",
+  "done",
+  "closed",
 ] as const;
 
 function entry(overrides: Partial<IssueStatusEntry> & { id: string }): IssueStatusEntry {
@@ -134,7 +133,7 @@ describe("issue status catalog mutations", () => {
   // realtime refetch lands, which is exactly the window the user is looking at.
   it("sorts a created status into its category instead of appending it", async () => {
     const qc = createClient();
-    const done = entry({ id: "builtin-done", key: "done", category: "completed", is_system: true, position: 0 });
+    const done = entry({ id: "builtin-done", key: "done", category: "done", is_system: true, position: 0 });
     qc.setQueryData(issueStatusKeys.list("ws-1"), catalog([builtInReview, done]));
     setApiInstance({
       createIssueStatus: vi.fn(async () => entry({ id: "qa", key: "qa", name: "QA" })),

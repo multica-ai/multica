@@ -1,7 +1,7 @@
 {
   "issue_statuses": {
     "title": "Issue Statuses",
-    "description": "Organize issue statuses into five lifecycle categories.",
+    "description": "Organize issue statuses into four lifecycle categories.",
     "loading": "Loading statuses…",
     "add": "Add status",
     "show_archived": "Show archived ({{count}})",
@@ -17,7 +17,7 @@
     "editor": {
       "create_title": "New status",
       "edit_title": "Edit status",
-      "behavior_hint": "This status will appear in {{category}}.",
+      "behavior_hint": "This status belongs to {{category}}. It does not inherit built-in parking, review, or failure recovery behavior.",
       "name": "Name",
       "name_placeholder": "e.g. Code Review",
       "key_hint": "Referred to as {{key}} by the API and the CLI.",
@@ -40,18 +40,16 @@
       "failed": "Could not archive the status."
     },
     "category_labels": {
-      "backlog": "Backlog",
       "unstarted": "Unstarted",
       "started": "Started",
-      "completed": "Completed",
-      "canceled": "Canceled"
+      "done": "Done",
+      "closed": "Closed"
     },
     "categories": {
-      "backlog": "Work that is not currently planned.",
-      "unstarted": "Planned work that has not started.",
+      "unstarted": "Work that has not started, whether planned or in the backlog.",
       "started": "Work that is active, under review, or blocked.",
-      "completed": "Work that has been finished.",
-      "canceled": "Work that will not be completed."
+      "done": "Work that has been finished.",
+      "closed": "Work that will not be completed."
     },
     "built_in_descriptions": {
       "backlog": "Parked. Assigning an issue here never starts an agent run.",

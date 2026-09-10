@@ -117,15 +117,14 @@ const mockListIssueTableRows = vi.hoisted(() =>
         next_cursor: null,
       };
     }
-    // Board / list surfaces page by five-value lifecycle category. This
+    // Board / list surfaces page by four-value lifecycle category. This
     // adapter fans a category back into concrete keys for the legacy fixture.
     const value = request.group_key?.replace(/^status(_category)?:/, "");
     const statusesByCategory: Record<string, string[]> = {
-      backlog: ["backlog"],
-      unstarted: ["todo"],
+      unstarted: ["backlog", "todo"],
       started: ["in_progress", "in_review", "blocked"],
-      completed: ["done"],
-      canceled: ["cancelled"],
+      done: ["done"],
+      closed: ["cancelled"],
     };
     const statuses = request.group.kind === "status_category"
       ? statusesByCategory[value] ?? []
@@ -286,51 +285,7 @@ vi.mock("@multica/core/api", () => ({
 }));
 
 // Mock issue config
-vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "unstarted", "started", "completed", "canceled"],
-  STATUS_ORDER: ["backlog", "unstarted", "started", "completed", "canceled"],
-  BUILT_IN_STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"],
-  BUILT_IN_STATUS_CATEGORY: {
-    backlog: "backlog",
-    todo: "unstarted",
-    in_progress: "started",
-    in_review: "started",
-    blocked: "started",
-    done: "completed",
-    cancelled: "canceled",
-  },
-  BUILT_IN_STATUS_LABEL: {
-    backlog: "Backlog",
-    todo: "Todo",
-    in_progress: "In Progress",
-    in_review: "In Review",
-    blocked: "Blocked",
-    done: "Done",
-    cancelled: "Cancelled",
-  },
-  STATUS_CONFIG: {
-    backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-    unstarted: { label: "Unstarted", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-    started: { label: "Started", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
-    completed: { label: "Completed", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
-    canceled: { label: "Canceled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-    todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-    in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
-    in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
-    done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
-    blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
-    cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-  },
-  PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
-  PRIORITY_DISPLAY_ORDER: ["none", "urgent", "high", "medium", "low"],
-  PRIORITY_CONFIG: {
-    urgent: { label: "Urgent", bars: 4, color: "text-destructive" },
-    high: { label: "High", bars: 3, color: "text-warning" },
-    medium: { label: "Medium", bars: 2, color: "text-warning" },
-    low: { label: "Low", bars: 1, color: "text-info" },
-    none: { label: "No priority", bars: 0, color: "text-muted-foreground" },
-  },
-}));
+// Use the real status configuration so category fixtures cannot drift.
 
 // Mock view store
 const mockViewState = {
@@ -763,7 +718,7 @@ describe("IssuesPage (shared)", () => {
 
     renderWithQuery(<IssuesPage />);
 
-    await screen.findByText("Backlog");
+    await screen.findByText("Unstarted");
     expect(screen.getAllByText("Unstarted").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Started").length).toBeGreaterThanOrEqual(1);
   });

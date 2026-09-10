@@ -33,7 +33,7 @@ func seedStatusCategoryFixture(t *testing.T) (projectID, customKey string) {
 	}
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO issue_status (workspace_id, key, name, description, category, color, position)
-		VALUES ($1, $2, 'QA', '', 'in_review', '#ff0000', 1)
+		VALUES ($1, $2, 'QA', '', 'started', '#ff0000', 1)
 	`, testWorkspaceID, customKey); err != nil {
 		t.Fatalf("create custom status: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestIssueTableStatusCategoryRowsReturnCustomStatusIssues(t *testing.T) {
 	// Every row carries its category, so the client can render the column
 	// without a second catalog round-trip.
 	for _, row := range rows.Rows {
-		if row.Issue.StatusCategory != "started" {
+		if row.Issue.StatusCategory != issuestatus.WireCategory(row.Issue.Status, "started") {
 			t.Fatalf("row %q status_category = %q, want started", row.Issue.Title, row.Issue.StatusCategory)
 		}
 	}
@@ -273,7 +273,7 @@ func TestIssueTableStatusCategoryFoldsBuiltInsWithoutCustomStatuses(t *testing.T
 	}
 
 	byCategory := collect("status_category")
-	want := map[string]int64{"unstarted": 1, "completed": 1}
+	want := map[string]int64{"unstarted": 1, "done": 1}
 	if len(byCategory) != len(want) {
 		t.Fatalf("category groups = %#v, want %#v", byCategory, want)
 	}

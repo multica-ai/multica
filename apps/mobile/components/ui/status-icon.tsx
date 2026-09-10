@@ -35,11 +35,10 @@ const FILL_R = 3.5;
 // a custom status inherits its category's token unless the catalog gave it a
 // colour of its own.
 const CATEGORY_COLOR: Record<IssueStatusCategory, string> = {
-  backlog: "#71717a", // muted-foreground
   unstarted: "#71717a",
   started: "#eab308", // warning
-  completed: "#3b82f6", // info
-  canceled: "#71717a",
+  done: "#3b82f6", // info
+  closed: "#71717a",
 };
 
 const BUILT_IN_COLOR: Record<BuiltInIssueStatus, string> = {
@@ -53,11 +52,10 @@ const BUILT_IN_COLOR: Record<BuiltInIssueStatus, string> = {
 };
 
 const CATEGORY_RENDERER: Record<IssueStatusCategory, BuiltInIssueStatus> = {
-  backlog: "backlog",
   unstarted: "todo",
   started: "in_progress",
-  completed: "done",
-  canceled: "cancelled",
+  done: "done",
+  closed: "cancelled",
 };
 
 function piePath(progress: number): string {

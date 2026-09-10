@@ -66,9 +66,9 @@ func TestWebhookStatusResolver(t *testing.T) {
 						ws := dbfx.Workspace(t, "Webhook status resolver", fmt.Sprintf("resolver-%s-%s-%d", provider, tc.name, workspace), testutil.Cols{"issue_prefix": "RSL"})
 						wsID := parseUUID(ws)
 						fixture := testutil.New(testPool, ws, testUserID)
-						for key, category := range map[string]string{"approved": "done", "dropped": "cancelled", "review": "in_review"} {
+						for key, category := range map[string]string{"approved": "done", "dropped": "closed", "review": "started"} {
 							if workspace == 1 && key == "approved" {
-								category = "in_review"
+								category = "started"
 							}
 							cols := testutil.Cols{"workspace_id": ws, "key": key, "name": key, "category": category, "color": "#123456"}
 							if key == "approved" {

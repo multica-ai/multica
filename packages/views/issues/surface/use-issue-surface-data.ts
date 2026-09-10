@@ -48,7 +48,7 @@ function ganttCanvasRows(issues: Issue[], showCompleted: boolean): Issue[] {
   if (showCompleted) return dated;
   // By CATEGORY: a custom status in done/cancelled is completed work, and
   // "show completed" has to hide it too. (MUL-6243)
-  return dated.filter((i) => !issueBehavesAsAny(i, ["completed", "canceled"]));
+  return dated.filter((i) => !issueBehavesAsAny(i, ["done", "closed"]));
 }
 
 export interface IssueSurfaceData {

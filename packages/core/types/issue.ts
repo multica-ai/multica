@@ -3,11 +3,10 @@ import type { IssuePropertyValues } from "./property";
 
 /** The five lifecycle categories used for grouping, filtering, and columns. */
 export type IssueStatusCategory =
-  | "backlog"
   | "unstarted"
   | "started"
-  | "completed"
-  | "canceled";
+  | "done"
+  | "closed";
 
 /** The seven built-in status keys kept for issue/API compatibility. */
 export type BuiltInIssueStatus =

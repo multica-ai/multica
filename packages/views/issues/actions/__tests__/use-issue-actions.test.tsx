@@ -65,7 +65,7 @@ const catalogEntries: IssueStatusEntry[] = [
         position: i,
       }),
   ),
-  statusEntry({ id: "later", key: "later", name: "Later", category: "backlog", position: 7 }),
+  statusEntry({ id: "later", key: "later", name: "Later", category: "unstarted", position: 7 }),
   statusEntry({ id: "rework", key: "rework", name: "Rework", category: "unstarted", position: 8 }),
 ];
 function statusEntry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {

@@ -129,7 +129,7 @@ describe("buildIssueStatusCatalog", () => {
 // on it. Those issues must keep their real name, colour and category — dropping
 // archived rows from resolution would degrade them to a raw key.
 describe("archived statuses stay resolvable", () => {
-  const archived = entry("gate_approved", "completed", {
+  const archived = entry("gate_approved", "done", {
     name: "Gate Approved",
     archived_at: "2026-01-01T00:00:00Z",
   });
@@ -138,12 +138,12 @@ describe("archived statuses stay resolvable", () => {
 
   it("keeps name and category for an issue left on an archived status", () => {
     expect(c.labelOf("gate_approved")).toBe("Gate Approved");
-    expect(c.categoryOf("gate_approved")).toBe("completed");
+    expect(c.categoryOf("gate_approved")).toBe("done");
   });
 
   it("excludes archived from the assignable set", () => {
     expect(c.activeStatuses.map((e) => e.key)).toEqual(["human_review"]);
-    expect(c.inCategory("completed")).toEqual([]);
+    expect(c.inCategory("done")).toEqual([]);
   });
 });
 
@@ -181,8 +181,8 @@ describe("statusOptions", () => {
 
   it("never offers an archived status", () => {
     const c = buildIssueStatusCatalog([
-      entry("done", "completed", { name: "Done", is_system: true }),
-      entry("gate_approved", "completed", { archived_at: "2026-01-01T00:00:00Z" }),
+      entry("done", "done", { name: "Done", is_system: true }),
+      entry("gate_approved", "done", { archived_at: "2026-01-01T00:00:00Z" }),
     ]);
     expect(statusOptions(c).map((o) => o.key)).not.toContain("gate_approved");
   });
@@ -194,14 +194,14 @@ describe("issueBehavesAs", () => {
   // rendered at full opacity as though the work were still open. A custom
   // status inherits its category's behavior in full. (MUL-6243)
   it("treats a custom status in the done category as done", () => {
-    const shipped = issue({ status: "shipped", status_category: "completed" });
-    expect(issueBehavesAs(shipped, "completed")).toBe(true);
+    const shipped = issue({ status: "shipped", status_category: "done" });
+    expect(issueBehavesAs(shipped, "done")).toBe(true);
     expect(issueBehavesAsAny(shipped, CLOSED_CATEGORIES)).toBe(true);
   });
 
   it("treats a custom status in the cancelled category as closed", () => {
     expect(
-      issueBehavesAsAny(issue({ status: "wont_do", status_category: "canceled" }), CLOSED_CATEGORIES),
+      issueBehavesAsAny(issue({ status: "wont_do", status_category: "closed" }), CLOSED_CATEGORIES),
     ).toBe(true);
   });
 

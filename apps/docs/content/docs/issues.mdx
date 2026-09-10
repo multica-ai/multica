@@ -75,17 +75,18 @@ Two changes are made by the system:
 
 ### Custom statuses
 
-A workspace owner or admin can add statuses of their own under **Settings → Issue Statuses** — `Code Review`, `QA`, `Rework`. Each new status belongs to one of the five lifecycle categories:
+A workspace owner or admin can add statuses under **Settings → Issue Statuses** — `Code Review`, `QA`, `Rework`. Every status belongs to one of four lifecycle categories:
 
-| Category | Default behavior for a new custom status |
+| Category | Lifecycle meaning |
 |---|---|
-| `backlog` | Parked like `backlog`: assigning an agent does not start a run. |
-| `unstarted` | Queued like `todo`: assigning an agent starts a run. |
-| `started` | Active like `in_progress`. |
-| `completed` | Terminal like `done`: closes a sub-issue stage and counts toward parent progress. |
-| `canceled` | Terminal like `cancelled`, with the record kept. |
+| `unstarted` | Not started. Includes built-in Backlog and Todo. |
+| `started` | Ongoing, including review and waiting. |
+| `done` | Successfully completed; terminal. |
+| `closed` | Cancelled or no longer pursued; terminal, not successful completion. |
 
-The lifecycle category controls where a custom status appears. Its exact automation behavior is retained separately for compatibility, so existing custom statuses keep behaving as they did before the five-category model. When the platform sets a status itself — such as rollback to `todo` or `done` after a linked PR merges — it writes the concrete built-in status, never a custom one.
+Custom statuses inherit lifecycle semantics only. They do not inherit built-in Backlog parking, In Review autopilot completion, Blocked failure, or In Progress recovery. Use the fixed built-in status when that behavior is required. Historical custom statuses follow the same rules: Awaiting Response is ongoing work, not automatic review completion. Assignment and creation still follow the general agent trigger rules.
+
+For installed clients, existing API category fields retain the seven-value wire enum. New clients normalize that representation into four categories; wire values never grant behavior inheritance. The database stores only the four lifecycle values.
 
 Four things follow from that model:
 

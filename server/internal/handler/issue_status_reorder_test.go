@@ -16,6 +16,10 @@ import (
 func insertCustomStatus(t *testing.T, key, category string, position int, archived bool) string {
 	t.Helper()
 	var id string
+	category, ok := issuestatus.ParseCategory(category)
+	if !ok {
+		t.Fatalf("invalid fixture category %q", category)
+	}
 	archivedAt := "NULL"
 	if archived {
 		archivedAt = "now()"
