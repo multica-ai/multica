@@ -2,7 +2,7 @@
 
 ## Prebuild the cancelled-chat session guard index
 
-Migration 461 builds `idx_agent_task_queue_chat_with_session_created_at`, which
+Migration 465 builds `idx_agent_task_queue_chat_with_session_created_at`, which
 keeps `AdvanceCancelledChatSessionPointer` from scanning the global task queue
 while a cancel or late session pin holds the chat row lock. This is a net-new
 index on `agent_task_queue`, and most historical chat tasks may satisfy its
@@ -45,8 +45,49 @@ build before deploying. The migration runner also registers invalid-index
 cleanup so an interrupted startup build can recover on its next attempt.
 
 Application rollback is compatible with the extra index, so leave it in place.
-Rolling back migration 461 drops the index and is functionally safe, but restores
+Rolling back migration 465 drops the index and is functionally safe, but restores
 the global scan and longer chat-lock hold time.
+
+## Issue description search index retirement
+
+Migrations 463 and 464 retire the two historical issue-description search
+indexes: `idx_issue_description_bigm` and `idx_issue_description_trgm`.
+`SearchIssues` now scans the selected workspace's issue candidates and evaluates
+description matches during projection, so neither global description GIN is
+read. Fresh installs also skip migration 139's historical trigram build. Do not
+repair or recreate these indexes after applying migrations 463 and 464.
+
+The down migrations restore the trigram index everywhere and also restore the
+CJK-friendly bigram index where `gin_bigm_ops` is available. Both use
+`CREATE INDEX CONCURRENTLY` and retry safely after an interrupted build.
+
+These migrations run during backend startup. A concurrent drop can wait for old
+transactions, so for multi-gigabyte production indexes prefer a low-traffic
+window: check for long-running transactions, then run each statement separately
+and outside a transaction before deploying:
+
+```sql
+DROP INDEX CONCURRENTLY IF EXISTS idx_issue_description_bigm;
+DROP INDEX CONCURRENTLY IF EXISTS idx_issue_description_trgm;
+```
+
+The subsequent migrations become fast no-ops. If startup performs a drop and
+is interrupted, `IF EXISTS` makes the next run retry safely; one index may
+remain until that retry completes. Rolling back to the current candidate-first
+search remains functionally correct without either index, but rolling back to
+the legacy search can make description queries much slower or time out until
+the database rollback rebuilds the indexes. Rebuilding up to two multi-gigabyte
+GIN indexes is not immediate; verify every restored index is live, ready, and
+valid before relying on it:
+
+```sql
+SELECT indexrelid::regclass AS index_name, indisvalid, indisready, indislive
+FROM pg_index
+WHERE indexrelid IN (
+    to_regclass('idx_issue_description_bigm'),
+    to_regclass('idx_issue_description_trgm')
+);
+```
 
 ## Comment content search index retirement
 
