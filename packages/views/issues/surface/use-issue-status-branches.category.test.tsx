@@ -10,12 +10,7 @@ import type { ApiClient } from "@multica/core/api/client";
 import type { Issue, IssueStatusCategory, IssueTableRowsRequest } from "@multica/core/types";
 import { useIssueStatusBranches } from "./use-issue-status-branches";
 
-/**
- * Board and list columns are CATEGORIES (MUL-6243). Before this, the hook asked
- * the server for a concrete status key AND re-checked `row.issue.status` against
- * the column key, so a card on a custom status was dropped twice over: it never
- * came back from the server, and it would have been filtered out if it had.
- */
+/** Built-ins and custom statuses sharing a category use separate branches. */
 
 function makeIssue(id: string, status: string, category: IssueStatusCategory): Issue {
   return {
@@ -50,7 +45,7 @@ const QA_ENTRY = {
   name: "QA",
   description: "",
   // Legacy servers return the concrete behavior category. The client folds it
-  // into the five-category model during a rolling upgrade.
+  // into the four-category model during a rolling upgrade.
   category: "in_review" as unknown as IssueStatusCategory,
   color: "#ff0000",
   is_system: false,
@@ -77,18 +72,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("useIssueStatusBranches — category columns", () => {
-  it("pages each column by category and keeps custom-status rows in it", async () => {
+describe("useIssueStatusBranches — exact status columns", () => {
+  it("pages custom statuses separately and rejects stale rows from a sibling status", async () => {
     const requests: IssueTableRowsRequest[] = [];
     const listIssueTableRows = vi.fn(async (request: IssueTableRowsRequest) => {
       requests.push(request);
       const rows =
-        request.group_key === "status_category:started"
+        request.group_key === "status:qa"
           ? [
               { issue: makeIssue("qa-1", "qa", "started"), direct_child_count: 0 },
               { issue: makeIssue("std-1", "in_review", "started"), direct_child_count: 0 },
             ]
-          : [];
+          : request.group_key === "status:in_review" ? [{ issue: makeIssue("std-1", "in_review", "started"), direct_child_count: 0 }] : [];
       return {
         query_fingerprint: "test",
         group_key: request.group_key ?? null,
@@ -113,7 +108,7 @@ describe("useIssueStatusBranches — category columns", () => {
         useIssueStatusBranches({
           wsId: "ws-1",
           query: QUERY,
-          statuses: ["started"],
+          statuses: ["qa", "in_review"],
           facets: undefined,
           facetsPending: false,
           facetsFetching: false,
@@ -124,18 +119,16 @@ describe("useIssueStatusBranches — category columns", () => {
 
     await waitFor(() => expect(result.current.issues.length).toBe(2));
 
-    // Five lifecycle columns always use the category contract: Started spans
-    // multiple built-ins as well as custom statuses.
-    expect(requests[0]?.group).toEqual({ kind: "status_category" });
-    expect(requests[0]?.group_key).toBe("status_category:started");
-    expect(requests.at(-1)?.group).toEqual({ kind: "status_category" });
-    expect(requests.at(-1)?.group_key).toBe("status_category:started");
-    // Both rows land in the column: the custom one is not dropped for failing
-    // to equal the column key.
+    // Each column requests its own exact key, even within the same category.
+    expect(requests[0]?.group).toEqual({ kind: "status" });
+    expect(requests[0]?.group_key).toBe("status:qa");
+    expect(requests.at(-1)?.group).toEqual({ kind: "status" });
+    expect(requests.map((r) => r.group_key)).toContain("status:in_review");
+    // Both independent branches contribute rows to the visible surface.
     expect(result.current.issues.map((i) => i.id).sort()).toEqual(["qa-1", "std-1"]);
   });
 
-  it("folds a custom status's facet count into its category's column total", async () => {
+  it("keeps independent facet totals for statuses in the same category", async () => {
     setApiInstance({
       listIssueTableRows: async (request: IssueTableRowsRequest) => ({
         query_fingerprint: "test",
@@ -157,7 +150,7 @@ describe("useIssueStatusBranches — category columns", () => {
         useIssueStatusBranches({
           wsId: "ws-1",
           query: QUERY,
-          statuses: ["started"],
+          statuses: ["qa", "in_review"],
           facets: {
             query_fingerprint: "test",
             total: 5,
@@ -181,8 +174,9 @@ describe("useIssueStatusBranches — category columns", () => {
     );
 
     await waitFor(() =>
-      expect(result.current.pagination.started?.total).toBe(5),
+      expect(result.current.pagination.qa?.total).toBe(3),
     );
+    expect(result.current.pagination.in_review?.total).toBe(2);
   });
 
   // The status facet is disjunctive: the server answers it with the status
@@ -213,7 +207,7 @@ describe("useIssueStatusBranches — category columns", () => {
         useIssueStatusBranches({
           wsId: "ws-1",
           query: { ...QUERY, filters: { statuses: ["qa"] } },
-          statuses: ["started"],
+          statuses: ["qa", "in_review"],
           facets: {
             query_fingerprint: "test",
             total: 5,
@@ -235,7 +229,7 @@ describe("useIssueStatusBranches — category columns", () => {
     );
 
     await waitFor(() =>
-      expect(result.current.pagination.started?.total).toBe(3),
+      expect(result.current.pagination.qa?.total).toBe(3),
     );
   });
 });
@@ -245,7 +239,7 @@ describe("useIssueStatusBranches — category columns", () => {
  * Started contains three concrete built-in states.
  */
 describe("useIssueStatusBranches — built-in-only workspaces", () => {
-  it("uses category grouping even when the catalog has no custom statuses", async () => {
+  it("uses exact status grouping without custom statuses", async () => {
     const requests: IssueTableRowsRequest[] = [];
     const listIssueStatuses = vi.fn(async () => ({
       // Built-ins only — the state of every workspace until an admin creates
@@ -280,7 +274,7 @@ describe("useIssueStatusBranches — built-in-only workspaces", () => {
         useIssueStatusBranches({
           wsId: "ws-1",
           query: QUERY,
-          statuses: ["started"],
+          statuses: ["in_review"],
           facets: undefined,
           facetsPending: false,
           facetsFetching: false,
@@ -293,8 +287,8 @@ describe("useIssueStatusBranches — built-in-only workspaces", () => {
     await waitFor(() => expect(requests.length).toBeGreaterThan(0));
 
     for (const request of requests) {
-      expect(request.group).toEqual({ kind: "status_category" });
-      expect(request.group_key).toBe("status_category:started");
+      expect(request.group).toEqual({ kind: "status" });
+      expect(request.group_key).toBe("status:in_review");
     }
   });
 })

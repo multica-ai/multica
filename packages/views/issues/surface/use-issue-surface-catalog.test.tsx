@@ -22,8 +22,7 @@ import { useIssueSurfaceController } from "./use-issue-surface-controller";
  * - A CUSTOM status filter cannot be routed to a column until the catalog
  *   answers. Fetching zero branches meanwhile renders an empty board with no
  *   spinner; failing renders one permanently, with no way to retry.
- * - Five lifecycle columns always use the `status_category` server contract;
- *   Started cannot be represented by one concrete status key.
+ * - Each concrete status becomes a branch only after catalog resolution.
  */
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
@@ -142,7 +141,7 @@ describe("useIssueSurfaceController — custom status filter vs a late catalog",
     });
 
     // Once the catalog answers, the filter routes to the column `qa` behaves as.
-    await waitFor(() => expect(result.current.visibleStatuses).toEqual(["started"]));
+    await waitFor(() => expect(result.current.visibleStatuses).toEqual(["qa"]));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
   });
 
@@ -190,10 +189,10 @@ describe("useIssueSurfaceController — swimlane protocol", () => {
     await waitFor(() => expect(groupRequests.length).toBeGreaterThan(0));
     // Every request uses lifecycle grouping, even for built-in-only catalogs.
     for (const request of groupRequests) {
-      expect(request.group).toMatchObject({ kind: "compound", secondary: "status_category" });
+      expect(request.group).toMatchObject({ kind: "compound", secondary: "status" });
     }
     for (const request of rowRequests) {
-      expect(request.group).toMatchObject({ kind: "compound", secondary: "status_category" });
+      expect(request.group).toMatchObject({ kind: "compound", secondary: "status" });
     }
   });
 
@@ -214,7 +213,7 @@ describe("useIssueSurfaceController — swimlane protocol", () => {
     await waitFor(() =>
       expect(
         groupRequests.some((request) =>
-          request.group.kind === "compound" && request.group.secondary === "status_category",
+          request.group.kind === "compound" && request.group.secondary === "status",
         ),
       ).toBe(true),
     );

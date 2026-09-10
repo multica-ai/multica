@@ -13,11 +13,8 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// Board, list and swimlane columns are CATEGORIES, not status keys (MUL-6243).
-// These tests pin the server half of that contract: a custom status must land
-// in its category's column, count toward it, and be reachable through the
-// paginated row query — the exact path where the first cut of the UI dropped
-// every custom-status card on the floor.
+// Pin the legacy category grouping API retained for installed clients.
+// Current Board/List/Swimlane status grouping uses exact status keys.
 func seedStatusCategoryFixture(t *testing.T) (projectID, customKey string) {
 	t.Helper()
 	ctx := context.Background()
@@ -55,7 +52,7 @@ func seedStatusCategoryFixture(t *testing.T) (projectID, customKey string) {
 	`, testWorkspaceID).Scan(&firstNumber); err != nil {
 		t.Fatalf("reserve issue numbers: %v", err)
 	}
-	// Two on the custom status, one on the built-in it behaves as, one elsewhere.
+	// Two on the custom status, one on a built-in in the same category, one elsewhere.
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id)
 		VALUES

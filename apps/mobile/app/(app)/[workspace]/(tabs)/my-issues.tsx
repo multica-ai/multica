@@ -5,14 +5,8 @@
  * (`involves_user_id`, MUL-2397) surfaces both the user's owned agents and
  * squads they're involved in (member / leader / has an owned agent inside).
  *
- * Issues are grouped by status CATEGORY using SectionList in
- * `BOARD_CATEGORIES` order; empty sections are filtered out so the screen
- * doesn't fill with "(0)" headers. Grouping is by category, not by status key,
- * because a workspace's custom statuses live inside their category's section
- * rather than adding one of their own — bucketing by key is what made
- * custom-status issues disappear from this list (MUL-6457). `cancelled` stays
- * excluded, so a custom status in that category is hidden here exactly like the
- * built-in Cancelled is: a custom status inherits its category's behavior.
+ * Issues are grouped by concrete status key; empty sections are omitted.
+ * Category controls lifecycle behavior and ordering, not section identity.
  *
  * Status + Priority filters mirror web's MyIssuesHeader filter sub-menus.
  * Filter state lives in `useMyIssuesViewStore` and is cleared on workspace
@@ -27,7 +21,6 @@ import { Ionicons } from "@expo/vector-icons";
 import type {
   IssuePriority,
   IssueStatus,
-  IssueStatusCategory,
 } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -45,9 +38,9 @@ import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useMyIssuesViewStore } from "@/data/stores/my-issues-view-store";
 import { useClearFiltersOnWorkspaceChange } from "@/lib/use-clear-filters-on-workspace-change";
-import { CATEGORY_LABEL, PRIORITY_LABEL } from "@/lib/issue-status";
+import { PRIORITY_LABEL } from "@/lib/issue-status";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
-import { groupIssuesByCategory } from "@/lib/group-issues-by-category";
+import { groupIssuesByStatus } from "@/lib/group-issues-by-status";
 import { filterIssues } from "@/lib/filter-issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
@@ -98,9 +91,7 @@ export default function MyIssues() {
     enabled: !!wsId && !!userId,
   });
 
-  // Only the active-filter chips need the catalog: sections group on the
-  // category the server already resolved onto each issue, so the list never
-  // waits for this. (MUL-6243)
+  // Catalog labels and ordering enhance exact-key sections without blocking rows.
   const catalog = useIssueStatuses();
 
   // Apply client-side status + priority filter. Mirrors the predicate at
@@ -110,7 +101,7 @@ export default function MyIssues() {
     [data, statusFilters, priorityFilters],
   );
 
-  const sections = useMemo(() => groupIssuesByCategory(filtered), [filtered]);
+  const sections = useMemo(() => groupIssuesByStatus(filtered, catalog.statuses), [filtered, catalog.statuses]);
 
   const hasActiveFilters =
     statusFilters.length > 0 || priorityFilters.length > 0;
@@ -171,7 +162,7 @@ export default function MyIssues() {
           )}
           renderSectionHeader={({ section }) => (
             <SectionHeader
-              category={section.category}
+              status={section.status}
               count={section.data.length}
             />
           )}
@@ -330,22 +321,21 @@ function Chip({ label, onClear }: { label: string; onClear: () => void }) {
   );
 }
 
-// The header names the CATEGORY, not any one status inside it, so it keeps
-// mobile's own copy and its category glyph even when the section holds custom
-// statuses.
+// The section header names its concrete built-in or custom status.
 function SectionHeader({
-  category,
+  status,
   count,
 }: {
-  category: IssueStatusCategory;
+  status: IssueStatus;
   count: number;
 }) {
+  const catalog = useIssueStatuses();
   return (
     <View className="flex-row items-center gap-2 px-4 py-2 bg-background">
       {/* Category keys resolve to their canonical lifecycle glyph. */}
-      <StatusIcon status={category} size={14} />
+      <StatusIcon status={status} category={catalog.categoryOf(status)} color={catalog.colorOf(status)} size={14} />
       <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-        {CATEGORY_LABEL[category]}
+        {catalog.labelOf(status)}
       </Text>
       <Text className="text-xs text-muted-foreground/60">{count}</Text>
     </View>

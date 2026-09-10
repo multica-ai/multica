@@ -117,8 +117,7 @@ const mockListIssueTableRows = vi.hoisted(() =>
         next_cursor: null,
       };
     }
-    // Board / list surfaces page by four-value lifecycle category. This
-    // adapter fans a category back into concrete keys for the legacy fixture.
+    // Support exact status branches and the legacy category contract.
     const value = request.group_key?.replace(/^status(_category)?:/, "");
     const statusesByCategory: Record<string, string[]> = {
       unstarted: ["backlog", "todo"],
@@ -265,6 +264,7 @@ vi.mock("@multica/core/api", () => ({
     listIssueTableGroups: (request: any) => mockListIssueTableGroups(request),
     listIssueTableRows: (request: any) => mockListIssueTableRows(request),
     listIssueTableFacets: (request: any) => mockListIssueTableFacets(request),
+    listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
     updateIssue: vi.fn(),
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
@@ -276,6 +276,7 @@ vi.mock("@multica/core/api", () => ({
     listIssueTableGroups: (request: any) => mockListIssueTableGroups(request),
     listIssueTableRows: (request: any) => mockListIssueTableRows(request),
     listIssueTableFacets: (request: any) => mockListIssueTableFacets(request),
+    listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
     updateIssue: vi.fn(),
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
@@ -313,7 +314,7 @@ const mockViewState = {
     { key: "labels", width: 220 },
   ],
   listCollapsedStatuses: [] as string[],
-  hiddenStatusCategories: [] as string[],
+  hiddenStatuses: [] as string[],
   setViewMode: vi.fn(),
   setGrouping: vi.fn(),
   toggleStatusFilter: vi.fn(),
@@ -734,9 +735,9 @@ describe("IssuesPage (shared)", () => {
 
     renderWithQuery(<IssuesPage />);
 
-    await screen.findByText("Unstarted");
-    expect(screen.getAllByText("Unstarted").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Started").length).toBeGreaterThanOrEqual(1);
+    await screen.findByText("Todo");
+    expect(screen.getAllByText("Todo").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("In Progress").length).toBeGreaterThanOrEqual(1);
   });
 
   it("groups board columns by assignee", async () => {

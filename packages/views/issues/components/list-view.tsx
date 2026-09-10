@@ -1,5 +1,8 @@
 "use client";
 
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useWorkspaceId } from "@multica/core/hooks";
+
 import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { ChevronRight, Plus } from "lucide-react";
 import { Accordion } from "@base-ui/react/accordion";
@@ -17,8 +20,7 @@ import {
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Virtuoso } from "react-virtuoso";
 import { Button } from "@multica/ui/components/ui/button";
-import type { Issue, IssueStatusCategory, Project } from "@multica/core/types";
-import { defaultStatusForCategory } from "@multica/core/issues";
+import type { Issue, IssueStatus, Project } from "@multica/core/types";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
@@ -59,13 +61,17 @@ const LIST_ROW_ESTIMATED_HEIGHT = 36;
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
+const EMPTY_STATUS_PAGE: IssueStatusPageState = {
+  total: 0, loaded: 0, hasMore: false, isLoading: false,
+  isFetching: false, isError: false, loadMore: () => {}, retry: () => {},
+};
 
-function buildListGroups(visibleStatuses: IssueStatusCategory[]): BoardColumnGroup[] {
+function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
   return visibleStatuses.map((status) => ({
     id: statusGroupId(status),
     title: status,
     status,
-    createData: { status: defaultStatusForCategory(status) },
+    createData: { status: status },
   }));
 }
 
@@ -81,8 +87,8 @@ function ListViewImpl({
   onCreateIssue,
 }: {
   issues: Issue[];
-  visibleStatuses: IssueStatusCategory[];
-  hiddenStatuses?: IssueStatusCategory[];
+  visibleStatuses: IssueStatus[];
+  hiddenStatuses?: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
   statusPagination: IssueStatusPagination;
@@ -98,6 +104,8 @@ function ListViewImpl({
   );
   const sortBy = useViewStore((s) => s.sortBy);
   const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const catalog = useIssueStatuses(wsId);
 
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
   const sortLabel = sortBy !== "position"
@@ -191,6 +199,8 @@ function ListViewImpl({
         const activeCol = findColumn(prev, activeId, groupIds);
         const overCol = findColumn(prev, overId, groupIds);
         if (!activeCol || !overCol || activeCol === overCol) return prev;
+        const targetStatus = groups.find((group) => group.id === overCol)?.status;
+        if (targetStatus && catalog.entryOf(targetStatus)?.archived_at) return prev;
 
         if (sortBy !== "position") return prev;
 
@@ -203,7 +213,7 @@ function ListViewImpl({
         return { ...prev, [activeCol]: oldIds, [overCol]: newIds };
       });
     },
-    [groupIds, sortBy, recentlyMovedRef, setColumns],
+    [groupIds, groups, catalog, sortBy, recentlyMovedRef, setColumns],
   );
 
   const handleDragEnd = useCallback(
@@ -257,6 +267,10 @@ function ListViewImpl({
       }
 
       const map = issueMapRef.current;
+      if (finalGroup.status && map.get(activeId)?.status !== finalGroup.status && catalog.entryOf(finalGroup.status)?.archived_at) {
+        resetColumns();
+        return;
+      }
 
       if (sortBy !== "position") {
         const currentIssue = map.get(activeId);
@@ -320,7 +334,7 @@ function ListViewImpl({
         beginSettle(),
       );
     },
-    [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef, t],
+    [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef, catalog, t],
   );
 
   // dnd-kit fires onDragCancel — never onDragEnd — when an active drag is
@@ -368,7 +382,7 @@ function ListViewImpl({
             const wasExpanded = expandedStatuses.includes(status);
             const isExpanded = value.includes(status);
             if (wasExpanded !== isExpanded) {
-              toggleListCollapsed(status as IssueStatusCategory);
+              toggleListCollapsed(status as IssueStatus);
             }
           }
         }}
@@ -383,7 +397,7 @@ function ListViewImpl({
               issueMap={issueMapRef.current}
               childProgressMap={childProgressMap}
               projectMap={projectMap}
-              page={statusPagination[status]}
+              page={statusPagination[status] ?? EMPTY_STATUS_PAGE}
               projectId={projectId}
               onCreateIssue={onCreateIssue}
               dragEnabled={dragEnabled}
@@ -458,7 +472,7 @@ function StatusAccordionItem({
   sortLabel,
   scrollParent,
 }: {
-  status: IssueStatusCategory;
+  status: IssueStatus;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
@@ -489,10 +503,13 @@ function StatusAccordionItem({
   const allSelected = issues.length > 0 && selectedCount === issues.length;
   const someSelected = selectedCount > 0;
 
-  const { setNodeRef: setDroppableRef, isOver } = useDroppable({
+  const statusWsId = useWorkspaceId();
+  const statusCatalog = useIssueStatuses(statusWsId);
+  const { setNodeRef: setDroppableRef, isOver: droppableIsOver } = useDroppable({
     id: statusGroupId(status),
     disabled: !dragEnabled,
   });
+  const isOver = droppableIsOver && !statusCatalog.entryOf(status)?.archived_at;
 
   const disableSorting = !!sortLabel;
 
@@ -600,7 +617,7 @@ function StatusAccordionItem({
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
           <StatusHeading status={status} count={page.total} />
         </Accordion.Trigger>
-        {onCreateIssue && (
+        {onCreateIssue && !statusCatalog.entryOf(status)?.archived_at && (
           <div className="pr-2">
             {/* Lazy-mounted tooltip machinery — see DeferredTooltip. */}
             <DeferredTooltip
@@ -612,7 +629,7 @@ function StatusAccordionItem({
                   className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
                   onClick={() => {
                     const defaults = {
-                      status: defaultStatusForCategory(status),
+                      status: status,
                       ...(projectId ? { project_id: projectId } : {}),
                     };
                     onCreateIssue(defaults);

@@ -23,53 +23,53 @@ describe("column visibility vs status filter", () => {
 
   // The regression: hiding one column wrote the OTHER six built-in keys into
   // statusFilters, so the query then excluded every custom status too — hiding
-  // Backlog silently dropped a QA card sitting in the Started column.
+  // Backlog silently dropped a QA card too.
   it("hiding a column does not touch the status filter", () => {
-    store.getState().hideStatus("unstarted");
+    store.getState().hideStatus("backlog");
 
-    expect(store.getState().hiddenStatusCategories).toEqual([
-      "closed",
-      "unstarted",
+    expect(store.getState().hiddenStatuses).toEqual([
+      "cancelled",
+      "backlog",
     ]);
     expect(store.getState().statusFilters).toEqual([]);
   });
 
   it("showing a column restores it without inventing a filter", () => {
-    store.getState().hideStatus("unstarted");
+    store.getState().hideStatus("backlog");
     store.getState().hideStatus("done");
-    store.getState().showStatus("unstarted");
+    store.getState().showStatus("backlog");
 
-    expect(store.getState().hiddenStatusCategories).toEqual([
-      "closed",
+    expect(store.getState().hiddenStatuses).toEqual([
+      "cancelled",
       "done",
     ]);
     expect(store.getState().statusFilters).toEqual([]);
   });
 
   it("hiding the same column twice is idempotent", () => {
-    store.getState().hideStatus("unstarted");
-    store.getState().hideStatus("unstarted");
+    store.getState().hideStatus("backlog");
+    store.getState().hideStatus("backlog");
 
-    expect(store.getState().hiddenStatusCategories).toEqual([
-      "closed",
-      "unstarted",
+    expect(store.getState().hiddenStatuses).toEqual([
+      "cancelled",
+      "backlog",
     ]);
   });
 
   it("a custom status filter survives hiding and showing a column", () => {
     store.getState().toggleStatusFilter("qa");
-    store.getState().hideStatus("unstarted");
-    store.getState().showStatus("unstarted");
+    store.getState().hideStatus("backlog");
+    store.getState().showStatus("backlog");
 
     expect(store.getState().statusFilters).toEqual(["qa"]);
   });
 
   it("clearing filters preserves column visibility", () => {
-    store.getState().hideStatus("unstarted");
-    store.getState().showStatus("closed");
+    store.getState().hideStatus("backlog");
+    store.getState().showStatus("cancelled");
     store.getState().clearFilters();
 
-    expect(store.getState().hiddenStatusCategories).toEqual(["unstarted"]);
+    expect(store.getState().hiddenStatuses).toEqual(["backlog"]);
   });
 });
 
@@ -81,17 +81,17 @@ describe("persisted lifecycle category upgrade", () => {
       listCollapsedStatuses: ["completed", "canceled"],
       statusFilters: ["in_review", "awaiting_response"],
     }, defaults);
-    expect(state.hiddenStatusCategories).toEqual(["unstarted", "started", "closed"]);
-    expect(state.listCollapsedStatuses).toEqual(["done", "closed"]);
+    expect(state.hiddenStatuses).toEqual(["backlog", "todo", "in_progress", "in_review", "blocked", "cancelled"]);
+    expect(state.listCollapsedStatuses).toEqual(["done", "cancelled"]);
     expect(state.statusFilters).toEqual(["in_review", "awaiting_response"]);
   });
-  it("keeps a combined category visible if only part of its old columns were hidden", () => {
-    const state = mergeViewStatePersisted({ hiddenStatusCategories: ["backlog", "in_review"] }, defaults);
-    expect(state.hiddenStatusCategories).toEqual([]);
+  it("keeps independent visibility for old concrete columns", () => {
+    const state = mergeViewStatePersisted({ hiddenStatuses: ["backlog", "in_review"] }, defaults);
+    expect(state.hiddenStatuses).toEqual(["backlog", "in_review"]);
   });
-  it("preserves current categories and explicit empty preferences", () => {
-    const state = mergeViewStatePersisted({ hiddenStatusCategories: ["started"], listCollapsedStatuses: [] }, defaults);
-    expect(state.hiddenStatusCategories).toEqual(["started"]);
+  it("preserves exact custom keys even if they resemble category names", () => {
+    const state = mergeViewStatePersisted({ hiddenStatuses: ["started"], listCollapsedStatuses: [] }, defaults);
+    expect(state.hiddenStatuses).toEqual(["started"]);
     expect(state.listCollapsedStatuses).toEqual([]);
   });
 });

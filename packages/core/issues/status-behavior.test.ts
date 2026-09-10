@@ -8,7 +8,7 @@ import {
   issueColumnCategory,
   statusCategoryOfKey,
   statusFilterColumns,
-  visibleStatusCategories,
+  visibleStatusKeys,
 } from "./status-category";
 
 function issue(status: string, statusCategory?: string): Pick<Issue, "status" | "status_category"> {
@@ -67,23 +67,17 @@ describe("issueBehavesAs", () => {
   });
 });
 
-/**
- * The board/list/swimlane column a card renders in. Columns are categories and
- * `issue.status` is a key, so a custom status has to be translated — the
- * regression it guards is a card in NO column at all (MUL-6409).
- */
+/** Internal legacy category cache/presentation fallback; not column identity. */
 describe("issueColumnCategory", () => {
   it("answers a built-in key with no server hint", () => {
     expect(issueColumnCategory(issue("in_review"))).toBe("started");
   });
 
-  it("puts a custom status in the column of the category it behaves as", () => {
+  it("resolves a custom status lifecycle from the payload", () => {
     expect(issueColumnCategory(issue("awaiting_response", "in_review"))).toBe("started");
   });
 
-  // Never null: a card in a possibly-wrong column is recoverable, a card in no
-  // column is invisible. The server sends a category on every issue payload, so
-  // this is the unreachable-in-practice floor.
+  // Presentation fallback only; exact status grouping does not use this helper.
   it("falls back to unstarted for a custom key the payload did not resolve", () => {
     expect(issueColumnCategory(issue("awaiting_response"))).toBe("unstarted");
   });
@@ -112,11 +106,11 @@ describe("statusFilterColumns", () => {
   }
 
   it("resolves built-ins without waiting for the catalog", () => {
-    expect(columns(statusFilterColumns(["todo", "done"], pending))).toEqual(["unstarted", "done"]);
+    expect(columns(statusFilterColumns(["todo", "done"], pending))).toEqual(["todo", "done"]);
   });
 
   it("maps a custom key to its category once the catalog is loaded", () => {
-    expect(columns(statusFilterColumns(["qa"], loaded))).toEqual(["started"]);
+    expect(columns(statusFilterColumns(["qa"], loaded))).toEqual(["qa"]);
   });
 
   // The regression: `categoryOf` answers `todo` for anything it has not loaded,
@@ -145,7 +139,7 @@ describe("statusFilterColumns", () => {
     );
 
     expect(stale.isError).toBe(false);
-    expect(columns(statusFilterColumns(["qa"], stale))).toEqual(["started"]);
+    expect(columns(statusFilterColumns(["qa"], stale))).toEqual(["qa"]);
   });
 
   // A LOADED catalog that does not know the key is authoritative: the status was
@@ -161,27 +155,27 @@ describe("statusFilterColumns", () => {
   });
 });
 
-describe("visibleStatusCategories", () => {
+describe("visibleStatusKeys", () => {
   const loaded = buildIssueStatusCatalog([
     entry("in_review", "in_review", true),
     entry("qa", "in_review"),
   ]);
 
   it("uses hidden preferences when there is no explicit status filter", () => {
-    expect(visibleStatusCategories([], ["closed"], loaded)).not.toContain(
-      "closed",
+    expect(visibleStatusKeys([], ["cancelled"], loaded)).not.toContain(
+      "cancelled",
     );
   });
 
   it("lets an explicit filter restore a hidden category", () => {
-    expect(visibleStatusCategories(["cancelled"], ["closed"], loaded)).toEqual([
-      "closed",
+    expect(visibleStatusKeys(["cancelled"], ["cancelled"], loaded)).toEqual([
+      "cancelled",
     ]);
   });
 
   it("maps a custom filter to its category", () => {
-    expect(visibleStatusCategories(["qa"], ["started"], loaded)).toEqual([
-      "started",
+    expect(visibleStatusKeys(["qa"], ["qa"], loaded)).toEqual([
+      "qa",
     ]);
   });
 });

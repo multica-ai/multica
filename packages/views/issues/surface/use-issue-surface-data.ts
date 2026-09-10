@@ -3,14 +3,13 @@
 import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Issue, Project } from "@multica/core/types";
-import { ALL_STATUSES } from "@multica/core/issues/config";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { childIssueProgressOptions } from "@multica/core/issues/queries";
 import { issueSurfaceGanttOptions } from "@multica/core/issues/surface/repository";
 import type { IssueSurfaceQueryPlan } from "@multica/core/issues/surface/query-plan";
-import type { IssueStatus, IssueStatusCategory, PropertyFilterValue } from "@multica/core/types";
+import type { IssueStatus, PropertyFilterValue } from "@multica/core/types";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { issueBehavesAsAny, visibleStatusCategories } from "@multica/core/issues";
+import { issueBehavesAsAny, statusColumnKeys, visibleStatusKeys } from "@multica/core/issues";
 import {
   applyIssueFilters,
   type IssueFilterState,
@@ -62,8 +61,8 @@ export interface IssueSurfaceData {
   ganttWorkingScopeIssues: Issue[] | undefined;
   filteredGanttIssues: Issue[];
   ganttIssues: Issue[];
-  visibleStatuses: IssueStatusCategory[];
-  hiddenStatuses: IssueStatusCategory[];
+  visibleStatuses: IssueStatus[];
+  hiddenStatuses: IssueStatus[];
   statusPagination: IssueStatusPagination;
   activeFilters: Omit<IssueFilters, "statusFilters">;
   childProgressMap: Map<string, ChildProgress>;
@@ -100,7 +99,7 @@ export function useIssueSurfaceData({
   serverGroupBranches,
   ganttShowCompleted,
   statusFilters,
-  hiddenStatusCategories,
+  hiddenStatusKeys,
   statusFilterPending,
   statusFilterError,
   priorityFilters,
@@ -127,7 +126,7 @@ export function useIssueSurfaceData({
    *  rows without it, so the working scope has to honour it too. */
   ganttShowCompleted: boolean;
   statusFilters: IssueStatus[];
-  hiddenStatusCategories: IssueStatusCategory[];
+  hiddenStatusKeys: IssueStatus[];
   /** A custom status filter is waiting on the catalog — hold loading. */
   statusFilterPending: boolean;
   /** The catalog failed, so a custom status filter cannot be honoured. */
@@ -335,26 +334,19 @@ export function useIssueSurfaceData({
 
   const catalog = useIssueStatuses(wsId);
 
-  const visibleStatuses = useMemo<IssueStatusCategory[]>(() => {
-    // Board columns are CATEGORIES, not status keys — adding a custom status
-    // must never add a column. Two independent things narrow them: hidden
-    // columns (display state) and the status filter, which is expressed in
-    // concrete KEYS and so has to be mapped back to the columns those keys land
-    // in. An explicit filter wins over hidden defaults so selecting Cancelled
-    // cannot produce an empty surface. (MUL-6243)
-    return visibleStatusCategories(
+  const visibleStatuses = useMemo<IssueStatus[]>(() => {
+    // An explicit exact-key filter wins over hidden column preferences.
+    return visibleStatusKeys(
       statusFilters,
-      hiddenStatusCategories,
+      hiddenStatusKeys,
       catalog,
     );
-  }, [statusFilters, hiddenStatusCategories, catalog]);
+  }, [statusFilters, hiddenStatusKeys, catalog]);
 
-  // Hidden columns are the lifecycle statuses not currently visible, so
-  // `closed` participates in the board show/hide controls exactly like the
-  // rest of the statuses.
-  const hiddenStatuses = useMemo<IssueStatusCategory[]>(
-    () => ALL_STATUSES.filter((s) => !visibleStatuses.includes(s)),
-    [visibleStatuses],
+  // Each catalog status can be hidden or restored independently.
+  const hiddenStatuses = useMemo<IssueStatus[]>(
+    () => statusColumnKeys(catalog).filter((s) => !visibleStatuses.includes(s)),
+    [catalog, visibleStatuses],
   );
 
   const activeFilters = useMemo(

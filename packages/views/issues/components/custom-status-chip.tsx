@@ -2,6 +2,7 @@
 
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import type { IssueStatusCatalog } from "@multica/core/issue-statuses";
+import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { IssueStatus } from "@multica/core/types";
 import { StatusIcon } from "./status-icon";
@@ -25,25 +26,11 @@ export function useIsCustomStatus(status: IssueStatus): boolean {
 function isCustomStatus(catalog: IssueStatusCatalog, status: IssueStatus): boolean {
   const entry = catalog.entryOf(status);
   if (!entry) return false;
-  // `is_system` is the authority; the key comparison covers the window before
-  // the catalog lands, where a built-in must still stay silent.
-  return entry.is_system !== true && status !== catalog.categoryOf(status);
+  return entry.is_system !== true && !isBuiltInIssueStatus(status);
 }
 
-/**
- * Names an issue's status when the surface around it only shows the CATEGORY
- * (MUL-6243).
- *
- * Board columns and list sections are categories, so two issues sitting in the
- * same "Started" column can be on different statuses — "Code Review" and "QA"
- * — with nothing on the card to tell them apart. This chip is that missing
- * signal.
- *
- * It renders NOTHING for a status that already is its category's built-in: the
- * column header already names the lifecycle phase and a chip repeating a
- * built-in status is pure noise. So a
- * workspace that never defined a custom status sees no visual change at all.
- */
+/** Names custom statuses on cards, including when grouped by project/assignee.
+ * Built-ins remain silent to preserve the compact default card layout. */
 export function CustomStatusChip({
   status,
   className = "",

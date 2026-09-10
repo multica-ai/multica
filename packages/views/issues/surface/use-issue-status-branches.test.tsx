@@ -9,7 +9,7 @@ import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import type {
   Issue,
-  IssueStatusCategory,
+  IssueStatus,
   IssueTableQuerySpec,
   IssueTableRowsRequest,
 } from "@multica/core/types";
@@ -93,7 +93,7 @@ describe("useIssueStatusBranches", () => {
     });
 
     const { result, rerender } = renderHook(
-      ({ statuses }: { statuses: IssueStatusCategory[] }) =>
+      ({ statuses }: { statuses: IssueStatus[] }) =>
         useIssueStatusBranches({
           wsId: "ws-1",
           query,
@@ -113,7 +113,7 @@ describe("useIssueStatusBranches", () => {
           enabled: true,
         }),
       {
-        initialProps: { statuses: ["unstarted"] },
+        initialProps: { statuses: ["todo"] },
         wrapper: wrapper(queryClient),
       },
     );
@@ -123,12 +123,12 @@ describe("useIssueStatusBranches", () => {
         "issue-1",
       ]),
     );
-    expect(result.current.pagination.unstarted.total).toBe(2);
-    expect(result.current.pagination.unstarted.hasMore).toBe(true);
+    expect(result.current.pagination.todo.total).toBe(2);
+    expect(result.current.pagination.todo.hasMore).toBe(true);
     expect(result.current.total).toBe(2);
     expect(result.current.isTotalKnown).toBe(true);
 
-    act(() => result.current.pagination.unstarted.loadMore());
+    act(() => result.current.pagination.todo.loadMore());
     await waitFor(() =>
       expect(result.current.issues.map((issue) => issue.id)).toEqual([
         "issue-1",
@@ -138,7 +138,7 @@ describe("useIssueStatusBranches", () => {
     expect(listIssueTableRows).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        group_key: "status_category:unstarted",
+        group_key: "status:todo",
         page: { limit: 50, cursor: "cursor-2" },
       }),
     );
@@ -147,7 +147,7 @@ describe("useIssueStatusBranches", () => {
     // reuses the settled cursor pages instead of restarting another chain.
     rerender({ statuses: [] });
     expect(result.current.issues).toEqual([]);
-    rerender({ statuses: ["unstarted"] });
+    rerender({ statuses: ["todo"] });
     await waitFor(() => expect(result.current.issues).toHaveLength(2));
     expect(listIssueTableRows).toHaveBeenCalledTimes(2);
 

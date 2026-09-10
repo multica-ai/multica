@@ -378,9 +378,11 @@ multica issue status <stage-2-child-id> todo   # promote when its deps are met
 ```
 
 `issue children --output json` reports per-stage `done` counts. A custom status
-counts as terminal here when its category is `done` or `closed`, which is what
-`status_category` on each child carries. Read `status_category` rather than
-matching `status` against the built-in names.
+counts as terminal here when its lifecycle category is `done` or `closed`.
+For installed-client compatibility, the JSON `status_category` field encodes
+these as `done` or `cancelled` respectively. Check those wire values (or the
+stage counts), not just the child's concrete `status` key: a custom key can
+also be terminal.
 
 Read each sub-issue's description before promoting and only promote items whose
 stated dependencies are met; if a description conflicts with the parent's

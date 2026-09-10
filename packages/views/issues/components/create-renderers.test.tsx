@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { ALL_STATUSES } from "@multica/core/issues/config";
+import { BUILT_IN_STATUS_ORDER } from "@multica/core/issues/config";
 import { BoardColumn } from "./board-column";
 import { ListView } from "./list-view";
 import type { IssueStatusPagination } from "../surface/use-issue-status-branches";
+
+vi.mock("@multica/core/issue-statuses/hooks", async () => {
+  const { buildIssueStatusCatalog } = await import("@multica/core/issue-statuses/queries");
+  return { useIssueStatuses: () => buildIssueStatusCatalog([{ key: "retired", name: "Retired", category: "started", is_system: false, archived_at: "2026-01-01" } as any]) };
+});
 
 const openModal = vi.hoisted(() => vi.fn());
 const hideStatus = vi.hoisted(() => vi.fn());
@@ -13,7 +18,7 @@ const deselect = vi.hoisted(() => vi.fn());
 
 function emptyStatusPagination(): IssueStatusPagination {
   return Object.fromEntries(
-    ALL_STATUSES.map((status) => [
+    BUILT_IN_STATUS_ORDER.map((status) => [
       status,
       {
         total: 0,
@@ -114,16 +119,28 @@ beforeEach(() => {
 });
 
 describe("issue renderer create entrypoints", () => {
-  it("routes board column create through the surface callback with local defaults", () => {
+  it("does not offer creation into an archived board/list status", () => {
+    const onCreateIssue = vi.fn();
+    const { container } = render(<>
+      <BoardColumn group={{ id: "status:retired", title: "Retired", status: "retired" }}
+        issueIds={[]} issueMap={new Map()} onCreateIssue={onCreateIssue} />
+      <ListView issues={[]} visibleStatuses={["retired"]} statusPagination={emptyStatusPagination()}
+        onCreateIssue={onCreateIssue} />
+    </>);
+    expect(container.querySelector(".lucide-plus")).toBeNull();
+    expect(onCreateIssue).not.toHaveBeenCalled();
+  });
+
+  it.each(["todo", "in_review", "awaiting_response"])("creates in the exact board column %s", (status) => {
     const onCreateIssue = vi.fn();
 
     render(
       <BoardColumn
         group={{
-          id: "unstarted",
-          title: "unstarted",
-          status: "unstarted",
-          createData: { status: "todo" },
+          id: status,
+          title: status,
+          status,
+          createData: { status },
         }}
         issueIds={[]}
         issueMap={new Map()}
@@ -136,19 +153,19 @@ describe("issue renderer create entrypoints", () => {
     fireEvent.click(buttons[buttons.length - 1]!);
 
     expect(onCreateIssue).toHaveBeenCalledWith({
-      status: "todo",
+      status,
       project_id: "project-1",
     });
     expect(openModal).not.toHaveBeenCalled();
   });
 
-  it("routes list status create through the surface callback with local defaults", () => {
+  it.each(["todo", "in_review", "awaiting_response"])("creates in the exact list section %s", (status) => {
     const onCreateIssue = vi.fn();
 
     render(
       <ListView
         issues={[]}
-        visibleStatuses={["unstarted"]}
+        visibleStatuses={[status]}
         statusPagination={emptyStatusPagination()}
         projectId="project-1"
         onCreateIssue={onCreateIssue}
@@ -159,7 +176,7 @@ describe("issue renderer create entrypoints", () => {
     fireEvent.click(buttons[buttons.length - 1]!);
 
     expect(onCreateIssue).toHaveBeenCalledWith({
-      status: "todo",
+      status,
       project_id: "project-1",
     });
     expect(openModal).not.toHaveBeenCalled();

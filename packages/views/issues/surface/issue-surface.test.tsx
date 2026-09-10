@@ -852,7 +852,7 @@ describe("IssueSurface — status catalog failure", () => {
     key: "qa",
     name: "QA",
     description: "",
-    category: "started" as const,
+    category: "in_progress" as const,
     color: "#ff0000",
     is_system: false,
     position: 1,

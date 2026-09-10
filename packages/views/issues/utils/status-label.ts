@@ -31,6 +31,8 @@ export function useStatusLabel(wsId: string) {
       if (isBuiltInIssueStatus(statusKey)) {
         return t(($) => $.status[statusKey as BuiltInIssueStatus]);
       }
+      const entry = entryOf(statusKey);
+      if (entry) return entry.name;
       if (isIssueStatusCategory(statusKey)) {
         return t(($) => $.status_category[statusKey as IssueStatusCategory]);
       }

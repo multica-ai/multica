@@ -238,7 +238,7 @@ describe("useIssueSurfaceController", () => {
         query: expect.objectContaining({
           scope: { kind: "project", project_id: "p1" },
         }),
-        group: { kind: "status_category" },
+        group: { kind: "status" },
       }),
     );
   });
@@ -315,7 +315,7 @@ describe("useIssueSurfaceController", () => {
     });
     expect(listIssueTableRows).toHaveBeenCalledWith(
       expect.objectContaining({
-        group_key: "status_category:unstarted",
+        group_key: "status:todo",
         page: { limit: 50, cursor: null },
       }),
     );
@@ -1220,8 +1220,8 @@ describe("useIssueSurfaceController", () => {
     expect(listIssues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "cancelled", limit: 50, offset: 0 }),
     );
-    expect(result.current.visibleStatuses).not.toContain("closed");
-    expect(result.current.hiddenStatuses).toContain("closed");
+    expect(result.current.visibleStatuses).not.toContain("cancelled");
+    expect(result.current.hiddenStatuses).toContain("cancelled");
   });
 
   it("keeps cancelled issues out of the default visible surface", async () => {
@@ -1241,7 +1241,7 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(result.current.visibleStatuses).not.toContain("closed");
+    expect(result.current.visibleStatuses).not.toContain("cancelled");
     const surfaceIds = result.current.surfaceIssues.map((i) => i.id);
     expect(surfaceIds).toContain("todo-1");
     expect(surfaceIds).not.toContain("cancelled-1");
@@ -1269,11 +1269,11 @@ describe("useIssueSurfaceController", () => {
 
     // The filter narrows the rendered columns and their contents — cancelled
     // is a normal status the filter can exclude, not an unlockable bucket.
-    expect(result.current.visibleStatuses).toEqual(["unstarted"]);
+    expect(result.current.visibleStatuses).toEqual(["todo"]);
     expect(result.current.issues.map((i) => i.id)).toEqual(["todo-1"]);
     // cancelled participates in show/hide like the rest — hidden here because
     // the active filter excludes it.
-    expect(result.current.hiddenStatuses).toContain("closed");
+    expect(result.current.hiddenStatuses).toContain("cancelled");
   });
 
   it("treats a cancelled-only filter like any other narrowing status filter", async () => {
@@ -1297,7 +1297,7 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     // Cancelled becomes the sole visible column and the surface narrows to it.
-    expect(result.current.visibleStatuses).toEqual(["closed"]);
+    expect(result.current.visibleStatuses).toEqual(["cancelled"]);
     expect(result.current.issues.map((i) => i.id)).toEqual(["cancelled-1"]);
     expect(result.current.surfaceIssues.map((i) => i.id)).toContain(
       "cancelled-1",
@@ -1558,7 +1558,7 @@ describe("useIssueSurfaceController", () => {
         .flatMap((lane) => lane.secondary_groups ?? [])
         .map((cell) => cell.value.kind === "status" ? cell.value.status : "")
         .sort(),
-    ).toEqual(["started", "unstarted"]);
+    ).toEqual(["in_progress", "todo"]);
   });
 
   // --- gantt canvas scope ------------------------------------------------

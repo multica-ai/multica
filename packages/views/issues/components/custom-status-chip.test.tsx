@@ -51,11 +51,11 @@ describe("CustomStatusChip", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  // Board columns and list sections are categories, so this chip is the only
+  // On boards grouped by project or assignee, this chip is the only
   // thing distinguishing two statuses that share one column.
-  it("names a custom status", () => {
-    catalogEntries = [IN_REVIEW_BUILT_IN, entry({ key: "qa", name: "QA Review" })];
-    render(<CustomStatusChip status="qa" />);
+  it.each(["qa", "started"])("names a custom status even if its key resembles a category: %s", (key) => {
+    catalogEntries = [IN_REVIEW_BUILT_IN, entry({ key, name: "QA Review" })];
+    render(<CustomStatusChip status={key} />);
     expect(screen.getByText("QA Review")).toBeInTheDocument();
   });
 

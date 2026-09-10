@@ -215,7 +215,7 @@ describe("Board grouped by project", () => {
           <IssueContextMenuProvider>
           <BoardView
             issues={issues}
-            visibleStatuses={["unstarted"]}
+            visibleStatuses={["todo"]}
             hiddenStatuses={[]}
             onMoveIssue={() => {}}
             projectMap={

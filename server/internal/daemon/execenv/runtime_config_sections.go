@@ -2,9 +2,9 @@ package execenv
 
 import (
 	"fmt"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"strings"
 
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
 
@@ -290,11 +290,8 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	}
 }
 
-// briefStatusCategoryOrder is the category order the catalog block renders in:
-// the board's category rank (matching ListIssueStatusEntries' ORDER BY), NOT
-// the static line's historical enumeration order. Local to the brief on
-// purpose — importing the issuestatus package would pull the db package into
-// execenv for a 7-element constant.
+// briefStatusCategoryOrder groups the briefing catalog by internal lifecycle,
+// matching ListIssueStatusEntries. User-facing columns still use status keys.
 var briefStatusCategoryOrder = issuestatus.Categories()
 
 // writeIssueStatusCommand emits the `multica issue status` bullet.

@@ -9,7 +9,6 @@ import type {
   IssueTableGroupDescriptor,
 } from "@multica/core/types";
 import type { IssueGroupBranches } from "../surface/use-issue-group-branches";
-import { issueColumnCategory } from "@multica/core/issues";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
@@ -323,7 +322,7 @@ function makeServerBranches(
           loaded: issues.filter(
             (issue) =>
               cell.value.kind === "status" &&
-              issueColumnCategory(issue) === cell.value.status,
+              issue.status === cell.value.status,
           ).length,
           hasMore: false,
           isLoading: false,
@@ -392,9 +391,9 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    expect(screen.getByText("Unstarted")).toBeInTheDocument();
-    expect(screen.getByText("Unstarted")).toBeInTheDocument();
-    expect(screen.getByText("Started")).toBeInTheDocument();
+    expect(screen.getByText("Todo")).toBeInTheDocument();
+    expect(screen.getByText("Todo")).toBeInTheDocument();
+    expect(screen.getByText("In Progress")).toBeInTheDocument();
   });
 
   // MUL-4290: `cancelled` is a first-class default status. Status columns come
@@ -435,7 +434,7 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    expect(screen.getByText("Closed")).toBeInTheDocument();
+    expect(screen.getByText("Cancelled")).toBeInTheDocument();
     expect(screen.getByText("Cancelled Orphan")).toBeInTheDocument();
   });
 
@@ -452,10 +451,11 @@ describe("SwimLaneView", () => {
     status_category: "started",
   };
 
-  it("renders a custom-status card in its category's column", () => {
+  it("renders a custom-status card in its own status column", () => {
     renderWithI18n(
       <SwimLaneView
         issues={[...mockIssues, customStatusOrphan]}
+        visibleStatuses={["todo", "in_progress", "awaiting_response"]}
         onMoveIssue={vi.fn()}
       />,
     );
@@ -468,8 +468,8 @@ describe("SwimLaneView", () => {
       <SwimLaneView
         issues={[...mockIssues, cancelledOrphan]}
         visibleStatuses={[
-          "unstarted",
-          "started",
+          "todo",
+          "in_progress",
           "done",
         ]}
         onMoveIssue={vi.fn()}
@@ -596,7 +596,7 @@ describe("SwimLaneView", () => {
     // No parent + Parent Issue 1 each have one + per visible status column.
     // The Other parents lane must add zero.
     const realLaneCount = 2;
-    const visibleStatusCount = 4; // Four lifecycle categories (closed included)
+    const visibleStatusCount = 7; // Four lifecycle categories (closed included)
     expect(
       screen.getAllByRole("button", { name: /add issue/i }).length,
     ).toBe(realLaneCount * visibleStatusCount);
@@ -616,13 +616,13 @@ describe("SwimLaneView", () => {
     act(() => {
       lastOnDragOver({
         active: { id: "child-1" },
-        over: { id: "swim:parent:__orphans__:unstarted" },
+        over: { id: "swim:parent:__orphans__:todo" },
       });
     });
     act(() => {
       lastOnDragEnd({
         active: { id: "child-1" },
-        over: { id: "swim:parent:__orphans__:unstarted" },
+        over: { id: "swim:parent:__orphans__:todo" },
       });
     });
 
@@ -636,8 +636,8 @@ describe("SwimLaneView", () => {
       <SwimLaneView
         issues={mockIssues.filter((i) => i.status === "todo")}
         unfilteredIssues={mockIssues}
-        visibleStatuses={["unstarted"]}
-        hiddenStatuses={["started", "done"]}
+        visibleStatuses={["todo"]}
+        hiddenStatuses={["in_progress", "done"]}
         onMoveIssue={vi.fn()}
       />,
     );
@@ -665,7 +665,7 @@ describe("SwimLaneView", () => {
         },
         count: 1,
         secondary_groups: [{
-          key: "compound:cGFyZW50OnBhcmVudC0x:status_category:done",
+          key: "compound:cGFyZW50OnBhcmVudC0x:status:done",
           value: { kind: "status", status: "done" },
           count: 1,
         }],
@@ -680,8 +680,8 @@ describe("SwimLaneView", () => {
         },
         count: 1,
         secondary_groups: [{
-          key: "compound:cGFyZW50Om5vbmU:status_category:unstarted",
-          value: { kind: "status", status: "unstarted" },
+          key: "compound:cGFyZW50Om5vbmU:status:todo",
+          value: { kind: "status", status: "todo" },
           count: 1,
         }],
       },
@@ -690,7 +690,7 @@ describe("SwimLaneView", () => {
     renderWithI18n(
       <SwimLaneView
         issues={[parent]}
-        visibleStatuses={["unstarted"]}
+        visibleStatuses={["todo"]}
         hiddenStatuses={["done"]}
         groupBranches={makeServerBranches(descriptors, [parent])}
         onMoveIssue={vi.fn()}
@@ -723,8 +723,8 @@ describe("SwimLaneView", () => {
         },
         count: 1,
         secondary_groups: [{
-          key: "compound:cGFyZW50OnBhcmVudC0x:status_category:unstarted",
-          value: { kind: "status", status: "unstarted" },
+          key: "compound:cGFyZW50OnBhcmVudC0x:status:todo",
+          value: { kind: "status", status: "todo" },
           count: 1,
         }],
       },
@@ -738,8 +738,8 @@ describe("SwimLaneView", () => {
         },
         count: 1,
         secondary_groups: [{
-          key: "compound:cGFyZW50Om5vbmU:status_category:unstarted",
-          value: { kind: "status", status: "unstarted" },
+          key: "compound:cGFyZW50Om5vbmU:status:todo",
+          value: { kind: "status", status: "todo" },
           count: 1,
         }],
       },
@@ -748,7 +748,7 @@ describe("SwimLaneView", () => {
     renderWithI18n(
       <SwimLaneView
         issues={[parent, child]}
-        visibleStatuses={["unstarted"]}
+        visibleStatuses={["todo"]}
         groupBranches={makeServerBranches(descriptors, [parent, child])}
         onMoveIssue={vi.fn()}
       />,
@@ -773,7 +773,7 @@ describe("SwimLaneView", () => {
     act(() => {
       lastOnDragEnd({
         active: { id: "lonely-child" },
-        over: { id: "swim:parent:parent-1:started" },
+        over: { id: "swim:parent:parent-1:in_progress" },
       });
     });
 
@@ -806,7 +806,7 @@ describe("SwimLaneView", () => {
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
-        visibleStatuses={["unstarted", "started", "closed"]}
+        visibleStatuses={["todo", "in_progress", "cancelled"]}
         hiddenStatuses={["done"]}
         onMoveIssue={vi.fn()}
       />,
@@ -824,7 +824,7 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    const targetCellId = "swim:parent:none:started";
+    const targetCellId = "swim:parent:none:in_progress";
 
     act(() => {
       lastOnDragOver({
@@ -862,7 +862,7 @@ describe("SwimLaneView", () => {
     act(() => {
       lastOnDragEnd({
         active: { id: "parent-1" },
-        over: { id: "swim:parent:none:unstarted" },
+        over: { id: "swim:parent:none:todo" },
       });
     });
 
@@ -875,7 +875,7 @@ describe("SwimLaneView", () => {
       <SwimLaneView issues={mockIssues} onMoveIssue={mockOnMoveIssue} />,
     );
 
-    const target = "swim:parent:parent-1:unstarted";
+    const target = "swim:parent:parent-1:todo";
     act(() => {
       lastOnDragOver({
         active: { id: "orphan-1" },
@@ -897,22 +897,22 @@ describe("SwimLaneView", () => {
       expect.any(Function),
     );
     // Moving lanes within Unstarted must preserve the concrete Backlog key.
-    expect(mockOnMoveIssue.mock.calls[0]![1]).not.toHaveProperty("status");
+    expect(mockOnMoveIssue.mock.calls[0]![1]).toHaveProperty("status", "todo");
   });
 
   it("renders count for hidden statuses from in-memory statusTotals", () => {
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
-        visibleStatuses={["started", "done", "closed"]}
-        hiddenStatuses={["unstarted"]}
+        visibleStatuses={["in_progress", "done", "cancelled"]}
+        hiddenStatuses={["backlog"]}
         onMoveIssue={vi.fn()}
       />,
     );
 
     const panel = screen.getByText("Hidden columns").parentElement!.parentElement!;
-    expect(panel).toHaveTextContent("Unstarted");
-    expect(panel).not.toHaveTextContent("Started");
+    expect(panel).toHaveTextContent("Backlog");
+    expect(panel).not.toHaveTextContent("In Progress");
     // The parent represented by a lane header is not counted as a card.
     expect(panel).toHaveTextContent("1");
   });
@@ -934,18 +934,18 @@ describe("SwimLaneView", () => {
       <SwimLaneView
         issues={mockIssues}
         unfilteredIssues={unfiltered}
-        visibleStatuses={["done", "closed"]}
-        hiddenStatuses={["unstarted", "started"]}
+        visibleStatuses={["done", "cancelled"]}
+        hiddenStatuses={["backlog", "in_progress", "blocked"]}
         onMoveIssue={vi.fn()}
       />,
     );
 
     const panel = screen.getByText("Hidden columns").parentElement!.parentElement!;
-    expect(panel).toHaveTextContent("Unstarted");
-    expect(panel).toHaveTextContent("Started");
+    expect(panel).toHaveTextContent("Backlog");
+    expect(panel).toHaveTextContent("In Progress");
     const counts = [...panel.querySelectorAll("span")].map((el) => el.textContent);
     expect(counts).toContain("1");
-    expect(counts).toContain("2");
+    expect(counts.filter((count) => count === "1")).toHaveLength(3);
   });
 
   const multiParentIssues: Issue[] = [
@@ -1293,7 +1293,7 @@ describe("SwimLaneView", () => {
     );
 
     // Drop "issue-c" (no project) into proj-1's todo cell.
-    const target = "swim:project:proj-1:unstarted";
+    const target = "swim:project:proj-1:todo";
     act(() => {
       lastOnDragOver({ active: { id: "issue-c" }, over: { id: target } });
     });
@@ -1317,7 +1317,7 @@ describe("SwimLaneView", () => {
       <SwimLaneView issues={projectIssues} onMoveIssue={mockOnMoveIssue} />,
     );
 
-    const target = "swim:project:none:started";
+    const target = "swim:project:none:in_progress";
     act(() => {
       lastOnDragOver({ active: { id: "issue-a" }, over: { id: target } });
     });
@@ -1396,7 +1396,7 @@ describe("SwimLaneView", () => {
       <SwimLaneView issues={assigneeIssues} onMoveIssue={mockOnMoveIssue} />,
     );
 
-    const target = "swim:assignee:member:user-1:started";
+    const target = "swim:assignee:member:user-1:in_progress";
     act(() => {
       lastOnDragOver({ active: { id: "issue-z" }, over: { id: target } });
     });
@@ -1620,13 +1620,13 @@ describe("SwimLaneView", () => {
     act(() => {
       lastOnDragOver({
         active: { id: "parent-1" },
-        over: { id: "swim:parent:parent-1:started" },
+        over: { id: "swim:parent:parent-1:in_progress" },
       });
     });
     act(() => {
       lastOnDragEnd({
         active: { id: "parent-1" },
-        over: { id: "swim:parent:parent-1:started" },
+        over: { id: "swim:parent:parent-1:in_progress" },
       });
     });
 

@@ -246,12 +246,9 @@ export const ISSUE_PAGE_SIZE = 50;
  * display preferences; there is no separate
  * "visible board" subset. This constant governs fetch/cache membership.
  *
- * Keyed on category, not on status key (MUL-6243). A workspace can define any
- * number of custom statuses, and bucketing by status would mean one more
- * parallel `listIssues` request on every board load per status added. Bucketing
- * by category keeps the fan-out fixed at 5 forever; a custom status appears in
- * the column of its lifecycle category, and the card's own badge is what
- * shows which specific status it is on.
+ * These are internal legacy cache buckets, not user-facing columns.
+ * Board/List use independently paged exact-key table branches; Swimlane uses
+ * compound status branches. Never derive visible column identity from this cache.
  */
 export const PAGINATED_CATEGORIES: readonly IssueStatusCategory[] = ALL_STATUSES;
 

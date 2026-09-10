@@ -70,7 +70,7 @@ type resolvedIssueTableGroup struct {
 	secondaryValues   []string
 	secondaryFiltered bool
 	// secondaryCategory marks a compound whose secondary axis is the CATEGORY
-	// of the status rather than the status key itself — the swimlane contract.
+	// of the status rather than its key, retained for installed clients.
 	secondaryCategory bool
 	// categoryKeys maps each of the 4 categories to the concrete status keys
 	// that belong to it, resolved ONCE per request. Category predicates expand
@@ -196,9 +196,8 @@ func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request,
 			statusCustomKeys: customKeys,
 		}, true
 	case "status_category":
-		// Board / list / swimlane columns are CATEGORIES, so a custom status
-		// groups into one of four lifecycle columns instead of getting a column
-		// of its own. (MUL-6243)
+		// Retained category-grouping API for installed clients. New task views
+		// use exact status groups, including custom keys.
 		customKeys, categoryKeys, err := h.resolveStatusCategoryMaps(r.Context(), workspaceID)
 		if err != nil {
 			slog.Warn("resolve status category group failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -251,6 +250,15 @@ END, ''))`,
 			writeIssueTableUnsupportedGroup(w, "primary_group_unsupported", "This primary group is not supported.")
 			return resolvedIssueTableGroup{}, false
 		}
+		var customKeys map[string]string
+		if !secondaryCategory {
+			var err error
+			customKeys, err = issuestatus.CustomKeyCategories(r.Context(), h.issueStatusCatalog(), workspaceID)
+			if err != nil {
+				writeIssueTableQueryFailure(w, r, "failed to resolve table group")
+				return resolvedIssueTableGroup{}, false
+			}
+		}
 		seenSecondaryValues := make(map[string]struct{}, len(group.SecondaryValues))
 		seenInputs := make(map[string]bool, len(group.SecondaryValues))
 		normalizedSecondaryValues := make([]string, 0, len(group.SecondaryValues))
@@ -269,7 +277,8 @@ END, ''))`,
 					value = normalized
 				}
 			}
-			if !issueTableContainsString(validSecondary, value) {
+			_, custom := customKeys[value]
+			if !issueTableContainsString(validSecondary, value) && (secondaryCategory || !custom) {
 				writeError(w, http.StatusBadRequest, "invalid group.secondary_values")
 				return resolvedIssueTableGroup{}, false
 			}
@@ -289,6 +298,7 @@ END, ''))`,
 			secondaryValues:   normalizedSecondaryValues,
 			secondaryFiltered: group.SecondaryValues != nil,
 			secondaryCategory: secondaryCategory,
+			statusCustomKeys:  customKeys,
 		}
 		if secondaryCategory {
 			customKeys, categoryKeys, err := h.resolveStatusCategoryMaps(r.Context(), workspaceID)
@@ -487,7 +497,13 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 			return descriptor, err
 		}
 		descriptor.SecondaryGroups = make([]issueTableGroupDescriptorResponse, 0, len(secondaryCounts))
-		secondaryValues := validIssueStatuses
+		secondaryValues := append([]string(nil), validIssueStatuses...)
+		customKeys := make([]string, 0, len(group.statusCustomKeys))
+		for key := range group.statusCustomKeys {
+			customKeys = append(customKeys, key)
+		}
+		sort.Strings(customKeys)
+		secondaryValues = append(secondaryValues, customKeys...)
 		if group.secondaryCategory {
 			secondaryValues = validIssueStatusCategories
 		}
@@ -627,7 +643,8 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 				status = normalized
 			}
 		}
-		if !ok || !issueTableContainsString(validSecondary, status) {
+		_, custom := group.statusCustomKeys[status]
+		if !ok || (!issueTableContainsString(validSecondary, status) && (group.secondaryCategory || !custom)) {
 			writeError(w, http.StatusBadRequest, "invalid group_key")
 			return "", false
 		}

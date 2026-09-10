@@ -45,8 +45,8 @@ PR #7990 is subsequent work, not part of this release.
    tasks automatically. Review affected in-flight work and move it to an
    appropriate fixed built-in status only when that action is intended.
 5. Verify four stored categories, seven unchanged fixed keys, unchanged row and
-   issue-reference counts, custom status CRUD/archive, terminal filtering, board
-   grouping, and lack of unintended task enqueues. Check API error rates and
+   issue-reference counts, custom status CRUD/archive, terminal filtering, independent built-in/custom status
+   columns, counts, pagination and drag/create targets, and lack of unintended task enqueues. Check API error rates and
    automation completion/failure paths.
 
 Release policy is fix-forward. Do not roll back application code over the new
@@ -72,9 +72,12 @@ backend upgrade. It does not promise identical old UI grouping or old agent
 instructions: old filters can broaden when categories combine, old saved
 grouping views can require refresh/upgrade, and old daemons cannot render the
 new lifecycle brief reliably. Update clients/daemons for the new feature.
-Persisted hidden/collapsed columns are normalized on load. If only some old
-columns in a merged lifecycle were hidden, the combined column stays visible
-to avoid hiding previously visible work; exact status filters are unchanged.
+Board/List/Swimlane status grouping uses concrete keys, with independent custom
+columns, counts and cursors. Hidden/collapsed preferences preserve exact keys;
+old category-named storage is read on load without merging sibling statuses.
+New snapshots persist `hiddenStatuses`; exact status filters are unchanged.
+Deploy the backend before clients: custom Swimlane columns require the compound
+`secondary: status` API to accept workspace-scoped custom keys.
 Validation errors (unknown/archived status, permissions, stale reorder sets)
 still return their normal error responses; no API guarantees every request
 will succeed, especially during the accepted mixed-version window.

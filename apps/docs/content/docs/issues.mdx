@@ -89,8 +89,8 @@ For installed clients, existing API category fields retain the seven-value wire 
 
 Four things follow from that model:
 
-- **A status's category is fixed once the status exists.** Changing it later would regroup every issue already sitting on that status, so the editor keeps it read-only. Choose the lifecycle stage first, then name it.
-- **Board columns are categories, not statuses.** Adding a status never adds a column — there is one column per category. A custom status sits in its category's column, and its cards carry a small chip with the status name, so `Code Review` and `QA` stay distinguishable inside Started.
+- **A status's category is fixed once the status exists.** Changing it later would change the lifecycle behavior of every issue already sitting on that status, so the editor keeps it read-only. Choose the lifecycle stage first, then name it.
+- **Status grouping uses individual statuses.** Board columns, List sections, and Swimlane status columns each distinguish built-in and custom statuses. `Code Review` and `QA` have separate columns even though both belong to Started. Categories are internal lifecycle classifications, not replacement column names.
 - **Built-in statuses are locked.** Their names, colors, and categories cannot be changed, and they cannot be archived — a workspace that never opens the page keeps exactly the board it had.
 - **Archiving retires a status, it does not delete it.** Issues already on it keep it, keep its name and color, and keep behaving the same. It only stops being offered the next time someone sets a status.
 

@@ -1,21 +1,22 @@
-import type { BuiltInIssueStatus, Issue, IssueStatusCategory } from "../types";
+import type { Issue, IssueStatus, IssueStatusCategory } from "../types";
 import {
+  compareIssueStatusEntries,
   isBuiltInIssueStatus,
   normalizeIssueStatusCategory,
 } from "../issue-statuses";
 import type { IssueStatusCatalog } from "../issue-statuses";
-import { ALL_STATUSES, BUILT_IN_STATUS_CATEGORY } from "./config";
+import { ALL_STATUSES, BUILT_IN_STATUS_CATEGORY, BUILT_IN_STATUS_ORDER } from "./config";
 
 /**
- * The category an issue's status belongs to — the bucket it occupies on the
- * board (MUL-6243).
+ * The internal lifecycle category used for behavior and cache predicates.
+ * User-facing status columns are keyed by issue.status, not this value.
  *
  * Pure on purpose: the cache helpers that call it run outside React and must
  * not reach for a catalog. It reads the server-provided `status_category` when
  * present and otherwise falls back to the fixed built-in key mapping.
  *
  * Returns null when the status is a custom key this response did not resolve,
- * so callers can skip bucketing rather than guessing a wrong column.
+ * so callers do not infer an unsupported lifecycle.
  */
 export function issueStatusCategory(
   issue: Pick<Issue, "status" | "status_category">,
@@ -40,38 +41,8 @@ export function statusCategoryOfKey(statusKey: string): IssueStatusCategory {
   return normalizeIssueStatusCategory(statusKey) ?? "unstarted";
 }
 
-/** Concrete built-in used when a user moves or creates in a lifecycle category. */
-export function defaultStatusForCategory(
-  category: IssueStatusCategory,
-): BuiltInIssueStatus {
-  switch (category) {
-    case "unstarted":
-      return "todo";
-    case "started":
-      return "in_progress";
-    case "done":
-      return "done";
-    case "closed":
-      return "cancelled";
-  }
-}
-
-/**
- * The board/list/swimlane COLUMN an issue renders in — always an answer, never
- * null (MUL-6409).
- *
- * Columns are categories while `issue.status` is a concrete KEY, and bucketing
- * a card by its key against category columns is how a custom status made cards
- * disappear: `status:awaiting_response` matched no column id, so the rows the
- * server had correctly returned were dropped on the floor. Filtering the board
- * by that status made it total — every card in the one visible column was
- * custom, so the column rendered empty next to a non-zero header count.
- *
- * The unresolved-custom-key fallback lands in `unstarted` rather than nowhere: a
- * card in a possibly-wrong column is recoverable, a card in no column is
- * invisible. In practice it is unreachable — the server sends a category on
- * every issue payload, and every built-in key has a fixed category.
- */
+/** Lifecycle fallback for legacy category queries and presentation tokens.
+ * Do not use this as the key of a user-facing status column. */
 export function issueColumnCategory(
   issue: Pick<Issue, "status" | "status_category">,
 ): IssueStatusCategory {
@@ -128,7 +99,7 @@ export function normalizeStatusPatch(patch: Partial<Issue>): Partial<Issue> {
  *                filter cannot be honoured without it.
  */
 export type StatusFilterColumnsResult =
-  | { state: "resolved"; columns: Set<IssueStatusCategory> }
+  | { state: "resolved"; columns: Set<IssueStatus> }
   | { state: "pending" }
   | { state: "error" };
 
@@ -136,10 +107,10 @@ export function statusFilterColumns(
   statusFilters: readonly string[],
   catalog: Pick<IssueStatusCatalog, "entryOf" | "isLoaded" | "isPending" | "isError">,
 ): StatusFilterColumnsResult {
-  const columns = new Set<IssueStatusCategory>();
+  const columns = new Set<IssueStatus>();
   for (const key of statusFilters) {
     if (isBuiltInIssueStatus(key)) {
-      columns.add(BUILT_IN_STATUS_CATEGORY[key]);
+      columns.add(key);
       continue;
     }
     // A custom key. Without an authoritative catalog there is no honest answer.
@@ -150,29 +121,35 @@ export function statusFilterColumns(
     // status was deleted, or belongs to another workspace. Contributing no
     // column is the resolved answer, not a pending one.
     const normalized = category ? normalizeIssueStatusCategory(category) : null;
-    if (normalized && ALL_STATUSES.includes(normalized)) columns.add(normalized);
+    if (normalized) columns.add(key);
   }
   return { state: "resolved", columns };
 }
 
-/**
- * Resolve the category columns a surface may display. An explicit status
- * filter wins over hidden-column preferences so selecting a hidden status
- * always provides a recovery path. Pending/error custom-status resolution is
- * handled by the caller's loading/error state, so it does not narrow here.
- */
-export function visibleStatusCategories(
+/** Ordered concrete columns. Archived statuses remain readable for existing work. */
+export function statusColumnKeys(
+  catalog: Pick<IssueStatusCatalog, "statuses">,
+): IssueStatus[] {
+  const entries = [...catalog.statuses].sort(compareIssueStatusEntries);
+  return ALL_STATUSES.flatMap((category) => [
+    ...BUILT_IN_STATUS_ORDER.filter((key) => BUILT_IN_STATUS_CATEGORY[key] === category),
+    ...entries.filter((entry) =>
+      !isBuiltInIssueStatus(entry.key) &&
+      normalizeIssueStatusCategory(entry.category) === category,
+    ).map((entry) => entry.key),
+  ]);
+}
+
+/** Exact-key filters override hidden-column preferences, never merge siblings. */
+export function visibleStatusKeys(
   statusFilters: readonly string[],
-  hiddenCategories: readonly IssueStatusCategory[],
-  catalog: Pick<IssueStatusCatalog, "entryOf" | "isLoaded" | "isPending" | "isError">,
-): IssueStatusCategory[] {
-  const resolved =
-    statusFilters.length > 0 ? statusFilterColumns(statusFilters, catalog) : null;
+  hiddenStatuses: readonly IssueStatus[],
+  catalog: Pick<IssueStatusCatalog, "statuses" | "entryOf" | "isLoaded" | "isPending" | "isError">,
+): IssueStatus[] {
+  const resolved = statusFilters.length > 0 ? statusFilterColumns(statusFilters, catalog) : null;
   const selected = resolved?.state === "resolved" ? resolved.columns : null;
-  return ALL_STATUSES.filter((category) =>
-    selected !== null
-      ? selected.has(category)
-      : !hiddenCategories.includes(category),
+  return statusColumnKeys(catalog).filter((key) =>
+    selected !== null ? selected.has(key) : !hiddenStatuses.includes(key),
   );
 }
 

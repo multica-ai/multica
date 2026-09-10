@@ -4,10 +4,9 @@ import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { IssueStatus, IssueStatusCategory, IssuePriority, PropertyFilterValue } from "../../types";
+import type { IssueStatus, IssuePriority, PropertyFilterValue } from "../../types";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
-import { STATUS_ORDER } from "../config/status";
 
 export type ViewMode = "board" | "list" | "table" | "gantt" | "swimlane";
 export type GanttZoom = "day" | "week" | "month";
@@ -190,8 +189,8 @@ export const DEFAULT_CARD_PROPERTIES: Readonly<CardProperties> = {
   labels: false,
 };
 
-export const DEFAULT_HIDDEN_STATUS_CATEGORIES: readonly IssueStatusCategory[] = [
-  "closed",
+export const DEFAULT_HIDDEN_STATUSES: readonly IssueStatus[] = [
+  "cancelled",
 ];
 
 export function defaultSortDirection(field: SortField): SortDirection {
@@ -272,9 +271,9 @@ export interface IssueViewState {
   // board / list / swimlane so users can focus on top-level parent issues.
   // Purely a display filter — it never touches the parent/child relationship.
   showSubIssues: boolean;
-  listCollapsedStatuses: IssueStatusCategory[];
+  listCollapsedStatuses: IssueStatus[];
   /**
-   * Board / list columns the user hid, as CATEGORIES.
+   * Board / list columns the user hid, as concrete status keys.
    *
    * Column visibility used to be expressed by writing the surviving statuses
    * into `statusFilters`, which stopped being correct once a category can hold
@@ -283,7 +282,7 @@ export interface IssueViewState {
    * exact-key filter are different questions and now have different fields.
    * (MUL-6243)
    */
-  hiddenStatusCategories: IssueStatusCategory[];
+  hiddenStatuses: IssueStatus[];
   ganttZoom: GanttZoom;
   ganttShowCompleted: boolean;
   /** Active swimlane grouping dimension. */
@@ -320,8 +319,8 @@ export interface IssueViewState {
   setPropertyFilterValues: (propertyId: string, optionIds: PropertyFilterValue[]) => void;
   setDateFilter: (filter: IssueDateFilter | null) => void;
   toggleAgentRunningFilter: () => void;
-  hideStatus: (category: IssueStatusCategory) => void;
-  showStatus: (category: IssueStatusCategory) => void;
+  hideStatus: (status: IssueStatus) => void;
+  showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
   /** Clear one filter dimension (a filter-bar chip). `property:<id>` clears
    *  that definition's entry only. Paired boolean flags (no-assignee /
@@ -335,7 +334,7 @@ export interface IssueViewState {
   toggleCardProperty: (key: keyof CardProperties) => void;
   toggleCardPropertyId: (propertyId: string) => void;
   toggleShowSubIssues: () => void;
-  toggleListCollapsed: (category: IssueStatusCategory) => void;
+  toggleListCollapsed: (status: IssueStatus) => void;
   setSwimlaneGrouping: (grouping: SwimlaneGrouping) => void;
   /** Update the lane order for the currently active swimlane grouping. */
   setSwimlaneOrder: (order: string[]) => void;
@@ -372,7 +371,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   cardPropertyIds: [],
   showSubIssues: true,
   listCollapsedStatuses: [],
-  hiddenStatusCategories: [...DEFAULT_HIDDEN_STATUS_CATEGORIES],
+  hiddenStatuses: [...DEFAULT_HIDDEN_STATUSES],
   ganttZoom: "week",
   ganttShowCompleted: false,
   swimlaneGrouping: "assignee",
@@ -481,15 +480,15 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   setDateFilter: (filter) => set({ dateFilter: filter }),
   toggleAgentRunningFilter: () =>
     set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
-  hideStatus: (category) =>
+  hideStatus: (status) =>
     set((state) =>
-      state.hiddenStatusCategories.includes(category)
+      state.hiddenStatuses.includes(status)
         ? state
-        : { hiddenStatusCategories: [...state.hiddenStatusCategories, category] },
+        : { hiddenStatuses: [...state.hiddenStatuses, status] },
     ),
-  showStatus: (category) =>
+  showStatus: (status) =>
     set((state) => ({
-      hiddenStatusCategories: state.hiddenStatusCategories.filter((c) => c !== category),
+      hiddenStatuses: state.hiddenStatuses.filter((key) => key !== status),
     })),
   clearFilters: () =>
     set({
@@ -663,7 +662,7 @@ export const viewStorePersistOptions = (name: string) => ({
     cardPropertyIds: state.cardPropertyIds,
     showSubIssues: state.showSubIssues,
     listCollapsedStatuses: state.listCollapsedStatuses,
-    hiddenStatusCategories: state.hiddenStatusCategories,
+    hiddenStatuses: state.hiddenStatuses,
     ganttZoom: state.ganttZoom,
     ganttShowCompleted: state.ganttShowCompleted,
     swimlaneGrouping: state.swimlaneGrouping,
@@ -694,21 +693,20 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   current: T,
 ): T {
   const p = (persisted ?? {}) as Partial<T>;
-  // Keep visibility conservative when old columns combine: hiding Backlog
-  // alone must not hide formerly-visible Todo work after the upgrade.
-  const categoriesFromStorage = (value: unknown, fallback: IssueStatusCategory[]) => {
+  // Read the old category-named field once; new snapshots persist exact keys.
+  const legacy = persisted as { hiddenStatusCategories?: unknown } | null;
+  const statusesFromStorage = (value: unknown, fallback: IssueStatus[], legacyCategories = false) => {
     if (!Array.isArray(value)) return fallback;
-    const oldGroups: Record<IssueStatusCategory, string[]> = {
+    const aliases: Record<string, string[]> = {
       unstarted: ["backlog", "todo"],
       started: ["in_progress", "in_review", "blocked"],
-      done: ["completed"],
+      completed: ["done"],
       closed: ["cancelled"],
+      canceled: ["cancelled"],
     };
-    return STATUS_ORDER.filter((category) =>
-      value.includes(category) ||
-      (category === "closed" && value.includes("canceled")) ||
-      oldGroups[category].every((key) => value.includes(key)),
-    );
+    return [...new Set(value.flatMap((key) =>
+      typeof key === "string" ? (legacyCategories ? aliases[key] ?? [key] : [key]) : [],
+    ))];
   };
   // `collapsedSwimlanes` changed shape from `string[]` to
   // `Record<SwimlaneGrouping, string[]>`. A snapshot saved in the old
@@ -742,8 +740,8 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   const merged = {
     ...current,
     ...p,
-    hiddenStatusCategories: categoriesFromStorage(p.hiddenStatusCategories, current.hiddenStatusCategories),
-    listCollapsedStatuses: categoriesFromStorage(p.listCollapsedStatuses, current.listCollapsedStatuses),
+    hiddenStatuses: statusesFromStorage(p.hiddenStatuses ?? legacy?.hiddenStatusCategories, current.hiddenStatuses, p.hiddenStatuses === undefined),
+    listCollapsedStatuses: statusesFromStorage(p.listCollapsedStatuses, current.listCollapsedStatuses, p.hiddenStatuses === undefined),
     cardProperties: {
       ...current.cardProperties,
       ...(p.cardProperties ?? {}),

@@ -95,13 +95,7 @@ describe("insertIdByPosition", () => {
   });
 });
 
-/**
- * Status columns are CATEGORIES while `issue.status` is a concrete KEY. Every
- * assertion here is a card on a custom status: bucketing it by the raw key
- * produced a column id no column has, so the card was dropped from the board
- * and the list — filtering by that status left a visibly empty column next to
- * a non-zero header count (MUL-6409).
- */
+/** Same-category statuses still have independent column identities. */
 describe("status grouping with custom statuses", () => {
   const custom = {
     ...mk("custom", 1),
@@ -110,14 +104,15 @@ describe("status grouping with custom statuses", () => {
   } as Issue;
   const builtIn = { ...mk("built-in", 2), status: "in_review" } as Issue;
   const inReviewColumn: BoardColumnGroup = {
-    id: "status:started",
-    title: "Started",
-    status: "started",
+    id: "status:in_review",
+    title: "In Review",
+    status: "in_review",
   };
+  const customColumn: BoardColumnGroup = { id: "status:awaiting_response", title: "Awaiting Response", status: "awaiting_response" };
   const todoColumn: BoardColumnGroup = {
-    id: "status:unstarted",
-    title: "Unstarted",
-    status: "unstarted",
+    id: "status:todo",
+    title: "Todo",
+    status: "todo",
   };
   const doneColumn: BoardColumnGroup = {
     id: "status:done",
@@ -125,25 +120,27 @@ describe("status grouping with custom statuses", () => {
     status: "done",
   };
 
-  it("buckets a custom status into its category's column", () => {
-    expect(getIssueGroupId(custom, "status")).toBe("status:started");
-    expect(getIssueGroupId(builtIn, "status")).toBe("status:started");
+  it("buckets custom and built-in statuses independently", () => {
+    expect(getIssueGroupId(custom, "status")).toBe("status:awaiting_response");
+    expect(getIssueGroupId(builtIn, "status")).toBe("status:in_review");
   });
 
   it("renders the card in that column instead of dropping it", () => {
-    const columns = buildColumns([custom, builtIn], [inReviewColumn], "status");
-    expect(columns["status:started"]).toEqual(["custom", "built-in"]);
+    const columns = buildColumns([custom, builtIn], [inReviewColumn, customColumn], "status");
+    expect(columns["status:in_review"]).toEqual(["built-in"]);
+    expect(columns["status:awaiting_response"]).toEqual(["custom"]);
   });
 
   it("treats the card as already in the column it is drawn in", () => {
-    expect(issueMatchesGroup(custom, inReviewColumn)).toBe(true);
+    expect(issueMatchesGroup(custom, customColumn)).toBe(true);
+    expect(issueMatchesGroup(custom, inReviewColumn)).toBe(false);
     expect(issueMatchesGroup(custom, todoColumn)).toBe(false);
   });
 
   // A status change starts an agent run, so a same-column reorder that rewrote
   // `awaiting_response` to `in_review` would be a silent, side-effecting edit.
   it("reorders within the column without rewriting the status", () => {
-    expect(getMoveUpdates(inReviewColumn, 5, custom)).toEqual({ position: 5 });
+    expect(getMoveUpdates(customColumn, 5, custom)).toEqual({ position: 5 });
   });
 
   it("still sets the status when the card moves to another column", () => {
@@ -151,7 +148,7 @@ describe("status grouping with custom statuses", () => {
   });
 
   it("sets the status when the caller has no issue to compare", () => {
-    expect(getMoveUpdates(inReviewColumn, 5)).toEqual({ status: "in_progress", position: 5 });
+    expect(getMoveUpdates(inReviewColumn, 5)).toEqual({ status: "in_review", position: 5 });
   });
 
   // A built-in card in its own column keeps carrying the (unchanged) key, so a

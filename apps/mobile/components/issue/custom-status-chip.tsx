@@ -1,16 +1,6 @@
 /**
- * Names an issue's status when the surface around it only shows the CATEGORY
- * (MUL-6243).
- *
- * List sections are categories, so two issues sitting in the same "Started"
- * section can be on different statuses — "Code Review" and "QA" — with nothing
- * on the row to tell them apart. This chip is that missing signal, mirroring
- * web's `packages/views/issues/components/custom-status-chip.tsx`.
- *
- * It renders NOTHING for a status that already is its category's built-in: the
- * section header already names the lifecycle phase and repeating a built-in
- * status is pure noise. So a
- * workspace that never defined a custom status sees no visual change at all.
+ * Names a custom status on a compact issue row, including ungrouped lists.
+ * Built-ins stay silent to keep the default row compact.
  *
  * Divergence from web: the catalog arrives as a PROP rather than from a hook
  * inside. Every mobile caller is a virtualized list row that already resolved
