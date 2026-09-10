@@ -48,7 +48,11 @@ describe("cancellationActorLabel", () => {
     expect(cancellationActorLabel({
       status: "cancelled",
       cancelled_by: { type: "system" },
-    }, fixedT("zh-Hans"))).toBe("取消者：系统");
+    }, fixedT("zh-Hans"))).toBe("已由系统取消");
+    expect(cancellationActorLabel({
+      status: "cancelled",
+      cancelled_by: { type: "member", name: "Jiayuan" },
+    }, fixedT("zh-Hans"))).toBe("已由 Jiayuan 取消");
     expect(cancellationActorLabel({ status: "cancelled" }, enT)).toBeNull();
   });
 
@@ -98,7 +102,7 @@ describe("cancelReasonLabel", () => {
   it("localizes a generic system cancellation in every supported locale", () => {
     const expected: Record<SupportedLocale, string> = {
       en: "Cancelled by the system",
-      "zh-Hans": "系统已取消",
+      "zh-Hans": "已由系统取消",
       ja: "システムによってキャンセルされました",
       ko: "시스템에서 취소함",
     };
@@ -117,14 +121,17 @@ describe("cancelReasonLabel", () => {
     }
   });
 
-  it("does not repeat a generic system reason when actor provenance already says system", () => {
-    expect(cancelReasonLabel({
-      status: "cancelled",
-      error: "automatic cancellation",
-      failure_reason: null,
-      cancelled_by: { type: "system" },
-    }, enT)).toBeNull();
-  });
+  it.each(["system", "member", "agent"])(
+    "does not add a generic system reason when %s actor provenance exists",
+    (type) => {
+      expect(cancelReasonLabel({
+        status: "cancelled",
+        error: "automatic cancellation",
+        failure_reason: null,
+        cancelled_by: { type },
+      }, enT)).toBeNull();
+    },
+  );
 });
 
 describe("failureReasonLabel", () => {

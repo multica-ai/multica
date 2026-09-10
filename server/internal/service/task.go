@@ -2854,7 +2854,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 			task, err = qtx.CancelQueuedAgentTask(ctx, db.CancelQueuedAgentTaskParams{
 				ID:              taskID,
 				ChatSessionID:   opts.ExpectedChatSession,
-				CancelledByType: pgtype.Text{String: opts.CancelledBy.Type, Valid: true},
+				CancelledByType: pgtype.Text{String: opts.CancelledBy.Type, Valid: opts.CancelledBy.Type != ""},
 				CancelledByID:   opts.CancelledBy.ID,
 				CancelledByName: pgtype.Text{String: opts.CancelledBy.Name, Valid: opts.CancelledBy.Name != ""},
 			})

@@ -94,7 +94,7 @@ export function cancelReasonLabel(
   if (task.status !== "cancelled") return null;
   const reason = failureReasonLabel(task.failure_reason, t);
   if (reason) return reason;
-  return task.error && task.cancelled_by?.type !== "system"
+  return task.error && !task.cancelled_by
     ? t(($) => $.task_failure.cancelled_by_system)
     : null;
 }
@@ -114,9 +114,10 @@ export function cancellationActorLabel(
   if (task.status !== "cancelled" || !task.cancelled_by) return null;
   const { type } = task.cancelled_by;
   if (type !== "member" && type !== "agent" && type !== "system") return null;
-  const name = type === "system"
-    ? t(($) => $.task_failure.system_actor)
-    : task.cancelled_by.name?.trim();
+  if (type === "system") {
+    return t(($) => $.task_failure.cancelled_by_system);
+  }
+  const name = task.cancelled_by.name?.trim();
   return name
     ? t(($) => $.task_failure.cancelled_by_actor, { name })
     : null;

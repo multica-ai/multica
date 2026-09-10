@@ -908,9 +908,8 @@
     "tool_kind_misc": "其他"
   },
   "task_failure": {
-    "cancelled_by_system": "系统已取消",
-    "cancelled_by_actor": "取消者：{{name}}",
-    "system_actor": "系统",
+    "cancelled_by_system": "已由系统取消",
+    "cancelled_by_actor": "已由 {{name}} 取消",
     "reasons": {
       "queued_expired": "排队已过期",
       "runtime_offline": "守护进程离线",
