@@ -55,7 +55,7 @@ Multica 当前会检测以下命令：
 
 使用 MiniMax Code 时，请安装受支持的 Node.js 版本（`>=22.19 <23` 或 `>=24 <27`），并运行 `npm install --global @minimax-ai/code@latest`。全局 npm 安装会把 `mcode` 放入 npm 的全局可执行目录；如果 `command -v mcode` 或 `Get-Command mcode` 找不到它，请将该目录加入 `PATH`。然后运行 `mcode login`。模型由 MiniMax Code 管理，Multica 无法通过 ACP 覆盖它。
 
-使用 DeepSeek Harness 时，请先安装 Node.js 20+ 并运行 `npm install -g @deepseek-ai/dsh`，然后为它安装 Multica 运行时 profile（`dsh plugin --profile multica add <bundle>`）。守护进程只有在 `dsh --profile multica --probe` 成功后才注册 DeepSeek Harness。启动守护进程前请设置 `DEEPSEEK_API_KEY`（或在 dsh 自身设置中保存）。
+使用 DeepSeek Harness 时，请先安装 Node.js 20+ 并运行 `npm install -g @deepseek-ai/dsh`，然后为它安装 Multica 运行时 profile —— 这个 bundle 实现了 Multica 驱动的 `--stdio` 协议，也是单独的 `dsh` 无法直接使用的原因。把 `MULTICA_DSH_PROFILE_BUNDLE` 设为要安装的 bundle，守护进程会替你安装；也可以自己执行 `dsh plugin --profile multica add <bundle>`，其中 `<bundle>` 是实现该协议的包（Multica 的桥接实现在 [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime)）。守护进程只有在 `dsh --profile multica --probe` 成功后才注册 DeepSeek Harness；失败时会在 `/health` 报告缺少 profile。启动守护进程前请设置 `DEEPSEEK_API_KEY`（或在 dsh 自身设置中保存）。
 
 这些登录凭据由工具保存在本机。Multica 不会接收 Claude、Codex、Cursor 或其他 CLI 的登录 token。
 

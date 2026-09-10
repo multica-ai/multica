@@ -55,7 +55,7 @@ QwenPaw를 사용할 때는 QwenPaw 자체 설정에서 공급자와 모델을 �
 
 MiniMax Code를 사용하려면 지원되는 Node.js 버전(`>=22.19 <23` 또는 `>=24 <27`)을 설치한 뒤 `npm install --global @minimax-ai/code@latest`를 실행하세요. npm 전역 설치는 `mcode`를 npm의 전역 실행 파일 디렉터리에 추가합니다. `command -v mcode` 또는 `Get-Command mcode`에서 찾지 못하면 해당 디렉터리를 `PATH`에 추가하세요. 그다음 `mcode login`을 실행합니다. 모델은 MiniMax Code가 관리하며 Multica는 ACP를 통해 이를 덮어쓸 수 없습니다.
 
-DeepSeek Harness를 사용하려면 Node.js 20+를 설치하고 `npm install -g @deepseek-ai/dsh`를 실행한 뒤 Multica 런타임 프로필을 추가하세요(`dsh plugin --profile multica add <bundle>`). 데몬은 `dsh --profile multica --probe`가 성공한 경우에만 DeepSeek Harness를 등록합니다. 데몬을 시작하기 전에 `DEEPSEEK_API_KEY`를 설정(또는 dsh 자체 설정에 저장)하세요.
+DeepSeek Harness를 사용하려면 Node.js 20+를 설치하고 `npm install -g @deepseek-ai/dsh`를 실행한 뒤 Multica 런타임 프로필을 추가하세요. 이 번들이 Multica가 사용하는 `--stdio` 프로토콜을 제공하며, `dsh`만으로는 사용할 수 없는 이유이기도 합니다. `MULTICA_DSH_PROFILE_BUNDLE`에 설치할 번들을 설정하면 데몬이 대신 추가합니다. 직접 하려면 `dsh plugin --profile multica add <bundle>`을 실행하세요(`<bundle>`은 이 프로토콜을 구현한 패키지이며, Multica의 브리지는 [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime)에 있습니다). 데몬은 `dsh --profile multica --probe`가 성공한 경우에만 DeepSeek Harness를 등록하고, 실패하면 `/health`에 프로필 누락을 보고합니다. 데몬을 시작하기 전에 `DEEPSEEK_API_KEY`를 설정(또는 dsh 자체 설정에 저장)하세요.
 
 로그인 자격 증명은 도구가 로컬에 저장합니다. Multica는 Claude, Codex, Cursor 또는 다른 CLI의 로그인 token을 받지 않습니다.
 
