@@ -36,7 +36,7 @@ GitHub 集成只读取安装时授权的仓库，不会提交代码、评论或 
 | GitHub 集成 | 总开关。关闭后，下面三项不再生效，但不会断开 GitHub App。 |
 | PR 侧栏 | 在任务详情中显示关联的 pull request。 |
 | Co-authored-by | 在智能体创建的 commit 中加入 `Co-authored-by: multica-agent <github@multica.ai>`。 |
-| 自动关联 PR | 从 PR 的分支名、标题和正文中识别任务编号。 |
+| 自动关联 PR | 从 PR 的分支名和标题中识别任务编号；正文中只识别紧跟关闭语句的编号。 |
 | **PR 卡片 → CI 与可合并性** | 对每个关联的 PR，Multica 从 GitHub API 拉取一份经鉴权的快照，把它的 **CI 状态**和**可合并性**镜像到卡片上（见下方 **PR 卡片展示什么**）。 |
 
 
@@ -63,7 +63,7 @@ Fixes MUL-123
 Resolves MUL-123
 ```
 
-正文中的普通提及，例如 `Related to MUL-123`，不会作为该任务的工作 PR 显示。Commit message 和 PR 评论也不会触发关联。
+正文中的普通提及，例如 `Related to MUL-123`，根本不会与该任务建立关联。Commit message 和 PR 评论也不会触发关联。
 
 ## 在任务中查看 PR
 
@@ -84,7 +84,7 @@ CI 状态和可合并性来自 Multica 从 GitHub API 拉取的快照，两者�
 PR 合并不一定代表任务已完成。Multica 只有在以下条件同时成立时，才把任务改为 `Done`：
 
 1. 至少一个已合并的关联 PR 使用了紧跟编号的关闭语句，例如 `Closes MUL-123`（`Closes login MUL-123` 这类中间隔词的写法不生效）；
-2. 该任务没有其他仍为 `Open` 或 `Draft` 的工作 PR（正文中的普通提及不算）；
+2. 该任务没有其他仍为 `Open` 或 `Draft` 的关联 PR；
 3. 任务当前不是 `done` 或 `cancelled`。
 
 因此，仅在分支名或标题中写 `MUL-123` 会建立关联，但不会单独触发完成。PR 关闭但没有合并，也不会完成任务。
@@ -176,7 +176,7 @@ make migrate-up
 - **连接按钮不可用**：检查 `GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 是否已进入 API 进程。
 - **Webhook 返回 401**：确认 GitHub App 与 API 使用同一个 Webhook secret，然后在 GitHub 的 **Recent Deliveries** 中重新投递。
 - **PR 没有关联**：检查仓库是否在 App 授权范围内、自动关联是否开启，以及编号是否属于当前工作区。
-- **正文写了编号但没显示**：改用 `Closes MUL-123`，或把编号放到分支名、PR 标题中。
+- **正文写了编号但没关联**：改用 `Closes MUL-123`，或把编号放到分支名、PR 标题中。
 - **没有 CI 状态**：确认 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY` 已配置，App 具有 Contents、Checks 与 Commit statuses 的只读权限并订阅了对应事件。缺少 Contents 会让整个快照失败，PR 卡片既没有 CI 也没有合并状态。给已安装的 App 补加权限后，还需要各 installation 的所有者在 GitHub 上批准才会生效。
 - **PR 合并后任务没完成**：确认 PR 使用了关闭语句，并检查是否还有其他关联 PR 处于 Open 或 Draft。
 

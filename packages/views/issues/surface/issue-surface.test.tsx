@@ -566,7 +566,7 @@ describe("IssueSurface — table pagination ownership", () => {
       "pt-sort-transition",
     );
     const listIssueTableRows = vi.fn((request: IssueTableRowsRequest) =>
-      request.query.sort.field === "position"
+      request.query.sort.field === "created_at"
         ? Promise.resolve({
             query_fingerprint: "sha256:initial-sort",
             group_key: null,

@@ -311,7 +311,7 @@ function BulkImportSummary({ results }: { results: BulkImportResult[] }) {
         {results.map((r) => (
           <div
             key={r.key}
-            className="flex items-center gap-2 rounded px-2 py-1.5 text-caption"
+            className="flex items-center gap-2 rounded-xs px-2 py-1.5 text-caption"
           >
             <ResultIcon status={r.status} />
             <span className="min-w-0 flex-1 truncate">{r.name}</span>
@@ -953,7 +953,7 @@ export function RuntimeLocalSkillImportPanel({
             {bulkState.results.map((r) => (
               <div
                 key={r.key}
-                className="flex items-center gap-2 rounded px-2 py-1 text-caption"
+                className="flex items-center gap-2 rounded-xs px-2 py-1 text-caption"
               >
                 <ResultIcon status={r.status} />
                 <span className="truncate">{r.name}</span>

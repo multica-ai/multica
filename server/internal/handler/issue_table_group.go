@@ -72,7 +72,7 @@ type resolvedIssueTableGroup struct {
 	// secondaryCategory marks a compound whose secondary axis is the CATEGORY
 	// of the status rather than the status key itself — the swimlane contract.
 	secondaryCategory bool
-	// categoryKeys maps each of the 5 categories to the concrete status keys
+	// categoryKeys maps each of the 4 categories to the concrete status keys
 	// that belong to it, resolved ONCE per request. Category predicates expand
 	// through this into `i.status = ANY(...)` so the (workspace_id, status)
 	// index stays usable — see issuestatus.ExpandCategories. (MUL-6243)
@@ -84,8 +84,12 @@ type resolvedIssueTableGroup struct {
 
 // statusCategoryExpr builds the scalar `status key -> category` rewrite used as
 // a GROUP BY expression. Built-ins and custom keys are both translated to one
-// of the five public lifecycle categories. (MUL-6243)
+// of the four lifecycle categories. (MUL-6243)
 func statusCategoryExpr(customKeys map[string]string, addArg func(any) string) string {
+	return statusValueCategoryExpr("i.status", customKeys, addArg)
+}
+
+func statusValueCategoryExpr(valueExpr string, customKeys map[string]string, addArg func(any) string) string {
 	allKeys := make(map[string]string, len(customKeys)+len(validIssueStatuses))
 	for _, key := range validIssueStatuses {
 		if category, ok := issuestatus.CategoryForBehavior(key); ok {
@@ -101,12 +105,16 @@ func statusCategoryExpr(customKeys map[string]string, addArg func(any) string) s
 	}
 	sort.Strings(keys)
 	var b strings.Builder
-	b.WriteString("CASE i.status")
+	b.WriteString("CASE " + valueExpr)
 	for _, key := range keys {
 		fmt.Fprintf(&b, " WHEN %s::text THEN %s::text", addArg(key), addArg(allKeys[key]))
 	}
-	b.WriteString(" ELSE i.status END")
+	b.WriteString(" ELSE " + valueExpr + " END")
 	return b.String()
+}
+
+func statusOrderExpression(categoryExpr string) string {
+	return "CASE " + categoryExpr + " WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END"
 }
 
 // resolveStatusCategoryMaps derives BOTH shapes a category grouping needs from
@@ -114,9 +122,9 @@ func statusCategoryExpr(customKeys map[string]string, addArg func(any) string) s
 // and the category -> concrete keys expansion that predicate() looks up (it has
 // no context or Querier of its own).
 //
-// One read, not three. A board loads five column branches as five separate
+// One read, not three. A board can load four column branches as separate
 // HTTP requests, so a per-call `ExpandCategories` + `CustomKeyCategories` pair
-// meant 21 extra catalog SELECTs behind one surface load.
+// would multiply catalog SELECTs behind one surface load.
 func (h *Handler) resolveStatusCategoryMaps(
 	ctx context.Context,
 	workspaceID pgtype.UUID,
@@ -172,10 +180,24 @@ func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request,
 		}
 		return resolvedIssueTableGroup{kind: "none"}, true
 	case "status":
-		return resolvedIssueTableGroup{kind: "status", groupExpr: "i.status"}, true
+		customKeys, err := issuestatus.CustomKeyCategories(
+			r.Context(),
+			h.issueStatusCatalog(),
+			workspaceID,
+		)
+		if err != nil {
+			slog.Warn("resolve status group order failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to resolve table group")
+			return resolvedIssueTableGroup{}, false
+		}
+		return resolvedIssueTableGroup{
+			kind:             "status",
+			groupExpr:        "i.status",
+			statusCustomKeys: customKeys,
+		}, true
 	case "status_category":
 		// Board / list / swimlane columns are CATEGORIES, so a custom status
-		// groups into one of five lifecycle columns instead of getting a column
+		// groups into one of four lifecycle columns instead of getting a column
 		// of its own. (MUL-6243)
 		customKeys, categoryKeys, err := h.resolveStatusCategoryMaps(r.Context(), workspaceID)
 		if err != nil {
@@ -230,20 +252,32 @@ END, ''))`,
 			return resolvedIssueTableGroup{}, false
 		}
 		seenSecondaryValues := make(map[string]struct{}, len(group.SecondaryValues))
+		seenInputs := make(map[string]bool, len(group.SecondaryValues))
+		normalizedSecondaryValues := make([]string, 0, len(group.SecondaryValues))
 		validSecondary := validIssueStatuses
 		if secondaryCategory {
 			validSecondary = validIssueStatusCategories
 		}
 		for _, value := range group.SecondaryValues {
+			if seenInputs[value] {
+				writeError(w, http.StatusBadRequest, "duplicate group.secondary_values")
+				return resolvedIssueTableGroup{}, false
+			}
+			seenInputs[value] = true
+			if secondaryCategory {
+				if normalized, ok := issuestatus.ParseCategory(value); ok {
+					value = normalized
+				}
+			}
 			if !issueTableContainsString(validSecondary, value) {
 				writeError(w, http.StatusBadRequest, "invalid group.secondary_values")
 				return resolvedIssueTableGroup{}, false
 			}
 			if _, exists := seenSecondaryValues[value]; exists {
-				writeError(w, http.StatusBadRequest, "duplicate group.secondary_values")
-				return resolvedIssueTableGroup{}, false
+				continue // Distinct legacy categories can now share one lifecycle.
 			}
 			seenSecondaryValues[value] = struct{}{}
+			normalizedSecondaryValues = append(normalizedSecondaryValues, value)
 		}
 		primary, ok := h.resolveIssueTableGroup(w, r, workspaceID, issueTableGroupSpec{Kind: group.Primary}, false)
 		if !ok {
@@ -252,7 +286,7 @@ END, ''))`,
 		resolved := resolvedIssueTableGroup{
 			kind:              "compound",
 			primary:           &primary,
-			secondaryValues:   append([]string(nil), group.SecondaryValues...),
+			secondaryValues:   normalizedSecondaryValues,
 			secondaryFiltered: group.SecondaryValues != nil,
 			secondaryCategory: secondaryCategory,
 		}
@@ -370,9 +404,12 @@ func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) st
 	}
 	switch group.kind {
 	case "status":
-		return "CASE group_value WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+		// Preserve fixed-key ordering within lifecycle groups. Custom keys sort
+		// beside their lifecycle's ordinary built-in without inheriting behavior.
+		categoryExpr := statusValueCategoryExpr("group_value", group.statusCustomKeys, addArg)
+		return "CASE group_value WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'blocked' THEN 4 WHEN 'done' THEN 5 WHEN 'cancelled' THEN 6 ELSE CASE " + categoryExpr + " WHEN 'unstarted' THEN 1 WHEN 'started' THEN 2 WHEN 'done' THEN 5 WHEN 'closed' THEN 6 ELSE 7 END END"
 	case "status_category":
-		return "CASE group_value WHEN 'backlog' THEN 0 WHEN 'unstarted' THEN 1 WHEN 'started' THEN 2 WHEN 'completed' THEN 3 WHEN 'canceled' THEN 4 ELSE 5 END"
+		return statusOrderExpression("group_value")
 	case "assignee":
 		return "CASE split_part(group_value, ':', 1) WHEN 'member' THEN 0 WHEN 'agent' THEN 1 WHEN 'squad' THEN 2 ELSE 3 END"
 	case "project":
@@ -422,10 +459,7 @@ func parseStatusCategoryGroupKey(key string) (string, bool) {
 		return "", false
 	}
 	category := strings.TrimPrefix(key, statusCategoryGroupKeyPrefix)
-	if !issueTableContainsString(validIssueStatusCategories, category) {
-		return "", false
-	}
-	return category, true
+	return issuestatus.ParseCategory(category)
 }
 
 // categoryKeysFor returns the concrete status keys in a category. Its fallback
@@ -589,6 +623,9 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 		validSecondary := validIssueStatuses
 		if group.secondaryCategory {
 			validSecondary = validIssueStatusCategories
+			if normalized, valid := issuestatus.ParseCategory(status); valid {
+				status = normalized
+			}
 		}
 		if !ok || !issueTableContainsString(validSecondary, status) {
 			writeError(w, http.StatusBadRequest, "invalid group_key")

@@ -794,6 +794,7 @@
     "kind_error": "오류",
     "group_calls_other": "호출 {{count}}회",
     "step_running": "진행 중",
+    "step_duration_unknown": "정확한 소요 시간을 확인할 수 없습니다.",
     "step_input": "입력",
     "step_result": "결과",
     "copy_step": "이 단계 복사",
@@ -810,6 +811,7 @@
   },
   "task_failure": {
     "cancelled_by_system": "시스템에서 취소함",
+    "cancelled_by_actor": "{{name}}이(가) 취소함",
     "reasons": {
       "queued_expired": "대기열에서 만료됨",
       "runtime_offline": "데몬 오프라인",

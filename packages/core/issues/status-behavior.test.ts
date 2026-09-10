@@ -8,6 +8,7 @@ import {
   issueColumnCategory,
   statusCategoryOfKey,
   statusFilterColumns,
+  visibleStatusCategories,
 } from "./status-category";
 
 function issue(status: string, statusCategory?: string): Pick<Issue, "status" | "status_category"> {
@@ -157,6 +158,31 @@ describe("statusFilterColumns", () => {
   // surface would show the built-in column and silently omit the custom one.
   it("reports pending when any custom key in the filter is unresolved", () => {
     expect(statusFilterColumns(["todo", "qa"], pending)).toEqual({ state: "pending" });
+  });
+});
+
+describe("visibleStatusCategories", () => {
+  const loaded = buildIssueStatusCatalog([
+    entry("in_review", "in_review", true),
+    entry("qa", "in_review"),
+  ]);
+
+  it("uses hidden preferences when there is no explicit status filter", () => {
+    expect(visibleStatusCategories([], ["closed"], loaded)).not.toContain(
+      "closed",
+    );
+  });
+
+  it("lets an explicit filter restore a hidden category", () => {
+    expect(visibleStatusCategories(["cancelled"], ["closed"], loaded)).toEqual([
+      "closed",
+    ]);
+  });
+
+  it("maps a custom filter to its category", () => {
+    expect(visibleStatusCategories(["qa"], ["started"], loaded)).toEqual([
+      "started",
+    ]);
   });
 });
 

@@ -893,6 +893,7 @@
     "kind_error": "错误",
     "group_calls_other": "{{count}} 次调用",
     "step_running": "进行中",
+    "step_duration_unknown": "无法确定准确耗时。",
     "step_input": "输入",
     "step_result": "结果",
     "copy_step": "复制这一步",
@@ -908,7 +909,8 @@
     "tool_kind_misc": "其他"
   },
   "task_failure": {
-    "cancelled_by_system": "系统已取消",
+    "cancelled_by_system": "已由系统取消",
+    "cancelled_by_actor": "已由 {{name}} 取消",
     "reasons": {
       "queued_expired": "排队已过期",
       "runtime_offline": "守护进程离线",

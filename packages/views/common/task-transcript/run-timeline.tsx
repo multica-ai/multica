@@ -266,7 +266,7 @@ export function RunTimeline({
           disabled={!canZoomOut}
           onClick={() => setZoomAround(ZOOM_STEPS[zoomIndex - 1] ?? 1)}
           aria-label={t(($) => $.transcript.timeline_zoom_out)}
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent disabled:opacity-40"
+          className="flex h-5 w-5 items-center justify-center rounded-xs text-muted-foreground transition-colors hover:bg-accent disabled:opacity-40"
         >
           <Minus className="h-3 w-3" />
         </button>
@@ -278,7 +278,7 @@ export function RunTimeline({
           disabled={!canZoomIn}
           onClick={() => setZoomAround(ZOOM_STEPS[zoomIndex + 1] ?? zoom)}
           aria-label={t(($) => $.transcript.timeline_zoom_in)}
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent disabled:opacity-40"
+          className="flex h-5 w-5 items-center justify-center rounded-xs text-muted-foreground transition-colors hover:bg-accent disabled:opacity-40"
         >
           <Plus className="h-3 w-3" />
         </button>

@@ -94,7 +94,7 @@ func TestEnsureIsIdempotent(t *testing.T) {
 }
 
 // TestCatalogOrderMatchesLifecycleGroups pins the concrete status order within
-// the five public groups.
+// the four lifecycle groups.
 func TestCatalogOrderMatchesLifecycleGroups(t *testing.T) {
 	seedTestCatalog(t)
 	entries, err := testHandler.Queries.ListIssueStatusEntries(context.Background(), db.ListIssueStatusEntriesParams{

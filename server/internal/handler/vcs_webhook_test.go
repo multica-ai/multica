@@ -146,10 +146,10 @@ func TestVCSWebhook_ForgejoMirrorsAndCloses(t *testing.T) {
 }
 
 // A bare body mention ("Related MUL-X", no closing keyword, not in title or
-// branch) must link reference_only: excluded from the issue PR list and from
-// the close gate, so it neither shows as a working PR nor blocks a genuine
-// Closes sibling from advancing the issue. Mirrors the GitHub qualifying rule.
-func TestVCSWebhook_ReferenceOnlyExcludedAndNonBlocking(t *testing.T) {
+// branch) claims nothing, so it must not link at all: it neither shows as a
+// working PR nor blocks a genuine Closes sibling from advancing the issue.
+// Mirrors the GitHub claim rule (MUL-3739, MUL-7072).
+func TestVCSWebhook_BareBodyMentionIsNotLinked(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
 	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
@@ -157,7 +157,7 @@ func TestVCSWebhook_ReferenceOnlyExcludedAndNonBlocking(t *testing.T) {
 	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
 
 	// PR #7: OPEN, mentions the issue only in the body with no closing keyword,
-	// generic title/branch → reference_only.
+	// generic title/branch → no claim, no link.
 	refRaw, _ := json.Marshal(map[string]any{
 		"action": "opened",
 		"pull_request": map[string]any{
@@ -178,24 +178,24 @@ func TestVCSWebhook_ReferenceOnlyExcludedAndNonBlocking(t *testing.T) {
 		t.Fatalf("ref PR: expected 202, got %d (%s)", w.Code, w.Body.String())
 	}
 
-	// The link exists but is reference_only, so it is hidden from the PR list.
-	var referenceOnly bool
+	// No link row at all, so nothing to exclude from the PR list.
+	var links int
 	if err := testPool.QueryRow(ctx,
-		`SELECT reference_only FROM issue_vcs_pull_request WHERE issue_id = $1`,
-		issue.ID).Scan(&referenceOnly); err != nil {
-		t.Fatalf("select reference_only: %v", err)
+		`SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`,
+		issue.ID).Scan(&links); err != nil {
+		t.Fatalf("count links: %v", err)
 	}
-	if !referenceOnly {
-		t.Fatalf("body-only mention should be reference_only")
+	if links != 0 {
+		t.Fatalf("body-only mention should not link, got %d rows", links)
 	}
 	if rows, err := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issue.ID)); err != nil {
 		t.Fatalf("list: %v", err)
 	} else if len(rows) != 0 {
-		t.Fatalf("reference_only PR must be excluded from the list, got %d rows", len(rows))
+		t.Fatalf("unlinked PR must not appear in the list, got %d rows", len(rows))
 	}
 
-	// PR #8: MERGED with a title reference + Closes keyword → qualifying,
-	// close_intent. The still-open reference_only PR #7 must NOT block advance.
+	// PR #8: MERGED with a title reference + Closes keyword → a real claim with
+	// close_intent. The still-open, unlinked PR #7 must NOT block advance.
 	closeRaw, _ := json.Marshal(map[string]any{
 		"action": "closed",
 		"pull_request": map[string]any{
@@ -219,7 +219,7 @@ func TestVCSWebhook_ReferenceOnlyExcludedAndNonBlocking(t *testing.T) {
 
 	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
 	if updated.Status != "done" {
-		t.Errorf("issue should advance despite the open reference_only PR, got %q", updated.Status)
+		t.Errorf("issue should advance despite the open unlinked PR, got %q", updated.Status)
 	}
 }
 
@@ -251,7 +251,7 @@ func TestCombinedCloseAggregateSpansProviders(t *testing.T) {
 	}
 	if err := testHandler.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
 		IssueID: parseUUID(issue.ID), PullRequestID: ghPR.ID, CloseIntent: false,
-		ReferenceOnly: false, LinkedByType: strToText("system"),
+		LinkedByType: strToText("system"),
 	}); err != nil {
 		t.Fatalf("LinkIssueToPullRequest: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestCombinedCloseAggregateSpansProviders(t *testing.T) {
 	}
 	if err := testHandler.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
 		IssueID: parseUUID(issue.ID), PullRequestID: vcsPR.ID, CloseIntent: true,
-		ReferenceOnly: false, LinkedByType: strToText("system"),
+		LinkedByType: strToText("system"),
 	}); err != nil {
 		t.Fatalf("LinkIssueToVCSPullRequest: %v", err)
 	}
@@ -345,9 +345,9 @@ func TestDeleteIssue_VCSLinkCleanupIsWorkspaceScoped(t *testing.T) {
 	}
 }
 
-// A redelivered older event must not rewrite the link metadata that a newer
-// event already set. The PR-upsert monotonic guard protects the PR row; this
-// covers the link (close_intent / reference_only).
+// A redelivered older event must not rewrite the link a newer event already
+// set. The PR-upsert monotonic guard protects the PR row; this covers the link
+// (close_intent, and the link's existence at all).
 func TestVCSWebhook_StaleEventDoesNotRewriteLink(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
@@ -377,20 +377,20 @@ func TestVCSWebhook_StaleEventDoesNotRewriteLink(t *testing.T) {
 		}
 	}
 
-	// Newer terminal event: merged with a qualifying Closes → close_intent, not reference_only.
+	// Newer terminal event: merged with a real claim (Closes) → close_intent.
 	fire("closed", "closed", true, "Fix "+issue.Identifier, "Closes "+issue.Identifier, "2026-05-02T00:00:00Z")
 	// Older redelivered "opened" event: bare body mention, generic title/branch.
-	// Without the guard this rewrites the link to close_intent=false, reference_only=true.
+	// Without the guard this clears close_intent and drops the link entirely.
 	fire("opened", "open", false, "WIP", "touches "+issue.Identifier, "2026-05-01T00:00:00Z")
 
-	var closeIntent, referenceOnly bool
+	var closeIntent bool
 	if err := testPool.QueryRow(ctx,
-		`SELECT close_intent, reference_only FROM issue_vcs_pull_request WHERE issue_id = $1`,
-		issue.ID).Scan(&closeIntent, &referenceOnly); err != nil {
+		`SELECT close_intent FROM issue_vcs_pull_request WHERE issue_id = $1`,
+		issue.ID).Scan(&closeIntent); err != nil {
 		t.Fatalf("select link: %v", err)
 	}
-	if !closeIntent || referenceOnly {
-		t.Errorf("stale event rewrote link: close_intent=%v reference_only=%v, want true/false", closeIntent, referenceOnly)
+	if !closeIntent {
+		t.Errorf("stale event rewrote link: close_intent=%v, want true", closeIntent)
 	}
 	// The PR row also stayed at the newer merged state.
 	rows, _ := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issue.ID))

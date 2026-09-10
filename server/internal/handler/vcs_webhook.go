@@ -188,16 +188,17 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		return
 	}
 
-	// Out-of-order guard for the link metadata. UpsertVCSPullRequest keeps the
+	// Out-of-order guard for the link write. UpsertVCSPullRequest keeps the
 	// newer persisted row on a stale redelivery, so `pr` may reflect a newer
-	// event than this `ev`. Everything the link write derives below —
-	// close_intent, reference_only, preserveCloseIntent — comes from `ev`, so
-	// rewriting the link from a stale event would corrupt what the newer event
-	// already set (e.g. a redelivered older "opened" event flipping a merged
-	// PR's link back to reference_only, blocking auto-advance). If the persisted
-	// row is strictly newer than this event, the newer event already linked and
-	// published — stop here. (An event with no usable timestamp falls back to
-	// now(), which is never strictly after the stored value, so it proceeds.)
+	// event than this `ev`. Everything the link write decides below — whether
+	// the PR still claims the issue, close_intent, preserveCloseIntent — comes
+	// from `ev`, so acting on a stale event would undo what the newer one
+	// already recorded (e.g. a redelivered older "opened" event clearing the
+	// close intent on a merged PR's link, blocking auto-advance, or dropping a
+	// link that event had just written). If the persisted row is strictly newer
+	// than this event, the newer event already linked and published — stop
+	// here. (An event with no usable timestamp falls back to now(), which is
+	// never strictly after the stored value, so it proceeds.)
 	evUpdatedAt := parseGHTimeRequired(ev.UpdatedAt)
 	if pr.PrUpdatedAt.Valid && evUpdatedAt.Valid && pr.PrUpdatedAt.Time.After(evUpdatedAt.Time) {
 		return
@@ -215,20 +216,18 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	for _, c := range extractClosingIdentifiers(ev.Title, ev.Body) {
 		closingIdents[c] = struct{}{}
 	}
-	// qualifyingIdents genuinely tie this PR to an issue: a title prefix, a
+	// claimedIdents are the identifiers this PR claims: a title prefix, a
 	// branch-name reference, or a body closing keyword. An identifier matched
-	// ONLY by a bare body mention is reference_only — it links (so the PR shows
-	// in history) but is hidden from the issue PR list and excluded from the
-	// close aggregate, so a drive-by "Related MUL-1" neither looks like a
-	// working PR nor blocks a genuine Closes sibling from advancing the issue.
-	// Mirrors the GitHub path (MUL-3739); branch is deliberately excluded from
-	// the closing-keyword scan there and here.
-	qualifyingIdents := map[string]struct{}{}
+	// ONLY by a bare body mention is a drive-by reference — it claims nothing,
+	// so it gets no link row and drops one an earlier claim created. Mirrors the
+	// GitHub path (MUL-3739, MUL-7072); branch is deliberately excluded from the
+	// closing-keyword scan there and here.
+	claimedIdents := map[string]struct{}{}
 	for _, id := range extractIdentifiers(ev.Title, ev.Branch) {
-		qualifyingIdents[id] = struct{}{}
+		claimedIdents[id] = struct{}{}
 	}
 	for c := range closingIdents {
-		qualifyingIdents[c] = struct{}{}
+		claimedIdents[c] = struct{}{}
 	}
 	// Freeze close_intent once the terminal merge/close event has arrived.
 	preserveCloseIntent := !ev.Terminal() && (ev.State == "merged" || ev.State == "closed")
@@ -239,15 +238,29 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		if !ok {
 			continue
 		}
+		if _, claimed := claimedIdents[id]; !claimed {
+			// Passing mention: never links, and drops an earlier claim's link
+			// while the PR is still editable. Frozen once terminal, like
+			// close_intent.
+			if preserveCloseIntent {
+				continue
+			}
+			if err := h.Queries.UnlinkIssueFromVCSPullRequest(ctx, db.UnlinkIssueFromVCSPullRequestParams{
+				IssueID:       issue.ID,
+				PullRequestID: pr.ID,
+			}); err != nil {
+				slog.Warn("vcs: unlink failed", "err", err)
+				continue
+			}
+			reevalIssues = append(reevalIssues, issue)
+			continue
+		}
 		_, declared := closingIdents[id]
 		closeIntent := declared && !preserveCloseIntent
-		_, qualifies := qualifyingIdents[id]
-		referenceOnly := !qualifies
 		if err := h.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
 			IssueID:             issue.ID,
 			PullRequestID:       pr.ID,
 			CloseIntent:         closeIntent,
-			ReferenceOnly:       referenceOnly,
 			PreserveCloseIntent: preserveCloseIntent,
 			LinkedByType:        strToText("system"),
 			LinkedByID:          pgtype.UUID{},

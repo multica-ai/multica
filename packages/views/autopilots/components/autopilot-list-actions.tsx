@@ -254,7 +254,7 @@ export function AutopilotBatchToolbar({
             type="button"
             aria-label={t(($) => $.actions.clear_selection)}
             onClick={onClear}
-            className="rounded p-0.5 transition-colors hover:bg-accent"
+            className="rounded-xs p-0.5 transition-colors hover:bg-accent"
           >
             <X className="size-3.5 text-muted-foreground" />
           </button>

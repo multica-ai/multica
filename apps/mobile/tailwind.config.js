@@ -7,6 +7,11 @@
  * See apps/mobile/docs/rnr-migration.md §5 for the sync rule.
  */
 const { hairlineWidth } = require("nativewind/theme");
+const radiusTokens = require("./lib/radius-tokens.json");
+
+const borderRadius = Object.fromEntries(
+  Object.entries(radiusTokens).map(([name, value]) => [name, `${value}px`]),
+);
 
 /** @type {import('tailwindcss').Config} */
 module.exports = {
@@ -68,11 +73,10 @@ module.exports = {
         "surface-1": "hsl(var(--surface-1))",
         "surface-2": "hsl(var(--surface-2))",
       },
-      borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
-      },
+      // React Native cannot consume the web package's CSS custom properties.
+      // Keep one mobile source for both NativeWind and inline RN styles; the
+      // radius guard verifies these resolved values against the web ladder.
+      borderRadius,
       borderWidth: {
         hairline: hairlineWidth(),
       },

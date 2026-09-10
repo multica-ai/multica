@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AlertCircle, Brain, ChevronRight, CirclePause, Clock3, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -15,7 +14,6 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
-import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
 import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceRow } from "../../common/task-transcript/build-steps";
@@ -24,7 +22,7 @@ import { redactSecrets } from "../../common/task-transcript/redact";
 import { ReadonlyContent } from "../../editor";
 import { useT } from "../../i18n";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
-import { cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel } from "./task-run-labels";
@@ -62,6 +60,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const { getActorName } = useActorName();
   const name = getActorName("agent", task.agent_id);
   const status = useStatusLabel(task.status);
+  const statusText = cancellationActorLabel(task, tAgents) ?? status;
   const active = isActiveCommentRun(task);
   const localViewState = useInlineCommentRunState();
   const state = viewState ?? localViewState;
@@ -108,7 +107,6 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     : task.status === "dispatched" ? t(($) => $.inline_run.starting)
     : task.status === "waiting_local_directory" ? t(($) => $.inline_run.waiting_directory)
     : activitySummary;
-  const summaryMotionKey = `${task.status}:${current?.seq ?? "empty"}`;
   const showProgress = active && !hasReply;
   const activityLabel = t(($) => $.inline_run.view_activity);
   const stepLabel = steps.length > 0 ? t(($) => $.inline_run.steps, { count: steps.length }) : "";
@@ -149,12 +147,12 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard />
           <span className="max-w-[30%] shrink-0 truncate text-body font-medium" title={name}>{name}</span>
         </>}
-        <span className={cn("flex shrink-0 items-center gap-1.5 whitespace-nowrap text-caption text-muted-foreground", showProgress && "sr-only")}
+        <span className={cn("flex min-w-0 max-w-[50%] shrink-0 items-center gap-1.5 whitespace-nowrap text-caption text-muted-foreground", showProgress && "sr-only")}
           role="status" data-run-status>
-          <TaskStatusIcon status={task.status} />{status}
+          <TaskStatusIcon status={task.status} /><span className="truncate" title={statusText}>{statusText}</span>
         </span>
         <button type="button"
-          className={cn("flex min-w-0 items-center gap-1.5 rounded py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          className={cn("flex min-w-0 items-center gap-1.5 rounded-xs py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             showProgress ? "flex-1 text-body" : "order-last ml-auto shrink-0",
             showIdentity && !showProgress && "@max-[32rem]/run:min-w-7 @max-[32rem]/run:justify-center")}
           aria-label={stepLabel ? `${activityLabel} · ${stepLabel}` : activityLabel}
@@ -162,7 +160,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           onClick={(event) => { state.disclosure.onTrigger(event); setExpanded(!expanded); }}>
           {showProgress
             ? <><RunActivityIndicator status={task.status} animate={animationVisibility.visible} />
-                <RunActivitySummary summary={summary} motionKey={summaryMotionKey} /></>
+                <RunActivitySummary summary={summary} /></>
             : <span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{activityLabel}</span>}
           {!showProgress && stepLabel && <span className="text-faint-foreground @max-[32rem]/run:hidden">· {stepLabel}</span>}
           <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
@@ -188,7 +186,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {rows.length > visibleCount && <button type="button" className="py-1 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
           {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={active} formatText={formatText} />)}
-          <button type="button" className="flex items-center gap-1.5 rounded py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          <button type="button" className="flex items-center gap-1.5 rounded-xs py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={openFullLog}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
         </div>}
       </div>
@@ -216,7 +214,7 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
     : row.kind === "thinking" ? t(($) => $.inline_run.thinking)
     : t(($) => $.inline_run.error);
   return <details className="min-w-0 text-caption" onToggle={onToggle}>
-    <summary onClick={disclosure.onTrigger} className="flex cursor-pointer list-none items-center gap-2 rounded py-1.5 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+    <summary onClick={disclosure.onTrigger} className="flex cursor-pointer list-none items-center gap-2 rounded-xs py-1.5 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
       {pending ? <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-info motion-reduce:animate-none" />
         : <Icon aria-hidden className={cn("size-3.5 shrink-0", error ? "text-destructive" : "text-muted-foreground")} />}
       <span className={cn("min-w-0 flex-1 truncate", error && "text-destructive")} title={summary}>{summary}</span>
@@ -252,21 +250,10 @@ function RunActivityIndicator({ status, animate }: { status: AgentTask["status"]
   return <Clock3 aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />;
 }
 
-function RunActivitySummary({ summary, motionKey }: { summary: string; motionKey: string }) {
-  const shouldReduceMotion = useReducedMotion() ?? false;
+function RunActivitySummary({ summary }: { summary: string }) {
+  // Update the existing text node. Replacing it for every streamed message
+  // invalidates ancestor :has() styles across the entire issue page.
   return <span data-run-summary className="grid h-[1lh] min-w-0 flex-1 overflow-hidden" title={summary}>
-    <AnimatePresence initial={false}>
-      <motion.span key={motionKey}
-        className="col-start-1 row-start-1 block min-w-0 max-w-full truncate"
-        initial={shouldReduceMotion ? false : { opacity: 0, transform: "translateY(6px)" }}
-        animate={shouldReduceMotion ? undefined : { opacity: 1, transform: "translateY(0)", transition: {
-          duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT,
-        } }}
-        exit={shouldReduceMotion ? undefined : { opacity: 0, transform: "translateY(-6px)", transition: {
-          duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN,
-        } }}>
-        {summary}
-      </motion.span>
-    </AnimatePresence>
+    <span className="col-start-1 row-start-1 block min-w-0 max-w-full truncate">{summary}</span>
   </span>;
 }

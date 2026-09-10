@@ -600,8 +600,9 @@ func codexStaticModels() []Model {
 	// multica#2009). It is deliberately NOT used to validate effort for an
 	// empty (follow-CLI-config) model: that config can resolve to any model,
 	// so ValidateThinkingLevel fails an empty codex model closed rather than
-	// borrowing this entry's catalog (which alone advertises `ultra`) — see
-	// ValidateThinkingLevel and MUL-4347. Keep exactly one entry flagged.
+	// borrowing this entry's catalog (Astra/Sol/Terra advertise `ultra`; Luna
+	// does not) — see ValidateThinkingLevel and MUL-4347. Keep exactly one
+	// entry flagged.
 	standardThinking := func(defaultLevel string, includeMax, includeUltra bool) *ModelThinking {
 		levels := []ThinkingLevel{
 			{Value: "low", Label: "Low", Description: "Fast responses with lighter reasoning"},
@@ -629,7 +630,8 @@ func codexStaticModels() []Model {
 		}
 	}
 	return []Model{
-		{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol", Provider: "openai", Default: true, Thinking: standardThinking("low", true, true)},
+		{ID: "gpt-6-astra", Label: "GPT-6 Astra", Provider: "openai", Default: true, Thinking: standardThinking("low", true, true)},
+		{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol", Provider: "openai", Thinking: standardThinking("low", true, true)},
 		{ID: "gpt-5.6-terra", Label: "GPT-5.6 Terra", Provider: "openai", Thinking: standardThinking("medium", true, true)},
 		{ID: "gpt-5.6-luna", Label: "GPT-5.6 Luna", Provider: "openai", Thinking: standardThinking("medium", true, false)},
 		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai", Thinking: standardThinking("medium", false, false)},

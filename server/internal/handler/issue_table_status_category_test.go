@@ -77,6 +77,44 @@ func statusCategoryQuery(projectID string) issueTableQuerySpec {
 	}
 }
 
+func TestIssueTableAcceptsLegacyLifecycleGroupInputs(t *testing.T) {
+	projectID, _ := seedStatusCategoryFixture(t)
+	legacyKey := "status_category:in_review"
+	w := httptest.NewRecorder()
+	testHandler.ListIssueTableRows(w, newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
+		Query: statusCategoryQuery(projectID), Group: issueTableGroupSpec{Kind: "status_category"},
+		GroupKey: &legacyKey, Page: issueTablePageRequest{Limit: 50},
+	}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("legacy rows: %d %s", w.Code, w.Body.String())
+	}
+	var rows issueTableRowsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows.Rows) != 3 {
+		t.Fatalf("legacy started rows = %d, want 3", len(rows.Rows))
+	}
+
+	// Distinct old categories combine, but an actually duplicated input is still
+	// rejected by the existing validation contract.
+	w = httptest.NewRecorder()
+	group, ok := testHandler.resolveIssueTableGroup(w, newRequest(http.MethodPost, "/api/issues/table/groups", nil), parseUUID(testWorkspaceID), issueTableGroupSpec{
+		Kind: "compound", Primary: "project", Secondary: "status_category",
+		SecondaryValues: []string{"in_progress", "in_review", "blocked"},
+	}, false)
+	if !ok {
+		t.Fatalf("legacy compound: %d %s", w.Code, w.Body.String())
+	}
+	if len(group.secondaryValues) != 1 || group.secondaryValues[0] != "started" {
+		t.Fatalf("normalized secondary values = %v", group.secondaryValues)
+	}
+	key := compoundCellGroupKey("project:"+projectID, "in_review", true)
+	if _, ok := group.predicate(w, key, func(any) string { return "$2" }); !ok {
+		t.Fatalf("legacy compound key rejected: %s", w.Body.String())
+	}
+}
+
 func TestIssueTableStatusCategoryGroupsFoldCustomStatuses(t *testing.T) {
 	projectID, _ := seedStatusCategoryFixture(t)
 
@@ -385,10 +423,10 @@ func TestIssueTableCompoundStatusCategoryReadsCatalogOncePerRequest(t *testing.T
 	}
 }
 
-// The common case: no custom statuses means the client never asks for the
-// category contract, so a default board pays nothing for this feature. This
-// pins the SERVER half — plain `status` grouping reads no catalog at all.
-func TestIssueTableStatusGroupingReadsNoCatalog(t *testing.T) {
+// Plain status groups keep their concrete keys, but their order still follows
+// each key's effective category. Resolve that map once per request rather than
+// running issue_effective_status() for every row or doing a second catalog read.
+func TestIssueTableStatusGroupingReadsCatalogOnce(t *testing.T) {
 	projectID, _ := seedStatusCategoryFixture(t)
 	counter := withCountingCatalog(t)
 
@@ -401,8 +439,8 @@ func TestIssueTableStatusGroupingReadsNoCatalog(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("groups status = %d: %s", w.Code, w.Body.String())
 	}
-	if counter.entryReads != 0 || counter.categoryReads != 0 {
-		t.Fatalf("plain status grouping read the catalog (%d entry, %d category), want 0",
+	if counter.entryReads != 1 || counter.categoryReads != 0 {
+		t.Fatalf("plain status grouping read the catalog (%d entry, %d category), want 1 entry and 0 category",
 			counter.entryReads, counter.categoryReads)
 	}
 }
@@ -414,6 +452,22 @@ func TestIssueTableStatusGroupingReadsNoCatalog(t *testing.T) {
 // status" 500 for the entire workspace.
 func TestIssueTableStatusGroupingCarriesCustomStatusGroups(t *testing.T) {
 	projectID, customKey := seedStatusCategoryFixture(t)
+	ctx := context.Background()
+	var cancelledNumber int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = issue_counter + 1
+		WHERE id = $1
+		RETURNING issue_counter
+	`, testWorkspaceID).Scan(&cancelledNumber); err != nil {
+		t.Fatalf("reserve cancelled issue number: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id)
+		VALUES ($1, 'cat-cancelled', 'cancelled', 'none', 'member', $2, 5, $3, $4)
+	`, testWorkspaceID, testUserID, cancelledNumber, projectID); err != nil {
+		t.Fatalf("seed cancelled issue: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	testHandler.ListIssueTableGroups(w, newRequest(http.MethodPost, "/api/issues/table/groups", issueTableGroupsRequest{
@@ -438,6 +492,16 @@ func TestIssueTableStatusGroupingCarriesCustomStatusGroups(t *testing.T) {
 	}
 	if counts["in_review"] != 1 {
 		t.Fatalf("built-in group = %d, want 1: %#v", counts["in_review"], counts)
+	}
+	if counts["cancelled"] != 1 {
+		t.Fatalf("cancelled group = %d, want 1: %#v", counts["cancelled"], counts)
+	}
+	indexes := map[string]int{}
+	for i, group := range groups.Groups {
+		indexes[group.Value.Status] = i
+	}
+	if indexes[customKey] >= indexes["cancelled"] {
+		t.Fatalf("custom in-review status sorted after cancelled: %#v", groups.Groups)
 	}
 
 	// And its group_key has to page back its own rows.

@@ -1579,8 +1579,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 	if h.workspaceAutoLinkPRsEnabled(ctx, wsID) {
 		idents := extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)
 		// closingIdents is the subset of identifiers that this PR explicitly
-		// declared via a closing keyword ("Closes/Fixes/Resolves MUL-X").
-		// Linking still happens for every mention (idents above), but the
+		// declared via a closing keyword ("Closes/Fixes/Resolves MUL-X"). The
 		// link row's close_intent column — and therefore whether the
 		// auto-advance gate eventually fires — is only set for keyword-
 		// declared identifiers. Bare title prefixes and branch-name
@@ -1589,20 +1588,25 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		for _, c := range extractClosingIdentifiers(p.PullRequest.Title, p.PullRequest.Body) {
 			closingIdents[c] = struct{}{}
 		}
-		// qualifyingIdents are the identifiers that genuinely tie this PR to an
-		// issue: a title prefix, a branch-name reference, or a body closing
-		// keyword. Any identifier that is linked but NOT in this set was matched
-		// only by a bare mention in the PR body ("Related MUL-1", "Follow up in
-		// MUL-1"). Those links are still recorded (auto-link stays generous so
-		// close_intent can be tracked across edits) but are flagged
-		// reference_only and hidden from the issue's PR list — a passing mention
-		// should not surface the PR as a working PR for that issue (MUL-3739).
-		qualifyingIdents := map[string]struct{}{}
+		// claimedIdents are the identifiers this PR actually claims: a title
+		// prefix, a branch-name reference, or a body closing keyword. An
+		// identifier matched only by a bare mention in the body ("Related
+		// MUL-1", "Follow up in MUL-1") is not a claim — a passing mention must
+		// not surface the PR as a working PR for that issue (MUL-3739) — so it
+		// gets no link row at all, and drops one an earlier claim had created.
+		//
+		// MUL-3739 used to write that row anyway and flag it reference_only,
+		// hidden from every read path. A hidden row had no reader, and once the
+		// PR went terminal the preserve gate froze the flag, so adding a closing
+		// keyword to a merged PR's body could never surface it — the one
+		// recovery action a user can take was the one that could not work
+		// (MUL-7072).
+		claimedIdents := map[string]struct{}{}
 		for _, id := range extractIdentifiers(p.PullRequest.Title, p.PullRequest.Head.Ref) {
-			qualifyingIdents[id] = struct{}{}
+			claimedIdents[id] = struct{}{}
 		}
 		for c := range closingIdents {
-			qualifyingIdents[c] = struct{}{}
+			claimedIdents[c] = struct{}{}
 		}
 		// close_intent should follow the PR title/body while the PR is still
 		// editable before its terminal close event. Once GitHub has delivered
@@ -1625,6 +1629,27 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 			if !ok {
 				continue
 			}
+			if _, claimed := claimedIdents[id]; !claimed {
+				// A passing mention. Never links; while the PR is still
+				// editable it also drops a link an earlier claim created, so
+				// the list follows the live parse. Once the PR is terminal the
+				// same preserve rule that freezes close_intent applies: a
+				// post-merge edit must not unlink a PR that did the work.
+				if preserveCloseIntent {
+					continue
+				}
+				if err := h.Queries.UnlinkIssueFromPullRequest(ctx, db.UnlinkIssueFromPullRequestParams{
+					IssueID:       issue.ID,
+					PullRequestID: pr.ID,
+				}); err != nil {
+					slog.Warn("github: unlink failed", "err", err)
+					continue
+				}
+				// Dropping a link can be what lets the issue advance, so the
+				// gate below still re-evaluates it.
+				reevalIssues = append(reevalIssues, issue)
+				continue
+			}
 			_, declared := closingIdents[id]
 			if declared && !closePolicy.permits(id, workspaceID) {
 				// The delivery-wide scan did not prove this workspace is the one
@@ -1635,13 +1660,10 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 				declared = false
 			}
 			closeIntent := declared && !preserveCloseIntent
-			_, qualifies := qualifyingIdents[id]
-			referenceOnly := !qualifies
 			if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
 				IssueID:             issue.ID,
 				PullRequestID:       pr.ID,
 				CloseIntent:         closeIntent,
-				ReferenceOnly:       referenceOnly,
 				PreserveCloseIntent: preserveCloseIntent,
 				LinkedByType:        strToText("system"),
 				LinkedByID:          pgtype.UUID{},

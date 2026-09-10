@@ -44,7 +44,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
-import { cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { RichContent } from "../../rich-content";
 import { api } from "@multica/core/api";
 import {
@@ -153,6 +153,8 @@ function formatElapsedMs(ms: number): string {
 
 /** A step's own duration, in the compact form the right column carries. */
 function formatStepDuration(ms: number): string {
+  if (ms <= 0) return "—";
+  if (ms < 100) return "<0.1s";
   if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
   const minutes = Math.floor(ms / 60_000);
@@ -244,7 +246,7 @@ function RunDetailRow({
         type="button"
         onClick={onCopy}
         title={copyTitle}
-        className="group -mx-1 grid w-[calc(100%+0.5rem)] grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 rounded px-1 py-0.5 text-left transition-colors hover:bg-accent/60"
+        className="group -mx-1 grid w-[calc(100%+0.5rem)] grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 rounded-xs px-1 py-0.5 text-left transition-colors hover:bg-accent/60"
       >
         <span className="text-muted-foreground">{label}</span>
         <span className="flex min-w-0 items-start gap-1.5">
@@ -762,17 +764,21 @@ export function AgentTranscriptDialog({
         // A server-cancelled run (worktree claim gate, preserved-work
         // delivery) carries a persisted reason the user must act on; surface
         // it on the badge instead of a bare "Cancelled". User-initiated
-        // cancels have no reason and keep the plain label. The badge carries
-        // no `title`: the raw `task.error` behind it is untranslated
-        // operator prose (#7411) and belongs in Run details, not in hover
-        // text on a status pill.
+        // cancels have no reason, but carry actor provenance when it was
+        // recorded. The title contains only this localized status — never the
+        // raw `task.error`, which is operator prose reserved for Run details.
         const cancelReason = cancelReasonLabel(task, t);
+        const cancelledBy = cancellationActorLabel(task, t);
+        const cancelStatus = cancelReason
+          ? `${cancelledBy ?? t(($) => $.transcript.status_cancelled)} · ${cancelReason}`
+          : cancelledBy ?? t(($) => $.transcript.status_cancelled);
         return (
-          <span className={cn(base, "bg-muted text-muted-foreground")}>
-            <XCircle className="h-3 w-3" />
-            {cancelReason
-              ? `${t(($) => $.transcript.status_cancelled)} · ${cancelReason}`
-              : t(($) => $.transcript.status_cancelled)}
+          <span
+            className={cn(base, "min-w-0 max-w-[45%] bg-muted text-muted-foreground")}
+            title={cancelStatus}
+          >
+            <XCircle className="h-3 w-3 shrink-0" />
+            <span className="truncate">{cancelStatus}</span>
           </span>
         );
       }
@@ -1415,8 +1421,28 @@ function DurationCell({ ms, pending }: { ms?: number; pending?: boolean }) {
   }
   if (ms === undefined) return <span className="w-12 shrink-0" />;
   return (
-    <span className="w-12 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground">
-      {formatStepDuration(ms)}
+    <StepDuration
+      ms={ms}
+      unknownLabel={t(($) => $.transcript.step_duration_unknown)}
+      className="w-12 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+    />
+  );
+}
+
+function StepDuration({
+  ms,
+  unknownLabel,
+  className,
+}: {
+  ms: number;
+  unknownLabel: string;
+  className?: string;
+}) {
+  const unknown = ms <= 0;
+  return (
+    <span className={className} title={unknown ? unknownLabel : undefined}>
+      <span aria-hidden={unknown || undefined}>{formatStepDuration(ms)}</span>
+      {unknown && <span className="sr-only">{unknownLabel}</span>}
     </span>
   );
 }
@@ -1596,16 +1622,22 @@ function GroupRow({
               type="button"
               onClick={() => onSelect(step.seq)}
               className={cn(
-                "flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-micro transition-colors",
+                "flex w-full items-baseline gap-2 rounded-xs px-2 py-1 text-left text-micro transition-colors",
                 selectedSeq === step.seq ? "bg-brand/10" : "hover:bg-accent/40",
               )}
             >
               <span className="truncate font-mono text-muted-foreground">
                 {callSummary(step, summaryLabels) || step.tool}
               </span>
-              <span className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground">
-                {step.durationMs === undefined ? "" : formatStepDuration(step.durationMs)}
-              </span>
+              {step.durationMs === undefined ? (
+                <span className="ml-auto shrink-0" />
+              ) : (
+                <StepDuration
+                  ms={step.durationMs}
+                  unknownLabel={t(($) => $.transcript.step_duration_unknown)}
+                  className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground"
+                />
+              )}
             </button>
           ))}
         </div>
@@ -1692,7 +1724,11 @@ function StepInspector({
           {call?.durationMs !== undefined && (
             <>
               <FactDot />
-              <span className="font-mono tabular-nums">{formatStepDuration(call.durationMs)}</span>
+              <StepDuration
+                ms={call.durationMs}
+                unknownLabel={t(($) => $.transcript.step_duration_unknown)}
+                className="font-mono tabular-nums"
+              />
             </>
           )}
         </span>

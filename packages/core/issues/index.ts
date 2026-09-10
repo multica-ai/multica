@@ -15,6 +15,7 @@ export {
   defaultStatusForCategory,
   statusCategoryOfKey,
   statusFilterColumns,
+  visibleStatusCategories,
   type StatusFilterColumnsResult,
   normalizeStatusPatch,
 } from "./status-category";

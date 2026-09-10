@@ -219,7 +219,7 @@ export function DiffDetailSurface({ lines, path }: { lines: TraceDiffLine[]; pat
             onClick={() => setShowAll(true)}
             // Opaque: the gradient alone does not clear the clipped line, so a
             // transparent label lands on top of it and both become unreadable.
-            className="mb-1.5 rounded border bg-background px-2 py-0.5 text-micro text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+            className="mb-1.5 rounded-xs border bg-background px-2 py-0.5 text-micro text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
           >
             {t(($) => $.transcript.show_all)}
           </button>
@@ -273,7 +273,7 @@ export function ToolDetailSurface({
             onClick={() => setShowAll(true)}
             // Opaque: the gradient alone does not clear the clipped line, so a
             // transparent label lands on top of it and both become unreadable.
-            className="mb-1.5 rounded border bg-background px-2 py-0.5 text-micro text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+            className="mb-1.5 rounded-xs border bg-background px-2 py-0.5 text-micro text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
           >
             {t(($) => $.transcript.show_all)}
           </button>

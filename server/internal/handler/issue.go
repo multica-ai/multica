@@ -120,6 +120,26 @@ var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
 var validIssueStatuses = issuestatus.Canonical()
 var validIssueStatusCategories = issuestatus.Categories()
 
+// Status sort follows the board's category order and resolves custom keys to
+// their effective category with one catalog read plus a parameterized CASE.
+// Keeping the indexed column bare avoids the per-row issue_effective_status()
+// call that would otherwise turn a bounded page into a workspace scan.
+func (h *Handler) issueStatusSortExpression(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	addArg func(any) string,
+) (string, error) {
+	customKeys, err := issuestatus.CustomKeyCategories(
+		ctx,
+		h.issueStatusCatalog(),
+		workspaceID,
+	)
+	if err != nil {
+		return "", err
+	}
+	return statusOrderExpression(statusCategoryExpr(customKeys, addArg)), nil
+}
+
 // resolveIssueStatusKey checks a status against the workspace's catalog and
 // returns the CANONICAL key to store. This is the application-layer replacement
 // for the enum CHECK that migration 337 dropped, so every write path must route
@@ -1287,6 +1307,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	sortCol := "position"
 	sortIsExpr := false
 	sortIsProperty := false
+	sortByStatus := false
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
 		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
@@ -1294,8 +1315,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		case "last_activity":
 			sortCol = "last_activity_at"
 		case "status":
-			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+			sortCol = "status"
 			sortIsExpr = true
+			sortByStatus = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
 			sortIsExpr = true
@@ -1349,7 +1371,6 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
 	}
-
 	if len(statusCategoriesFilter) > 0 {
 		// Expanded to concrete status keys rather than filtered through
 		// issue_effective_status(): wrapping the column in a function makes the
@@ -1516,6 +1537,18 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	whereSql := strings.Join(where, " AND ")
 
 	// Build ORDER BY clause.
+	// Count queries use only filter parameters. Sort-only CASE parameters must
+	// be appended afterwards or COUNT receives unused/untyped bind positions.
+	filterArgCount := len(args)
+	if sortByStatus {
+		var err error
+		sortCol, err = h.issueStatusSortExpression(r.Context(), wsUUID, addArg)
+		if err != nil {
+			slog.Warn("resolve status sort failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to resolve sort")
+			return
+		}
+	}
 	orderBy := sortCol
 	if !sortIsExpr {
 		orderBy = "i." + sortCol
@@ -1598,7 +1631,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 	// Get the true total count for pagination awareness.
 	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM issue i WHERE %s`, whereSql)
 	// Count query uses the same args minus the OFFSET and LIMIT params (last two added).
-	countArgs := args[:len(args)-2]
+	countArgs := args[:filterArgCount]
 	var total int64
 	if err := h.DB.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
 		slog.Warn("ListIssues count failed", "error", err)
@@ -2062,7 +2095,13 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		case "last_activity":
 			sortCol = "last_activity_at"
 		case "status":
-			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+			var err error
+			sortCol, err = h.issueStatusSortExpression(r.Context(), wsUUID, addArg)
+			if err != nil {
+				slog.Warn("resolve grouped status sort failed", append(logger.RequestAttrs(r), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to resolve sort")
+				return
+			}
 			sortIsExpr = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"

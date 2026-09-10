@@ -275,6 +275,14 @@ export interface TaskAttribution {
   rerun_of_task_id?: string;
 }
 
+/** Point-in-time identity of the actor that cancelled a run. */
+export interface TaskCancellationActor {
+  /** Open wire value; current servers emit member, agent, or system. */
+  type: string;
+  id?: string;
+  name?: string;
+}
+
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -314,6 +322,8 @@ export interface AgentTask {
   failure_reason?: TaskFailureReason | (string & {}) | "";
   /** The input comment was edited or deleted, invalidating this run. */
   cancelled_by_comment_change?: boolean;
+  /** Present on cancellations recorded by a backend with actor provenance. */
+  cancelled_by?: TaskCancellationActor;
   created_at: string;
   /** Non-empty when the task was spawned from a chat session. */
   chat_session_id?: string;

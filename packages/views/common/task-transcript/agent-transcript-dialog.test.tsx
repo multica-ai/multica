@@ -384,6 +384,57 @@ describe("AgentTranscriptDialog", () => {
     expect(screen.getByText("total 0")).toBeInTheDocument();
   });
 
+  it("shows a meaningful bound instead of rounding a fast call to zero", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Bash",
+        input: { command: "sed -n 1,20p README.md" },
+        created_at: "2026-06-08T08:00:00.000Z",
+      },
+      {
+        seq: 2,
+        type: "tool_result",
+        tool: "Bash",
+        output: "ok",
+        created_at: "2026-06-08T08:00:00.040Z",
+      },
+    ]);
+
+    expect(screen.getByText("<0.1s")).toBeInTheDocument();
+    expect(screen.queryByText("0.0s")).not.toBeInTheDocument();
+  });
+
+  it("does not claim a duration for legacy calls whose batched timestamps are identical", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Bash",
+        input: { command: "pwd" },
+        created_at: "2026-06-08T08:00:00.000Z",
+      },
+      {
+        seq: 2,
+        type: "tool_result",
+        tool: "Bash",
+        output: "/repo",
+        created_at: "2026-06-08T08:00:00.000Z",
+      },
+    ]);
+
+    const unknownDuration = screen.getByText("—");
+    expect(unknownDuration).toHaveAttribute("aria-hidden", "true");
+    expect(unknownDuration.parentElement).toHaveAttribute("title", "Exact duration is unavailable.");
+    expect(unknownDuration.parentElement).not.toHaveAttribute("aria-label");
+    expect(screen.getByText("Exact duration is unavailable.")).toHaveClass("sr-only");
+    const row = screen.getByRole("button", { name: /Exact duration is unavailable\./ });
+    fireEvent.click(row);
+    expect(screen.getAllByText("Exact duration is unavailable.")).toHaveLength(2);
+    expect(screen.queryByText("0.0s")).not.toBeInTheDocument();
+  });
+
   it("keeps a screenshot out of the list and renders it as an image", () => {
     const output = JSON.stringify([
       { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } },
@@ -786,7 +837,7 @@ describe("AgentTranscriptDialog — delivered branch", () => {
 // explain itself: the localized reason rides the status badge and heads the
 // "Reason" row in Run details, while the raw persisted diagnostic sits under
 // its own "Technical details" heading. A user's own cancel stays a plain
-// "Cancelled" — they know why they clicked.
+// "Cancelled" for historical rows that predate actor provenance.
 describe("AgentTranscriptDialog — cancel reason", () => {
   const gateError = "worktree mode needs daemon version 0.4.24 or newer on that machine";
 
@@ -823,13 +874,26 @@ describe("AgentTranscriptDialog — cancel reason", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps a user-initiated cancel a plain Cancelled", () => {
+  it("keeps a legacy user-initiated cancel a plain Cancelled", () => {
     renderDialog(items, {
       task: { ...baseTask, status: "cancelled", error: null },
     });
 
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
     expect(screen.queryByText(/Local directory error/)).not.toBeInTheDocument();
+  });
+
+  it("names the actor on a new user-initiated cancellation", () => {
+    renderDialog(items, {
+      task: {
+        ...baseTask,
+        status: "cancelled",
+        error: null,
+        cancelled_by: { type: "member", id: "user-1", name: "Jiayuan" },
+      },
+    });
+
+    expect(screen.getByText("Cancelled by Jiayuan")).toBeInTheDocument();
   });
 
   // #7411: the status badge used to carry the raw English error as its

@@ -372,6 +372,22 @@ vi.mock("@multica/core/issues/stores/view-store", () => ({
     { key: "labels", label: "Labels" },
     { key: "childProgress", label: "Sub-issue progress" },
   ],
+  cardPropertyOptionsForView: () => [
+    { key: "priority", label: "Priority" },
+    { key: "description", label: "Description" },
+    { key: "assignee", label: "Assignee" },
+    { key: "dueDate", label: "Due date" },
+    { key: "project", label: "Project" },
+    { key: "labels", label: "Labels" },
+    { key: "childProgress", label: "Sub-issue progress" },
+  ],
+  sortOptionsForView: () => [
+    { value: "position", label: "Manual" },
+    { value: "priority", label: "Priority" },
+    { value: "due_date", label: "Due date" },
+    { value: "created_at", label: "Created date" },
+    { value: "title", label: "Title" },
+  ],
 }));
 
 vi.mock("@multica/core/issues/stores/view-store-context", () => ({
