@@ -257,7 +257,7 @@ func TestIssueTableCompoundStatusCategoryCellsFoldCustomStatuses(t *testing.T) {
 }
 
 // A workspace with no custom statuses still folds concrete built-ins into the
-// five public lifecycle categories.
+// four lifecycle categories.
 func TestIssueTableStatusCategoryFoldsBuiltInsWithoutCustomStatuses(t *testing.T) {
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()
@@ -368,8 +368,8 @@ func withCountingCatalog(t *testing.T) *countingCatalogQuerier {
 	return counter
 }
 
-// A board loads five column branches as separate HTTP requests, so a catalog
-// read that looks cheap per request is multiplied by five. The first
+// A board loads up to four column branches as separate HTTP requests, so a catalog
+// read that looks cheap per request is multiplied by four. The first
 // cut ran ExpandCategories AND CustomKeyCategories per resolve — two reads
 // where one suffices, i.e. 14 catalog reads behind one board load instead of 7.
 func TestIssueTableStatusCategoryReadsCatalogOncePerRequest(t *testing.T) {

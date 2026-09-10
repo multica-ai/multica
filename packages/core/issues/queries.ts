@@ -241,9 +241,9 @@ export type AssigneeGroupedIssuesFilter = Omit<
 export const ISSUE_PAGE_SIZE = 50;
 
 /**
- * CATEGORIES fetched and paginated into the list/board cache — all five,
- * `canceled` included. Canceled is a first-class default (MUL-4290), so it
- * lives in the cache and renders like any other column; there is no separate
+ * CATEGORIES fetched and paginated into the list/board cache — all four,
+ * `closed` included. It lives in the cache even when hidden by the surface's
+ * display preferences; there is no separate
  * "visible board" subset. This constant governs fetch/cache membership.
  *
  * Keyed on category, not on status key (MUL-6243). A workspace can define any

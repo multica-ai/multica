@@ -142,7 +142,7 @@ func TestReorderIssueStatusesRejectsForeignInputs(t *testing.T) {
 		{"ids must belong to the named category", "started", []string{inReview, inTodo}, http.StatusBadRequest},
 		{"duplicate ids are rejected", "started", []string{inReview, inReview}, http.StatusBadRequest},
 		{"an empty order is rejected", "started", nil, http.StatusBadRequest},
-		{"the category must be one of the five", "nope", []string{inReview}, http.StatusBadRequest},
+		{"the category must be one of the four", "nope", []string{inReview}, http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

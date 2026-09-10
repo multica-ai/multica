@@ -183,7 +183,7 @@ export function IssueStatusesTab() {
             {t(($) => $.issue_statuses.loading)}
           </div>
         ) : (
-          // One list, not five cards: the categories are sections of a single
+          // The four categories are sections of a single
           // workflow, and separate borders made them read as unrelated
           // settings.
           <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
