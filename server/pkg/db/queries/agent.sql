@@ -2748,3 +2748,12 @@ RETURNING *;
 
 -- name: GetCommentThreadRootID :one
 SELECT comment_thread_root_id(@comment_id::uuid)::uuid AS id;
+
+-- name: UpdateAgentTaskTokenTemplates :one
+-- Replaces an agent's enabled task-token template ids wholesale. Written only
+-- by PUT /api/agents/{id}/task-tokens, which validates every id against the
+-- server-configured catalog first.
+UPDATE agent
+SET task_token_templates = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;

@@ -40,6 +40,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/tasktoken"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	composiosdk "github.com/multica-ai/multica/server/pkg/composio"
@@ -254,6 +255,12 @@ type RouterOptions struct {
 	// any test that happened to have the variable set. nil means unset, which
 	// is what tests and NewRouter get.
 	LLMMaxRetries *llm.RetryOverride
+	// TaskTokenIssuer signs per-task identity tokens for external systems.
+	// Nil leaves the feature off, which is what an unconfigured deployment
+	// and every test gets. main.go builds it from MULTICA_TASK_TOKEN_* and
+	// fails the boot on a malformed catalog, for the same reason
+	// LLMMaxRetries is injected rather than read here.
+	TaskTokenIssuer *tasktoken.Issuer
 }
 
 func buildChannelSupervisor(
@@ -447,6 +454,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.Metrics = opts.BusinessMetrics
 	h.FeatureFlags = opts.FeatureFlags
 	h.TaskService.FeatureFlags = opts.FeatureFlags
+	h.TaskTokenIssuer = opts.TaskTokenIssuer
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
 	entitlementClient, entitlementErr := entitlement.New(entitlement.Config{
@@ -1314,6 +1322,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Get("/readyz", health.readyHandler)
 	r.Get("/healthz", health.readyHandler)
 
+	// Public key set for task identity tokens. Unauthenticated by design:
+	// the systems that verify these tokens are external to Multica and hold
+	// no credentials here, and the response is public key material. 404s
+	// unless the feature is configured. See internal/handler/tasktoken_jwks.go.
+	r.Get("/.well-known/jwks.json", h.GetTaskTokenJWKS)
+
 	// Realtime subsystem metrics — connection counts, slow-client evictions,
 	// and per-event-type send QPS counters. Exposed as JSON so it can be
 	// scraped by ops or surfaced in the admin UI without adding a Prometheus
@@ -2112,6 +2126,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// internal/handler/agent_env.go.
 					r.Get("/env", h.GetAgentEnv)
 					r.Put("/env", h.UpdateAgentEnv)
+					// Which identity tokens this agent may be issued. Same
+					// authorization as /env; the GET exposes no secrets, the
+					// PUT is validated against the server-configured catalog.
+					r.Get("/task-tokens", h.GetAgentTaskTokens)
+					r.Put("/task-tokens", h.UpdateAgentTaskTokens)
 				})
 			})
 

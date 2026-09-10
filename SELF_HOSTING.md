@@ -167,6 +167,11 @@ multica daemon status
 3. Go to **Settings → Agents** and create a new agent
 4. Create an issue and assign it to your agent — it will pick up the task automatically
 
+> **Connecting agents to your own internal systems?** Task identity tokens let
+> an agent act as the person who asked, so your existing permission model and
+> audit trail keep working instead of collapsing into a shared service account.
+> See [Task Identity Tokens](TASK_IDENTITY_TOKENS.md).
+
 ---
 
 ## Kubernetes Deployment (Alternative)

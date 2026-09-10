@@ -449,6 +449,9 @@ import {
   type IssueView,
   type IssueViewPreference,
   type CreateIssueViewRequest,
+  AgentTaskTokensSchema,
+  EMPTY_AGENT_TASK_TOKENS,
+  type AgentTaskTokens,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1614,6 +1617,33 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/env`, {
       method: "PUT",
       body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Lists the deployment's task-token catalog plus the ids this agent has
+   * enabled. Returns no secrets — tokens exist only during a task run.
+   * Same authorization as the env endpoints: agent actors get a 403.
+   */
+  async getAgentTaskTokens(id: string): Promise<AgentTaskTokens> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/task-tokens`);
+    return parseWithFallback(raw, AgentTaskTokensSchema, EMPTY_AGENT_TASK_TOKENS, {
+      endpoint: "GET /api/agents/{id}/task-tokens",
+    });
+  }
+
+  /**
+   * Replaces the set of task-token templates this agent may be issued. Every
+   * id must exist in the server-configured catalog; the server rejects
+   * anything else with a 400.
+   */
+  async updateAgentTaskTokens(id: string, enabled: string[]): Promise<AgentTaskTokens> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/task-tokens`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    });
+    return parseWithFallback(raw, AgentTaskTokensSchema, EMPTY_AGENT_TASK_TOKENS, {
+      endpoint: "PUT /api/agents/{id}/task-tokens",
     });
   }
 

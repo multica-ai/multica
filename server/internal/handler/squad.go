@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -1186,7 +1187,7 @@ func commentMentionsAnyone(content string) bool {
 // paths go through computeCommentAgentTriggers so preview and create share the
 // same trigger set.
 // It returns true only when a leader task was actually enqueued.
-func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID, handoffNote string) bool {
+func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, authorType, authorID, handoffNote string, attr attribution.Result) bool {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
@@ -1195,22 +1196,9 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		return false
 	}
 
-	// The gate must judge the SAME top-of-chain human the enqueue path will
-	// persist on the leader task row, or it drifts: an agent-created issue that
-	// correctly inherits its originator (MUL-4305) would still be denied here
-	// if the gate used an empty originator. Member authors are their own
-	// originator; for agent/system-triggered assigns we resolve the originator
-	// exactly like EnqueueTaskForSquadLeader* does (via the issue's origin
-	// link). triggerCommentID is always empty on the assign/promote path, so we
-	// pass an invalid UUID to match. A still-unresolved originator leaves
-	// leaderOriginator empty, which correctly fails closed for member/team
-	// targets while a workspace target still admits the agent principal.
-	leaderOriginator := ""
-	if authorType == "member" {
-		leaderOriginator = authorID
-	} else {
-		leaderOriginator = uuidToString(h.TaskService.OriginatorForIssueTask(ctx, issue, pgtype.UUID{}))
-	}
+	// Judge exactly the identity that will be persisted, including an empty
+	// identity when the assigning agent has no usable source task.
+	leaderOriginator := uuidToString(attr.UserID)
 	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, authorType, authorID, leaderOriginator, uuidToString(issue.WorkspaceID)) {
 		return false
 	}
@@ -1225,13 +1213,7 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		return false
 	}
 
-	// triggerCommentID is always empty on the assign/promote path; legacy
-	// handoff text rides its dedicated task column instead.
-	_ = triggerCommentID
-	// The member who performed the assign/promote is the accountable human for the
-	// leader run (MUL-4302 §4) — the same principal the gate above judged. An agent
-	// author is not a human, so only a member actor is threaded.
-	if _, err := h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, handoffNote, memberActorUserID(authorType, authorID)); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, handoffNote, attr); err != nil {
 		slog.Warn("enqueue squad leader task failed",
 			"issue_id", uuidToString(issue.ID),
 			"squad_id", uuidToString(squad.ID),
