@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -555,77 +554,5 @@ func TestVCSWebhook_MalformedTolerated(t *testing.T) {
 	testPool.QueryRow(ctx, `SELECT count(*) FROM vcs_pull_request WHERE workspace_id = $1`, testWorkspaceID).Scan(&count)
 	if count != 0 {
 		t.Errorf("expected no PR rows, got %d", count)
-	}
-}
-
-// The self-hosted path owes the same two guarantees as GitHub: removing the key
-// outright (not just downgrading it to a mention) unlinks the PR, and the unlink
-// itself re-runs the auto-advance gate even though the PR is still open
-// (MUL-7072).
-func TestVCSWebhook_WithdrawnClaimUnlinksAndReleasesTheGate(t *testing.T) {
-	ctx := context.Background()
-	box := withVCSBox(t)
-	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
-	issue := newVCSIssue(t, "Withdrawn claim releases the gate")
-	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
-
-	fire := func(number int, action, state string, merged bool, title, body, updatedAt string) {
-		t.Helper()
-		payload := map[string]any{
-			"action": action,
-			"pull_request": map[string]any{
-				"number":   number,
-				"html_url": fmt.Sprintf("https://forgejo.test/acme/widget/pulls/%d", number),
-				"title":    title, "body": body, "state": state, "merged": merged,
-				"created_at": "2026-05-01T00:00:00Z", "updated_at": updatedAt,
-				"head": map[string]any{"ref": "work", "sha": fmt.Sprintf("sha%d", number)},
-				"user": map[string]any{"username": "octo"},
-			},
-			"repository": map[string]any{"name": "widget", "owner": map[string]any{"username": "acme"}},
-		}
-		if merged {
-			payload["pull_request"].(map[string]any)["merged_at"] = "2026-05-02T00:00:00Z"
-		}
-		raw, _ := json.Marshal(payload)
-		w := httptest.NewRecorder()
-		testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
-			"X-Gitea-Event": "pull_request", "X-Gitea-Signature": giteaSig(raw),
-		}, raw))
-		if w.Code != http.StatusAccepted {
-			t.Fatalf("PR %d %s: %d %s", number, action, w.Code, w.Body.String())
-		}
-	}
-	linkCount := func() int {
-		t.Helper()
-		var n int
-		if err := testPool.QueryRow(ctx,
-			`SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`, issue.ID).Scan(&n); err != nil {
-			t.Fatalf("count links: %v", err)
-		}
-		return n
-	}
-
-	// MR #11 carries the closing intent and merges; MR #12 claims the issue in
-	// its title only, so it keeps the gate shut while it is open.
-	fire(11, "opened", "open", false, "Fix "+issue.Identifier, "Closes "+issue.Identifier, "2026-05-01T01:00:00Z")
-	fire(12, "opened", "open", false, issue.Identifier+": follow-up", "", "2026-05-01T01:00:00Z")
-	fire(11, "closed", "closed", true, "Fix "+issue.Identifier, "Closes "+issue.Identifier, "2026-05-02T00:00:00Z")
-	if linkCount() != 2 {
-		t.Fatalf("both claims should be linked, got %d rows", linkCount())
-	}
-	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
-	if updated.Status == "done" {
-		t.Fatalf("issue advanced while MR #12 still claimed it")
-	}
-
-	// MR #12 drops the key from every field while still open: unlink, then the
-	// gate runs and the issue advances on the merged MR's stored close intent.
-	fire(12, "edited", "open", false, "follow-up", "", "2026-05-03T00:00:00Z")
-	if linkCount() != 1 {
-		t.Errorf("withdrawing the key entirely should unlink, got %d rows", linkCount())
-	}
-	updated, _ = testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
-	if updated.Status != "done" {
-		t.Errorf("withdrawing the only blocking claim must release the gate, got %q", updated.Status)
 	}
 }

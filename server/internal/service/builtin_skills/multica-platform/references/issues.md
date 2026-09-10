@@ -56,7 +56,8 @@ up for an issue, put the key in the title, the branch, or after a closing keywor
 in the body — not as a loose body reference.
 
 While the PR is still open the link follows the live title and body: adding a key
-links it, and withdrawing every key unlinks it again. Once the PR has merged or
+links it, and downgrading that key to a plain mention drops the link. Once the PR
+has merged or
 closed, existing links and their close-intent decision are frozen — but a PR that
 was never linked can still be linked by editing it, so a forgotten key is
 repairable after the fact. That late link does not move the issue to `done`;

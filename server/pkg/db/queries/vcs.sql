@@ -162,36 +162,6 @@ SELECT
     COALESCE(SUM(CASE WHEN state = 'merged' AND close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
 FROM combined;
 
--- name: GetIssueCombinedCloseAggregateExcludingPR :one
--- GetIssueCombinedPullRequestCloseAggregate with one link ignored: the counts the
--- gate will see once that link is deleted. A webhook that is about to drop a
--- withdrawn claim's link asks this BEFORE deleting, and deletes only after the
--- resulting decision is fully applied — a failure in between then leaves the link
--- in place for a redelivery to retry, instead of stranding an issue that neither
--- the next payload nor the link table can point at again (MUL-7072).
---
--- Exactly one exclusion is set per call; the other stays NULL and matches
--- nothing, so the provider whose PR is not being unlinked counts in full.
-WITH combined AS (
-    SELECT pr.state AS state, ipr.close_intent AS close_intent
-    FROM github_pull_request pr
-    JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = sqlc.arg('issue_id')
-      AND (sqlc.narg('exclude_github_pr')::uuid IS NULL
-           OR ipr.pull_request_id <> sqlc.narg('exclude_github_pr')::uuid)
-    UNION ALL
-    SELECT pr.state AS state, ipr.close_intent AS close_intent
-    FROM vcs_pull_request pr
-    JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = sqlc.arg('issue_id')
-      AND (sqlc.narg('exclude_vcs_pr')::uuid IS NULL
-           OR ipr.pull_request_id <> sqlc.narg('exclude_vcs_pr')::uuid)
-)
-SELECT
-    COALESCE(SUM(CASE WHEN state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
-    COALESCE(SUM(CASE WHEN state = 'merged' AND close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
-FROM combined;
-
 -- =====================
 -- VCS commit status (CI)
 -- =====================
@@ -246,10 +216,3 @@ ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
 -- cannot retroactively unlink a PR that did the work.
 DELETE FROM issue_vcs_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2;
-
--- name: ListIssueIDsForVCSPullRequest :many
--- Every issue this PR is currently linked to. The webhook uses it to drop links
--- for issues the PR no longer claims: a removed key leaves no trace in the
--- payload, so the stored links are the only source of truth.
-SELECT issue_id FROM issue_vcs_pull_request
-WHERE pull_request_id = $1;

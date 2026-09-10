@@ -47,55 +47,6 @@ func (q *Queries) DeleteVCSConnection(ctx context.Context, arg DeleteVCSConnecti
 	return err
 }
 
-const getIssueCombinedCloseAggregateExcludingPR = `-- name: GetIssueCombinedCloseAggregateExcludingPR :one
-WITH combined AS (
-    SELECT pr.state AS state, ipr.close_intent AS close_intent
-    FROM github_pull_request pr
-    JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = $1
-      AND ($2::uuid IS NULL
-           OR ipr.pull_request_id <> $2::uuid)
-    UNION ALL
-    SELECT pr.state AS state, ipr.close_intent AS close_intent
-    FROM vcs_pull_request pr
-    JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = $1
-      AND ($3::uuid IS NULL
-           OR ipr.pull_request_id <> $3::uuid)
-)
-SELECT
-    COALESCE(SUM(CASE WHEN state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
-    COALESCE(SUM(CASE WHEN state = 'merged' AND close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
-FROM combined
-`
-
-type GetIssueCombinedCloseAggregateExcludingPRParams struct {
-	IssueID         pgtype.UUID `json:"issue_id"`
-	ExcludeGithubPr pgtype.UUID `json:"exclude_github_pr"`
-	ExcludeVcsPr    pgtype.UUID `json:"exclude_vcs_pr"`
-}
-
-type GetIssueCombinedCloseAggregateExcludingPRRow struct {
-	OpenCount                  int64 `json:"open_count"`
-	MergedWithCloseIntentCount int64 `json:"merged_with_close_intent_count"`
-}
-
-// GetIssueCombinedPullRequestCloseAggregate with one link ignored: the counts the
-// gate will see once that link is deleted. A webhook that is about to drop a
-// withdrawn claim's link asks this BEFORE deleting, and deletes only after the
-// resulting decision is fully applied — a failure in between then leaves the link
-// in place for a redelivery to retry, instead of stranding an issue that neither
-// the next payload nor the link table can point at again (MUL-7072).
-//
-// Exactly one exclusion is set per call; the other stays NULL and matches
-// nothing, so the provider whose PR is not being unlinked counts in full.
-func (q *Queries) GetIssueCombinedCloseAggregateExcludingPR(ctx context.Context, arg GetIssueCombinedCloseAggregateExcludingPRParams) (GetIssueCombinedCloseAggregateExcludingPRRow, error) {
-	row := q.db.QueryRow(ctx, getIssueCombinedCloseAggregateExcludingPR, arg.IssueID, arg.ExcludeGithubPr, arg.ExcludeVcsPr)
-	var i GetIssueCombinedCloseAggregateExcludingPRRow
-	err := row.Scan(&i.OpenCount, &i.MergedWithCloseIntentCount)
-	return i, err
-}
-
 const getIssueCombinedPullRequestCloseAggregate = `-- name: GetIssueCombinedPullRequestCloseAggregate :one
 WITH combined AS (
     SELECT pr.state AS state, ipr.close_intent AS close_intent
@@ -214,34 +165,6 @@ type ListIssueIDsForVCSPRHeadParams struct {
 // commit-status event can fan out a PR-card refresh to the right issues.
 func (q *Queries) ListIssueIDsForVCSPRHead(ctx context.Context, arg ListIssueIDsForVCSPRHeadParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listIssueIDsForVCSPRHead, arg.ConnectionID, arg.HeadSha)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []pgtype.UUID{}
-	for rows.Next() {
-		var issue_id pgtype.UUID
-		if err := rows.Scan(&issue_id); err != nil {
-			return nil, err
-		}
-		items = append(items, issue_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listIssueIDsForVCSPullRequest = `-- name: ListIssueIDsForVCSPullRequest :many
-SELECT issue_id FROM issue_vcs_pull_request
-WHERE pull_request_id = $1
-`
-
-// Every issue this PR is currently linked to. The webhook uses it to drop links
-// for issues the PR no longer claims: a removed key leaves no trace in the
-// payload, so the stored links are the only source of truth.
-func (q *Queries) ListIssueIDsForVCSPullRequest(ctx context.Context, pullRequestID pgtype.UUID) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listIssueIDsForVCSPullRequest, pullRequestID)
 	if err != nil {
 		return nil, err
 	}

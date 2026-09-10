@@ -210,40 +210,50 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	// a provider is the opt-in, so there is no separate per-workspace flag. The
 	// issue-side machinery is shared with GitHub.
 	linkedIssueIDs := make([]string, 0)
-	closing := extractClosingIdentifiers(ev.Title, ev.Body)
-	closingIdents := make(map[string]struct{}, len(closing))
-	for _, c := range closing {
+	idents := extractIdentifiers(ev.Title, ev.Body, ev.Branch)
+	closingIdents := map[string]struct{}{}
+	for _, c := range extractClosingIdentifiers(ev.Title, ev.Body) {
 		closingIdents[c] = struct{}{}
 	}
-	// claims are the identifiers this PR claims: a title prefix, a branch-name
-	// reference, or a body closing keyword. An identifier matched ONLY by a bare
-	// body mention is a drive-by reference — it claims nothing, so it links
-	// nothing, and a link an earlier claim created is dropped below. Mirrors the
+	// claimedIdents are the identifiers this PR claims: a title prefix, a
+	// branch-name reference, or a body closing keyword. An identifier matched
+	// ONLY by a bare body mention is a drive-by reference — it claims nothing,
+	// so it gets no link row and drops one an earlier claim created. Mirrors the
 	// GitHub path (MUL-3739, MUL-7072); branch is deliberately excluded from the
 	// closing-keyword scan there and here.
-	claims := extractIdentifiers(ev.Title, ev.Branch)
-	seen := make(map[string]struct{}, len(claims)+len(closing))
-	for _, id := range claims {
-		seen[id] = struct{}{}
+	claimedIdents := map[string]struct{}{}
+	for _, id := range extractIdentifiers(ev.Title, ev.Branch) {
+		claimedIdents[id] = struct{}{}
 	}
-	for _, c := range closing {
-		if _, dup := seen[c]; dup {
-			continue
-		}
-		seen[c] = struct{}{}
-		claims = append(claims, c)
+	for c := range closingIdents {
+		claimedIdents[c] = struct{}{}
 	}
 	// Freeze close_intent once the terminal merge/close event has arrived.
 	preserveCloseIntent := !ev.Terminal() && (ev.State == "merged" || ev.State == "closed")
 	prefix := h.getIssuePrefix(ctx, conn.WorkspaceID)
-	reevalIssues := make([]db.Issue, 0, len(claims))
-	claimedIssueIDs := make(map[string]struct{}, len(claims))
-	for _, id := range claims {
+	reevalIssues := make([]db.Issue, 0, len(idents))
+	for _, id := range idents {
 		issue, ok := h.lookupIssueByIdentifier(ctx, conn.WorkspaceID, prefix, id)
 		if !ok {
 			continue
 		}
-		claimedIssueIDs[uuidToString(issue.ID)] = struct{}{}
+		if _, claimed := claimedIdents[id]; !claimed {
+			// Passing mention: never links, and drops an earlier claim's link
+			// while the PR is still editable. Frozen once terminal, like
+			// close_intent.
+			if preserveCloseIntent {
+				continue
+			}
+			if err := h.Queries.UnlinkIssueFromVCSPullRequest(ctx, db.UnlinkIssueFromVCSPullRequestParams{
+				IssueID:       issue.ID,
+				PullRequestID: pr.ID,
+			}); err != nil {
+				slog.Warn("vcs: unlink failed", "err", err)
+				continue
+			}
+			reevalIssues = append(reevalIssues, issue)
+			continue
+		}
 		_, declared := closingIdents[id]
 		closeIntent := declared && !preserveCloseIntent
 		if err := h.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
@@ -261,44 +271,9 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		reevalIssues = append(reevalIssues, issue)
 	}
 
-	// Keep the catalog local to this delivery and connection's workspace. Shared
-	// by the unlink pass and the terminal gate below.
-	resolver := issuestatus.NewResolver(conn.WorkspaceID)
-
-	// Withdrawn claims: drop every link this PR still carries for an issue it no
-	// longer claims, since a removed key leaves no trace in the payload. Frozen
-	// once the PR is terminal, like close_intent. The gate runs before the delete
-	// and the delete only follows a fully applied decision, so a failure in
-	// between stays retryable. Mirrors the GitHub path (MUL-7072).
-	if !preserveCloseIntent {
-		linked, err := h.Queries.ListIssueIDsForVCSPullRequest(ctx, pr.ID)
-		if err != nil {
-			slog.Warn("vcs: list linked issues failed", "err", err)
-		}
-		for _, issueID := range linked {
-			if _, keep := claimedIssueIDs[uuidToString(issueID)]; keep {
-				continue
-			}
-			issue, err := h.Queries.GetIssue(ctx, issueID)
-			if err != nil {
-				slog.Warn("vcs: load unlinked issue failed", "err", err, "issue_id", uuidToString(issueID))
-				continue
-			}
-			if err := h.releaseGateAfterUnlink(ctx, resolver, issue, pgtype.UUID{}, pr.ID, workspaceID); err != nil {
-				slog.Warn("vcs: gate before unlink failed", "err", err, "issue_id", uuidToString(issueID))
-				continue
-			}
-			if err := h.Queries.UnlinkIssueFromVCSPullRequest(ctx, db.UnlinkIssueFromVCSPullRequestParams{
-				IssueID:       issueID,
-				PullRequestID: pr.ID,
-			}); err != nil {
-				slog.Warn("vcs: unlink failed", "err", err)
-				continue
-			}
-		}
-	}
-
 	if ev.State == "merged" || ev.State == "closed" {
+		// Keep the catalog local to this delivery and connection's workspace.
+		resolver := issuestatus.NewResolver(conn.WorkspaceID)
 		for _, issue := range reevalIssues {
 			// A custom terminal status counts as terminal here. (MUL-6243)
 			if s := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status); s == "done" || s == "cancelled" {
@@ -310,7 +285,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 				continue
 			}
 			if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
-				_ = h.advanceIssueToDone(ctx, issue, workspaceID)
+				h.advanceIssueToDone(ctx, issue, workspaceID)
 			}
 		}
 	}
