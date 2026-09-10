@@ -276,6 +276,13 @@ type Handler struct {
 	// UI consults IsConfigured() to decide whether to surface install
 	// entry points.
 	LarkAPIClient lark.APIClient
+	// LarkDocuments executes the fixed Agent-scoped document MCP tools. It is
+	// wired with the same encrypted installation store and regional HTTP client
+	// as messaging, and remains nil when the Lark master key is unset.
+	LarkDocuments feishuDocumentExecutor
+	// Test seam for the capability resolver. Production always leaves this nil
+	// and performs fresh task/runtime/Agent/installation reads on every call.
+	feishuDocumentsScopeLoader feishuDocumentsScopeLoader
 	// Composio integration (MUL-3720). Nil when COMPOSIO_API_KEY is unset;
 	// the composio HTTP handlers return 503 in that case. Wired in
 	// cmd/server/router.go after handler.New.

@@ -601,6 +601,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// backfills) take it directly; the constructor-based services
 				// wrap *db.Queries internally, so they keep taking queries.
 				cs := lark.NewChannelStore(queries)
+				h.LarkDocuments = lark.NewDocumentService(cs, installSvc, larkClient, slog.Default())
 				patcher := lark.NewPatcher(cs, installSvc, larkClient, lark.PatcherConfig{})
 				patcher.Register(bus)
 
@@ -1449,6 +1450,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// The broker asks for an mcp hook's credential at connection time, so
 		// a secret never sits in a task record.
 		r.Get("/tasks/{id}/plugin-mcp/{contributionId}/credential", h.ResolvePluginMCPCredential)
+		// Built-in Feishu document MCP: both the credential exchange and every
+		// call revalidate the exact live task, daemon, Agent and installation.
+		r.Get("/tasks/{id}/remote-mcp/{contributionId}/credential", h.ResolveRemoteMCPCredential)
+		r.Post("/tasks/{id}/feishu-documents/{contributionId}/mcp", h.ServeFeishuDocumentsMCP)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
 		// Canonical machine-level batch claim (MUL-4257). `/claim` is a
