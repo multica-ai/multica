@@ -1638,6 +1638,8 @@ function DraggableSwimLane({
           {lane.parentIssue && (
             <StatusIcon
               status={lane.parentIssue.status}
+              color={statusCatalog.colorOf(lane.parentIssue.status)}
+              icon={statusCatalog.iconOf(lane.parentIssue.status)}
               category={issueStatusCategory(lane.parentIssue) ?? undefined}
               className="size-3.5"
             />

@@ -74,6 +74,8 @@ export interface IssueStatusCatalog {
    * and drifts from the same status two pixels away. (MUL-6440)
    */
   colorOf: (statusKey: string) => string | null;
+  /** Custom visual geometry; null keeps the default. Never drives behavior. */
+  iconOf: (statusKey: string) => string | null;
   /** ACTIVE statuses belonging to one category, in display order. */
   inCategory: (category: IssueStatusCategory) => IssueStatusEntry[];
   /** True once the catalog has loaded; false while it is still in flight. */
@@ -199,6 +201,10 @@ export function buildIssueStatusCatalog(
     categoryOf,
     entryOf: (statusKey) => byKey.get(statusKey),
     colorOf: (statusKey) => issueStatusColor(byKey.get(statusKey)),
+    iconOf: (statusKey) => {
+      const entry = byKey.get(statusKey);
+      return entry && !entry.is_system ? entry.icon || null : null;
+    },
     labelOf: (statusKey) => {
       const entry = byKey.get(statusKey);
       if (entry) return entry.name;

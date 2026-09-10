@@ -2115,6 +2115,12 @@ describe("issue status catalog schemas", () => {
     expect(parsed.archived_at).toBeNull();
   });
 
+  it.each([undefined, null, "", "three_quarters", "future-icon"])("keeps catalog readable with icon %s", (icon) => {
+    const parsed = IssueStatusEntrySchema.parse({ ...baseStatus, icon });
+    expect(parsed.key).toBe(baseStatus.key);
+    expect(parsed.icon).toBe(icon);
+  });
+
   // PATCH /api/issue-statuses/reorder returns the same catalog shape as the
   // list endpoint, so a malformed reorder response degrades the same way rather
   // than leaving the settings page holding an unparsed blob. (MUL-6243)

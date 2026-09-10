@@ -62,12 +62,12 @@ export function HiddenColumnRow({
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const labelOf = useStatusLabel(wsId);
-  const { categoryOf, colorOf } = useIssueStatuses(wsId);
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
   const viewStoreApi = useViewStoreApi();
   return (
     <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
       <div className="flex items-center gap-2">
-        <StatusIcon category={categoryOf(status)} color={colorOf(status)} status={status} className="h-3.5 w-3.5" />
+        <StatusIcon category={categoryOf(status)} color={colorOf(status)} icon={iconOf(status)} status={status} className="h-3.5 w-3.5" />
         <span className="text-body">{labelOf(status)}</span>
       </div>
       <div className="flex items-center gap-1.5">

@@ -3,7 +3,7 @@ import type { IssueStatusCategory } from "./issue";
 /**
  * A workspace's issue status catalog (MUL-6243).
  *
- * Seven concrete built-in statuses are grouped into five lifecycle categories.
+ * Seven concrete built-in statuses are grouped into four lifecycle categories.
  * Category is presentation and workflow phase; the server keeps the legacy
  * status behavior projection separate so collapsing `in_review` and `blocked`
  * into `started` does not change existing automation behavior.
@@ -13,6 +13,10 @@ import type { IssueStatusCategory } from "./issue";
 // two only make sense read together. Re-exported here so catalog consumers can
 // import both from one place. (MUL-6243, MUL-7240)
 export type { IssueStatusCategory } from "./issue";
+
+/** Visual geometry only; never use these values to infer workflow behavior. */
+export const ISSUE_STATUS_ICONS = ["dotted", "circle", "half", "three_quarters", "check", "slash", "cross"] as const;
+export type IssueStatusIcon = (typeof ISSUE_STATUS_ICONS)[number];
 
 export interface IssueStatusEntry {
   id: string;
@@ -29,6 +33,8 @@ export interface IssueStatusEntry {
   category: IssueStatusCategory;
   /** "#rrggbb". */
   color: string;
+  /** Empty/absent means category default. Unknown future values render a fallback. */
+  icon?: string | null;
   /**
    * True for the 7 built-ins. They cannot be renamed, recolored, archived, or
    * have their category changed.
@@ -43,7 +49,7 @@ export interface IssueStatusEntry {
 
 export interface ListIssueStatusesResponse {
   statuses: IssueStatusEntry[];
-  /** The five lifecycle categories, in display order. */
+  /** The four lifecycle categories, in display order. */
   categories: IssueStatusCategory[];
   total: number;
 }
@@ -55,6 +61,7 @@ export interface CreateIssueStatusRequest {
   description?: string;
   category: IssueStatusCategory;
   color: string;
+  icon?: IssueStatusIcon | "";
 }
 
 /**
@@ -66,5 +73,7 @@ export interface UpdateIssueStatusRequest {
   name?: string;
   description?: string;
   color?: string;
+  /** Omit to preserve; empty string resets to the default. */
+  icon?: IssueStatusIcon | "";
   position?: number;
 }

@@ -55,6 +55,7 @@ export function CustomStatusChip({
         status={status}
         category={catalog.categoryOf(status)}
         color={entry.color}
+        icon={entry.icon}
         className="size-3"
       />
       <span className="truncate">{entry.name}</span>

@@ -32,7 +32,7 @@ export type TabVisual =
   /** An issue's live status glyph. `null` while the issue is loading.
    *  `category` is what selects the glyph — carried here so the tab strip
    *  never has to resolve a custom status key on its own. (MUL-6243) */
-  | { kind: "issue-status"; status: IssueStatus | null; category?: IssueStatusCategory }
+  | { kind: "issue-status"; status: IssueStatus | null; category?: IssueStatusCategory; color?: string | null; icon?: string | null }
   /** A project's own icon. `null` falls back to the default project glyph. */
   | { kind: "project-icon"; icon: string | null }
   /** An actor's avatar, resolved by the view layer from `actorType`+`id`. */

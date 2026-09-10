@@ -13,6 +13,7 @@ vi.mock("@multica/core/hooks", () => ({
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => ({
+    iconOf: () => null,
     colorOf: (status: string) =>
       status === "awaiting_response" ? "#f97316" : null,
   }),

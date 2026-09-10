@@ -52,7 +52,7 @@ WHERE id = sqlc.arg('id')::uuid
 -- name: CreateIssueStatusEntry :one
 -- Custom statuses only: is_system is never set here, so the canonical-key and
 -- non-archivable CHECK constraints can only ever apply to seeded rows.
-INSERT INTO issue_status (workspace_id, key, name, description, category, color, position)
+INSERT INTO issue_status (workspace_id, key, name, description, category, color, icon, position)
 VALUES (
     sqlc.arg('workspace_id')::uuid,
     sqlc.arg('key')::text,
@@ -60,6 +60,7 @@ VALUES (
     sqlc.arg('description')::text,
     sqlc.arg('category')::text,
     sqlc.arg('color')::text,
+    sqlc.arg('icon')::text,
     COALESCE(
         (SELECT MAX(position) + 1 FROM issue_status
          WHERE workspace_id = sqlc.arg('workspace_id')::uuid
@@ -77,6 +78,7 @@ UPDATE issue_status SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
     color = COALESCE(sqlc.narg('color'), color),
+    icon = COALESCE(sqlc.narg('icon'), icon),
     position = COALESCE(sqlc.narg('position'), position),
     updated_at = now()
 WHERE id = sqlc.arg('id')::uuid

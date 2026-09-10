@@ -34,6 +34,17 @@
       "description": "설명",
       "description_placeholder": "팀에게 이 상태가 의미하는 것",
       "color": "색상",
+      "icon": "아이콘 모양",
+      "icon_shapes": {
+        "default": "기본값",
+        "dotted": "점선 원",
+        "circle": "원",
+        "half": "반원 채우기",
+        "three_quarters": "4분의 3 채우기",
+        "check": "체크",
+        "slash": "사선",
+        "cross": "엑스"
+      },
       "cancel": "취소",
       "save": "저장",
       "saving": "저장 중…",

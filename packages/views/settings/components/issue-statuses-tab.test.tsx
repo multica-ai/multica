@@ -8,6 +8,8 @@ import en from "../../locales/en/settings.json";
 import { IssueStatusesTab } from "./issue-statuses-tab";
 
 const reorderMutate = vi.hoisted(() => vi.fn());
+const createMutate = vi.hoisted(() => vi.fn());
+const updateMutate = vi.hoisted(() => vi.fn());
 let catalog: IssueStatusEntry[] = [];
 let role: string = "owner";
 
@@ -31,8 +33,8 @@ vi.mock("@multica/core/issue-statuses/queries", async (importOriginal) => ({
   issueStatusListOptions: () => ({ queryKey: ["issue-statuses", "ws-1"] }),
 }));
 vi.mock("@multica/core/issue-statuses/mutations", () => ({
-  useCreateIssueStatus: () => ({ mutate: vi.fn(), isPending: false }),
-  useUpdateIssueStatus: () => ({ mutate: vi.fn(), isPending: false }),
+  useCreateIssueStatus: () => ({ mutate: createMutate, isPending: false }),
+  useUpdateIssueStatus: () => ({ mutate: updateMutate, isPending: false }),
   useArchiveIssueStatus: () => ({ mutate: vi.fn() }),
   useReorderIssueStatuses: () => ({ mutate: reorderMutate }),
 }));
@@ -82,11 +84,50 @@ const BUILT_IN_IN_REVIEW = entry({
 afterEach(() => {
   cleanup();
   reorderMutate.mockClear();
+  createMutate.mockClear();
+  updateMutate.mockClear();
   catalog = [];
   role = "owner";
 });
 
 describe("IssueStatusesTab", () => {
+  it("creates a status with independent shape and color", async () => {
+    catalog = [BUILT_IN_IN_REVIEW];
+    render(<IssueStatusesTab />);
+    fireEvent.click(screen.getByLabelText(`${en.issue_statuses.add}: ${en.issue_statuses.category_labels.started}`));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(en.issue_statuses.editor.name), { target: { value: "Awaiting response" } });
+    const choice = within(dialog).getByRole("button", { name: en.issue_statuses.editor.icon_shapes.three_quarters });
+    fireEvent.click(choice);
+    expect(choice).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(dialog).getByRole("button", { name: en.issue_statuses.editor.save }));
+    expect(createMutate).toHaveBeenCalledWith(expect.objectContaining({ name: "Awaiting response", category: "started", icon: "three_quarters", color: expect.any(String) }), expect.any(Object));
+  });
+
+  it("loads and edits a saved shape without changing category", async () => {
+    catalog = [entry({ key: "qa", name: "QA", icon: "slash" })];
+    render(<IssueStatusesTab />);
+    fireEvent.click(screen.getByLabelText(en.issue_statuses.actions.open.replace("{{name}}", "QA")));
+    fireEvent.click(await screen.findByRole("menuitem", { name: en.issue_statuses.actions.edit }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: en.issue_statuses.editor.icon_shapes.slash })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(dialog).getByRole("button", { name: en.issue_statuses.editor.icon_shapes.cross }));
+    fireEvent.click(within(dialog).getByRole("button", { name: en.issue_statuses.editor.save }));
+    expect(updateMutate).toHaveBeenCalledWith(expect.objectContaining({ id: "qa", icon: "cross" }), expect.any(Object));
+    expect(updateMutate.mock.calls[0]![0]).not.toHaveProperty("category");
+  });
+
+  it("preserves a future icon when editing only the name", async () => {
+    catalog = [entry({ key: "qa", name: "QA", icon: "future-shape" })];
+    render(<IssueStatusesTab />);
+    fireEvent.click(screen.getByLabelText(en.issue_statuses.actions.open.replace("{{name}}", "QA")));
+    fireEvent.click(await screen.findByRole("menuitem", { name: en.issue_statuses.actions.edit }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(en.issue_statuses.editor.name), { target: { value: "Renamed QA" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: en.issue_statuses.editor.save }));
+    expect(updateMutate.mock.calls[0]![0]).toMatchObject({ id: "qa", name: "Renamed QA" });
+    expect(updateMutate.mock.calls[0]![0]).not.toHaveProperty("icon");
+  });
   it("keeps the create dialog concise and category choices text-only", async () => {
     catalog = [BUILT_IN_IN_REVIEW];
     render(<IssueStatusesTab />);

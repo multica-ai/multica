@@ -49,7 +49,9 @@ import type {
   BuiltInIssueStatus,
   IssueStatusCategory,
   IssueStatusEntry,
+  IssueStatusIcon,
 } from "@multica/core/types";
+import { ISSUE_STATUS_ICONS } from "@multica/core/types/issue-status";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -117,6 +119,7 @@ interface StatusDraft {
   description: string;
   category: IssueStatusCategory;
   color: string;
+  icon: IssueStatusIcon | "";
 }
 
 const EMPTY_DRAFT: StatusDraft = {
@@ -124,6 +127,7 @@ const EMPTY_DRAFT: StatusDraft = {
   description: "",
   category: "unstarted",
   color: COLOR_PICKER_PRESETS[6]!,
+  icon: "",
 };
 
 export function IssueStatusesTab() {
@@ -424,6 +428,7 @@ function StatusRow({
         status={entry.key}
         category={normalizeIssueStatusCategory(entry.category) ?? "unstarted"}
         color={issueStatusColor(entry)}
+        icon={entry.icon}
         className="size-4"
       />
       {/* Name over description, the way the row is read. The old layout pinned
@@ -503,6 +508,7 @@ function StatusEditorDialog({
   const create = useCreateIssueStatus();
   const update = useUpdateIssueStatus();
   const [draft, setDraft] = useState<StatusDraft>(EMPTY_DRAFT);
+  const [iconChanged, setIconChanged] = useState(false);
 
   const categoryItems = ALL_STATUSES.map((c) => ({
     value: c,
@@ -511,6 +517,7 @@ function StatusEditorDialog({
 
   useEffect(() => {
     if (!open) return;
+    setIconChanged(false);
     setDraft(
       status
         ? {
@@ -518,6 +525,8 @@ function StatusEditorDialog({
             description: status.description ?? "",
             category: normalizeIssueStatusCategory(status.category) ?? "unstarted",
             color: status.color,
+            icon: ISSUE_STATUS_ICONS.includes(status.icon as IssueStatusIcon)
+              ? status.icon as IssueStatusIcon : "",
           }
         : { ...EMPTY_DRAFT, category: category ?? "unstarted" },
     );
@@ -538,6 +547,8 @@ function StatusEditorDialog({
           name,
           description: draft.description.trim(),
           color: draft.color,
+          // Preserve an unknown future icon when only other fields are edited.
+          ...(iconChanged ? { icon: draft.icon } : {}),
         },
         { onSuccess: () => onOpenChange(false), onError },
       );
@@ -549,6 +560,7 @@ function StatusEditorDialog({
         description: draft.description.trim(),
         category: draft.category,
         color: draft.color,
+        icon: draft.icon,
       },
       {
         onSuccess: (created) => {
@@ -677,6 +689,7 @@ function StatusEditorDialog({
                       status={status?.key ?? ""}
                       category={draft.category}
                       color={draft.color}
+                      icon={draft.icon}
                       className="size-5"
                     />
                     <span className="font-mono text-caption uppercase text-muted-foreground">
@@ -686,6 +699,31 @@ function StatusEditorDialog({
                 }
               />
             </div>
+            <fieldset className="space-y-2">
+              <legend className="text-caption font-medium">
+                {t(($) => $.issue_statuses.editor.icon)}
+              </legend>
+              <div className="flex flex-wrap gap-2">
+                {(["", ...ISSUE_STATUS_ICONS] as const).map((icon) => (
+                  <Button
+                    key={icon}
+                    type="button"
+                    variant={draft.icon === icon ? "secondary" : "outline"}
+                    size="icon"
+                    className="size-11 aria-pressed:ring-2 aria-pressed:ring-ring"
+                    aria-label={t(($) => $.issue_statuses.editor.icon_shapes[icon || "default"])}
+                    aria-pressed={draft.icon === icon}
+                    title={t(($) => $.issue_statuses.editor.icon_shapes[icon || "default"])}
+                    onClick={() => {
+                      setIconChanged(true);
+                      setDraft((current) => ({ ...current, icon }));
+                    }}
+                  >
+                    <StatusIcon status="" category={draft.category} color={draft.color} icon={icon} className="size-5" />
+                  </Button>
+                ))}
+              </div>
+            </fieldset>
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>

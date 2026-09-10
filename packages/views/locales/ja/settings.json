@@ -34,6 +34,17 @@
       "description": "説明",
       "description_placeholder": "チームにとってこのステータスが意味すること",
       "color": "色",
+      "icon": "アイコンの形",
+      "icon_shapes": {
+        "default": "デフォルト",
+        "dotted": "点線の円",
+        "circle": "円",
+        "half": "半分塗りつぶし",
+        "three_quarters": "4分の3塗りつぶし",
+        "check": "チェック",
+        "slash": "斜線",
+        "cross": "バツ"
+      },
       "cancel": "キャンセル",
       "save": "保存",
       "saving": "保存中…",

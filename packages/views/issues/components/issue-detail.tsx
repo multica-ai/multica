@@ -533,6 +533,7 @@ function ActivityBlock({
   resolveStatusLabel,
   resolveStatusCategory,
   resolveStatusColor,
+  resolveStatusIcon,
   t,
   timeAgo,
   locale,
@@ -551,6 +552,7 @@ function ActivityBlock({
   resolveStatusCategory: (statusKey: string) => IssueStatusCategory;
   /** A custom status's own `#rrggbb`; null for built-ins and unknown keys. */
   resolveStatusColor: (statusKey: string) => string | null;
+  resolveStatusIcon: (statusKey: string) => string | null;
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
   locale: string;
@@ -619,6 +621,7 @@ function ActivityBlock({
               status={details.to as IssueStatus}
               category={resolveStatusCategory(details.to ?? "")}
               color={resolveStatusColor(details.to ?? "")}
+              icon={resolveStatusIcon(details.to ?? "")}
               className="h-4 w-4 shrink-0"
             />
           );
@@ -701,6 +704,7 @@ function SubIssueRow({
   const paths = useWorkspacePaths();
   const updateIssue = useUpdateIssue();
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(child.id));
+  const childStatusCatalog = useIssueStatuses(useWorkspaceId());
   const toggleSelected = useIssueSelectionStore((s) => s.toggle);
   // Category, not key: a custom status in the done/cancelled categories is
   // finished work and has to strike through like any other. (MUL-6243)
@@ -780,6 +784,9 @@ function SubIssueRow({
           trigger={
             <StatusIcon
               status={child.status}
+              category={childStatusCatalog.categoryOf(child.status)}
+              color={childStatusCatalog.colorOf(child.status)}
+              icon={childStatusCatalog.iconOf(child.status)}
               className="h-[15px] w-[15px] shrink-0"
             />
           }
@@ -1156,13 +1163,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const resolveStatusLabel = useStatusLabel(wsId);
-  // The glyph set is per CATEGORY (MUL-6243), so a status-change entry for a
-  // custom status drew the same icon as the built-in it sits beside — an
-  // "In Review → Awaiting Response" line looked like nothing had moved. Colour
-  // is what carries a custom status's own identity, as the inbox row and the
-  // status-changed detail label already render it. `colorOf` is what keeps a
-  // built-in on its semantic token instead of the catalog's seed hex.
-  const { categoryOf: resolveStatusCategory, colorOf: resolveStatusColor } =
+  // Activity and issue visuals share the catalog's custom geometry and color;
+  // built-ins keep their fixed glyph and semantic token.
+  const { categoryOf: resolveStatusCategory, colorOf: resolveStatusColor, iconOf: resolveStatusIcon } =
     useIssueStatuses(wsId);
   // Description autosave is deliberately NOT gated (no explicit submit; the
   // editor already strips `blob:` before serializing and binds ids on the
@@ -2497,6 +2500,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               >
                 <StatusIcon
                   status={parentIssue.status}
+                  color={resolveStatusColor(parentIssue.status)}
+                  icon={resolveStatusIcon(parentIssue.status)}
                   category={issueStatusCategory(parentIssue) ?? undefined}
                   className="h-3.5 w-3.5 shrink-0"
                 />
@@ -2688,6 +2693,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         resolveStatusLabel={resolveStatusLabel}
         resolveStatusCategory={resolveStatusCategory}
         resolveStatusColor={resolveStatusColor}
+        resolveStatusIcon={resolveStatusIcon}
         t={t}
         timeAgo={timeAgo}
         locale={locale}
@@ -2970,6 +2976,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
               <StatusIcon
                   status={parentIssue.status}
+                  color={resolveStatusColor(parentIssue.status)}
+                  icon={resolveStatusIcon(parentIssue.status)}
                   category={issueStatusCategory(parentIssue) ?? undefined}
                   className="h-3.5 w-3.5 shrink-0"
                 />

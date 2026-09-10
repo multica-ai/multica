@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, ChevronRight, LocateFixed, Maximize2, Minimize2, XIcon } from "lucide-react";
 import { issueStatusCategory } from "@multica/core/issues";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import type { Issue, IssueSourceContext, SourceContextCommentSnapshot } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -53,6 +55,7 @@ export function SourceContextBadge({
   parentProgress?: { done: number; total: number };
 }) {
   const { t } = useT("issues");
+  const { colorOf, iconOf } = useIssueStatuses(useWorkspaceId());
   const locale = useLocale();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
@@ -158,6 +161,8 @@ export function SourceContextBadge({
             >
               <StatusIcon
                 status={parentIssue.status}
+                color={colorOf(parentIssue.status)}
+                icon={iconOf(parentIssue.status)}
                 category={issueStatusCategory(parentIssue) ?? undefined}
                 className="size-3.5"
               />

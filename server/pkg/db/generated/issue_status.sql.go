@@ -19,7 +19,7 @@ WHERE id = $1::uuid
   AND workspace_id = $2::uuid
   AND is_system = FALSE
   AND archived_at IS NULL
-RETURNING id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at
+RETURNING id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at, icon
 `
 
 type ArchiveIssueStatusEntryParams struct {
@@ -49,6 +49,7 @@ func (q *Queries) ArchiveIssueStatusEntry(ctx context.Context, arg ArchiveIssueS
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Icon,
 	)
 	return i, err
 }
@@ -75,7 +76,7 @@ func (q *Queries) CountIssuesUsingStatusKey(ctx context.Context, arg CountIssues
 }
 
 const createIssueStatusEntry = `-- name: CreateIssueStatusEntry :one
-INSERT INTO issue_status (workspace_id, key, name, description, category, color, position)
+INSERT INTO issue_status (workspace_id, key, name, description, category, color, icon, position)
 VALUES (
     $1::uuid,
     $2::text,
@@ -83,6 +84,7 @@ VALUES (
     $4::text,
     $5::text,
     $6::text,
+    $7::text,
     COALESCE(
         (SELECT MAX(position) + 1 FROM issue_status
          WHERE workspace_id = $1::uuid
@@ -90,7 +92,7 @@ VALUES (
         0
     )
 )
-RETURNING id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at
+RETURNING id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at, icon
 `
 
 type CreateIssueStatusEntryParams struct {
@@ -100,6 +102,7 @@ type CreateIssueStatusEntryParams struct {
 	Description string      `json:"description"`
 	Category    string      `json:"category"`
 	Color       string      `json:"color"`
+	Icon        string      `json:"icon"`
 }
 
 // Custom statuses only: is_system is never set here, so the canonical-key and
@@ -112,6 +115,7 @@ func (q *Queries) CreateIssueStatusEntry(ctx context.Context, arg CreateIssueSta
 		arg.Description,
 		arg.Category,
 		arg.Color,
+		arg.Icon,
 	)
 	var i IssueStatus
 	err := row.Scan(
@@ -127,6 +131,7 @@ func (q *Queries) CreateIssueStatusEntry(ctx context.Context, arg CreateIssueSta
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Icon,
 	)
 	return i, err
 }
@@ -142,7 +147,7 @@ func (q *Queries) DeleteIssueStatusEntriesForWorkspace(ctx context.Context, work
 }
 
 const getIssueStatusEntryByID = `-- name: GetIssueStatusEntryByID :one
-SELECT id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at FROM issue_status
+SELECT id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at, icon FROM issue_status
 WHERE id = $1::uuid
   AND workspace_id = $2::uuid
 `
@@ -168,12 +173,13 @@ func (q *Queries) GetIssueStatusEntryByID(ctx context.Context, arg GetIssueStatu
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Icon,
 	)
 	return i, err
 }
 
 const getIssueStatusEntryByKey = `-- name: GetIssueStatusEntryByKey :one
-SELECT id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at FROM issue_status
+SELECT id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at, icon FROM issue_status
 WHERE workspace_id = $1::uuid
   AND key = $2::text
 `
@@ -199,12 +205,13 @@ func (q *Queries) GetIssueStatusEntryByKey(ctx context.Context, arg GetIssueStat
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Icon,
 	)
 	return i, err
 }
 
 const listActiveCustomIssueStatusEntries = `-- name: ListActiveCustomIssueStatusEntries :many
-SELECT id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at FROM issue_status
+SELECT id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at, icon FROM issue_status
 WHERE workspace_id = $1::uuid
   AND category = $2::text
   AND is_system = FALSE
@@ -242,6 +249,7 @@ func (q *Queries) ListActiveCustomIssueStatusEntries(ctx context.Context, arg Li
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Icon,
 		); err != nil {
 			return nil, err
 		}
@@ -254,7 +262,7 @@ func (q *Queries) ListActiveCustomIssueStatusEntries(ctx context.Context, arg Li
 }
 
 const listIssueStatusEntries = `-- name: ListIssueStatusEntries :many
-SELECT id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at FROM issue_status
+SELECT id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at, icon FROM issue_status
 WHERE workspace_id = $1::uuid
   AND ($2::bool OR archived_at IS NULL)
 ORDER BY
@@ -303,6 +311,7 @@ func (q *Queries) ListIssueStatusEntries(ctx context.Context, arg ListIssueStatu
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Icon,
 		); err != nil {
 			return nil, err
 		}
@@ -450,19 +459,21 @@ UPDATE issue_status SET
     name = COALESCE($1, name),
     description = COALESCE($2, description),
     color = COALESCE($3, color),
-    position = COALESCE($4, position),
+    icon = COALESCE($4, icon),
+    position = COALESCE($5, position),
     updated_at = now()
-WHERE id = $5::uuid
-  AND workspace_id = $6::uuid
+WHERE id = $6::uuid
+  AND workspace_id = $7::uuid
   AND is_system = FALSE
   AND archived_at IS NULL
-RETURNING id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at
+RETURNING id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at, icon
 `
 
 type UpdateIssueStatusEntryParams struct {
 	Name        pgtype.Text   `json:"name"`
 	Description pgtype.Text   `json:"description"`
 	Color       pgtype.Text   `json:"color"`
+	Icon        pgtype.Text   `json:"icon"`
 	Position    pgtype.Float8 `json:"position"`
 	ID          pgtype.UUID   `json:"id"`
 	WorkspaceID pgtype.UUID   `json:"workspace_id"`
@@ -476,6 +487,7 @@ func (q *Queries) UpdateIssueStatusEntry(ctx context.Context, arg UpdateIssueSta
 		arg.Name,
 		arg.Description,
 		arg.Color,
+		arg.Icon,
 		arg.Position,
 		arg.ID,
 		arg.WorkspaceID,
@@ -494,6 +506,7 @@ func (q *Queries) UpdateIssueStatusEntry(ctx context.Context, arg UpdateIssueSta
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Icon,
 	)
 	return i, err
 }

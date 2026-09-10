@@ -34,6 +34,17 @@
       "description": "Description",
       "description_placeholder": "What this status means for your team",
       "color": "Color",
+      "icon": "Icon shape",
+      "icon_shapes": {
+        "default": "Default",
+        "dotted": "Dotted circle",
+        "circle": "Circle",
+        "half": "Half-filled circle",
+        "three_quarters": "Three-quarter circle",
+        "check": "Checkmark",
+        "slash": "Slash",
+        "cross": "Cross"
+      },
       "cancel": "Cancel",
       "save": "Save",
       "saving": "Saving…",

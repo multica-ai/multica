@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { render, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { issueDetailOptions } from "@multica/core/issues/queries";
+import { issueStatusListOptions } from "@multica/core/issue-statuses/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import {
@@ -97,6 +98,28 @@ function presentationOf(url: string, fallback?: string) {
 
 beforeEach(() => {
   ws.current = { id: "ws1", slug: "acme" };
+});
+
+it("updates a tab's custom icon from the shared catalog cache without fetching", () => {
+  const qc = makeClient();
+  seed(qc);
+  qc.setQueryData(issueDetailOptions("ws1", "i1").queryKey, {
+    id: "i1", identifier: "MUL-1", title: "QA", status: "qa", status_category: "started",
+  } as never);
+  qc.setQueryData(issueStatusListOptions("ws1").queryKey, {
+    statuses: [{
+      id: "qa", workspace_id: "ws1", key: "qa", name: "QA", description: "",
+      category: "started", color: "#123456", icon: "slash", is_system: false,
+      position: 0, archived_at: null, created_at: "", updated_at: "",
+    }],
+    categories: ["unstarted", "started", "done", "closed"],
+    total: 1,
+  });
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  const { result } = renderHook(() => useTabPresentation("/acme/issues/i1"), { wrapper });
+  expect(result.current.visual).toMatchObject({ kind: "issue-status", status: "qa", icon: "slash", color: "#123456" });
+  const { container } = render(<ResourceLeadingVisual visual={result.current.visual} />);
+  expect(container.querySelector("svg line")).not.toBeNull();
 });
 
 describe("useTabPresentation — live from cache", () => {

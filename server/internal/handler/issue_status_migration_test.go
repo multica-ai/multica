@@ -97,4 +97,36 @@ func TestIssueStatusLifecycleMigrationPreservesIdentity(t *testing.T) {
 	if unknown != "custom_done" {
 		t.Fatalf("cross-workspace resolution: %q", unknown)
 	}
+	// Adding icon must not rewrite old statuses, and replay must not erase a
+	// shape saved after the first application (fix-forward migration recovery).
+	if _, err := tx.Exec(ctx, "CREATE TEMP TABLE catalog_before_icon AS SELECT * FROM issue_status"); err != nil {
+		t.Fatal(err)
+	}
+	iconMigration, err := os.ReadFile("../../migrations/468_issue_status_icon.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, string(iconMigration)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM catalog_before_icon b FULL JOIN issue_status s USING(id)
+		WHERE to_jsonb(b) IS DISTINCT FROM (to_jsonb(s) - 'icon') OR s.icon != ''`).Scan(&changed); err != nil {
+		t.Fatal(err)
+	}
+	if changed != 0 {
+		t.Fatalf("icon migration changed %d existing statuses", changed)
+	}
+	if _, err := tx.Exec(ctx, "UPDATE issue_status SET icon = 'slash' WHERE key = 'custom_blocked'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, string(iconMigration)); err != nil {
+		t.Fatal(err)
+	}
+	var icon string
+	if err := tx.QueryRow(ctx, "SELECT icon FROM issue_status WHERE key = 'custom_blocked'").Scan(&icon); err != nil {
+		t.Fatal(err)
+	}
+	if icon != "slash" {
+		t.Fatalf("migration replay erased saved icon: %q", icon)
+	}
 }

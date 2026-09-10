@@ -16,20 +16,20 @@ import { useStatusLabel } from "./status-label";
 
 export interface StatusOption {
   key: IssueStatus;
-  /** The category this status behaves as — drives its icon and hover color. */
+  /** Lifecycle category; not the custom status's icon or automation behavior. */
   category: IssueStatusCategory;
   label: string;
   /** `#rrggbb` for a custom status; null for a built-in, which keeps its token color. */
   color: string | null;
+  icon?: string | null;
 }
 
 /**
  * The statuses a user can pick or filter by, as one flat list in canonical
  * category order (MUL-6243, MUL-6399).
  *
- * Category is carried per option rather than expressed as a heading: it is the
- * behavior a status inherits, which the icon and hover color already say, and
- * a heading per category turned a 7-row list into 14 rows of half whitespace.
+ * Category is carried per option rather than expressed as a heading. Shape
+ * and color belong to the concrete status and convey no automation behavior.
  *
  * Shared by the status picker and the status filter so the two can never drift
  * — a status offered in one and missing from the other is exactly how an issue
@@ -52,7 +52,7 @@ export function useStatusOptions(
   return useMemo(
     () => {
       const includedArchived = new Set(includeArchivedKeys);
-      return ALL_STATUSES.flatMap((category) => {
+      return ALL_STATUSES.flatMap<StatusOption>((category) => {
         const entries = statuses.filter(
           (entry) =>
             normalizeIssueStatusCategory(entry.category) === category &&
@@ -76,6 +76,7 @@ export function useStatusOptions(
           category,
           label: labelOf(e.key),
           color: issueStatusColor(e),
+          icon: e.icon,
         }));
       });
     },

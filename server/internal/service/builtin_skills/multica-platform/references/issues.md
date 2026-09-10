@@ -246,6 +246,10 @@ category in Settings. Display order is shared by boards, lists and status
 menus; it never changes automation or a status's category. Built-in definitions
 still cannot be edited or archived.
 
+Custom statuses can have an independently chosen icon shape and color. These
+are presentation only: never infer lifecycle, completion, or agent behavior
+from an icon. Use the status key and lifecycle category instead.
+
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
   the assigned agent then.

@@ -4,6 +4,7 @@ import type {
   BuiltInIssueStatus,
   IssueStatus,
   IssueStatusCategory,
+  IssueStatusIcon,
 } from "@multica/core/types";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 
@@ -166,6 +167,16 @@ const CATEGORY_RENDERER: Record<IssueStatusCategory, BuiltInIssueStatus> = {
   closed: "cancelled",
 };
 
+const ICON_RENDERERS: Record<IssueStatusIcon, () => React.ReactNode> = {
+  dotted: BacklogIcon,
+  circle: TodoIcon,
+  half: InProgressIcon,
+  three_quarters: InReviewIcon,
+  check: DoneIcon,
+  slash: BlockedIcon,
+  cross: CancelledIcon,
+};
+
 const BUILT_IN_ICON_COLOR: Record<BuiltInIssueStatus, string> = {
   backlog: "text-muted-foreground",
   todo: "text-muted-foreground",
@@ -184,6 +195,7 @@ export function StatusIcon({
   status,
   category: categoryProp,
   color,
+  icon,
   className = "h-4 w-4",
   inheritColor = false,
 }: {
@@ -196,17 +208,22 @@ export function StatusIcon({
   category?: IssueStatusCategory;
   /** A custom status's `#rrggbb`. Built-ins keep their semantic token color. */
   color?: string | null;
+  /** Custom geometry, independent of category. Unknown/absent uses the default. */
+  icon?: string | null;
   className?: string;
   inheritColor?: boolean;
 }) {
-  // Custom statuses use their category glyph; concrete built-ins retain their
-  // more specific progress/review/blocked glyphs within that category.
+  // Built-ins stay locked; custom geometry never determines lifecycle behavior.
   const category = categoryProp ?? statusCategoryOfKey(status);
   const builtIn = isBuiltInIssueStatus(status) ? status : null;
-  const Renderer = STATUS_RENDERERS[builtIn ?? CATEGORY_RENDERER[category]] ?? TodoIcon;
+  const customRenderer = icon && Object.hasOwn(ICON_RENDERERS, icon)
+    ? ICON_RENDERERS[icon as IssueStatusIcon]
+    : null;
+  const Renderer = (builtIn ? STATUS_RENDERERS[builtIn] : customRenderer)
+    ?? STATUS_RENDERERS[CATEGORY_RENDERER[category]] ?? TodoIcon;
   // A custom color wins over the category's token, but only when the caller
   // isn't already forcing the glyph to inherit (selected rows, dark chips).
-  const useCustomColor = !inheritColor && Boolean(color);
+  const useCustomColor = !builtIn && !inheritColor && Boolean(color);
 
   return (
     <svg

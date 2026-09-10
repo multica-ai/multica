@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import type { GanttZoom } from "@multica/core/issues/stores/view-store";
@@ -321,6 +322,7 @@ function ScheduledRow({
   const locale = useLocale();
   const p = useWorkspacePaths();
   const wsId = useWorkspaceId();
+  const { colorOf, iconOf } = useIssueStatuses(wsId);
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),
     enabled: !!issue.project_id,
@@ -375,6 +377,8 @@ function ScheduledRow({
         >
           <StatusIcon
             status={issue.status}
+            color={colorOf(issue.status)}
+            icon={iconOf(issue.status)}
             category={issueStatusCategory(issue) ?? undefined}
             className="h-3.5 w-3.5"
           />

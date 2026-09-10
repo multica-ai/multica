@@ -34,6 +34,17 @@
       "description": "描述",
       "description_placeholder": "这个状态对团队意味着什么",
       "color": "颜色",
+      "icon": "图标形状",
+      "icon_shapes": {
+        "default": "默认",
+        "dotted": "虚线圆",
+        "circle": "空心圆",
+        "half": "半圆填充",
+        "three_quarters": "四分之三圆",
+        "check": "对勾",
+        "slash": "斜线",
+        "cross": "叉号"
+      },
       "cancel": "取消",
       "save": "保存",
       "saving": "保存中…",

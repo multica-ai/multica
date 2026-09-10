@@ -33,6 +33,7 @@ type IssueStatusResponse struct {
 	Description string  `json:"description"`
 	Category    string  `json:"category"`
 	Color       string  `json:"color"`
+	Icon        string  `json:"icon"`
 	IsSystem    bool    `json:"is_system"`
 	Position    float64 `json:"position"`
 	ArchivedAt  *string `json:"archived_at"`
@@ -60,6 +61,7 @@ func issueStatusToResponse(s db.IssueStatus) IssueStatusResponse {
 		Description: s.Description,
 		Category:    category,
 		Color:       s.Color,
+		Icon:        s.Icon,
 		IsSystem:    s.IsSystem,
 		Position:    s.Position,
 		ArchivedAt:  timestampToPtr(s.ArchivedAt),
@@ -76,6 +78,7 @@ type CreateIssueStatusRequest struct {
 	Description string `json:"description"`
 	Category    string `json:"category"`
 	Color       string `json:"color"`
+	Icon        string `json:"icon"`
 }
 
 // UpdateIssueStatusRequest deliberately has no Key or Category field. Both are
@@ -85,6 +88,7 @@ type UpdateIssueStatusRequest struct {
 	Name        *string  `json:"name"`
 	Description *string  `json:"description"`
 	Color       *string  `json:"color"`
+	Icon        *string  `json:"icon"`
 	Position    *float64 `json:"position"`
 }
 
@@ -163,6 +167,10 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Category = category
+	if !validIssueStatusIcon(req.Icon) {
+		writeError(w, http.StatusBadRequest, "invalid status icon")
+		return
+	}
 	color, err := normalizeColor(req.Color)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -189,6 +197,7 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		Category:    category,
 		Color:       strings.ToLower(color),
+		Icon:        req.Icon,
 	})
 	if badRequest != "" {
 		writeError(w, http.StatusBadRequest, badRequest)
@@ -320,6 +329,14 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		color = pgtype.Text{String: strings.ToLower(normalized), Valid: true}
 	}
+	var icon pgtype.Text
+	if req.Icon != nil {
+		if !validIssueStatusIcon(*req.Icon) {
+			writeError(w, http.StatusBadRequest, "invalid status icon")
+			return
+		}
+		icon = pgtype.Text{String: *req.Icon, Valid: true}
+	}
 	var position pgtype.Float8
 	if req.Position != nil {
 		position = pgtype.Float8{Float64: *req.Position, Valid: true}
@@ -331,6 +348,7 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		Name:        name,
 		Description: description,
 		Color:       color,
+		Icon:        icon,
 		Position:    position,
 	})
 	if err != nil {
@@ -350,6 +368,17 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publishIssueStatusChanged(uuidToString(wsUUID), member, "updated")
 	writeJSON(w, http.StatusOK, issueStatusToResponse(updated))
+}
+
+// These identifiers describe geometry, not workflow semantics. Empty selects
+// the category default. Unknown values are rejected on writes, not on reads.
+func validIssueStatusIcon(icon string) bool {
+	switch icon {
+	case "", "dotted", "circle", "half", "three_quarters", "check", "slash", "cross":
+		return true
+	default:
+		return false
+	}
 }
 
 // ArchiveIssueStatus retires a custom status from FUTURE assignment. Issues

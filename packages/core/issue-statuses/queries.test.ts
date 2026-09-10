@@ -18,6 +18,18 @@ function entry(key: string, category: string, name = key, archivedAt: string | n
 }
 
 describe("buildIssueStatusCatalog", () => {
+  it("resolves custom geometry including archived statuses but never overrides built-ins", () => {
+    const catalog = buildIssueStatusCatalog([
+      { ...entry("qa", "started"), icon: "three_quarters" },
+      { ...entry("retired", "started", "Retired", "2026-01-01"), icon: "slash" },
+      { ...entry("todo", "unstarted"), is_system: true, icon: "check" },
+    ]);
+    expect(catalog.iconOf("qa")).toBe("three_quarters");
+    expect(catalog.iconOf("retired")).toBe("slash");
+    expect(catalog.iconOf("todo")).toBeNull();
+    expect(catalog.iconOf("unknown")).toBeNull();
+    expect(buildIssueStatusCatalog(undefined).iconOf("qa")).toBeNull();
+  });
   // The catalog is fetched async, but a status must render on the very first
   // paint. Built-in keys are their own category, so an unloaded catalog still
   // resolves all 7 — which is what keeps the default workspace identical

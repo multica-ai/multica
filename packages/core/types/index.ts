@@ -2,6 +2,7 @@ export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssign
 export type {
   IssueStatusCategory,
   IssueStatusEntry,
+  IssueStatusIcon,
   ListIssueStatusesResponse,
   CreateIssueStatusRequest,
   UpdateIssueStatusRequest,

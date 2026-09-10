@@ -287,6 +287,7 @@ export function InboxFilterMenu({
                     status={option.key}
                     category={option.category}
                     color={option.color}
+                    icon={option.icon}
                     className="size-3.5"
                   />
                   <span className="flex-1">{option.label}</span>

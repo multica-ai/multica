@@ -79,7 +79,7 @@ describe("StatusPicker trigger color", () => {
   // one and as the `text-success` token in the other — the same status in two
   // visibly different greens, side by side. (MUL-6440)
   it("paints a built-in from the token, exactly like its row in the list", () => {
-    catalogEntries = [IN_REVIEW, QA];
+    catalogEntries = [IN_REVIEW, { ...QA, icon: "slash" }];
     const { container } = renderWithI18n(
       <StatusPicker status="in_review" onUpdate={() => {}} open onOpenChange={() => {}} />,
     );
@@ -98,7 +98,7 @@ describe("StatusPicker trigger color", () => {
   // The other half of the same rule: a CUSTOM status has no token to fall back
   // on, so its own color has to reach both controls.
   it("paints a custom status from its own color in both places", () => {
-    catalogEntries = [IN_REVIEW, QA];
+    catalogEntries = [IN_REVIEW, { ...QA, icon: "slash" }];
     const { container } = renderWithI18n(
       <StatusPicker status="qa" onUpdate={() => {}} open onOpenChange={() => {}} />,
     );
@@ -108,5 +108,7 @@ describe("StatusPicker trigger color", () => {
 
     expect(trigger?.style.color).toBe("rgb(236, 122, 45)");
     expect(row?.style.color).toBe(trigger?.style.color);
+    expect(trigger?.querySelector("line")).not.toBeNull();
+    expect(row?.innerHTML).toBe(trigger?.innerHTML);
   });
 });

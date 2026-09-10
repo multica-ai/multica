@@ -263,7 +263,7 @@ function demoteCancelledItems(items: MentionItem[], query: string): MentionItem[
 export const MentionList = forwardRef<MentionListRef, MentionListProps>(
   function MentionList({ items, query, command, includeProjectSearch = false }, ref) {
     const { t } = useT("editor");
-    const { colorOf: statusColorOf } = useIssueStatuses(getCurrentWsId() ?? "");
+    const { colorOf: statusColorOf, iconOf: statusIconOf } = useIssueStatuses(getCurrentWsId() ?? "");
     // Selection is tracked by item identity, NOT by a positional index. The
     // list is re-bucketed by groupItems() and grows asynchronously (server
     // search results), so a slot index is not a stable target — the row under
@@ -471,6 +471,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
           <MentionRow
             key={`${item.type}-${item.id}`}
             item={item}
+            statusIcon={item.type === "issue" && item.status ? statusIconOf(item.status) : null}
             statusColor={
               item.type === "issue" && item.status
                 ? statusColorOf(item.status)
@@ -525,12 +526,14 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
 function MentionRow({
   item,
   statusColor,
+  statusIcon,
   selected,
   onSelect,
   buttonRef,
 }: {
   item: MentionItem;
   statusColor?: string | null;
+  statusIcon?: string | null;
   selected: boolean;
   onSelect: () => void;
   buttonRef: (el: HTMLButtonElement | null) => void;
@@ -557,6 +560,7 @@ function MentionRow({
               status={item.status}
               category={item.statusCategory}
               color={statusColor}
+              icon={statusIcon}
               className="h-3.5 w-3.5"
             />
           ) : (
