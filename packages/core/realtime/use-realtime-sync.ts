@@ -793,7 +793,15 @@ export function useRealtimeSync(
       },
       project: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+          // The issue table can filter on a project's status, so a
+          // project create/update/delete changes which issues a filtered
+          // window holds. The payload carries no previous status to compare
+          // against, and project writes are rare, so refresh the table
+          // queries unconditionally rather than guess.
+          qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+        }
       },
       squad: () => {
         const wsId = getCurrentWsId();

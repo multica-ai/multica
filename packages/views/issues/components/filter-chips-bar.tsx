@@ -338,9 +338,13 @@ function useFilterChips(
   const deltaNoProject = baseline
     ? includeNoProject && !baseline.includeNoProject
     : includeNoProject;
-  const deltaProjectStatuses = baseline
-    ? projectStatusFilters.filter((s) => !baseline.projectStatus.has(s))
-    : projectStatusFilters;
+  const deltaProjectStatuses = (
+    baseline
+      ? projectStatusFilters.filter((s) => !baseline.projectStatus.has(s))
+      : projectStatusFilters
+    // The store sanitizes on rehydrate; this keeps a member the config does
+    // not know from throwing on `.dotColor` if one ever gets past that.
+  ).filter((status) => PROJECT_STATUS_CONFIG[status] !== undefined);
   const deltaLabels = baseline
     ? labelFilters.filter((id) => !baseline.label.has(id))
     : labelFilters;

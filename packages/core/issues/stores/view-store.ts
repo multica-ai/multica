@@ -5,6 +5,7 @@ import { create } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { IssueStatus, IssueStatusCategory, IssuePriority, ProjectStatus, PropertyFilterValue } from "../../types";
+import { PROJECT_STATUS_ORDER } from "../../projects/config";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
@@ -770,6 +771,16 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
     tableCollapsedParents: Array.isArray(p.tableCollapsedParents)
       ? p.tableCollapsedParents
       : current.tableCollapsedParents,
+    // A saved view is a server-owned blob and a persisted snapshot can be
+    // hand-edited, so an unknown member can arrive here. It cannot be
+    // represented: the backend rejects it with a 400 and the filter chip
+    // resolves its dot through PROJECT_STATUS_CONFIG. Drop it, like
+    // `baselineFromQuery` does on the read side.
+    projectStatusFilters: Array.isArray(p.projectStatusFilters)
+      ? p.projectStatusFilters.filter((status): status is ProjectStatus =>
+          (PROJECT_STATUS_ORDER as readonly string[]).includes(status as string),
+        )
+      : current.projectStatusFilters,
   };
   return {
     ...merged,

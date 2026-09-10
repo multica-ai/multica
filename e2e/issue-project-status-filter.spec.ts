@@ -30,6 +30,8 @@ test.describe("Issue filter: project status", () => {
   const orphanIssue = `pstatus no project ${suffix}`;
   const all = [activeIssue, plannedIssue, orphanIssue];
 
+  let plannedProjectId: string;
+
   test.beforeEach(async ({ page }) => {
     api = await createTestApi();
     const activeProject = await api.createProject(`pstatus active ${suffix}`, {
@@ -38,6 +40,7 @@ test.describe("Issue filter: project status", () => {
     const plannedProject = await api.createProject(`pstatus planned ${suffix}`, {
       status: "planned",
     });
+    plannedProjectId = plannedProject.id;
     await api.createIssue(activeIssue, { project_id: activeProject.id });
     await api.createIssue(plannedIssue, { project_id: plannedProject.id });
     await api.createIssue(orphanIssue);
@@ -75,5 +78,26 @@ test.describe("Issue filter: project status", () => {
     await expect
       .poll(() => visibleIssueTitles(page, all))
       .toEqual([...all].sort());
+  });
+
+  // The issue payloads do not change when a PROJECT's status does, so only a
+  // cache invalidation can refresh a window filtered on it — the global
+  // staleTime is Infinity. Without one the list stays stale until reload.
+  test("picks up a project that moves into the selected status", async ({
+    page,
+  }) => {
+    await openProjectStatusMenu(page);
+    const inProgress = page.getByRole("menuitemcheckbox", { name: "In Progress" });
+    await inProgress.click();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await expect(inProgress).toBeHidden();
+    await expect.poll(() => visibleIssueTitles(page, all)).toEqual([activeIssue]);
+
+    await api.updateProject(plannedProjectId, { status: "in_progress" });
+
+    await expect
+      .poll(() => visibleIssueTitles(page, all), { timeout: 15000 })
+      .toEqual([activeIssue, plannedIssue].sort());
   });
 });

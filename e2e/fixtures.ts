@@ -199,6 +199,17 @@ export class TestApiClient {
     return project as { id: string; title: string; status: string };
   }
 
+  async updateProject(id: string, updates: Record<string, unknown>) {
+    const res = await this.authedFetch(`/api/projects/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      throw new Error(`update project failed: ${res.status} ${await res.text()}`);
+    }
+    return res.json();
+  }
+
   async deleteProject(id: string) {
     await this.authedFetch(`/api/projects/${id}`, { method: "DELETE" });
   }

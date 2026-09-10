@@ -164,14 +164,18 @@ export function useIssueSurfaceData({
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],
   );
-  // Only defined once the catalog is actually loaded: `undefined` makes the
-  // project-status predicate a no-op instead of emptying the surface.
+  // Keyed off `projectData`, NOT `projects`: the latter falls back to
+  // EMPTY_PROJECTS while the query is loading or failed, which would build a
+  // defined-but-empty map. `applyIssueFilters` treats a defined map as
+  // authoritative, so that map would drop every issue and blank the board.
+  // `undefined` is the honest answer until the catalog actually arrives, and
+  // it makes the predicate a no-op.
   const projectStatusById = useMemo(
     () =>
-      loadProjects
-        ? new Map(projects.map((project) => [project.id, project.status]))
+      projectData
+        ? new Map(projectData.map((project) => [project.id, project.status]))
         : undefined,
-    [loadProjects, projects],
+    [projectData],
   );
   const workingFilterContext = useMemo(
     () => ({ runningIssueIds: workingIssueIDs, projectStatusById }),

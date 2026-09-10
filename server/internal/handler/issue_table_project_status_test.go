@@ -1,14 +1,13 @@
 package handler
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // The project-status filter is a dimension of its own, next to the
@@ -16,79 +15,43 @@ import (
 // one of the selected `ProjectStatus` values. Combining it with any other
 // filter is an AND, and an issue with no project can never satisfy it.
 func TestIssueTableRowsFilterByProjectStatus(t *testing.T) {
-	ctx := context.Background()
 	suffix := time.Now().UnixNano()
-	metadata := fmt.Sprintf(`{"project_status_filter_test":%q}`, fmt.Sprintf("pstatus-%d", suffix))
-
-	createProject := func(title, status string) string {
-		var id string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO project (workspace_id, title, status) VALUES ($1, $2, $3) RETURNING id
-		`, testWorkspaceID, title, status).Scan(&id); err != nil {
-			t.Fatalf("create project %q: %v", title, err)
-		}
-		return id
+	project := func(status string) string {
+		return dbfx.Project(t, fmt.Sprintf("pstatus %s %d", status, suffix),
+			testutil.Cols{"status": status})
 	}
-	activeProject := createProject(fmt.Sprintf("pstatus active %d", suffix), "in_progress")
-	plannedProject := createProject(fmt.Sprintf("pstatus planned %d", suffix), "planned")
-	doneProject := createProject(fmt.Sprintf("pstatus done %d", suffix), "completed")
+	activeProject := project("in_progress")
+	plannedProject := project("planned")
+	doneProject := project("completed")
 
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE metadata @> $1::jsonb`, metadata)
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM project WHERE id IN ($1, $2, $3)`,
-			activeProject, plannedProject, doneProject)
-	})
-
-	insertIssue := func(title string, projectID *string) string {
-		var number int
-		if err := testPool.QueryRow(ctx, `
-			UPDATE workspace
-			SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
-			WHERE id = $1 RETURNING issue_counter
-		`, testWorkspaceID).Scan(&number); err != nil {
-			t.Fatalf("next issue number: %v", err)
-		}
-		var id string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id, metadata)
-			VALUES ($1, $2, 'todo', 'none', 'member', $3, 0, $4, $5, $6::jsonb)
-			RETURNING id
-		`, testWorkspaceID, title, testUserID, number, projectID, metadata).Scan(&id); err != nil {
-			t.Fatalf("create issue %q: %v", title, err)
-		}
-		return id
+	issue := func(title string, projectID any) string {
+		return dbfx.Issue(t, fmt.Sprintf("%s %d", title, suffix),
+			testutil.Cols{"project_id": projectID})
 	}
+	activeIssue := issue("pstatus active", activeProject)
+	plannedIssue := issue("pstatus planned", plannedProject)
+	doneIssue := issue("pstatus done", doneProject)
+	orphanIssue := issue("pstatus no project", nil)
 
-	activeIssue := insertIssue("pstatus active issue", &activeProject)
-	plannedIssue := insertIssue("pstatus planned issue", &plannedProject)
-	doneIssue := insertIssue("pstatus done issue", &doneProject)
-	orphanIssue := insertIssue("pstatus no project issue", nil)
-
+	fixture := map[string]struct{}{
+		activeIssue: {}, plannedIssue: {}, doneIssue: {}, orphanIssue: {},
+	}
+	// The workspace is shared, so read back only the rows this test wrote.
 	rows := func(filters issueTableFiltersRequest) []string {
 		t.Helper()
-		// Scope the window to this fixture so the shared workspace's other
-		// issues cannot drift the assertion.
-		filters.Properties = nil
-		w := httptest.NewRecorder()
-		testHandler.ListIssueTableRows(w, newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
-			Query: issueTableQuerySpec{
-				Scope:   issueTableScope{Kind: "workspace"},
-				Filters: filters,
-				Sort:    issueTableSortRequest{Field: "title", Direction: "asc"},
-			},
-			Group: issueTableGroupSpec{Kind: "none"},
-			Page:  issueTablePageRequest{Limit: 100},
-		}))
-		if w.Code != http.StatusOK {
-			t.Fatalf("rows status = %d: %s", w.Code, w.Body.String())
-		}
 		var response issueTableRowsResponse
-		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
-			t.Fatalf("decode rows: %v", err)
-		}
-		fixture := map[string]struct{}{
-			activeIssue: {}, plannedIssue: {}, doneIssue: {}, orphanIssue: {},
-		}
+		testutil.Call(t, testHandler.ListIssueTableRows,
+			newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
+				Query: issueTableQuerySpec{
+					Scope:   issueTableScope{Kind: "workspace"},
+					Filters: filters,
+					Sort:    issueTableSortRequest{Field: "title", Direction: "asc"},
+				},
+				Group: issueTableGroupSpec{Kind: "none"},
+				Page:  issueTablePageRequest{Limit: 100},
+			}),
+		).Want(http.StatusOK).JSON(&response)
+
 		ids := make([]string, 0, len(response.Rows))
 		for _, row := range response.Rows {
 			if _, ok := fixture[row.Issue.ID]; ok {
@@ -142,19 +105,17 @@ func TestIssueTableRowsFilterByProjectStatus(t *testing.T) {
 }
 
 func TestIssueTableRowsRejectsUnknownProjectStatus(t *testing.T) {
-	w := httptest.NewRecorder()
-	testHandler.ListIssueTableRows(w, newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
-		Query: issueTableQuerySpec{
-			Scope: issueTableScope{Kind: "workspace"},
-			// "backlog" is an issue status, not a project status — the project
-			// lifecycle has no such value.
-			Filters: issueTableFiltersRequest{ProjectStatuses: []string{"backlog"}},
-			Sort:    issueTableSortRequest{Field: "position", Direction: "asc"},
-		},
-		Group: issueTableGroupSpec{Kind: "none"},
-		Page:  issueTablePageRequest{Limit: 50},
-	}))
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.ListIssueTableRows,
+		newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
+			Query: issueTableQuerySpec{
+				Scope: issueTableScope{Kind: "workspace"},
+				// "backlog" is an issue status, not a project status — the
+				// project lifecycle has no such value.
+				Filters: issueTableFiltersRequest{ProjectStatuses: []string{"backlog"}},
+				Sort:    issueTableSortRequest{Field: "position", Direction: "asc"},
+			},
+			Group: issueTableGroupSpec{Kind: "none"},
+			Page:  issueTablePageRequest{Limit: 50},
+		}),
+	).Want(http.StatusBadRequest)
 }
