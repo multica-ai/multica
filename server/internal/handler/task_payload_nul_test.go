@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // seedNULTask creates an agent with one running task, ready to be driven
@@ -111,19 +112,39 @@ func TestCompleteTaskCallbackWithNULSucceeds(t *testing.T) {
 		t.Fatal("completed_at is NULL, want a terminal timestamp")
 	}
 
-	var stored TaskCompleteRequest
-	if err := json.Unmarshal(storedJSON, &stored); err != nil {
-		t.Fatalf("decode stored result: %v", err)
+	// result now holds ONLY the canonical v1 envelope. work_dir /
+	// durable_work_dir are asserted against their own columns below rather than
+	// inside the blob: they were removed from result deliberately (CODI-11), so
+	// finding them here again would be the regression.
+	stored, ok := protocol.ReadStoredResult(storedJSON)
+	if !ok {
+		t.Fatalf("stored result is unreadable: %s", storedJSON)
 	}
 	// Removing rather than rejecting: the readable text survives.
-	if stored.Output != "done summary text" {
-		t.Fatalf("stored output = %q, want %q", stored.Output, "done summary text")
+	if stored.Summary != "done summary text" {
+		t.Fatalf("stored summary = %q, want %q", stored.Summary, "done summary text")
 	}
-	if stored.WorkDir != "/tmp/workdir" {
-		t.Fatalf("stored work_dir = %q, want %q", stored.WorkDir, "/tmp/workdir")
+	var blob map[string]any
+	if err := json.Unmarshal(storedJSON, &blob); err != nil {
+		t.Fatalf("decode stored result: %v", err)
 	}
-	if stored.DurableWorkDir != "/Users/dev/project" {
-		t.Fatalf("stored durable_work_dir = %q, want %q", stored.DurableWorkDir, "/Users/dev/project")
+	for _, leaked := range []string{"work_dir", "durable_work_dir", "session_id", "branch_name", "pr_url"} {
+		if _, present := blob[leaked]; present {
+			t.Errorf("transport field %q is still stored inside result", leaked)
+		}
+	}
+
+	var workDir, durableWorkDir string
+	if err := testPool.QueryRow(ctx, `
+		SELECT work_dir, durable_work_dir FROM agent_task_queue WHERE id = $1`, taskID).
+		Scan(&workDir, &durableWorkDir); err != nil {
+		t.Fatalf("read task dirs: %v", err)
+	}
+	if workDir != "/tmp/workdir" {
+		t.Fatalf("work_dir column = %q, want %q", workDir, "/tmp/workdir")
+	}
+	if durableWorkDir != "/Users/dev/project" {
+		t.Fatalf("durable_work_dir column = %q, want %q", durableWorkDir, "/Users/dev/project")
 	}
 }
 

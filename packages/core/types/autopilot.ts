@@ -1,3 +1,5 @@
+import type { CompletionResult } from "./agent";
+
 export type AutopilotStatus = "active" | "paused" | "archived";
 
 export type AutopilotExecutionMode = "create_issue" | "run_only";
@@ -131,7 +133,7 @@ export interface AutopilotRun {
   // Older servers omit it.
   reason_code?: string;
   trigger_payload: unknown;
-  result: unknown;
+  result: CompletionResult | null;
   created_at: string;
 }
 

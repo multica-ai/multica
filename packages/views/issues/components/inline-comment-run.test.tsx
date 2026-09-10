@@ -179,14 +179,14 @@ describe("InlineCommentRun", () => {
   });
 
   it("keeps completed replies readable without fetching or duplicating their deliverable", () => {
-    setup(task({ status: "completed", result: { comment: "Already posted" } }), true);
+    setup(task({ status: "completed", result: { version: 1, summary: "Already posted", artifact_ids: [] } }), true);
     expect(api.listTaskMessages).not.toHaveBeenCalled();
     expect(screen.queryByText("Already posted")).not.toBeInTheDocument();
     expect(screen.getByText("Completed")).toBeInTheDocument();
   });
 
   it("shows a completed deliverable if the corresponding comment is missing", () => {
-    setup(task({ status: "completed", result: { comment: "Review complete." } }));
+    setup(task({ status: "completed", result: { version: 1, summary: "Review complete.", artifact_ids: [] } }));
     expect(screen.getByText("Review complete.")).toBeInTheDocument();
     expect(screen.getByText("Review complete.").closest('[data-slot="card"]')).toBeNull();
     expect(screen.getByText("Completed").closest('[data-slot="card"]')).toBeNull();

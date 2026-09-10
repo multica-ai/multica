@@ -13,9 +13,10 @@ export const EMPTY_COMMENT_RUNS: CommentRun[] = [];
 
 /** Use the daemon's deliverable, never guess a final answer from progress text. */
 export function commentRunOutput(task: AgentTask): string | null {
-  if (task.status !== "completed" || !task.result || typeof task.result !== "object") return null;
-  return "comment" in task.result && typeof task.result.comment === "string" && task.result.comment.trim()
-    ? task.result.comment : null;
+  if (task.status !== "completed") return null;
+  // The API boundary normalizes both legacy output and v1 results to summary.
+  const summary = task.result?.summary;
+  return typeof summary === "string" && summary.trim() ? summary : null;
 }
 
 export function isActiveCommentRun(task: AgentTask): boolean {

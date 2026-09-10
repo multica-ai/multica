@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
+import { CompletionResultSchema } from "@multica/core/api/schemas";
 import { commentRunOutput, buildCommentRunView } from "./comment-runs";
 
 const groupCommentRuns = (...args: Parameters<typeof buildCommentRunView>) => buildCommentRunView(...args).runs;
@@ -255,11 +256,16 @@ describe("groupCommentRuns", () => {
 
 describe("commentRunOutput", () => {
   it("only exposes the completed daemon deliverable and tolerates response drift", () => {
-    expect(commentRunOutput(task("r", { status: "completed", result: { comment: "Done" } }))).toBe("Done");
-    for (const result of [null, "Done", {}, { comment: 1 }, { comment: " " }]) {
-      expect(commentRunOutput(task("r", { status: "completed", result }))).toBeNull();
+    expect(commentRunOutput(task("r", { status: "completed", result: { version: 1, summary: "Done", artifact_ids: [] } }))).toBe("Done");
+    for (const result of [null, "Done", {}, { version: 1, summary: 1 }, { version: 1, summary: " " }]) {
+      expect(commentRunOutput(task("r", { status: "completed", result: CompletionResultSchema.parse(result) }))).toBeNull();
     }
-    expect(commentRunOutput(task("r", { result: { comment: "Still working" } }))).toBeNull();
+    expect(commentRunOutput(task("r", { result: { version: 1, summary: "Still working", artifact_ids: [] } }))).toBeNull();
+  });
+
+  it("uses the API-normalized summary for a legacy server result", () => {
+    const run = task("r", { status: "completed", result: CompletionResultSchema.parse({ output: "Legacy answer" }) });
+    expect(commentRunOutput(run)).toBe("Legacy answer");
   });
 });
 
