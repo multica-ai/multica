@@ -92,13 +92,20 @@ async function measure(ref, label) {
   // REMOTE_API_URL is a runtime setting. Passing it to the build breaks
   // prerendering, and turbo filters it out of the build env anyway.
   //
-  // `--force` because this report states a build time. A cache hit would put
-  // seconds next to a build that CI pays minutes for, and a run where one ref
-  // hits the cache and the other misses would read as a difference between the
-  // products.
+  // The cache is left on. A restored build is byte-identical to the one that
+  // produced it, so it cannot move the numbers this script collects — only the
+  // build time it reports. Saying which side was cached costs nothing; forcing
+  // two real builds to avoid the ambiguity costs minutes on every local run,
+  // and buys nothing on CI, where the runner is always cold anyway.
   const buildStart = Date.now();
-  run("pnpm", ["exec", "turbo", "build", "--filter=@multica/web", "--force"], { cwd: checkout });
+  const buildLog = execFileSync(
+    "pnpm",
+    ["exec", "turbo", "build", "--filter=@multica/web"],
+    { cwd: checkout, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+  );
+  process.stdout.write(buildLog);
   const buildS = seconds(buildStart);
+  const buildCached = /cache hit/.test(buildLog);
 
   const port = await freePort();
   const startStart = Date.now();
@@ -135,7 +142,7 @@ async function measure(ref, label) {
     ? JSON.parse(readFileSync(reportPath, "utf8"))
     : { status: "invalid", invalid: ["the scenario produced no report"] };
   return {
-    ...report, ref, sha, spec_failed: failed,
+    ...report, ref, sha, spec_failed: failed, build_cached: buildCached,
     timings_s: { install: installS, build: buildS, start: startS, measure: measureS },
   };
 }
@@ -161,7 +168,8 @@ function markdown(base, head) {
     const ratio = a === 0 ? "N/A" : `${((b / a - 1) * 100).toFixed(1)}%`;
     return `| ${label} | ${a} | ${b} | ${delta >= 0 ? "+" : ""}${delta} | ${ratio} |`;
   });
-  const timing = (r) => `install ${r.timings_s.install}s · build ${r.timings_s.build}s · start ${r.timings_s.start}s · measure ${r.timings_s.measure}s`;
+  const timing = (r) =>
+    `install ${r.timings_s.install}s · build ${r.timings_s.build}s${r.build_cached ? " (restored from cache — not a real build)" : ""} · start ${r.timings_s.start}s · measure ${r.timings_s.measure}s`;
   return [
     "## Comment typing under live runs (MUL-7227)",
     "",
