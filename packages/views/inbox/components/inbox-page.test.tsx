@@ -283,7 +283,7 @@ describe("InboxPage", () => {
     render(<InboxPage />);
 
     const listPanel = screen.getByTestId("panel-list");
-    expect(listPanel).toHaveAttribute("data-default-size", "280");
+    expect(listPanel).toHaveAttribute("data-default-size", "260");
     expect(listPanel).toHaveAttribute("data-min-size", "240");
     expect(listPanel).toHaveAttribute("data-max-size", "400");
   });

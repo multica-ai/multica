@@ -100,7 +100,7 @@ import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
 import { useT } from "../../i18n";
 import { useIssueLimitUpgradePrompt } from "../../modals/use-issue-limit-upgrade-prompt";
 
-const INBOX_LIST_DEFAULT_SIZE = 280;
+const INBOX_LIST_DEFAULT_SIZE = 260;
 const INBOX_LIST_MIN_SIZE = 240;
 const INBOX_LIST_MAX_SIZE = 400;
 
