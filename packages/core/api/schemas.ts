@@ -516,7 +516,7 @@ export const ListIssueStatusesResponseSchema = z.object({
 // to a server that predates this endpoint still has the canonical list.
 export const EMPTY_LIST_ISSUE_STATUSES_RESPONSE: ListIssueStatusesResponse = {
   statuses: [],
-  categories: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+  categories: ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"],
   total: 0,
 };
 

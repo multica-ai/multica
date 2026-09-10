@@ -341,8 +341,8 @@ export function useIssueSurfaceData({
     // must never add a column. Two independent things narrow them: hidden
     // columns (display state) and the status filter, which is expressed in
     // concrete KEYS and so has to be mapped back to the columns those keys land
-    // in. Default view shows every category, `cancelled` last (its canonical
-    // position in ALL_STATUSES). (MUL-6243)
+    // in. An explicit filter wins over hidden defaults so selecting Cancelled
+    // cannot produce an empty surface. (MUL-6243)
     const resolved =
       statusFilters.length > 0 ? statusFilterColumns(statusFilters, catalog) : null;
     // Pending/error contribute no narrowing here; the surface's loading and
@@ -351,8 +351,9 @@ export function useIssueSurfaceData({
     const selected = resolved?.state === "resolved" ? resolved.columns : null;
     return ALL_STATUSES.filter(
       (s) =>
-        !hiddenStatusCategories.includes(s) &&
-        (selected === null || selected.has(s)),
+        selected !== null
+          ? selected.has(s)
+          : !hiddenStatusCategories.includes(s),
     );
   }, [statusFilters, hiddenStatusCategories, catalog]);
 

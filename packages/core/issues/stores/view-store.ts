@@ -178,6 +178,44 @@ export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }
   { key: "childProgress", label: "Sub-issue progress" },
 ];
 
+export const DEFAULT_CARD_PROPERTIES: Readonly<CardProperties> = {
+  priority: true,
+  description: false,
+  assignee: true,
+  startDate: false,
+  dueDate: true,
+  project: true,
+  childProgress: true,
+  labels: false,
+};
+
+export const DEFAULT_HIDDEN_STATUS_CATEGORIES: readonly IssueStatusCategory[] = [
+  "cancelled",
+];
+
+export function defaultSortDirection(field: SortField): SortDirection {
+  return field === "created_at" || field === "updated_at" ? "desc" : "asc";
+}
+
+/** Only expose card controls that the active renderer can honor. */
+export function cardPropertyOptionsForView(viewMode: ViewMode) {
+  if (viewMode === "table" || viewMode === "gantt") return [];
+  if (viewMode === "list") {
+    return CARD_PROPERTY_OPTIONS.filter((option) => option.key !== "description");
+  }
+  return CARD_PROPERTY_OPTIONS;
+}
+
+export function sortOptionsForView(
+  viewMode: ViewMode,
+  grouping: IssueGrouping,
+) {
+  if (viewMode === "board" && grouping !== "status") {
+    return SORT_OPTIONS.filter((option) => option.value !== "position");
+  }
+  return SORT_OPTIONS;
+}
+
 export interface IssueViewState {
   viewMode: ViewMode;
   grouping: IssueGrouping;
@@ -307,22 +345,13 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   propertyFilters: {},
   dateFilter: null,
   agentRunningFilter: false,
-  sortBy: "position",
-  sortDirection: "asc",
-  cardProperties: {
-    priority: true,
-    description: true,
-    assignee: true,
-    startDate: true,
-    dueDate: true,
-    project: true,
-    childProgress: true,
-    labels: true,
-  },
+  sortBy: "created_at",
+  sortDirection: "desc",
+  cardProperties: { ...DEFAULT_CARD_PROPERTIES },
   cardPropertyIds: [],
   showSubIssues: true,
   listCollapsedStatuses: [],
-  hiddenStatusCategories: [],
+  hiddenStatusCategories: [...DEFAULT_HIDDEN_STATUS_CATEGORIES],
   ganttZoom: "week",
   ganttShowCompleted: false,
   swimlaneGrouping: "assignee",
@@ -339,7 +368,12 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
   toggleGanttShowCompleted: () =>
     set((state) => ({ ganttShowCompleted: !state.ganttShowCompleted })),
-  setGrouping: (grouping) => set({ grouping }),
+  setGrouping: (grouping) =>
+    set((state) =>
+      grouping !== "status" && state.sortBy === "position"
+        ? { grouping, sortBy: "created_at", sortDirection: "desc" }
+        : { grouping },
+    ),
   toggleStatusFilter: (status) =>
     set((state) => ({
       statusFilters: state.statusFilters.includes(status)
@@ -438,9 +472,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       propertyFilters: {},
       dateFilter: null,
       agentRunningFilter: false,
-      // Reset restores every column, matching what it did when hiding a column
-      // was expressed as a status filter.
-      hiddenStatusCategories: [],
+      hiddenStatusCategories: [...DEFAULT_HIDDEN_STATUS_CATEGORIES],
     }),
   resetFiltersTo: (snapshot) => set({ ...snapshot }),
   clearFilterDimension: (dimension) =>
@@ -467,7 +499,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         }
       }
     }),
-  setSortBy: (field) => set({ sortBy: field }),
+  setSortBy: (field) =>
+    set({ sortBy: field, sortDirection: defaultSortDirection(field) }),
   setSortDirection: (dir) => set({ sortDirection: dir }),
   toggleCardProperty: (key) =>
     set((state) => ({
@@ -633,7 +666,7 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   const persistedTitle = persistedTableColumns.find(
     (column) => column.key === "title",
   );
-  return {
+  const merged = {
     ...current,
     ...p,
     cardProperties: {
@@ -657,6 +690,11 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
       ? p.tableCollapsedParents
       : current.tableCollapsedParents,
   };
+  return merged.viewMode === "board" &&
+    merged.grouping !== "status" &&
+    merged.sortBy === "position"
+    ? { ...merged, sortBy: "created_at", sortDirection: "desc" }
+    : merged;
 }
 
 /** Factory: creates a vanilla StoreApi for use with React Context. */

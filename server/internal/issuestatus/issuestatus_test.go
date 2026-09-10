@@ -202,11 +202,10 @@ func TestCategoriesAndBuiltInsAreTheSameSet(t *testing.T) {
 	}
 }
 
-// The display order is copied from the frontend's historical STATUS_ORDER.
-// Reordering it would visibly rearrange every existing user's board, so it is
-// pinned here rather than left to look tidy.
-func TestCategoryRankPreservesHistoricalStatusOrder(t *testing.T) {
-	want := []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
+// The display order is shared with the frontend board and keeps actionable
+// Blocked work before the completed column.
+func TestCategoryRankMatchesBoardStatusOrder(t *testing.T) {
+	want := []string{"backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"}
 	got := Canonical()
 	for i := range want {
 		if got[i] != want[i] {

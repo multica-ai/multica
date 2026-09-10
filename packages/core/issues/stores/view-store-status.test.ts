@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it, beforeEach } from "vitest";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { viewStoreSlice, type IssueViewState } from "./view-store";
+import {
+  cardPropertyOptionsForView,
+  sortOptionsForView,
+  viewStoreSlice,
+  type IssueViewState,
+} from "./view-store";
 import { baselineFromQuery } from "../../issue-views/baseline";
 
 /**
@@ -21,7 +26,10 @@ describe("column visibility vs status filter", () => {
   it("hiding a column does not touch the status filter", () => {
     store.getState().hideStatus("backlog");
 
-    expect(store.getState().hiddenStatusCategories).toEqual(["backlog"]);
+    expect(store.getState().hiddenStatusCategories).toEqual([
+      "cancelled",
+      "backlog",
+    ]);
     expect(store.getState().statusFilters).toEqual([]);
   });
 
@@ -30,7 +38,10 @@ describe("column visibility vs status filter", () => {
     store.getState().hideStatus("done");
     store.getState().showStatus("backlog");
 
-    expect(store.getState().hiddenStatusCategories).toEqual(["done"]);
+    expect(store.getState().hiddenStatusCategories).toEqual([
+      "cancelled",
+      "done",
+    ]);
     expect(store.getState().statusFilters).toEqual([]);
   });
 
@@ -38,7 +49,10 @@ describe("column visibility vs status filter", () => {
     store.getState().hideStatus("backlog");
     store.getState().hideStatus("backlog");
 
-    expect(store.getState().hiddenStatusCategories).toEqual(["backlog"]);
+    expect(store.getState().hiddenStatusCategories).toEqual([
+      "cancelled",
+      "backlog",
+    ]);
   });
 
   it("a custom status filter survives hiding and showing a column", () => {
@@ -49,11 +63,60 @@ describe("column visibility vs status filter", () => {
     expect(store.getState().statusFilters).toEqual(["qa"]);
   });
 
-  it("reset restores every column", () => {
+  it("reset restores the default hidden Cancelled column", () => {
     store.getState().hideStatus("backlog");
     store.getState().clearFilters();
 
-    expect(store.getState().hiddenStatusCategories).toEqual([]);
+    expect(store.getState().hiddenStatusCategories).toEqual(["cancelled"]);
+  });
+});
+
+describe("issue view defaults", () => {
+  let store: StoreApi<IssueViewState>;
+  beforeEach(() => {
+    store = createStore<IssueViewState>()((set) => viewStoreSlice(set));
+  });
+
+  it("starts with newest-created issues first and a compact card", () => {
+    const state = store.getState();
+
+    expect([state.sortBy, state.sortDirection]).toEqual(["created_at", "desc"]);
+    expect(state.cardProperties).toEqual({
+      priority: true,
+      description: false,
+      assignee: true,
+      startDate: false,
+      dueDate: true,
+      project: true,
+      childProgress: true,
+      labels: false,
+    });
+  });
+
+  it("uses the semantic default direction when changing sort fields", () => {
+    store.getState().setSortBy("updated_at");
+    expect(store.getState().sortDirection).toBe("desc");
+
+    store.getState().setSortBy("priority");
+    expect(store.getState().sortDirection).toBe("asc");
+  });
+
+  it("leaves manual order when the board stops grouping by status", () => {
+    store.getState().setSortBy("position");
+    store.getState().setGrouping("assignee");
+
+    expect(store.getState().sortBy).toBe("created_at");
+    expect(store.getState().sortDirection).toBe("desc");
+  });
+
+  it("only offers controls the active view can apply", () => {
+    expect(
+      cardPropertyOptionsForView("list").map((option) => option.key),
+    ).not.toContain("description");
+    expect(cardPropertyOptionsForView("gantt")).toEqual([]);
+    expect(
+      sortOptionsForView("board", "assignee").map((option) => option.value),
+    ).not.toContain("position");
   });
 });
 

@@ -2071,7 +2071,7 @@ describe("issue status catalog schemas", () => {
   it("parses a full catalog response", () => {
     const parsed = ListIssueStatusesResponseSchema.parse({
       statuses: [baseStatus],
-      categories: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+      categories: ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"],
       total: 1,
     });
     expect(parsed.statuses[0]?.key).toBe("human_review");

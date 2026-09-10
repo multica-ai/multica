@@ -100,6 +100,10 @@ vi.mock("@multica/core/modals", () => ({
   ),
 }));
 
+vi.mock("./priority-icon", () => ({
+  PriorityIcon: () => <span data-testid="priority-icon" />,
+}));
+
 // Capture the DndContext callbacks so a test can drive dnd-kit's real
 // lifecycle — including the cancel path, which never calls onDragEnd.
 let lastOnDragStart: any = null;
@@ -218,8 +222,16 @@ function renderListView(
 describe("ListView status header collapse", () => {
   beforeEach(() => {
     mockViewState.listCollapsedStatuses = [];
+    mockViewState.cardProperties = { priority: true };
     lastOnDragStart = null;
     lastOnDragCancel = null;
+  });
+
+  it("honors the priority card-property toggle", () => {
+    mockViewState.cardProperties = { priority: false };
+    renderListView();
+
+    expect(screen.queryByTestId("priority-icon")).not.toBeInTheDocument();
   });
 
   it("collapses a status group when its header is clicked", async () => {

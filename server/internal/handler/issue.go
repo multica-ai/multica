@@ -121,6 +121,10 @@ var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
 // workspaces that have no custom statuses.
 var validIssueStatuses = issuestatus.Canonical()
 
+// Status sort follows the board's category order and resolves custom keys to
+// their effective category. Custom keys used to fall through after Cancelled.
+const issueStatusSortExpression = "CASE issue_effective_status(i.workspace_id, i.status) WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'blocked' THEN 4 WHEN 'done' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+
 // resolveIssueStatusKey checks a status against the workspace's catalog and
 // returns the CANONICAL key to store. This is the application-layer replacement
 // for the enum CHECK that migration 337 dropped, so every write path must route
@@ -1297,7 +1301,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		case "last_activity":
 			sortCol = "last_activity_at"
 		case "status":
-			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+			sortCol = issueStatusSortExpression
 			sortIsExpr = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
@@ -2065,7 +2069,7 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		case "last_activity":
 			sortCol = "last_activity_at"
 		case "status":
-			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+			sortCol = issueStatusSortExpression
 			sortIsExpr = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"

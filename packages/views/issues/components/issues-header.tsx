@@ -85,6 +85,8 @@ import {
   GROUPING_OPTIONS,
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
+  cardPropertyOptionsForView,
+  sortOptionsForView,
   type ActorFilterValue,
   type IssueDateField,
   type IssueDateFilter,
@@ -1949,6 +1951,8 @@ export function IssueDisplayControls({
     labels: "card_labels",
     childProgress: "card_child_progress",
   };
+  const availableCardPropertyOptions = cardPropertyOptionsForView(viewMode);
+  const availableSortOptions = sortOptionsForView(viewMode, grouping);
   const sortPropertyId = propertyIdFromViewKey(sortBy);
   const groupingPropertyId = propertyIdFromViewKey(grouping);
   const tableGroupingPropertyId = propertyIdFromViewKey(tableGrouping);
@@ -2208,7 +2212,7 @@ export function IssueDisplayControls({
                 <div className="flex items-center gap-1.5">
                   <Select
                     items={[
-                      ...SORT_OPTIONS.map((opt) => ({
+                      ...availableSortOptions.map((opt) => ({
                         value: opt.value as string,
                         label: t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]]),
                       })),
@@ -2227,7 +2231,7 @@ export function IssueDisplayControls({
                     </SelectTrigger>
                     <SelectContent align="end">
                       <SelectGroup>
-                      {SORT_OPTIONS.map((opt) => (
+                      {availableSortOptions.map((opt) => (
                         <SelectItem key={opt.value} value={opt.value}>
                           {t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]])}
                         </SelectItem>
@@ -2268,7 +2272,7 @@ export function IssueDisplayControls({
                   onCheckedChange={() => act.toggleShowSubIssues()}
                 />
               </label>
-              {viewMode !== "table" && (
+              {availableCardPropertyOptions.length > 0 && (
                 <div>
                   <span className="text-caption font-medium text-muted-foreground">
                     {t(($) => $.display.card_properties_section)}
@@ -2276,7 +2280,7 @@ export function IssueDisplayControls({
                   {/* Chip toggles (pressed = shown on cards). Unpressed chips
                       dim so the active set reads at a glance. */}
                   <div className="mt-2 flex flex-wrap gap-1">
-                    {CARD_PROPERTY_OPTIONS.map((opt) => (
+                    {availableCardPropertyOptions.map((opt) => (
                       <Toggle
                         key={opt.key}
                         size="sm"

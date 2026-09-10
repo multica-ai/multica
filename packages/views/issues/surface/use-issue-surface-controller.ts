@@ -367,8 +367,9 @@ export function useIssueSurfaceController({
           : null;
       const visible = ALL_STATUSES.filter(
         (category) =>
-          !hiddenStatusCategories.includes(category) &&
-          (selected === null || selected.has(category)),
+          selected !== null
+            ? selected.has(category)
+            : !hiddenStatusCategories.includes(category),
       );
       return effectiveViewMode === "list"
         ? visible.filter((status) => !listCollapsedStatuses.includes(status))

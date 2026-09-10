@@ -41,6 +41,8 @@ vi.mock("@multica/core/paths", () => ({
 }));
 
 const viewState = vi.hoisted(() => ({
+  viewMode: "board",
+  grouping: "status",
   cardProperties: {
     priority: false,
     description: false,
@@ -162,4 +164,19 @@ describe("BoardCardContent assignee picker", () => {
       expect(navigation.push).not.toHaveBeenCalled();
     },
   );
+
+  it("does not repeat the assignee inside an assignee-grouped board", () => {
+    viewState.grouping = "assignee";
+    const issue = makeIssue("member");
+    const { container } = render(
+      <NavigationProvider value={navigation}>
+        <IssueSurfaceActionsProvider actions={actions}>
+          <BoardCardContent issue={issue} editable />
+        </IssueSurfaceActionsProvider>
+      </NavigationProvider>,
+    );
+
+    expect(container.querySelector('[data-slot="avatar"]')).toBeNull();
+    viewState.grouping = "status";
+  });
 });

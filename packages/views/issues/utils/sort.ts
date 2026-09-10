@@ -1,11 +1,27 @@
 import type { Issue } from "@multica/core/types";
-import { PRIORITY_ORDER } from "@multica/core/issues/config";
+import { issueColumnCategory } from "@multica/core/issues";
+import { PRIORITY_ORDER, STATUS_ORDER } from "@multica/core/issues/config";
 import type { SortField, SortDirection } from "@multica/core/issues/stores/view-store";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 
 const PRIORITY_RANK: Record<string, number> = Object.fromEntries(
   PRIORITY_ORDER.map((p, i) => [p, i])
 );
+const STATUS_RANK: Record<string, number> = Object.fromEntries(
+  STATUS_ORDER.map((status, index) => [status, index]),
+);
+
+function compareOptionalDate(
+  a: string | null | undefined,
+  b: string | null | undefined,
+  direction: SortDirection,
+): number {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  const dir = direction === "desc" ? -1 : 1;
+  return dir * (new Date(a).getTime() - new Date(b).getTime());
+}
 
 export function sortIssues(
   issues: Issue[],
@@ -33,39 +49,38 @@ export function sortIssues(
     });
   }
 
-  const sorted = issues.toSorted((a, b) => {
+  const dir = direction === "desc" ? -1 : 1;
+  return issues.toSorted((a, b) => {
     switch (field) {
       case "priority":
-        return (
+        return dir * (
           (PRIORITY_RANK[a.priority] ?? 99) -
           (PRIORITY_RANK[b.priority] ?? 99)
         );
-      case "start_date": {
-        if (!a.start_date && !b.start_date) return 0;
-        if (!a.start_date) return 1;
-        if (!b.start_date) return -1;
-        return (
-          new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+      case "status":
+        return dir * (
+          (STATUS_RANK[issueColumnCategory(a)] ?? STATUS_ORDER.length) -
+          (STATUS_RANK[issueColumnCategory(b)] ?? STATUS_ORDER.length)
         );
-      }
-      case "due_date": {
-        if (!a.due_date && !b.due_date) return 0;
-        if (!a.due_date) return 1;
-        if (!b.due_date) return -1;
-        return (
-          new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
-        );
-      }
+      case "start_date":
+        return compareOptionalDate(a.start_date, b.start_date, direction);
+      case "due_date":
+        return compareOptionalDate(a.due_date, b.due_date, direction);
       case "created_at":
-        return (
+        return dir * (
           new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         );
+      case "updated_at":
+        return dir * (
+          new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()
+        );
       case "title":
-        return a.title.localeCompare(b.title);
+        return dir * a.title.localeCompare(b.title);
       case "position":
       default:
+        // Manual order is user-defined and always ascending. The server also
+        // ignores direction for this field.
         return a.position - b.position;
     }
   });
-  return direction === "desc" ? sorted.reverse() : sorted;
 }

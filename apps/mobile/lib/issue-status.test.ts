@@ -158,8 +158,8 @@ describe("statusOptions", () => {
       "todo",
       "in_progress",
       "in_review",
-      "done",
       "blocked",
+      "done",
       "cancelled",
     ]);
     expect(options.every((o) => o.color === null)).toBe(true);

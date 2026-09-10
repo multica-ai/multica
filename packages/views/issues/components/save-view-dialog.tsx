@@ -45,9 +45,9 @@ import {
   viewStorePersistOptions,
   mergeViewStatePersisted,
   GROUPING_OPTIONS,
-  SORT_OPTIONS,
   SWIMLANE_GROUPINGS,
-  CARD_PROPERTY_OPTIONS,
+  cardPropertyOptionsForView,
+  sortOptionsForView,
   type IssueGrouping,
   type IssueViewState,
   type SortField,
@@ -159,6 +159,7 @@ export function DraftDefinitionFields() {
   const cardProperties = useViewStore((s) => s.cardProperties);
   const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
   const act = useViewStoreApi().getState();
+  const availableSortOptions = sortOptionsForView(viewMode, grouping);
 
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const groupableProperties = useMemo(
@@ -351,7 +352,7 @@ export function DraftDefinitionFields() {
               <div className="flex items-center gap-1.5">
                 <Select
                   items={[
-                    ...SORT_OPTIONS.map((opt) => ({
+                    ...availableSortOptions.map((opt) => ({
                       value: opt.value as string,
                       label: t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]]),
                     })),
@@ -370,7 +371,7 @@ export function DraftDefinitionFields() {
                   </SelectTrigger>
                   <SelectContent align="start">
                     <SelectGroup>
-                      {SORT_OPTIONS.map((opt) => (
+                      {availableSortOptions.map((opt) => (
                         <SelectItem key={opt.value} value={opt.value}>
                           {t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]])}
                         </SelectItem>
@@ -405,13 +406,13 @@ export function DraftDefinitionFields() {
                 )}
               </div>
             </div>
-            {viewMode !== "table" && (
+            {cardPropertyOptionsForView(viewMode).length > 0 && (
               <div className="flex items-start gap-3">
                 <Label className={`${ROW_LABEL} pt-1`}>
                   {t(($) => $.display.card_properties_section)}
                 </Label>
                 <div className="flex min-w-0 flex-1 flex-wrap gap-1">
-                  {CARD_PROPERTY_OPTIONS.map((opt) => (
+                  {cardPropertyOptionsForView(viewMode).map((opt) => (
                     <Toggle
                       key={opt.key}
                       size="sm"

@@ -47,20 +47,15 @@ const (
 	Cancelled  = "cancelled"
 )
 
-// canonicalOrder is the historical STATUS_ORDER from the frontend's static
-// status config. Category ranking copies it verbatim so a workspace with no
-// custom statuses sees a board and picker identical to before this feature.
-//
-// Note the order is NOT grouped by lifecycle: in_review and done sit between
-// in_progress and blocked. That is the shipped order, and reordering it to look
-// tidier would visibly rearrange every existing user's board.
+// canonicalOrder mirrors the frontend board order. Blocked precedes Done so an
+// actionable exception is not pushed beyond the completed column.
 var canonicalOrder = []string{
 	Backlog,
 	Todo,
 	InProgress,
 	InReview,
-	Done,
 	Blocked,
+	Done,
 	Cancelled,
 }
 
