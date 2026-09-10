@@ -180,7 +180,7 @@ export function visibleStatusCategories(
  * Whether an issue belongs to a given lifecycle category (MUL-6243).
  *
  * Comparing `issue.status` to a built-in key answers lifecycle questions only
- * for a workspace with no custom statuses: a custom status in `completed` is
+ * for a workspace with no custom statuses: a custom status in `done` is
  * completed, and code that checks `status === "done"` silently disagrees.
  *
  * An unresolved custom key answers `false`, and that direction is deliberate —

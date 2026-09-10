@@ -72,6 +72,9 @@ backend upgrade. It does not promise identical old UI grouping or old agent
 instructions: old filters can broaden when categories combine, old saved
 grouping views can require refresh/upgrade, and old daemons cannot render the
 new lifecycle brief reliably. Update clients/daemons for the new feature.
+Persisted hidden/collapsed columns are normalized on load. If only some old
+columns in a merged lifecycle were hidden, the combined column stays visible
+to avoid hiding previously visible work; exact status filters are unchanged.
 Validation errors (unknown/archived status, permissions, stale reorder sets)
 still return their normal error responses; no API guarantees every request
 will succeed, especially during the accepted mixed-version window.

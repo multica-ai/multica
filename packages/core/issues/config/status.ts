@@ -2,7 +2,7 @@ import type { BuiltInIssueStatus, IssueStatusCategory } from "../../types";
 
 // These three are keyed on CATEGORY, not on status key. A workspace can define
 // any number of custom statuses, but every one belongs to exactly one of the
-// five lifecycle categories below. Concrete built-in status keys remain a
+// four lifecycle categories below. Concrete built-in status keys remain a
 // separate seven-value compatibility surface. (MUL-6243, MUL-7240)
 
 export const STATUS_ORDER: IssueStatusCategory[] = [

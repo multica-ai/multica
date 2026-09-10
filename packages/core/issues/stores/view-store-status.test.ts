@@ -5,6 +5,7 @@ import {
   cardPropertyOptionsForView,
   sortOptionsForView,
   viewStoreSlice,
+  mergeViewStatePersisted,
   type IssueViewState,
 } from "./view-store";
 import { baselineFromQuery } from "../../issue-views/baseline";
@@ -69,6 +70,29 @@ describe("column visibility vs status filter", () => {
     store.getState().clearFilters();
 
     expect(store.getState().hiddenStatusCategories).toEqual(["unstarted"]);
+  });
+});
+
+describe("persisted lifecycle category upgrade", () => {
+  const defaults = createStore<IssueViewState>()((set) => viewStoreSlice(set)).getState();
+  it("normalizes legacy hidden/collapsed categories without changing exact status filters", () => {
+    const state = mergeViewStatePersisted({
+      hiddenStatusCategories: ["backlog", "todo", "in_progress", "in_review", "blocked", "cancelled"],
+      listCollapsedStatuses: ["completed", "canceled"],
+      statusFilters: ["in_review", "awaiting_response"],
+    }, defaults);
+    expect(state.hiddenStatusCategories).toEqual(["unstarted", "started", "closed"]);
+    expect(state.listCollapsedStatuses).toEqual(["done", "closed"]);
+    expect(state.statusFilters).toEqual(["in_review", "awaiting_response"]);
+  });
+  it("keeps a combined category visible if only part of its old columns were hidden", () => {
+    const state = mergeViewStatePersisted({ hiddenStatusCategories: ["backlog", "in_review"] }, defaults);
+    expect(state.hiddenStatusCategories).toEqual([]);
+  });
+  it("preserves current categories and explicit empty preferences", () => {
+    const state = mergeViewStatePersisted({ hiddenStatusCategories: ["started"], listCollapsedStatuses: [] }, defaults);
+    expect(state.hiddenStatusCategories).toEqual(["started"]);
+    expect(state.listCollapsedStatuses).toEqual([]);
   });
 });
 

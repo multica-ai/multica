@@ -7,6 +7,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import type { IssueStatus, IssueStatusCategory, IssuePriority, PropertyFilterValue } from "../../types";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
+import { STATUS_ORDER } from "../config/status";
 
 export type ViewMode = "board" | "list" | "table" | "gantt" | "swimlane";
 export type GanttZoom = "day" | "week" | "month";
@@ -693,6 +694,22 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   current: T,
 ): T {
   const p = (persisted ?? {}) as Partial<T>;
+  // Keep visibility conservative when old columns combine: hiding Backlog
+  // alone must not hide formerly-visible Todo work after the upgrade.
+  const categoriesFromStorage = (value: unknown, fallback: IssueStatusCategory[]) => {
+    if (!Array.isArray(value)) return fallback;
+    const oldGroups: Record<IssueStatusCategory, string[]> = {
+      unstarted: ["backlog", "todo"],
+      started: ["in_progress", "in_review", "blocked"],
+      done: ["completed"],
+      closed: ["cancelled"],
+    };
+    return STATUS_ORDER.filter((category) =>
+      value.includes(category) ||
+      (category === "closed" && value.includes("canceled")) ||
+      oldGroups[category].every((key) => value.includes(key)),
+    );
+  };
   // `collapsedSwimlanes` changed shape from `string[]` to
   // `Record<SwimlaneGrouping, string[]>`. A snapshot saved in the old
   // shape would otherwise overwrite the default record with an array
@@ -725,6 +742,8 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   const merged = {
     ...current,
     ...p,
+    hiddenStatusCategories: categoriesFromStorage(p.hiddenStatusCategories, current.hiddenStatusCategories),
+    listCollapsedStatuses: categoriesFromStorage(p.listCollapsedStatuses, current.listCollapsedStatuses),
     cardProperties: {
       ...current.cardProperties,
       ...(p.cardProperties ?? {}),

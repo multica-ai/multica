@@ -40,15 +40,14 @@ Assignment does not bypass an agent's Access; when assigning to a squad, the lea
 
 ## Status
 
-Every workspace starts with seven built-in statuses, grouped into five lifecycle categories:
+Every workspace starts with seven built-in statuses, grouped into four lifecycle categories:
 
 | Category | Built-in statuses | Meaning |
 |---|---|---|
-| `backlog` | `backlog` | Not starting yet. |
-| `unstarted` | `todo` | Scoped and waiting to start. |
+| `unstarted` | `backlog`, `todo` | Work that has not started, whether planned or deferred. |
 | `started` | `in_progress`, `in_review`, `blocked` | Work has started, is awaiting review, or cannot continue for now. |
-| `completed` | `done` | Finished. |
-| `canceled` | `cancelled` | No longer pursued; the record stays. |
+| `done` | `done` | Successfully finished; terminal. |
+| `closed` | `cancelled` | No longer pursued; terminal, not successful completion. |
 
 Categories keep boards, lists, and filters simple. Concrete statuses still preserve the more specific workflow behavior agents and automations rely on.
 

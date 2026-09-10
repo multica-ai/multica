@@ -106,7 +106,7 @@ describe("issue surface view store registry", () => {
       "desc",
     ]);
     expect(legacy.cardProperties.description).toBe(false);
-    expect(legacy.hiddenStatusCategories).toEqual(["cancelled"]);
+    expect(legacy.hiddenStatusCategories).toEqual(["closed"]);
 
     const custom = getIssueSurfaceViewStore("workspace:custom").getState();
     expect([custom.sortBy, custom.sortDirection]).toEqual(["title", "desc"]);
