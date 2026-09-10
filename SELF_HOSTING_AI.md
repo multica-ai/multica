@@ -80,6 +80,14 @@ invoked directly is the reverse again — there the environment outranks `.env`.
 startup output is read back from Docker Compose, so the address it prints is the
 one the stack is actually published on.
 
+`make selfhost` checks those host ports before it pulls anything. If one is
+taken it names the port, names the process or container holding it when it can,
+and exits without starting or downloading — so a conflict costs a second rather
+than a full image pull ending in Docker's `port is already allocated`. When the
+run is also the one that creates `.env`, it records `PORT` and `FRONTEND_PORT`
+there, so `make selfhost PORT=9090 FRONTEND_PORT=9071` is remembered by later
+bare runs. An existing `.env` is left untouched.
+
 ## Troubleshooting
 
 - **Backend not ready:** `docker compose -f docker-compose.selfhost.yml logs backend`

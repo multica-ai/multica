@@ -22,7 +22,7 @@ The machine running the Multica service needs:
 
 - Docker Engine or Docker Desktop, with `docker compose` working
 - Git, Make, curl, and OpenSSL
-- Ports `3000` and `8080` free on the machine
+- Two free ports for the web app and the API. The defaults are `3000` and `8080`; if either is taken, startup stops and tells you, and you can pick others with `make selfhost PORT=… FRONTEND_PORT=…`
 
 Confirm Docker and Compose are available first:
 

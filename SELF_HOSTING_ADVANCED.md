@@ -169,7 +169,10 @@ If the frontend and backend are served from different hostnames, `COOKIE_DOMAIN`
 > the same everywhere. None of this affects whether the reported port is correct:
 > `make selfhost` and both installers read the published port back from
 > `docker compose port`, so the health check and the printed URL always match
-> what Compose actually published.
+> what Compose actually published. It asks the same question before starting:
+> `make selfhost` refuses to run when a host port it would publish is already
+> taken, naming the port and its holder before any image is pulled, and records
+> the ports it used in a `.env` it creates.
 
 The web development server is one intentional exception to the generic `PORT`
 fallback: Next uses `PORT` for its own frontend listener before it evaluates the

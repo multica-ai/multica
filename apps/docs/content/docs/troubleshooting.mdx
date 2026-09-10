@@ -207,6 +207,29 @@ netstat -ano | findstr :8080       # Windows
 
 If it is another Multica checkout, run `make stop` in that directory first. Otherwise stop the offending program normally, or change the current service's port. Public ports 80/443 are listened on by a reverse proxy such as Caddy or Nginx.
 
+### The self-hosted stack
+
+`make selfhost` and `make selfhost-build` check the host ports they are about to publish before doing anything else, so a conflict is reported in a second instead of after several hundred megabytes of images have been pulled:
+
+```
+  Port 3000 (frontend) is already in use by the Docker container my-other-app.
+
+Multica was not started; no images were pulled.
+
+Pick free ports and run again:
+  make selfhost FRONTEND_PORT=<free port>
+```
+
+Every conflicting port is listed at once, and the offender is named when the machine can identify it. Pass free ports as the message suggests:
+
+```bash
+make selfhost PORT=9090 FRONTEND_PORT=9071
+```
+
+If that run is the one that creates `.env`, both ports are written into it, so later bare `make selfhost` runs stay on them. An existing `.env` is never rewritten — set `PORT` and `FRONTEND_PORT` in it yourself, or the command-line values apply to that run only.
+
+Only listeners the stack would actually collide with count: it publishes on `127.0.0.1`, so a service bound to another interface is not a conflict, and neither is a Multica container of this project already sitting on the port — re-running `make selfhost` is how the stack picks up a new image.
+
 ## Log locations
 
 | Component | How to view |
