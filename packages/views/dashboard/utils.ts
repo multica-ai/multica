@@ -255,6 +255,9 @@ export function mergeAgentDashboardRows(
   // stay at 0 for sorting, while the leaderboard renders them as unavailable.
   for (const r of runTimeRows) {
     if (merged.has(r.agent_id)) continue;
+    // Old servers omit the coverage field. The missing token aggregate may
+    // merely be lagging, so do not reinterpret every run as unreported.
+    const coverageKnown = r.metered_task_count !== undefined;
     const meteredTaskCount = r.metered_task_count ?? 0;
     merged.set(r.agent_id, {
       agentId: r.agent_id,
@@ -262,9 +265,10 @@ export function mergeAgentDashboardRows(
       cost: 0,
       seconds: r.total_seconds,
       taskCount: r.task_count,
-      unreportedTaskCount: Math.max(0, r.task_count - meteredTaskCount),
-      hasReportedUsage:
-        r.metered_task_count === undefined ? false : meteredTaskCount > 0,
+      unreportedTaskCount: coverageKnown
+        ? Math.max(0, r.task_count - meteredTaskCount)
+        : 0,
+      hasReportedUsage: coverageKnown && meteredTaskCount > 0,
       hasUsageTotals: false,
     });
   }

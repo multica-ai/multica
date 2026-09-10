@@ -706,20 +706,65 @@ func TestFormatIssueUsageTokensDistinguishesUnreportedRuns(t *testing.T) {
 		value         any
 		terminal      any
 		metered       any
+		usageRows     any
 		coverageKnown bool
 		want          string
 	}{
-		{"complete", float64(3800), float64(1), float64(1), true, "3800"},
-		{"partially reported", float64(3800), float64(2), float64(1), true, ">=3800"},
-		{"fully unreported", float64(0), float64(4), float64(0), true, "—"},
-		{"old server", float64(0), nil, float64(0), false, "0"},
+		{"complete", float64(3800), float64(1), float64(1), float64(1), true, "3800"},
+		{"partially reported", float64(3800), float64(2), float64(1), float64(1), true, ">=3800"},
+		{"fully unreported", float64(0), float64(4), float64(0), float64(0), true, "—"},
+		{"nonterminal usage with unreported terminal run", float64(40000), float64(1), float64(0), float64(1), true, ">=40000"},
+		{"only nonterminal usage", float64(40000), float64(0), float64(0), float64(1), true, "40000"},
+		{"unknown usage row count preserves known total", float64(40000), float64(1), float64(0), nil, true, ">=40000"},
+		{"old server", float64(0), nil, float64(0), float64(0), false, "0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := formatIssueUsageTokens(tt.value, tt.terminal, tt.metered, tt.coverageKnown); got != tt.want {
+			if got := formatIssueUsageTokens(tt.value, tt.terminal, tt.metered, tt.usageRows, tt.coverageKnown); got != tt.want {
 				t.Fatalf("formatIssueUsageTokens() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRunIssueUsageTableKeepsNonterminalUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/MUL-2818":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-uuid",
+				"identifier": "MUL-2818",
+				"title":      "CLI usage lookup",
+			})
+		case "/api/issues/issue-uuid/usage":
+			json.NewEncoder(w).Encode(map[string]any{
+				"total_input_tokens":       40000,
+				"total_output_tokens":      0,
+				"total_cache_read_tokens":  0,
+				"total_cache_write_tokens": 0,
+				"task_count":               1,
+				"terminal_task_count":      1,
+				"metered_task_count":       0,
+				"unreported_task_count":    1,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	out, err := captureStdout(t, func() error {
+		return runIssueUsage(newIssueUsageTestCmd(), []string{"MUL-2818"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueUsage: %v", err)
+	}
+	if !strings.Contains(out, ">=40000") {
+		t.Fatalf("table output hides nonterminal usage:\n%s", out)
 	}
 }
 

@@ -401,6 +401,7 @@ describe("DashboardPage — unreported usage", () => {
   });
 
   it("keeps the run visible while replacing invented token and cost zeroes", () => {
+    runtimeMeteredCountRef.current = 0;
     renderDashboard();
 
     const list = within(screen.getByRole("list", { name: "Leaderboard" }));
@@ -420,6 +421,29 @@ describe("DashboardPage — unreported usage", () => {
     const row = list.getAllByRole("listitem")[0] as HTMLElement;
     expect(row).toHaveTextContent("Usage totals are still being processed");
     expect(row).not.toHaveTextContent("did not report usage");
+    expect(within(row).getAllByText("—")).toHaveLength(2);
+  });
+
+  it("keeps old-server coverage unknown without claiming unreported usage", () => {
+    runtimeMeteredCountRef.current = undefined;
+    renderDashboard();
+
+    const list = within(screen.getByRole("list", { name: "Leaderboard" }));
+    const row = list.getAllByRole("listitem")[0] as HTMLElement;
+    expect(row).not.toHaveTextContent("did not report usage");
+    expect(row).not.toHaveTextContent("still being processed");
+    expect(within(row).getAllByText("—")).toHaveLength(2);
+  });
+
+  it("shows both missing coverage and delayed totals", () => {
+    runtimeMeteredCountRef.current = 6;
+    renderDashboard();
+
+    const list = within(screen.getByRole("list", { name: "Leaderboard" }));
+    const row = list.getAllByRole("listitem")[0] as HTMLElement;
+    expect(row).toHaveTextContent(
+      "6 runs did not report usage · totals are still being processed",
+    );
     expect(within(row).getAllByText("—")).toHaveLength(2);
   });
 });

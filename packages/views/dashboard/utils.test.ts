@@ -220,7 +220,16 @@ describe("mergeAgentDashboardRows", () => {
     // list with unavailable token columns.
     const merged = mergeAgentDashboardRows(
       [],
-      [{ agent_id: "agent-c", total_seconds: 30, task_count: 1, failed_count: 1, cancelled_count: 0 }],
+      [
+        {
+          agent_id: "agent-c",
+          total_seconds: 30,
+          task_count: 1,
+          metered_task_count: 0,
+          failed_count: 1,
+          cancelled_count: 0,
+        },
+      ],
     );
     expect(merged).toHaveLength(1);
     expect(merged[0]!.tokens).toBe(0);
@@ -229,6 +238,26 @@ describe("mergeAgentDashboardRows", () => {
     expect(merged[0]!.unreportedTaskCount).toBe(1);
     expect(merged[0]!.hasReportedUsage).toBe(false);
     expect(merged[0]!.hasUsageTotals).toBe(false);
+  });
+
+  it("does not invent unreported runs for an old server", () => {
+    const merged = mergeAgentDashboardRows(
+      [],
+      [
+        {
+          agent_id: "agent-old-server",
+          total_seconds: 30,
+          task_count: 1,
+          failed_count: 1,
+          cancelled_count: 0,
+        },
+      ],
+    );
+    expect(merged[0]).toMatchObject({
+      unreportedTaskCount: 0,
+      hasReportedUsage: false,
+      hasUsageTotals: false,
+    });
   });
 
   it("separates real-time usage coverage from delayed aggregate totals", () => {

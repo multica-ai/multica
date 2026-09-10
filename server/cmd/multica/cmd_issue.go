@@ -346,8 +346,11 @@ var issueRunMessagesCmd = &cobra.Command{
 var issueUsageCmd = &cobra.Command{
 	Use:   "usage <issue-id>",
 	Short: "Show aggregated token usage for an issue",
-	Args:  exactArgs(1),
-	RunE:  runIssueUsage,
+	Long: "Show aggregated token usage for an issue.\n\n" +
+		"In table output, RUNS counts terminal runs. Token totals prefixed with >= " +
+		"are lower bounds because one or more terminal runs did not report usage.",
+	Args: exactArgs(1),
+	RunE: runIssueUsage,
 }
 
 var issueRerunCmd = &cobra.Command{
@@ -2457,16 +2460,17 @@ func runIssueUsage(cmd *cobra.Command, args []string) error {
 	if !hasUnreported {
 		unreported = "—"
 	}
+	usageRows := result["task_count"]
 
 	// JSON numbers decode to float64; formatIssueUsageTokens and
 	// formatMetadataValue render them as clean integers (no scientific
 	// notation for large cache-token counts).
 	headers := []string{"INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE", "RUNS", "METERED_RUNS", "UNREPORTED"}
 	rows := [][]string{{
-		formatIssueUsageTokens(result["total_input_tokens"], terminal, metered, hasTerminal && hasMetered),
-		formatIssueUsageTokens(result["total_output_tokens"], terminal, metered, hasTerminal && hasMetered),
-		formatIssueUsageTokens(result["total_cache_read_tokens"], terminal, metered, hasTerminal && hasMetered),
-		formatIssueUsageTokens(result["total_cache_write_tokens"], terminal, metered, hasTerminal && hasMetered),
+		formatIssueUsageTokens(result["total_input_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
+		formatIssueUsageTokens(result["total_output_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
+		formatIssueUsageTokens(result["total_cache_read_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
+		formatIssueUsageTokens(result["total_cache_write_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
 		formatMetadataValue(terminal),
 		formatMetadataValue(metered),
 		formatMetadataValue(unreported),
@@ -2475,7 +2479,7 @@ func runIssueUsage(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func formatIssueUsageTokens(value, terminal, metered any, coverageKnown bool) string {
+func formatIssueUsageTokens(value, terminal, metered, usageRows any, coverageKnown bool) string {
 	if !coverageKnown {
 		return formatMetadataValue(value)
 	}
@@ -2484,7 +2488,8 @@ func formatIssueUsageTokens(value, terminal, metered any, coverageKnown bool) st
 	if !terminalOK || !meteredOK || terminalCount <= meteredCount {
 		return formatMetadataValue(value)
 	}
-	if meteredCount == 0 {
+	usageRowCount, usageRowsOK := usageRows.(float64)
+	if meteredCount == 0 && usageRowsOK && usageRowCount == 0 {
 		return "—"
 	}
 	return ">=" + formatMetadataValue(value)

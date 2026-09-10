@@ -210,13 +210,17 @@ export function Leaderboard({
                 const costText = usageUnavailable
                   ? "—"
                   : `${usageIncomplete ? "≥" : ""}$${row.cost.toFixed(2)}`;
-                const coverageText = usageIncomplete
-                  ? t(($) => $.leaderboard.usage_unreported, {
+                const coverageText = usageIncomplete && usageTotalsPending
+                  ? t(($) => $.leaderboard.usage_unreported_pending, {
                       count: row.unreportedTaskCount,
                     })
-                  : usageTotalsPending
-                    ? t(($) => $.leaderboard.usage_totals_pending)
-                    : null;
+                  : usageIncomplete
+                    ? t(($) => $.leaderboard.usage_unreported, {
+                        count: row.unreportedTaskCount,
+                      })
+                    : usageTotalsPending
+                      ? t(($) => $.leaderboard.usage_totals_pending)
+                      : null;
                 return (
                   <li
                     key={row.agentId}
