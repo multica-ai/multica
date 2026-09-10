@@ -1796,10 +1796,15 @@ export function StepBody({ item }: { item: TimelineItem }) {
       // server-side budget and keeps the clip at its existing length; nothing
       // about how long an input renders is this change's business.
       const clip = item.type === "tool_result" ? null : DISPLAY_CLIP_CHARS;
+      // Redact the whole body, then clip it. The other order drops the tail a
+      // pattern needs to match, so a secret straddling the clip renders its
+      // head (MUL-7227 review) — and the clip length is a display choice that
+      // must not decide what stays hidden.
+      const safe = redactSecrets(text);
       const clipped =
-        clip !== null && text.length > clip
-          ? `${redactSecrets(text.slice(0, clip))}\n${t(($) => $.transcript.display_clipped)}`
-          : redactSecrets(text);
+        clip !== null && safe.length > clip
+          ? `${safe.slice(0, clip)}\n${t(($) => $.transcript.display_clipped)}`
+          : safe;
       const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
       return (
         <ToolDetailSurface

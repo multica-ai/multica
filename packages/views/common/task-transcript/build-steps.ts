@@ -1,4 +1,4 @@
-import type { TimelineItem } from "./build-timeline";
+import { redactTimelineItem, type TimelineItem } from "./build-timeline";
 
 /**
  * A run's steps, derived from the flat event stream.
@@ -190,6 +190,35 @@ export function groupSteps(steps: TraceStep[]): TraceRow[] {
   flush();
 
   return rows;
+}
+
+/**
+ * Redact every body this row can put on screen.
+ *
+ * Applied to the rows actually being rendered rather than to the whole
+ * transcript: scanning every message on each live flush is what made the
+ * client stall (MUL-7227), and the rows on screen are a bounded slice of it.
+ * What must not change is the order — a row is redacted whole, before its
+ * summary is cut to 200 characters and before `StepBody` reaches its display
+ * clip, because a secret straddling either cut cannot be matched afterwards.
+ */
+export function redactTraceRow(row: TraceRow): TraceRow {
+  if (isGroupRow(row)) return { ...row, steps: row.steps.map(redactCallStep) };
+  return redactTraceStep(row);
+}
+
+/** `redactTraceRow` for a single step. */
+export function redactTraceStep(step: TraceStep): TraceStep {
+  if (step.kind === "call") return redactCallStep(step);
+  return { ...step, item: redactTimelineItem(step.item) };
+}
+
+function redactCallStep(step: TraceCallStep): TraceCallStep {
+  return {
+    ...step,
+    call: step.call && redactTimelineItem(step.call),
+    result: step.result && redactTimelineItem(step.result),
+  };
 }
 
 // `TraceMessageStep` carries three kinds on one interface, so a `kind` check

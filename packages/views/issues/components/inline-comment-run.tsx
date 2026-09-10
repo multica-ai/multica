@@ -18,7 +18,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
 import { buildTimelineStructure, redactTimelineItems, type TimelineItem } from "../../common/task-transcript/build-timeline";
-import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceRow } from "../../common/task-transcript/build-steps";
+import { buildSteps, groupSteps, isCallStep, isGroupRow, redactTraceRow, redactTraceStep, type TraceRow } from "../../common/task-transcript/build-steps";
 import { traceEventSummary, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
 import { redactSecrets } from "../../common/task-transcript/redact";
 import { ReadonlyContent } from "../../editor";
@@ -96,6 +96,13 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, loadTranscript);
   const steps = useMemo(() => buildSteps(items), [items]);
   const rows = useMemo(() => groupSteps(steps), [steps]);
+  // Only the rows on screen are redacted, and they are redacted whole before
+  // anything below cuts them. That bound is the point: the transcript this
+  // slice comes from can be thousands of messages (MUL-7227).
+  const visibleRows = useMemo(
+    () => rows.slice(-visibleCount).map(redactTraceRow),
+    [rows, visibleCount],
+  );
   useEffect(() => {
     if (!active) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -111,7 +118,13 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const output = !hasReply ? commentRunOutput(task) : null;
   const latest = steps.findLast((step) => step.kind !== "text" || step.item.content?.trim());
   const pendingCall = steps.findLast((step) => isCallStep(step) && !step.result);
-  const current = pendingCall ?? latest;
+  // Redacted before it is summarized, not after: `traceToolArgSummary` and
+  // friends cut to 200 characters, and a pattern spanning that cut cannot be
+  // matched once the tail is gone. One step, so this stays off the hot path.
+  const current = useMemo(() => {
+    const step = pendingCall ?? latest;
+    return step && redactTraceStep(step);
+  }, [pendingCall, latest]);
   // Keep the last activity visible after a tool returns, until new progress arrives.
   const activitySummary = current && isCallStep(current)
     ? redactSecrets(traceToolArgSummary(current.call?.input, { formatText }) || current.tool)
@@ -202,7 +215,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {!isPending && !isError && rows.length === 0 && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.empty)}</p>}
           {rows.length > visibleCount && <button type="button" className="py-1 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
-          {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={active} formatText={formatText} />)}
+          {visibleRows.map((row) => <InlineStep key={row.seq} row={row} live={active} formatText={formatText} />)}
           <button type="button" className="flex items-center gap-1.5 rounded py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={openFullLog}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
         </div>}

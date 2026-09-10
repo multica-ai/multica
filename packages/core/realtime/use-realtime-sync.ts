@@ -1746,6 +1746,23 @@ export function useRealtimeSync(
     };
   }, [ws, qc, authStore, onToast]);
 
+  // Connect -> repair timelines fetched before this client was subscribed.
+  //
+  // `taskMessagesOptions` holds `staleTime: Infinity` and is kept current by
+  // `task:message` frames, so a row persisted between the HTTP read and the
+  // socket coming up is in neither: the response was snapshotted before it
+  // existed, and its broadcast went out while nobody here was listening.
+  // Removing the focus refetch (MUL-7227) took away the accident that used to
+  // paper over this, so it is repaired where it happens instead — once per
+  // connection, and only for the caches whose sole live source is the socket,
+  // rather than on every window focus.
+  useEffect(() => {
+    if (!ws) return;
+    return ws.onConnect(() => {
+      qc.invalidateQueries({ queryKey: chatKeys.taskMessagesAll() });
+    });
+  }, [ws, qc]);
+
   // Reconnect -> refetch all data to recover missed events
   useEffect(() => {
     if (!ws) return;

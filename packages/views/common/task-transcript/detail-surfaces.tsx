@@ -178,6 +178,17 @@ export function DiffDetailSurface({ lines, path }: { lines: TraceDiffLine[]; pat
   const added = lines.filter((l) => l.kind === "add").length;
   const removed = lines.filter((l) => l.kind === "remove").length;
 
+  // Redacted here, before highlighting, rather than only in the fallback below.
+  // The highlighter returns markup that is rendered with
+  // `dangerouslySetInnerHTML`, so whatever it is handed reaches the screen
+  // without passing the fallback's `redactSecrets` — which made the redaction
+  // conditional on a language lookup failing. Diff lines are also built from
+  // tool input, which carries no upstream redaction at all.
+  const safeLines = useMemo(
+    () => lines.map((line) => (line.text ? { ...line, text: redactSecrets(line.text) } : line)),
+    [lines],
+  );
+
   // Each side is highlighted as one block so multi-line strings and comments
   // keep their grammar, then split back per line to sit in the diff gutter.
   // Runs only when the row is expanded, which is where this component mounts.
@@ -190,13 +201,13 @@ export function DiffDetailSurface({ lines, path }: { lines: TraceDiffLine[]; pat
       context: null,
     };
     for (const kind of ["add", "remove", "context"] as const) {
-      const side = lines.filter((l) => l.kind === kind);
+      const side = safeLines.filter((l) => l.kind === kind);
       if (side.length > 0) {
         sides[kind] = highlightToLines(side.map((l) => l.text).join("\n"), language);
       }
     }
     return sides;
-  }, [lines, path]);
+  }, [safeLines, path]);
 
   return (
     <div className="relative">
@@ -210,7 +221,7 @@ export function DiffDetailSurface({ lines, path }: { lines: TraceDiffLine[]; pat
           isLong && !showAll && "max-h-52 overflow-hidden",
         )}
       >
-        {renderDiffRows(lines, highlighted)}
+        {renderDiffRows(safeLines, highlighted)}
       </pre>
       {isLong && !showAll && (
         <div className="absolute inset-x-0 bottom-0 flex h-12 items-end justify-center rounded-b-md bg-gradient-to-b from-transparent to-background">

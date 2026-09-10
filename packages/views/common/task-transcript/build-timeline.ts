@@ -58,11 +58,25 @@ export function appendTimelineItem(items: TimelineItem[], item: TimelineItem): T
  * actually render should build the structure and skip this.
  */
 export function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
-  return items.map((item) => ({
+  return items.map(redactTimelineItem);
+}
+
+/**
+ * Redact one record's bodies.
+ *
+ * Whole bodies, before anything downstream clips or summarizes them. Every
+ * consumer of a body cuts first and redacts second — `StepBody` at its display
+ * clip, the step summaries at 200 characters — so a pattern that spans the cut
+ * loses the tail it needs to match and the head renders. Redacting the record
+ * first is what made that ordering harmless, and it stays harmless as long as
+ * a raw record never reaches a renderer.
+ */
+export function redactTimelineItem(item: TimelineItem): TimelineItem {
+  return {
     ...item,
     content: item.content ? redactSecrets(item.content) : item.content,
     output: item.output ? redactSecrets(item.output) : item.output,
-  }));
+  };
 }
 
 /**
