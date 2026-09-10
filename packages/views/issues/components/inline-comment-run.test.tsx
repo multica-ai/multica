@@ -149,6 +149,46 @@ describe("InlineCommentRun", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("Full transcript");
   });
 
+  it("updates streamed summaries without replacing their DOM nodes", async () => {
+    const events: TaskMessagePayload[] = [...messages,
+      { task_id: id, issue_id: "issue", seq: 3, type: "tool_result", tool: "exec_command", output: "Passed" },
+    ];
+    vi.mocked(api.listTaskMessages).mockResolvedValue([...events]);
+    const { client } = setup(task());
+    const summary = await screen.findByText("pnpm test");
+    const text = summary.firstChild;
+    const container = summary.closest("[data-run-summary]")!;
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(container, { childList: true, subtree: true });
+    try {
+      // Cover a new seq with the same label, a changed tool argument, and prose.
+      for (const next of [
+        { type: "tool_use", tool: "exec_command", input: { command: "pnpm test" } },
+        { type: "tool_use", tool: "exec_command", input: { command: "pnpm lint" } },
+        { type: "text", content: "Reviewing the results." },
+      ] as const) {
+        events.push({ task_id: id, issue_id: "issue", seq: events.length + 1, ...next });
+        if (next.type === "tool_use") events.push({
+          task_id: id, issue_id: "issue", seq: events.length + 1,
+          type: "tool_result", tool: next.tool, output: "Passed",
+        });
+        await act(async () => {
+          client.setQueryData(chatKeys.taskMessages(id), [...events]);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        const label = next.type === "text" ? next.content : next.input.command;
+        await waitFor(() => expect(summary).toHaveTextContent(label));
+        expect(summary.isConnected).toBe(true);
+        expect(summary.firstChild).toBe(text);
+        expect(container).toHaveAttribute("title", label);
+      }
+      expect([...mutations, ...observer.takeRecords()]).toHaveLength(0);
+    } finally {
+      observer.disconnect();
+    }
+  });
+
   it("retains the last meaningful activity between tool results and the next agent message", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue([]);
     const { client } = setup(task());

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AlertCircle, Brain, ChevronRight, CirclePause, Clock3, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -15,7 +14,6 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
-import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
 import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceRow } from "../../common/task-transcript/build-steps";
@@ -108,7 +106,6 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     : task.status === "dispatched" ? t(($) => $.inline_run.starting)
     : task.status === "waiting_local_directory" ? t(($) => $.inline_run.waiting_directory)
     : activitySummary;
-  const summaryMotionKey = `${task.status}:${current?.seq ?? "empty"}`;
   const showProgress = active && !hasReply;
   const activityLabel = t(($) => $.inline_run.view_activity);
   const stepLabel = steps.length > 0 ? t(($) => $.inline_run.steps, { count: steps.length }) : "";
@@ -162,7 +159,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           onClick={(event) => { state.disclosure.onTrigger(event); setExpanded(!expanded); }}>
           {showProgress
             ? <><RunActivityIndicator status={task.status} animate={animationVisibility.visible} />
-                <RunActivitySummary summary={summary} motionKey={summaryMotionKey} /></>
+                <RunActivitySummary summary={summary} /></>
             : <span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{activityLabel}</span>}
           {!showProgress && stepLabel && <span className="text-faint-foreground @max-[32rem]/run:hidden">· {stepLabel}</span>}
           <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
@@ -252,21 +249,10 @@ function RunActivityIndicator({ status, animate }: { status: AgentTask["status"]
   return <Clock3 aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />;
 }
 
-function RunActivitySummary({ summary, motionKey }: { summary: string; motionKey: string }) {
-  const shouldReduceMotion = useReducedMotion() ?? false;
+function RunActivitySummary({ summary }: { summary: string }) {
+  // Update the existing text node. Replacing it for every streamed message
+  // invalidates ancestor :has() styles across the entire issue page.
   return <span data-run-summary className="grid h-[1lh] min-w-0 flex-1 overflow-hidden" title={summary}>
-    <AnimatePresence initial={false}>
-      <motion.span key={motionKey}
-        className="col-start-1 row-start-1 block min-w-0 max-w-full truncate"
-        initial={shouldReduceMotion ? false : { opacity: 0, transform: "translateY(6px)" }}
-        animate={shouldReduceMotion ? undefined : { opacity: 1, transform: "translateY(0)", transition: {
-          duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT,
-        } }}
-        exit={shouldReduceMotion ? undefined : { opacity: 0, transform: "translateY(-6px)", transition: {
-          duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN,
-        } }}>
-        {summary}
-      </motion.span>
-    </AnimatePresence>
+    <span className="col-start-1 row-start-1 block min-w-0 max-w-full truncate">{summary}</span>
   </span>;
 }
