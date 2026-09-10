@@ -380,10 +380,13 @@ type UnlinkIssueFromVCSPullRequestParams struct {
 }
 
 // Drops a link an earlier claim created, for the GitHub twin's reason: while a
-// PR is still editable, the link follows the live title/body parse, so removing
-// the claim (closing keyword, title prefix, branch reference) removes the link.
-// Callers must not run this once the PR has gone terminal — a post-merge edit
-// cannot retroactively unlink a PR that did the work.
+// PR is still editable, the link follows the live title/body parse, so a key the
+// payload still carries but no longer claims — "Closes MUL-1" edited down to
+// "Related MUL-1" — loses its link. A key deleted from the PR outright is NOT
+// covered: the payload keeps no trace of it, so noticing that needs the stored
+// links instead, which is its own change. Callers must not run this once the PR
+// has gone terminal — a post-merge edit cannot retroactively unlink a PR that
+// did the work.
 func (q *Queries) UnlinkIssueFromVCSPullRequest(ctx context.Context, arg UnlinkIssueFromVCSPullRequestParams) error {
 	_, err := q.db.Exec(ctx, unlinkIssueFromVCSPullRequest, arg.IssueID, arg.PullRequestID)
 	return err

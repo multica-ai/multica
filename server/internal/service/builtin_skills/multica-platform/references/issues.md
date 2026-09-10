@@ -57,11 +57,10 @@ in the body — not as a loose body reference.
 
 While the PR is still open the link follows the live title and body: adding a key
 links it, and downgrading that key to a plain mention drops the link. Once the PR
-has merged or
-closed, existing links and their close-intent decision are frozen — but a PR that
-was never linked can still be linked by editing it, so a forgotten key is
-repairable after the fact. That late link does not move the issue to `done`;
-close intent is decided at merge time.
+has merged or closed, existing links and their close-intent decision are frozen —
+but a PR that was never linked can still be linked by editing it, so a forgotten
+key is repairable after the fact. That late link does not move the issue to
+`done`; close intent is decided at merge time.
 
 ```text
 Closes MUL-123 in the body                        # links
