@@ -272,7 +272,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           version: "0.4.43",
           date: "2026-09-10",
-          title: "Lark グループでのネイティブ返信とメンション、より正確な使用量、ツール出力の省略表示、より軽快な実行ログ",
+          title: "より軽快なエージェントの実行ログ、実行記録の再読み込みの削減",
           changes: [],
           features: [
             "コマンドラインでエージェントを作成・更新するとき、会話の書き出し候補を設定できます。",
@@ -280,6 +280,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           ],
           improvements: [
             "同じ Issue で複数のエージェントが同時に動いても、画面が重くなりません。",
+            "アプリに戻ったときに、画面上の実行ログを丸ごと読み込み直しません。",
             "トップページに Antigravity が並びます。",
           ],
           fixes: [

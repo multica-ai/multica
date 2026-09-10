@@ -296,7 +296,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.43",
         date: "2026-09-10",
-        title: "Native Lark group replies, truer usage numbers, truncated tool output notices, and smoother run logs",
+        title: "Smoother agent run logs and fewer transcript reloads",
         changes: [],
         features: [
           "Set, replace, or clear an agent's conversation starters from the command line.",
@@ -304,6 +304,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         ],
         improvements: [
           "Several agents running on one Issue no longer slow the page down.",
+          "Coming back to the app no longer reloads every run log on screen.",
           "The homepage now shows Antigravity among the agents Multica supports.",
         ],
         fixes: [

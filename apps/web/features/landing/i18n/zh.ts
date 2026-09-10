@@ -296,7 +296,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.43",
         date: "2026-09-10",
-        title: "飞书群原生引用与提及、用量口径更准、工具输出截断提示、运行日志更流畅",
+        title: "智能体运行日志更流畅、运行记录不再重复加载",
         changes: [],
         features: [
           "在命令行创建或更新智能体时，可以直接设置对话开场建议。",
@@ -304,6 +304,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         ],
         improvements: [
           "同一个 Issue 里多个智能体同时运行，页面也不会再卡顿。",
+          "切回应用时，屏幕上的运行日志不会再整份重新加载。",
           "官网首页现在展示 Antigravity。",
         ],
         fixes: [

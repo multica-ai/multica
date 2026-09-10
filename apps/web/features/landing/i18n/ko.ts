@@ -271,7 +271,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.4.43",
           date: "2026-09-10",
-          title: "Lark 그룹 네이티브 답장과 멘션, 더 정확한 사용량, 도구 출력 생략 표시, 더 매끄러운 실행 로그",
+          title: "더 매끄러운 에이전트 실행 로그, 실행 기록 재로딩 감소",
           changes: [],
           features: [
             "명령줄에서 에이전트를 만들거나 수정할 때 대화 시작 문구를 설정할 수 있습니다.",
@@ -279,6 +279,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           ],
           improvements: [
             "같은 Issue에서 여러 에이전트가 동시에 돌아도 화면이 느려지지 않습니다.",
+            "앱으로 돌아올 때 화면의 실행 로그를 전부 다시 불러오지 않습니다.",
             "홈페이지에 Antigravity가 함께 표시됩니다.",
           ],
           fixes: [
