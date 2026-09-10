@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { TaskMessagePayload } from "@multica/core/types/events";
-import { appendTimelineItem, buildTimeline, coalesceTimelineItems, type TimelineItem } from "./build-timeline";
+import { appendTimelineItem, buildTimeline, buildTimelineStructure, coalesceTimelineItems, redactTimelineItems, type TimelineItem } from "./build-timeline";
 
 function message(seq: number, type: TaskMessagePayload["type"], content?: string): TaskMessagePayload {
   return {
@@ -76,6 +76,22 @@ describe("task transcript timeline", () => {
     expect(items[0]?.content).toBe("Authorization: Bearer [REDACTED]");
     expect(items[0]?.content).not.toContain("abc123xyz");
     expect(items[0]?.content).not.toContain("def456");
+  });
+
+  it("leaves bodies raw when only the structure was asked for", () => {
+    const raw = buildTimelineStructure([
+      message(1, "text", "Authorization: Bearer abc123xyz."),
+      message(2, "text", "def456"),
+    ]);
+
+    // Coalescing still happens; redaction is what the caller opted out of, and
+    // it must still fold the same way once applied.
+    expect(raw[0]?.content).toBe("Authorization: Bearer abc123xyz.def456");
+    expect(redactTimelineItems(raw)[0]?.content).toBe("Authorization: Bearer [REDACTED]");
+    expect(redactTimelineItems(raw)).toEqual(buildTimeline([
+      message(1, "text", "Authorization: Bearer abc123xyz."),
+      message(2, "text", "def456"),
+    ]));
   });
 
   it("keeps the latest created_at when coalescing streaming fragments", () => {

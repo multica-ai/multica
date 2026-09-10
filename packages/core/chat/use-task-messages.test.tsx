@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
@@ -53,6 +53,27 @@ describe("useTaskMessages", () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue([msg(1), msg(2), msg(3), msg(4), msg(5)]);
     await act(async () => { await client.invalidateQueries({ queryKey: chatKeys.taskMessagesAll() }); });
     await waitFor(() => expect(result.current.data).toHaveLength(5));
+    client.clear();
+  });
+
+  it("does not refetch the transcript when the window regains focus", async () => {
+    // This endpoint returns the whole transcript and does not paginate, so an
+    // "always" focus refetch made every alt-tab back into the desktop app
+    // re-download every transcript on screen (MUL-7227). Live frames keep the
+    // cache current, so there is nothing to catch up on.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(api.listTaskMessages).mockResolvedValue([msg(1)]);
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    const { result } = renderHook(() => useTaskMessages(id, true), { wrapper });
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    expect(api.listTaskMessages).toHaveBeenCalledTimes(1);
+
+    act(() => { focusManager.setFocused(false); });
+    act(() => { focusManager.setFocused(true); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(api.listTaskMessages).toHaveBeenCalledTimes(1);
+    focusManager.setFocused(undefined);
     client.clear();
   });
 });

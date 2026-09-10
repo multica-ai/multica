@@ -41,7 +41,17 @@ export function appendTimelineItem(items: TimelineItem[], item: TimelineItem): T
   return coalesceTimelineItems([...items, item]);
 }
 
-function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
+/**
+ * Run the display safety net over every message body.
+ *
+ * This is the whole cost of building a timeline — coalescing a 3000-message
+ * transcript is ~0.1ms, redacting it is ~23ms, because every pattern scans
+ * every byte of every `content` and `output`. That is fine once per opened
+ * transcript and ruinous on a live run, whose timeline is rebuilt on each
+ * 100ms flush window (MUL-7227). Callers that redact the bounded strings they
+ * actually render should build the structure and skip this.
+ */
+export function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
   return items.map((item) => ({
     ...item,
     content: item.content ? redactSecrets(item.content) : item.content,
@@ -49,8 +59,14 @@ function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
   }));
 }
 
-/** Build a chronologically ordered timeline from raw task messages. */
-export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
+/**
+ * Chronological timeline of the raw message bodies, without redaction.
+ *
+ * Only for callers that redact at every point where they put one of these
+ * strings on screen — a caller that renders `content` or `output` directly
+ * wants `buildTimeline`. `input` is untouched by redaction either way.
+ */
+export function buildTimelineStructure(msgs: TaskMessagePayload[]): TimelineItem[] {
   const items: TimelineItem[] = [];
   for (const msg of msgs) {
     items.push({
@@ -63,5 +79,10 @@ export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
       created_at: msg.created_at,
     });
   }
-  return redactTimelineItems(coalesceTimelineItems(items));
+  return coalesceTimelineItems(items);
+}
+
+/** Build a chronologically ordered, redacted timeline from raw task messages. */
+export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
+  return redactTimelineItems(buildTimelineStructure(msgs));
 }

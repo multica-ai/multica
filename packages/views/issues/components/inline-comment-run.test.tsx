@@ -16,8 +16,12 @@ vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Reviewer" }) }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 vi.mock("../../editor", () => ({ ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div> }));
+const dialogItems: { current: { content?: string }[] } = { current: [] };
 vi.mock("../../common/task-transcript/agent-transcript-dialog", () => ({
-  AgentTranscriptDialog: ({ contentState, isLive }: { contentState?: ReactNode; isLive?: boolean }) => <div role="dialog" data-live={isLive}>{contentState ?? "Full transcript"}</div>,
+  AgentTranscriptDialog: ({ contentState, isLive, items }: { contentState?: ReactNode; isLive?: boolean; items?: { content?: string }[] }) => {
+    dialogItems.current = items ?? [];
+    return <div role="dialog" data-live={isLive}>{contentState ?? "Full transcript"}</div>;
+  },
   StepBody: ({ item }: { item: { output?: string } }) => <div>{item.output}</div>,
 }));
 
@@ -218,5 +222,42 @@ describe("InlineCommentRun", () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("redacts the live progress line without redacting the whole transcript", async () => {
+    // The collapsed row derives from an unredacted timeline (MUL-7227: doing it
+    // eagerly re-scans the transcript on every 100ms flush), so the safety net
+    // has to hold at the point the summary becomes a string.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(chatKeys.taskMessages(id), [
+      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Found AKIA1234567890ABCDEF in config." },
+    ] satisfies TaskMessagePayload[]);
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Found AKIA1234567890ABCDEF in config." },
+    ]);
+    renderWithI18n(<QueryClientProvider client={client}>
+      <InlineCommentRun run={{ task: task(), commentId: "comment", hasReply: false }} />
+    </QueryClientProvider>);
+
+    await screen.findByText("Found [REDACTED AWS KEY] in config.");
+    expect(screen.queryByText(/AKIA1234567890ABCDEF/)).not.toBeInTheDocument();
+  });
+
+  it("hands the full log a redacted transcript, and only once it is open", async () => {
+    const secret: TaskMessagePayload[] = [
+      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Found AKIA1234567890ABCDEF in config." },
+    ];
+    vi.mocked(api.listTaskMessages).mockResolvedValue(secret);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(chatKeys.taskMessages(id), secret);
+    dialogItems.current = [];
+    renderWithI18n(<QueryClientProvider client={client}>
+      <InlineCommentRun run={{ task: task({ status: "completed", completed_at: "2026-09-07T00:01:23Z" }), commentId: "comment", hasReply: true }} presentation="header" />
+    </QueryClientProvider>);
+
+    expect(dialogItems.current).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Open full log" }));
+    await waitFor(() => expect(dialogItems.current).toHaveLength(1));
+    expect(dialogItems.current[0]?.content).toBe("Found [REDACTED AWS KEY] in config.");
   });
 });

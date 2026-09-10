@@ -214,13 +214,23 @@ export function taskMessagesOptions(taskId: string) {
   });
 }
 
-/** A visible run follows WS updates and backfills on mount and completion. */
+/**
+ * A visible run follows WS updates and backfills on mount and completion.
+ *
+ * Deliberately no `refetchOnWindowFocus`. This endpoint returns the whole
+ * transcript with unbounded tool payloads and does not paginate, so an
+ * "always" refetch here means every alt-tab back into the desktop app
+ * re-downloads and re-merges every transcript on screen (MUL-7227). It buys
+ * nothing: the socket stays connected while the window is in the background
+ * and `task:message` frames keep this cache current, and the effect below
+ * already backfills the two transitions a focus refetch was covering — a run
+ * becoming visible, and a live run reaching its terminal state.
+ */
 export function useTaskMessages(taskId: string, isLive: boolean, enabled = true) {
   const query = useQuery({
     ...taskMessagesOptions(taskId),
     enabled: enabled && isTaskMessageTaskId(taskId),
     refetchOnMount: "always",
-    refetchOnWindowFocus: "always",
   });
   const previous = useRef({ isLive, enabled });
   const { refetch } = query;
