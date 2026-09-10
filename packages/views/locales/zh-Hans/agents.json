@@ -841,6 +841,8 @@
     "show_all": "显示全部",
     "patch_truncated": "...（已截断）",
     "patch_body_truncated": "...（内容已截断）",
+    "display_clipped": "...（内容过长，此处仅显示开头）",
+    "output_truncated_note": "输出内容过长，只保留了开头部分。",
     "patch_no_content": "（未记录内容）",
     "patch_summary_more": "{{path}}，另有 {{extra}} 个文件",
     "status_queued": "排队中",

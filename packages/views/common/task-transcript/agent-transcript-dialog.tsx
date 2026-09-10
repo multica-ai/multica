@@ -62,7 +62,7 @@ import {
   FOLLOW_EDGE_THRESHOLD,
   LINE_SCROLL_PX,
 } from "./transcript-follow";
-import type { TimelineItem } from "./build-timeline";
+import { isOutputTruncated, type TimelineItem } from "./build-timeline";
 import {
   buildLanes,
   buildSteps,
@@ -1752,10 +1752,17 @@ function InspectorSection({ label, children }: { label: string; children: React.
 }
 
 /** One payload, rendered as what it is. */
+/** Pre-existing render ceiling for a body with no server-side budget. */
+const DISPLAY_CLIP_CHARS = 8000;
+
 export function StepBody({ item }: { item: TimelineItem }) {
   const { t } = useT("agents");
   const detail = useMemo(() => traceEventDetail(item), [item]);
   const image = useMemo(() => readImageResult(item.output), [item.output]);
+  // Stated where the output actually ends, for a reader who has just reached
+  // the bottom and is wondering whether that was all of it. A header badge said
+  // the same thing louder, before anyone had asked the question.
+  const note = isOutputTruncated(item) ? t(($) => $.transcript.output_truncated_note) : undefined;
 
   // A screenshot is a picture, not a 200KB base64 string in a <pre>.
   if (image) {
@@ -1769,6 +1776,7 @@ export function StepBody({ item }: { item: TimelineItem }) {
         <figcaption className="pt-1 text-micro text-faint-foreground">
           {t(($) => $.transcript.image_result)} · {formatBytes(base64ByteLength(image.base64))}
         </figcaption>
+        {note && <span className="block pt-1 text-micro text-faint-foreground">{note}</span>}
       </figure>
     );
   }
@@ -1779,15 +1787,27 @@ export function StepBody({ item }: { item: TimelineItem }) {
     case "patch":
       return <PatchDetailSurface files={detail.files} truncated={detail.truncated} />;
     case "file":
-      return (
-        <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />
-      );
+      return <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />;
     default: {
       const text = detail.text;
+      // A stored tool result is already capped at 8192 bytes by the daemon, so
+      // clipping it again could only shave a couple of hundred more characters
+      // — under a note that already reports the same loss. Tool input has no
+      // server-side budget and keeps the clip at its existing length; nothing
+      // about how long an input renders is this change's business.
+      const clip = item.type === "tool_result" ? null : DISPLAY_CLIP_CHARS;
       const clipped =
-        text.length > 8000 ? `${redactSecrets(text.slice(0, 8000))}\n... (truncated)` : redactSecrets(text);
+        clip !== null && text.length > clip
+          ? `${redactSecrets(text.slice(0, clip))}\n${t(($) => $.transcript.display_clipped)}`
+          : redactSecrets(text);
       const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
-      return <ToolDetailSurface text={clipped} language={path ? languageForPath(path) : undefined} />;
+      return (
+        <ToolDetailSurface
+          text={clipped}
+          language={path ? languageForPath(path) : undefined}
+          note={note}
+        />
+      );
     }
   }
 }

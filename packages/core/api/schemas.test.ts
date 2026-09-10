@@ -14,6 +14,7 @@ import {
   EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
   AgentTaskListSchema,
+  TaskMessageListSchema,
   AutopilotQuotaUsageSchema,
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
@@ -2106,5 +2107,67 @@ describe("issue status catalog schemas", () => {
       { endpoint: "POST /api/issue-statuses" },
     );
     expect(parsed).toEqual(EMPTY_ISSUE_STATUS_ENTRY);
+  });
+});
+
+describe("TaskMessageListSchema", () => {
+  const row = { task_id: "task-1", issue_id: "issue-1", seq: 1, type: "tool_result", output: "log line" };
+
+  // The whole point of the field: a server that never sends it is saying
+  // "nobody measured this", and only `undefined` can carry that. A default of
+  // false would make every historical row assert it is complete.
+  it("leaves a missing truncation flag undefined rather than false", () => {
+    const parsed = TaskMessageListSchema.parse([row]);
+    expect(parsed[0]).not.toHaveProperty("output_truncated", false);
+    expect(parsed[0]?.output_truncated).toBeUndefined();
+  });
+
+  it("keeps both measured values", () => {
+    const parsed = TaskMessageListSchema.parse([
+      { ...row, seq: 1, output_truncated: true },
+      { ...row, seq: 2, output_truncated: false },
+    ]);
+    expect(parsed.map((m) => m.output_truncated)).toEqual([true, false]);
+  });
+
+  // Drift defense. Without a field-level catch, one bad boolean fails its row,
+  // the array fails with it, and parseWithFallback hands the viewer an empty
+  // transcript — a malformed flag would delete the whole run from the screen.
+  // Degrading the field to "unknown" is the correct loss.
+  it("keeps the record and forgets the field when the flag is malformed", () => {
+    const parsed = parseWithFallback<{ output?: string; output_truncated?: boolean }[]>(
+      [{ ...row, output_truncated: "false" }],
+      TaskMessageListSchema,
+      [],
+      { endpoint: "GET /api/tasks/:id/messages" },
+    );
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.output).toBe("log line");
+    expect(parsed[0]?.output_truncated).toBeUndefined();
+  });
+
+  it("keeps the surrounding rows when one row's flag is malformed", () => {
+    const parsed = TaskMessageListSchema.parse([
+      { ...row, seq: 1, output_truncated: true },
+      { ...row, seq: 2, output_truncated: 12345 },
+      { ...row, seq: 3, output_truncated: false },
+    ]);
+    expect(parsed.map((m) => m.seq)).toEqual([1, 2, 3]);
+    expect(parsed.map((m) => m.output_truncated)).toEqual([true, undefined, false]);
+  });
+
+  it("falls back to an empty transcript when the response is not a list", () => {
+    const parsed = parseWithFallback(
+      { messages: "nope" },
+      TaskMessageListSchema,
+      [],
+      { endpoint: "GET /api/tasks/:id/messages" },
+    );
+    expect(parsed).toEqual([]);
+  });
+
+  it("downgrades an unknown message type instead of dropping the transcript", () => {
+    const parsed = TaskMessageListSchema.parse([{ ...row, type: "video" }]);
+    expect(parsed[0]?.type).toBe("text");
   });
 });

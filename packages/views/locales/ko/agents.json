@@ -742,6 +742,8 @@
     "show_all": "모두 보기",
     "patch_truncated": "...(잘림)",
     "patch_body_truncated": "...(본문 잘림)",
+    "display_clipped": "...(내용이 길어 앞부분만 표시합니다)",
+    "output_truncated_note": "출력이 너무 길어 앞부분만 저장되어 있습니다.",
     "patch_no_content": "(기록된 내용 없음)",
     "patch_summary_more": "{{path}} 외 {{extra}}개",
     "status_queued": "대기열",

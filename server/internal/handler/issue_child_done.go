@@ -264,27 +264,55 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		// reality rather than a mid-batch snapshot. A lower closed stage would
 		// re-introduce the stale "advance the next stage" instruction the bug was
 		// about.
-		var rep db.Issue
-		var bestStage int32
-		found := false
-		for _, c := range g.children {
-			if !c.Stage.Valid {
-				continue // an unstaged child in a staged set closes no stage
-			}
-			if !stageBarrierClosed(children, c, isTerminal) {
-				continue
-			}
-			if !found || c.Stage.Int32 > bestStage {
-				found = true
-				bestStage = c.Stage.Int32
-				rep = c
-			}
-		}
+		rep, found := highestClosedBatchStage(children, g.children, isTerminal)
 		if !found {
 			continue
 		}
-		h.postChildDoneComment(ctx, parent, rep, children, true, bestStage, batch, isTerminal)
+		h.postChildDoneComment(ctx, parent, rep, children, true, rep.Stage.Int32, batch, isTerminal)
 	}
+}
+
+// highestClosedBatchStage selects the first completed child in the highest
+// closed stage of a staged sibling set. The terminal predicate must come from
+// resolveTerminalChildren: all required statuses must be known before selection.
+// A stage S is closed iff no non-terminal staged sibling has stage <= S, so
+// finding the earliest open stage once reduces selection from O(N*K) to O(N+K).
+func highestClosedBatchStage(children, completed []db.Issue, isTerminal func(db.Issue) bool) (db.Issue, bool) {
+	var lowestCompleted pgtype.Int4
+	for _, c := range completed {
+		if c.Stage.Valid && (!lowestCompleted.Valid || c.Stage.Int32 < lowestCompleted.Int32) {
+			lowestCompleted = c.Stage
+		}
+	}
+	if !lowestCompleted.Valid {
+		return db.Issue{}, false
+	}
+	var firstOpen pgtype.Int4
+	for _, c := range children {
+		if !c.Stage.Valid {
+			continue // Unstaged siblings were not resolved and cannot block a stage.
+		}
+		if !isTerminal(c) {
+			if c.Stage.Int32 <= lowestCompleted.Int32 {
+				return db.Issue{}, false // This sibling blocks every candidate; do not scan the rest.
+			}
+			if !firstOpen.Valid || c.Stage.Int32 < firstOpen.Int32 {
+				firstOpen = c.Stage
+			}
+		}
+	}
+	var rep db.Issue
+	found := false
+	for _, c := range completed {
+		if !c.Stage.Valid || (firstOpen.Valid && c.Stage.Int32 >= firstOpen.Int32) {
+			continue
+		}
+		if !found || c.Stage.Int32 > rep.Stage.Int32 {
+			found = true
+			rep = c
+		}
+	}
+	return rep, found
 }
 
 // postChildDoneComment builds and posts the parent's child-done system comment

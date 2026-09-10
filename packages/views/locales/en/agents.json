@@ -856,6 +856,8 @@
     "show_all": "Show all",
     "patch_truncated": "... (truncated)",
     "patch_body_truncated": "... (body truncated)",
+    "display_clipped": "... (too long to show in full — only the start is displayed)",
+    "output_truncated_note": "Output was too long — only the beginning was kept.",
     "patch_no_content": "(no content reported)",
     "patch_summary_more": "{{path}} +{{extra}} more",
     "status_queued": "Queued",
