@@ -27,6 +27,9 @@
 -- The binding keeps its own last_message_id / last_thread_id: those drive the
 -- history-boundary bookkeeping (history_start_message_id, history_end_message_id)
 -- which is genuinely a per-session latest-trigger cursor, not per-generation.
+-- That cursor is deliberately NOT interchangeable with the values here: it
+-- advances for channel commands (/issue) too, whereas the generation trigger
+-- is written only for messages that are actually agent input.
 --
 -- No index: every read here goes through an existing key (chat_session_id +
 -- revision, or task_id).
@@ -38,17 +41,20 @@ ALTER TABLE channel_chat_context_generation
 ALTER TABLE channel_task_delivery
     ADD COLUMN IF NOT EXISTS channel_sender_id TEXT;
 
--- Seed the generation that is current for each session from the binding's
--- cursor, so live sessions keep replying to the right message across the
--- deploy instead of degrading to a chat-level send until their next inbound
--- turn. Only the CURRENT revision is seeded: for any older generation the
--- binding cursor has already moved on and would be exactly the wrong value.
--- last_sender_id has no source to seed from and stays NULL — those sessions
--- reply without a mention until their next turn records one.
-UPDATE channel_chat_context_generation AS generation
-SET last_message_id = binding.last_message_id,
-    last_thread_id  = binding.last_thread_id
-FROM channel_chat_session_binding AS binding
-WHERE binding.chat_session_id = generation.chat_session_id
-  AND binding.context_revision = generation.revision
-  AND generation.last_message_id IS NULL;
+-- Existing generations intentionally keep a NULL trigger — no backfill, in
+-- line with 451_agent_task_comment_thread's "pre-migration rows drain without
+-- rewriting historical data".
+--
+-- Nothing needs one. The trigger is recorded during AppendUserMessage, which
+-- commits before the debounced flush that enqueues the task and creates its
+-- delivery row, so the first inbound turn after deploy already supplies a
+-- correct value for that generation. Only a generation that is enqueued with
+-- NO post-deploy append could read NULL here — the recovered-run path for an
+-- older unowned generation — and that is exactly the case a backfill cannot
+-- serve: the binding cursor it would have to copy from has already advanced
+-- past that generation, so seeding would supply a confidently wrong message
+-- and sender rather than no answer.
+--
+-- A NULL degrades to the chat-level send with no mention, which for those runs
+-- is strictly better than what they got before this change: the session's
+-- newest trigger, i.e. some other member's message.
