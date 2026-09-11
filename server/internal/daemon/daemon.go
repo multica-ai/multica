@@ -559,6 +559,16 @@ type Daemon struct {
 	// and cleared by trySelfReload, read by /health. Diagnostic only.
 	reloadPendingReason atomic.Pointer[string]
 
+	// providerCap holds the per-provider concurrency pools parsed from
+	// MULTICA_<PROVIDER>_MAX_CONCURRENT_TASKS: provider -> token pool
+	// (buffered channel of exactly that capacity), nil when the provider has
+	// no cap configured. Values are read once per provider and never re-read;
+	// the daemon's environment is fixed for the life of the process. Lazily
+	// initialized so test daemons built as bare literals share the path with
+	// New(). Guarded by providerCapMu.
+	providerCapMu sync.Mutex
+	providerCap   map[string]chan struct{}
+
 	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
 	// microseconds it takes to make a decision; ClaimTask itself runs without
 	// the lock so a slow per-runtime claim cannot stall auto-update or any
@@ -658,6 +668,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		deletingEnvRoots:          make(map[string]bool),
 		activeStores:              make(map[string]int),
 		deletingStores:            make(map[string]bool),
+		providerCap:               make(map[string]chan struct{}),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		pendingWorkInflight:       make(map[string]struct{}),
@@ -5423,6 +5434,19 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		"resume_session", task.PriorSessionID != "",
 		"reuse_workdir", task.PriorWorkDir != "",
 	)
+
+	// Enforce the per-provider concurrency cap (MULTICA_<PROVIDER>_MAX_CONCURRENT_TASKS)
+	// before any other task-scoped resource is acquired: a task parked on a
+	// saturated provider must not hold a local_directory path mutex while it
+	// waits, or unrelated tasks on that path would queue behind it. ok=false
+	// means the task must not run (server-side terminal state or daemon
+	// shutdown); the matching recovery path owns the outcome, so this returns
+	// without reporting a failure.
+	providerRelease, ok := d.waitForProviderCapacity(ctx, task, provider, taskLog)
+	if !ok {
+		return
+	}
+	defer providerRelease()
 
 	// If the task targets a project_resource of type local_directory that
 	// is pinned to this daemon, acquire the path mutex before runner.run

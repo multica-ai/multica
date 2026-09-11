@@ -73,6 +73,8 @@ One daemon executes at most 20 runs at a time by default; each agent at most 6. 
 
 Once a limit is reached, new runs keep queueing. You can adjust a single agent's concurrency in the agent settings, and the machine-wide cap through `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Parallel runs compete for machine capacity, tool account quota, and the same working directory all at once.
 
+Beyond the machine-wide cap, each provider can have its own through `MULTICA_<PROVIDER>_MAX_CONCURRENT_TASKS` (the runtime's provider name uppercased, e.g. `MULTICA_CLAUDE_MAX_CONCURRENT_TASKS=1`). A claimed run whose provider is at its cap holds its machine slot and parks until a slot for that provider frees, so the cap is enforced without re-queueing. The value is read the first time a run starts for that provider and stays in effect for the daemon's lifetime; providers without the variable are unlimited.
+
 ## Private and public runtimes
 
 A local runtime is **private** by default: only the runtime owner can create agents on it. Workspace owners and admins are no exception — the runtime is someone else's computer, and running an agent there spends their machine and their tool credentials.

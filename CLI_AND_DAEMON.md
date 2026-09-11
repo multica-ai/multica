@@ -306,55 +306,79 @@ Agent-specific overrides:
 | `MULTICA_CLAUDE_PATH` | Custom path to the `claude` binary |
 | `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
 | `MULTICA_CLAUDE_ARGS` | Default extra arguments for Claude Code runs |
+| `MULTICA_CLAUDE_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Claude (unset = unlimited; a run at the cap parks until a provider slot frees) |
 | `MULTICA_ANTIGRAVITY_PATH` | Custom path to the `agy` binary |
 | `MULTICA_ANTIGRAVITY_MODEL` | Override the Antigravity model used |
+| `MULTICA_ANTIGRAVITY_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Antigravity |
 | `MULTICA_CODEBUDDY_PATH` | Custom path to the `codebuddy` binary |
 | `MULTICA_CODEBUDDY_MODEL` | Override the CodeBuddy model used |
 | `MULTICA_CODEBUDDY_ARGS` | Default extra arguments for CodeBuddy runs |
+| `MULTICA_CODEBUDDY_MAX_CONCURRENT_TASKS` | Max concurrent tasks for CodeBuddy |
 | `MULTICA_CODEARTS_PATH` | Custom path to the `codearts` launcher or binary |
 | `MULTICA_CODEARTS_MODEL` | Override the CodeArts model used |
+| `MULTICA_CODEARTS_MAX_CONCURRENT_TASKS` | Max concurrent tasks for CodeArts |
 | `MULTICA_DEVECO_PATH` | Custom path to the `deveco` binary |
 | `MULTICA_DEVECO_MODEL` | Override the DevEco Code model used |
+| `MULTICA_DEVECO_MAX_CONCURRENT_TASKS` | Max concurrent tasks for DevEco Code |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
 | `MULTICA_CODEX_ARGS` | Default extra arguments for Codex runs |
+| `MULTICA_CODEX_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Codex |
 | `MULTICA_COPILOT_PATH` | Custom path to the `copilot` binary |
 | `MULTICA_COPILOT_MODEL` | Override the Copilot model used (note: GitHub Copilot routes models through your account entitlement, so this may not be honoured) |
+| `MULTICA_COPILOT_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Copilot |
 | `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
 | `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
+| `MULTICA_OPENCODE_MAX_CONCURRENT_TASKS` | Max concurrent tasks for OpenCode |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
 | `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
 | `MULTICA_OPENCLAW_CLI_TIMEOUT` | Deadline for each `openclaw config ...` call during task preparation (default 30s; accepts `45s` or `45`). Raise it when the local CLI is slow to start; the daemon also reads it from `backends.openclaw.cli_timeout` in the CLI config |
+| `MULTICA_OPENCLAW_MAX_CONCURRENT_TASKS` | Max concurrent tasks for OpenClaw |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |
+| `MULTICA_HERMES_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Hermes |
 | `MULTICA_PI_PATH` | Custom path to the `pi` binary |
 | `MULTICA_PI_MODEL` | Override the Pi model used |
+| `MULTICA_PI_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Pi |
 | `MULTICA_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
 | `MULTICA_CURSOR_MODEL` | Override the Cursor Agent model used |
+| `MULTICA_CURSOR_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Cursor Agent |
 | `MULTICA_KIMI_PATH` | Custom path to the `kimi` binary |
 | `MULTICA_KIMI_MODEL` | Override the Kimi model used |
+| `MULTICA_KIMI_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Kimi |
 | `MULTICA_REASONIX_PATH` | Custom path to the `reasonix` binary |
 | `MULTICA_REASONIX_MODEL` | Override the Reasonix model used |
+| `MULTICA_REASONIX_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Reasonix |
 | `MULTICA_DIM_PATH` | Custom path to the `dim` binary |
 | `MULTICA_DIM_MODEL` | Override the Dim model used |
+| `MULTICA_DIM_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Dim |
 | `MULTICA_KIRO_PATH` | Custom path to the `kiro-cli` binary |
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
+| `MULTICA_KIRO_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Kiro |
 | `MULTICA_QODER_PATH` | Custom path to the `qodercli` binary |
 | `MULTICA_QODER_MODEL` | Override the Qoder model used |
+| `MULTICA_QODER_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Qoder |
 | `MULTICA_QODERCLICN_PATH` | Custom path to the `qoderclicn` binary |
 | `MULTICA_QODERCLICN_MODEL` | Override the Qoder CN model used |
+| `MULTICA_QODERCLICN_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Qoder CN |
 | `MULTICA_TRAECLI_PATH` | Custom path to the `traecli` binary |
 | `MULTICA_TRAECLI_MODEL` | Override the Trae model used (a model id from your logged-in traecli catalog, e.g. `Doubao-Seed-2.1-Pro`) |
+| `MULTICA_TRAECLI_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Trae |
 | `MULTICA_GROK_PATH` | Custom path to the `grok` binary (defaults to `grok` on PATH; often `~/.grok/bin/grok`) |
 | `MULTICA_GROK_MODEL` | Override the Grok model used (e.g. `grok-4.5`) |
+| `MULTICA_GROK_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Grok |
 | `MULTICA_QWEN_PATH` | Custom path to the `qwen` binary |
 | `MULTICA_QWEN_MODEL` | Override the Qwen Code model used |
 | `MULTICA_QWEN_ARGS` | Daemon-wide extra Qwen arguments (POSIX shellword parsing; managed protocol flags are filtered) |
+| `MULTICA_QWEN_MAX_CONCURRENT_TASKS` | Max concurrent tasks for Qwen Code |
 | `MULTICA_QWENPAW_PATH` | Custom path to the `qwenpaw` binary |
 | `MULTICA_QWENPAW_ARGS` | Daemon-wide extra QwenPaw arguments (POSIX shellword parsing; managed protocol flags are filtered) |
+| `MULTICA_QWENPAW_MAX_CONCURRENT_TASKS` | Max concurrent tasks for QwenPaw |
 | `MULTICA_MCODE_PATH` | Custom path to the `mcode` binary |
+| `MULTICA_MCODE_MAX_CONCURRENT_TASKS` | Max concurrent tasks for MCode |
 | `MULTICA_DSH_PATH` | Custom path to the `dsh` binary |
 | `MULTICA_DSH_MODEL` | Override the DeepSeek Harness model used (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`) |
+| `MULTICA_DSH_MAX_CONCURRENT_TASKS` | Max concurrent tasks for DeepSeek Harness |
 
 If a previously generated `~/.multica/hooks` wrapper is first on `PATH` and calls the same command name again, the daemon skips that hooks directory during built-in agent discovery and records the real binary path behind it. If your interactive shell still recurses when you run `claude`, `codex`, or `hermes` manually, remove the hooks entry from your shell startup file or replace the wrapper body with an absolute `exec /path/to/real-binary "$@"`.
 
