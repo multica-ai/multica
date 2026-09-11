@@ -156,7 +156,8 @@ allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `REDIS_URL` | 비어 있음 | 공유 rate limit, 실시간 이벤트, token cache에 사용. 설정하지 않으면 실시간 이벤트와 초대 제한은 프로세스 메모리로 fallback하고 인증 rate limit은 비활성화 |
+| `REDIS_URL` | 비어 있음 | 공유 rate limit, 실시간 이벤트, 채널 WebSocket lease, token cache 등 모든 Redis 기능이 사용하는 유일한 연결 URL |
+| `REDIS_CLUSTER_MODE` | `false` | `true`로 설정하면 `REDIS_URL`이 단일 구성 엔드포인트여도 Redis Cluster 클라이언트를 사용합니다. 클러스터 모드에서는 데이터베이스 0과 `REALTIME_RELAY_MODE=sharded`가 필요합니다 |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 관리형 Redis가 `CLIENT SETNAME`을 금지하면 `true`로 설정 |
 | `RATE_LIMIT_AUTH` | `5` | IP당 1분에 인증 코드 전송 또는 Google 로그인 시작 허용 횟수 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | IP당 1분에 인증 코드 검증 허용 횟수 |

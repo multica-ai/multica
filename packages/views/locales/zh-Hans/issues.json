@@ -180,6 +180,16 @@
     "card_properties_section": "卡片属性",
     "ascending_title": "升序",
     "descending_title": "降序",
+    "newest_first": "最新优先",
+    "oldest_first": "最早优先",
+    "highest_priority_first": "最高优先级优先",
+    "lowest_priority_first": "最低优先级优先",
+    "earliest_first": "最早日期优先",
+    "latest_first": "最晚日期优先",
+    "workflow_order": "按工作流顺序",
+    "reverse_workflow_order": "按工作流倒序",
+    "alphabetical_order": "A 到 Z",
+    "reverse_alphabetical_order": "Z 到 A",
     "group_status": "状态",
     "group_assignee": "负责人",
     "group_parent": "父级任务",
@@ -334,7 +344,8 @@
     "empty_column": "无任务",
     "empty_grouping": "没有匹配的任务",
     "no_value": "未设置",
-    "ordered_by": "按{{field}}排序"
+    "ordered_by": "按{{field}}排序",
+    "manual_reorder_hint": "切换到“手动”排序后，才能调整同一列内的顺序。"
   },
   "detail": {
     "not_found": "这个任务不存在或已在该工作区被删除。",
@@ -368,7 +379,7 @@
     "quick_action_blocked_body": "\"{{name}}\"由一个你无权触发的智能体执行。可以请工作区管理员把该智能体开放给团队，或把这条操作改绑一个共享的智能体。",
     "quick_action_blocked_ok": "知道了",
     "pull_requests_loading": "加载中...",
-    "pull_requests_empty": "还没有关联的 PR。在 PR 的分支名、标题或正文里引用本任务的 identifier 即可自动关联。",
+    "pull_requests_empty": "还没有关联的 PR。把本任务的 identifier 写进 PR 的分支名或标题，或者在正文里写在 Closes 后面，即可自动关联。",
     "pull_request_state_open": "Open",
     "pull_request_state_draft": "Draft",
     "pull_request_state_merged": "Merged",
@@ -543,7 +554,25 @@
     }
   },
   "reply": {
-    "placeholder": "回复..."
+    "placeholder": "回复...",
+    "annotations": {
+      "confirm_add": "添加批注",
+      "save": "保存批注",
+      "add_comment": "加入评论",
+      "add": "加入回复",
+      "note_label": "批注",
+      "count_other": "{{count}} 条批注",
+      "quote_limit": "每次最多选择 {{count}} 个字符。",
+      "count_limit": "一条评论最多包含 {{count}} 条批注。",
+      "remove": "移除第 {{number}} 条批注",
+      "source_changed": "原文已更改或不可用，已保留你保存的引用。",
+      "intent_hint": "请填写至少一条批注意见或评论正文后再发送。",
+      "target_deleted": "回复目标已删除。请移除此草稿中的全部批注，再选择仍存在的评论文字重新添加批注。",
+      "selection_failed": "未能获取选中文字。请在同一条评论或任务描述内重新选择后再试。",
+      "source_label": "{{name}} 的评论",
+      "edit": "编辑批注 {{number}}",
+      "note_placeholder": "添加意见..."
+    }
   },
   "agent_activity": {
     "hover_header_other": "{{count}} 个智能体工作中",

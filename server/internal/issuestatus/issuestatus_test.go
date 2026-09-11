@@ -202,11 +202,10 @@ func TestCategoriesAndBuiltInsAreTheSameSet(t *testing.T) {
 	}
 }
 
-// The display order is copied from the frontend's historical STATUS_ORDER.
-// Reordering it would visibly rearrange every existing user's board, so it is
-// pinned here rather than left to look tidy.
-func TestCategoryRankPreservesHistoricalStatusOrder(t *testing.T) {
-	want := []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
+// The display order is shared with the frontend board and keeps actionable
+// Blocked work before the completed column.
+func TestCategoryRankMatchesBoardStatusOrder(t *testing.T) {
+	want := []string{"backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"}
 	got := Canonical()
 	for i := range want {
 		if got[i] != want[i] {
@@ -504,6 +503,34 @@ func TestResolverFailsSafeWhenTheCatalogReadFails(t *testing.T) {
 	r := NewResolver(testWorkspace)
 	if got := r.Effective(context.Background(), q, "human_review"); got != "human_review" {
 		t.Errorf("Effective on a failed catalog read = %q, want the key unchanged", got)
+	}
+}
+
+func TestResolverReportsCachedLoadFailure(t *testing.T) {
+	ctx := context.Background()
+	q := newFakeQuerier(custom("parked", Backlog))
+	readErr := errors.New("transient catalog failure")
+	q.err = readErr
+	r := NewResolver(testWorkspace)
+	if got := r.Err(); got != nil || q.lists != 0 {
+		t.Fatalf("unused resolver: err=%v, reads=%d", got, q.lists)
+	}
+	if got := r.Effective(ctx, q, Done); got != Done || r.Err() != nil || q.lists != 0 {
+		t.Fatalf("built-in status touched the catalog: status=%q, err=%v, reads=%d", got, r.Err(), q.lists)
+	}
+	if got := r.Effective(ctx, q, "parked"); got != "parked" || !errors.Is(r.Err(), readErr) {
+		t.Fatalf("failed read: status=%q, err=%v", got, r.Err())
+	}
+	q.err = nil
+	if got := r.Effective(ctx, q, "parked"); got != "parked" || !errors.Is(r.Err(), readErr) || q.lists != 1 {
+		t.Fatalf("failure was not cached: status=%q, err=%v, reads=%d", got, r.Err(), q.lists)
+	}
+	fresh := NewResolver(testWorkspace)
+	if got := fresh.Effective(ctx, q, "parked"); got != Backlog || fresh.Err() != nil || q.lists != 2 {
+		t.Fatalf("fresh resolver did not recover: status=%q, err=%v, reads=%d", got, fresh.Err(), q.lists)
+	}
+	if got := fresh.Effective(ctx, q, "unknown"); got != "unknown" || fresh.Err() != nil || q.lists != 2 {
+		t.Fatalf("unknown key confused with read failure: status=%q, err=%v, reads=%d", got, fresh.Err(), q.lists)
 	}
 }
 

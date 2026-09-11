@@ -180,7 +180,7 @@ function CopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {
       type="button"
       onClick={handleCopy}
       aria-label={ariaLabel}
-      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="shrink-0 rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       {copied ? (
         <Check className="h-3.5 w-3.5 text-success" aria-hidden />
@@ -314,7 +314,7 @@ function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
             {/* CLI command — literal shell string, not i18n content. */}
             <code
               className={cn(
-                "rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-foreground",
+                "rounded-xs bg-muted px-1.5 py-0.5 font-mono text-micro text-foreground",
                 CODE_LIGATURE_CLASS,
               )}
             >
@@ -326,7 +326,7 @@ function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
             {/* CLI command — literal shell string, not i18n content. */}
             <code
               className={cn(
-                "rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-foreground",
+                "rounded-xs bg-muted px-1.5 py-0.5 font-mono text-micro text-foreground",
                 CODE_LIGATURE_CLASS,
               )}
             >

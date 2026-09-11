@@ -75,7 +75,7 @@ export function SourceContextCommentList({
                     : getAuthorLabel?.(comment) ?? comment.author.name}
                 </span>
                 {comment.id === anchorCommentId && (
-                  <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-info">
+                  <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-info">
                     {t(($) => $.source_context.source_comment)}
                   </span>
                 )}

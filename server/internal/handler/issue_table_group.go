@@ -87,8 +87,16 @@ type resolvedIssueTableGroup struct {
 // built-in key IS its own category, so a workspace with no custom statuses gets
 // exactly `i.status`. (MUL-6243)
 func statusCategoryExpr(customKeys map[string]string, addArg func(any) string) string {
+	return statusValueCategoryExpr("i.status", customKeys, addArg)
+}
+
+func statusValueCategoryExpr(
+	valueExpr string,
+	customKeys map[string]string,
+	addArg func(any) string,
+) string {
 	if len(customKeys) == 0 {
-		return "i.status"
+		return valueExpr
 	}
 	keys := make([]string, 0, len(customKeys))
 	for key := range customKeys {
@@ -96,12 +104,16 @@ func statusCategoryExpr(customKeys map[string]string, addArg func(any) string) s
 	}
 	sort.Strings(keys)
 	var b strings.Builder
-	b.WriteString("CASE i.status")
+	b.WriteString("CASE " + valueExpr)
 	for _, key := range keys {
 		fmt.Fprintf(&b, " WHEN %s::text THEN %s::text", addArg(key), addArg(customKeys[key]))
 	}
-	b.WriteString(" ELSE i.status END")
+	b.WriteString(" ELSE " + valueExpr + " END")
 	return b.String()
+}
+
+func statusOrderExpression(categoryExpr string) string {
+	return "CASE " + categoryExpr + " WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'blocked' THEN 4 WHEN 'done' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
 }
 
 // resolveStatusCategoryMaps derives BOTH shapes a category grouping needs from
@@ -167,7 +179,21 @@ func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request,
 		}
 		return resolvedIssueTableGroup{kind: "none"}, true
 	case "status":
-		return resolvedIssueTableGroup{kind: "status", groupExpr: "i.status"}, true
+		customKeys, err := issuestatus.CustomKeyCategories(
+			r.Context(),
+			h.issueStatusCatalog(),
+			workspaceID,
+		)
+		if err != nil {
+			slog.Warn("resolve status group order failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to resolve table group")
+			return resolvedIssueTableGroup{}, false
+		}
+		return resolvedIssueTableGroup{
+			kind:             "status",
+			groupExpr:        "i.status",
+			statusCustomKeys: customKeys,
+		}, true
 	case "status_category":
 		// Board / list / swimlane columns are CATEGORIES, so a custom status
 		// groups into the column it behaves as instead of getting a column of
@@ -361,7 +387,9 @@ func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) st
 	}
 	switch group.kind {
 	case "status", "status_category":
-		return "CASE group_value WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+		return statusOrderExpression(
+			statusValueCategoryExpr("group_value", group.statusCustomKeys, addArg),
+		)
 	case "assignee":
 		return "CASE split_part(group_value, ':', 1) WHEN 'member' THEN 0 WHEN 'agent' THEN 1 WHEN 'squad' THEN 2 ELSE 3 END"
 	case "project":

@@ -26,12 +26,12 @@ const patCachePrefix = "mul:auth:pat:"
 // to use — every method becomes a no-op or reports a cache miss, and the
 // auth middleware degrades to direct DB lookups.
 type PATCache struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
 // NewPATCache returns a cache backed by rdb. Pass nil to disable caching;
 // the returned *PATCache is safe to call but never hits Redis.
-func NewPATCache(rdb *redis.Client) *PATCache {
+func NewPATCache(rdb redis.UniversalClient) *PATCache {
 	if rdb == nil {
 		return nil
 	}

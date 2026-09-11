@@ -156,7 +156,8 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `REDIS_URL` | 空 | 共有レート制限、リアルタイムイベント、token cache に使用。未設定の場合、リアルタイムイベントと招待制限はプロセス内メモリにフォールバックし、認証レート制限は無効になります |
+| `REDIS_URL` | 空 | 共有レート制限、リアルタイムイベント、チャンネル WebSocket リース、token cache など、すべての Redis 機能が使用する唯一の接続 URL |
+| `REDIS_CLUSTER_MODE` | `false` | `true` にすると、`REDIS_URL` が単一の設定エンドポイントでも Redis Cluster クライアントを使用します。クラスターモードではデータベース 0 と `REALTIME_RELAY_MODE=sharded` が必要です |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | マネージド Redis が `CLIENT SETNAME` を禁止している場合に `true` を設定 |
 | `RATE_LIMIT_AUTH` | `5` | 認証コード送信または Google ログイン開始の、IP あたり毎分の回数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 認証コード検証の、IP あたり毎分の回数 |

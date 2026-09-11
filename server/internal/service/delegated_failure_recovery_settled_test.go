@@ -124,8 +124,12 @@ func TestPlannedButUndeliveredRecoveryStaysPending(t *testing.T) {
 	ctx := context.Background()
 	recoveryTaskID, recoveryCommentID := f.seedRecoverySignal(t, svc)
 
-	if _, err := svc.CancelTask(ctx, recoveryTaskID); err != nil {
+	cancelled, err := svc.CancelTask(ctx, recoveryTaskID)
+	if err != nil {
 		t.Fatalf("CancelTask: %v", err)
+	}
+	if !cancelled.CancelledByType.Valid || cancelled.CancelledByType.String != "system" {
+		t.Fatalf("automatic cancellation actor = %#v, want system", cancelled.CancelledByType)
 	}
 	if f.settled(t, recoveryCommentID) {
 		t.Fatal("automatic cancellation settled a recovery it never delivered")
@@ -147,7 +151,11 @@ func TestUserCancelledRecoveryIsSettled(t *testing.T) {
 	ctx := context.Background()
 	recoveryTaskID, recoveryCommentID := f.seedRecoverySignal(t, svc)
 
-	if _, err := svc.CancelTaskByUser(ctx, recoveryTaskID); err != nil {
+	if _, err := svc.CancelTaskByUser(ctx, recoveryTaskID, TaskCancellationActor{
+		Type: "member",
+		ID:   util.MustParseUUID(f.userID),
+		Name: "Recovery owner",
+	}); err != nil {
 		t.Fatalf("CancelTaskByUser: %v", err)
 	}
 	if !f.settled(t, recoveryCommentID) {

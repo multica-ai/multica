@@ -1,0 +1,76 @@
+name: UI performance report
+
+# Manual only. This builds the frontend twice — about five minutes of runner
+# time on CI — to produce one sample per ref, which is a report and not a
+# verdict. Running it on every frontend PR would spend that on reports nobody
+# asked for, and a job that is not required still takes a runner and a
+# concurrency slot.
+#
+# The routine guard is the component test #8260 added, which pins the exact
+# failure mode behind MUL-7227 and runs in the normal suite. Run this when a
+# change touches summary animation, long lists, transcript rendering or global
+# styles, and attach the report to the PR.
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Base ref (branch, tag or SHA)"
+        required: true
+      head:
+        description: "Head ref (branch, tag or SHA)"
+        required: true
+
+# Read-only and without secrets: it builds and runs whatever refs it is given.
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-performance-${{ inputs.base }}-${{ inputs.head }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    # Measured on CI: ~340s for the comparison itself, of which ~292s is the
+    # two builds and ~26s the two measurements, plus setup. Fifteen minutes
+    # leaves room for build variance and still stops a run that has hung.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Both refs must be reachable: the script builds each one in its own
+          # worktree, and a shallow clone cannot produce them.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (runner tree — supplies the spec and the browser)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Compare
+        run: node scripts/perf-compare.mjs --base "${{ inputs.base }}" --head "${{ inputs.head }}" --out perf-report
+
+      - name: Publish to the job summary
+        if: always()
+        run: |
+          if [ -f perf-report/comparison.md ]; then
+            cat perf-report/comparison.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The comparison produced no report; see the job log." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-performance-report
+          path: perf-report/
+          if-no-files-found: warn

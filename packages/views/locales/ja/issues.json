@@ -180,6 +180,16 @@
     "card_properties_section": "カードのプロパティ",
     "ascending_title": "昇順",
     "descending_title": "降順",
+    "newest_first": "新しい順",
+    "oldest_first": "古い順",
+    "highest_priority_first": "優先度の高い順",
+    "lowest_priority_first": "優先度の低い順",
+    "earliest_first": "日付の早い順",
+    "latest_first": "日付の遅い順",
+    "workflow_order": "ワークフロー順",
+    "reverse_workflow_order": "ワークフローの逆順",
+    "alphabetical_order": "A から Z",
+    "reverse_alphabetical_order": "Z から A",
     "group_status": "ステータス",
     "group_assignee": "担当者",
     "group_parent": "親タスク",
@@ -334,7 +344,8 @@
     "empty_column": "タスクなし",
     "empty_grouping": "一致するタスクがありません",
     "no_value": "値なし",
-    "ordered_by": "{{field}} 順に並べたボード"
+    "ordered_by": "{{field}} 順に並べたボード",
+    "manual_reorder_hint": "列内の順序を変更するには、並び順を「手動」に切り替えてください。"
   },
   "detail": {
     "not_found": "このタスクはこのワークスペースに存在しないか、削除されています。",
@@ -368,7 +379,7 @@
     "quick_action_blocked_body": "「{{name}}」は、あなたが実行を許可されていないエージェントで動作します。ワークスペース管理者にそのエージェントをチームへ公開してもらうか、共有エージェントへの変更を依頼してください。",
     "quick_action_blocked_ok": "了解",
     "pull_requests_loading": "読み込み中...",
-    "pull_requests_empty": "まだリンクされた Pull request がありません。PR のブランチ名、タイトル、または本文にこのタスクの識別子を入れると、自動的にリンクされます。",
+    "pull_requests_empty": "まだリンクされた Pull request がありません。このタスクの識別子を PR のブランチ名かタイトルに入れるか、本文で Closes の直後に書くと、自動的にリンクされます。",
     "pull_request_state_open": "オープン",
     "pull_request_state_draft": "ドラフト",
     "pull_request_state_merged": "マージ済み",
@@ -543,7 +554,25 @@
     }
   },
   "reply": {
-    "placeholder": "返信を残す..."
+    "placeholder": "返信を残す...",
+    "annotations": {
+      "confirm_add": "注釈を追加",
+      "save": "注釈を保存",
+      "add_comment": "コメントに追加",
+      "add": "返信に追加",
+      "note_label": "コメント",
+      "count_other": "{{count}} 件の注釈",
+      "quote_limit": "一度に選択できるのは {{count}} 文字までです。",
+      "count_limit": "コメントに追加できる注釈は {{count}} 件までです。",
+      "remove": "注釈 {{number}} を削除",
+      "source_changed": "原文が変更されたか、利用できません。保存した引用は保持されます。",
+      "intent_hint": "注釈のコメントか本文を入力してから送信してください。",
+      "target_deleted": "返信先が削除されました。この下書きの注釈をすべて削除し、残っているコメントの文字を選択して注釈を追加し直してください。",
+      "selection_failed": "選択範囲を取得できませんでした。同じコメントまたは説明の中で文字を選び直してください。",
+      "source_label": "{{name}} のコメント",
+      "edit": "注釈 {{number}} を編集",
+      "note_placeholder": "コメントを追加…"
+    }
   },
   "agent_activity": {
     "hover_header_other": "作業中のエージェント {{count}} 件",

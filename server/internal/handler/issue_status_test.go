@@ -89,10 +89,8 @@ func TestEnsureIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestCatalogOrderMatchesHistoricalStatusOrder pins the default board order.
-// A workspace with no custom statuses must list exactly as it did before this
-// feature, or every existing user's board silently rearranges.
-func TestCatalogOrderMatchesHistoricalStatusOrder(t *testing.T) {
+// TestCatalogOrderMatchesBoardStatusOrder pins the default board order.
+func TestCatalogOrderMatchesBoardStatusOrder(t *testing.T) {
 	seedTestCatalog(t)
 	entries, err := testHandler.Queries.ListIssueStatusEntries(context.Background(), db.ListIssueStatusEntriesParams{
 		WorkspaceID: parseUUID(testWorkspaceID),
@@ -107,7 +105,7 @@ func TestCatalogOrderMatchesHistoricalStatusOrder(t *testing.T) {
 			gotSystem = append(gotSystem, e.Key)
 		}
 	}
-	want := []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
+	want := []string{"backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"}
 	for i := range want {
 		if i >= len(gotSystem) || gotSystem[i] != want[i] {
 			t.Fatalf("built-in order = %v, want %v (frontend STATUS_ORDER)", gotSystem, want)

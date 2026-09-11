@@ -22,6 +22,7 @@ const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 // Counts MockContentEditor mounts. This pins the description to exactly one
 // eager editor per issue and catches stale editor reuse across issue switches.
 const contentEditorMounts = vi.hoisted(() => ({ count: 0 }));
+const descriptionSelectionAction = vi.hoisted(() => ({ current: undefined as { label: string; onSelect: () => void } | undefined }));
 // Stable empty-attachments reference: the real store returns a shared constant
 // so the `useCommentDraftStore(s => s.getAttachments(key))` selector keeps a
 // stable identity. A fresh `[]` per call would loop useSyncExternalStore.
@@ -177,10 +178,12 @@ vi.mock("../../editor", async () => ({
       placeholder,
       flushPendingOnUnmount,
       onReady,
+      selectionAction,
     }: any,
     ref: any,
   ) {
     const initialValue = syncedValue ?? defaultValue ?? "";
+    if (syncedValue !== undefined) descriptionSelectionAction.current = selectionAction;
     const valueRef = useRef(initialValue);
     const baseRef = useRef(initialValue);
     const [editorValue, setEditorValue] = useState(initialValue);
@@ -406,6 +409,7 @@ vi.mock("@multica/core/issues/stores", async () => ({
       const state = {
         drafts: {} as Record<string, { content: string; attachments: unknown[]; updatedAt: number }>,
         getDraft: () => undefined,
+        getAnnotations: () => emptyDraftAttachments,
         getAttachments: () => emptyDraftAttachments,
         getUploads: () => emptyDraftAttachments,
         setDraft: () => {},
@@ -422,6 +426,7 @@ vi.mock("@multica/core/issues/stores", async () => ({
       getState: () => ({
         drafts: {} as Record<string, { content: string; attachments: unknown[]; updatedAt: number }>,
         getDraft: () => undefined,
+        getAnnotations: () => emptyDraftAttachments,
         getAttachments: () => emptyDraftAttachments,
         getUploads: () => emptyDraftAttachments,
         setDraft: () => {},
@@ -692,6 +697,7 @@ describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     contentEditorMounts.count = 0;
+    descriptionSelectionAction.current = undefined;
     mockViewport.isMobile = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
@@ -808,6 +814,13 @@ describe("IssueDetail (shared)", () => {
     expect(skeletonGutters).toEqual(
       horizontalGutters(container.querySelector(".max-w-4xl")),
     );
+  });
+
+  it("wires the description selection toolbar to annotation collection", async () => {
+    renderIssueDetail();
+    await screen.findByDisplayValue("Add JWT auth to the backend");
+    expect(descriptionSelectionAction.current?.label).toBe("Add to comment");
+    expect(descriptionSelectionAction.current?.onSelect).toBeTypeOf("function");
   });
 
   it("renders issue title and description after loading", async () => {
@@ -1280,6 +1293,76 @@ describe("IssueDetail (shared)", () => {
     fireEvent.click(within(run as HTMLElement).getByRole("button", { name: "Open full log" }));
     await screen.findByRole("dialog");
     expect(mockApiObj.listTaskMessages).toHaveBeenCalledWith(taskId);
+  });
+
+  it("places one coalesced queued block after the batch's latest reply", async () => {
+    const root = mockTimeline[0]!;
+    const first = { ...mockTimeline[1]!, id: "queued-first", parent_id: root.id,
+      content: "First queued instruction", created_at: "2026-01-16T00:00:01Z" };
+    const latest = { ...first, id: "queued-latest", content: "Latest queued instruction",
+      created_at: "2026-01-16T00:00:02Z" };
+    const task: AgentTask = {
+      id: "4a2e8d1c-7f9b-4e2a-9c1d-123456789abd", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+      status: "queued", priority: 0, created_at: root.created_at,
+      started_at: null, dispatched_at: null, completed_at: null, result: null, error: null,
+      trigger_comment_id: latest.id, coalesced_comment_ids: [first.id], delivered_comment_ids: [],
+    };
+    mockApiObj.listTimeline.mockResolvedValue([root, first, latest]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+    const { container } = renderIssueDetail();
+
+    await screen.findByText("Waiting for an available agent.");
+    const run = container.querySelector(`[data-run-comment-id="${task.id}"]`)!;
+    expect(run).not.toBeNull();
+    const latestComment = container.querySelector(`#comment-${latest.id}`);
+    const firstComment = container.querySelector(`#comment-${first.id}`);
+    expect(latestComment).not.toBeNull();
+    expect(firstComment).not.toBeNull();
+    expect(latestComment!.nextElementSibling).toBe(run);
+    expect(firstComment!.nextElementSibling).not.toBe(run);
+  });
+
+  it("keeps the running block after its delivered comment and one queued block after later replies", async () => {
+    const root = mockTimeline[0]!;
+    const first = { ...mockTimeline[1]!, id: "successor-first", parent_id: root.id,
+      content: "First successor instruction", created_at: "2026-01-16T00:00:01Z" };
+    const latest = { ...first, id: "successor-latest", content: "Latest successor instruction",
+      created_at: "2026-01-16T00:00:02Z" };
+    const running: AgentTask = {
+      id: "4a2e8d1c-7f9b-4e2a-9c1d-123456789ab0", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+      status: "running", priority: 0, created_at: root.created_at,
+      started_at: root.created_at, dispatched_at: root.created_at, completed_at: null, result: null, error: null,
+      trigger_comment_id: root.id, delivered_comment_ids: [root.id],
+    };
+    const queued: AgentTask = {
+      ...running,
+      id: "4a2e8d1c-7f9b-4e2a-9c1d-123456789ab1",
+      status: "queued", started_at: null, dispatched_at: null,
+      trigger_comment_id: latest.id, coalesced_comment_ids: [first.id], delivered_comment_ids: [],
+    };
+    mockApiObj.listTimeline.mockResolvedValue([root, first, latest]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([running, queued]);
+    const { container } = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(container.querySelector(`[data-run-comment-id="${running.id}"]`)).not.toBeNull();
+      expect(container.querySelector(`[data-run-comment-id="${queued.id}"]`)).not.toBeNull();
+    });
+    const rootContent = container.querySelector(`[data-comment-content="${root.id}"]`);
+    const runningBlock = container.querySelector(`[data-run-comment-id="${running.id}"]`);
+    const firstComment = container.querySelector(`#comment-${first.id}`);
+    const latestComment = container.querySelector(`#comment-${latest.id}`);
+    const queuedBlock = container.querySelector(`[data-run-comment-id="${queued.id}"]`);
+    expect(rootContent).not.toBeNull();
+    expect(runningBlock).not.toBeNull();
+    expect(firstComment).not.toBeNull();
+    expect(latestComment).not.toBeNull();
+    expect(queuedBlock).not.toBeNull();
+    expect(rootContent!.compareDocumentPosition(runningBlock!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(runningBlock!.compareDocumentPosition(firstComment!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(firstComment!.compareDocumentPosition(latestComment!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(latestComment!.nextElementSibling).toBe(queuedBlock);
+    expect(container.querySelectorAll(`[data-run-comment-id="${queued.id}"]`)).toHaveLength(1);
   });
 
   it.each([null, "comment-1"])("shows an assignment reply once in its run slot when posted under %s", async (parentId) => {
@@ -2818,6 +2901,40 @@ describe("IssueDetail (shared)", () => {
       );
     });
   });
+
+  // MUL-7211 regression: a standalone run's published reply belongs at the
+  // reply's own time. It used to render in the run's ENQUEUE slot while the
+  // card showed the reply time, pushing it above every comment written while
+  // the run worked. Ordering matrix lives in comment-runs.test.ts.
+  it("renders an assignment run's reply after the comments it followed", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "comment", id: "midway", actor_type: "member", actor_id: "user-1",
+        content: "Remember the E2E pass", parent_id: null,
+        created_at: "2026-01-17T00:00:00Z", updated_at: "2026-01-17T00:00:00Z", comment_type: "comment",
+      },
+      {
+        type: "comment", id: "run-reply", actor_type: "agent", actor_id: "agent-1",
+        content: "step1 done", parent_id: null, source_task_id: "task-early",
+        created_at: "2026-01-18T00:00:00Z", updated_at: "2026-01-18T00:00:00Z", comment_type: "comment",
+      },
+    ]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([{
+      id: "task-early", agent_id: "agent-1", runtime_id: "rt-1", issue_id: "issue-1",
+      kind: "issue", status: "completed", priority: 0,
+      dispatched_at: "2026-01-16T00:00:00Z", started_at: "2026-01-16T00:00:00Z",
+      completed_at: "2026-01-18T00:00:00Z", result: { comment: "step1 done" }, error: null,
+      created_at: "2026-01-16T00:00:00Z", delivered_comment_ids: [],
+    }]);
+
+    const { container } = renderIssueDetail();
+    await screen.findByText("Remember the E2E pass");
+    await screen.findByText("step1 done");
+
+    const rendered = Array.from(container.querySelectorAll("[id^='comment-']")).map((el) => el.id);
+    expect(rendered.indexOf("comment-midway")).toBeLessThan(rendered.indexOf("comment-run-reply"));
+  });
+
 });
 
 describe("groupSubIssuesByStage", () => {

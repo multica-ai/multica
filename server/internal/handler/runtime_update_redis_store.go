@@ -36,10 +36,10 @@ return 0
 `)
 
 type RedisUpdateStore struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewRedisUpdateStore(rdb *redis.Client) *RedisUpdateStore {
+func NewRedisUpdateStore(rdb redis.UniversalClient) *RedisUpdateStore {
 	return &RedisUpdateStore{rdb: rdb}
 }
 

@@ -47,20 +47,15 @@ const (
 	Cancelled  = "cancelled"
 )
 
-// canonicalOrder is the historical STATUS_ORDER from the frontend's static
-// status config. Category ranking copies it verbatim so a workspace with no
-// custom statuses sees a board and picker identical to before this feature.
-//
-// Note the order is NOT grouped by lifecycle: in_review and done sit between
-// in_progress and blocked. That is the shipped order, and reordering it to look
-// tidier would visibly rearrange every existing user's board.
+// canonicalOrder mirrors the frontend board order. Blocked precedes Done so an
+// actionable exception is not pushed beyond the completed column.
 var canonicalOrder = []string{
 	Backlog,
 	Todo,
 	InProgress,
 	InReview,
-	Done,
 	Blocked,
+	Done,
 	Cancelled,
 }
 
@@ -451,6 +446,7 @@ type Resolver struct {
 	categories  map[string]string
 	names       map[string]string
 	loaded      bool
+	loadErr     error
 }
 
 // NewResolver returns a Resolver for one workspace. It performs no I/O.
@@ -460,7 +456,9 @@ func NewResolver(workspaceID pgtype.UUID) *Resolver {
 
 // load fetches the catalog once, on the first call that needs it. A failed read
 // leaves the maps nil, which makes every lookup below fall back to its
-// key-unchanged branch — the same fail-safe the single-shot resolver applies.
+// key-unchanged branch. Callers making side-effect decisions must check Err
+// and require a valid resolved category: a successful read can still miss a
+// custom key that was created after the snapshot.
 func (r *Resolver) load(ctx context.Context, q Querier) {
 	if r.loaded {
 		return
@@ -471,6 +469,7 @@ func (r *Resolver) load(ctx context.Context, q Querier) {
 		IncludeArchived: true,
 	})
 	if err != nil {
+		r.loadErr = err
 		return
 	}
 	r.categories = make(map[string]string, len(entries))
@@ -479,6 +478,13 @@ func (r *Resolver) load(ctx context.Context, q Querier) {
 		r.categories[e.Key] = e.Category
 		r.names[e.Key] = e.Name
 	}
+}
+
+// Err returns the cached catalog-read error, or nil before the first catalog
+// read and after a successful read. It performs no I/O. A fresh Resolver
+// is required to try again after a failed read.
+func (r *Resolver) Err() error {
+	return r.loadErr
 }
 
 // Effective mirrors the package-level Effective, but amortizes the catalog read

@@ -32,6 +32,7 @@ multica runtime update <runtime-id> --target-version <version> --output json
 multica runtime delete <runtime-id>
 multica repo checkout <url>
 multica repo checkout <url> --ref <branch-or-sha>
+multica repo checkout <url> --fresh
 ```
 
 Runtime and repo commands affect active agent execution. Do not restart daemons,
@@ -54,6 +55,33 @@ trigger path refuses it with `agent_runtime_required`.
 runtimes use a linked worktree; Linux and Windows Codex use task-local Git
 metadata so a task can stage and commit without making the shared repository
 cache writable.
+
+Running `repo checkout` again where the repository is already checked out
+(the same task, a follow-up turn, or a reused workdir) never silently discards
+work:
+
+- a checkout with uncommitted changes, untracked files, or commits that no
+  remote ref reaches is kept exactly as it is — no reset, clean, branch switch,
+  or branch deletion — and only its remote refs are fetched;
+- a checkout already on the current task's branch is treated as done, and only
+  its remote refs are fetched;
+- a clean checkout with nothing unpushed on some other branch still moves to a
+  new branch from the latest default branch (or `--ref`).
+
+When a checkout is kept, the command says so and reports its branch and how
+many uncommitted files and unpushed commits it holds. `--fresh` discards the
+existing checkout's uncommitted changes and untracked files and starts over on
+a new branch from the latest default branch (or `--ref`). It deletes no branch
+holding unpushed commits, so those commits stay on the old branch:
+
+- with task-local Git metadata, the old branch stays in the checkout, including
+  when `--fresh` replaces a linked worktree left by an older daemon;
+- with a linked worktree, the old branch lives in the daemon's shared
+  repository cache, whose periodic cleanup drops `agent/*` branches that no
+  checkout has checked out.
+
+Push any commits you still need before using `--fresh`. This needs a daemon
+that includes the change; older daemons always start over.
 
 `repo checkout` requires both `MULTICA_DAEMON_PORT` and the injected task-scoped
 `MULTICA_TOKEN`; it is intended to run inside the active daemon task and from

@@ -841,6 +841,8 @@
     "show_all": "显示全部",
     "patch_truncated": "...（已截断）",
     "patch_body_truncated": "...（内容已截断）",
+    "display_clipped": "...（内容过长，此处仅显示开头）",
+    "output_truncated_note": "输出内容过长，只保留了开头部分。",
     "patch_no_content": "（未记录内容）",
     "patch_summary_more": "{{path}}，另有 {{extra}} 个文件",
     "status_queued": "排队中",
@@ -891,6 +893,7 @@
     "kind_error": "错误",
     "group_calls_other": "{{count}} 次调用",
     "step_running": "进行中",
+    "step_duration_unknown": "无法确定准确耗时。",
     "step_input": "输入",
     "step_result": "结果",
     "copy_step": "复制这一步",
@@ -906,7 +909,8 @@
     "tool_kind_misc": "其他"
   },
   "task_failure": {
-    "cancelled_by_system": "系统已取消",
+    "cancelled_by_system": "已由系统取消",
+    "cancelled_by_actor": "已由 {{name}} 取消",
     "reasons": {
       "queued_expired": "排队已过期",
       "runtime_offline": "守护进程离线",

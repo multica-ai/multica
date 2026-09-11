@@ -51,6 +51,10 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 			// and a stale signpost, neither of which any other test would
 			// notice.
 			protocol.DaemonCapabilityPlatformSkillV1,
+			// Gates whether an automatic retry is handed its parent's workdir
+			// (MUL-7034). Dropping it silently sends those retries back to a
+			// fresh directory, losing the continuity nothing else would flag.
+			protocol.DaemonCapabilityCheckoutKeepsWorkV1,
 		} {
 			if !capabilities[want] {
 				t.Errorf("X-Client-Capabilities missing %q: %v", want, capabilities)

@@ -136,6 +136,73 @@ func TestShouldReusePriorWorkdirChatAcceptsMatchingConversation(t *testing.T) {
 	}
 }
 
+// TestShouldReusePriorWorkdirDeclinesRemovedDirectory covers an automatic retry
+// whose parent's workdir was GC'd between the failure and the claim (MUL-7034):
+// the server still offers the recorded path, and the daemon must decline it so
+// the run prepares a fresh environment instead.
+func TestShouldReusePriorWorkdirDeclinesRemovedDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
+	writeLeaderManagedEnvProvenance(t, workDir, "ws-leader", "issue-leader", "agent-leader")
+
+	task := leaderReuseTestTask("task-retry")
+	task.IsLeaderTask = false
+	task.PriorWorkDir = workDir
+	if _, ok := shouldReusePriorWorkdir(task, nil, root); !ok {
+		t.Fatalf("setup: fully-provenanced workdir %q was not reusable", workDir)
+	}
+
+	if err := os.RemoveAll(filepath.Dir(workDir)); err != nil {
+		t.Fatalf("remove env root: %v", err)
+	}
+	if _, ok := shouldReusePriorWorkdir(task, nil, root); ok {
+		t.Fatal("reused a prior workdir that no longer exists")
+	}
+}
+
+// TestRunTaskReusesPriorWorkdirForFreshSession drives real runTask calls
+// through what the server hands an automatic retry after a
+// conversation-poisoning failure: the parent's workdir and no session
+// (MUL-7034). The run continues in that directory; once the directory has been
+// GC'd, it prepares a fresh one instead.
+func TestRunTaskReusesPriorWorkdirForFreshSession(t *testing.T) {
+	t.Parallel()
+
+	d, _, cleanup := newLeaderReuseTestDaemon(t)
+	defer cleanup()
+
+	run := func(task Task) TaskResult {
+		t.Helper()
+		task.IsLeaderTask = false
+		result, err := d.runTask(context.Background(), task, "claude", 0, d.logger)
+		if err != nil {
+			t.Fatalf("runTask %s: %v", task.ID, err)
+		}
+		return result
+	}
+
+	firstResult := run(leaderReuseTestTask("task-first"))
+
+	retry := leaderReuseTestTask("task-retry")
+	retry.PriorWorkDir = firstResult.WorkDir
+	retry.PriorSessionResumeUnavailable = true
+	if retryResult := run(retry); !sameDir(t, retryResult.WorkDir, firstResult.WorkDir) {
+		t.Fatalf("retry WorkDir = %q, want the reused %q", retryResult.WorkDir, firstResult.WorkDir)
+	}
+
+	if err := os.RemoveAll(firstResult.EnvRoot); err != nil {
+		t.Fatalf("remove env root: %v", err)
+	}
+	afterGC := leaderReuseTestTask("task-after-gc")
+	afterGC.PriorWorkDir = firstResult.WorkDir
+	if afterGCResult := run(afterGC); afterGCResult.WorkDir == firstResult.WorkDir {
+		t.Fatalf("run reused a workdir that no longer exists: %q", afterGCResult.WorkDir)
+	}
+}
+
 // TestShouldReusePriorWorkdirSquadLeaderAcceptsManagedProvenance is the unit
 // positive: managed shape + matching Prepare-time provenance + matching marker.
 func TestShouldReusePriorWorkdirSquadLeaderAcceptsManagedProvenance(t *testing.T) {

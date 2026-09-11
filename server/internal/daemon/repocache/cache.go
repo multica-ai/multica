@@ -736,18 +736,44 @@ type WorktreeParams struct {
 	// listed as a writable root — on Linux (multica-ai/multica#2925) and on the
 	// Windows native sandbox (multica-ai/multica#6449).
 	IsolatedGitMetadata bool
+	// Fresh discards what an existing checkout at the target path holds —
+	// uncommitted changes, untracked files, its branch position — and starts
+	// over on a new branch from the base ref. It deletes no branch holding
+	// unpushed commits. Without it, an existing checkout that holds work or is
+	// already on this task's branch is kept as it is.
+	Fresh bool
 }
 
 // WorktreeResult describes a successfully created worktree.
 type WorktreeResult struct {
 	Path       string `json:"path"`        // absolute path to the worktree
-	BranchName string `json:"branch_name"` // git branch created for this worktree
+	BranchName string `json:"branch_name"` // branch checked out; empty for a kept checkout on a detached HEAD
+	// Kept is set when an existing checkout was left exactly as it was — not
+	// reset, cleaned, switched, or pruned — and only its remote refs were
+	// fetched. It names why: KeptTaskBranch or KeptLocalWork.
+	Kept string `json:"kept,omitempty"`
+	// UncommittedFiles and UnpushedCommits describe a kept checkout: the paths
+	// `git status` reports, untracked files included, and the commits on HEAD
+	// that no remote-tracking ref reaches.
+	UncommittedFiles int `json:"uncommitted_files,omitempty"`
+	UnpushedCommits  int `json:"unpushed_commits,omitempty"`
 }
 
+// Reasons CreateWorktree keeps an existing checkout, reported in
+// WorktreeResult.Kept.
+const (
+	// KeptTaskBranch: the checkout is already on this task's branch, so the
+	// checkout was already done.
+	KeptTaskBranch = "task_branch"
+	// KeptLocalWork: the checkout holds uncommitted changes, untracked files,
+	// or unpushed commits that moving it to a new branch would lose.
+	KeptLocalWork = "local_work"
+)
+
 // CreateWorktree looks up the bare cache for a repo, fetches latest, and creates
-// a git worktree in the agent's working directory. If a worktree already exists
-// at the target path (reused environment), it updates the existing worktree to
-// the latest remote default branch instead of failing.
+// a git worktree in the agent's working directory. If a checkout already exists
+// at the target path (reused environment), updateExistingCheckoutContext
+// decides what happens to it.
 func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	return c.CreateWorktreeContext(context.Background(), params)
 }
@@ -847,13 +873,14 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// that omits the mode hint. This also makes provider transitions on a reused
 	// workdir backward compatible.
 	if params.IsolatedGitMetadata || isIsolatedCheckoutContext(ctx, worktreePath) {
-		actualBranch, err := c.createOrUpdateIsolatedCheckoutContext(
+		result, err := c.createOrUpdateIsolatedCheckoutContext(
 			ctx,
 			barePath,
 			params.RepoURL,
 			worktreePath,
 			branchName,
 			baseRef,
+			params.Fresh,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("create isolated checkout: %w", err)
@@ -867,19 +894,14 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, context.Cause(ctx)
 		}
 
-		c.logger.Info("repo checkout: isolated checkout ready",
-			"url", params.RepoURL,
-			"path", worktreePath,
-			"branch", actualBranch,
-			"base", baseRef,
-		)
-		return &WorktreeResult{Path: worktreePath, BranchName: actualBranch}, nil
+		c.logCheckoutReady("repo checkout: isolated checkout ready", params.RepoURL, baseRef, result)
+		return result, nil
 	}
 
 	// If worktree already exists (reused environment from a prior task),
-	// update it to the latest remote code instead of creating a new one.
+	// reuse it instead of creating a new one.
 	if isGitWorktree(worktreePath) {
-		actualBranch, err := updateExistingWorktreeContext(ctx, worktreePath, branchName, baseRef)
+		result, err := updateExistingCheckoutContext(ctx, worktreePath, branchName, baseRef, params.Fresh)
 		if err != nil {
 			return nil, fmt.Errorf("update existing worktree: %w", err)
 		}
@@ -898,17 +920,8 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, context.Cause(ctx)
 		}
 
-		c.logger.Info("repo checkout: existing worktree updated",
-			"url", params.RepoURL,
-			"path", worktreePath,
-			"branch", actualBranch,
-			"base", baseRef,
-		)
-
-		return &WorktreeResult{
-			Path:       worktreePath,
-			BranchName: actualBranch,
-		}, nil
+		c.logCheckoutReady("repo checkout: existing worktree updated", params.RepoURL, baseRef, result)
+		return result, nil
 	}
 
 	// Create a new worktree. createWorktree may rename the branch to avoid
@@ -944,6 +957,29 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	}, nil
 }
 
+// logCheckoutReady logs how CreateWorktree left an existing or isolated
+// checkout, naming a kept one as such so the log never reads as if its work
+// had moved to baseRef.
+func (c *Cache) logCheckoutReady(msg, repoURL, baseRef string, result *WorktreeResult) {
+	if result.Kept != "" {
+		c.logger.Info("repo checkout: existing checkout kept",
+			"url", repoURL,
+			"path", result.Path,
+			"branch", result.BranchName,
+			"reason", result.Kept,
+			"uncommitted_files", result.UncommittedFiles,
+			"unpushed_commits", result.UnpushedCommits,
+		)
+		return
+	}
+	c.logger.Info(msg,
+		"url", repoURL,
+		"path", result.Path,
+		"branch", result.BranchName,
+		"base", baseRef,
+	)
+}
+
 const (
 	isolatedCheckoutConfigKey   = "multica.checkout-mode"
 	isolatedCheckoutConfigValue = "isolated"
@@ -957,58 +993,82 @@ const (
 // The temporary cache remote is then replaced with the real repository URL so
 // an agent's normal fetch / push commands still target GitHub rather than the
 // daemon-owned bare cache.
-func (c *Cache) createOrUpdateIsolatedCheckout(barePath, repoURL, checkoutPath, branchName, baseRef string) (string, error) {
-	return c.createOrUpdateIsolatedCheckoutContext(context.Background(), barePath, repoURL, checkoutPath, branchName, baseRef)
+func (c *Cache) createOrUpdateIsolatedCheckout(barePath, repoURL, checkoutPath, branchName, baseRef string, fresh bool) (*WorktreeResult, error) {
+	return c.createOrUpdateIsolatedCheckoutContext(context.Background(), barePath, repoURL, checkoutPath, branchName, baseRef, fresh)
 }
 
-func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, barePath, repoURL, checkoutPath, branchName, baseRef string) (string, error) {
+func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, barePath, repoURL, checkoutPath, branchName, baseRef string, fresh bool) (*WorktreeResult, error) {
 	baseCommit, err := resolveCommitContext(ctx, barePath, baseRef)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if isIsolatedCheckoutContext(ctx, checkoutPath) {
 		if err := setIsolatedCheckoutOriginContext(ctx, checkoutPath, repoURL); err != nil {
-			return "", err
+			return nil, err
 		}
 		// Idempotent, and required for a workdir that was first created while
 		// the cache was still a full clone: without it, a checkout backed by a
 		// blobless cache resolves missing blobs to nothing instead of fetching.
 		if isPartialCloneContext(ctx, barePath) {
 			if err := configurePromisorRemoteContext(ctx, checkoutPath); err != nil {
-				return "", err
+				return nil, err
 			}
 		}
+		// Refresh the remote refs before inspecting the checkout: a kept
+		// checkout still gets them, and they decide which commits are unpushed.
 		if err := syncIsolatedCheckoutRefsContext(ctx, barePath, checkoutPath, baseRef); err != nil {
-			return "", err
+			return nil, err
 		}
-		actualBranch, err := updateExistingWorktreeContext(ctx, checkoutPath, branchName, baseCommit)
-		if err != nil {
-			return "", err
+		result, err := updateExistingCheckoutContext(ctx, checkoutPath, branchName, baseCommit, fresh)
+		if err != nil || result.Kept != "" {
+			return result, err
 		}
 		// Drop earlier tasks' agent/* heads so a reused workdir doesn't grow a
 		// new local branch on every checkout. Non-fatal: leftover branches are
 		// harmless clutter and must never fail the checkout.
-		if err := deleteStaleAgentBranchesContext(ctx, checkoutPath, actualBranch); err != nil {
+		if err := deleteStaleAgentBranchesContext(ctx, checkoutPath, result.BranchName); err != nil {
 			c.logger.Warn("repo checkout: prune stale branches failed (non-fatal)", "error", err)
 		}
-		return actualBranch, nil
+		return result, nil
 	}
 	// A daemon upgrade can resume a pre-fix Codex workdir that still has a
 	// linked worktree. Remove it through Git (so the shared admin record is
 	// cleaned too), then recreate the same checkout path with local metadata.
+	// Removing it deletes its working tree, so one keepReason claims stays a
+	// linked worktree until the caller asks for fresh. Even then its branch
+	// comes along when it holds unpushed commits: fresh discards the working
+	// tree, not commits, and left in the shared cache the branch would be
+	// out of the agent's reach and dropped by the next GC.
+	var carryBranch string
 	if isGitWorktree(checkoutPath) {
+		state, err := inspectCheckoutContext(ctx, checkoutPath)
+		if err != nil {
+			return nil, err
+		}
+		if !fresh {
+			if state.Kept = keepReason(state, branchName); state.Kept != "" {
+				return state, nil
+			}
+		}
+		if state.BranchName != "" && state.UnpushedCommits > 0 {
+			carryBranch = state.BranchName
+		}
 		if err := removeLinkedWorktreeContext(ctx, barePath, checkoutPath); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 	if _, err := os.Stat(checkoutPath); err == nil {
-		return "", fmt.Errorf("checkout path already exists and is not a Multica isolated checkout: %s", checkoutPath)
+		return nil, fmt.Errorf("checkout path already exists and is not a Multica isolated checkout: %s", checkoutPath)
 	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("stat checkout path: %w", err)
+		return nil, fmt.Errorf("stat checkout path: %w", err)
 	}
 
-	return createIsolatedCheckoutContext(ctx, barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit)
+	actualBranch, err := createIsolatedCheckoutContext(ctx, barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit, carryBranch)
+	if err != nil {
+		return nil, err
+	}
+	return &WorktreeResult{Path: checkoutPath, BranchName: actualBranch}, nil
 }
 
 func removeLinkedWorktree(barePath, checkoutPath string) error {
@@ -1070,11 +1130,14 @@ func localCloneArgs(goos, barePath, checkoutPath string) []string {
 	return append(args, "--origin", isolatedCacheRemoteName, barePath, checkoutPath)
 }
 
-func createIsolatedCheckout(barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit string) (_ string, retErr error) {
-	return createIsolatedCheckoutContext(context.Background(), barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit)
+// createIsolatedCheckout seeds a new isolated checkout from the cache. A
+// non-empty carryBranch names a cache branch to import as a local branch of
+// the same name — the branch of the linked worktree this checkout replaces.
+func createIsolatedCheckout(barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit, carryBranch string) (_ string, retErr error) {
+	return createIsolatedCheckoutContext(context.Background(), barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit, carryBranch)
 }
 
-func createIsolatedCheckoutContext(ctx context.Context, barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit string) (_ string, retErr error) {
+func createIsolatedCheckoutContext(ctx context.Context, barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit, carryBranch string) (_ string, retErr error) {
 	if out, err := runGitCombinedOutputContext(
 		ctx,
 		localCloneArgs(runtime.GOOS, barePath, checkoutPath)...,
@@ -1123,6 +1186,15 @@ func createIsolatedCheckoutContext(ctx context.Context, barePath, repoURL, check
 	}
 	if err := deleteAllLocalBranchesContext(ctx, checkoutPath); err != nil {
 		return "", err
+	}
+	// Import the carried branch before creating the task branch, so a carried
+	// branch with the task branch's own name moves the new one to a
+	// timestamped name instead of being overwritten.
+	if carryBranch != "" {
+		ref := "refs/heads/" + carryBranch
+		if out, err := runGitCombinedOutputContext(ctx, "-C", checkoutPath, "fetch", "--no-tags", barePath, ref+":"+ref); err != nil {
+			return "", fmt.Errorf("carry branch %s: %s: %w", carryBranch, strings.TrimSpace(string(out)), err)
+		}
 	}
 	if out, err := runGitCombinedOutputContext(ctx, "-C", checkoutPath, "config", isolatedCheckoutConfigKey, isolatedCheckoutConfigValue); err != nil {
 		return "", fmt.Errorf("mark isolated checkout: %s: %w", strings.TrimSpace(string(out)), err)
@@ -1250,32 +1322,53 @@ func deleteAllLocalBranches(repoPath string) error {
 }
 
 func deleteAllLocalBranchesContext(ctx context.Context, repoPath string) error {
-	return deleteLocalBranchesUnderContext(ctx, repoPath, "refs/heads/", "")
+	return deleteLocalBranchesUnderContext(ctx, repoPath, "refs/heads/", nil)
 }
 
 // deleteStaleAgentBranches prunes branches left by earlier Multica tasks while
-// preserving the current task branch and every user-created local branch.
+// preserving the current task branch, every user-created local branch, and
+// every agent branch holding commits no remote-tracking ref reaches. In an
+// isolated checkout that branch is the only copy of those commits; deleting it
+// would leave them to the reflog (MUL-7284).
 func deleteStaleAgentBranches(repoPath, keepBranch string) error {
 	return deleteStaleAgentBranchesContext(context.Background(), repoPath, keepBranch)
 }
 
 func deleteStaleAgentBranchesContext(ctx context.Context, repoPath, keepBranch string) error {
-	return deleteLocalBranchesUnderContext(ctx, repoPath, "refs/heads/agent/", "refs/heads/"+keepBranch)
+	keepRef := "refs/heads/" + keepBranch
+	return deleteLocalBranchesUnderContext(ctx, repoPath, "refs/heads/agent/", func(ref string) (bool, error) {
+		if ref == keepRef {
+			return true, nil
+		}
+		unpushed, err := countUnpushedCommitsContext(ctx, repoPath, ref)
+		return unpushed > 0, err
+	})
 }
 
-func deleteLocalBranchesUnder(repoPath, namespace, keepRef string) error {
-	return deleteLocalBranchesUnderContext(context.Background(), repoPath, namespace, keepRef)
+// deleteLocalBranchesUnder deletes every branch under namespace that keep does
+// not claim. A nil keep deletes them all.
+func deleteLocalBranchesUnder(repoPath, namespace string, keep func(ref string) (bool, error)) error {
+	return deleteLocalBranchesUnderContext(context.Background(), repoPath, namespace, keep)
 }
 
-func deleteLocalBranchesUnderContext(ctx context.Context, repoPath, namespace, keepRef string) error {
+func deleteLocalBranchesUnderContext(ctx context.Context, repoPath, namespace string, keep func(ref string) (bool, error)) error {
 	out, err := runGitOutputContext(ctx, "-C", repoPath, "for-each-ref", "--format=%(refname)", namespace)
 	if err != nil {
 		return fmt.Errorf("list local branches: %w", err)
 	}
 	for _, ref := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		ref = strings.TrimSpace(ref)
-		if ref == "" || ref == keepRef {
+		if ref == "" {
 			continue
+		}
+		if keep != nil {
+			kept, err := keep(ref)
+			if err != nil {
+				return err
+			}
+			if kept {
+				continue
+			}
 		}
 		if out, err := runGitCombinedOutputContext(ctx, "-C", repoPath, "update-ref", "-d", ref); err != nil {
 			return fmt.Errorf("delete local branch %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
@@ -1398,10 +1491,112 @@ func isGitWorktree(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
+// updateExistingCheckoutContext handles a checkout CreateWorktree finds already
+// in place. Re-running checkout must never silently lose work (MUL-7284), and
+// a reused workdir reaches here within one task (a repeated checkout), in a
+// follow-up turn, and from a fresh session that has no memory of the directory.
+// So unless fresh is set, a checkout keepReason claims is left exactly as it
+// is. Only one with nothing to lose — or any, when fresh is set — is moved to a
+// new branch from baseRef. The caller fetches beforehand, so a kept checkout
+// still has current remote refs.
+func updateExistingCheckoutContext(ctx context.Context, path, branchName, baseRef string, fresh bool) (*WorktreeResult, error) {
+	if !fresh {
+		state, err := inspectCheckoutContext(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		if state.Kept = keepReason(state, branchName); state.Kept != "" {
+			return state, nil
+		}
+	}
+	actualBranch, err := updateExistingWorktreeContext(ctx, path, branchName, baseRef)
+	if err != nil {
+		return nil, err
+	}
+	return &WorktreeResult{Path: path, BranchName: actualBranch}, nil
+}
+
+// keepReason says why an existing checkout must be left as it is, or returns
+// "" when moving it to a new branch loses nothing. It is kept when it is
+// already on this task's branch — the checkout was already done — or when it
+// holds uncommitted changes, untracked files, or unpushed commits.
+func keepReason(state *WorktreeResult, branchName string) string {
+	switch {
+	case isTaskBranch(state.BranchName, branchName):
+		return KeptTaskBranch
+	case state.UncommittedFiles > 0 || state.UnpushedCommits > 0:
+		return KeptLocalWork
+	default:
+		return ""
+	}
+}
+
+// inspectCheckoutContext describes what an existing checkout holds: its branch
+// (empty on a detached HEAD), the paths `git status` reports, untracked files
+// included, and the commits on HEAD that no remote-tracking ref reaches.
+func inspectCheckoutContext(ctx context.Context, path string) (*WorktreeResult, error) {
+	result := &WorktreeResult{Path: path}
+	// symbolic-ref fails on a detached HEAD, which leaves BranchName empty.
+	if out, err := runGitOutputContext(ctx, "-C", path, "symbolic-ref", "--quiet", "HEAD"); err == nil {
+		result.BranchName = strings.TrimPrefix(strings.TrimSpace(string(out)), "refs/heads/")
+	}
+	// Untracked files are counted one by one because `git clean -fd` would
+	// delete each of them. Ignored files are not: nothing here deletes them.
+	out, err := runGitOutputContext(ctx, "-C", path, "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		return nil, fmt.Errorf("inspect existing checkout %s: git status: %w", path, err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if line != "" {
+			result.UncommittedFiles++
+		}
+	}
+	if result.UnpushedCommits, err = countUnpushedCommitsContext(ctx, path, "HEAD"); err != nil {
+		return nil, fmt.Errorf("inspect existing checkout %s: %w", path, err)
+	}
+	return result, nil
+}
+
+// countUnpushedCommitsContext counts the commits reachable from ref that no
+// remote-tracking ref reaches: work whose only copy is this repository.
+func countUnpushedCommitsContext(ctx context.Context, repoPath, ref string) (int, error) {
+	out, err := runGitOutputContext(ctx, "-C", repoPath, "rev-list", "--count", ref, "--not", "--remotes")
+	if err != nil {
+		return 0, fmt.Errorf("count unpushed commits on %s: %w", ref, err)
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("count unpushed commits on %s: %w", ref, err)
+	}
+	return count, nil
+}
+
+// isTaskBranch reports whether branch is the one CreateWorktree gives the task
+// that owns branchName: that name itself, or the timestamp-suffixed name a
+// branch collision retry picks (see updateExistingWorktree).
+func isTaskBranch(branch, branchName string) bool {
+	if branch == branchName {
+		return true
+	}
+	suffix, ok := strings.CutPrefix(branch, branchName+"-")
+	if !ok || suffix == "" {
+		return false
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // updateExistingWorktree resets the worktree to a clean state and checks out a
-// new branch from the default branch. The caller is responsible for fetching
-// the bare cache beforehand (worktrees share the same object store).
-// Returns the actual branch name used (may differ from input on collision).
+// new branch from the default branch, discarding uncommitted changes and
+// untracked files. Callers go through updateExistingCheckoutContext, which
+// reaches it only when that loses nothing or the caller asked for fresh. The
+// caller is responsible for fetching the bare cache beforehand (worktrees share
+// the same object store). Returns the actual branch name used (may differ from
+// input on collision).
 func updateExistingWorktree(worktreePath, branchName, baseRef string) (string, error) {
 	return updateExistingWorktreeContext(context.Background(), worktreePath, branchName, baseRef)
 }

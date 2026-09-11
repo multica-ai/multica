@@ -64,7 +64,7 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
         <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
           Resources
         </Text>
-        <Pressable onPress={onAdd} className="px-2 py-1 active:bg-secondary rounded">
+        <Pressable onPress={onAdd} className="px-2 py-1 active:bg-secondary rounded-xs">
           <Text className="text-xs text-brand">Add</Text>
         </Pressable>
       </View>

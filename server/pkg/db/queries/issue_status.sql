@@ -20,9 +20,8 @@ VALUES
 ON CONFLICT DO NOTHING;
 
 -- name: ListIssueStatusEntries :many
--- Ordered by category rank (the historical STATUS_ORDER, so the default board
--- and picker stay pixel-identical for a workspace with no custom statuses),
--- then intra-category position, then key as a stable tiebreak.
+-- Ordered by the canonical board category rank, then intra-category position,
+-- then key as a stable tiebreak.
 SELECT * FROM issue_status
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND (sqlc.arg('include_archived')::bool OR archived_at IS NULL)
@@ -32,8 +31,8 @@ ORDER BY
         WHEN 'todo' THEN 1
         WHEN 'in_progress' THEN 2
         WHEN 'in_review' THEN 3
-        WHEN 'done' THEN 4
-        WHEN 'blocked' THEN 5
+        WHEN 'blocked' THEN 4
+        WHEN 'done' THEN 5
         WHEN 'cancelled' THEN 6
         ELSE 7
     END,

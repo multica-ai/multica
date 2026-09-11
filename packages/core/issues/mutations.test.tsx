@@ -3,11 +3,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
+import { createQueryClient } from "../query-client";
 import {
   useBatchUpdateIssues,
   useCreateComment,
@@ -22,12 +23,17 @@ import {
   type IssueSortParam,
 } from "./queries";
 import { onIssueUpdated, onIssueAuxiliaryRevision } from "./ws-updaters";
-import { inboxKeys } from "../inbox/queries";
+import { inboxKeys, inboxListOptions } from "../inbox/queries";
+import {
+  onInboxInvalidate,
+  onInboxIssueStatusChanged,
+} from "../inbox/ws-updaters";
 import type {
   InboxItem,
   Issue,
   ListIssuesCache,
   TimelineEntry,
+  UpdateIssueRequest,
 } from "../types";
 
 vi.mock("../hooks", () => ({
@@ -789,6 +795,349 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     expect(bucketIds(myKey, "todo")).toEqual(["issue-1"]);
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
+  });
+});
+
+// MUL-7286: a status / priority write cancels the Inbox list's in-flight
+// request so it cannot land on top of the optimistic patch. Whatever that
+// request was carrying — here a new notification — must be re-read once the
+// write settles, or the unread badge counts a row the list never shows. The
+// cancel primitive itself is covered in inbox/ws-updaters.test.ts.
+describe("status / priority writes re-read an Inbox list they left behind", () => {
+  const readItem = makeInboxItem("n1", "issue-1", {
+    read: true,
+    issue_priority: "none",
+  });
+  const notification = makeInboxItem("n2", "issue-2", {
+    created_at: "2025-01-02T00:00:00Z",
+  });
+  const writes = [
+    {
+      name: "useUpdateIssue",
+      write: (hooks: WriteHooks) =>
+        hooks.single.mutateAsync({ id: "issue-1", priority: "high" }),
+    },
+    {
+      name: "useBatchUpdateIssues",
+      write: (hooks: WriteHooks) =>
+        hooks.batch.mutateAsync({ ids: ["issue-1"], updates: { priority: "high" } }),
+    },
+  ];
+
+  let qc: QueryClient;
+  const unmounts: Array<() => void> = [];
+
+  function renderWriteHooks() {
+    const hooks = renderHook(
+      () => ({ single: useUpdateIssue(), batch: useBatchUpdateIssues() }),
+      { wrapper: createWrapper(qc) },
+    );
+    unmounts.push(hooks.unmount);
+    return hooks.result;
+  }
+  type WriteHooks = ReturnType<typeof renderWriteHooks>["current"];
+
+  function mountInbox() {
+    const page = renderHook(() => useQuery(inboxListOptions(WS_ID)), {
+      wrapper: createWrapper(qc),
+    });
+    unmounts.push(page.unmount);
+    return page.result;
+  }
+
+  function mockApi(
+    listInbox: () => Promise<InboxItem[]>,
+    { fail = false }: { fail?: boolean } = {},
+  ) {
+    const settle = <T,>(value: T) =>
+      fail ? Promise.reject(new Error("boom")) : Promise.resolve(value);
+    setApiInstance({
+      listInbox,
+      updateIssue: () => settle(makeIssue(1, { priority: "high" })),
+      batchUpdateIssues: () => settle({ updated: 1 }),
+    } as unknown as ApiClient);
+  }
+
+  beforeEach(() => {
+    qc = createQueryClient();
+  });
+
+  afterEach(() => {
+    unmounts.splice(0).forEach((unmount) => unmount());
+    qc.clear();
+  });
+
+  it.each(
+    writes.flatMap((w) => [
+      { ...w, issueEvent: false },
+      { ...w, issueEvent: true },
+    ]),
+  )(
+    "$name re-reads the request it interrupted (issue event meanwhile: $issueEvent)",
+    async ({ write, issueEvent }) => {
+      let release!: (items: InboxItem[]) => void;
+      const listInbox = vi
+        .fn<() => Promise<InboxItem[]>>()
+        .mockResolvedValueOnce([readItem])
+        .mockImplementationOnce(
+          () => new Promise((resolve) => (release = resolve)),
+        )
+        .mockResolvedValue([notification, readItem]);
+      mockApi(listInbox);
+      const hooks = renderWriteHooks();
+      const inbox = mountInbox();
+      await waitFor(() => expect(inbox.current.data).toEqual([readItem]));
+
+      // `inbox:new` while the Inbox is open; the list re-read is still out.
+      act(() => {
+        void onInboxInvalidate(qc, WS_ID);
+      });
+      await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
+      expect(qc.getQueryState(inboxKeys.list(WS_ID))?.fetchStatus).toBe("fetching");
+      if (issueEvent) {
+        // An `issue:updated` patching a listed row mid-request replaces the
+        // snapshot TanStack reverts to on cancel with a non-invalidated state.
+        onInboxIssueStatusChanged(qc, WS_ID, "issue-1", "in_progress");
+      }
+
+      await act(async () => {
+        await write(hooks.current);
+      });
+      release([notification, readItem]); // interrupted: its response is dropped
+
+      await waitFor(() =>
+        expect(inbox.current.data?.map((item) => item.id)).toEqual(["n2", "n1"]),
+      );
+      expect(listInbox).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it.each(writes)(
+    "$name adds no Inbox request when it interrupts none",
+    async ({ write }) => {
+      const listInbox = vi
+        .fn<() => Promise<InboxItem[]>>()
+        .mockResolvedValue([readItem]);
+      mockApi(listInbox);
+      const hooks = renderWriteHooks();
+      const inbox = mountInbox();
+      await waitFor(() => expect(inbox.current.data).toEqual([readItem]));
+
+      await act(async () => {
+        await write(hooks.current);
+      });
+
+      await waitFor(() =>
+        expect(inbox.current.data?.[0]?.issue_priority).toBe("high"),
+      );
+      expect(listInbox).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(writes)(
+    "$name keeps the pending refresh when a failed write rolls the rows back",
+    async ({ write }) => {
+      const listInbox = vi.fn<() => Promise<InboxItem[]>>();
+      mockApi(listInbox, { fail: true });
+      // The user is elsewhere: the list is cached, nothing observes it, and an
+      // `inbox:new` has marked it to re-read on the next visit.
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(WS_ID), [readItem]);
+      await onInboxInvalidate(qc, WS_ID);
+      const hooks = renderWriteHooks();
+
+      await act(async () => {
+        await write(hooks.current).catch(() => {});
+      });
+
+      await waitFor(() =>
+        expect(qc.getQueryState(inboxKeys.list(WS_ID))?.isInvalidated).toBe(true),
+      );
+      expect(qc.getQueryData(inboxKeys.list(WS_ID))).toEqual([readItem]);
+      expect(listInbox).not.toHaveBeenCalled();
+    },
+  );
+
+  // Writes that overlap each other or a list request: the re-read must come
+  // after the last save, or it reads a pending write's old value and lands on
+  // top of its patch.
+  describe("overlapping writes", () => {
+    const rowA = makeInboxItem("n-a", "issue-1", { read: true, issue_priority: "none" });
+    const rowB = makeInboxItem("n-b", "issue-2", { read: true, issue_priority: "none" });
+    const newRow = makeInboxItem("n-c", "issue-3", {
+      issue_priority: "none",
+      created_at: "2025-01-02T00:00:00Z",
+    });
+    type Kind = "useUpdateIssue" | "useBatchUpdateIssues";
+
+    // List reads and saves complete only when the test says so. A read answers
+    // with the rows as they were when it reached the server.
+    function controlledServer(initial: InboxItem[]) {
+      let rows = initial;
+      const reads: Array<() => void> = [];
+      const saves = new Map<string, () => void>();
+      const listInbox = vi.fn(() => {
+        const snapshot = rows;
+        return new Promise<InboxItem[]>((resolve) =>
+          reads.push(() => resolve(snapshot)),
+        );
+      });
+      const save = (id: string, priority: UpdateIssueRequest["priority"]) =>
+        new Promise<void>((resolve) =>
+          saves.set(id, () => {
+            rows = rows.map((row) =>
+              row.issue_id === id ? { ...row, issue_priority: priority } : row,
+            );
+            resolve();
+          }),
+        );
+      setApiInstance({
+        listInbox,
+        updateIssue: (id: string, data: UpdateIssueRequest) =>
+          save(id, data.priority).then(() => ({ ...makeIssue(1), ...data, id })),
+        batchUpdateIssues: (ids: string[], updates: UpdateIssueRequest) =>
+          save(ids[0]!, updates.priority).then(() => ({ updated: ids.length })),
+      } as unknown as ApiClient);
+      return {
+        listInbox,
+        setRows: (next: InboxItem[]) => {
+          rows = next;
+        },
+        answerReads: () => reads.splice(0).forEach((answer) => answer()),
+        saving: (id: string) => saves.has(id),
+        commit: (id: string) => saves.get(id)!(),
+      };
+    }
+
+    function write(hooks: WriteHooks, kind: Kind, id: string) {
+      return kind === "useUpdateIssue"
+        ? hooks.single.mutateAsync({ id, priority: "high" })
+        : hooks.batch.mutateAsync({ ids: [id], updates: { priority: "high" } });
+    }
+
+    async function loadInbox(server: ReturnType<typeof controlledServer>) {
+      const inbox = mountInbox();
+      await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(1));
+      server.answerReads();
+      await waitFor(() => expect(inbox.current.data).toBeDefined());
+      return () => inbox.current.data?.map((row) => [row.id, row.issue_priority]);
+    }
+
+    const pairings = [
+      ["useUpdateIssue", "useUpdateIssue"],
+      ["useBatchUpdateIssues", "useBatchUpdateIssues"],
+      ["useUpdateIssue", "useBatchUpdateIssues"],
+      ["useBatchUpdateIssues", "useUpdateIssue"],
+    ] as const;
+
+    // An `inbox:new` re-read is out when A's write interrupts it; B's write
+    // starts before A is saved and finds nothing to interrupt.
+    async function overlapWrites(first: Kind, second: Kind) {
+      const server = controlledServer([rowA, rowB]);
+      const hooks = renderWriteHooks();
+      const rendered = await loadInbox(server);
+      server.setRows([newRow, rowA, rowB]);
+      act(() => {
+        void onInboxInvalidate(qc, WS_ID);
+      });
+      await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(2));
+
+      let writeA!: Promise<unknown>;
+      let writeB!: Promise<unknown>;
+      act(() => {
+        writeA = write(hooks.current, first, "issue-1");
+      });
+      await waitFor(() => expect(server.saving("issue-1")).toBe(true));
+      act(() => {
+        writeB = write(hooks.current, second, "issue-2");
+      });
+      await waitFor(() => expect(server.saving("issue-2")).toBe(true));
+      expect(qc.getQueryState(inboxKeys.list(WS_ID))?.fetchStatus).toBe("idle");
+      return { server, rendered, writeA, writeB };
+    }
+
+    const everySaved = [
+      ["n-c", "none"],
+      ["n-a", "high"],
+      ["n-b", "high"],
+    ];
+
+    it.each(pairings)(
+      "re-reads once, after the last of them saves (%s, then %s)",
+      async (first: Kind, second: Kind) => {
+        const { server, rendered, writeA, writeB } = await overlapWrites(first, second);
+
+        await act(async () => {
+          server.commit("issue-1");
+          await writeA;
+        });
+        await act(async () => {});
+        // A owes the re-read, but reading while B is unsaved would miss B.
+        expect(server.listInbox).toHaveBeenCalledTimes(2);
+
+        await act(async () => {
+          server.commit("issue-2");
+          await writeB;
+        });
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
+        server.answerReads();
+
+        await waitFor(() => expect(rendered()).toEqual(everySaved));
+      },
+    );
+
+    it.each(pairings)(
+      "re-reads when both saves land in the same tick (%s, then %s)",
+      async (first: Kind, second: Kind) => {
+        const { server, rendered, writeA, writeB } = await overlapWrites(first, second);
+
+        // Each write settles while the other still counts as in flight.
+        await act(async () => {
+          server.commit("issue-1");
+          server.commit("issue-2");
+          await Promise.all([writeA, writeB]);
+        });
+        expect(qc.isMutating()).toBe(0);
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
+        server.answerReads();
+
+        await waitFor(() => expect(rendered()).toEqual(everySaved));
+      },
+    );
+
+    it.each(["useUpdateIssue", "useBatchUpdateIssues"] as const)(
+      "%s re-reads a list request that started while it was saving",
+      async (kind: Kind) => {
+        const server = controlledServer([rowA]);
+        const hooks = renderWriteHooks();
+        const rendered = await loadInbox(server);
+
+        let writeA!: Promise<unknown>;
+        act(() => {
+          writeA = write(hooks.current, kind, "issue-1");
+        });
+        await waitFor(() => expect(server.saving("issue-1")).toBe(true));
+        // `inbox:new` mid-save: this read reaches the server before A is saved.
+        server.setRows([newRow, rowA]);
+        act(() => {
+          void onInboxInvalidate(qc, WS_ID);
+        });
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(2));
+
+        await act(async () => {
+          server.commit("issue-1");
+          await writeA;
+        });
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
+        server.answerReads();
+
+        await waitFor(() =>
+          expect(rendered()).toEqual([
+            ["n-c", "none"],
+            ["n-a", "high"],
+          ]),
+        );
+      },
+    );
   });
 });
 

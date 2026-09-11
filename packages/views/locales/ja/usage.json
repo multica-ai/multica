@@ -94,6 +94,9 @@
     "header_cost": "コスト",
     "header_time": "時間",
     "header_tasks": "実行",
+    "usage_unreported_other": "{{count}} 件の実行で使用量が報告されていません",
+    "usage_unreported_pending_other": "{{count}} 件の実行で使用量が報告されていません · 使用量を集計しています",
+    "usage_totals_pending": "使用量を集計しています",
     "show_all": "すべて表示",
     "show_less": "上位 {{count}} 件のみ",
     "no_data": "この期間にエージェントの活動はありません。"

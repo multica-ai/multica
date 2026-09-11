@@ -477,7 +477,7 @@ function LevelBadge({ level }: { level: LogLevel }) {
   return (
     <span
       className={cn(
-        "inline-flex h-4 shrink-0 items-center rounded border px-1 text-micro font-medium uppercase tracking-wide",
+        "inline-flex h-4 shrink-0 items-center rounded-xs border px-1 text-micro font-medium uppercase tracking-wide",
         LEVEL_BADGE_CLASS[level],
       )}
     >
@@ -513,7 +513,7 @@ function LogLineRow({
   return (
     <div
       className={cn(
-        "grid grid-cols-[auto_auto_minmax(0,1fr)] items-baseline gap-2 rounded px-2 py-0.5 hover:bg-accent/30",
+        "grid grid-cols-[auto_auto_minmax(0,1fr)] items-baseline gap-2 rounded-xs px-2 py-0.5 hover:bg-accent/30",
         hasFields && "cursor-pointer",
       )}
       onClick={hasFields ? onToggle : undefined}
@@ -582,7 +582,7 @@ function GroupRows({
         <button
           type="button"
           onClick={onToggle}
-          className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 bg-muted/30 px-2 py-0.5 text-micro italic text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded-xs border border-dashed border-muted-foreground/25 bg-muted/30 px-2 py-0.5 text-micro italic text-muted-foreground hover:bg-muted/60 hover:text-foreground"
         >
           <span>···</span>
           <span>
@@ -618,7 +618,7 @@ function GroupRows({
       <button
         type="button"
         onClick={onToggle}
-        className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded border border-dashed border-muted-foreground/25 px-2 py-0.5 text-micro italic text-muted-foreground hover:text-foreground"
+        className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded-xs border border-dashed border-muted-foreground/25 px-2 py-0.5 text-micro italic text-muted-foreground hover:text-foreground"
       >
         <span>···</span>
         <span>
@@ -685,7 +685,7 @@ function highlight(text: string, query: string): ReactNode {
   return (
     <>
       {text.slice(0, idx)}
-      <mark className="rounded bg-warning/30 px-0.5 text-foreground">
+      <mark className="rounded-xs bg-warning/30 px-0.5 text-foreground">
         {text.slice(idx, idx + query.length)}
       </mark>
       {text.slice(idx + query.length)}

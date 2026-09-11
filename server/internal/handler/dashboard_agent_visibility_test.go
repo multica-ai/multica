@@ -199,10 +199,11 @@ func TestDashboardPerAgentRollupsFoldRestrictedAgents(t *testing.T) {
 	// ---- agent-runtime -----------------------------------------------------
 
 	type runTimeRow struct {
-		AgentID      string `json:"agent_id"`
-		TotalSeconds int64  `json:"total_seconds"`
-		TaskCount    int32  `json:"task_count"`
-		FailedCount  int32  `json:"failed_count"`
+		AgentID          string `json:"agent_id"`
+		TotalSeconds     int64  `json:"total_seconds"`
+		TaskCount        int32  `json:"task_count"`
+		MeteredTaskCount int32  `json:"metered_task_count"`
+		FailedCount      int32  `json:"failed_count"`
 	}
 	var ownerRunTime, memberRunTime []runTimeRow
 	const runTimePath = "/api/dashboard/agent-runtime?days=7"
@@ -215,19 +216,20 @@ func TestDashboardPerAgentRollupsFoldRestrictedAgents(t *testing.T) {
 	assertDashboardAgentPresence(t, "agent-runtime (member)", dashboardAgentIDSet(memberRunTime, runTimeID),
 		dashboardAgentPresence{privateAgent: false, publicAgent: true, sentinel: true}, privateAgentID, publicAgentID)
 
-	sumRunTime := func(rows []runTimeRow) (secs int64, tasks, failed int32) {
+	sumRunTime := func(rows []runTimeRow) (secs int64, tasks, metered, failed int32) {
 		for _, r := range rows {
 			secs += r.TotalSeconds
 			tasks += r.TaskCount
+			metered += r.MeteredTaskCount
 			failed += r.FailedCount
 		}
 		return
 	}
-	ownerSecs, ownerTasks, ownerFailed := sumRunTime(ownerRunTime)
-	memberSecs, memberTasks, memberFailed := sumRunTime(memberRunTime)
-	if ownerSecs != memberSecs || ownerTasks != memberTasks || ownerFailed != memberFailed {
-		t.Errorf("agent-runtime: folding changed the totals — owner (%ds, %d tasks, %d failed), member (%ds, %d tasks, %d failed)",
-			ownerSecs, ownerTasks, ownerFailed, memberSecs, memberTasks, memberFailed)
+	ownerSecs, ownerTasks, ownerMetered, ownerFailed := sumRunTime(ownerRunTime)
+	memberSecs, memberTasks, memberMetered, memberFailed := sumRunTime(memberRunTime)
+	if ownerSecs != memberSecs || ownerTasks != memberTasks || ownerMetered != memberMetered || ownerFailed != memberFailed {
+		t.Errorf("agent-runtime: folding changed the totals — owner (%ds, %d tasks, %d metered, %d failed), member (%ds, %d tasks, %d metered, %d failed)",
+			ownerSecs, ownerTasks, ownerMetered, ownerFailed, memberSecs, memberTasks, memberMetered, memberFailed)
 	}
 	// One bucket, not one row per hidden agent: how MANY private agents exist
 	// is itself part of what "private" hides.

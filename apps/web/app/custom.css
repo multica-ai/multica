@@ -16,6 +16,17 @@
     color-scheme: light;
 }
 .landing-light {
+    /* Landing has an editorial radius language independent from product UI.
+       Components consume these by role, so a redesign does not require
+       rediscovering scattered one-off pixel values. */
+    --landing-radius-checkbox: 4px;
+    --landing-radius-menu-item: 6px;
+    --landing-radius-nav-item: 9px;
+    --landing-radius-control: 10px;
+    --landing-radius-button: 11px;
+    --landing-radius-action: 12px;
+    --landing-radius-menu: 14px;
+    --landing-radius-card: 16px;
     --app-shell: oklch(0.964435 0.001327 286.375);
     --page-canvas: oklch(0.988087 0 0);
     --surface: oklch(1 0 0);

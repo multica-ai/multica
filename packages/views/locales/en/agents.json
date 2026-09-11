@@ -856,6 +856,8 @@
     "show_all": "Show all",
     "patch_truncated": "... (truncated)",
     "patch_body_truncated": "... (body truncated)",
+    "display_clipped": "... (too long to show in full — only the start is displayed)",
+    "output_truncated_note": "Output was too long — only the beginning was kept.",
     "patch_no_content": "(no content reported)",
     "patch_summary_more": "{{path}} +{{extra}} more",
     "status_queued": "Queued",
@@ -909,6 +911,7 @@
     "group_calls_one": "{{count}} call",
     "group_calls_other": "{{count}} calls",
     "step_running": "Still running",
+    "step_duration_unknown": "Exact duration is unavailable.",
     "step_input": "Input",
     "step_result": "Result",
     "copy_step": "Copy this step",
@@ -926,6 +929,7 @@
   },
   "task_failure": {
     "cancelled_by_system": "Cancelled by the system",
+    "cancelled_by_actor": "Cancelled by {{name}}",
     "reasons": {
       "queued_expired": "Expired in queue",
       "runtime_offline": "Daemon offline",

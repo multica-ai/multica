@@ -927,15 +927,21 @@ func TestAuxiliaryVisibleMutationsAdvanceOwnerRevisionExactlyOnce(t *testing.T) 
 	if err != nil || metadataIssue.Revision != 9 {
 		t.Fatalf("set metadata = (%+v, %v), want revision 9", metadataIssue, err)
 	}
-	metadataIssue, err = testHandler.Queries.SetIssueMetadataKey(ctx, metadataParams)
-	if err != nil || metadataIssue.Revision != 9 {
-		t.Fatalf("duplicate metadata set = (%+v, %v), want unchanged revision 9", metadataIssue, err)
+	_, err = testHandler.Queries.SetIssueMetadataKey(ctx, metadataParams)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("duplicate metadata set error = %v, want pgx.ErrNoRows", err)
 	}
-	metadataIssue, err = testHandler.Queries.DeleteIssueMetadataKey(ctx, db.DeleteIssueMetadataKeyParams{
+	currentMetadataIssue, err := testHandler.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID: issueUUID, WorkspaceID: workspaceUUID,
+	})
+	if err != nil || currentMetadataIssue.Revision != 9 {
+		t.Fatalf("issue after duplicate metadata set = (%+v, %v), want revision 9", currentMetadataIssue, err)
+	}
+	deletedMetadataIssue, err := testHandler.Queries.DeleteIssueMetadataKey(ctx, db.DeleteIssueMetadataKeyParams{
 		Key: metadataParams.Key, ID: issueUUID, WorkspaceID: workspaceUUID,
 	})
-	if err != nil || metadataIssue.Revision != 10 {
-		t.Fatalf("delete metadata = (%+v, %v), want revision 10", metadataIssue, err)
+	if err != nil || deletedMetadataIssue.Revision != 10 {
+		t.Fatalf("delete metadata = (%+v, %v), want revision 10", deletedMetadataIssue, err)
 	}
 
 	propertyParams := db.SetIssuePropertyValueParams{
