@@ -62,7 +62,7 @@ func NewMemoryInvitationRateLimiters(limits InvitationRateLimits) InvitationRate
 
 // NewRedisInvitationRateLimiters builds replica-shared gates with isolated key
 // namespaces for each dimension.
-func NewRedisInvitationRateLimiters(rdb *redis.Client, limits InvitationRateLimits) InvitationRateLimiters {
+func NewRedisInvitationRateLimiters(rdb redis.UniversalClient, limits InvitationRateLimits) InvitationRateLimiters {
 	return InvitationRateLimiters{
 		Actor:     newRedisSlidingWindowRateLimiter(rdb, limits.Actor, invitationActorLimiterKeyPrefix),
 		Workspace: newRedisSlidingWindowRateLimiter(rdb, limits.Workspace, invitationWorkspaceLimiterKeyPrefix),

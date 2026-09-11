@@ -133,8 +133,8 @@ func deliverEnvelope(hub *Hub, daemonRuntime DaemonRuntimeDeliverer, wecomOutbou
 // subscribers. Local fanout is delegated to the wrapped *Hub.
 type RedisRelay struct {
 	hub       *Hub
-	writeRDB  *redis.Client
-	readRDB   *redis.Client
+	writeRDB  redis.UniversalClient
+	readRDB   redis.UniversalClient
 	nodeID    string
 	retention StreamRetentionConfig
 	ttl       *streamTTLRefresher
@@ -161,7 +161,7 @@ type scopeConsumer struct {
 
 // NewRedisRelay constructs a relay. The caller is responsible for invoking
 // Start before producing messages.
-func NewRedisRelay(hub *Hub, rdb *redis.Client) *RedisRelay {
+func NewRedisRelay(hub *Hub, rdb redis.UniversalClient) *RedisRelay {
 	return NewRedisRelayWithClients(hub, rdb, rdb)
 }
 
@@ -169,13 +169,13 @@ func NewRedisRelay(hub *Hub, rdb *redis.Client) *RedisRelay {
 // writes and blocking reads. The read client is reserved for XREADGROUP BLOCK
 // calls so long-polling stream consumers cannot exhaust the pool used by XADD,
 // heartbeats, acks, and other request-path Redis operations.
-func NewRedisRelayWithClients(hub *Hub, writeRDB, readRDB *redis.Client) *RedisRelay {
+func NewRedisRelayWithClients(hub *Hub, writeRDB, readRDB redis.UniversalClient) *RedisRelay {
 	return NewRedisRelayWithClientsAndConfig(hub, writeRDB, readRDB, DefaultStreamRetentionConfig())
 }
 
 // NewRedisRelayWithClientsAndConfig applies the same stream retention controls
 // used by sharded mode so legacy and dual-mode rollouts cannot silently diverge.
-func NewRedisRelayWithClientsAndConfig(hub *Hub, writeRDB, readRDB *redis.Client, retention StreamRetentionConfig) *RedisRelay {
+func NewRedisRelayWithClientsAndConfig(hub *Hub, writeRDB, readRDB redis.UniversalClient, retention StreamRetentionConfig) *RedisRelay {
 	if readRDB == nil {
 		readRDB = writeRDB
 	}

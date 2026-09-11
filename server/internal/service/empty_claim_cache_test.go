@@ -40,6 +40,16 @@ func newRedisTestClient(t *testing.T) *redis.Client {
 	return rdb
 }
 
+func TestEmptyClaimKeysShareRedisClusterHashTag(t *testing.T) {
+	const runtimeID = "runtime-a"
+	if got, want := emptyClaimKey(runtimeID), "mul:claim:runtime:{runtime-a}:empty"; got != want {
+		t.Fatalf("empty claim key = %q, want %q", got, want)
+	}
+	if got, want := emptyClaimVersion(runtimeID), "mul:claim:runtime:{runtime-a}:version"; got != want {
+		t.Fatalf("empty claim version key = %q, want %q", got, want)
+	}
+}
+
 func TestEmptyClaimCache_NilSafe(t *testing.T) {
 	var c *EmptyClaimCache // nil
 	ctx := context.Background()

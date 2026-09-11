@@ -15,7 +15,7 @@ import (
 // credential. The token is hashed before it is used as a Redis key; secrets
 // must never enter logs or operational data. A missing Redis client fails open,
 // matching the existing public-edge limiter behavior.
-func PluginRateLimit(rdb *redis.Client, limit int, window time.Duration) func(http.Handler) http.Handler {
+func PluginRateLimit(rdb redis.UniversalClient, limit int, window time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		if rdb == nil {
 			return next
