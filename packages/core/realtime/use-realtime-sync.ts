@@ -975,6 +975,21 @@ export function useRealtimeSync(
       // every message would flood the network. Specific chat handlers below
       // still receive it via ws.on() (a separate subscription channel).
       "task:message",
+      // task:progress is broadcast-only narration: ReportProgress persists
+      // nothing, so the tick itself never signals that a task cache changed.
+      // The upstream daemon reports it twice per run — at launch and at the
+      // successful wrap-up — where the 100ms debounce coalesces it with the
+      // adjacent lifecycle invalidation, so skipping it changes little
+      // upstream. The savings come from runtimes that stream progress
+      // continuously during a run (observed on a self-hosted deployment
+      // reporting every few seconds): each tick refetched eight query
+      // families whose data had not changed. The cost: a progress tick no
+      // longer repairs a previously LOST lifecycle event for a mounted view;
+      // the run's own terminal transition still does — see the tradeoff test
+      // in use-realtime-sync-task-progress.test.tsx. Lifecycle transitions
+      // (queued / dispatch / running / completed / failed / cancelled) keep
+      // flowing through the prefix invalidation.
+      "task:progress",
       // task:completed / task:failed deliberately NOT here. They go through
       // both the task-prefix invalidate (refreshes the agent-task-snapshot
       // cache) AND the chat-specific ws.on() handlers below. The two
