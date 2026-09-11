@@ -73,13 +73,14 @@ import {
   Heading3,
   FilePlus,
   Loader2,
+  MessageSquarePlus,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function shouldShowBubbleMenu(editor: Editor): boolean {
+function shouldShowBubbleMenu(editor: Editor, hasSelectionAction = false): boolean {
   if (!editor.isEditable) return false;
   const { selection } = editor.state;
   if (selection.empty) return false;
@@ -87,7 +88,7 @@ function shouldShowBubbleMenu(editor: Editor): boolean {
   if (!editor.state.doc.textBetween(from, to).trim().length) return false;
   if (selection instanceof NodeSelection) return false;
   const $from = editor.state.doc.resolve(from);
-  if ($from.parent.type.name === "codeBlock") return false;
+  if ($from.parent.type.name === "codeBlock" && !hasSelectionAction) return false;
   return true;
 }
 
@@ -494,9 +495,11 @@ function CreateSubIssueButton({
 function EditorBubbleMenu({
   editor,
   currentIssueId,
+  selectionAction,
 }: {
   editor: Editor;
   currentIssueId?: string;
+  selectionAction?: { label: string; onSelect: () => void };
 }) {
   const { t } = useT("editor");
   const [visible, setVisible] = useState(false);
@@ -512,6 +515,7 @@ function EditorBubbleMenu({
       italic: e.isActive("italic"),
       strike: e.isActive("strike"),
       code: e.isActive("code"),
+      codeBlock: e.isActive("codeBlock"),
       highlight: e.isActive("highlight"),
       link: e.isActive("link"),
       blockquote: e.isActive("blockquote"),
@@ -546,11 +550,11 @@ function EditorBubbleMenu({
   useEffect(() => {
     const onTransaction = () => {
       if (!editor.isInitialized) return;
-      setVisible(shouldShowBubbleMenu(editor));
+      setVisible(shouldShowBubbleMenu(editor, !!selectionAction));
     };
     editor.on("transaction", onTransaction);
     return () => { editor.off("transaction", onTransaction); };
-  }, [editor]);
+  }, [editor, selectionAction]);
 
   // Hide on blur — debounced to allow focus to settle (e.g. clicking menu)
   useEffect(() => {
@@ -634,6 +638,14 @@ function EditorBubbleMenu({
       ) : (
         <TooltipProvider delay={300}>
           <div className="bubble-menu">
+            {selectionAction && <Button variant="ghost" size="sm" onClick={() => {
+              selectionAction.onSelect();
+              // Keep later editor transactions from reopening the formatting
+              // toolbar over the annotation's note field. The text is untouched.
+              editor.commands.setTextSelection(editor.state.selection.to);
+              setVisible(false);
+            }}><MessageSquarePlus />{selectionAction.label}</Button>}
+            {!fmt.codeBlock && <>
             <MarkButton editor={editor} mark="bold" icon={Bold} label={t(($) => $.bubble_menu.bold)} shortcut={createShortcutChord("B", { primary: true })} isActive={fmt.bold} />
             <MarkButton editor={editor} mark="italic" icon={Italic} label={t(($) => $.bubble_menu.italic)} shortcut={createShortcutChord("I", { primary: true })} isActive={fmt.italic} />
             <MarkButton editor={editor} mark="strike" icon={Strikethrough} label={t(($) => $.bubble_menu.strikethrough)} shortcut={createShortcutChord("S", { primary: true, shift: true })} isActive={fmt.strike} />
@@ -696,6 +708,7 @@ function EditorBubbleMenu({
                 <CreateSubIssueButton editor={editor} parentIssueId={currentIssueId} />
               </>
             )}
+            </>}
           </div>
         </TooltipProvider>
       )}

@@ -556,15 +556,16 @@
   "reply": {
     "placeholder": "답글 남기기...",
     "annotations": {
+      "add_comment": "댓글에 추가",
       "add": "답글에 추가",
       "note_label": "코멘트 (선택 사항)",
       "count": "주석 {{count}}개",
       "count_other": "주석 {{count}}개",
       "quote_limit": "한 번에 최대 {{count}}자까지 선택할 수 있습니다.",
-      "count_limit": "답글에 주석을 최대 {{count}}개까지 추가할 수 있습니다.",
+      "count_limit": "댓글에 주석을 최대 {{count}}개까지 추가할 수 있습니다.",
       "remove": "주석 {{number}} 삭제",
       "source_changed": "원문이 변경되었거나 사용할 수 없습니다. 저장한 인용문은 유지됩니다.",
-      "intent_hint": "주석에 코멘트를 추가하거나 전체 답글을 작성한 후 전송하세요.",
+      "intent_hint": "주석에 의견을 추가하거나 본문을 작성한 후 전송하세요.",
       "target_deleted": "답글 대상이 삭제되었습니다. 주석을 삭제하고 새 답글 대상을 선택하세요.",
       "edit": "주석 {{number}} 편집",
       "note_placeholder": "의견 추가 (선택 사항)…"

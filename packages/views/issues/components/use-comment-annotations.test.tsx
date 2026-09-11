@@ -10,11 +10,24 @@ const key = "reply:issue:root" as const;
 
 function Fixture({ actorType = "agent", sourceKey = "initial" }: { actorType?: string; sourceKey?: string }) {
   const annotation = useCommentAnnotations({
-    draftKey: key, entry: { ...entry, actor_type: actorType }, replies: [], enabled: true, getActorName: () => "Emacs",
+    draftKey: key, sources: [{ id: entry.id, name: actorType }], enabled: true,
   });
   return <div ref={annotation.cardRef} {...annotation.captureProps}>
     {annotation.popup}
     <div key={sourceKey} data-comment-content="root" tabIndex={0}>Selected text</div>
+  </div>;
+}
+
+function DescriptionFixture({ issueId = "issue", loaded = true }: { issueId?: string; loaded?: boolean }) {
+  const sourceId = `description:${issueId}`;
+  const annotations = useCommentAnnotations({
+    draftKey: `new:${issueId}`, sources: [{ id: sourceId, name: "Description" }], enabled: loaded, editable: true,
+  });
+  if (!loaded) return null;
+  return <div ref={annotations.cardRef} {...annotations.captureProps}>
+    {annotations.popup}
+    <div data-comment-content={sourceId}><div contentEditable suppressContentEditableWarning>Selected text</div></div>
+    <button onMouseDown={(event) => event.preventDefault()} onClick={annotations.addSelection}>Add to comment</button>
   </div>;
 }
 
@@ -54,6 +67,30 @@ beforeEach(() => {
 });
 
 describe("selection to reply", () => {
+  it("restores saved source markers when the description loads asynchronously", async () => {
+    useCommentDraftStore.getState().addAnnotation("new:issue", {
+      id: "saved", sourceCommentId: "description:issue", sourceActorName: "Description",
+      quote: "Selected text", note: "Saved note", start: 0, prefix: "", suffix: "\n",
+    });
+    const { rerender } = renderWithI18n(<DescriptionFixture loaded={false} />);
+    rerender(<DescriptionFixture />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
+    expect(await screen.findByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Saved note");
+  });
+  it("captures editable descriptions into a new thread draft and clears the popup on issue switch", async () => {
+    const { container, rerender } = renderWithI18n(<DescriptionFixture />);
+    selectText(container);
+    expect(screen.queryByRole("button", { name: "Add to reply" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add to comment" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Question about description" } });
+    expect(useCommentDraftStore.getState().getAnnotations("new:issue")[0]).toMatchObject({ quote: "Selected text", note: "Question about description" });
+    expect(useCommentDraftStore.getState().drafts["new:issue"]?.replyTarget).toBeUndefined();
+    expect(container.querySelector("[contenteditable]")).toHaveTextContent("Selected text");
+    rerender(<DescriptionFixture issueId="other" />);
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Comment (optional)" })).not.toBeInTheDocument());
+    expect(useCommentDraftStore.getState().getAnnotations("new:other")).toHaveLength(0);
+    expect(useCommentDraftStore.getState().getAnnotations("new:issue")).toHaveLength(1);
+  });
   it("keeps the source note usable when expanding the thread remounts its body", async () => {
     const view = renderWithI18n(<Fixture />);
     selectText(view.container);
@@ -84,10 +121,10 @@ describe("selection to reply", () => {
     expect(await screen.findByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Please explain");
   });
 
-  it("does not offer annotations on member comments", () => {
+  it("offers annotations on member comments", async () => {
     const { container } = renderWithI18n(<Fixture actorType="member" />);
     selectText(container);
-    expect(screen.queryByRole("button", { name: "Add to reply" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Add to reply" })).toBeInTheDocument();
   });
 
   it("keeps the action open through the mouseup and click that finish a drag", async () => {

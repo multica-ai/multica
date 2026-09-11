@@ -123,7 +123,7 @@ function writeDraft(
   content: string,
   uploads: DraftUpload[],
   annotations = drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS,
-  replyTarget = annotations.length ? drafts[key]?.replyTarget : undefined,
+  replyTarget = key.startsWith("reply:") && annotations.length ? drafts[key]?.replyTarget : undefined,
 ): Record<string, CommentDraft> {
   if (!isMeaningful(content, uploads, annotations)) {
     if (!(key in drafts)) return drafts;
@@ -157,7 +157,7 @@ function pruneStaleDrafts(drafts: Record<string, CommentDraft>): Record<string, 
     const annotations = normalizeReplyAnnotations(v.annotations);
     if (v.updatedAt >= cutoff && isMeaningful(v.content, uploads, annotations)) {
       const first = annotations[0];
-      const replyTarget = first ? (v.replyTarget && typeof v.replyTarget.commentId === "string" && typeof v.replyTarget.actorName === "string"
+      const replyTarget = k.startsWith("reply:") && first ? (v.replyTarget && typeof v.replyTarget.commentId === "string" && typeof v.replyTarget.actorName === "string"
         ? v.replyTarget : { commentId: first.sourceCommentId, actorName: first.sourceActorName }) : undefined;
       out[k] = { ...v, attachments: uploads, annotations, replyTarget };
     }
@@ -243,13 +243,18 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
         }),
       getAnnotations: (key) => get().drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS,
       addAnnotation: (key, annotation) => {
-        if (!key.startsWith("reply:") || !annotation.quote.trim() || annotation.quote.length > MAX_ANNOTATION_QUOTE_LENGTH) return undefined;
+        if ((!key.startsWith("reply:") && !key.startsWith("new:")) || !annotation.quote.trim() || annotation.quote.length > MAX_ANNOTATION_QUOTE_LENGTH) return undefined;
         const current = get().getAnnotations(key);
         const duplicate = current.find((a) => a.sourceCommentId === annotation.sourceCommentId &&
           a.start === annotation.start && a.quote === annotation.quote && a.prefix === annotation.prefix && a.suffix === annotation.suffix);
         if (duplicate) return duplicate.id;
         if (current.length >= MAX_REPLY_ANNOTATIONS) return undefined;
-        set((s) => ({ drafts: writeDraft(s.drafts, key, s.drafts[key]?.content ?? "", uploadsOf(s.drafts, key), [...current, annotation], s.drafts[key]?.replyTarget ?? { commentId: annotation.sourceCommentId, actorName: annotation.sourceActorName }) }));
+        set((s) => {
+          const replyTarget = key.startsWith("reply:")
+            ? s.drafts[key]?.replyTarget ?? { commentId: annotation.sourceCommentId, actorName: annotation.sourceActorName }
+            : undefined;
+          return { drafts: writeDraft(s.drafts, key, s.drafts[key]?.content ?? "", uploadsOf(s.drafts, key), [...current, annotation], replyTarget) };
+        });
         return annotation.id;
       },
       updateAnnotation: (key, id, note) => set((s) => {

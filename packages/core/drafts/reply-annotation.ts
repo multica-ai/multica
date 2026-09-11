@@ -1,6 +1,7 @@
 /** Private, workspace-scoped reply metadata. Published replies remain Markdown. */
 export interface ReplyAnnotation {
   id: string;
+  /** Local source key. Descriptions use description:<issueId>, never a reply target. */
   sourceCommentId: string;
   sourceActorName: string;
   sourceRevision?: number;

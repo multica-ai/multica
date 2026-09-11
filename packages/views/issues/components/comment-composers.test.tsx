@@ -1118,14 +1118,16 @@ describe("sticky composer preference", () => {
   });
 });
 
-describe("annotated replies", () => {
-  const draftKey = "reply:issue-1:comment-1" as const;
+describe.each(["reply", "description"])("annotations in %s drafts", (source) => {
+  const draftKey = source === "reply" ? "reply:issue-1:comment-1" as const : "new:issue-1" as const;
+  const renderAnnotatedComposer = (onSubmit: Parameters<typeof renderCommentInput>[0]) => source === "reply"
+    ? renderReplyInput({ draftKey: "reply:issue-1:comment-1", onSubmit }) : renderCommentInput(onSubmit);
   const annotation = { id: "a", sourceCommentId: "agent-source", sourceActorName: "Emacs", quote: "Selected text", note: "Please revise", start: 0, prefix: "", suffix: "" };
 
   it("sends an annotation-only draft once without requiring a mounted editor", async () => {
     useCommentDraftStore.getState().addAnnotation(draftKey, annotation);
     const onSubmit = vi.fn().mockResolvedValue("reply-new");
-    renderReplyInput({ draftKey, onSubmit });
+    renderAnnotatedComposer(onSubmit);
     expect(screen.queryByTestId("editor")).not.toBeInTheDocument();
     const send = screen.getByRole("button", { name: "Send" });
     fireEvent.click(send);
@@ -1139,7 +1141,7 @@ describe("annotated replies", () => {
   it("keeps annotations on failure and blocks quote-only drafts until a note is entered", async () => {
     useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "" });
     const onSubmit = vi.fn().mockResolvedValue(false);
-    renderReplyInput({ draftKey, onSubmit });
+    renderAnnotatedComposer(onSubmit);
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /1 annotation/ }));
     expect(screen.queryByRole("textbox", { name: "Comment (optional)" })).not.toBeInTheDocument();
@@ -1153,7 +1155,7 @@ describe("annotated replies", () => {
     useCommentDraftStore.getState().addAnnotation(draftKey, annotation);
     let accept!: (id: string) => void;
     const onSubmit = vi.fn(() => new Promise<string>((resolve) => { accept = resolve; }));
-    renderReplyInput({ draftKey, onSubmit });
+    renderAnnotatedComposer(onSubmit);
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     act(() => { useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, id: "b", quote: "Another point" }); });

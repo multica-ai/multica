@@ -556,15 +556,16 @@
   "reply": {
     "placeholder": "回复...",
     "annotations": {
+      "add_comment": "加入评论",
       "add": "加入回复",
       "note_label": "批注（可选）",
       "count": "{{count}} 条批注",
       "count_other": "{{count}} 条批注",
       "quote_limit": "每次最多选择 {{count}} 个字符。",
-      "count_limit": "一条回复最多包含 {{count}} 条批注。",
+      "count_limit": "一条评论最多包含 {{count}} 条批注。",
       "remove": "移除第 {{number}} 条批注",
       "source_changed": "原文已更改或不可用，已保留你保存的引用。",
-      "intent_hint": "请添加至少一条批注内容或整体回复后再发送。",
+      "intent_hint": "请填写至少一条批注意见或评论正文后再发送。",
       "target_deleted": "回复目标已删除。请移除这些批注并重新选择回复目标。",
       "edit": "编辑批注 {{number}}",
       "note_placeholder": "添加意见（可选）…"

@@ -571,16 +571,17 @@
   "reply": {
     "placeholder": "Leave a reply...",
     "annotations": {
+      "add_comment": "Add to comment",
       "add": "Add to reply",
       "note_label": "Comment (optional)",
       "count": "{{count}} annotations",
       "count_one": "{{count}} annotation",
       "count_other": "{{count}} annotations",
       "quote_limit": "Select up to {{count}} characters at a time.",
-      "count_limit": "A reply can contain up to {{count}} annotations.",
+      "count_limit": "A comment can contain up to {{count}} annotations.",
       "remove": "Remove annotation {{number}}",
       "source_changed": "The source changed or is unavailable. Your saved quote is kept.",
-      "intent_hint": "Add a comment to an annotation or write an overall reply before sending.",
+      "intent_hint": "Add a note to an annotation or write a message before sending.",
       "target_deleted": "The reply target was deleted. Remove these annotations and select a new reply target.",
       "edit": "Edit annotation {{number}}",
       "note_placeholder": "Add an optional comment…"

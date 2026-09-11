@@ -355,6 +355,20 @@ describe("reply annotations", () => {
     expect(store.getDraft(key)).toBeUndefined();
   });
 
+  it("persists description annotations with the new comment draft without a reply target", async () => {
+    const store = useCommentDraftStore.getState();
+    store.setDraft("new:issue", "Existing draft");
+    store.addAnnotation("new:issue", { ...annotation, sourceCommentId: "description:issue" });
+    store.updateAnnotation("new:issue", annotation.id, "Description note");
+    await flush();
+    useCommentDraftStore.getState().drafts = {};
+    await useCommentDraftStore.persist.rehydrate();
+    expect(useCommentDraftStore.getState().getDraft("new:issue")).toBe("Existing draft");
+    expect(useCommentDraftStore.getState().getAnnotations("new:issue")[0]?.note).toBe("Description note");
+    expect(useCommentDraftStore.getState().drafts["new:issue"]?.replyTarget).toBeUndefined();
+    expect(useCommentDraftStore.getState().addAnnotation("edit:issue:comment", annotation)).toBeUndefined();
+  });
+
   it("reopens duplicate ranges, bounds collection, and changes identity only on actual edits", () => {
     const store = useCommentDraftStore.getState();
     expect(store.addAnnotation(key, annotation)).toBe("a");

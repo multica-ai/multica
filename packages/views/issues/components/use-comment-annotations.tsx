@@ -5,7 +5,6 @@ import { MessageSquarePlus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { MAX_ANNOTATION_QUOTE_LENGTH, MAX_REPLY_ANNOTATIONS } from "@multica/core/drafts/reply-annotation";
-import type { TimelineEntry } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { annotationRange, captureCommentSelection, findAnnotationSource } from "./comment-annotation-selection";
 import { CommentSelectionBubble } from "./comment-selection-bubble";
@@ -13,13 +12,13 @@ import { CommentSelectionBubble } from "./comment-selection-bubble";
 type CapturedSelection = NonNullable<ReturnType<typeof captureCommentSelection>>;
 type SourceAnchor = { id: string; range: Range; root: HTMLElement };
 
-export function useCommentAnnotations({ draftKey, entry, replies, enabled, getActorName, onAdded }: {
+export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, editable = false }: {
   draftKey: CommentDraftKey;
-  entry: TimelineEntry;
-  replies: TimelineEntry[];
+  sources: { id: string; name: string; revision?: number }[];
   enabled: boolean;
-  getActorName: (type: string, id: string) => string;
   onAdded?: () => void;
+  /** Editable descriptions use their existing toolbar to call addSelection. */
+  editable?: boolean;
 }) {
   const { t } = useT("issues");
   const cardRef = useRef<HTMLDivElement>(null);
@@ -48,14 +47,17 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
     if (restoreFocus && selection?.root.isConnected) selection.root.focus({ preventScroll: true });
     setSelection(null); setEditingId(null); setError(false);
   };
-  const capture = () => {
-    if (!enabled || !cardRef.current) return;
-    const captured = captureCommentSelection(cardRef.current, window.getSelection());
-    const source = captured && [entry, ...replies].find((e) => e.id === captured.sourceCommentId);
-    if (!captured || source?.actor_type !== "agent" || source.type !== "comment" ||
-      (source.comment_type && source.comment_type !== "comment")) return;
-    setSelection(captured); setEditingId(null); setError(false);
+  const readSelection = () => {
+    if (!enabled || !cardRef.current) return null;
+    const captured = captureCommentSelection(cardRef.current, window.getSelection(), editable);
+    return captured && sources.some((source) => source.id === captured.sourceCommentId) ? captured : null;
   };
+  const capture = () => {
+    const captured = readSelection();
+    if (captured) { setSelection(captured); setEditingId(null); setError(false); }
+  };
+
+  useEffect(() => { setSelection(null); setEditingId(null); setError(false); }, [draftKey]);
 
   // Dismiss on the next press, never on the click completing the opening drag.
   useEffect(() => {
@@ -90,13 +92,13 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
   }, [editingId]);
 
   useEffect(() => {
-    if (!cardRef.current) return;
+    if (!enabled || !cardRef.current) return;
     const card = cardRef.current;
     const canHighlight = typeof Highlight !== "undefined" && typeof CSS !== "undefined" && !!CSS.highlights;
     const update = () => {
       const next = annotationsRef.current.flatMap((a) => {
         const root = findAnnotationSource(card, a.sourceCommentId);
-        const range = root && annotationRange(root, a);
+        const range = root && annotationRange(root, a, editable);
         return root && range ? [{ id: a.id, range, root }] : [];
       });
       setAnchors(next);
@@ -123,7 +125,7 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
     });
     observer.observe(card, { childList: true, subtree: true, characterData: true });
     return () => { observer.disconnect(); if (canHighlight) CSS.highlights.delete(highlightName); };
-  }, [anchorKey, highlightName]);
+  }, [anchorKey, highlightName, draftKey, editable, enabled]);
 
   useEffect(() => {
     if (editingId && !editing) { setSelection(null); setEditingId(null); }
@@ -132,7 +134,7 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
   const editAnnotation = (id: string, scrollToSource = false): boolean => {
     const annotation = annotationsRef.current.find((a) => a.id === id);
     const root = cardRef.current && annotation && findAnnotationSource(cardRef.current, annotation.sourceCommentId);
-    const range = root && annotation && annotationRange(root, annotation);
+    const range = root && annotation && annotationRange(root, annotation, editable);
     if (!root || !range || !annotation) return false;
     if (scrollToSource) {
       const element = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
@@ -142,14 +144,15 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
     return true;
   };
 
-  const add = () => {
-    if (!selection) return;
-    const source = [entry, ...replies].find((e) => e.id === selection.sourceCommentId);
+  const add = (captured = selection) => {
+    if (!captured) return;
+    const source = sources.find((e) => e.id === captured.sourceCommentId);
     if (!source) { close(); return; }
-    const { quote, start, prefix, suffix, sourceCommentId } = selection;
+    const { quote, start, prefix, suffix, sourceCommentId } = captured;
+    setSelection(captured);
     const id = useCommentDraftStore.getState().addAnnotation(draftKey, {
       id: crypto.randomUUID(), sourceCommentId,
-      sourceActorName: source.actor_name || getActorName(source.actor_type, source.actor_id),
+      sourceActorName: source.name,
       sourceRevision: source.revision, quote, start, prefix, suffix, note: "",
     });
     if (!id) { setError(true); return; }
@@ -161,14 +164,15 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
   return {
     cardRef,
     editAnnotation,
+    addSelection: () => add(readSelection()),
     captureProps: {
-      "data-annotation-thread": entry.id,
+      "data-annotation-thread": draftKey,
       onPointerUp: (event: React.PointerEvent) => {
-        if (event.target instanceof Element && event.target.closest("[data-comment-content]") &&
+        if (!editable && event.target instanceof Element && event.target.closest("[data-comment-content]") &&
           !event.target.closest("button, [contenteditable=true]")) capture();
       },
       onKeyUp: (event: React.KeyboardEvent) => {
-        if (event.shiftKey && event.key.startsWith("Arrow")) capture();
+        if (!editable && event.shiftKey && event.key.startsWith("Arrow")) capture();
       },
       onKeyDown: (event: React.KeyboardEvent) => {
         if (event.key === "Tab" && !event.shiftKey && selection && !editingId &&
@@ -201,8 +205,8 @@ export function useCommentAnnotations({ draftKey, entry, replies, enabled, getAc
                 event.preventDefault(); close(true);
               }
             }} /> : <Button ref={actionRef} variant="ghost" size="sm"
-              onMouseDown={(event) => event.preventDefault()} onClick={add}>
-              <MessageSquarePlus />{t(($) => $.reply.annotations.add)}
+              onMouseDown={(event) => event.preventDefault()} onClick={() => add()}>
+              <MessageSquarePlus />{t(($) => editable ? $.reply.annotations.add_comment : $.reply.annotations.add)}
             </Button>}
         </div>
         {error && <p role="alert" className="mt-1 max-w-72 rounded-lg bg-popover p-2 text-caption text-destructive shadow-[var(--menu-shadow)]">

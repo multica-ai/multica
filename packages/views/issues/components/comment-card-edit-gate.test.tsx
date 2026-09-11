@@ -368,7 +368,7 @@ describe("comment edit — upload submit gate", () => {
 // Keep the real card, annotation hook, reply composer and submit wiring together.
 // Source parsing and persistence boundary matrices live in their own suites.
 describe("comment thread — selection reply", () => {
-  it.each([false, true])("sends only quote and note in the source thread and clears overlays (note open: %s)", async (keepNoteOpen) => {
+  it.each([[false, "agent", "agent-1", "comment"], [true, "agent", "agent-1", "comment"], [false, "member", "user-1", "comment"], [false, "member", "other-user", "comment"], [false, "member", "user-1", "note"]] as const)("sends quotes in the source thread and clears overlays (open: %s, author: %s %s, type: %s)", async (keepNoteOpen, actorType, actorId, commentType) => {
     Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 1024 });
     Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 768 });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 10, 600, 400));
@@ -379,7 +379,7 @@ describe("comment thread — selection reply", () => {
     store.setDraft("reply:issue-1:other-thread", "Other thread draft");
     const taskDraft = useCommentDraftStore.getState().drafts["new:issue-1"];
     const onReply = vi.fn().mockResolvedValue("published-reply");
-    const child: TimelineEntry = { ...entry, id: "agent-child", parent_id: entry.id, actor_type: "agent", content: "Selected agent text" };
+    const child: TimelineEntry = { ...entry, id: "agent-child", parent_id: entry.id, actor_type: actorType, actor_id: actorId, comment_type: commentType, content: "Selected agent text" };
     const { container } = renderCard(undefined, { replies: [child], onReply });
     const source = container.querySelector<HTMLElement>('[data-comment-content="agent-child"]')!;
     fireEvent.pointerDown(source);
@@ -393,7 +393,7 @@ describe("comment thread — selection reply", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Reply-specific note" } });
     if (!keepNoteOpen) fireEvent.pointerDown(document.body);
-    expect(container.querySelector('[data-annotation-thread="comment-1"]')).toHaveTextContent("1 annotation");
+    expect(container.querySelector('[data-annotation-thread="reply:issue-1:comment-1"]')).toHaveTextContent("1 annotation");
     expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Preview reply" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send" }));

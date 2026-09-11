@@ -1,12 +1,12 @@
 import { locateReplyAnnotation, type ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
 
-const EXCLUDED = 'button, input, textarea, [contenteditable="true"], [aria-hidden="true"], [hidden], script, style';
+const EXCLUDED = 'button, input, textarea, [aria-hidden="true"], [hidden], script, style';
 const BLOCKS = new Set(["P", "DIV", "LI", "PRE", "BLOCKQUOTE", "H1", "H2", "H3", "H4", "H5", "H6", "TR"]);
 
 /** A deterministic visible-text index shared by capture and source navigation.
  * Block boundaries and code newlines survive; renderer controls are excluded.
  */
-export function indexCommentText(root: HTMLElement) {
+export function indexCommentText(root: HTMLElement, editable = false) {
   let text = "";
   const nodes: { node: Text; start: number; end: number }[] = [];
   const newline = () => { if (text && !text.endsWith("\n")) text += "\n"; };
@@ -16,7 +16,7 @@ export function indexCommentText(root: HTMLElement) {
       nodes.push({ node: node as Text, start: text.length, end: text.length + value.length });
       text += value;
     } else if (node instanceof HTMLElement) {
-      if (node.matches(EXCLUDED)) return;
+      if (node.matches(EXCLUDED) || (!editable && node.matches('[contenteditable="true"]'))) return;
       if (node.tagName === "BR") { text += "\n"; return; }
       const block = BLOCKS.has(node.tagName);
       if (block) newline();
@@ -32,13 +32,13 @@ function contentRoot(node: Node): HTMLElement | null {
   return (node instanceof Element ? node : node.parentElement)?.closest<HTMLElement>("[data-comment-content]") ?? null;
 }
 
-export function captureCommentSelection(card: HTMLElement, selection: Selection | null) {
+export function captureCommentSelection(card: HTMLElement, selection: Selection | null, editable = false) {
   if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return null;
   const range = selection.getRangeAt(0);
   const root = contentRoot(range.startContainer);
   if (!root || root !== contentRoot(range.endContainer) || !card.contains(root) ||
     root.closest("[data-annotation-thread]") !== card) return null;
-  const { text, nodes } = indexCommentText(root);
+  const { text, nodes } = indexCommentText(root, editable);
   const selected = nodes.filter(({ node }) => range.intersectsNode(node));
   const first = selected[0];
   const last = selected.at(-1);
@@ -55,8 +55,8 @@ export function captureCommentSelection(card: HTMLElement, selection: Selection 
   };
 }
 
-export function annotationRange(root: HTMLElement, annotation: ReplyAnnotation): Range | null {
-  const { text, nodes } = indexCommentText(root);
+export function annotationRange(root: HTMLElement, annotation: ReplyAnnotation, editable = false): Range | null {
+  const { text, nodes } = indexCommentText(root, editable);
   const start = locateReplyAnnotation(text, annotation);
   if (start === null) return null;
   const end = start + annotation.quote.length;
