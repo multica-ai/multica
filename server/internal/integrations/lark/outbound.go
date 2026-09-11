@@ -152,6 +152,13 @@ type PatcherQueries interface {
 	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error)
 	CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error)
 	UpdateLarkOutboundCardStatus(ctx context.Context, arg UpdateOutboundCardStatusParams) error
+	// ListAttachmentsByChatMessage reads the files an agent bound to one
+	// assistant message at task completion. Taken with the generated db
+	// params rather than a domain type because ChannelStore embeds
+	// *db.Queries and therefore already satisfies it — this list is the
+	// one seam where the narrow interface would cost a hand-written
+	// adapter for no gain. See outbound_media.go for the caller.
+	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
 }
 
 // CredentialsResolver decrypts an installation's app_secret for the
@@ -212,19 +219,36 @@ type Patcher struct {
 	credentials     CredentialsResolver
 	client          APIClient
 	typingIndicator *TypingIndicatorManager
-	cfg             PatcherConfig
+	// media is the same client as `client`, narrowed to the four
+	// upload/send methods the attachment hop needs. It is nil for any
+	// APIClient that does not implement them (the stub, the test
+	// fakes), which is how "attachments are not deliverable in this
+	// deployment" is expressed — see outbound_media.go.
+	media mediaAPIClient
+	// objects is the deployment's object store, or nil when this
+	// deployment configured none. Set via SetAttachments. Both it and
+	// media must be non-nil before a file can be delivered.
+	objects mediaObjectStore
+	cfg     PatcherConfig
 }
 
 // NewPatcher constructs a Patcher bound to its dependencies. The
 // patcher does not subscribe to the bus until Register is called.
 func NewPatcher(queries PatcherQueries, credentials CredentialsResolver, client APIClient, cfg PatcherConfig) *Patcher {
 	cfg = cfg.withDefaults()
-	return &Patcher{
+	p := &Patcher{
 		queries:     queries,
 		credentials: credentials,
 		client:      client,
 		cfg:         cfg,
 	}
+	// A type assertion rather than a fifth constructor argument: the
+	// media methods are an optional capability of the transport, and
+	// the fakes that do not have them must keep compiling.
+	if m, ok := client.(mediaAPIClient); ok {
+		p.media = m
+	}
+	return p
 }
 
 // SetTypingIndicatorManager wires the typing-indicator manager into the
@@ -402,7 +426,7 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 
 	switch e.Type {
 	case protocol.EventChatDone:
-		return p.sendChatReply(ctx, creds, binding, mentionOpenID(binding), e.Payload)
+		return p.sendChatReply(ctx, creds, binding, mentionOpenID(binding), inst.WorkspaceID, e.Payload)
 	case protocol.EventTaskFailed:
 		return p.fail(ctx, creds, binding, taskID, agentName, e.Payload)
 	}
@@ -466,7 +490,7 @@ func mentionOpenID(binding ChatSessionBinding) string {
 // that member (see mention.go). The wire shape is chosen from the agent's own
 // content BEFORE the mention is attached, so a mention can never flip a plain
 // prose answer onto the card path.
-func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, mentionOpenID string, payload any) error {
+func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, mentionOpenID string, workspaceID pgtype.UUID, payload any) error {
 	content := chatDoneContent(payload)
 	if content == "" {
 		return nil
@@ -478,28 +502,47 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 		return nil
 	}
 	target := threadReplyTarget(binding)
-	if containsMarkdown(content) {
-		markdown := prependMarkdownMention(mentionOpenID, content)
-		return sendWithReplyFallback(p.cfg.Logger, "send markdown card", target, func(t ReplyTarget) error {
+	markdown := containsMarkdown(content)
+
+	// used records the target the send actually went out on. The whole
+	// point of sendWithReplyFallback is that it may retry without
+	// threading, and files must land in the same conversation the answer
+	// landed in — not in the topic the answer was bounced out of.
+	var used ReplyTarget
+	send := func(t ReplyTarget) error {
+		used = t
+		if markdown {
 			_, err := p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
 				InstallationID: creds,
 				ChatID:         outboundChatID(binding),
-				Markdown:       markdown,
+				Markdown:       prependMarkdownMention(mentionOpenID, content),
 				ReplyTarget:    t,
 			})
 			return err
-		})
-	}
-	text := prependTextMention(mentionOpenID, content)
-	return sendWithReplyFallback(p.cfg.Logger, "send text message", target, func(t ReplyTarget) error {
+		}
 		_, err := p.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
 			ChatID:         outboundChatID(binding),
-			Text:           text,
+			Text:           prependTextMention(mentionOpenID, content),
 			ReplyTarget:    t,
 		})
 		return err
-	})
+	}
+	op := "send text message"
+	if markdown {
+		op = "send markdown card"
+	}
+	if err := sendWithReplyFallback(p.cfg.Logger, op, target, send); err != nil {
+		return err
+	}
+
+	// The answer is out; the files are the second hop. Spawned rather
+	// than awaited because this runs on the synchronous publish
+	// goroutine — see outbound_media.go for why the answer must never
+	// wait behind an upload. Best-effort by construction: the reply is
+	// already delivered, so nothing here can fail the reply.
+	p.deliverAttachmentsAsync(creds, binding, used, workspaceID, payload)
+	return nil
 }
 
 // outboundChatID recovers the real Lark chat id from the chat binding. The
