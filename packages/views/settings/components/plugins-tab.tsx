@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertCircle, CalendarClock, Loader2, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useCurrentMember } from "@multica/core/permissions";
+import { api } from "@multica/core/api";
 import {
   pluginInstallationsOptions,
   pluginPackagesOptions,
@@ -373,7 +374,9 @@ function PublishAndInstall({ wsId, canManage }: { wsId: string; canManage: boole
   };
 
   return (
-    <SettingsSection title={t(($) => $.plugins.publish.title)} description={t(($) => $.plugins.publish.description)}>
+    <>
+      <MarketplaceCatalog wsId={wsId} />
+      <SettingsSection title={t(($) => $.plugins.publish.title)} description={t(($) => $.plugins.publish.description)}>
       <SettingsCard>
         <div className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-caption text-muted-foreground">{t(($) => $.plugins.publish.hint)}</p>
@@ -471,6 +474,40 @@ function PublishAndInstall({ wsId, canManage }: { wsId: string; canManage: boole
             </div>
           </div>
         ) : null}
+      </SettingsCard>
+      </SettingsSection>
+    </>
+  );
+}
+
+function MarketplaceCatalog({ wsId }: { wsId: string }) {
+  const [manifestText, setManifestText] = useState("");
+  const preview = useMutation({
+    mutationFn: async () => {
+      let manifest: unknown;
+      try { manifest = JSON.parse(manifestText); } catch { throw new Error("marketplace.json must be valid JSON"); }
+      return api.previewClaudeMarketplace(wsId, manifest);
+    },
+  });
+  return (
+    <SettingsSection title="Claude marketplace" description="Preview a marketplace.json safely before publishing native Multica plugins.">
+      <SettingsCard>
+        <div className="space-y-3 px-4 py-4">
+          <Textarea value={manifestText} onChange={(event) => setManifestText(event.target.value)} placeholder='{"name":"My catalog","owner":{"name":"Team"},"plugins":[]}' rows={6} />
+          <div className="flex justify-end">
+            <Button disabled={!manifestText.trim() || preview.isPending} onClick={() => preview.mutate()}>
+              {preview.isPending ? <Loader2 className="animate-spin" /> : null} Preview marketplace
+            </Button>
+          </div>
+          {preview.error ? <p className="text-caption text-destructive">{preview.error instanceof Error ? preview.error.message : "Preview failed"}</p> : null}
+          {preview.data ? (
+            <div className="space-y-2 border-t border-surface-border pt-3">
+              <div className="text-body font-medium">{preview.data.name}</div>
+              <p className="text-caption text-muted-foreground">{preview.data.plugins.length} plugin(s) discovered. Sources are shown for review; nothing was installed.</p>
+              <ul className="space-y-1 text-caption">{preview.data.plugins.map((plugin) => <li key={plugin.name}><code>{plugin.name}</code> — {plugin.source.kind}{plugin.source.repository ? `:${plugin.source.repository}` : plugin.source.url ? `:${plugin.source.url}` : ""}</li>)}</ul>
+            </div>
+          ) : null}
+        </div>
       </SettingsCard>
     </SettingsSection>
   );

@@ -72,6 +72,7 @@ import type {
   PluginPackage,
   PluginPackageListResponse,
   PluginPreview,
+  ClaudeMarketplacePreview,
   PluginSurfaceLaunch,
   ResourceLabelsResponse,
   RuntimeModelListRequest,
@@ -792,6 +793,26 @@ const ReactionSchema = z.object({
   emoji: z.string(),
   created_at: z.string(),
 });
+
+export const ClaudeMarketplacePreviewSchema = z.object({
+  name: z.string(),
+  owner: z.object({ name: z.string(), email: z.string().optional() }).loose(),
+  description: z.string().optional(),
+  version: z.string().optional(),
+  plugins: z.array(z.object({
+    name: z.string(),
+    description: z.string().optional(),
+    version: z.string().optional(),
+    source: z.object({
+      kind: z.string(), repository: z.string().optional(), url: z.string().optional(),
+      ref: z.string().optional(), subdir: z.string().optional(), package: z.string().optional(), version: z.string().optional(),
+    }).loose(),
+  }).loose()),
+}).loose();
+
+export const EMPTY_CLAUDE_MARKETPLACE_PREVIEW: ClaudeMarketplacePreview = {
+  name: "", owner: { name: "" }, plugins: [],
+};
 
 // Nested attachments embedded in timeline/comment responses stay lenient on
 // purpose: a single malformed attachment must not knock the whole timeline
