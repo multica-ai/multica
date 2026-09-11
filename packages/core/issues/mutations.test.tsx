@@ -1022,38 +1022,49 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
       return () => inbox.current.data?.map((row) => [row.id, row.issue_priority]);
     }
 
-    it.each([
+    const pairings = [
       ["useUpdateIssue", "useUpdateIssue"],
       ["useBatchUpdateIssues", "useBatchUpdateIssues"],
       ["useUpdateIssue", "useBatchUpdateIssues"],
       ["useBatchUpdateIssues", "useUpdateIssue"],
-    ] as const)(
+    ] as const;
+
+    // An `inbox:new` re-read is out when A's write interrupts it; B's write
+    // starts before A is saved and finds nothing to interrupt.
+    async function overlapWrites(first: Kind, second: Kind) {
+      const server = controlledServer([rowA, rowB]);
+      const hooks = renderWriteHooks();
+      const rendered = await loadInbox(server);
+      server.setRows([newRow, rowA, rowB]);
+      act(() => {
+        void onInboxInvalidate(qc, WS_ID);
+      });
+      await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(2));
+
+      let writeA!: Promise<unknown>;
+      let writeB!: Promise<unknown>;
+      act(() => {
+        writeA = write(hooks.current, first, "issue-1");
+      });
+      await waitFor(() => expect(server.saving("issue-1")).toBe(true));
+      act(() => {
+        writeB = write(hooks.current, second, "issue-2");
+      });
+      await waitFor(() => expect(server.saving("issue-2")).toBe(true));
+      expect(qc.getQueryState(inboxKeys.list(WS_ID))?.fetchStatus).toBe("idle");
+      return { server, rendered, writeA, writeB };
+    }
+
+    const everySaved = [
+      ["n-c", "none"],
+      ["n-a", "high"],
+      ["n-b", "high"],
+    ];
+
+    it.each(pairings)(
       "re-reads once, after the last of them saves (%s, then %s)",
       async (first: Kind, second: Kind) => {
-        const server = controlledServer([rowA, rowB]);
-        const hooks = renderWriteHooks();
-        const rendered = await loadInbox(server);
-
-        // `inbox:new` while the Inbox is open; its re-read is still out.
-        server.setRows([newRow, rowA, rowB]);
-        act(() => {
-          void onInboxInvalidate(qc, WS_ID);
-        });
-        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(2));
-
-        // A's write interrupts that re-read; B's starts before A is saved and
-        // finds nothing to interrupt.
-        let writeA!: Promise<unknown>;
-        let writeB!: Promise<unknown>;
-        act(() => {
-          writeA = write(hooks.current, first, "issue-1");
-        });
-        await waitFor(() => expect(server.saving("issue-1")).toBe(true));
-        act(() => {
-          writeB = write(hooks.current, second, "issue-2");
-        });
-        await waitFor(() => expect(server.saving("issue-2")).toBe(true));
-        expect(qc.getQueryState(inboxKeys.list(WS_ID))?.fetchStatus).toBe("idle");
+        const { server, rendered, writeA, writeB } = await overlapWrites(first, second);
 
         await act(async () => {
           server.commit("issue-1");
@@ -1070,13 +1081,26 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
         await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
         server.answerReads();
 
-        await waitFor(() =>
-          expect(rendered()).toEqual([
-            ["n-c", "none"],
-            ["n-a", "high"],
-            ["n-b", "high"],
-          ]),
-        );
+        await waitFor(() => expect(rendered()).toEqual(everySaved));
+      },
+    );
+
+    it.each(pairings)(
+      "re-reads when both saves land in the same tick (%s, then %s)",
+      async (first: Kind, second: Kind) => {
+        const { server, rendered, writeA, writeB } = await overlapWrites(first, second);
+
+        // Each write settles while the other still counts as in flight.
+        await act(async () => {
+          server.commit("issue-1");
+          server.commit("issue-2");
+          await Promise.all([writeA, writeB]);
+        });
+        expect(qc.isMutating()).toBe(0);
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
+        server.answerReads();
+
+        await waitFor(() => expect(rendered()).toEqual(everySaved));
       },
     );
 

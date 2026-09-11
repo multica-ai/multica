@@ -87,23 +87,45 @@ export type UpdateIssueMutationInput = {
 // Issue CRUD
 // ---------------------------------------------------------------------------
 
-// Shared by the single and batch update hooks, so a settling write can tell
-// whether another is still in flight.
-const issueWriteMutationKey = (wsId: string) => ["issue-write", wsId] as const;
+// Shared by the single and batch update hooks, so the inbox re-read can wait
+// for the last of them (see `owedInboxRereads`).
+const ISSUE_WRITE = "issue-write";
+const issueWriteMutationKey = (wsId: string) => [ISSUE_WRITE, wsId] as const;
 
 // Workspaces whose inbox lists owe a re-read, per client.
 const inboxRereadsOwed = new WeakMap<QueryClient, Set<string>>();
 
-// Inbox side of settling an issue write. A status / priority write patches the
-// inbox rows optimistically, so the lists owe a re-read only when the write left
-// them behind the server: onMutate interrupted one of their requests (see
+// A client's owed re-reads, each paid once its workspace has no issue write
+// left in flight. Issued earlier, the re-read could read a pending write's old
+// value and land after that write's patch, reverting a saved change. The check
+// runs when a write reaches its terminal state, not in onSettled: TanStack
+// calls onSettled while the mutation still counts as pending, so two writes
+// settling in the same tick would each count the other and both skip
+// (MUL-7286).
+function owedInboxRereads(qc: QueryClient): Set<string> {
+  const existing = inboxRereadsOwed.get(qc);
+  if (existing) return existing;
+  const owed = new Set<string>();
+  inboxRereadsOwed.set(qc, owed);
+  qc.getMutationCache().subscribe((event) => {
+    if (event.type !== "updated") return;
+    if (event.action.type !== "success" && event.action.type !== "error") return;
+    const [kind, wsId] = event.mutation.options.mutationKey ?? [];
+    if (kind !== ISSUE_WRITE || typeof wsId !== "string") return;
+    if (!owed.has(wsId)) return;
+    if (qc.isMutating({ mutationKey: issueWriteMutationKey(wsId) }) > 0) return;
+    owed.delete(wsId);
+    void onInboxInvalidate(qc, wsId);
+  });
+  return owed;
+}
+
+// Inbox side of settling a status / priority write. It patched the inbox rows
+// optimistically, so the lists owe a re-read only when the write left them
+// behind the server: onMutate interrupted one of their requests (see
 // `cancelInboxLists`), a failure restored their rollback snapshot, or a list
 // request is still out and may have read the server before this write
 // committed. Otherwise the patch was the whole change, and no request is added.
-//
-// The re-read waits for the last in-flight issue write, which inherits the
-// obligation. Issued while another write is pending, it would read that write's
-// old value and land after its patch, reverting a saved change (MUL-7286).
 function settleInboxAfterIssueWrite(
   qc: QueryClient,
   wsId: string,
@@ -111,20 +133,10 @@ function settleInboxAfterIssueWrite(
   inboxWrite: { interrupted: boolean } | undefined,
   failed: boolean,
 ) {
-  let owed = inboxRereadsOwed.get(qc);
-  if (!owed) {
-    owed = new Set();
-    inboxRereadsOwed.set(qc, owed);
+  if (!inboxWrite) return;
+  if (inboxWrite.interrupted || failed || isInboxListRequestInFlight(qc, wsId)) {
+    owedInboxRereads(qc).add(wsId);
   }
-  if (
-    inboxWrite &&
-    (inboxWrite.interrupted || failed || isInboxListRequestInFlight(qc, wsId))
-  ) {
-    owed.add(wsId);
-  }
-  // The settling write itself still counts as in flight.
-  if (qc.isMutating({ mutationKey: issueWriteMutationKey(wsId) }) > 1) return;
-  if (owed.delete(wsId)) void onInboxInvalidate(qc, wsId);
 }
 
 function useIssueCreateMutation<TVariables>(
@@ -336,7 +348,6 @@ export function useUpdateIssue() {
       invalidateStaleListKeys(qc, reconcile.staleKeys);
     },
     onSettled: (_data, err, vars, ctx) => {
-      // Runs even without ctx: the last write settles what earlier ones owe.
       settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
       // The issue's own list + detail caches are reconciled surgically in
       // onSuccess / onError, so they are deliberately NOT invalidated here — a
@@ -632,7 +643,6 @@ export function useBatchUpdateIssues() {
       }
     },
     onSettled: (_data, err, _vars, ctx) => {
-      // Runs even without ctx: the last write settles what earlier ones owe.
       settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
       // Deliberately NOT invalidating issueKeys.list / myAll here: the onMutate
       // pass above is a complete surgical reconcile for the loaded bucketed
