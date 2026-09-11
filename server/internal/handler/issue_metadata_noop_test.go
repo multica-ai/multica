@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -326,11 +327,11 @@ func TestIssueMetadataMutationIsWorkspaceScoped(t *testing.T) {
 		Key:         "state",
 		Value:       []byte(`"ready"`),
 	})
-	if err != pgx.ErrNoRows {
+	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("cross-workspace set error = %v, want pgx.ErrNoRows", err)
 	}
 	state := readMetadataRowState(t, foreignIssueID)
-	if string(state.metadata) != "{}" {
+	if state.metadata != "{}" {
 		t.Fatalf("cross-workspace set mutated metadata: %s", state.metadata)
 	}
 }

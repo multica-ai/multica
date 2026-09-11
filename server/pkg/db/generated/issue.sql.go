@@ -860,6 +860,30 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 	return i, err
 }
 
+const getIssueMetadataInWorkspace = `-- name: GetIssueMetadataInWorkspace :one
+SELECT metadata, revision FROM issue
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetIssueMetadataInWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type GetIssueMetadataInWorkspaceRow struct {
+	Metadata []byte `json:"metadata"`
+	Revision int64  `json:"revision"`
+}
+
+// Reloads the committed metadata snapshot after a conditional mutation
+// returns no rows, without fetching the rest of the issue payload.
+func (q *Queries) GetIssueMetadataInWorkspace(ctx context.Context, arg GetIssueMetadataInWorkspaceParams) (GetIssueMetadataInWorkspaceRow, error) {
+	row := q.db.QueryRow(ctx, getIssueMetadataInWorkspace, arg.ID, arg.WorkspaceID)
+	var i GetIssueMetadataInWorkspaceRow
+	err := row.Scan(&i.Metadata, &i.Revision)
+	return i, err
+}
+
 const listChildIssues = `-- name: ListChildIssues :many
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at FROM issue
 WHERE parent_issue_id = $1
@@ -1630,7 +1654,9 @@ type SetIssueMetadataKeyRow struct {
 // SearchIssues: moved to handler (dynamic SQL for multi-word search support).
 // Atomically sets a single key in the issue's metadata JSONB. The
 // workspace_id filter is the authorization gate — handler resolves the
-// issue first so this is also the tenant check.
+// issue first so this is also the tenant check. A no-op, a missing issue, or
+// a workspace mismatch returns no rows; callers that must distinguish those
+// cases need a separate workspace-scoped read.
 func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataKeyParams) (SetIssueMetadataKeyRow, error) {
 	row := q.db.QueryRow(ctx, setIssueMetadataKey,
 		arg.Key,

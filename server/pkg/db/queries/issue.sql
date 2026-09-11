@@ -81,6 +81,12 @@ WHERE workspace_id = sqlc.arg('workspace_id')
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetIssueMetadataInWorkspace :one
+-- Reloads the committed metadata snapshot after a conditional mutation
+-- returns no rows, without fetching the rest of the issue payload.
+SELECT metadata, revision FROM issue
+WHERE id = $1 AND workspace_id = $2;
+
 -- name: LockIssueForChannelMediaBind :one
 -- Channel media resolves after /issue creation. Hold a key-share lock while
 -- the attachment row is written so a concurrent issue delete cannot land
@@ -561,7 +567,9 @@ GROUP BY parent_issue_id;
 -- name: SetIssueMetadataKey :one
 -- Atomically sets a single key in the issue's metadata JSONB. The
 -- workspace_id filter is the authorization gate — handler resolves the
--- issue first so this is also the tenant check.
+-- issue first so this is also the tenant check. A no-op, a missing issue, or
+-- a workspace mismatch returns no rows; callers that must distinguish those
+-- cases need a separate workspace-scoped read.
 UPDATE issue SET
     metadata = jsonb_set(metadata, ARRAY[sqlc.arg('key')::text], sqlc.arg('value')::jsonb),
     revision = revision + 1,

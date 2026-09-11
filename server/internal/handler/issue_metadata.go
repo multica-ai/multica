@@ -200,10 +200,12 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 	queryDuration := time.Since(queryStarted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			current, getErr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			fallbackStarted := time.Now()
+			current, getErr := h.Queries.GetIssueMetadataInWorkspace(r.Context(), db.GetIssueMetadataInWorkspaceParams{
 				ID:          issue.ID,
 				WorkspaceID: issue.WorkspaceID,
 			})
+			queryDuration += time.Since(fallbackStarted)
 			if errors.Is(getErr, pgx.ErrNoRows) {
 				h.recordIssueMetadataMutation(r, "set", "not_found", issueID, key, queryDuration)
 				writeError(w, http.StatusNotFound, "issue not found")
@@ -211,7 +213,7 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 			}
 			if getErr != nil {
 				h.recordIssueMetadataMutation(r, "set", "error", issueID, key, queryDuration)
-				slog.Warn("GetIssueInWorkspace after metadata set no-op failed", append(logger.RequestAttrs(r), "error", getErr, "issue_id", issueID, "key", key)...)
+				slog.Warn("GetIssueMetadataInWorkspace after metadata set no-op failed", append(logger.RequestAttrs(r), "error", getErr, "issue_id", issueID, "key", key)...)
 				writeError(w, http.StatusInternalServerError, "failed to load issue metadata")
 				return
 			}
@@ -270,10 +272,12 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 	queryDuration := time.Since(queryStarted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			current, getErr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			fallbackStarted := time.Now()
+			current, getErr := h.Queries.GetIssueMetadataInWorkspace(r.Context(), db.GetIssueMetadataInWorkspaceParams{
 				ID:          issue.ID,
 				WorkspaceID: issue.WorkspaceID,
 			})
+			queryDuration += time.Since(fallbackStarted)
 			if errors.Is(getErr, pgx.ErrNoRows) {
 				h.recordIssueMetadataMutation(r, "delete", "not_found", issueID, key, queryDuration)
 				writeError(w, http.StatusNotFound, "issue not found")
@@ -281,7 +285,7 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 			}
 			if getErr != nil {
 				h.recordIssueMetadataMutation(r, "delete", "error", issueID, key, queryDuration)
-				slog.Warn("GetIssueInWorkspace after metadata delete no-op failed", append(logger.RequestAttrs(r), "error", getErr, "issue_id", issueID, "key", key)...)
+				slog.Warn("GetIssueMetadataInWorkspace after metadata delete no-op failed", append(logger.RequestAttrs(r), "error", getErr, "issue_id", issueID, "key", key)...)
 				writeError(w, http.StatusInternalServerError, "failed to load issue metadata")
 				return
 			}

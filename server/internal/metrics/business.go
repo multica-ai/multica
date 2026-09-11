@@ -295,7 +295,7 @@ func NewBusinessMetrics() *BusinessMetrics {
 		}, metricLabels("multica_issue_metadata_mutation_total")),
 		issueMetadataMutationDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: "multica", Subsystem: "issue_metadata", Name: "mutation_duration_seconds",
-			Help: "Duration of issue metadata UPDATE queries by operation and bounded result.", Buckets: chatClaimResumeQueryDurationBuckets,
+			Help: "Duration of issue metadata database work by operation and bounded result, including fallback reads after conditional no-ops.", Buckets: chatClaimResumeQueryDurationBuckets,
 		}, metricLabels("multica_issue_metadata_mutation_duration_seconds")),
 		activeTasks: map[string]activeTaskLabels{},
 		events:      newBusinessEventMetrics(),
@@ -357,9 +357,10 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 	}, m.events.collectors()...)
 }
 
-// RecordIssueMetadataMutation records the UPDATE query only. HTTP latency and
-// pool acquisition pressure are exposed by the existing HTTP and DB pool
-// collectors, while these labels distinguish useful writes from no-op load.
+// RecordIssueMetadataMutation records the UPDATE and, for a no-row result, its
+// fallback read. HTTP latency and pool acquisition pressure are exposed by the
+// existing HTTP and DB pool collectors, while these labels distinguish useful
+// writes from no-op load.
 func (m *BusinessMetrics) RecordIssueMetadataMutation(op, result string, duration time.Duration) {
 	if m == nil {
 		return
