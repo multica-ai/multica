@@ -181,6 +181,11 @@ func TestParseSkillArchive_RejectsUnsafeSkillMdPath(t *testing.T) {
 		"/abs/SKILL.md",
 		`..\escape\SKILL.md`,
 		`\abs\SKILL.md`,
+		`C:\abs\SKILL.md`,
+		`C:relative\SKILL.md`,
+		`.\C:\abs\SKILL.md`,
+		`\\server\share\SKILL.md`,
+		"unsafe\x00/SKILL.md",
 	} {
 		data := buildTestZip(t, map[string]string{name: testSkillMd})
 		if _, err := parseSkillArchive(data, "x.skill"); err == nil {
@@ -211,17 +216,58 @@ func TestParseSkillArchive_DropsTraversalAndJunk(t *testing.T) {
 
 func TestParseSkillArchive_DropsUnsafeWindowsSupportingPaths(t *testing.T) {
 	data := buildTestZip(t, map[string]string{
-		"SKILL.md":       testSkillMd,
-		`..\escape.txt`:  "outside",
-		`\absolute.txt`:  "absolute",
-		`safe\nested.md`: "keep",
+		"SKILL.md":             testSkillMd,
+		`..\escape.txt`:        "outside",
+		`\absolute.txt`:        "absolute",
+		`C:\absolute.txt`:      "drive absolute",
+		`C:drive-relative.txt`: "drive relative",
+		`\\server\share.txt`:   "unc",
+		"unsafe\x00/file.txt":  "nul",
+		`safe\nested/file.md`:  "keep",
 	})
 	imported, err := parseSkillArchive(data, "s.skill")
 	if err != nil {
 		t.Fatalf("parseSkillArchive: %v", err)
 	}
-	if got := filePaths(imported); len(got) != 1 || got[0] != "safe/nested.md" {
-		t.Fatalf("files = %v, want only [safe/nested.md]", got)
+	if got := filePaths(imported); len(got) != 1 || got[0] != "safe/nested/file.md" {
+		t.Fatalf("files = %v, want only [safe/nested/file.md]", got)
+	}
+}
+
+func TestParseSkillArchive_DropsDrivePathAfterWrapperRemoval(t *testing.T) {
+	data := buildTestZip(t, map[string]string{
+		`s\SKILL.md`:        testSkillMd,
+		`s\C:\absolute.txt`: "drive absolute",
+		`s\C:relative.txt`:  "drive relative",
+		`s\safe.txt`:        "keep",
+	})
+	imported, err := parseSkillArchive(data, "s.skill")
+	if err != nil {
+		t.Fatalf("parseSkillArchive: %v", err)
+	}
+	if got := filePaths(imported); len(got) != 1 || got[0] != "safe.txt" {
+		t.Fatalf("files = %v, want only [safe.txt]", got)
+	}
+}
+
+func TestParseSkillArchive_RejectsCanonicalSkillMdCollision(t *testing.T) {
+	data := buildTestZip(t, map[string]string{
+		"SKILL.md":   testSkillMd,
+		`.\SKILL.md`: testSkillMd,
+	})
+	if _, err := parseSkillArchive(data, "s.skill"); err == nil || !strings.Contains(err.Error(), "same path") {
+		t.Fatalf("error = %v, want canonical path collision", err)
+	}
+}
+
+func TestParseSkillArchive_RejectsCanonicalSupportingFileCollision(t *testing.T) {
+	data := buildTestZip(t, map[string]string{
+		"SKILL.md":           testSkillMd,
+		`agents\openai.yaml`: "windows",
+		"agents/openai.yaml": "slash",
+	})
+	if _, err := parseSkillArchive(data, "s.skill"); err == nil || !strings.Contains(err.Error(), "same path") {
+		t.Fatalf("error = %v, want canonical path collision", err)
 	}
 }
 
