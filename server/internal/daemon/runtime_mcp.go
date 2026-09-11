@@ -411,6 +411,10 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 			kimiHome = filepath.Join(home, ".kimi-code")
 		}
 		path, key, source, format = filepath.Join(kimiHome, "mcp.json"), "mcpServers", "User config", "json"
+	case "junie":
+		// Inventory only. Junie loads its user/project config natively while
+		// Multica-managed servers arrive separately in the ACP session request.
+		path, key, source, format = filepath.Join(home, ".junie", "mcp", "mcp.json"), "mcpServers", "User config", "json"
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {

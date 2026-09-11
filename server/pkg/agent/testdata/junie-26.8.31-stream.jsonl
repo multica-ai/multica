@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-junie-fixture","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Checking the workspace."}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-junie-fixture","update":{"sessionUpdate":"tool_call","toolCallId":"tool-1","title":"Read file: README.md","kind":"read","rawInput":{"path":"README.md"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-junie-fixture","update":{"sessionUpdate":"tool_call_update","toolCallId":"tool-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"fixture output"}}]}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-junie-fixture","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Done."}}}}
+{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn","usage":{"inputTokens":12,"outputTokens":5}}}

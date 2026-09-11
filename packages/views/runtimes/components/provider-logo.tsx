@@ -4,11 +4,17 @@ import codeartsLogo from "./codearts-logo.svg";
 import qwenLogo from "./qwen-logo.svg";
 import reasonixLogo from "./reasonix-logo.svg";
 import dimLogo from "./dim-logo.png";
+import junieLogo from "./junie-logo.png";
 
 // Next.js exposes static imports as objects while Vite exposes URL strings.
 // Normalize both shapes here so shared provider logos work in web and desktop.
 function staticAssetSrc(asset: string | { src: string }): string {
   return typeof asset === "string" ? asset : asset.src;
+}
+
+// JetBrains Junie — official application icon shipped with Junie CLI.
+function JunieLogo({ className }: { className: string }) {
+  return <img src={staticAssetSrc(junieLogo)} alt="" className={className} />;
 }
 
 // Claude (Anthropic) — official mark, sourced from Bootstrap Icons (bi-claude)
@@ -414,6 +420,8 @@ export function ProviderLogo({
       return <ReasonixLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
+    case "junie":
+      return <JunieLogo className={className} />;
     case "qoder":
     case "qoderclicn":
       return <QoderLogo className={className} />;

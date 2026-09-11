@@ -157,7 +157,7 @@ type acpDeliverableCase struct {
 	// notification is the JSON-RPC method the runtime pushes updates on.
 	notification string
 	// camelUpdates selects the CamelCase discriminator (`update.type:
-	// "AgentMessageChunk"`) kiro and qoder emit, instead of the snake_case
+	// "AgentMessageChunk"`) Junie, Kiro, and Qoder emit, instead of the snake_case
 	// `update.sessionUpdate` form hermes/kimi/traecli/grok emit.
 	camelUpdates bool
 }
@@ -173,6 +173,7 @@ var acpDeliverableCases = []acpDeliverableCase{
 	{backend: "grok", binary: "grok", notification: "session/update"},
 	{backend: "mcode", binary: "mcode", notification: "session/update"},
 	{backend: "kiro", binary: "kiro-cli", notification: "session/notification", camelUpdates: true},
+	{backend: "junie", binary: "junie", notification: "session/notification", camelUpdates: true},
 	{backend: "qoder", binary: "qodercli", notification: "session/notification", camelUpdates: true},
 	{backend: "qoderclicn", binary: "qoderclicn", notification: "session/notification", camelUpdates: true},
 }

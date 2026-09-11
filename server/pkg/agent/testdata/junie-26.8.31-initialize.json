@@ -1,0 +1,17 @@
+{
+  "protocolVersion": 1,
+  "agentCapabilities": {
+    "loadSession": true,
+    "promptCapabilities": {"image": true, "embeddedContext": true},
+    "mcpCapabilities": {"http": true, "sse": true}
+  },
+  "sessionCapabilities": {
+    "fork": {},
+    "list": {},
+    "resume": {},
+    "close": {},
+    "additionalDirectories": {}
+  },
+  "authMethods": [{"id": "jetbrains-account", "name": "JetBrains Account"}],
+  "agentInfo": {"name": "Junie", "version": "26.8.31"}
+}

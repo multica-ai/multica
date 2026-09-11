@@ -118,6 +118,12 @@ Check in this order:
 7. If repo checkout failed, classify it after checking whether repo context was
    present in the task/project context.
 
+For Junie, availability and authentication are separate checks. Discovery uses
+`MULTICA_JUNIE_PATH` (default `junie`) and may expose models before a prompt can
+run. Prompt authentication remains in Junie's own JetBrains Account,
+`JUNIE_API_KEY`, BYOK, or local-provider configuration; Multica neither stores
+those credentials nor starts Junie's browser login flow.
+
 ## Repos
 
 The runtime brief lists repos available to this task. Treat that list as the

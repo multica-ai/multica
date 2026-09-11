@@ -289,7 +289,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, codearts, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim, zeroclaw)
+	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, codearts, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, junie, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim, zeroclaw)
 	CLIVersion     string            // detected version paired with ExecutablePath; observation only, never used to choose behavior
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
@@ -359,6 +359,7 @@ var SupportedTypes = []string{
 	"reasonix",
 	"dsh",
 	"kiro",
+	"junie",
 	"antigravity",
 	"qoder",
 	"qoderclicn",
@@ -458,6 +459,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &dimBackend{cfg: cfg}, nil
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
+	case "junie":
+		return &junieBackend{cfg: cfg}, nil
 	case "antigravity":
 		return &antigravityBackend{cfg: cfg}, nil
 	case "qoder", "qoderclicn":
@@ -509,6 +512,7 @@ var launchHeaders = map[string]string{
 	"reasonix":    "reasonix acp",
 	"dsh":         "dsh --profile multica (stdio)",
 	"kiro":        "kiro-cli acp",
+	"junie":       "junie --acp=true",
 	"openclaw":    "openclaw agent (json)",
 	"opencode":    "opencode run (json)",
 	"pi":          "pi (json mode)",
