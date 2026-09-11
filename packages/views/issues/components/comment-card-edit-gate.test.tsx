@@ -368,7 +368,7 @@ describe("comment edit — upload submit gate", () => {
 // Keep the real card, annotation hook, reply composer and submit wiring together.
 // Source parsing and persistence boundary matrices live in their own suites.
 describe("comment thread — selection reply", () => {
-  it("adds a nested agent quote and sends inside that thread without changing task or other-thread drafts", async () => {
+  it.each([false, true])("sends only quote and note in the source thread and clears overlays (note open: %s)", async (keepNoteOpen) => {
     Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 1024 });
     Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 768 });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 10, 600, 400));
@@ -392,14 +392,17 @@ describe("comment thread — selection reply", () => {
     fireEvent.click(source);
     fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Reply-specific note" } });
-    fireEvent.pointerDown(document.body);
+    if (!keepNoteOpen) fireEvent.pointerDown(document.body);
     expect(container.querySelector('[data-annotation-thread="comment-1"]')).toHaveTextContent("1 annotation");
     expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Preview reply" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onReply).toHaveBeenCalledTimes(1));
-    expect(onReply).toHaveBeenCalledWith("agent-child", expect.stringContaining("Reply-specific note"), undefined, undefined);
-    expect(onReply.mock.calls[0]?.[1]).toContain("> Selected agent text");
+    expect(onReply).toHaveBeenCalledWith("agent-child", "> Selected agent text\n\nReply-specific note", undefined, undefined);
+    await waitFor(() => {
+      expect(useCommentDraftStore.getState().getAnnotations("reply:issue-1:comment-1")).toHaveLength(0);
+      expect(document.querySelector("[data-reply-annotation-overlay]")).not.toBeInTheDocument();
+    });
     expect(useCommentDraftStore.getState().drafts["new:issue-1"]).toBe(taskDraft);
     expect(useCommentDraftStore.getState().getDraft("reply:issue-1:other-thread")).toBe("Other thread draft");
   });

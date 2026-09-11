@@ -8,9 +8,14 @@ const annotation: ReplyAnnotation = {
 };
 
 describe("annotated reply serialization", () => {
-  it("publishes one ordered Markdown reply with multiline quotes and notes", () => {
+  it("publishes only the user body, quotes and notes, without source links or labels", () => {
     expect(composeAnnotatedReply("Overall reply", [annotation, { ...annotation, id: "b", quote: "other", note: "" }]))
-      .toBe("Overall reply\n\n1. Emacs\n\n   > first\n   > second\n\n   Please revise.\n\n2. Emacs\n\n   > other");
+      .toBe("Overall reply\n\n> first\n> second\n\nPlease revise.\n\n> other");
+  });
+
+  it("preserves user-authored note Markdown and links without list indentation", () => {
+    expect(composeAnnotatedReply("", [{ ...annotation, note: "See [details](https://example.com).\n\n- First change\n- Second change" }]))
+      .toBe("> first\n> second\n\nSee [details](https://example.com).\n\n- First change\n- Second change");
   });
 
   it("keeps quoted raw mentions and markup inert, while preserving deliberate mentions", () => {

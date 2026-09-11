@@ -45,19 +45,14 @@ function quoteText(text: string): string {
     (char) => `&#${char.charCodeAt(0)};`);
 }
 
-export function composeAnnotatedReply(content: string, annotations: readonly ReplyAnnotation[], sourceLink?: (commentId: string) => string): string {
+export function composeAnnotatedReply(content: string, annotations: readonly ReplyAnnotation[]): string {
   const body = content.trim();
   if (!annotations.length) return body;
   // Keep the user's leading /note command (and explicit mentions) in place.
-  return [body, ...annotations.map((a, index) => {
-    const marker = `${index + 1}. `;
-    const indent = " ".repeat(marker.length);
-    const author = quoteText(a.sourceActorName.replace(/\s+/g, " "));
-    const source = sourceLink ? `[${author}](${sourceLink(a.sourceCommentId)})` : author;
-    return `${marker}${source}\n\n` +
-      a.quote.split(/\r?\n/).map((line) => `${indent}> ${quoteText(line)}`).join("\n") +
-      (a.note.trim() ? `\n\n${a.note.trim().split("\n").map((line) => `${indent}${line}`).join("\n")}` : "");
-  })].filter(Boolean).join("\n\n");
+  return [body, ...annotations.map((a) =>
+    a.quote.split(/\r?\n/).map((line) => `> ${quoteText(line)}`).join("\n") +
+      (a.note.trim() ? `\n\n${a.note.trim()}` : ""),
+  )].filter(Boolean).join("\n\n");
 }
 
 /** Relocate only an unambiguous quote with matching context after source edits. */

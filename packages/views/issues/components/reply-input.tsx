@@ -1,6 +1,5 @@
 "use client";
 
-import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
 import { ReplyAnnotations } from "./reply-annotations";
 import { useRef, useState, useCallback, useEffect } from "react";
@@ -81,12 +80,8 @@ function ReplyInput({
   const setDraft = useCommentDraftStore((s) => s.setDraft);
   const [isEmpty, setIsEmpty] = useState(!initialDraft?.trim());
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
-  const workspaceSlug = useWorkspaceSlug();
-  const sourceLink = workspaceSlug
-    ? (id: string) => `${paths.workspace(workspaceSlug).issueDetail(issueId)}#comment-${encodeURIComponent(id)}`
-    : undefined;
   const annotations = useCommentDraftStore((s) => draftKey ? s.getAnnotations(draftKey) : EMPTY_REPLY_ANNOTATIONS);
-  const composedContent = composeAnnotatedReply(content, annotations, sourceLink);
+  const composedContent = composeAnnotatedReply(content, annotations);
   const canSend = !targetMissing && (annotations.length ? hasReplyIntent(content, annotations) : !isEmpty);
   const triggerPreview = useCommentTriggerPreview({ issueId, parentId, content: canSend ? composedContent : "" });
   // Uploads for this reply session (MUL-5181) — owned by the coordinator. With
@@ -172,7 +167,7 @@ function ReplyInput({
     containerRef: composerRef,
     normalize: (raw) => {
       const current = draftKey ? useCommentDraftStore.getState().getAnnotations(draftKey) : EMPTY_REPLY_ANNOTATIONS;
-      return !targetMissing && hasReplyIntent(raw, current) ? composeAnnotatedReply(raw, current, sourceLink) : "";
+      return !targetMissing && hasReplyIntent(raw, current) ? composeAnnotatedReply(raw, current) : "";
     },
     // A thread reply is rarely the last thing the user has to say, so the caret
     // stays in the box for the next one. Unlike a top-level comment, the posted
