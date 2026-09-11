@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/dispatch"
@@ -100,24 +101,46 @@ func TestAgentReadinessVerdict(t *testing.T) {
 			t.Errorf("notice contains %q, which belongs to the unrunnable-CLI repair: %q", wrong, notice)
 		}
 	}
-	// The one exception is an install the daemon is running right now: that wait
-	// DOES end by itself, so the work queues instead of being refused. This is
-	// why the daemon states it explicitly rather than leaving the server to infer
-	// it from the code.
-	installing := runtimeVerdict(db.AgentRuntime{
-		Status:   "offline",
-		Metadata: []byte(`{"offline_reason":{"code":"dsh_profile","installing":true,"detail":"installing the configured bundle now"}}`),
-	})
-	if installing.Blocked() {
-		t.Errorf("in-flight DSH install: got %+v, want the waitable verdict", installing)
-	}
-	if installing.Reason != dispatch.ReasonRuntimeOffline {
-		t.Errorf("in-flight DSH install: reason = %q, want %q", installing.Reason, dispatch.ReasonRuntimeOffline)
-	}
 	// The unrunnable-CLI notice keeps its own text and its fenced command.
 	if unusableNotice := RuntimeUnusableNotice("Kit", unusable); !strings.Contains(unusableNotice, "node install.cjs") {
 		t.Errorf("unusable-CLI notice lost its repair command: %q", unusableNotice)
 	}
+	// The installing claim is bounded, not trusted. A withdraw cannot be
+	// guaranteed — the verdict is built before the runtime ids it needs are
+	// known, the corrective Deregister is best-effort and runs on a cancelled
+	// context during shutdown, and a daemon restarted mid-install does not track
+	// the row at all — so a claim older than the install it describes must stop
+	// buying a queue, or it recreates the failure it was added to prevent.
+	installingRow := func(updatedAt time.Time) db.AgentRuntime {
+		return db.AgentRuntime{
+			Status:    "offline",
+			Metadata:  []byte(`{"offline_reason":{"code":"dsh_profile","installing":true,"detail":"installing the configured bundle now"}}`),
+			UpdatedAt: pgtype.Timestamptz{Time: updatedAt, Valid: true},
+		}
+	}
+	// The one exception is an install the daemon is running right now: that wait
+	// DOES end by itself, so the work queues instead of being refused.
+	fresh := runtimeVerdict(installingRow(time.Now()))
+	if fresh.Blocked() {
+		t.Errorf("install in flight: got %+v, want the waitable verdict", fresh)
+	}
+	if fresh.Reason != dispatch.ReasonRuntimeOffline {
+		t.Errorf("install in flight: reason = %q, want %q", fresh.Reason, dispatch.ReasonRuntimeOffline)
+	}
+	stale := runtimeVerdict(installingRow(time.Now().Add(-runtimeInstallClaimWindow - time.Minute)))
+	if !stale.Blocked() || stale.Reason != dispatch.ReasonRuntimeProfileMissing {
+		t.Fatalf("stale install claim: got %+v, want blocked/runtime_profile_missing", stale)
+	}
+	// No timestamp to bound it with: refuse rather than queue behind something
+	// that cannot be shown to be running.
+	unbounded := runtimeVerdict(db.AgentRuntime{
+		Status:   "offline",
+		Metadata: []byte(`{"offline_reason":{"code":"dsh_profile","installing":true}}`),
+	})
+	if !unbounded.Blocked() {
+		t.Errorf("install claim with no updated_at: got %+v, want blocked", unbounded)
+	}
+
 	// An unrecognised or malformed reason must not invent a verdict: unknown
 	// causes stay in the waitable bucket they are in today.
 	for name, metadata := range map[string]string{

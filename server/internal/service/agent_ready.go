@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -172,7 +173,7 @@ func runtimeVerdict(rt db.AgentRuntime) AgentVerdict {
 		// would send the user to the wrong repair. The one exception is an
 		// install the daemon is running right now: that wait DOES end by
 		// itself, so the work queues instead of being refused.
-		case reason.Code == runtimeOfflineCodeDshProfile && !reason.Installing:
+		case reason.Code == runtimeOfflineCodeDshProfile && !installClaimHolds(reason, rt):
 			return AgentVerdict{
 				Availability: AgentBlocked,
 				Reason:       dispatch.ReasonRuntimeProfileMissing,
@@ -186,6 +187,39 @@ func runtimeVerdict(rt db.AgentRuntime) AgentVerdict {
 		Reason:       dispatch.ReasonRuntimeOffline,
 		Detail:       "agent runtime is " + rt.Status,
 	}
+}
+
+// runtimeInstallClaimWindow is how long an `installing` claim on a runtime row
+// is honoured before the row is read as a plain missing profile.
+//
+// The claim is what makes this one offline runtime worth queueing behind, so a
+// claim that outlives its install recreates exactly the failure the structured
+// reason exists to prevent — work queued behind something that stopped. The
+// daemon withdraws the claim when an install gives up, but a withdraw cannot be
+// guaranteed: the verdict is built before the runtime ids the withdraw needs are
+// known, the corrective Deregister is best-effort and runs on an already-
+// cancelled context during shutdown, and a daemon restarted mid-install does not
+// track the row at all.
+//
+// So the claim is bounded rather than guaranteed. SetAgentRuntimeOfflineWithReason
+// stamps updated_at, and the install it describes is itself bounded by the
+// daemon's provisioning timeout; a window comfortably longer than that covers a
+// real install while capping every way the claim can be left behind. The
+// withdraw stays as the fast path — this is the floor under it.
+const runtimeInstallClaimWindow = 5 * time.Minute
+
+// installClaimHolds reports whether a runtime row's in-flight-install claim is
+// still worth queueing behind.
+//
+// A row with no usable timestamp cannot be bounded, so the claim is not honoured:
+// the cost of refusing during a real install is one retry the notice already
+// asks for, and the cost of honouring a stale claim is work that queues until it
+// expires.
+func installClaimHolds(reason runtimeOfflineReason, rt db.AgentRuntime) bool {
+	if !reason.Installing || !rt.UpdatedAt.Valid {
+		return false
+	}
+	return time.Since(rt.UpdatedAt.Time) < runtimeInstallClaimWindow
 }
 
 // parseRuntimeOfflineReason reads the daemon's explanation off a runtime row.
