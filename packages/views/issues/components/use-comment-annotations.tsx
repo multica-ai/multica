@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { MessageSquarePlus } from "lucide-react";
+import { MessageSquarePlus, Trash2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { MAX_ANNOTATION_QUOTE_LENGTH, MAX_REPLY_ANNOTATIONS } from "@multica/core/drafts/reply-annotation";
@@ -44,7 +44,10 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
   const highlightName = `reply-annotation-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`;
 
   const close = (restoreFocus = false) => {
-    if (restoreFocus && selection?.root.isConnected) selection.root.focus({ preventScroll: true });
+    if (restoreFocus && selection?.root.isConnected) {
+      const target = editable ? selection.root.querySelector<HTMLElement>("[contenteditable=true]") ?? selection.root : selection.root;
+      target.focus({ preventScroll: true });
+    }
     setSelection(null); setEditingId(null); setError(false);
   };
   const readSelection = () => {
@@ -195,7 +198,7 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
       })}
       {enabled && selection && <CommentSelectionBubble range={selection.range} source={selection.root} owner={draftKey}>
         <div className="bubble-menu max-w-[calc(100vw-16px)]">
-          {editing ? <textarea ref={inputRef} value={editing.note} rows={Math.min(4, Math.max(1, editing.note.split("\n").length))}
+          {editing ? <><textarea ref={inputRef} value={editing.note} rows={Math.min(4, Math.max(1, editing.note.split("\n").length))}
             aria-label={t(($) => $.reply.annotations.note_label)}
             placeholder={t(($) => $.reply.annotations.note_placeholder)}
             className="min-h-8 w-72 min-w-0 resize-none rounded-sm bg-transparent px-2 py-1 text-body outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
@@ -204,7 +207,15 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
               if (event.key === "Enter" && !event.nativeEvent.isComposing && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
                 event.preventDefault(); close(true);
               }
-            }} /> : <Button ref={actionRef} variant="ghost" size="sm"
+            }} />
+            <Button variant="ghost" size="icon-sm" className="self-start text-muted-foreground hover:text-destructive"
+              aria-label={t(($) => $.reply.annotations.remove, { number: annotations.indexOf(editing) + 1 })}
+              title={t(($) => $.reply.annotations.remove, { number: annotations.indexOf(editing) + 1 })}
+              onClick={() => {
+                useCommentDraftStore.getState().removeAnnotation(draftKey, editing.id);
+                close(true);
+              }}><Trash2 /></Button>
+            </> : <Button ref={actionRef} variant="ghost" size="sm"
               onMouseDown={(event) => event.preventDefault()} onClick={() => add()}>
               <MessageSquarePlus />{t(($) => editable ? $.reply.annotations.add_comment : $.reply.annotations.add)}
             </Button>}

@@ -37,7 +37,7 @@ import { useCreateIssue } from "@multica/core/issues/mutations";
 import { useT } from "../i18n";
 import { createShortcutChord, type ShortcutChord } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
-import { Toggle } from "@multica/ui/components/ui/toggle";
+import { Toggle, toggleVariants } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
 import {
   Tooltip,
@@ -638,13 +638,25 @@ function EditorBubbleMenu({
       ) : (
         <TooltipProvider delay={300}>
           <div className="bubble-menu">
-            {selectionAction && <Button variant="ghost" size="sm" onClick={() => {
-              selectionAction.onSelect();
-              // Keep later editor transactions from reopening the formatting
-              // toolbar over the annotation's note field. The text is untouched.
-              editor.commands.setTextSelection(editor.state.selection.to);
-              setVisible(false);
-            }}><MessageSquarePlus />{selectionAction.label}</Button>}
+            {selectionAction && <>
+              <Tooltip>
+                <TooltipTrigger render={
+                  <button type="button" className={toggleVariants({ size: "sm" })}
+                    aria-label={selectionAction.label}
+                    onClick={() => {
+                      selectionAction.onSelect();
+                      // Keep later editor transactions from reopening the formatting
+                      // toolbar over the annotation's note field. The text is untouched.
+                      editor.commands.setTextSelection(editor.state.selection.to);
+                      setVisible(false);
+                    }} />
+                }>
+                  <MessageSquarePlus className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}>{selectionAction.label}</TooltipContent>
+              </Tooltip>
+              {!fmt.codeBlock && <Separator orientation="vertical" className="mx-0.5 h-5" />}
+            </>}
             {!fmt.codeBlock && <>
             <MarkButton editor={editor} mark="bold" icon={Bold} label={t(($) => $.bubble_menu.bold)} shortcut={createShortcutChord("B", { primary: true })} isActive={fmt.bold} />
             <MarkButton editor={editor} mark="italic" icon={Italic} label={t(($) => $.bubble_menu.italic)} shortcut={createShortcutChord("I", { primary: true })} isActive={fmt.italic} />

@@ -67,6 +67,37 @@ beforeEach(() => {
 });
 
 describe("selection to reply", () => {
+  it.each([false, true])("removes a saved annotation at its source and preserves the rest of the draft (description: %s)", async (description) => {
+    const draftKey = description ? "new:issue" as const : key;
+    const sourceId = description ? "description:issue" : "root";
+    const store = useCommentDraftStore.getState();
+    store.setDraft(draftKey, "Keep my overall reply");
+    for (const [id, quote, start] of [["first", "Selected", 0], ["second", "text", 9]] as const) {
+      store.addAnnotation(draftKey, { id, sourceCommentId: sourceId, sourceActorName: "Author",
+        quote, start, prefix: "", suffix: "", note: `Note ${id}` });
+    }
+    const { container } = renderWithI18n(description ? <DescriptionFixture /> : <Fixture />);
+    const source = container.querySelector<HTMLElement>(description ? "[contenteditable]" : "[data-comment-content]")!;
+    fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
+    expect(await screen.findByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Note first");
+    const remove = screen.getByRole("button", { name: "Remove annotation 1" });
+    fireEvent.pointerDown(remove);
+    fireEvent.click(remove);
+    await waitFor(() => expect(screen.queryByRole("textbox")).not.toBeInTheDocument());
+    expect(source).toHaveFocus();
+    expect(source).toHaveTextContent("Selected text");
+    expect(store.getAnnotations(draftKey).map((a) => a.id)).toEqual(["second"]);
+    expect(store.getDraft(draftKey)).toBe("Keep my overall reply");
+    expect(screen.queryByRole("button", { name: "Edit annotation 2" })).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
+    expect(await screen.findByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Note second");
+    fireEvent.click(screen.getByRole("button", { name: "Remove annotation 1" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Edit annotation 1" })).not.toBeInTheDocument());
+    expect(store.getAnnotations(draftKey)).toHaveLength(0);
+    expect(store.getDraft(draftKey)).toBe("Keep my overall reply");
+    expect(useCommentDraftStore.getState().drafts[draftKey]?.replyTarget).toBeUndefined();
+  });
   it("restores saved source markers when the description loads asynchronously", async () => {
     useCommentDraftStore.getState().addAnnotation("new:issue", {
       id: "saved", sourceCommentId: "description:issue", sourceActorName: "Description",
