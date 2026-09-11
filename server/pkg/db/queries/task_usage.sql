@@ -334,3 +334,31 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
 GROUP BY atq.agent_id, 2
 ORDER BY atq.agent_id, 2;
+
+-- name: GetSessionBilledInputTokens :one
+-- Total input tokens billed across every task that has run on one provider
+-- session for an (agent, issue) pair. This is the resume-budget signal
+-- (GH #4754): the question it answers is "how expensive has this conversation
+-- already become", asked before deciding whether the next turn should inherit
+-- it.
+--
+-- Cache reads are counted. A cached prefix is cheaper, not smaller — it still
+-- occupies the context window the next turn has to fit inside, and the window
+-- is what the budget protects.
+--
+-- This is a PROXY for transcript size, not a measurement of it. The precise
+-- number — peak input tokens on a single request — is recorded nowhere; what
+-- IS recorded is the per-task sum over every generation, which grows both with
+-- the transcript and with the number of tool-call round trips. Those are the
+-- same two things that make a session expensive to inherit, so the proxy moves
+-- with what we care about even though its unit is not context-window tokens.
+-- The default budget is therefore calibrated from observed session
+-- distributions (GH #4754 reports 330k for a no-op scan against 11.0M / 11.5M
+-- for the two sessions that made a one-line comment cost 190k input tokens),
+-- never from any model's advertised window.
+SELECT COALESCE(SUM(tu.input_tokens + tu.cache_read_tokens), 0)::bigint AS billed_input_tokens
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.agent_id = sqlc.arg('agent_id')
+  AND atq.issue_id = sqlc.arg('issue_id')
+  AND atq.session_id = sqlc.arg('session_id');

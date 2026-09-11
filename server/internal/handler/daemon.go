@@ -2786,7 +2786,23 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
 				if prior.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = prior.SessionID.String
+					// GH #4754: resume is not free. A session that has already
+					// run substantial tool-heavy work makes the NEXT turn start
+					// from its whole transcript, so a one-line comment inherits
+					// a context that costs more than answering it from scratch
+					// would — and eventually one that does not fit at all.
+					// Past the budget, drop the session and let this turn read
+					// what it needs.
+					//
+					// The workdir is deliberately kept: the repository is still
+					// checked out and the branch is still the conversation's,
+					// so this resets the transcript without re-paying for the
+					// environment.
+					if h.resumeExceedsContextBudget(r.Context(), task, prior.SessionID.String) {
+						resp.PriorSessionResumeUnavailable = true
+					} else {
+						resp.PriorSessionID = prior.SessionID.String
+					}
 				}
 				if prior.WorkDir.Valid {
 					resp.PriorWorkDir = prior.WorkDir.String

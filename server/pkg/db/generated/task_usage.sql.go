@@ -89,6 +89,48 @@ func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID)
 	return i, err
 }
 
+const getSessionBilledInputTokens = `-- name: GetSessionBilledInputTokens :one
+SELECT COALESCE(SUM(tu.input_tokens + tu.cache_read_tokens), 0)::bigint AS billed_input_tokens
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.agent_id = $1
+  AND atq.issue_id = $2
+  AND atq.session_id = $3
+`
+
+type GetSessionBilledInputTokensParams struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	IssueID   pgtype.UUID `json:"issue_id"`
+	SessionID pgtype.Text `json:"session_id"`
+}
+
+// Total input tokens billed across every task that has run on one provider
+// session for an (agent, issue) pair. This is the resume-budget signal
+// (GH #4754): the question it answers is "how expensive has this conversation
+// already become", asked before deciding whether the next turn should inherit
+// it.
+//
+// Cache reads are counted. A cached prefix is cheaper, not smaller — it still
+// occupies the context window the next turn has to fit inside, and the window
+// is what the budget protects.
+//
+// This is a PROXY for transcript size, not a measurement of it. The precise
+// number — peak input tokens on a single request — is recorded nowhere; what
+// IS recorded is the per-task sum over every generation, which grows both with
+// the transcript and with the number of tool-call round trips. Those are the
+// same two things that make a session expensive to inherit, so the proxy moves
+// with what we care about even though its unit is not context-window tokens.
+// The default budget is therefore calibrated from observed session
+// distributions (GH #4754 reports 330k for a no-op scan against 11.0M / 11.5M
+// for the two sessions that made a one-line comment cost 190k input tokens),
+// never from any model's advertised window.
+func (q *Queries) GetSessionBilledInputTokens(ctx context.Context, arg GetSessionBilledInputTokensParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getSessionBilledInputTokens, arg.AgentID, arg.IssueID, arg.SessionID)
+	var billed_input_tokens int64
+	err := row.Scan(&billed_input_tokens)
+	return billed_input_tokens, err
+}
+
 const getTaskUsage = `-- name: GetTaskUsage :many
 SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at, cost_usd_ticks FROM task_usage
 WHERE task_id = $1
