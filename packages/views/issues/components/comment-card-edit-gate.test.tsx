@@ -394,12 +394,12 @@ describe("comment thread — selection reply", () => {
     fireEvent.mouseUp(source);
     fireEvent.click(source);
     fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Comment", exact: true }), { target: { value: "Reply-specific note" } });
+    fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), { target: { value: "Reply-specific note" } });
     expect(useCommentDraftStore.getState().getAnnotations("reply:issue-1:comment-1")).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Add annotation", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
     if (keepNoteOpen) {
-      fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1", exact: true }));
-      fireEvent.change(await screen.findByRole("textbox", { name: "Comment", exact: true }), { target: { value: "Unconfirmed edit" } });
+      fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
+      fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), { target: { value: "Unconfirmed edit" } });
     }
     expect(container.querySelector('[data-annotation-thread="reply:issue-1:comment-1"]')).toHaveTextContent("1 annotation");
     expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
