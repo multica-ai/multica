@@ -1941,8 +1941,7 @@ func TestAgentSkillToggleAndRemoveAdvanceAgentUpdatedAt(t *testing.T) {
 	toggleReq := newRequest("PUT", "/api/agents/"+agentID+"/skills/"+skillA+"/enabled", map[string]any{
 		"enabled": false,
 	})
-	toggleReq = withURLParam(toggleReq, "id", agentID)
-	toggleReq = withURLParam(toggleReq, "skillId", skillA)
+	toggleReq = withURLParams(toggleReq, "id", agentID, "skillId", skillA)
 	toggleW := testutil.Call(t, testHandler.SetAgentSkillEnabled, toggleReq).Want(http.StatusOK)
 	if !readUpdatedAt().After(past) {
 		t.Fatal("disabling a skill did not advance agent.updated_at")
@@ -1959,8 +1958,7 @@ func TestAgentSkillToggleAndRemoveAdvanceAgentUpdatedAt(t *testing.T) {
 
 	past = backdate()
 	removeReq := newRequest("DELETE", "/api/agents/"+agentID+"/skills/"+skillA, nil)
-	removeReq = withURLParam(removeReq, "id", agentID)
-	removeReq = withURLParam(removeReq, "skillId", skillA)
+	removeReq = withURLParams(removeReq, "id", agentID, "skillId", skillA)
 	removeW := testutil.Call(t, testHandler.RemoveAgentSkill, removeReq).Want(http.StatusOK)
 	if !readUpdatedAt().After(past) {
 		t.Fatal("removing a skill did not advance agent.updated_at")
