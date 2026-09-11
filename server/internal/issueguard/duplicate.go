@@ -42,6 +42,18 @@ func NewActiveDuplicateError(issue db.Issue, issuePrefix string) *ActiveDuplicat
 	}
 }
 
+// inactiveStatusKeys are the status keys the duplicate guards never count as an
+// active duplicate: the terminal categories, plus Triage. An issue waiting in
+// Triage has not been taken on yet, so it must not block anyone filing the same
+// work; a duplicate there is resolved by merging it from Triage.
+func inactiveStatusKeys(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID) ([]string, error) {
+	return issuestatus.ExpandCategories(ctx, q, workspaceID, []string{
+		issuestatus.Done,
+		issuestatus.Cancelled,
+		issuestatus.Triage,
+	})
+}
+
 func LockAndFindActiveDuplicate(
 	ctx context.Context,
 	q *db.Queries,
@@ -61,17 +73,14 @@ func LockAndFindActiveDuplicate(
 	if allowDuplicate {
 		return db.Issue{}, false, nil
 	}
-	terminalStatusKeys, err := issuestatus.ExpandCategories(ctx, q, workspaceID, []string{
-		issuestatus.Done,
-		issuestatus.Cancelled,
-	})
+	inactiveKeys, err := inactiveStatusKeys(ctx, q, workspaceID)
 	if err != nil {
 		return db.Issue{}, false, err
 	}
 
 	duplicate, err := q.FindActiveDuplicateIssue(ctx, db.FindActiveDuplicateIssueParams{
 		WorkspaceID:        workspaceID,
-		TerminalStatusKeys: terminalStatusKeys,
+		TerminalStatusKeys: inactiveKeys,
 		ProjectID:          projectID,
 		ParentIssueID:      parentIssueID,
 		NormalizedTitle:    normalizedTitle,
@@ -101,17 +110,14 @@ func LockAndFindRecentAutopilotDuplicate(
 	if err := q.LockIssueDuplicateKey(ctx, recentAutopilotLockKey(workspaceID, autopilotID, projectID, normalizedTitle)); err != nil {
 		return db.Issue{}, false, err
 	}
-	terminalStatusKeys, err := issuestatus.ExpandCategories(ctx, q, workspaceID, []string{
-		issuestatus.Done,
-		issuestatus.Cancelled,
-	})
+	inactiveKeys, err := inactiveStatusKeys(ctx, q, workspaceID)
 	if err != nil {
 		return db.Issue{}, false, err
 	}
 
 	duplicate, err := q.FindRecentAutopilotDuplicateIssue(ctx, db.FindRecentAutopilotDuplicateIssueParams{
 		WorkspaceID:        workspaceID,
-		TerminalStatusKeys: terminalStatusKeys,
+		TerminalStatusKeys: inactiveKeys,
 		OriginID:           autopilotID,
 		ProjectID:          projectID,
 		NormalizedTitle:    normalizedTitle,

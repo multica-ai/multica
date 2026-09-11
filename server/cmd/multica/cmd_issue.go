@@ -223,7 +223,9 @@ var issueStatusCmd = &cobra.Command{
 	Long: "Change an issue's status. The argument is a status KEY, not its display name.\n" +
 		"Built-in keys: backlog, todo, in_progress, in_review, done, blocked, cancelled.\n" +
 		"A workspace may define custom statuses on top of these; their keys are shown in\n" +
-		"Workspace Settings > Issue Statuses, and an unknown value errors with the full list.",
+		"Workspace Settings > Issue Statuses, and an unknown value errors with the full list.\n" +
+		"The key triage is reserved for issues waiting in Triage: it cannot be set here,\n" +
+		"and an issue in Triage keeps its status until it is accepted.",
 	Args: exactArgs(2),
 	RunE: runIssueStatus,
 }
@@ -391,7 +393,9 @@ var issueSearchCmd = &cobra.Command{
 // validIssueStatuses are the 7 BUILT-IN status keys, present in every
 // workspace. Since MUL-6243 a workspace may define additional custom statuses,
 // so this is the list shown in help text and error messages, not the set of
-// accepted values — see validateIssueStatus.
+// accepted values — see validateIssueStatus. The reserved `triage` key is
+// left out on purpose: it is readable (`issue list --status triage`) but never
+// a value a write may set.
 var validIssueStatuses = []string{
 	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
 }
