@@ -3,6 +3,7 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -221,6 +222,104 @@ func TestDshDesktopBundlePathsFor_ShimOutranksTheNodeScript(t *testing.T) {
 		if strings.HasSuffix(path, ".js") {
 			t.Errorf("windows candidate %q cannot be spawned there", path)
 		}
+	}
+}
+
+// The pnpm `dsh plugin` forwards to lives under runtime-commands in the app's
+// own data directory — and the two platforms disagree about the shape. macOS
+// 2.0.5 keeps a flat runtime-commands/bin; a Windows install keeps
+// runtime-commands/generations/<id>/bin. Composing either path would have left
+// the other reporting "pnpm not found on PATH" on exactly the machines the
+// automatic install exists for, so both are searched.
+func TestDshPluginPathDirs_FindsBothLayouts(t *testing.T) {
+	t.Setenv(dshPluginPathEnv, "")
+
+	t.Run("generational", func(t *testing.T) {
+		home := t.TempDir()
+		appData := dshDesktopAppDataDir(runtime.GOOS, os.Getenv, home)
+		if appData == "" {
+			t.Skip("no app-data location on this platform")
+		}
+		want := mkShim(t, filepath.Join(appData, "runtime-commands", "generations", "gen-1"), time.Now())
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+
+		got := dshPluginPathDirs()
+		if len(got) == 0 || got[0] != filepath.Join(want, "bin") {
+			t.Fatalf("dirs = %v, want %q first", got, filepath.Join(want, "bin"))
+		}
+	})
+
+	t.Run("flat", func(t *testing.T) {
+		home := t.TempDir()
+		appData := dshDesktopAppDataDir(runtime.GOOS, os.Getenv, home)
+		if appData == "" {
+			t.Skip("no app-data location on this platform")
+		}
+		flat := filepath.Join(appData, "runtime-commands", "bin")
+		if err := os.MkdirAll(flat, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+
+		got := dshPluginPathDirs()
+		if len(got) != 1 || got[0] != flat {
+			t.Fatalf("dirs = %v, want exactly %q", got, flat)
+		}
+	})
+}
+
+// An explicit override is the whole answer. An operator who pinned a directory
+// that does not exist is trying to bypass the bundled pnpm, and silently
+// falling back to it would defeat that — they should get "pnpm not found".
+func TestDshPluginPathDirs_OverrideWins(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(dshPluginPathEnv, dir)
+	if got := dshPluginPathDirs(); len(got) != 1 || got[0] != dir {
+		t.Fatalf("dirs = %v, want exactly %q", got, dir)
+	}
+
+	t.Setenv(dshPluginPathEnv, filepath.Join(dir, "does-not-exist"))
+	if got := dshPluginPathDirs(); len(got) != 0 {
+		t.Fatalf("dirs = %v, want none for an override that does not exist", got)
+	}
+}
+
+// An upgrade writes a new generation and can leave the old one behind; the
+// newest is the one the app is driving. The flat directory ranks last, because
+// a host holding both is one where the generational layout is the newer.
+func TestDshDesktopBinDirs_Ordering(t *testing.T) {
+	root := t.TempDir()
+	mkShim(t, filepath.Join(root, "old"), time.Now().Add(-72*time.Hour))
+	current := mkShim(t, filepath.Join(root, "current"), time.Now())
+	flat := filepath.Join(root, "bin")
+	if err := os.MkdirAll(flat, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := dshDesktopBinDirs(root)
+	want := []string{
+		filepath.Join(current, "bin"),
+		filepath.Join(root, "old", "bin"),
+		flat,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("dirs =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	// A payload with no bin, a stray file, and a missing root offer nothing.
+	if err := os.MkdirAll(filepath.Join(root, "half-extracted"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if len(dshDesktopBinDirs(root)) != 3 {
+		t.Errorf("a payload without a bin directory was offered: %v", dshDesktopBinDirs(root))
+	}
+	if got := dshDesktopBinDirs(filepath.Join(root, "nope")); len(got) != 0 {
+		t.Errorf("dirs = %v for a missing root, want none", got)
+	}
+	if got := dshDesktopBinDirs(""); len(got) != 0 {
+		t.Errorf("dirs = %v for an empty root, want none", got)
 	}
 }
 

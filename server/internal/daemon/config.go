@@ -1110,78 +1110,125 @@ var dshDesktopShimTiers = []struct {
 	{dir: "cli"},
 }
 
+// dshBinDir is one generated command directory plus the keys that order it.
+type dshBinDir struct {
+	path    string
+	name    string
+	modTime time.Time
+}
+
+// dshDesktopBinDirsIn collects the bin directories under root, unsorted.
+//
+// DSH Desktop lays its generated command directories out in two shapes, and a
+// host can be on either depending on which version generated them:
+//
+//	<root>/bin            — flat
+//	<root>/<id>/bin       — one payload directory per generation
+//
+// The payload id is a content hash, sometimes with a generation uuid appended,
+// so it is enumerated rather than composed. Only directories holding a bin are
+// accepted, so a stray file or a half-extracted download is skipped rather than
+// turned into a candidate.
+//
+// The flat directory carries a zero timestamp, which sorts it last: a host that
+// has both shapes is one where the generational layout is the newer of the two.
+func dshDesktopBinDirsIn(root string) []dshBinDir {
+	if root == "" {
+		return nil
+	}
+	var dirs []dshBinDir
+	if entries, err := os.ReadDir(root); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() || entry.Name() == "bin" {
+				continue
+			}
+			binDir := filepath.Join(root, entry.Name(), "bin")
+			if !isExistingDir(binDir) {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			dirs = append(dirs, dshBinDir{path: binDir, name: entry.Name(), modTime: info.ModTime()})
+		}
+	}
+	if flat := filepath.Join(root, "bin"); isExistingDir(flat) {
+		dirs = append(dirs, dshBinDir{path: flat, name: ""})
+	}
+	return dirs
+}
+
+// sortDshBinDirs orders generated directories newest first.
+//
+// This is what protects a host mid-upgrade: a new payload is written and the
+// previous one can be left in place, and the newest is the one the app is
+// actually driving. The name breaks ties, because two payloads written in the
+// same filesystem timestamp tick must still produce one stable answer rather
+// than whatever ReadDir returned — and because the answer feeds PATH and
+// process launches, an order that changes between rounds is a daemon that picks
+// a different CLI each time.
+func sortDshBinDirs(dirs []dshBinDir) {
+	sort.SliceStable(dirs, func(i, j int) bool {
+		if !dirs[i].modTime.Equal(dirs[j].modTime) {
+			return dirs[i].modTime.After(dirs[j].modTime)
+		}
+		return dirs[i].name > dirs[j].name
+	})
+}
+
+// dshDesktopBinDirs returns the bin directories under root, newest first.
+func dshDesktopBinDirs(root string) []string {
+	dirs := dshDesktopBinDirsIn(root)
+	sortDshBinDirs(dirs)
+	paths := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		paths = append(paths, dir.path)
+	}
+	return paths
+}
+
+// isExistingDir reports whether path is a directory that exists.
+func isExistingDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 // dshDesktopShimCandidates expands the generated CLI payloads under appData
 // into launchable candidate paths.
 //
-// The payload directory is a content hash — and, under host-commands, a hash
-// plus a generation uuid — so it cannot be composed, only enumerated. An
-// upgrade writes a new payload and can leave the previous one in place, which
-// is why order matters within a tier: the newest payload is the one the app is
-// actually driving, and offering an abandoned one first would register a CLI
-// the user has already replaced.
-//
-// Directories are the only thing accepted, and only when they hold a bin
-// subdirectory, so a stray file or a half-extracted download is skipped rather
-// than turned into a candidate. Modification time orders them; the name breaks
-// ties, because two payloads written in the same filesystem timestamp tick must
-// still produce one stable answer rather than whatever ReadDir returned.
+// Tier order is applied first and payload age second, so a working shim in the
+// preferred tier always outranks a newer one in the fallback tier. Within a
+// tier every root is pooled before sorting, so the newest generation wins even
+// when it belongs to a different DSH profile than the one ReadDir happened to
+// return first.
 func dshDesktopShimCandidates(appData string, names []string) []string {
 	if appData == "" || len(names) == 0 {
 		return nil
 	}
-	type payload struct {
-		tier    int
-		path    string
-		name    string
-		modTime time.Time
-	}
-	var payloads []payload
-	for tier, spec := range dshDesktopShimTiers {
-		for _, root := range dshDesktopPayloadRoots(filepath.Join(appData, spec.dir), spec.profiled) {
-			entries, err := os.ReadDir(root)
-			if err != nil {
-				continue
-			}
-			for _, entry := range entries {
-				if !entry.IsDir() {
-					continue
-				}
-				dir := filepath.Join(root, entry.Name())
-				if info, err := os.Stat(filepath.Join(dir, "bin")); err != nil || !info.IsDir() {
-					continue
-				}
-				info, err := entry.Info()
-				if err != nil {
-					continue
-				}
-				payloads = append(payloads, payload{
-					tier: tier, path: dir, name: entry.Name(), modTime: info.ModTime(),
-				})
-			}
-		}
-	}
-	sort.Slice(payloads, func(i, j int) bool {
-		if payloads[i].tier != payloads[j].tier {
-			return payloads[i].tier < payloads[j].tier
-		}
-		if !payloads[i].modTime.Equal(payloads[j].modTime) {
-			return payloads[i].modTime.After(payloads[j].modTime)
-		}
-		return payloads[i].name > payloads[j].name
-	})
-
 	var paths []string
-	for _, p := range payloads {
-		for _, name := range names {
-			paths = append(paths, filepath.Join(p.path, "bin", name))
+	for _, spec := range dshDesktopShimTiers {
+		var tierDirs []dshBinDir
+		for _, root := range dshDesktopPayloadRoots(filepath.Join(appData, spec.dir), spec.profiled) {
+			tierDirs = append(tierDirs, dshDesktopBinDirsIn(root)...)
+		}
+		sortDshBinDirs(tierDirs)
+		for _, dir := range tierDirs {
+			for _, name := range names {
+				paths = append(paths, filepath.Join(dir.path, name))
+			}
 		}
 	}
 	return paths
 }
 
-// dshDesktopPayloadRoots resolves one tier to the directories that hold its
-// payloads. A profiled tier has a per-profile level above them whose names
-// belong to the user, so it is enumerated; an unprofiled tier is the root.
+// dshDesktopPayloadRoots resolves one tier to the directories whose contents
+// dshDesktopBinDirsIn enumerates.
+//
+// A profiled tier keys its payloads by DSH profile and puts them under a
+// `generations` directory (host-commands/<profile>/generations). The profile
+// names belong to the user, so that level is enumerated; an unprofiled tier
+// holds its payloads directly.
 func dshDesktopPayloadRoots(dir string, profiled bool) []string {
 	if !profiled {
 		return []string{dir}
@@ -1196,7 +1243,7 @@ func dshDesktopPayloadRoots(dir string, profiled bool) []string {
 			continue
 		}
 		generations := filepath.Join(dir, entry.Name(), "generations")
-		if info, err := os.Stat(generations); err == nil && info.IsDir() {
+		if isExistingDir(generations) {
 			roots = append(roots, generations)
 		}
 	}

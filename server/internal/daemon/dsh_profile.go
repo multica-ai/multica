@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -101,27 +102,40 @@ func dshProfileBundleSpecs() []string {
 }
 
 // dshPluginPathDirs returns the directories that may hold the pnpm `dsh plugin`
-// forwards to, most specific first. Only directories that exist are returned:
+// forwards to, newest first. Only directories that exist are returned:
 // prepending a miss to PATH buys nothing and makes the environment harder to
 // read in a failure report.
+//
+// DSH Desktop keeps its private pnpm shim under runtime-commands in its own
+// per-user data directory, on both platforms — the daemon inherits no path to
+// it, and without this the install fails with "pnpm not found on PATH" on
+// exactly the machines the automatic install is for.
+//
+// The layout is not the same on both, which is why this shares the enumerator
+// with CLI-shim discovery rather than composing a path: macOS 2.0.5 keeps a
+// flat runtime-commands/bin, while a Windows install keeps
+// runtime-commands/generations/<id>/bin. Both shapes, and both levels, are
+// searched, so neither is a version this daemon silently stops supporting.
 func dshPluginPathDirs() []string {
-	var candidates []string
+	// An explicit override is the whole answer: an operator who pinned a
+	// directory that does not exist should get "pnpm not found", not a silent
+	// fallback to a bundled one they were trying to bypass.
 	if override := strings.TrimSpace(os.Getenv(dshPluginPathEnv)); override != "" {
-		candidates = append(candidates, override)
-	} else if home, err := os.UserHomeDir(); err == nil {
-		// DSH Desktop keeps its private pnpm shim here. macOS-only because the
-		// desktop app ships only for macOS today; other platforms (and
-		// non-standard installs) are what dshPluginPathEnv overrides.
-		candidates = append(candidates, filepath.Join(home,
-			"Library", "Application Support", "DSH Desktop", "runtime-commands", "bin"))
-	}
-	var dirs []string
-	for _, dir := range candidates {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			dirs = append(dirs, dir)
+		if isExistingDir(override) {
+			return []string{override}
 		}
+		return nil
 	}
-	return dirs
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	appData := dshDesktopAppDataDir(runtime.GOOS, os.Getenv, home)
+	if appData == "" {
+		return nil
+	}
+	root := filepath.Join(appData, "runtime-commands")
+	return append(dshDesktopBinDirs(filepath.Join(root, "generations")), dshDesktopBinDirs(root)...)
 }
 
 // dshPluginEnv copies the daemon's environment with dshPluginPathDirs prepended
