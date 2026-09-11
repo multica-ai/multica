@@ -232,7 +232,9 @@ export function IssueStatusesTab() {
             <AlertDialogDescription>{t(($) => $.issue_statuses.built_in_dialog.description)}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogAction>{t(($) => $.issue_statuses.built_in_dialog.confirm)}</AlertDialogAction>
+            <AlertDialogCancel variant="default">
+              {t(($) => $.issue_statuses.built_in_dialog.confirm)}
+            </AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

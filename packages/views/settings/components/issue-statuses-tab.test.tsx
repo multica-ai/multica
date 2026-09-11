@@ -2,7 +2,8 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { IssueStatusEntry } from "@multica/core/types";
 import en from "../../locales/en/settings.json";
 import { IssueStatusesTab } from "./issue-statuses-tab";
@@ -268,7 +269,12 @@ describe("IssueStatusesTab", () => {
     ]);
   });
 
-  it.each(["edit", "archive"] as const)("explains the built-in restriction on %s", async (action) => {
+  it.each([
+    ["edit", "click"], ["archive", "click"],
+    ["edit", "enter"], ["archive", "enter"],
+    ["edit", "escape"], ["archive", "escape"],
+  ] as const)("dismisses the built-in %s notice using %s", async (action, dismiss) => {
+    const user = userEvent.setup();
     catalog = [BUILT_IN_IN_REVIEW];
     render(<IssueStatusesTab />);
     const trigger = screen.getByLabelText(
@@ -281,5 +287,16 @@ describe("IssueStatusesTab", () => {
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText(en.issue_statuses.built_in_dialog.description)).toBeInTheDocument();
     expect(screen.queryByLabelText(en.issue_statuses.editor.name)).toBeNull();
+    const close = within(dialog).getByRole("button", { name: en.issue_statuses.built_in_dialog.confirm });
+    if (dismiss === "click") {
+      await user.click(close);
+    } else {
+      close.focus();
+      await user.keyboard(dismiss === "enter" ? "{Enter}" : "{Escape}");
+    }
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    // Closing must release the modal layer, not leave Settings inaccessible.
+    await user.click(screen.getByLabelText(`${en.issue_statuses.add}: ${en.issue_statuses.category_labels.started}`));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 });
