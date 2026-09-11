@@ -1,47 +1,40 @@
 name: UI performance report
 
-# Reports only. This workflow is deliberately not part of the required
-# `frontend` gate: one sample per ref cannot separate a small regression from
-# machine noise, so a number here is something a reviewer reads, not something
-# that blocks a merge. Wire it into the gate only after the noise floor has
-# been calibrated on real CI hardware.
+# Manual only. This builds the frontend twice — about five minutes of runner
+# time on CI — to produce one sample per ref, which is a report and not a
+# verdict. Running it on every frontend PR would spend that on reports nobody
+# asked for, and a job that is not required still takes a runner and a
+# concurrency slot.
+#
+# The routine guard is the component test #8260 added, which pins the exact
+# failure mode behind MUL-7227 and runs in the normal suite. Run this when a
+# change touches summary animation, long lists, transcript rendering or global
+# styles, and attach the report to the PR.
 on:
-  pull_request:
-    paths:
-      - "apps/web/**"
-      - "packages/core/**"
-      - "packages/views/**"
-      - "packages/ui/**"
-      - "e2e/perf/**"
-      - "playwright.perf.config.ts"
-      - "scripts/perf-compare.mjs"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "turbo.json"
-      - ".github/workflows/ui-performance.yml"
   workflow_dispatch:
     inputs:
       base:
-        description: "Base ref to measure"
+        description: "Base ref (branch, tag or SHA)"
         required: true
       head:
-        description: "Head ref to measure"
+        description: "Head ref (branch, tag or SHA)"
         required: true
 
-# Read-only, and `pull_request` rather than `pull_request_target`: this builds
-# and runs the PR's own code, so it must never hold write access or secrets.
+# Read-only and without secrets: it builds and runs whatever refs it is given.
 permissions:
   contents: read
 
 concurrency:
-  group: ui-performance-${{ github.event.pull_request.number || github.ref }}
+  group: ui-performance-${{ inputs.base }}-${{ inputs.head }}
   cancel-in-progress: true
 
 jobs:
   compare:
-    # One scenario, two builds, measured one after the other on this runner.
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Measured on CI: ~340s for the comparison itself, of which ~292s is the
+    # two builds and ~26s the two measurements, plus setup. Fifteen minutes
+    # leaves room for build variance and still stops a run that has hung.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,21 +55,8 @@ jobs:
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Resolve refs
-        id: refs
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "base=${{ inputs.base }}" >> "$GITHUB_OUTPUT"
-            echo "head=${{ inputs.head }}" >> "$GITHUB_OUTPUT"
-          else
-            # Pin the SHAs the PR actually names. `main` moves, and the default
-            # merge checkout is neither of the two commits under comparison.
-            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
-            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Compare
-        run: node scripts/perf-compare.mjs --base "${{ steps.refs.outputs.base }}" --head "${{ steps.refs.outputs.head }}" --out perf-report
+        run: node scripts/perf-compare.mjs --base "${{ inputs.base }}" --head "${{ inputs.head }}" --out perf-report
 
       - name: Publish to the job summary
         if: always()

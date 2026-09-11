@@ -33,10 +33,32 @@ node scripts/perf-compare.mjs --base origin/main --head HEAD --out perf-report
 ```
 
 The comparison needs Node, pnpm and Chromium. It writes `comparison.json` and
-`comparison.md`, and cleans up the worktrees and servers it created.
+`comparison.md`. Each side stops its server, waits for it to exit and removes
+its worktree before the next side starts, and the script exits on its own on
+success, on failure and on cancellation.
 
 The ordinary e2e suite ignores this directory; it needs a production build and
 a machine that is not busy doing anything else.
+
+## When to run it
+
+Nothing runs this automatically. The routine guard is the component test from
+#8260, which pins the exact failure mode behind MUL-7227 — a streamed message
+replacing the summary's DOM node — and runs with the normal suite.
+
+Run the comparison yourself, or through the **UI performance report** workflow
+(`workflow_dispatch`, base and head refs as inputs), when a change touches
+summary animation, long lists, transcript rendering or global styles — and
+attach the report to the PR. The cost of doing it by hand instead of on every
+PR is that a regression outside those areas will not be caught automatically.
+
+## What it costs
+
+On a GitHub-hosted `ubuntu-latest` runner the comparison took 340.5 s: 291.5 s
+for the two production builds, 26 s for the two measurements, the rest install
+and startup — plus checkout, dependency and Chromium setup around it. The job is
+capped at 15 minutes. Locally, a repeat comparison whose builds come out of the
+turbo cache takes under a minute; the report says when a build was restored.
 
 ## Reading the result
 
@@ -51,7 +73,10 @@ the UI, and a composer that did not end up holding every character. An empty
 page types very quickly.
 
 One sample per ref. Read a small difference as noise until a second run says
-otherwise; the observed spread on the fixed build is around 1%.
+otherwise. Locally the spread across three runs of one build was around 1%; on
+CI, comparing two refs with no product difference between them came out 2%
+apart on typing and on style recalculation. A threshold needs more CI samples
+than that before it can be trusted.
 
 ## Changing the fixture
 
