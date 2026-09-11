@@ -9,7 +9,7 @@ export {
   type IssueStatusCatalog,
 } from "./queries";
 export { compareIssueStatusEntries } from "./queries";
-export { issueStatusArchiveConflictCount, prepareIssueStatusList } from "./archive";
+export { issueStatusArchiveConflictCount, createIssueStatusListStore } from "./archive";
 export { useIssueStatuses } from "./hooks";
 export {
   useCreateIssueStatus,

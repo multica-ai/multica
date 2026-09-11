@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import type { Issue } from "@multica/core/types";
+import type { Issue, IssueStatusEntry } from "@multica/core/types";
 import { groupIssuesByStatus } from "./group-issues-by-status";
 
 function issue(id: string, status: string, statusCategory?: string): Issue {
@@ -81,5 +81,28 @@ describe("groupIssuesByStatus", () => {
 
   it("returns nothing for an empty list", () => {
     expect(groupIssuesByStatus([])).toEqual([]);
+  });
+});
+
+describe("status grouping order", () => {
+  it("honors positions for custom and built-in rows inside fixed categories", () => {
+    const entries = [
+      { key: "qa", category: "started", position: -1 },
+      { key: "in_progress", category: "started", position: 20 },
+      { key: "blocked", category: "started", position: 10 },
+      { key: "in_review", category: "started", position: 0 },
+      { key: "shipped", category: "done", position: -100 },
+      { key: "todo", category: "unstarted", position: 0 },
+    ] as IssueStatusEntry[];
+    const issues = entries.map((entry) => ({ status: entry.key })) as Issue[];
+    expect(groupIssuesByStatus(issues, entries).map((section) => section.status)).toEqual([
+      "todo", "qa", "in_review", "blocked", "in_progress", "shipped",
+    ]);
+  });
+  it("retains seeded built-in order for tied positions and keeps unknown keys visible", () => {
+    const issues = ["blocked", "in_review", "in_progress", "todo", "backlog", "unknown"].map((status) => ({ status })) as Issue[];
+    expect(groupIssuesByStatus(issues).map((section) => section.status)).toEqual([
+      "backlog", "todo", "unknown", "in_progress", "in_review", "blocked",
+    ]);
   });
 });

@@ -24,7 +24,10 @@ import type {
   ListIssuesParams,
   ListIssuesResponse,
 } from "@multica/core/types";
-import { IssueSurface } from "./issue-surface";
+import { IssueSurface, IssueSurfaceWithStore } from "./issue-surface";
+import { createIssueStatusListStore } from "@multica/core/issue-statuses";
+import { baselineFromQuery } from "@multica/core/issue-views/baseline";
+import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { statusTableMethodsFromLegacy } from "./status-table-test-api";
 
 // Mutable so tests can simulate a workspace switch — the workspace layout
@@ -183,6 +186,24 @@ describe("IssueSurface — scope switch loading semantics", () => {
     qc.clear();
     pruneIssueSurfaceViewStates([]);
     vi.restoreAllMocks();
+  });
+
+  it("renders an exact-status transient list without reading or changing the active saved view", async () => {
+    const stored = getIssueSurfaceViewStore("workspace:all");
+    stored.setState({ statusFilters: ["cancelled"], showSubIssues: false });
+    const previous = stored.getState();
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "saved-view");
+    const store = createIssueStatusListStore("todo");
+    const { unmount } = render(<QueryClientProvider client={qc}>
+      <IssueSurfaceWithStore store={store} baseline={baselineFromQuery({ statusFilters: ["todo"] })}
+        scope={{ type: "workspace", actorKind: "all" }} modes={["list"]} renderHeader={() => null} batchToolbar="never" />
+    </QueryClientProvider>);
+    await screen.findByText("P1 issue");
+    expect(store.getState().statusFilters).toEqual(["todo"]);
+    unmount();
+    expect(stored.getState()).toBe(previous);
+    expect(useActiveIssueViewStore.getState().active["ws-1:workspace"]).toBe("saved-view");
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", null);
   });
 
   it("shows loading — not the previous project's issues — while the next project is fetching", async () => {

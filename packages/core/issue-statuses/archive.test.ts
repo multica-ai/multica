@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/client";
-import { issueStatusArchiveConflictCount, prepareIssueStatusList } from "./archive";
+import { issueStatusArchiveConflictCount, createIssueStatusListStore } from "./archive";
 import { getIssueSurfaceViewStore } from "../issues/stores/surface-view-store";
 import { useActiveIssueViewStore } from "../issue-views/active-view-store";
 import { useIssuesScopeStore } from "../issues/stores/issues-scope-store";
@@ -24,12 +24,16 @@ describe("archive precondition", () => {
     useActiveIssueViewStore.getState().setActive("ws:workspace", "v1");
     useActiveIssueViewStore.getState().setActive("other:workspace", "v2");
     useIssuesScopeStore.getState().setScope("issues", "agents");
-    prepareIssueStatusList("ws", "shipped");
-    expect(store.getState()).toMatchObject({ statusFilters: ["shipped"], priorityFilters: [], projectFilters: [], dateFilter: null,
+    const previous = store.getState();
+    const inspection = createIssueStatusListStore("shipped");
+    expect(inspection.getState()).toMatchObject({ statusFilters: ["shipped"], priorityFilters: [], projectFilters: [], dateFilter: null,
       hiddenStatuses: [], listCollapsedStatuses: [], showSubIssues: true, agentRunningFilter: false, viewMode: "list" });
-    expect(useActiveIssueViewStore.getState().active["ws:workspace"]).toBeUndefined();
+    inspection.getState().toggleListCollapsed("shipped");
+    expect(store.getState()).toBe(previous);
+    expect(createIssueStatusListStore("shipped").getState().listCollapsedStatuses).toEqual([]);
+    expect(useActiveIssueViewStore.getState().active["ws:workspace"]).toBe("v1");
     expect(useActiveIssueViewStore.getState().active["other:workspace"]).toBe("v2");
-    expect(useIssuesScopeStore.getState().scopes.issues).toBe("all");
+    expect(useIssuesScopeStore.getState().scopes.issues).toBe("agents");
     expect(saved.getState().statusFilters).toEqual(["backlog"]);
   });
 });

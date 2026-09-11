@@ -348,7 +348,7 @@ function SectionHeader({
   return (
     <View className="flex-row items-center gap-2 px-4 py-2 bg-background">
       {/* Category keys resolve to their canonical lifecycle glyph. */}
-      <StatusIcon status={status} category={catalog.categoryOf(status)} color={catalog.colorOf(status)} size={14} />
+      <StatusIcon status={status} category={catalog.categoryOf(status)} icon={catalog.iconOf(status)} color={catalog.colorOf(status)} size={14} />
       <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
         {catalog.labelOf(status)}
       </Text>

@@ -80,6 +80,7 @@ type resolvedIssueTableGroup struct {
 	// statusCustomKeys is the CUSTOM key -> category map behind
 	// statusCategoryExpr. Empty for a workspace with no custom statuses.
 	statusCustomKeys map[string]string
+	statusOrder      []string
 }
 
 // statusCategoryExpr builds the scalar `status key -> category` rewrite used as
@@ -180,20 +181,25 @@ func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request,
 		}
 		return resolvedIssueTableGroup{kind: "none"}, true
 	case "status":
-		customKeys, err := issuestatus.CustomKeyCategories(
-			r.Context(),
-			h.issueStatusCatalog(),
-			workspaceID,
-		)
+		entries, err := h.Queries.ListIssueStatusEntries(r.Context(), db.ListIssueStatusEntriesParams{
+			WorkspaceID: workspaceID, IncludeArchived: true,
+		})
 		if err != nil {
 			slog.Warn("resolve status group order failed", append(logger.RequestAttrs(r), "error", err)...)
 			writeIssueTableQueryFailure(w, r, "failed to resolve table group")
 			return resolvedIssueTableGroup{}, false
 		}
+		customKeys := make(map[string]string)
+		for _, entry := range entries {
+			if !entry.IsSystem {
+				customKeys[entry.Key] = entry.Category
+			}
+		}
 		return resolvedIssueTableGroup{
 			kind:             "status",
 			groupExpr:        "i.status",
 			statusCustomKeys: customKeys,
+			statusOrder:      issueTableStatusOrder(entries),
 		}, true
 	case "status_category":
 		// Retained category-grouping API for installed clients. New task views
@@ -408,16 +414,54 @@ func (group resolvedIssueTableGroup) sortExpression() string {
 	return "group_value"
 }
 
+// Match the catalog's category / position / built-in / key ordering, including
+// fallback built-ins before a legacy workspace's catalog has been seeded.
+func issueTableStatusOrder(entries []db.IssueStatus) []string {
+	rows := append([]db.IssueStatus(nil), entries...)
+	seen := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		seen[row.Key] = true
+	}
+	builtIns := []string{"backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"}
+	builtInRank := make(map[string]int)
+	for i, key := range builtIns {
+		builtInRank[key] = i
+		if !seen[key] {
+			category, _ := issuestatus.CategoryForBehavior(key)
+			rows = append(rows, db.IssueStatus{Key: key, Category: category, IsSystem: true})
+		}
+	}
+	categoryRank := map[string]int{"unstarted": 0, "started": 1, "done": 2, "closed": 3}
+	sort.Slice(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
+		if categoryRank[a.Category] != categoryRank[b.Category] {
+			return categoryRank[a.Category] < categoryRank[b.Category]
+		}
+		if a.Position != b.Position {
+			return a.Position < b.Position
+		}
+		if a.IsSystem != b.IsSystem {
+			return a.IsSystem
+		}
+		if a.IsSystem && builtInRank[a.Key] != builtInRank[b.Key] {
+			return builtInRank[a.Key] < builtInRank[b.Key]
+		}
+		return a.Key < b.Key
+	})
+	keys := make([]string, len(rows))
+	for i, row := range rows {
+		keys[i] = row.Key
+	}
+	return keys
+}
+
 func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) string {
 	if group.kind == "compound" && group.primary != nil {
 		return group.primary.orderExpression(addArg)
 	}
 	switch group.kind {
 	case "status":
-		// Preserve fixed-key ordering within lifecycle groups. Custom keys sort
-		// beside their lifecycle's ordinary built-in without inheriting behavior.
-		categoryExpr := statusValueCategoryExpr("group_value", group.statusCustomKeys, addArg)
-		return "CASE group_value WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'blocked' THEN 4 WHEN 'done' THEN 5 WHEN 'cancelled' THEN 6 ELSE CASE " + categoryExpr + " WHEN 'unstarted' THEN 1 WHEN 'started' THEN 2 WHEN 'done' THEN 5 WHEN 'closed' THEN 6 ELSE 7 END END"
+		return fmt.Sprintf("COALESCE(array_position(%s::text[], group_value), 100000)", addArg(group.statusOrder))
 	case "status_category":
 		return statusOrderExpression("group_value")
 	case "assignee":

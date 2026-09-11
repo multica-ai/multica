@@ -4,11 +4,41 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
+
+func TestIssueTableConcreteStatusCatalogOrder(t *testing.T) {
+	projectID, customKey := seedStatusCategoryFixture(t)
+	for _, position := range []int{-100, 100} {
+		if _, err := testPool.Exec(context.Background(), `UPDATE issue_status SET position = $3 WHERE workspace_id = $1 AND key = $2`, testWorkspaceID, customKey, position); err != nil {
+			t.Fatal(err)
+		}
+		request := issueTableGroupsRequest{Query: statusCategoryQuery(projectID), Group: issueTableGroupSpec{Kind: "status"}, Page: issueTablePageRequest{Limit: 1}}
+		var got []string
+		for page := 0; page < 4; page++ {
+			var response issueTableGroupsResponse
+			testutil.Call(t, testHandler.ListIssueTableGroups, newRequest(http.MethodPost, "/api/issues/table/groups", request)).Want(http.StatusOK).JSON(&response)
+			for _, group := range response.Groups {
+				got = append(got, group.Value.Status)
+			}
+			if response.NextCursor == nil {
+				break
+			}
+			request.Page.Cursor = response.NextCursor
+		}
+		want := []string{"todo", customKey, "in_review"}
+		if position > 0 {
+			want = []string{"todo", "in_review", customKey}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("position %d: groups = %v, want %v", position, got, want)
+		}
+	}
+}
 
 func TestIssueTableCompoundConcreteCustomStatuses(t *testing.T) {
 	projectID, customKey := seedStatusCategoryFixture(t)

@@ -514,7 +514,7 @@ export const ListIssueStatusesResponseSchema = z.object({
   total: z.number().default(0),
 }).loose();
 
-// The fallback carries the five lifecycle categories. Concrete built-in status
+// The fallback carries the four lifecycle categories. Concrete built-in status
 // keys remain available through the status configuration.
 export const EMPTY_LIST_ISSUE_STATUSES_RESPONSE: ListIssueStatusesResponse = {
   statuses: [],

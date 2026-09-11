@@ -33,7 +33,7 @@ export type RunConfirmIntent =
  * agent, so an unresolvable key has to stay unresolved and let the caller fail
  * safe. (MUL-6463)
  *
- * Resolution order mirrors the server (`issuestatus.Effective`): a category the
+ * Resolves lifecycle classification, not special built-in behavior: a category the
  * payload already carries wins, a BUILT-IN key maps to its lifecycle category, and only a
  * custom key needs the workspace catalog.
  */
@@ -59,13 +59,12 @@ const NEVER_STARTS: IssueStatusCategory[] = ["done", "closed"];
  * routes on one answer instead of re-deriving it (MUL-6463).
  *
  * - **assign**: giving the issue an agent/squad owner. Skipped only when the
- *   issue is KNOWN to be parked, because assigning into the backlog category
+ *   issue is on the fixed backlog key, because assigning into that status
  *   never starts a run (`server/internal/service/issue_trigger.go`) and the
  *   dialog would promise something that cannot happen.
- * - **promote**: moving an already-owned issue out of the backlog category.
+ * - **promote**: moving an already-owned issue out of the fixed backlog status.
  *   That status change alone starts the run (`RunSourceStatus`), so it earns
- *   the same dialog — for built-in `todo` and every custom Todo-category
- *   status alike.
+ *   the same dialog when the target is not terminal, including custom statuses.
  *
  * Unresolvable categories fail toward confirming: a dialog the user dismisses
  * costs a click, a silent start costs an unwanted agent run.

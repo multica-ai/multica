@@ -15,12 +15,11 @@ const createMutate = vi.hoisted(() => vi.fn());
 const updateMutate = vi.hoisted(() => vi.fn());
 const archiveMutate = vi.hoisted(() => vi.fn());
 const navigatePush = vi.hoisted(() => vi.fn());
-const prepareList = vi.hoisted(() => vi.fn());
 vi.mock("@multica/core/paths", () => ({ useWorkspacePaths: () => ({ issues: () => "/dev/issues" }) }));
 vi.mock("../../navigation", () => ({ useNavigation: () => ({ push: navigatePush }) }));
-vi.mock("@multica/core/issue-statuses", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@multica/core/issue-statuses")>()),
-  prepareIssueStatusList: prepareList,
+vi.mock("../../issues/surface/issue-surface", () => ({
+  IssueSurfaceWithStore: ({ store, scope }: { store: { getState: () => { statusFilters: string[] } }; scope: { actorKind: string } }) =>
+    <div data-testid="inspection-list">{scope.actorKind}:{store.getState().statusFilters.join(",")}</div>,
 }));
 let catalog: IssueStatusEntry[] = [];
 let role: string = "owner";
@@ -100,7 +99,6 @@ afterEach(() => {
   updateMutate.mockClear();
   archiveMutate.mockReset();
   navigatePush.mockClear();
-  prepareList.mockClear();
   catalog = [];
   role = "owner";
 });
@@ -168,8 +166,8 @@ describe("IssueStatusesTab", () => {
     expect(within(dialog).getByText(/120/)).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: en.issue_statuses.archive_dialog.confirm })).toBeNull();
     await userEvent.click(within(dialog).getByRole("button", { name: en.issue_statuses.archive_dialog.view_issues }));
-    expect(prepareList).toHaveBeenCalledWith("ws-1", "shipped");
-    expect(navigatePush).toHaveBeenCalledWith("/dev/issues");
+    expect(screen.getByTestId("inspection-list")).toHaveTextContent("all:shipped");
+    expect(navigatePush).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 
@@ -182,6 +180,40 @@ describe("IssueStatusesTab", () => {
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
     act(() => archiveMutate.mock.calls[0]![1].onSuccess());
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+  it("rechecks the server on retry and resets a conflict when reopened", async () => {
+    catalog = [entry({ key: "qa", name: "QA" })];
+    archiveMutate.mockImplementationOnce((_id, options) => options.onError(new ApiError("in use", 409, "Conflict", { code: "issue_status_in_use", issue_count: 2 })));
+    render(<IssueStatusesTab />);
+    const open = async () => {
+      await userEvent.click(screen.getByLabelText(en.issue_statuses.actions.open.replace("{{name}}", "QA")));
+      await userEvent.click(await screen.findByRole("menuitem", { name: en.issue_statuses.actions.archive }));
+    };
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: en.issue_statuses.archive_dialog.confirm }));
+    const retry = screen.getByRole("button", { name: en.issue_statuses.archive_dialog.retry });
+    expect(retry).toHaveClass("border");
+    await userEvent.click(retry);
+    expect(archiveMutate).toHaveBeenCalledTimes(2);
+    expect(archiveMutate.mock.calls[1]![0]).toBe("qa");
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: en.issue_statuses.archive_dialog.cancel }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    await open();
+    expect(screen.getByRole("button", { name: en.issue_statuses.archive_dialog.confirm })).toBeInTheDocument();
+    expect(screen.queryByText(en.issue_statuses.archive_dialog.in_use_title)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: en.issue_statuses.archive_dialog.confirm }));
+    act(() => archiveMutate.mock.calls[2]![1].onSuccess());
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("marks the status name as ordinary text that password managers should ignore", () => {
+    render(<IssueStatusesTab />);
+    fireEvent.click(screen.getByLabelText(`${en.issue_statuses.add}: ${en.issue_statuses.category_labels.started}`));
+    const input = screen.getByLabelText(en.issue_statuses.editor.name);
+    expect(input).toHaveAttribute("type", "text");
+    expect(input).toHaveAttribute("autocomplete", "off");
+    expect(input).toHaveAttribute("data-1p-ignore");
   });
   it("creates a status with independent shape and color", async () => {
     catalog = [BUILT_IN_IN_REVIEW];

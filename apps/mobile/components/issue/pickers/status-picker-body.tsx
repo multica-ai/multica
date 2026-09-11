@@ -53,7 +53,7 @@ export function StatusPickerBody({ value, onChange }: Props) {
               <StatusIcon
                 status={option.key}
                 category={option.category}
-                color={option.color}
+                icon={option.icon} color={option.color}
                 size={18}
               />
               <Text className="flex-1 text-base text-foreground">

@@ -51,6 +51,7 @@
       "save_failed": "状态保存失败。"
     },
     "archive_dialog": {
+      "retry": "重试归档",
       "title": "归档这个状态？",
       "description": "先将 \"{{name}}\" 中的所有任务移至其他状态。清空后才能归档，归档后将从看板和状态选项中移除。",
       "in_use_title": "先转移任务，再归档",

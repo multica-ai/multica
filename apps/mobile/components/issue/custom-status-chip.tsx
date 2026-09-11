@@ -28,7 +28,7 @@ export function CustomStatusChip({
       <StatusIcon
         status={status}
         category={catalog.categoryOf(status)}
-        color={entry.color}
+        icon={entry.icon} color={entry.color}
         size={10}
       />
       <Text className="text-[10px] text-muted-foreground shrink" numberOfLines={1}>

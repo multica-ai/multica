@@ -23,7 +23,7 @@ import type {
 } from "@multica/core/types";
 
 /**
- * The 5 categories in canonical display order. Mirrors `ALL_STATUSES` in
+ * The four categories in canonical display order. Mirrors `ALL_STATUSES` in
  * packages/core/issues/config/status.ts.
  */
 export const STATUS_CATEGORIES: IssueStatusCategory[] = [
@@ -234,6 +234,7 @@ export interface IssueStatusCatalog {
   entryOf: (statusKey: string) => IssueStatusEntry | undefined;
   /** See {@link issueStatusColor} — null keeps the category's token colour. */
   colorOf: (statusKey: string) => string | null;
+  iconOf: (statusKey: string) => string | null;
   /** ACTIVE statuses in one category, in display order. */
   inCategory: (category: IssueStatusCategory) => IssueStatusEntry[];
   /** True once the catalog has loaded; false while it is still in flight. */
@@ -263,6 +264,7 @@ export function buildIssueStatusCatalog(
     },
     entryOf: (statusKey) => byKey.get(statusKey),
     colorOf: (statusKey) => issueStatusColor(byKey.get(statusKey)),
+    iconOf: (statusKey) => byKey.get(statusKey)?.icon ?? null,
     labelOf: (statusKey) => {
       // Built-in first, so a workspace that never opened status settings reads
       // exactly as it did before the catalog existed.
@@ -297,8 +299,24 @@ export function isCustomStatus(
   return entry.is_system !== true && !isBuiltInIssueStatus(statusKey);
 }
 
+const ICON_STATUS: Record<string, BuiltInIssueStatus> = {
+  dotted: "backlog", circle: "todo", half: "in_progress", three_quarters: "in_review",
+  check: "done", slash: "blocked", cross: "cancelled",
+};
+const CATEGORY_ICON_STATUS: Record<IssueStatusCategory, BuiltInIssueStatus> = {
+  unstarted: "todo", started: "in_progress", done: "done", closed: "cancelled",
+};
+
+/** Geometry only: custom shapes never change lifecycle or built-in behavior. */
+export function statusIconRenderer(status: string, category: IssueStatusCategory, icon?: string | null): BuiltInIssueStatus {
+  if (isBuiltInIssueStatus(status)) return status;
+  if (icon && Object.hasOwn(ICON_STATUS, icon)) return ICON_STATUS[icon];
+  return CATEGORY_ICON_STATUS[category] ?? "todo";
+}
+
 /** One row in the status picker / status filter. */
 export interface StatusOption {
+  icon: string | null;
   key: IssueStatus;
   /** The category this status behaves as — drives its glyph. */
   category: IssueStatusCategory;
@@ -332,6 +350,7 @@ export function statusOptions(catalog: IssueStatusCatalog): StatusOption[] {
         category,
         label: STATUS_LABEL[status],
         color: null,
+        icon: null,
       }));
     }
     return entries.map((entry) => ({
@@ -339,6 +358,7 @@ export function statusOptions(catalog: IssueStatusCatalog): StatusOption[] {
       category,
       label: catalog.labelOf(entry.key),
       color: issueStatusColor(entry),
+      icon: entry.icon ?? null,
     }));
   });
 }

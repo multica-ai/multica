@@ -11,7 +11,30 @@ import {
   issueColumnCategory,
   issueStatusColor,
   statusOptions,
+  statusIconRenderer,
 } from "./issue-status";
+
+describe("custom icon parity", () => {
+  it.each([
+    ["dotted", "backlog"], ["circle", "todo"], ["half", "in_progress"],
+    ["three_quarters", "in_review"], ["check", "done"], ["slash", "blocked"], ["cross", "cancelled"],
+  ])("uses %s geometry independent of lifecycle", (icon, expected) => {
+    expect(statusIconRenderer("qa", "started", icon)).toBe(expected);
+    expect(statusIconRenderer("qa", "closed", icon)).toBe(expected);
+    expect(statusIconRenderer("todo", "unstarted", icon)).toBe("todo");
+  });
+  it("falls back for missing, unknown and prototype-shaped icon names", () => {
+    for (const icon of [null, undefined, "new-shape", "constructor", "__proto__"]) {
+      expect(statusIconRenderer("shipped", "done", icon)).toBe("done");
+    }
+  });
+  it("passes stored shapes to picker options without changing category", () => {
+    const catalog = buildIssueStatusCatalog([entry("qa", "started", { icon: "slash" })]);
+    expect(catalog.iconOf("qa")).toBe("slash");
+    expect(catalog.iconOf("unknown")).toBeNull();
+    expect(statusOptions(catalog).find((option) => option.key === "qa")).toMatchObject({ icon: "slash", category: "started" });
+  });
+});
 
 function entry(
   key: string,

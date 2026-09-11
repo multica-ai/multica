@@ -25,7 +25,10 @@ the restriction; no schema migration or automatic issue migration is involved.
 
 Archived statuses no longer create default board/list/swimlane columns. Old
 archives with historical issues remain resolvable and can be inspected/moved
-out via Settings > Show archived > View issues (explicit exact-status filter).
+out via Settings > Show archived > View issues (an independent, transient exact-status
+list). This includes sub-issues and terminal issues without changing saved-view
+selection, workspace filters, or All/Members/Agents preferences. Moving issues
+does not automatically archive the status; retry archive explicitly once empty.
 The archive itself neither moves issues nor emits issue transition events.
 
 The server's `Effective`/SQL `issue_effective_status` functions preserve built-in
@@ -41,7 +44,9 @@ PR #7990 is subsequent work, not part of this release.
 
 1. Before deploying, count catalog rows by category and active/archive state;
    identify custom Backlog, In Review and Blocked usages, especially issues in
-   active autopilot runs. Tell affected users that those custom statuses will
+   active autopilot runs. Also check historical custom keys named `unstarted`,
+   `started`, or `closed`: exact-key filters must continue selecting those statuses,
+   not interpret their keys as category filters. Tell affected users that those custom statuses will
    no longer park, finish or fail automation. The decision applies to historical
    custom statuses too; no legacy behavior is retained.
 2. Apply migration 468 (categories) and 469 (icon), then deploy the matching backend. The catalog rewrite,

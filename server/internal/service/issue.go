@@ -729,8 +729,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 		return pgtype.UUID{}
 	}
 	// Backlog is the parking lot: nothing runs from it, so nothing here needs
-	// explaining either. A custom status in the backlog category parks the
-	// same way. (MUL-6243)
+	// explaining either. Custom unstarted statuses do not inherit parking.
 	if issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
 		return pgtype.UUID{}
 	}

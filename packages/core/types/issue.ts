@@ -1,7 +1,7 @@
 import type { Label } from "./label";
 import type { IssuePropertyValues } from "./property";
 
-/** The five lifecycle categories used for grouping, filtering, and columns. */
+/** Four lifecycle classifications. User-facing columns group by status key. */
 export type IssueStatusCategory =
   | "unstarted"
   | "started"

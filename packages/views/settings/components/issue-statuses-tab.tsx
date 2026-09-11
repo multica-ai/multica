@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
+  ArrowLeft,
   ArrowDown,
   ArrowUp,
   GripVertical,
@@ -31,8 +32,9 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
-import { issueStatusArchiveConflictCount, prepareIssueStatusList } from "@multica/core/issue-statuses";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { issueStatusArchiveConflictCount, createIssueStatusListStore } from "@multica/core/issue-statuses";
+import { baselineFromQuery } from "@multica/core/issue-views/baseline";
+import { IssueSurfaceWithStore } from "../../issues/surface/issue-surface";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
   issueStatusColor,
@@ -100,7 +102,6 @@ import { StatusIcon } from "../../issues/components/status-icon";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
-import { useNavigation } from "../../navigation";
 
 /**
  * Workspace issue status catalog management (MUL-6243).
@@ -141,6 +142,9 @@ export function IssueStatusesTab() {
   const [createCategory, setCreateCategory] = useState<IssueStatusCategory | null>(null);
   const [editing, setEditing] = useState<IssueStatusEntry | null>(null);
   const [pendingArchive, setPendingArchive] = useState<IssueStatusEntry | null>(null);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [inspection, setInspection] = useState<{ workspaceId: string; status: IssueStatusEntry } | null>(null);
+  const [inspectionOpen, setInspectionOpen] = useState(false);
   const [showBuiltInNotice, setShowBuiltInNotice] = useState(false);
 
   const { data: statuses = [], isLoading } = useQuery(issueStatusListOptions(wsId));
@@ -170,6 +174,12 @@ export function IssueStatusesTab() {
   );
 
   const archivedCount = statuses.filter((s) => !s.is_system && s.archived_at).length;
+
+  const viewIssues = (status: IssueStatusEntry) => {
+    setArchiveOpen(false);
+    setInspection({ workspaceId: wsId, status });
+    setInspectionOpen(true);
+  };
 
   return (
     <SettingsTab
@@ -207,7 +217,11 @@ export function IssueStatusesTab() {
                 canManage={isAdmin}
                 onCreate={() => setCreateCategory(group.category)}
                 onEdit={(entry) => entry.is_system ? setShowBuiltInNotice(true) : setEditing(entry)}
-                onArchive={(entry) => entry.is_system ? setShowBuiltInNotice(true) : setPendingArchive(entry)}
+                onArchive={(entry) => {
+                  if (entry.is_system) setShowBuiltInNotice(true);
+                  else { setPendingArchive(entry); setArchiveOpen(true); }
+                }}
+                onViewIssues={viewIssues}
               />
             ))}
           </div>
@@ -227,7 +241,12 @@ export function IssueStatusesTab() {
         }
         status={editing}
       />
-      <ArchiveStatusDialog key={pendingArchive?.id ?? "closed"} status={pendingArchive} onClose={() => setPendingArchive(null)} />
+      <ArchiveStatusDialog open={archiveOpen && pendingArchive?.workspace_id === wsId} status={pendingArchive} onClose={() => setArchiveOpen(false)} onViewIssues={viewIssues} />
+      <Dialog open={inspectionOpen && inspection?.workspaceId === wsId} onOpenChange={setInspectionOpen} onOpenChangeComplete={(open) => !open && setInspection(null)}>
+        <DialogContent className="flex h-[85dvh] flex-col overflow-hidden sm:max-w-6xl">
+          {inspection?.workspaceId === wsId && <StatusIssueInspection key={`${wsId}:${inspection.status.key}`} status={inspection.status} onClose={() => setInspectionOpen(false)} />}
+        </DialogContent>
+      </Dialog>
       <AlertDialog open={showBuiltInNotice} onOpenChange={setShowBuiltInNotice}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -252,6 +271,7 @@ function CategorySection({
   onCreate,
   onEdit,
   onArchive,
+  onViewIssues,
 }: {
   category: IssueStatusCategory;
   entries: IssueStatusEntry[];
@@ -259,6 +279,7 @@ function CategorySection({
   onCreate: () => void;
   onEdit: (status: IssueStatusEntry) => void;
   onArchive: (status: IssueStatusEntry) => void;
+  onViewIssues: (status: IssueStatusEntry) => void;
 }) {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
@@ -365,6 +386,7 @@ function CategorySection({
                   isReordering={reorder.isPending}
                   onEdit={() => onEdit(entry)}
                   onArchive={() => onArchive(entry)}
+                  onViewIssues={() => onViewIssues(entry)}
                   onMoveUp={canMove && activeIndex > 0
                     ? () => move(index, order.findIndex((s) => s.id === sortableIds[activeIndex - 1]))
                     : undefined}
@@ -390,6 +412,7 @@ function StatusRow({
   isReordering,
   onEdit,
   onArchive,
+  onViewIssues,
   onMoveUp,
   onMoveDown,
 }: {
@@ -401,6 +424,7 @@ function StatusRow({
   isReordering: boolean;
   onEdit: () => void;
   onArchive: () => void;
+  onViewIssues: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
 }) {
@@ -460,7 +484,7 @@ function StatusRow({
           <p className="truncate text-caption text-muted-foreground">{description}</p>
         )}
       </div>
-      {archived && <StatusIssuesButton statusKey={entry.key} />}
+      {archived && <StatusIssuesButton variant="outline" onClick={onViewIssues} />}
       {canManage && !archived && (
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -612,6 +636,9 @@ function StatusEditorDialog({
               </FieldLabel>
               <Input
                 id="status-name"
+                type="text"
+                autoComplete="off"
+                data-1p-ignore
                 autoFocus
                 maxLength={64}
                 value={draft.name}
@@ -753,30 +780,45 @@ function StatusEditorDialog({
   );
 }
 
-function StatusIssuesButton({ statusKey, onOpen }: { statusKey: string; onOpen?: () => void }) {
+function StatusIssueInspection({ status, onClose }: { status: IssueStatusEntry; onClose: () => void }) {
   const { t } = useT("settings");
-  const wsId = useWorkspaceId();
-  const paths = useWorkspacePaths();
-  const navigation = useNavigation();
-  return <Button variant="outline" onClick={() => {
-    prepareIssueStatusList(wsId, statusKey);
-    onOpen?.();
-    navigation.push(paths.issues());
-  }}>{t(($) => $.issue_statuses.archive_dialog.view_issues)}</Button>;
+  const [store] = useState(() => createIssueStatusListStore(status.key));
+  const baseline = useMemo(() => baselineFromQuery({ statusFilters: [status.key] }), [status.key]);
+  return <>
+    <DialogHeader>
+      <DialogTitle>{status.name}</DialogTitle>
+      <Button variant="ghost" className="self-start" onClick={onClose}>
+        <ArrowLeft />{t(($) => $.issue_statuses.title)}
+      </Button>
+    </DialogHeader>
+    <IssueSurfaceWithStore store={store} baseline={baseline} scope={{ type: "workspace", actorKind: "all" }} modes={["list"]} renderHeader={() => null} batchToolbar="always" />
+  </>;
+}
+
+function StatusIssuesButton({ onClick, variant = "default", disabled = false }: { onClick: () => void; variant?: "default" | "outline"; disabled?: boolean }) {
+  const { t } = useT("settings");
+  return <Button variant={variant} disabled={disabled} onClick={onClick}>{t(($) => $.issue_statuses.archive_dialog.view_issues)}</Button>;
 }
 
 function ArchiveStatusDialog({
   status,
+  open,
   onClose,
+  onViewIssues,
 }: {
   status: IssueStatusEntry | null;
+  open: boolean;
   onClose: () => void;
+  onViewIssues: (status: IssueStatusEntry) => void;
 }) {
   const { t } = useT("settings");
   const archive = useArchiveIssueStatus();
   const [issueCount, setIssueCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (open) setIssueCount(null);
+  }, [open, status?.id]);
   return (
-    <AlertDialog open={Boolean(status)} onOpenChange={(open) => !open && !archive.isPending && onClose()}>
+    <AlertDialog open={open} onOpenChange={(nextOpen) => !nextOpen && !archive.isPending && onClose()}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{issueCount !== null
@@ -792,7 +834,8 @@ function ArchiveStatusDialog({
           <AlertDialogCancel disabled={archive.isPending}>
             {t(($) => $.issue_statuses.archive_dialog.cancel)}
           </AlertDialogCancel>
-          {issueCount !== null && status ? <StatusIssuesButton statusKey={status.key} onOpen={onClose} /> : <AlertDialogAction
+          <AlertDialogAction
+            variant={issueCount !== null ? "outline" : "default"}
             disabled={archive.isPending}
             onClick={() => {
               if (!status) return;
@@ -813,8 +856,9 @@ function ArchiveStatusDialog({
               });
             }}
           >
-            {archive.isPending ? t(($) => $.issue_statuses.archive_dialog.archiving) : t(($) => $.issue_statuses.archive_dialog.confirm)}
-          </AlertDialogAction>}
+            {archive.isPending ? t(($) => $.issue_statuses.archive_dialog.archiving) : issueCount !== null ? t(($) => $.issue_statuses.archive_dialog.retry) : t(($) => $.issue_statuses.archive_dialog.confirm)}
+          </AlertDialogAction>
+          {issueCount !== null && status && <StatusIssuesButton disabled={archive.isPending} onClick={() => onViewIssues(status)} />}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

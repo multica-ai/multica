@@ -51,6 +51,7 @@
       "save_failed": "Could not save the status."
     },
     "archive_dialog": {
+      "retry": "Retry archive",
       "title": "Archive this status?",
       "description": "Move all issues out of \"{{name}}\" before archiving it. Once empty, it will be removed from boards and status pickers.",
       "in_use_title": "Move issues before archiving",

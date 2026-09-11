@@ -131,9 +131,8 @@ export interface ListIssuesParams {
   statuses?: IssueStatus[];
   /**
    * Filter by lifecycle category rather than by exact key, so one bucket holds
-   * all concrete and custom statuses in that phase. This keeps the board's
-   * fan-out fixed at 5 requests however many
-   * custom statuses a workspace defines. (MUL-6243)
+   * all concrete and custom statuses in that phase. Task views use exact
+   * status keys for their columns instead.
    */
   status_category?: IssueStatusCategory;
   /** Multi-value form of `status_category`. OR within the field. */
@@ -338,10 +337,8 @@ export type IssueTableGroupSpec =
   /**
    * Group by the CATEGORY a status behaves as, not by the status key.
    *
-   * Board columns, list sections and swimlane cells are categories, so a custom
-   * status folds into the column it behaves as instead of getting one of its
-   * own — which is what keeps the surface's fan-out pinned at 5 no matter how
-   * many statuses a workspace defines. The descriptor still reports
+   * Retained for installed clients. New Board/List/Swimlane surfaces group by
+   * concrete status keys, not categories. The descriptor still reports
    * `value.kind === "status"` for response compatibility; the group KEY is
    * what distinguishes lifecycle categories from concrete statuses.
    * (MUL-6243)

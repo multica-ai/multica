@@ -27,7 +27,9 @@ export function groupIssuesByStatus(issues: Issue[], entries: IssueStatusEntry[]
     if (categoryRank) return categoryRank;
     const aBuilt = BUILT_IN_STATUS_ORDER.indexOf(a as keyof typeof BUILT_IN_STATUS_CATEGORY);
     const bBuilt = BUILT_IN_STATUS_ORDER.indexOf(b as keyof typeof BUILT_IN_STATUS_CATEGORY);
+    const position = (entryByKey.get(a)?.position ?? 0) - (entryByKey.get(b)?.position ?? 0);
+    if (position) return position;
     if (aBuilt !== -1 || bBuilt !== -1) return (aBuilt === -1 ? 99 : aBuilt) - (bBuilt === -1 ? 99 : bBuilt);
-    return (entryByKey.get(a)?.position ?? 0) - (entryByKey.get(b)?.position ?? 0) || a.localeCompare(b);
+    return a.localeCompare(b);
   }).map(([status, data]) => ({ status, data }));
 }

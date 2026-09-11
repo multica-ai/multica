@@ -11,7 +11,7 @@
  * import the web component. SVG ops are written with react-native-svg
  * primitives instead of HTML <svg>.
  *
- * Custom statuses use their category glyph, while concrete built-ins retain
+ * Custom statuses use their selected shape, falling back to their category glyph, while concrete built-ins retain
  * their more specific progress/review/blocked glyphs inside the category.
  * Callers that hold the workspace catalog pass `category` and `color`; callers
  * that only hold a key get the exact built-in resolution.
@@ -23,7 +23,7 @@ import type {
   IssueStatus,
   IssueStatusCategory,
 } from "@multica/core/types";
-import { isBuiltInIssueStatus, statusCategoryOfKey } from "@/lib/issue-status";
+import { isBuiltInIssueStatus, statusCategoryOfKey, statusIconRenderer } from "@/lib/issue-status";
 
 const CX = 7;
 const CY = 7;
@@ -49,13 +49,6 @@ const BUILT_IN_COLOR: Record<BuiltInIssueStatus, string> = {
   done: "#3b82f6", // info
   blocked: "#dc2626", // destructive
   cancelled: "#71717a",
-};
-
-const CATEGORY_RENDERER: Record<IssueStatusCategory, BuiltInIssueStatus> = {
-  unstarted: "todo",
-  started: "in_progress",
-  done: "done",
-  closed: "cancelled",
 };
 
 function piePath(progress: number): string {
@@ -157,6 +150,7 @@ export function StatusIcon({
   status,
   category: categoryProp,
   color: colorProp,
+  icon,
   size = 16,
 }: {
   status: IssueStatus;
@@ -168,12 +162,13 @@ export function StatusIcon({
   category?: IssueStatusCategory;
   /** A custom status's `#rrggbb`. Built-ins keep their category token. */
   color?: string | null;
+  icon?: string | null;
   size?: number;
 }) {
   const category = categoryProp ?? statusCategoryOfKey(status);
   const builtIn = isBuiltInIssueStatus(status) ? status : null;
-  const iconStatus = builtIn ?? CATEGORY_RENDERER[category];
-  const color = colorProp ?? (builtIn ? BUILT_IN_COLOR[builtIn] : CATEGORY_COLOR[category]);
+  const iconStatus = statusIconRenderer(status, category, icon);
+  const color = builtIn ? BUILT_IN_COLOR[builtIn] : colorProp ?? CATEGORY_COLOR[category];
   return (
     <Svg width={size} height={size} viewBox="0 0 14 14">
       {iconStatus === "backlog" ? (

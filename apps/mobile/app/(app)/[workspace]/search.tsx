@@ -159,7 +159,7 @@ function SearchIssueRow({ item, query, slug }: SearchIssueRowProps) {
   // (server/internal/handler/issue.go:592). Keep mobile strictly aligned.
   const showSnippet =
     item.match_source === "comment" && !!item.matched_snippet;
-  const { colorOf, labelOf } = useIssueStatuses();
+  const { colorOf, labelOf, iconOf } = useIssueStatuses();
   const category = issueColumnCategory(item);
   const statusLabel = labelOf(item.status);
   return (
@@ -171,7 +171,7 @@ function SearchIssueRow({ item, query, slug }: SearchIssueRowProps) {
         <StatusIcon
           status={item.status}
           category={category}
-          color={colorOf(item.status)}
+          icon={iconOf(item.status)} color={colorOf(item.status)}
           size={14}
         />
         <PriorityIcon priority={item.priority} size={14} />
@@ -265,7 +265,7 @@ interface RecentRowProps {
 }
 
 function RecentRow({ item, slug }: RecentRowProps) {
-  const { colorOf, labelOf } = useIssueStatuses();
+  const { colorOf, labelOf, iconOf } = useIssueStatuses();
   const category = issueColumnCategory(item);
   const statusLabel = labelOf(item.status);
   return (
@@ -277,7 +277,7 @@ function RecentRow({ item, slug }: RecentRowProps) {
         <StatusIcon
           status={item.status}
           category={category}
-          color={colorOf(item.status)}
+          icon={iconOf(item.status)} color={colorOf(item.status)}
           size={14}
         />
         <Text className="text-xs text-muted-foreground shrink-0 w-16">
