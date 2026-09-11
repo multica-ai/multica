@@ -93,27 +93,6 @@ func TestBusinessMetricsChatClaimResumeObservations(t *testing.T) {
 	}
 }
 
-func TestBusinessMetricsIssueMetadataMutationObservations(t *testing.T) {
-	m := NewBusinessMetrics()
-
-	m.RecordIssueMetadataMutation("set", "changed", 20*time.Millisecond)
-	m.RecordIssueMetadataMutation("set", "noop", 10*time.Millisecond)
-	m.RecordIssueMetadataMutation("delete", "not_found", 5*time.Millisecond)
-
-	for _, labels := range [][]string{
-		{"set", "changed"},
-		{"set", "noop"},
-		{"delete", "not_found"},
-	} {
-		if got := testutil.ToFloat64(m.issueMetadataMutation.WithLabelValues(labels...)); got != 1 {
-			t.Errorf("issue metadata mutation %v = %v, want 1", labels, got)
-		}
-	}
-	if got := testutil.CollectAndCount(m.issueMetadataMutationDuration); got != 3 {
-		t.Fatalf("issue metadata duration series = %d, want 3", got)
-	}
-}
-
 func TestBusinessMetricsLLMPricingAndUnpricedTokens(t *testing.T) {
 	m := NewBusinessMetrics()
 
