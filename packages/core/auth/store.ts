@@ -42,6 +42,7 @@ export interface AuthState {
   sendCode: (email: string) => Promise<void>;
   verifyCode: (email: string, code: string) => Promise<User>;
   loginWithGoogle: (code: string, redirectUri: string) => Promise<User>;
+  loginWithGitea: (code: string, state: string) => Promise<User>;
   loginWithToken: (token: string) => Promise<User>;
   logout: () => void;
   sessionExpired: () => void;
@@ -94,6 +95,18 @@ export function createAuthStore(options: AuthStoreOptions) {
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
       set({ user, isLoading: false, status: "authenticated", expired: false });
+      return user;
+    },
+
+    loginWithGitea: async (code: string, state: string) => {
+      const { token, user } = await api.giteaLogin(code, state);
+      if (!cookieAuth) {
+        storage.setItem("multica_token", token);
+        api.setToken(token);
+      }
+      onLogin?.();
+      identifyAnalytics(user.id, { email: user.email, name: user.name });
+      set({ user, isLoading: false, status: "authenticated" });
       return user;
     },
 

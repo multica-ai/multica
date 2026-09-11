@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS external_auth_identity_provider_subject_uidx;
