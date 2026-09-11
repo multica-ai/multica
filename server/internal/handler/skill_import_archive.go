@@ -109,7 +109,7 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 		if f.FileInfo().IsDir() {
 			continue
 		}
-		clean := path.Clean(f.Name)
+		clean := cleanArchiveEntryName(f.Name)
 		if !strings.EqualFold(path.Base(clean), skillpkg.ContentFilename) {
 			continue
 		}
@@ -149,7 +149,7 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 		if f.FileInfo().IsDir() {
 			continue
 		}
-		clean := path.Clean(f.Name)
+		clean := cleanArchiveEntryName(f.Name)
 		// Only files under the resolved skill root belong to this skill.
 		if rootPrefix != "" && !strings.HasPrefix(clean, rootPrefix) {
 			continue
@@ -188,6 +188,14 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 		return imported.files[i].path < imported.files[j].path
 	})
 	return imported, nil
+}
+
+// cleanArchiveEntryName canonicalizes the non-standard backslash separators
+// emitted by Windows PowerShell's Compress-Archive before applying ZIP path
+// semantics. Validation still runs on the cleaned result, so backslash-based
+// absolute and traversal entries cannot bypass the zip-slip guards.
+func cleanArchiveEntryName(name string) string {
+	return path.Clean(strings.ReplaceAll(name, "\\", "/"))
 }
 
 // archiveEntryPrefix returns the directory prefix (with trailing slash) of a

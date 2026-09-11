@@ -119,6 +119,45 @@ func TestParseSkillArchive_RootLayout(t *testing.T) {
 	}
 }
 
+func TestParseSkillArchive_NormalizesWindowsEntrySeparators(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		entries  map[string]string
+		wantPath string
+	}{
+		{
+			name: "root layout",
+			entries: map[string]string{
+				"SKILL.md":           testSkillMd,
+				`agents\openai.yaml`: "model: openai",
+			},
+			wantPath: "agents/openai.yaml",
+		},
+		{
+			name: "wrapper layout",
+			entries: map[string]string{
+				`review-helper\SKILL.md`:           testSkillMd,
+				`review-helper\agents\openai.yaml`: "model: openai",
+			},
+			wantPath: "agents/openai.yaml",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := buildTestZip(t, tc.entries)
+			imported, err := parseSkillArchive(data, "review-helper.zip")
+			if err != nil {
+				t.Fatalf("parseSkillArchive: %v", err)
+			}
+			if got := filePaths(imported); len(got) != 1 || got[0] != tc.wantPath {
+				t.Fatalf("files = %v, want [%s]", got, tc.wantPath)
+			}
+			if strings.Contains(imported.files[0].path, `\`) {
+				t.Fatalf("stored path %q still contains a backslash", imported.files[0].path)
+			}
+		})
+	}
+}
+
 func TestParseSkillArchive_NoSkillMd(t *testing.T) {
 	data := buildTestZip(t, map[string]string{
 		"my-skill/notes.md": "hello",
@@ -137,7 +176,12 @@ func TestParseSkillArchive_InvalidZip(t *testing.T) {
 func TestParseSkillArchive_RejectsUnsafeSkillMdPath(t *testing.T) {
 	// A SKILL.md whose only candidate path is absolute or traversal must not be
 	// accepted as the primary content; the archive is treated as having none.
-	for _, name := range []string{"../escape/SKILL.md", "/abs/SKILL.md"} {
+	for _, name := range []string{
+		"../escape/SKILL.md",
+		"/abs/SKILL.md",
+		`..\escape\SKILL.md`,
+		`\abs\SKILL.md`,
+	} {
 		data := buildTestZip(t, map[string]string{name: testSkillMd})
 		if _, err := parseSkillArchive(data, "x.skill"); err == nil {
 			t.Errorf("expected rejection for unsafe SKILL.md path %q", name)
@@ -162,6 +206,22 @@ func TestParseSkillArchive_DropsTraversalAndJunk(t *testing.T) {
 	got := filePaths(imported)
 	if len(got) != 1 || got[0] != "keep.md" {
 		t.Fatalf("files = %v, want only [keep.md]", got)
+	}
+}
+
+func TestParseSkillArchive_DropsUnsafeWindowsSupportingPaths(t *testing.T) {
+	data := buildTestZip(t, map[string]string{
+		"SKILL.md":       testSkillMd,
+		`..\escape.txt`:  "outside",
+		`\absolute.txt`:  "absolute",
+		`safe\nested.md`: "keep",
+	})
+	imported, err := parseSkillArchive(data, "s.skill")
+	if err != nil {
+		t.Fatalf("parseSkillArchive: %v", err)
+	}
+	if got := filePaths(imported); len(got) != 1 || got[0] != "safe/nested.md" {
+		t.Fatalf("files = %v, want only [safe/nested.md]", got)
 	}
 }
 
