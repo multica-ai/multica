@@ -197,6 +197,33 @@ func TestFindLocalPathLinksIgnoresDirectories(t *testing.T) {
 	}
 }
 
+// The workdir signal has to hold for paths that do not exist on disk — that is
+// the whole reason it exists next to the "names a file that exists here" one.
+// An agent writes paths as its own $PWD spells them, which keeps unresolved
+// symlinks (the daemon exports PWD=<workdir> to agent processes), so the
+// classifier has to canonicalize the candidate even when the file is missing.
+// While it did not, a workdir path with a missing intermediate directory
+// matched neither signal and the link was published — unreadable for everyone
+// but the runtime it names.
+func TestFindLocalPathLinksReportsMissingWorkdirPaths(t *testing.T) {
+	root := t.TempDir()
+	physical := filepath.Join(root, "physical")
+	if err := os.MkdirAll(physical, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	logical := filepath.Join(root, "logical")
+	if err := os.Symlink(physical, logical); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	t.Chdir(logical)
+
+	target := filepath.Join(logical, "artifacts", "report.md")
+	got := targets(findLocalPathLinks("see [the report](" + target + ")"))
+	if len(got) != 1 || got[0] != target {
+		t.Errorf("a missing path inside the workdir should be reported, got %v", got)
+	}
+}
+
 func TestGuardLocalPathLinksOnlyFiresInAgentContext(t *testing.T) {
 	workdir := withWorkdir(t)
 	shot := filepath.Join(workdir, "shot.png")
