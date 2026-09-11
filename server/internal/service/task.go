@@ -541,9 +541,10 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 		}
 	}
 	// Autopilot-origin issues (origin_id is the autopilot id) from a schedule /
-	// webhook trigger attribute to the firing trigger's CREATOR — trigger_owner
-	// (MUL-4302; MUL-6951) — degrading to the audit-only rule publisher when no
-	// creator is recoverable. That human is the originator as well as the
+	// webhook trigger attribute to the firing trigger's persisted created_by
+	// principal — trigger_owner (MUL-4302; MUL-6951; legacy semantics in
+	// ResolveAutopilotTriggerPrincipal) — degrading to the audit-only rule publisher
+	// when the trigger has none. That human is the originator as well as the
 	// accountable, so a create_issue-mode run carries the same authorization a
 	// manual "run now" by that member would; an edit of the trigger does not move
 	// it. Resolved the same way
@@ -587,8 +588,9 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 // from its active (latest) rule version snapshot (MUL-4302 §3.4). Shared by both
 // autopilot execution modes — run_only dispatch and the create_issue enqueue path —
 // so they attribute identically. originator stays NULL: an autopilot DOES carry a
-// human's authority since MUL-6951, but it comes from the trigger's creator, and
-// this is the fallback for when that creator cannot be proven. Only the
+// human's authority since MUL-6951, but it comes from the trigger's created_by
+// principal (see ResolveAutopilotTriggerPrincipal), and this is the fallback for a
+// trigger that has none. Only the
 // audit-accountable side is set, to the version's member publisher. A missing version (autopilot published before this feature, or
 // none yet) or a non-member/absent publisher degrades to unattributed rather than
 // fabricating a human. Never returns an error: attribution must not fail an
