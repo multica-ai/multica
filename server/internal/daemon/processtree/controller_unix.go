@@ -44,18 +44,23 @@ func (c *controller) attach(cmd *exec.Cmd) error {
 	return nil
 }
 
-// stillOurs reports whether pid still refers to the process tagged with
-// startTime in attach. See the equivalent (and the reasoning behind it) in
+// stillOurs reports whether it is safe to signal pid, using the tag laid
+// down in attach. See the equivalent (and the reasoning behind it) in
 // server/pkg/agent/pidtag_unix.go — this package cannot import that one
 // without an import cycle, so the same small check is duplicated here rather
 // than shared.
+//
+// A pid that no longer exists at all answers true (harmless no-op signal;
+// also how a surviving grandchild left in the group after the leader exited
+// still gets reached). Only a pid that exists but is now a *different*
+// process — proven by a starttime mismatch — answers false.
 func (c *controller) stillOurs(pid int) bool {
 	if c.startTime == 0 {
 		return true
 	}
 	current, err := procStartTime(pid)
 	if err != nil {
-		return false
+		return true
 	}
 	return current == c.startTime
 }

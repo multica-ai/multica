@@ -43,20 +43,27 @@ func forgetStartTime(cmd *exec.Cmd) {
 	pidTags.Delete(cmd)
 }
 
-// stillOurProcess reports whether cmd.Process.Pid still refers to the same
-// process this package started under that number, using the tag
-// recordStartTime laid down right after Start(). Three outcomes:
+// stillOurProcess reports whether it is safe to signal cmd.Process.Pid,
+// using the tag recordStartTime laid down right after Start(). Four
+// outcomes:
 //
 //   - No tag was ever recorded (recordStartTime never ran, or /proc could not
 //     be read that once): behave exactly as before this patch — assume yes,
 //     since that is what every caller did previously.
-//   - pid does not currently exist, or its starttime no longer matches the
-//     tag: the process this package started has already exited, and the
-//     kernel has (or may have) handed that pid to something unrelated.
-//     Answer no — signaling it now would hit whatever that is instead.
+//   - pid does not currently exist at all: nothing this package started is
+//     there to hit, so signaling it is a harmless no-op (ESRCH) exactly as
+//     before this patch — answer yes. This is also the common, wanted case:
+//     the direct child has already exited but may have left a grandchild
+//     forked into the same process group, still holding a pipe or a
+//     repository lock, that this signal is the only way left to reach.
+//     Refusing here would silently stop reaping that grandchild.
+//   - pid exists but its starttime no longer matches the tag: this is a
+//     *different* process that came to hold the same number after the one
+//     this package started already exited. Answer no — signaling now would
+//     hit that unrelated process (or, worst case, this daemon's own process
+//     group) instead of anything this package owns.
 //   - pid exists and its starttime still matches: this is still the same
-//     process (or, if it already exited, the pid has not yet been reused —
-//     either way a signal now lands correctly, or lands on nothing).
+//     process this package started. Answer yes.
 func stillOurProcess(cmd *exec.Cmd) bool {
 	if cmd == nil || cmd.Process == nil {
 		return false
@@ -67,7 +74,9 @@ func stillOurProcess(cmd *exec.Cmd) bool {
 	}
 	current, err := readProcStartTime(cmd.Process.Pid)
 	if err != nil {
-		return false
+		// pid no longer exists — signaling it is a harmless no-op, and
+		// required to reach any grandchild still alive in its group.
+		return true
 	}
 	return current == tagged.(uint64)
 }
