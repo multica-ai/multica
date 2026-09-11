@@ -160,10 +160,10 @@ export function useIssueRealtime(
         }),
         ws.on("comment:deleted", (payload) => {
           if (payload.issue_id !== issueId) return;
-          // Cascade: descendant replies must come out alongside the parent,
-          // otherwise buildTimelineRows promotes them to top-level rows and
-          // the user sees ghost replies after another client deletes the
-          // thread. Server already cascades; this mirrors it in the cache.
+          // A comment with replies is tombstoned (comment:updated), never
+          // removed, so any cached reply of a removed comment is stale (older
+          // servers cascaded the delete). Sweep them so buildTimelineRows
+          // does not promote them to ghost top-level rows.
           removeCommentCascade(qc, wsId, issueId, payload.comment_id);
         }),
         ws.on("activity:created", (payload) => {

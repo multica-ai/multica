@@ -6,6 +6,7 @@ import { issueKeys } from "@/data/queries/issue-keys";
 import {
   addCommentReaction,
   addIssueReaction,
+  commentToTimelineEntry,
   onIssueAuxiliaryRevision,
   invalidateIssueAfterReconnect,
   patchIssueDetail,
@@ -288,5 +289,32 @@ describe("mobile issue revision gates", () => {
     addIssueReaction(qc, wsId, issueId, reaction, 2);
 
     expect(qc.getQueryData<Issue>(key)?.reactions).toEqual([]);
+  });
+});
+
+// #8296: a delete tombstones a comment that has replies and announces it as
+// comment:updated. The snapshot must keep deleted_at, or the card would render
+// an empty comment instead of the placeholder.
+describe("commentToTimelineEntry", () => {
+  it("carries the tombstone marker through a comment snapshot", () => {
+    const entry = commentToTimelineEntry({
+      id: "comment-1",
+      issue_id: "issue-1",
+      author_type: "member",
+      author_id: "user-1",
+      content: "",
+      type: "comment",
+      parent_id: null,
+      reactions: [],
+      attachments: [],
+      created_at: "2026-09-11T07:00:00Z",
+      updated_at: "2026-09-11T08:00:00Z",
+      resolved_at: null,
+      resolved_by_type: null,
+      resolved_by_id: null,
+      deleted_at: "2026-09-11T08:00:00Z",
+    });
+
+    expect(entry.deleted_at).toBe("2026-09-11T08:00:00Z");
   });
 });

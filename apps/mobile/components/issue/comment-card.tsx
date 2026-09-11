@@ -33,6 +33,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import type { Reaction, TimelineEntry } from "@multica/core/types";
+import { isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { useActorLookup } from "@/data/use-actor-name";
@@ -225,6 +226,8 @@ function ResolvedThreadBar({
     const ordered: { type: string | null; id: string | null; name?: string }[] =
       [];
     for (const e of [entry, ...replies]) {
+      // A deleted comment names no author (mirrors web's useAuthorsLabel).
+      if (isDeletedComment(e)) continue;
       const key = `${e.actor_type}:${e.actor_id}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -483,6 +486,17 @@ function CommentBody({
     if (isSelecting) return;
     onPressChange?.(entry.id, longPress.isPressed);
   }, [longPress.isPressed, entry.id, isSelecting, onPressChange]);
+
+  if (isDeletedComment(entry)) {
+    // Kept only so the replies to it stay attached (#8296): no author, body
+    // or long-press actions. Mirrors CommentRow's placeholder in
+    // packages/views/issues/components/comment-card.tsx.
+    return (
+      <Text className="text-sm italic text-muted-foreground">
+        This comment was deleted
+      </Text>
+    );
+  }
 
   const body = (
     <View className="gap-2">

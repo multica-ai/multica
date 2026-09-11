@@ -25,6 +25,7 @@ import type {
   TimelineEntry,
   UpdateIssueRequest,
 } from "@multica/core/types";
+import { applyCommentDeletion } from "@multica/core/issues/comment-deletion";
 import { api } from "@/data/api";
 import { isIssueStatusCategory } from "@/lib/issue-status";
 import { issueKeys } from "@/data/queries/issues";
@@ -313,10 +314,12 @@ export function useEditComment(issueId: string) {
 }
 
 /**
- * Delete a comment. Strips the matching TimelineEntry (and any replies
- * with parent_id === commentId) from the timeline cache optimistically.
- * Backend cascades reply deletion server-side; we mirror the cascade
- * locally so the optimistic patch leaves no orphans on screen.
+ * Delete a comment. Deleting removes only that comment (#8296): one with
+ * replies stays as a tombstone so they keep their parent. Not optimistic —
+ * which outcome applies depends on replies only the server sees for certain.
+ * Once it confirms, mirror its outcome with the same pure helper web uses
+ * (`useDeleteComment` in packages/core/issues/mutations.ts); realtime events
+ * and the settle refetch reconcile the rest.
  */
 export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
@@ -324,25 +327,10 @@ export function useDeleteComment(issueId: string) {
 
   return useMutation({
     mutationFn: (commentId: string) => api.deleteComment(commentId),
-    onMutate: async (commentId) => {
-      const key = issueKeys.timeline(wsId, issueId);
-      await qc.cancelQueries({ queryKey: key });
-      const prev = qc.getQueryData<TimelineEntry[]>(key);
-      qc.setQueryData<TimelineEntry[]>(key, (old) =>
-        old?.filter(
-          (entry) =>
-            !(
-              entry.type === "comment" &&
-              (entry.id === commentId || entry.parent_id === commentId)
-            ),
-        ),
+    onSuccess: (_data, commentId) => {
+      qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(wsId, issueId), (old) =>
+        old ? applyCommentDeletion(old, commentId, new Date().toISOString()) : old,
       );
-      return { prev, key };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev !== undefined && ctx.key) {
-        qc.setQueryData(ctx.key, ctx.prev);
-      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });

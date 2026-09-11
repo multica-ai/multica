@@ -177,7 +177,8 @@ export function useCommentLongPress(
           case "delete":
             Alert.alert(
               "Delete comment?",
-              "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone.",
+              // Only this comment goes; replies to it are kept (#8296).
+              "This comment will be permanently deleted. Any replies to it stay in the thread. This cannot be undone.",
               [
                 { text: "Cancel", style: "cancel" },
                 {
