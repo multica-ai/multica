@@ -1,12 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { setApiInstance } from "../api";
+import { configStore } from "../config";
 import type { ApiClient } from "../api/client";
 import { createQueryClient } from "../query-client";
 import {
@@ -1230,6 +1231,8 @@ describe("comment mutations — owner revision and last activity", () => {
   // removal) is applied only once the server confirms; the matrix itself lives
   // in comment-deletion.test.ts.
   it("keeps the timeline until the delete is confirmed, then keeps the replies", async () => {
+    configStore.getState().setCommentDeleteKeepRepliesSupported(true);
+    onTestFinished(() => configStore.getState().setCommentDeleteKeepRepliesSupported(false));
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     seed(qc);
     const [root] = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))!;
@@ -1242,11 +1245,11 @@ describe("comment mutations — owner revision and last activity", () => {
       wrapper: createWrapper(qc),
     });
 
-    let pending!: Promise<void>;
+    let pending!: Promise<unknown>;
     await act(async () => {
       pending = result.current.mutateAsync("comment-1");
     });
-    await waitFor(() => expect(deleteComment).toHaveBeenCalled());
+    await waitFor(() => expect(deleteComment).toHaveBeenCalledWith("comment-1", { keepReplies: true }));
     expect(qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))).toEqual([root, reply]);
 
     await act(async () => {
@@ -1258,6 +1261,29 @@ describe("comment mutations — owner revision and last activity", () => {
     expect(timeline[0]).toMatchObject({ content: "" });
     expect(timeline[0]?.deleted_at).toEqual(expect.any(String));
     expect(timeline[1]).toEqual(reply);
+    qc.clear();
+  });
+
+  // A server that has not declared the capability deletes the replies too:
+  // the client uses the legacy route and mirrors that outcome.
+  it("mirrors a reply-deleting server when the capability is not declared", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seed(qc);
+    const [root] = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))!;
+    const reply: TimelineEntry = { ...root!, id: "comment-2", parent_id: "comment-1", content: "reply" };
+    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(issueId), [root!, reply]);
+    const deleteComment = vi.fn().mockResolvedValue(undefined);
+    setApiInstance({ deleteComment } as unknown as ApiClient);
+    const { result } = renderHook(() => useDeleteComment(issueId), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync("comment-1");
+    });
+
+    expect(deleteComment).toHaveBeenCalledWith("comment-1", { keepReplies: false });
+    expect(qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))).toEqual([]);
     qc.clear();
   });
 

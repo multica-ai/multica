@@ -40,6 +40,7 @@ import {
   mentionLabelsByTarget,
 } from "@multica/core/issues/comment-trigger-outcomes";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
+import { removeCommentSubtree } from "@multica/core/issues/comment-deletion";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 import { blockedShortReasonLabel } from "../blocked-trigger-copy";
@@ -203,29 +204,12 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment_id, issue_id } = payload as CommentDeletedPayload;
         if (issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
-          if (!old) return old;
-          // A comment with replies is tombstoned (comment:updated), never
-          // removed, so any cached reply of a removed comment is stale: older
-          // servers cascaded the delete to every descendant. Sweep them too
-          // (the full timeline lives in this single cache).
-          const idsToRemove = new Set<string>([comment_id]);
-          let changed = true;
-          while (changed) {
-            changed = false;
-            for (const e of old) {
-              if (
-                e.parent_id &&
-                idsToRemove.has(e.parent_id) &&
-                !idsToRemove.has(e.id)
-              ) {
-                idsToRemove.add(e.id);
-                changed = true;
-              }
-            }
-          }
-          return old.filter((e) => !idsToRemove.has(e.id));
-        });
+        // A comment with replies is tombstoned (comment:updated), never
+        // removed, so any cached reply of a removed comment is stale: older
+        // servers cascaded the delete to every descendant.
+        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+          old ? removeCommentSubtree(old, comment_id) : old,
+        );
       },
       [qc, issueId],
     ),

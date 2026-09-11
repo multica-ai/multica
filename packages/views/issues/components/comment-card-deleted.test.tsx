@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { forwardRef, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -51,6 +51,7 @@ vi.mock("../../editor", async () => ({
   }),
 }));
 
+import { configStore } from "@multica/core/config";
 import { CommentCard } from "./comment-card";
 
 const DELETED_AT = "2026-09-11T08:00:00Z";
@@ -115,12 +116,25 @@ describe("CommentCard — deleted comments", () => {
     expect(screen.getByText("Leave a reply...")).toBeTruthy();
   });
 
-  it("tells the user the replies are kept when deleting a comment that has them", async () => {
+  it("tells the user the replies are kept when the server keeps them", async () => {
+    configStore.getState().setCommentDeleteKeepRepliesSupported(true);
+    onTestFinished(() => configStore.getState().setCommentDeleteKeepRepliesSupported(false));
     renderThread(comment("a", null), [comment("bb", "a")]);
 
     fireEvent.click(actionMenus()[0]!);
     fireEvent.click(await screen.findByText("Delete"));
 
     expect(await screen.findByText(/Its replies stay in the thread/)).toBeTruthy();
+  });
+
+  // An older server deletes the replies with the comment; the copy must not
+  // promise otherwise.
+  it("warns that the replies go too when the server has not declared it keeps them", async () => {
+    renderThread(comment("a", null), [comment("bb", "a")]);
+
+    fireEvent.click(actionMenus()[0]!);
+    fireEvent.click(await screen.findByText("Delete"));
+
+    expect(await screen.findByText(/and all its replies will be permanently deleted/)).toBeTruthy();
   });
 });

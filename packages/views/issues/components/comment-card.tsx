@@ -40,6 +40,7 @@ import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { isDeletedComment } from "@multica/core/issues/comment-deletion";
+import { useConfigStore } from "@multica/core/config";
 import { selectStandaloneAttachments } from "@multica/core/attachments/image-sequence";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -160,15 +161,20 @@ function DeleteCommentDialog({
   hasReplies?: boolean;
 }) {
   const { t } = useT("issues");
+  // Only a server that declares it keeps the replies (#8296); an older one
+  // deletes them with the comment, and the copy must say so.
+  const keepsReplies = useConfigStore((s) => s.commentDeleteKeepRepliesSupported);
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t(($) => $.comment.delete_title)}</AlertDialogTitle>
           <AlertDialogDescription>
-            {hasReplies
-              ? t(($) => $.comment.delete_desc_with_replies)
-              : t(($) => $.comment.delete_desc)}
+            {!hasReplies
+              ? t(($) => $.comment.delete_desc)
+              : keepsReplies
+                ? t(($) => $.comment.delete_desc_replies_kept)
+                : t(($) => $.comment.delete_desc_with_replies)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

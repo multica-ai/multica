@@ -48,7 +48,8 @@ import type {
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
-import { applyCommentDeletion } from "./comment-deletion";
+import { applyCommentDeletion, removeCommentSubtree } from "./comment-deletion";
+import { configStore } from "../config";
 import {
   onIssueAuxiliaryRevision,
   invalidateIssueOwnerProjections,
@@ -931,15 +932,24 @@ export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (commentId: string) => api.deleteComment(commentId),
+    // The capability is read when the delete runs, so the route matches the
+    // copy the confirmation showed. Older servers delete the replies too.
+    mutationFn: async (commentId: string) => {
+      const keepReplies = configStore.getState().commentDeleteKeepRepliesSupported;
+      await api.deleteComment(commentId, { keepReplies });
+      return keepReplies;
+    },
     // Not optimistic: whether the comment disappears or stays as a tombstone
     // depends on replies only the server sees for certain (#8296). Once it
     // confirms, mirror its outcome; realtime events and the settle refetch
     // reconcile the rest.
-    onSuccess: (_data, commentId) => {
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
-        old ? applyCommentDeletion(old, commentId, new Date().toISOString()) : old,
-      );
+    onSuccess: (keptReplies, commentId) => {
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+        if (!old) return old;
+        return keptReplies
+          ? applyCommentDeletion(old, commentId, new Date().toISOString())
+          : removeCommentSubtree(old, commentId);
+      });
       // The endpoint remains 204 for compatibility, so the local caller has
       // no body carrying issue_revision. The realtime event will narrow this
       // with its revision when connected; this is the no-WS safety net.

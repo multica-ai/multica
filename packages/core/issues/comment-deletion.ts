@@ -15,6 +15,26 @@ function hasReplies(entries: readonly TimelineEntry[], commentId: string): boole
 }
 
 /**
+ * Removes a comment and every cached descendant: what a server from before
+ * #8296 does on delete, and the only safe reading of a removal event, since a
+ * newer server never removes a comment that still has replies.
+ */
+export function removeCommentSubtree(entries: TimelineEntry[], commentId: string): TimelineEntry[] {
+  const removed = new Set([commentId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const e of entries) {
+      if (e.parent_id && removed.has(e.parent_id) && !removed.has(e.id)) {
+        removed.add(e.id);
+        changed = true;
+      }
+    }
+  }
+  return entries.filter((e) => !removed.has(e.id));
+}
+
+/**
  * Applies a confirmed comment delete to a flat timeline cache the way the
  * server does: a comment with replies becomes a tombstone; one without is
  * removed, together with every tombstone ancestor it leaves without replies.

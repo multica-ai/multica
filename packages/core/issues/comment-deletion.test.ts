@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { TimelineEntry } from "../types";
-import { applyCommentDeletion, isDeletedComment } from "./comment-deletion";
+import { applyCommentDeletion, isDeletedComment, removeCommentSubtree } from "./comment-deletion";
 
 const DELETED_AT = "2026-09-11T08:00:00Z";
 
@@ -86,5 +86,12 @@ describe("applyCommentDeletion", () => {
       comment("d", "a"),
     ];
     expect(ids(applyCommentDeletion(timeline, "c", DELETED_AT))).toEqual(["a", "d"]);
+  });
+});
+
+describe("removeCommentSubtree", () => {
+  it("removes the comment and every descendant, and nothing else", () => {
+    const timeline = [comment("a", null), comment("b", "a"), comment("c", "b"), comment("d", null)];
+    expect(ids(removeCommentSubtree(timeline, "a"))).toEqual(["d"]);
   });
 });
