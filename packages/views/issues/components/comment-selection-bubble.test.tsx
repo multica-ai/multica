@@ -62,3 +62,33 @@ describe("annotation marker layout", () => {
     dispose();
   });
 });
+
+
+describe("annotation editor layout", () => {
+  it("keeps the portaled editor inside its source scroll panel", async () => {
+    const panel = document.createElement("div");
+    panel.style.cssText = "position: relative; overflow: auto; width: 500px; height: 700px;";
+    const source = document.createElement("div");
+    source.textContent = "Selected text near the left edge";
+    panel.append(source);
+    document.body.append(panel);
+    vi.spyOn(panel, "getBoundingClientRect").mockReturnValue(new DOMRect(400, 0, 500, 700));
+    for (const [key, value] of Object.entries({ clientWidth: 500, clientHeight: 700, offsetWidth: 500, offsetHeight: 700 })) {
+      Object.defineProperty(panel, key, { configurable: true, value });
+    }
+    vi.spyOn(source, "getBoundingClientRect").mockReturnValue(new DOMRect(420, 100, 460, 500));
+    const range = document.createRange();
+    range.selectNodeContents(source);
+    range.getBoundingClientRect = () => new DOMRect(420, 100, 100, 20);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(320);
+    const view = render(<CommentSelectionBubble range={range} source={source} owner="test">
+      <textarea aria-label="Annotation note" />
+    </CommentSelectionBubble>);
+    try {
+      const input = await screen.findByRole("textbox", { name: "Annotation note" });
+      // Centering on the quote alone would put the editor at x=310, over
+      // Inbox's list. Its reference clipping ancestors provide the boundary.
+      await waitFor(() => expect(parseFloat(input.parentElement!.style.left)).toBe(408));
+    } finally { view.unmount(); panel.remove(); }
+  });
+});

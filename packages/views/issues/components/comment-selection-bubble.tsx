@@ -48,7 +48,7 @@ export function CommentSelectionBubble({ range, source, children, owner, markerR
             };
           }),
           shift({ padding: 8, mainAxis: false, crossAxis: true }), hide(),
-        ] : [offset(8), flip(), shift({ padding: 8 }), hide()],
+        ] : [offset(8), flip({ padding: 8, altBoundary: true }), shift({ padding: 8, altBoundary: true }), hide()],
       }).then(({ x, y, middlewareData }) => {
         if (!active || currentRevision !== revision || !element.isConnected) return;
         const rect = range.getBoundingClientRect();
