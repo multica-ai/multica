@@ -42,7 +42,7 @@ export function hasReplyIntent(content: string, annotations: readonly ReplyAnnot
  * rendered text. Escape ampersands first so source entities remain literal.
  */
 function quoteText(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/[<>\\`*_[\]{}()#!|~:$+.=\-]/g,
+  return text.replace(/&/g, "&amp;").replace(/[<>\\`*_[\]{}()#!|~:$+.=-]/g,
     (char) => `&#${char.charCodeAt(0)};`)
     // Leading spaces must survive HTML whitespace collapsing and must not
     // become Markdown list nesting or an indented code block. Tabs use 4 stops.
