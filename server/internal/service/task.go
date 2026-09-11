@@ -612,23 +612,24 @@ func ruleOwnerAttribution(ctx context.Context, q *db.Queries, workspaceID, autop
 }
 
 // triggerOwnerAttribution resolves an autopilot schedule/webhook run to the firing
-// trigger's CREATOR (MUL-4302; MUL-6951). triggerID is the autopilot_run's
-// trigger_id.
+// trigger's dispatch principal, created_by (MUL-4302; MUL-6951) — see
+// ResolveAutopilotTriggerPrincipal for what that column does and does not prove.
+// triggerID is the autopilot_run's trigger_id.
 //
-// The creator is immutable — a substantive edit re-stamps published_by, not
-// created_by, so it cannot re-authorize the automation as the editor (MUL-6951,
-// Bohan's ruling). Because the DB invariant forces accountable == originator once
-// the originator is set, BOTH columns on the task name the creator; the editor's
-// responsibility for the config lives on autopilot_trigger.published_by.
+// No edit rewrites created_by — a substantive edit re-stamps published_by — so it
+// cannot re-authorize the automation as the editor (MUL-6951, Bohan's ruling).
+// Because the DB invariant forces accountable == originator once the originator is
+// set, BOTH columns on the task name that principal; the editor's responsibility
+// for the config lives on autopilot_trigger.published_by.
 //
-// A trigger with no recoverable creator degrades to ruleOwnerAttribution, which is
+// A trigger with no principal degrades to ruleOwnerAttribution, which is
 // audit-only — the run then carries no originator and the invoke gate fails closed.
 // Never errors: attribution must not fail an enqueue.
 func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, workspaceID, autopilotID pgtype.UUID, evidenceKind attribution.EvidenceKind, evidenceRefID pgtype.UUID) attribution.Result {
 	if principal := ResolveAutopilotTriggerPrincipal(ctx, q, triggerID, autopilotID, workspaceID); principal.Valid {
 		return attribution.TriggerOwner(principal, evidenceKind, evidenceRefID)
 	}
-	// No provable principal: degrade to the rule publisher, which is AUDIT-ONLY.
+	// No principal: degrade to the rule publisher, which is AUDIT-ONLY.
 	// rule_owner must never become an authorization identity — it is a guess at
 	// "who probably owns this rule", and promoting it would hand a legacy trigger
 	// somebody's invoke rights without that person ever arming anything. The run
@@ -637,8 +638,9 @@ func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, work
 }
 
 // ResolveAutopilotTriggerPrincipal returns the human a schedule/webhook dispatch
-// ACTS AS, or an invalid UUID when none can be proven — in which case every
-// caller must fail closed rather than substitute a different human.
+// ACTS AS — the trigger's created_by — or an invalid UUID when there is none, in
+// which case every caller must fail closed rather than substitute a different
+// human.
 //
 // This is the single source of that answer (MUL-6951). Admission
 // (autopilotAdmitInvoke), the originator stamped on the task, and every run
@@ -646,11 +648,19 @@ func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, work
 // person A and then run with person B's rights — a combination neither of them
 // could produce by hand, and the exact fork Elon's review found.
 //
-// The principal is the trigger's IMMUTABLE created_by, not published_by:
-// published_by transfers to whoever last substantively edits the trigger, so
-// using it would let a collaborator adjusting a cron expression silently hand the
-// automation their own rights (MUL-6951, Bohan's ruling: the run always acts as
-// the trigger's creator).
+// The principal is the trigger's created_by, not published_by: published_by
+// transfers to whoever last substantively edits the trigger, so using it would let
+// a collaborator adjusting a cron expression silently hand the automation their
+// own rights (MUL-6951, Bohan's ruling: the run always acts as the trigger's
+// creator).
+//
+// What created_by records depends on the trigger's age. For a trigger created
+// since MUL-6951 it is the member who created it, written at creation. For a legacy
+// trigger it is a principal inferred once by backfill and frozen — the last
+// publisher (migration 449), else the autopilot's creator (migration 467) — so it
+// is NOT proof of who created that trigger; treat it only as the dispatch
+// principal. Nothing here infers a principal at dispatch time, and no edit
+// rewrites it.
 //
 // Three conditions, all required, all fail-closed:
 //
@@ -659,9 +669,8 @@ func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, work
 //     cannot select the principal. The membership check below is not a substitute:
 //     it proves the resolved human is in the workspace passed in, which a member of
 //     two workspaces satisfies even when the trigger came from the other one;
-//   - created_by names a member — a legacy trigger predating the column that had
-//     neither a published_by (migration 449) nor a still-member autopilot creator
-//     (migration 467) to backfill from resolves nobody rather than a guess;
+//   - created_by names a member — a legacy trigger that neither backfill could
+//     fill resolves nobody;
 //   - that member is STILL in the autopilot's workspace, re-checked on every
 //     dispatch, so removing someone actually revokes what their triggers can do.
 func ResolveAutopilotTriggerPrincipal(ctx context.Context, q *db.Queries, triggerID, autopilotID, workspaceID pgtype.UUID) pgtype.UUID {

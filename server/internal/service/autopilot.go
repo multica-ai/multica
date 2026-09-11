@@ -978,10 +978,11 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	// Attribution splits on the trigger only to pick WHICH human and which source
 	// label; both branches now produce a real originator. A MANUAL trigger is a
 	// direct human action: the triggering member is direct_human (MUL-4302 §4). A
-	// schedule / webhook trigger resolves the firing trigger's immutable CREATOR —
-	// trigger_owner, from run.TriggerID (MUL-4302; MUL-6951) — degrading to the rule
-	// version publisher (rule_owner, audit-only) when no creator is recoverable, then
-	// to unattributed. An edit of the trigger does NOT move this: published_by
+	// schedule / webhook trigger resolves the firing trigger's created_by principal —
+	// trigger_owner, from run.TriggerID (MUL-4302; MUL-6951; for a legacy trigger a
+	// backfilled inference, see ResolveAutopilotTriggerPrincipal) — degrading to the
+	// rule version publisher (rule_owner, audit-only) when it has none, then to
+	// unattributed. An edit of the trigger does NOT move this: published_by
 	// transfers, created_by does not. Since MUL-6951 that human is the originator
 	// too, so an armed autopilot runs with its creator's authorization instead of
 	// borrowing narrowly-scoped capabilities per surface; the source label is what
