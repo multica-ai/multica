@@ -15,10 +15,10 @@
  *   node scripts/perf-compare.mjs --base <ref> --head <ref> [--out <dir>]
  */
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 
 const repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"]).toString().trim();
 const args = process.argv.slice(2);
@@ -58,36 +58,80 @@ function removeCheckout(checkout) {
   catch { rmSync(checkout, { recursive: true, force: true }); }
 }
 
+/** True while any process in the group is still alive. */
+const groupAlive = (pgid) => {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (error) {
+    // ESRCH: no process left in the group. EPERM would mean one exists that
+    // we may not signal — alive, as far as teardown is concerned.
+    return error.code === "EPERM";
+  }
+};
+
 /**
- * Stop a server and wait until it is really gone.
- *
- * Teardown used to hang off `process.on("exit")`, which cannot work: a live
- * child keeps the event loop running, so `exit` never fires, so the child is
- * never killed. The report would be written and the process would then wait
- * forever — on CI until the job was cancelled at sixty minutes. Stopping is
- * explicit now, and it is only done when the port has stopped answering.
+ * Whether anything still holds the port. Only a refused connection counts as
+ * closed: a server that has stopped answering still accepts the handshake, and
+ * a timeout proves nothing either way.
  */
+const portBound = (port) =>
+  new Promise((done) => {
+    const socket = connect({ port, host: "127.0.0.1" });
+    const settle = (bound) => { socket.destroy(); done(bound); };
+    socket.setTimeout(1_000, () => settle(true));
+    socket.once("connect", () => settle(true));
+    socket.once("error", (error) => settle(error.code !== "ECONNREFUSED"));
+  });
+
+async function groupExitWithin(pgid, ms) {
+  const deadline = Date.now() + ms;
+  while (groupAlive(pgid)) {
+    if (Date.now() > deadline) return false;
+    await delay(100);
+  }
+  return true;
+}
+
+/**
+ * Stop a server and wait until every process it started is gone.
+ *
+ * The pnpm wrapper exiting proves nothing about `next-server` beneath it, so
+ * this waits on the whole process group, escalating to SIGKILL if the group
+ * outlives SIGTERM. The server stays registered for the last-resort handlers
+ * until the group is confirmed gone: dropping it any earlier is what let a
+ * surviving child outlive the script. Then the port must refuse connections —
+ * not merely stop answering.
+ *
+ * Teardown is explicit rather than hung off `process.on("exit")`: a live child
+ * keeps the event loop running, so `exit` would never fire and the child would
+ * never be killed — on CI, until the job was cancelled at sixty minutes.
+ */
+/**
+ * How long a server gets to exit on SIGTERM before it is killed. Next exits in
+ * well under a second; the margin is for a loaded machine. Overridable so the
+ * lifecycle test can prove the SIGKILL path without waiting on it.
+ */
+const STOP_GRACE_MS = Number(process.env.PERF_STOP_GRACE_MS) || 10_000;
+
 async function stopServer(child, port) {
+  const pgid = child.pid;
+  killGroup(child, "SIGTERM");
+  if (!(await groupExitWithin(pgid, STOP_GRACE_MS))) {
+    killGroup(child, "SIGKILL");
+    if (!(await groupExitWithin(pgid, 5_000))) {
+      throw new Error(`server process group ${pgid} survived SIGKILL`);
+    }
+  }
   liveServers.delete(child);
-  if (child.exitCode === null && child.signalCode === null) {
-    const exited = new Promise((done) => child.once("exit", done));
-    killGroup(child, "SIGTERM");
-    const graceful = await Promise.race([exited.then(() => true), delay(10_000).then(() => false)]);
-    if (!graceful) {
-      killGroup(child, "SIGKILL");
-      await Promise.race([exited, delay(5_000)]);
+
+  const deadline = Date.now() + 5_000;
+  while (await portBound(port)) {
+    if (Date.now() > deadline) {
+      throw new Error(`port ${port} still bound after its server's process group exited`);
     }
+    await delay(200);
   }
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    try {
-      await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1_000) });
-    } catch {
-      return; // refused: nothing is listening any more
-    }
-    await delay(250);
-  }
-  throw new Error(`frontend on :${port} still answering after it was stopped`);
 }
 
 // Last resort only, for a signal (a cancelled CI job) or an exit that happens
@@ -177,8 +221,12 @@ async function measure(ref, label) {
 
     // The spec, fixture and browser come from this working tree, not the ref's.
     const reportPath = join(outDir, `${label}.json`);
+    // Only a report this run wrote may be read back. A file left by an earlier
+    // run into the same directory would otherwise stand in for a scenario that
+    // failed before writing one — stale numbers, presented as today's.
+    rmSync(reportPath, { force: true });
     const measureStart = Date.now();
-    let failed = false;
+    let scenarioExit = 0;
     try {
       run("pnpm", ["exec", "playwright", "test", "--config=playwright.perf.config.ts"], {
         cwd: repoRoot,
@@ -188,15 +236,28 @@ async function measure(ref, label) {
           PERF_REPORT_PATH: reportPath,
         },
       });
-    } catch {
-      // A failing scenario still wrote its reasons; the comparison reports them.
-      failed = true;
+    } catch (error) {
+      scenarioExit = typeof error.status === "number" ? error.status : 1;
     }
     const measureS = seconds(measureStart);
 
-    const report = existsSync(reportPath)
-      ? JSON.parse(readFileSync(reportPath, "utf8"))
-      : { status: "invalid", invalid: ["the scenario produced no report"] };
+    let report;
+    try {
+      report = JSON.parse(readFileSync(reportPath, "utf8"));
+    } catch {
+      report = { status: "invalid", invalid: ["the scenario produced no readable report"] };
+    }
+    // The scenario process has the last word. A report that says `ok` from a
+    // run whose process then failed is not a sample: whatever failed after the
+    // numbers were written is exactly what nobody has looked at.
+    if (scenarioExit !== 0 && report.status === "ok") {
+      report.status = "invalid";
+      report.invalid = [
+        ...(report.invalid ?? []),
+        `the scenario reported ok but its process exited ${scenarioExit}`,
+      ];
+    }
+    const failed = scenarioExit !== 0;
     return {
       ...report, ref, sha, spec_failed: failed, build_cached: buildCached,
       timings_s: { install: installS, build: buildS, start: startS, measure: measureS },
@@ -252,6 +313,11 @@ function markdown(base, head) {
 }
 
 mkdirSync(outDir, { recursive: true });
+// The files this script writes, cleared up front: a comparison that aborts
+// early must not leave the previous run's summary looking like its own.
+for (const name of ["base.json", "head.json", "comparison.json", "comparison.md"]) {
+  rmSync(join(outDir, name), { force: true });
+}
 const totalStart = Date.now();
 let exitCode = 1;
 let base;

@@ -97,6 +97,8 @@ jobs:
               - 'scripts/worktree-db.test.sh'
               - 'scripts/dev-env.sh'
               - 'scripts/dev-env.test.sh'
+              - 'scripts/perf-compare.mjs'
+              - 'scripts/perf-compare.test.sh'
               - 'scripts/selfhost-wait.sh'
               # selfhost-config.test.sh asserts on the installers' side of
               # the port contract, so a change to either must run it.
@@ -292,6 +294,13 @@ jobs:
       - name: Test development environment registry
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/dev-env.test.sh
+
+      # The browser comparison runs only on demand, but its verdict and its
+      # cleanup are cheap to prove on every change: a fake pnpm, no build and
+      # no browser, a few seconds.
+      - name: Test UI performance comparison runner
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: bash scripts/perf-compare.test.sh
 
       - name: Verify reserved-slugs.ts is up to date
         if: ${{ needs.changes.outputs.frontend == 'true' }}
