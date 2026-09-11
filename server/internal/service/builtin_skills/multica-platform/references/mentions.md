@@ -207,6 +207,8 @@ still has replies stays in `comment list` output as a placeholder — `deleted_a
 set, `content` empty, no attachments — so the replies keep their `parent_id`.
 It carries no input: it never triggers a run, and there is nothing in it to
 answer. It can still be the `--parent` of a reply that continues its thread.
+Against a server that predates this, `comment delete` refuses instead of
+deleting the replies too.
 
 An edit is treated as a fresh action — it re-derives the comment's lineage from
 the editing action. Only the agent author editing its OWN comment re-stamps the
