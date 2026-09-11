@@ -276,7 +276,7 @@ func TestTriageResolvesWithoutTheCatalog(t *testing.T) {
 }
 
 // With Triage occupying its key, disambiguation lands on triage_2 — the same
-// replacement migration 467 picks for a workspace that already owned a custom
+// replacement migration 469 picks for a workspace that already owned a custom
 // `triage`. The two must agree, or a renamed status and a newly derived one
 // could disagree about which key is next.
 func TestFirstFreeKeySkipsTriage(t *testing.T) {

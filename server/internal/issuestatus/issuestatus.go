@@ -249,7 +249,7 @@ func DeriveKey(name, category string, taken map[string]bool) (string, error) {
 // explicitly" — the very error this package was changed to stop showing a UI
 // that has no key field.
 //
-// Migration 467 applies this same rule in SQL to rename a pre-existing custom
+// Migration 469 applies this same rule in SQL to rename a pre-existing custom
 // `triage` key; keep the two in step.
 func firstFreeKey(base string, taken map[string]bool) (string, error) {
 	if !keyOccupied(base, taken) {

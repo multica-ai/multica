@@ -821,19 +821,31 @@ func main() {
 	fmt.Println("Done.")
 }
 
-// logMigrationNotice forwards what migration SQL deliberately RAISEs to the
-// migration log. pgx drops server notices unless a handler is set, which made
-// the per-row reports that data-repair migrations print (e.g. 056, 467)
-// invisible to whoever ran the deploy.
+// migrationReportPrefix marks a notice a migration raises on purpose to say
+// what it changed, e.g.
 //
-// Only SQLSTATE 00000 is forwarded: that is what a plain RAISE carries, while
-// the "already exists, skipping" chatter of IF [NOT] EXISTS DDL — including the
-// tracking-table create on every run — has a condition code of its own.
+//	RAISE NOTICE 'migration report: renamed % row(s)', n;
+//
+// Only these reach the migration log. The server's own notices cannot be told
+// apart from a deliberate RAISE by condition code — "does not exist, skipping"
+// and the rename notice of ADD CONSTRAINT ... USING INDEX both carry SQLSTATE
+// 00000 — so the marker is explicit.
+const migrationReportPrefix = "migration report: "
+
+// migrationReport returns the text of a notice raised with
+// migrationReportPrefix, and false for every other notice.
+func migrationReport(notice *pgconn.Notice) (string, bool) {
+	return strings.CutPrefix(notice.Message, migrationReportPrefix)
+}
+
+// logMigrationNotice forwards migration reports to the migration log. pgx
+// drops server notices unless a handler is set, so without it the per-row
+// report a data-repair migration prints (e.g. 469) never reached whoever ran
+// the deploy.
 func logMigrationNotice(_ *pgconn.PgConn, notice *pgconn.Notice) {
-	if notice.Code != "00000" {
-		return
+	if report, ok := migrationReport(notice); ok {
+		slog.Info("migration report", "message", report)
 	}
-	slog.Info("migration notice", "severity", notice.Severity, "message", notice.Message)
 }
 
 // runMigrations applies (direction="up") or rolls back (direction="down")

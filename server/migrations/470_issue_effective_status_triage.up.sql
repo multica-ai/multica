@@ -1,6 +1,6 @@
 -- Teach the SQL mirror of issuestatus.Effective about the reserved `triage`
 -- key (MUL-7212, design MUL-7189 §2.1). Like the Go resolver, it is its own
--- category and never looked up: migration 467 guarantees no catalog row can
+-- category and never looked up: migrations 468-469 guarantee no catalog row can
 -- hold it, so the fast path is exact rather than a guess.
 CREATE OR REPLACE FUNCTION issue_effective_status(p_workspace_id UUID, p_status TEXT)
 RETURNS TEXT

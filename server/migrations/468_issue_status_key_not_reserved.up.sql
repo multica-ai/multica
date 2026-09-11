@@ -1,0 +1,21 @@
+-- Reserve the `triage` status key, step 1 of 2: the write barrier (MUL-7212).
+--
+-- `triage` becomes a platform-reserved key: the status of an issue waiting in
+-- Triage. It has no catalog row, it is not a category, and the server refuses
+-- it as a custom key. Before this change nothing reserved it, so a workspace
+-- may already own a CUSTOM status keyed `triage`; migration 469 renames those.
+--
+-- The CHECK lands first, NOT VALID and in a file of its own, so it commits
+-- before 469 scans for conflicts. From then on no pod — including an old one
+-- still running during the rollout, which accepts `triage` as a custom key —
+-- can create or keep writing a `triage` row, and the conflict set 469 scans
+-- cannot grow behind its back. A single migration that scanned first and added
+-- the CHECK last left that window open: a row created in between failed the
+-- final validation and aborted the deploy.
+--
+-- NOT VALID skips the existing rows, which still hold the key until 469
+-- renames them and validates the constraint. Until then an old pod updating one
+-- of those rows (rename, archive, reorder) is refused by the CHECK; the window
+-- is the gap between two files of one migration run.
+ALTER TABLE issue_status
+    ADD CONSTRAINT issue_status_key_not_reserved CHECK (key <> 'triage') NOT VALID;

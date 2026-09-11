@@ -1,15 +1,13 @@
--- Reserve the `triage` status key (MUL-7212, design MUL-7189 §2.1).
+-- Reserve the `triage` status key, step 2 of 2: repair the conflicts and
+-- validate the barrier (MUL-7212, design MUL-7189 §2.1).
 --
--- `triage` becomes a platform-reserved key: the status of an issue waiting in
--- Triage. It has no catalog row, it is not a category, and the server refuses
--- it as a custom key (issuestatus.IsBuiltIn). Before this change nothing
--- reserved it, so a workspace may already own a CUSTOM status keyed `triage`;
--- once the new server reads that key as "in Triage", every issue on it would
--- silently change meaning.
---
--- This migration runs before any server that reserves the key starts (the
--- entrypoint finishes migrations first). The file executes as one implicit
--- transaction, and for every workspace that owns a custom `triage` it:
+-- Migration 468 already refuses any new `triage` row, so the set of workspaces
+-- that own a custom `triage` is fixed by the time this file scans for it. Once
+-- the new server reads that key as "in Triage", every issue on such a custom
+-- status would silently change meaning, so this migration runs before any
+-- server that reserves the key starts (the entrypoint finishes migrations
+-- first). The file executes as one implicit transaction, and for every
+-- workspace that owns a custom `triage` it:
 --
 --   1. picks a replacement key with the same rule as issuestatus.firstFreeKey:
 --      `triage_2`, `triage_3`, ... — the first one this workspace does not own,
@@ -20,7 +18,7 @@
 --      query.statusFilters — the only other place a status key is stored as
 --      live configuration. activity_log / inbox_item details are history and
 --      are left as written;
---   3. prints one NOTICE per workspace with the counts.
+--   3. reports the counts for the workspace in the migration log.
 --
 -- Each workspace's catalog is taken under the same EXCLUSIVE advisory lock
 -- that archive holds. Old pods still running during the rollout take the
@@ -29,8 +27,8 @@
 -- the rest) or re-resolves after it and is refused. No issue can be left on
 -- the old key.
 --
--- Finally a CHECK makes the reservation hold in storage, so an old pod that
--- still accepts `triage` as a custom key cannot recreate the conflict.
+-- VALIDATE then proves no `triage` row is left. It takes SHARE UPDATE
+-- EXCLUSIVE, so it does not block reads or writes of the catalog.
 --
 -- issue.revision is bumped on the moved issues, so a client editing with the
 -- old status in hand gets a revision conflict instead of writing it back.
@@ -82,10 +80,11 @@ BEGIN
           AND query -> 'statusFilters' @> '["triage"]'::jsonb;
         GET DIAGNOSTICS rewritten_views = ROW_COUNT;
 
-        RAISE NOTICE 'reserve triage status key: workspace % renamed custom status triage to %, moved % issue(s), rewrote % saved view(s)',
+        -- The "migration report: " prefix is what cmd/migrate forwards to its
+        -- log; other server notices are dropped.
+        RAISE NOTICE 'migration report: reserve triage status key: workspace % renamed custom status triage to %, moved % issue(s), rewrote % saved view(s)',
             legacy.workspace_id, replacement, moved_issues, rewritten_views;
     END LOOP;
 END $$;
 
-ALTER TABLE issue_status
-    ADD CONSTRAINT issue_status_key_not_reserved CHECK (key <> 'triage');
+ALTER TABLE issue_status VALIDATE CONSTRAINT issue_status_key_not_reserved;

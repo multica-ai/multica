@@ -14,9 +14,14 @@ import (
 // Triage write protection (MUL-7212). A triage issue can only be made by
 // Triage intake, which does not exist yet, so these tests insert one directly.
 
+// The number comes from the workspace counter, not the fixture's MAX+1, so an
+// HTTP create later in the same test cannot be handed the same number.
 func triageIssueForTest(t *testing.T, title string) string {
 	t.Helper()
-	return dbfx.Issue(t, title, testutil.Cols{"status": issuestatus.Triage})
+	return dbfx.Issue(t, title, testutil.Cols{
+		"status": issuestatus.Triage,
+		"number": nextWorkspaceIssueNumber(t),
+	})
 }
 
 func issueStatusOf(t *testing.T, issueID string) string {
