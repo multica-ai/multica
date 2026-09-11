@@ -95,7 +95,7 @@ func TestConvergeAgentRuntimes_ForcedRoundWithNothingMissingKeepsTheBackoffClear
 // The mismatch must be judged from live state rather than from a change since
 // the last look: the daemon that hit this had started a minute before the
 // removal, so its first observation was already "no profile".
-func TestDshRuntimeProfileInconsistent(t *testing.T) {
+func TestDshRuntimeProfileMismatch(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DSH_HOME", home)
 
@@ -114,7 +114,7 @@ func TestDshRuntimeProfileInconsistent(t *testing.T) {
 	// A registered dsh runtime with no profile on disk: the state that has to
 	// bring a round.
 	d := registered()
-	if !d.dshRuntimeProfileInconsistent() {
+	if d.dshRuntimeProfileMismatch() == dshMismatchNone {
 		t.Fatal("a registered dsh with no profile was judged consistent; the runtime keeps taking work")
 	}
 
@@ -126,7 +126,7 @@ func TestDshRuntimeProfileInconsistent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if d.dshRuntimeProfileInconsistent() {
+	if d.dshRuntimeProfileMismatch() != dshMismatchNone {
 		t.Fatal("a registered dsh with its profile installed was judged inconsistent")
 	}
 
@@ -134,7 +134,7 @@ func TestDshRuntimeProfileInconsistent(t *testing.T) {
 	// manual install produces.
 	d = registered()
 	d.runtimeIndex = map[string]Runtime{}
-	if !d.dshRuntimeProfileInconsistent() {
+	if d.dshRuntimeProfileMismatch() == dshMismatchNone {
 		t.Fatal("an installed profile with no dsh runtime was judged consistent; it would never register")
 	}
 
@@ -144,15 +144,63 @@ func TestDshRuntimeProfileInconsistent(t *testing.T) {
 	d = registered()
 	d.runtimeIndex = map[string]Runtime{"rt-dsh": {ID: "rt-dsh", Provider: "dsh", ProfileID: "prof-1"}}
 	d.cfg.Agents = map[string]AgentEntry{}
-	if d.dshRuntimeProfileInconsistent() {
+	if d.dshRuntimeProfileMismatch() != dshMismatchNone {
 		t.Fatal("a mismatch no round could resolve was reported as inconsistent")
 	}
 
 	// With a dsh CLI present it is actionable again: the profile is installed
 	// and the built-in runtime is genuinely missing.
 	d.cfg.Agents = map[string]AgentEntry{"dsh": {Path: "/somewhere/dsh"}}
-	if !d.dshRuntimeProfileInconsistent() {
+	if d.dshRuntimeProfileMismatch() == dshMismatchNone {
 		t.Fatal("an installed profile plus a discovered dsh should earn a registration round")
+	}
+}
+
+// A registered dsh whose profile was removed has to keep forcing rounds until
+// it is condemned, because condemning it takes two of them: the first sighting
+// only starts condemnedConfirmWindow, and with dsh still registered nothing is
+// missing a runtime — so an unforced tick returns from convergeAgentRuntimes
+// without probing anything, and the second sighting never happens.
+//
+// Throttling this direction to one forced round (as the profile-without-runtime
+// direction is throttled, where no round is guaranteed to make progress) leaves
+// the runtime live and claiming work indefinitely. That is the bug this test
+// exists to catch, so it asserts the FORCE SEQUENCE, not just the mismatch kind.
+func TestDshRuntimeProfileMismatch_ForcingConvergesEachDirection(t *testing.T) {
+	// Replays the tick body of agentDiscoveryLoop.
+	forceSequence := func(mismatch dshProfileMismatch, ticks int) []bool {
+		var last dshProfileMismatch
+		out := make([]bool, 0, ticks)
+		for i := 0; i < ticks; i++ {
+			force := mismatch.forcesEveryTick() || (mismatch != dshMismatchNone && mismatch != last)
+			last = mismatch
+			out = append(out, force)
+		}
+		return out
+	}
+
+	for _, force := range forceSequence(dshMismatchRuntimeWithoutProfile, 4) {
+		if !force {
+			t.Fatal("a registered dsh with no profile stopped forcing rounds; " +
+				"the confirmation window needs a second probe round that nothing else schedules")
+		}
+	}
+
+	// The other direction stays throttled: it is the one a round cannot be
+	// relied on to resolve, so forcing every tick would bypass
+	// agentConvergeMaxBackoff forever.
+	got := forceSequence(dshMismatchProfileWithoutRuntime, 4)
+	if !got[0] {
+		t.Fatal("an installed profile with no runtime never earned its first round")
+	}
+	for _, force := range got[1:] {
+		if force {
+			t.Fatalf("profile-without-runtime forced more than once: %v", got)
+		}
+	}
+
+	if forceSequence(dshMismatchNone, 3)[0] {
+		t.Fatal("agreeing states forced a round")
 	}
 }
 

@@ -9,6 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/multica-ai/multica/server/internal/daemon/processtree"
+	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 // The DSH backend drives `dsh --profile multica --stdio`, and that profile is
@@ -122,27 +127,109 @@ func dshPluginPathDirs() []string {
 // dshPluginEnv copies the daemon's environment with dshPluginPathDirs prepended
 // to PATH, so `dsh plugin` resolves the pnpm DSH ships when the operator has no
 // pnpm of their own.
+//
+// The PATH entry is matched case-insensitively, which is not cosmetic on
+// Windows: the variable is conventionally spelled `Path`, so an exact `PATH=`
+// match misses it, and the appended entry then wins under Go's
+// case-insensitive de-duplication of the child environment — leaving the
+// package manager with only the plugin directory and none of the system path.
+// The original spelling is preserved rather than normalized so the merge cannot
+// itself introduce a second entry.
 func dshPluginEnv() []string {
-	env := os.Environ()
-	dirs := dshPluginPathDirs()
+	return mergeDshPluginPath(os.Environ(), dshPluginPathDirs())
+}
+
+// mergeDshPluginPath prepends dirs to whichever PATH-like entry env already has,
+// preserving that entry's own spelling, or appends one when there is none.
+//
+// Split out from the environment read so the merge is testable with the exact
+// shape Windows hands the daemon: matching is case-insensitive because the
+// variable is conventionally spelled `Path` there, and an exact `PATH=` match
+// misses it — after which the appended entry wins under Go's case-insensitive
+// de-duplication of the child environment, leaving the package manager with only
+// the plugin directory and none of the system path.
+func mergeDshPluginPath(env, dirs []string) []string {
 	if len(dirs) == 0 {
 		return env
 	}
 	prefix := strings.Join(dirs, string(os.PathListSeparator))
 	for i, kv := range env {
-		if strings.HasPrefix(kv, "PATH=") {
-			env[i] = "PATH=" + prefix + string(os.PathListSeparator) + strings.TrimPrefix(kv, "PATH=")
-			return env
+		eq := strings.IndexByte(kv, '=')
+		if eq <= 0 || !strings.EqualFold(kv[:eq], "PATH") {
+			continue
 		}
+		env[i] = kv[:eq+1] + prefix + string(os.PathListSeparator) + kv[eq+1:]
+		return env
 	}
 	return append(env, "PATH="+prefix)
 }
 
+// dshProvisionOutputBytes bounds the package-manager output kept in a log line.
+// pnpm prints a tree plus a summary and the useful part is the tail, so the tail
+// is what survives.
+const dshProvisionOutputBytes = 2048
+
+// dshProvisionOutput renders captured output for a log line. Registry errors
+// routinely echo the request URL, so the text is redacted before it is bounded:
+// a bundle spec can carry credentials, and an operator's spec is in their own
+// environment where they can read it.
+func dshProvisionOutput(raw []byte) string {
+	text := redact.Text(strings.TrimSpace(string(raw)))
+	if len(text) <= dshProvisionOutputBytes {
+		return text
+	}
+	// Cut on a rune boundary. Package-manager output is full of box drawing and
+	// check marks, and non-ASCII paths are ordinary on the machines this runs
+	// on, so a byte cut lands mid-rune often enough to matter — and what it
+	// produces is an invalid-UTF-8 log line, which downstream JSON encoders
+	// rewrite into replacement characters.
+	tail := text[len(text)-dshProvisionOutputBytes:]
+	for len(tail) > 0 && !utf8.ValidString(tail[:1]) {
+		tail = tail[1:]
+	}
+	return "…" + tail
+}
+
+// dshProfileRepair names what is missing, and deliberately carries NO command.
+//
+// The install is `dsh plugin --profile multica add <bundle>`, and <bundle> is
+// the operator's own choice of npm spec, directory or tarball — Multica's own
+// bridge is not on a public registry yet (multica#6936). A Repair.Command is
+// rendered to the user inside a shell code fence as the thing to run on that
+// machine, so shipping the placeholder there hands out a line that fails when
+// pasted. Package alone still tells the server which repair to explain; the
+// prose that explains it lives in the server's notice, where it can name both
+// ways to supply a real bundle.
+func dshProfileRepair() agent.ExecFormatRepair {
+	return agent.ExecFormatRepair{Package: "DeepSeek Harness runtime profile"}
+}
+
+// dshProvisionCommand builds one install invocation. Split out from the run so
+// the argv and the environment it executes under are assertable on every
+// platform, including the Windows ones where a shell fixture cannot stand in
+// for a package manager.
+func dshProvisionCommand(dshPath, spec string) *exec.Cmd {
+	cmd := exec.Command(dshPath, "plugin", "--profile", dshMulticaProfileName, "add", spec)
+	cmd.Env = dshPluginEnv()
+	return cmd
+}
+
 // provisionDshMulticaProfile installs the configured runtime bundle into the
 // `multica` profile, so a later discovery round finds a usable dsh. Candidates
-// are tried in order and the first success wins; every failure is reported with
-// the CLI's own output, which is where "pnpm not found on PATH" and registry
-// errors actually surface.
+// are tried in order and the first success wins.
+//
+// Runs the package manager through processtree: `dsh plugin` forwards to pnpm,
+// which spawns node, which spawns whatever the bundle's install script needs.
+// Killing only the direct child would leave that tree writing into the operator's
+// DSH home after the daemon has stopped, and a daemon rollback cannot undo a
+// write that already landed.
+//
+// Neither the spec nor the raw output is logged: a spec can be an npm URL with
+// credentials in its userinfo or a path carrying a username, so the log names
+// the candidate by position instead, and the output is redacted and bounded.
+//
+// A nil return means the profile is on disk, not merely that the package
+// manager exited 0 — see the loop for why those are not the same thing.
 //
 // Returns nil when nothing is configured — the caller treats provisioning as
 // best-effort either way, and the missing-profile verdict stands until a probe
@@ -156,19 +243,36 @@ func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slo
 	defer cancel()
 
 	var lastErr error
-	for _, spec := range specs {
-		cmd := exec.CommandContext(ctx, dshPath, "plugin", "--profile", dshMulticaProfileName, "add", spec)
-		cmd.Env = dshPluginEnv()
-		cmd.WaitDelay = 5 * time.Second
-		output, err := cmd.CombinedOutput()
-		if err == nil {
+	for i, spec := range specs {
+		output, err := processtree.CombinedOutput(ctx, dshProvisionCommand(dshPath, spec), 5*time.Second)
+		switch {
+		case err == nil && dshMulticaProfilePresent():
 			logger.Info("installed the DSH runtime profile",
-				"bundle", spec, "path", dshPath, "profile", dshMulticaProfileName)
+				"bundle_candidate", i+1, "candidates", len(specs),
+				"path", dshPath, "profile", dshMulticaProfileName)
 			return nil
+		case err == nil:
+			// Exit 0 with no manifest behind it. The exit status is the package
+			// manager's opinion about its own run; dshMulticaProfilePresent is
+			// the fact the REST of the daemon judges by — the probe
+			// classification and the discovery loop's mismatch check both read
+			// it — so an install allowed to report success while disagreeing
+			// with it would log "installed the DSH runtime profile" and leave
+			// every later round reporting that same profile as missing.
+			//
+			// Treating it as a failed candidate rather than as done is what
+			// gives the remaining candidates their turn: a spec that resolves
+			// and installs dependencies without producing a profile has not
+			// done the job, and stopping on it would hide a later spec that
+			// would have.
+			lastErr = fmt.Errorf("dsh plugin --profile %s add (candidate %d of %d): reported success without creating the profile: %s",
+				dshMulticaProfileName, i+1, len(specs), dshProvisionOutput(output))
+		default:
+			lastErr = fmt.Errorf("dsh plugin --profile %s add (candidate %d of %d): %w: %s",
+				dshMulticaProfileName, i+1, len(specs), err, dshProvisionOutput(output))
 		}
-		lastErr = fmt.Errorf("dsh plugin --profile %s add %s: %w: %s",
-			dshMulticaProfileName, spec, err, strings.TrimSpace(string(output)))
-		logger.Warn("DSH runtime profile install failed", "bundle", spec, "error", lastErr)
+		logger.Warn("DSH runtime profile install failed",
+			"bundle_candidate", i+1, "candidates", len(specs), "error", lastErr)
 	}
 	return lastErr
 }
@@ -185,23 +289,46 @@ func (d *Daemon) startDshProfileProvision(dshPath string) bool {
 	if len(dshProfileBundleSpecs()) == 0 {
 		return false
 	}
+	// The daemon's own context, not the caller's: a probe round is scoped to one
+	// round, and an install killed with it would leave the operator with a
+	// half-written profile and no explanation.
+	ctx := d.daemonLifecycleCtx()
 	started := false
 	d.dshProvisionOnce.Do(func() {
 		started = true
+		// Set before the goroutine rather than inside it: the verdict that
+		// starts the install is built in the same round, and an offline reason
+		// that says "wait" has to be true from the first deregistration.
+		d.dshInstallInFlight.Store(true)
 		go func() {
-			if err := provisionDshMulticaProfile(context.Background(), dshPath, d.logger); err != nil {
-				d.logger.Warn("automatic DSH runtime profile install failed; dsh stays unregistered until the profile exists",
-					"path", dshPath, "error", err)
+			defer d.dshInstallInFlight.Store(false)
+			// provisionDshMulticaProfile returns nil only once the profile is
+			// actually on disk, so nil here means there is something new to
+			// find. The exit status alone would not have meant that.
+			err := provisionDshMulticaProfile(ctx, dshPath, d.logger)
+			if err == nil {
+				d.logger.Info("DSH runtime profile installed; re-probing to bring dsh online")
+				// Re-probe now rather than at the next scheduled round. The
+				// discovery loop backs off while a provider cannot register, and
+				// dsh counts as "missing a runtime" for as long as the profile is
+				// absent — so the attempt this replaces can be
+				// agentConvergeMaxBackoff away, which is indistinguishable from
+				// "it does not work" to anyone watching the runtime list. On a
+				// daemon that started with nothing registered this also has to
+				// pick the workspace up first; see registerAfterDshProfileInstall.
+				d.registerAfterDshProfileInstall(ctx)
 				return
 			}
-			d.logger.Info("DSH runtime profile installed; re-probing to bring dsh online")
-			// Re-probe now rather than at the next scheduled round. The
-			// discovery loop backs off while a provider cannot register, and
-			// dsh counts as "missing a runtime" for as long as the profile is
-			// absent — so the attempt this replaces can be
-			// agentConvergeMaxBackoff away, which is indistinguishable from
-			// "it does not work" to anyone watching the runtime list.
-			d.kickAgentDiscovery()
+			d.logger.Warn("automatic DSH runtime profile install did not produce a profile; dsh stays unregistered until one exists",
+				"path", dshPath, "error", err)
+			// Withdraw the claim before returning. Any runtime taken offline
+			// while this install was running says "installing" on its row, and
+			// the server reads that as a wait worth queueing behind. Nothing
+			// else will ever rewrite it: the demotion already removed the
+			// runtime from the index, so no later round has a runtime to
+			// condemn and no later deregistration is sent. Left alone, that row
+			// queues work forever behind an install that has already given up.
+			d.withdrawDshInstallWait(ctx)
 		}()
 	})
 	return started
