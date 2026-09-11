@@ -958,7 +958,9 @@ function CommentCardImpl({
   const { getActorName } = useActorName();
   const replyTarget = useCommentDraftStore((s) => s.drafts[`reply:${issueId}:${entry.id}`]?.replyTarget);
   const replyTargetId = replyTarget?.commentId ?? entry.id;
-  const replyTargetMissing = !!replyTarget && replyTargetId !== entry.id && !replies.some((r) => r.id === replyTargetId);
+  // A deleted target's tombstone is as gone as a removed row.
+  const replyTargetMissing = !!replyTarget && replyTargetId !== entry.id
+    && !replies.some((r) => r.id === replyTargetId && !isDeletedComment(r));
   const annotation = useCommentAnnotations({
     draftKey: `reply:${issueId}:${entry.id}`,
     sources: [entry, ...replies].filter((e) => e.type === "comment")
