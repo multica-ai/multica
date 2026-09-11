@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -42,17 +43,69 @@ func TestStaticModelCatalogsAreValid(t *testing.T) {
 	}
 }
 
-func TestListModelsQwenUsesRuntimeDefaultAndManualEntry(t *testing.T) {
-	// Qwen returns its manual-entry catalog without resolving or executing a CLI.
-	got, err := ListModels(context.Background(), "qwen", Command{Path: ""})
+func TestListModelsQwenDiscoversAccountCatalog(t *testing.T) {
+	qwenHome := t.TempDir()
+	t.Setenv("QWEN_HOME", qwenHome)
+	settings := `{
+  "env": {"SECRET_API_KEY": "must-not-be-read-as-a-model"},
+  "modelProviders": {
+    "openai": [
+      {"id":"deepseek-v4-flash","name":"[ModelStudio Standard] deepseek-v4-flash","baseUrl":"https://dashscope.example/v1"},
+      {"id":"qwen3.7-plus","name":"[ModelStudio Standard] qwen3.7-plus","baseUrl":"https://dashscope.example/v1"},
+      {"id":"deepseek-v4-flash","name":"[DeepSeek] deepseek-v4-flash","baseUrl":"https://deepseek.example"},
+      {"id":"z-ai/glm-4.5-air:free","name":"[OpenRouter] z-ai/glm-4.5-air:free","baseUrl":"https://openrouter.example/v1"}
+    ]
+  },
+  "model": {"name":"deepseek-v4-flash","baseUrl":"https://deepseek.example"}
+}`
+	if err := os.WriteFile(filepath.Join(qwenHome, "settings.json"), []byte(settings), 0o600); err != nil {
+		t.Fatalf("write Qwen settings: %v", err)
+	}
+
+	got, err := ListModels(context.Background(), "qwen", Command{Path: missingAgentExecutable(t, "qwen")})
+	if err != nil {
+		t.Fatalf("ListModels(qwen) error: %v", err)
+	}
+	if len(got.Models) != 3 {
+		t.Fatalf("ListModels(qwen) = %+v, want three account models", got)
+	}
+	if got.Fallback {
+		t.Error("Qwen configured catalog must be authoritative, not a fallback")
+	}
+	if got.Models[0].ID != "deepseek-v4-flash" || got.Models[0].Label != "[DeepSeek] deepseek-v4-flash" || !got.Models[0].Default {
+		t.Fatalf("first Qwen model = %+v, want deduplicated current DeepSeek route", got.Models[0])
+	}
+	if got.Models[1].ID != "qwen3.7-plus" || got.Models[1].Label != "[ModelStudio Standard] qwen3.7-plus" {
+		t.Fatalf("second Qwen model = %+v, want configured Qwen label", got.Models[1])
+	}
+	if got.Models[2].ID != "z-ai/glm-4.5-air:free" {
+		t.Fatalf("third Qwen model = %+v, want OpenRouter model", got.Models[2])
+	}
+}
+
+func TestListModelsQwenWithoutSettingsKeepsDefaultAndManualEntry(t *testing.T) {
+	t.Setenv("QWEN_HOME", t.TempDir())
+
+	got, err := ListModels(context.Background(), "qwen", Command{Path: missingAgentExecutable(t, "qwen")})
 	if err != nil {
 		t.Fatalf("ListModels(qwen) error: %v", err)
 	}
 	if len(got.Models) != 0 {
-		t.Fatalf("ListModels(qwen) = %+v, want no account-specific static catalog", got)
+		t.Fatalf("ListModels(qwen) = %+v, want empty catalog when settings are absent", got)
 	}
 	if got.Fallback {
-		t.Error("qwen's empty catalog is deliberate, not a discovery fallback")
+		t.Error("missing Qwen settings must preserve manual entry, not report a static fallback")
+	}
+}
+
+func TestReadQwenModelsRejectsMalformedSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"modelProviders":`), 0o600); err != nil {
+		t.Fatalf("write malformed Qwen settings: %v", err)
+	}
+
+	if _, err := readQwenModels(path); err == nil || !strings.Contains(err.Error(), "parse Qwen settings") {
+		t.Fatalf("readQwenModels error = %v, want parse Qwen settings error", err)
 	}
 }
 

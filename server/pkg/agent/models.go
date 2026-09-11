@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -265,10 +267,13 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 			return discoverCodebuddyModels(ctx, runtimeCmd)
 		})
 	case "qwen":
-		// Qwen Code has no account-independent headless model catalog. An
-		// empty list keeps the runtime default and manual model entry available
-		// without advertising a Token-Plan-specific model to other accounts.
-		return Catalog{Models: []Model{}}, nil
+		// Qwen Code keeps its account-scoped headless model catalog in the user
+		// settings file. Read only the model provider definitions instead of
+		// publishing a static Token-Plan-specific list that would be wrong for
+		// other accounts.
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discovered(discoverQwenModels(ctx, runtimeCmd))
+		})
 	case "qwenpaw":
 		// QwenPaw's model selection is unsupported (session/set_model
 		// persists to agent scope, not session scope), so there is no
@@ -653,6 +658,94 @@ func discoverTraecliModels(ctx context.Context, runtimeCmd Command) ([]Model, er
 		tmpdirPrefix: "multica-traecli-discovery-",
 		acpArgs:      []string{"acp", "serve", "--yolo"},
 	})
+}
+
+// discoverQwenModels reads Qwen Code's configured modelProviders without
+// loading its env block or invoking a model. Qwen's ACP catalog cannot be used
+// here: ACP exposes route IDs for provider disambiguation, while Multica's
+// Qwen backend executes headlessly with `qwen --model`, which accepts the
+// configured model ID.
+func discoverQwenModels(_ context.Context, _ Command) ([]Model, error) {
+	qwenHome := strings.TrimSpace(os.Getenv("QWEN_HOME"))
+	if qwenHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve Qwen home: %w", err)
+		}
+		qwenHome = filepath.Join(home, ".qwen")
+	}
+	return readQwenModels(filepath.Join(qwenHome, "settings.json"))
+}
+
+func readQwenModels(path string) ([]Model, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return []Model{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read Qwen settings: %w", err)
+	}
+
+	type configuredModel struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		BaseURL string `json:"baseUrl"`
+	}
+	var settings struct {
+		ModelProviders map[string][]configuredModel `json:"modelProviders"`
+		Model          struct {
+			Name    string `json:"name"`
+			BaseURL string `json:"baseUrl"`
+		} `json:"model"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, fmt.Errorf("parse Qwen settings: %w", err)
+	}
+
+	providerIDs := make([]string, 0, len(settings.ModelProviders))
+	for providerID := range settings.ModelProviders {
+		providerIDs = append(providerIDs, providerID)
+	}
+	sort.Strings(providerIDs)
+
+	currentID := strings.TrimSpace(settings.Model.Name)
+	currentBaseURL := strings.TrimSpace(settings.Model.BaseURL)
+	models := make([]Model, 0)
+	modelIndex := make(map[string]int)
+	selectedIndex := -1
+	for _, providerID := range providerIDs {
+		for _, configured := range settings.ModelProviders[providerID] {
+			id := strings.TrimSpace(configured.ID)
+			if id == "" {
+				continue
+			}
+			label := strings.TrimSpace(configured.Name)
+			if label == "" {
+				label = id
+			}
+			candidate := Model{ID: id, Label: label, Provider: providerID}
+			matchesCurrent := id == currentID && (currentBaseURL == "" || strings.TrimSpace(configured.BaseURL) == currentBaseURL)
+			if index, exists := modelIndex[id]; exists {
+				// The headless --model flag cannot disambiguate two configured
+				// routes with the same ID. Prefer the currently selected route so
+				// the label describes what Qwen will actually use.
+				if matchesCurrent {
+					models[index] = candidate
+					selectedIndex = index
+				}
+				continue
+			}
+			modelIndex[id] = len(models)
+			models = append(models, candidate)
+			if matchesCurrent {
+				selectedIndex = len(models) - 1
+			}
+		}
+	}
+	if selectedIndex >= 0 {
+		models[selectedIndex].Default = true
+	}
+	return models, nil
 }
 
 // cursorStaticModels is a minimal fallback used when
