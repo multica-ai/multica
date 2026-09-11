@@ -564,30 +564,24 @@ GROUP BY parent_issue_id;
 -- issue first so this is also the tenant check.
 UPDATE issue SET
     metadata = jsonb_set(metadata, ARRAY[sqlc.arg('key')::text], sqlc.arg('value')::jsonb),
-    revision = revision + CASE WHEN metadata -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN 1 ELSE 0 END,
-    last_activity_at = CASE
-        WHEN metadata -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb
-        THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
-        ELSE last_activity_at
-    END,
+    revision = revision + 1,
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
     updated_at = now()
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
-RETURNING *;
+  AND metadata -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb
+RETURNING id, workspace_id, metadata, revision;
 
 -- name: DeleteIssueMetadataKey :one
 -- Atomically removes a single key from the issue's metadata JSONB.
--- Deleting a missing key is a no-op (still returns the row).
+-- Deleting a missing key is a no-op (returns no rows).
 UPDATE issue SET
     metadata = metadata - sqlc.arg('key')::text,
-    revision = revision + CASE WHEN metadata ? sqlc.arg('key')::text THEN 1 ELSE 0 END,
-    last_activity_at = CASE
-        WHEN metadata ? sqlc.arg('key')::text
-        THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
-        ELSE last_activity_at
-    END,
+    revision = revision + 1,
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
     updated_at = now()
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
-RETURNING *;
+  AND metadata ? sqlc.arg('key')::text
+RETURNING id, workspace_id, metadata, revision;
 
 -- name: MarkIssueFirstExecuted :one
 -- Flips first_executed_at from NULL to now() atomically. Returns the row if
