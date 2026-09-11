@@ -2147,6 +2147,23 @@ func rerunSourceMatchesTaskScope(task, source db.AgentTaskQueue) bool {
 	return false
 }
 
+// applyFreshSessionRetryWorkdir resolves the prior pointers for an automatic
+// retry that must start a fresh session. CreateRetryTask forces one only when
+// the parent's failure poisoned the conversation (currently
+// codex_semantic_inactivity), and still copies the parent's work_dir onto the
+// child: a poisoned conversation says nothing about the files it left behind,
+// the same contract the manual-retry branch applies (MUL-4869, MUL-7034). The
+// daemon validates the directory before reusing it and falls back to a fresh
+// Prepare when it is gone. The failed attempt's working memory does not come
+// back, so the continuity gap is disclosed rather than presenting the reused
+// workdir as a clean start.
+func applyFreshSessionRetryWorkdir(task db.AgentTaskQueue, resp *AgentTaskResponse) {
+	if task.WorkDir.Valid {
+		resp.PriorWorkDir = task.WorkDir.String
+	}
+	resp.PriorSessionResumeUnavailable = true
+}
+
 func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 	return resp.AgentID != "" && resp.Agent != nil && resp.Agent.ID == resp.AgentID
 }
@@ -2781,6 +2798,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}); err == nil && missing {
 				resp.PriorSessionResumeUnavailable = true
 			}
+		} else if task.RetryOfTaskID.Valid {
+			// Automatic retry that must start a fresh session: continue in the
+			// parent's workdir, never its session. A force_fresh task with no
+			// retry lineage still resumes nothing.
+			applyFreshSessionRetryWorkdir(*task, &resp)
 		}
 	}
 
@@ -2955,6 +2977,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			if err == nil && missing {
 				resp.PriorSessionResumeUnavailable = true
 			}
+		} else if task.RetryOfTaskID.Valid {
+			// Same as the issue branch. The retry lineage is what separates this
+			// from a user-requested fresh start (the Lark fresh-session command),
+			// which still inherits nothing.
+			applyFreshSessionRetryWorkdir(*task, &resp)
 		}
 
 		parts := make([]string, 0, len(unanswered))

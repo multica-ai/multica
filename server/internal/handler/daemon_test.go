@@ -3182,6 +3182,118 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 	})
 }
 
+// createAutoRetryForTest runs the production retry insert against a failed
+// parent, so a claim test exercises the row CreateRetryTask actually writes.
+func createAutoRetryForTest(t *testing.T, ctx context.Context, parentID string) {
+	t.Helper()
+	child, err := testHandler.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: parseUUID(parentID)})
+	if err != nil {
+		t.Fatalf("setup: CreateRetryTask: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, child.ID)
+	})
+}
+
+// TestClaimTask_AutoRetryFreshSessionReusesParentWorkdir is the MUL-7034
+// claim-layer contract for an automatic retry of a conversation-poisoning
+// failure: a fresh session, the parent's workdir, and a disclosed continuity
+// gap. The retry row comes from the real CreateRetryTask so the query and the
+// claim are pinned together; the workdir reaches the daemon only when both
+// carry it (GH #7998). Contrast a force_fresh task with no retry lineage, which
+// resumes nothing (TestClaimTask_IssuePriorSessionRuntimeGuard).
+func TestClaimTask_AutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	issueID := dbfx.Issue(t, "auto-retry fresh-session fixture", testutil.Cols{"status": "in_progress"})
+
+	// An earlier healthy turn is what the (agent, issue) resume lookup returns,
+	// since it skips the poisoned parent. Getting its session or workdir back
+	// would mean the retry fell through to that lookup.
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":   runtimeID,
+		"issue_id":     issueID,
+		"status":       "completed",
+		"started_at":   testutil.Raw("now() - interval '30 minutes'"),
+		"completed_at": testutil.Raw("now() - interval '25 minutes'"),
+		"session_id":   "earlier-healthy-session",
+		"work_dir":     "/tmp/earlier-healthy-workdir",
+	})
+	parentID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":     runtimeID,
+		"issue_id":       issueID,
+		"status":         "failed",
+		"failure_reason": "codex_semantic_inactivity",
+		"started_at":     testutil.Raw("now() - interval '20 minutes'"),
+		"completed_at":   testutil.Raw("now() - interval '1 minute'"),
+		"session_id":     "codex-stuck-session",
+		"work_dir":       "/tmp/codex-stuck-workdir",
+		"attempt":        1,
+		"max_attempts":   2,
+	})
+	createAutoRetryForTest(t, ctx, parentID)
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorWorkDir != "/tmp/codex-stuck-workdir" {
+		t.Fatalf("PriorWorkDir = %q, want the failed parent's /tmp/codex-stuck-workdir", task.PriorWorkDir)
+	}
+	if task.PriorSessionID != "" {
+		t.Fatalf("PriorSessionID = %q, want empty (the poisoned session must not resume)", task.PriorSessionID)
+	}
+	if !task.PriorSessionResumeUnavailable {
+		t.Fatal("auto-retry must disclose that the failed attempt's context did not come back")
+	}
+}
+
+// TestClaimTask_ChatAutoRetryFreshSessionReusesParentWorkdir is the chat half
+// of the same contract. The chat_session pointer names a different session and
+// workdir, so the assertions prove the retry continues its parent rather than
+// the conversation-wide pointer. Contrast a force_fresh chat task with no retry
+// lineage, which inherits nothing
+// (TestClaimTask_ChatForceFreshSessionSkipsPriorSession).
+func TestClaimTask_ChatAutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "auto-retry fresh chat",
+		"session_id": "chat-pointer-session",
+		"work_dir":   "/tmp/chat-pointer-workdir",
+		"runtime_id": runtimeID,
+	})
+	parentID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":      runtimeID,
+		"chat_session_id": chatSessionID,
+		"status":          "failed",
+		"failure_reason":  "codex_semantic_inactivity",
+		"started_at":      testutil.Raw("now() - interval '20 minutes'"),
+		"completed_at":    testutil.Raw("now() - interval '1 minute'"),
+		"session_id":      "codex-stuck-chat-session",
+		"work_dir":        "/tmp/codex-stuck-chat-workdir",
+		"attempt":         1,
+		"max_attempts":    2,
+	})
+	createAutoRetryForTest(t, ctx, parentID)
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorWorkDir != "/tmp/codex-stuck-chat-workdir" {
+		t.Fatalf("PriorWorkDir = %q, want the failed parent's /tmp/codex-stuck-chat-workdir", task.PriorWorkDir)
+	}
+	if task.PriorSessionID != "" {
+		t.Fatalf("PriorSessionID = %q, want empty (the poisoned session must not resume)", task.PriorSessionID)
+	}
+	if !task.PriorSessionResumeUnavailable {
+		t.Fatal("chat auto-retry must disclose that the failed attempt's context did not come back")
+	}
+}
+
 func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

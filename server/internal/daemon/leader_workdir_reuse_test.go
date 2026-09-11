@@ -136,6 +136,33 @@ func TestShouldReusePriorWorkdirChatAcceptsMatchingConversation(t *testing.T) {
 	}
 }
 
+// TestShouldReusePriorWorkdirDeclinesRemovedDirectory covers an automatic retry
+// whose parent's workdir was GC'd between the failure and the claim (MUL-7034):
+// the server still offers the recorded path, and the daemon must decline it so
+// the run prepares a fresh environment instead.
+func TestShouldReusePriorWorkdirDeclinesRemovedDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
+	writeLeaderManagedEnvProvenance(t, workDir, "ws-leader", "issue-leader", "agent-leader")
+
+	task := leaderReuseTestTask("task-retry")
+	task.IsLeaderTask = false
+	task.PriorWorkDir = workDir
+	if _, ok := shouldReusePriorWorkdir(task, nil, root); !ok {
+		t.Fatalf("setup: fully-provenanced workdir %q was not reusable", workDir)
+	}
+
+	if err := os.RemoveAll(filepath.Dir(workDir)); err != nil {
+		t.Fatalf("remove env root: %v", err)
+	}
+	if _, ok := shouldReusePriorWorkdir(task, nil, root); ok {
+		t.Fatal("reused a prior workdir that no longer exists")
+	}
+}
+
 // TestShouldReusePriorWorkdirSquadLeaderAcceptsManagedProvenance is the unit
 // positive: managed shape + matching Prepare-time provenance + matching marker.
 func TestShouldReusePriorWorkdirSquadLeaderAcceptsManagedProvenance(t *testing.T) {
