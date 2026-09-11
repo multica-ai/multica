@@ -22,7 +22,7 @@
     "fumadocs-core": "^15.5.2",
     "fumadocs-mdx": "^12.0.3",
     "lucide-react": "catalog:",
-    "next": "^16.2.5",
+    "next": "^16.2.12",
     "react": "catalog:",
     "react-dom": "catalog:",
     "shadcn": "^4.1.0",
