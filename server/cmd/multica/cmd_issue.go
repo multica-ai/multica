@@ -189,6 +189,29 @@ var issuePullRequestsCmd = &cobra.Command{
 	RunE:    runIssuePullRequests,
 }
 
+var issuePullRequestsLinkCmd = &cobra.Command{
+	Use:   "link <issue> <pr-url>",
+	Short: "Link a GitHub pull request to an issue",
+	Long: "Link a GitHub pull request to an issue without requiring the issue's\n" +
+		"identifier anywhere in the pull request's title, body, or branch name —\n" +
+		"the private counterpart to webhook auto-link discovery. The pull request\n" +
+		"is fetched from GitHub to confirm it exists and that a GitHub\n" +
+		"installation connected to this workspace can see it, then linked the\n" +
+		"same way webhook discovery would link it, so it shows up in the issue's\n" +
+		"linked pull-request list and UI.\n\n" +
+		"Safe to run again: relinking the same pull request updates\n" +
+		"--close-on-merge instead of creating a duplicate link.",
+	Args: exactArgs(2),
+	RunE: runIssuePullRequestsLink,
+}
+
+var issuePullRequestsUnlinkCmd = &cobra.Command{
+	Use:   "unlink <issue> <pr-url>",
+	Short: "Unlink a pull request from an issue",
+	Args:  exactArgs(2),
+	RunE:  runIssuePullRequestsUnlink,
+}
+
 var issueChildrenCmd = &cobra.Command{
 	Use:     "children <id>",
 	Aliases: []string{"subissues"},
@@ -484,6 +507,8 @@ func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
 	issueCmd.AddCommand(issuePullRequestsCmd)
+	issuePullRequestsCmd.AddCommand(issuePullRequestsLinkCmd)
+	issuePullRequestsCmd.AddCommand(issuePullRequestsUnlinkCmd)
 	issueCmd.AddCommand(issueChildrenCmd)
 	issueCmd.AddCommand(issueCreateCmd)
 	issueCmd.AddCommand(issueUpdateCmd)
@@ -532,6 +557,10 @@ func init() {
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue pull-requests link
+	issuePullRequestsLinkCmd.Flags().Bool("close-on-merge", false, "Advance the issue to done when this pull request merges, the same effect a 'Closes/Fixes/Resolves' keyword has on an auto-discovered link")
+	issuePullRequestsLinkCmd.Flags().String("output", "json", "Output format: table or json")
 
 	issueChildrenCmd.Flags().String("output", "table", "Output format: table or json")
 	issueChildrenCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
@@ -958,6 +987,63 @@ func runIssuePullRequests(cmd *cobra.Command, args []string) error {
 
 	prs, _ := result["pull_requests"].([]any)
 	printIssuePullRequestsTable(normalizePullRequestList(prs))
+	return nil
+}
+
+func runIssuePullRequestsLink(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	closeOnMerge, _ := cmd.Flags().GetBool("close-on-merge")
+	body := map[string]any{
+		"url":            args[1],
+		"close_on_merge": closeOnMerge,
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/pull-requests", body, &result); err != nil {
+		return fmt.Errorf("link pull request: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	pr, _ := result["pull_request"].(map[string]any)
+	printIssuePullRequestsTable(normalizePullRequestList([]any{pr}))
+	return nil
+}
+
+func runIssuePullRequestsUnlink(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	body := map[string]any{"url": args[1]}
+	if err := client.DeleteJSONWithBody(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/pull-requests", body); err != nil {
+		return fmt.Errorf("unlink pull request: %w", err)
+	}
+
+	fmt.Fprintln(os.Stdout, "Unlinked.")
 	return nil
 }
 

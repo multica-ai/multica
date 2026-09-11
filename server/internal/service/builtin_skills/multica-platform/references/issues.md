@@ -142,6 +142,30 @@ platform at all. A delivery that failed is not retried on its own, but it can be
 redelivered once the receiving side is fixed. Report what you found in the result
 comment rather than repeating the edit.
 
+### Linking a PR without a routable key
+
+`multica issue pull-requests link` and `unlink` are the manual counterpart to
+webhook auto-link discovery, for GitHub pull requests that never got a
+routable key in their title, body, or branch — for example a PR opened in a
+repo where the Multica issue key must stay internal-only and cannot appear on
+any public GitHub surface.
+
+```bash
+multica issue pull-requests link <issue-id> <pr-url> [--close-on-merge]
+multica issue pull-requests unlink <issue-id> <pr-url>
+```
+
+`<pr-url>` is the GitHub PR's `html_url`
+(`https://github.com/<owner>/<repo>/pull/<number>`). `link` fetches the PR from
+GitHub to confirm it exists and that a GitHub installation connected to this
+workspace can see it, then writes the same link row webhook discovery would
+have written — the PR appears in `multica issue pull-requests` and the issue's
+UI exactly as an auto-discovered link would. Without `--close-on-merge` the
+link behaves like a bare title/branch reference (links, does not close on
+merge); with it, the link behaves like a close keyword (the issue can
+auto-advance to `done` when the PR merges). Relinking the same issue/PR
+pair updates `--close-on-merge` rather than creating a duplicate link.
+
 ## Listing and ordering issues
 
 `issue list` reads one page at a time, with a server maximum of 100 issues.
