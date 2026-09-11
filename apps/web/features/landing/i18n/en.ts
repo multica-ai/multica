@@ -296,7 +296,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.43",
         date: "2026-09-11",
-        title: "Desktop history menus, new Issue board defaults, truncated tool output notices, and steadier long runs",
+        title: "Desktop history menus, new Issue board defaults, and performance improvements",
         changes: [],
         features: [
           "Back and Forward on the desktop app list the pages you visited, so you can jump straight to one.",

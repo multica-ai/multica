@@ -296,7 +296,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.43",
         date: "2026-09-11",
-        title: "桌面端历史菜单、Issue 看板新默认视图、工具输出截断提示、长任务运行更稳",
+        title: "桌面端历史菜单、Issue 看板新默认视图、性能优化",
         changes: [],
         features: [
           "桌面端的前进/后退可以列出最近访问过的页面，直接跳回去。",

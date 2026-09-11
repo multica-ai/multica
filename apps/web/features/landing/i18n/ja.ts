@@ -272,7 +272,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           version: "0.4.43",
           date: "2026-09-11",
-          title: "デスクトップの履歴メニュー、Issue ボードの新しい初期表示、ツール出力の省略表示、長時間タスクがより安定",
+          title: "デスクトップの履歴メニュー、Issue ボードの新しい初期表示、パフォーマンス改善",
           changes: [],
           features: [
             "デスクトップの戻る／進むに最近見たページが並び、そこへ直接移動できます。",

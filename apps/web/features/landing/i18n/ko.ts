@@ -271,7 +271,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.4.43",
           date: "2026-09-11",
-          title: "데스크톱 방문 기록 메뉴, 새로워진 Issue 보드 기본 화면, 도구 출력 생략 표시, 더 안정적인 장시간 태스크",
+          title: "데스크톱 방문 기록 메뉴, 새로워진 Issue 보드 기본 화면, 성능 개선",
           changes: [],
           features: [
             "데스크톱의 뒤로·앞으로에 최근 본 페이지가 나열되어 바로 이동할 수 있습니다.",
