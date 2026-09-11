@@ -107,7 +107,8 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 	rootPrefix := ""
 	skillMdEntries := make(map[string]string)
 	for _, f := range zr.File {
-		if f.FileInfo().IsDir() {
+		// Compress-Archive directory markers may have no directory attributes.
+		if f.FileInfo().IsDir() || strings.HasSuffix(f.Name, `\`) {
 			continue
 		}
 		clean := cleanArchiveEntryName(f.Name)
@@ -152,7 +153,8 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 
 	seenFiles := make(map[string]string)
 	for _, f := range zr.File {
-		if f.FileInfo().IsDir() {
+		// Compress-Archive directory markers may have no directory attributes.
+		if f.FileInfo().IsDir() || strings.HasSuffix(f.Name, `\`) {
 			continue
 		}
 		clean := cleanArchiveEntryName(f.Name)
