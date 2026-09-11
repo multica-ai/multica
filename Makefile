@@ -31,6 +31,11 @@ export
 MULTICA_ARGS ?= $(ARGS)
 
 COMPOSE := docker compose
+# Local development deliberately shares one PostgreSQL Compose project across
+# the main checkout and worktrees. Worktree env files also carry a distinct
+# project name for self-host Compose stacks, so pin these database helpers to
+# the shared project explicitly.
+LOCAL_COMPOSE := $(COMPOSE) -p multica
 
 define REQUIRE_ENV
 	@if [ ! -f "$(ENV_FILE)" ]; then \
@@ -234,10 +239,10 @@ check: ## Run typecheck, TS tests, Go tests, and Playwright E2E for the current 
 	@ENV_FILE="$(ENV_FILE)" bash scripts/check.sh
 
 db-up: ## Start the shared PostgreSQL container used by main and worktrees
-	@$(COMPOSE) up -d postgres
+	@$(LOCAL_COMPOSE) up -d postgres
 
 db-down: ## Stop the shared PostgreSQL container without removing its Docker volume
-	@$(COMPOSE) down
+	@$(LOCAL_COMPOSE) down
 
 db-drop: ## Permanently drop the current env's local database after confirmation
 	$(REQUIRE_ENV)
@@ -257,7 +262,7 @@ db-reset: ## Drop and recreate the current env's database, then re-run all migra
 	esac
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	@echo "==> Dropping and recreating database '$(POSTGRES_DB)'..."
-	@$(COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d postgres -v ON_ERROR_STOP=1 \
+	@$(LOCAL_COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d postgres -v ON_ERROR_STOP=1 \
 		-c "DROP DATABASE IF EXISTS \"$(POSTGRES_DB)\" WITH (FORCE);" \
 		-c "CREATE DATABASE \"$(POSTGRES_DB)\";"
 	@echo "==> Running migrations..."

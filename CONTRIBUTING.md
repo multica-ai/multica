@@ -101,6 +101,9 @@ Notes:
 - `POSTGRES_DB` is unique per worktree
 - `POSTGRES_PORT` stays fixed at `5432`
 - backend and frontend ports are derived from the worktree path hash
+- `.env.worktree` includes a deterministic `COMPOSE_PROJECT_NAME` for a
+  self-host Compose stack started directly from that checkout; the local
+  development helpers still pin PostgreSQL to the shared `multica` project
 - `make worktree-env` refuses to overwrite an existing `.env.worktree`
 
 To regenerate a worktree env file:

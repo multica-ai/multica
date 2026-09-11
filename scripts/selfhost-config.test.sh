@@ -44,6 +44,67 @@ printf '\nBACKEND_PORT=9100\nSMTP_FROM_EMAIL=multica@example.com\n' >>"$tmp_env"
 printf 'MULTICA_LLM_API_KEY=llm-key-from-env\nMULTICA_LLM_BASE_URL=http://gateway.example/v1\nMULTICA_LLM_DEFAULT_MODEL=model-from-env\nMULTICA_LLM_MAX_RETRIES=3\n' >>"$tmp_env"
 printf 'DATABASE_REPLICA_URL=postgres://reader:secret@replica.example.com:5432/multica?sslmode=require\nDATABASE_REPLICA_MAX_CONNS=12\nDATABASE_REPLICA_MIN_CONNS=1\n' >>"$tmp_env"
 
+# Both Compose entry points must keep the existing single-checkout project name
+# while allowing callers and generated worktree env files to isolate stacks.
+for compose_file in docker-compose.yml docker-compose.selfhost.yml; do
+  default_name="$(
+    env -u COMPOSE_PROJECT_NAME docker compose \
+      --env-file "$tmp_env" \
+      -f "$compose_file" \
+      config | sed -n '1s/^name: //p'
+  )"
+  if [ "$default_name" != "multica" ]; then
+    echo "$compose_file should default to the multica Compose project, got ${default_name:-<none>}"
+    exit 1
+  fi
+
+  override_name="$(
+    env COMPOSE_PROJECT_NAME=multica_config_test docker compose \
+      --env-file "$tmp_env" \
+      -f "$compose_file" \
+      config | sed -n '1s/^name: //p'
+  )"
+  if [ "$override_name" != "multica_config_test" ]; then
+    echo "$compose_file did not honor COMPOSE_PROJECT_NAME, got ${override_name:-<none>}"
+    exit 1
+  fi
+done
+
+worktree_env_same="$tmp_dir/.env.worktree.same"
+worktree_env_other="$tmp_dir/.env.worktree.other"
+WORKTREE_NAME=selfhost-config-test bash scripts/init-worktree-env.sh "$worktree_env_same" >/dev/null
+WORKTREE_NAME=selfhost-config-test bash scripts/init-worktree-env.sh "$worktree_env_other" >/dev/null
+worktree_project_name="$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$worktree_env_same")"
+same_generated_project_name="$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$worktree_env_other")"
+if [ -z "$worktree_project_name" ] || [ "$worktree_project_name" != "$same_generated_project_name" ]; then
+  echo "worktree env generation must be deterministic"
+  exit 1
+fi
+if ! [[ "$worktree_project_name" =~ ^multica_selfhost_config_test_[0-9]+$ ]]; then
+  echo "worktree env generated an invalid or unexpected Compose project name: $worktree_project_name"
+  exit 1
+fi
+
+FORCE=1 WORKTREE_NAME=selfhost-config-other bash scripts/init-worktree-env.sh "$worktree_env_other" >/dev/null
+other_project_name="$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$worktree_env_other")"
+if [ "$worktree_project_name" = "$other_project_name" ]; then
+  echo "different worktree names must not share a Compose project name"
+  exit 1
+fi
+
+generated_name="$(
+  env -u COMPOSE_PROJECT_NAME docker compose \
+    --env-file "$worktree_env_same" \
+    -f docker-compose.yml \
+    config | sed -n '1s/^name: //p'
+)"
+if [ "$generated_name" != "$worktree_project_name" ]; then
+  echo "docker-compose.yml did not use the generated worktree project name"
+  echo "  generated env: $worktree_project_name"
+  echo "  compose name:  ${generated_name:-<none>}"
+  exit 1
+fi
+
 config="$(
   docker compose \
     --env-file "$tmp_env" \
