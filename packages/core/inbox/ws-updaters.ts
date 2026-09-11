@@ -44,14 +44,35 @@ export async function onInboxNew(
   await onInboxInvalidate(qc, wsId);
 }
 
+// An issue event only patches known rows; it cannot fulfill a pending inbox
+// refresh. setQueryData clears isInvalidated even when the updater returns the
+// same array. Preserve it so an inactive list still refetches on its next mount
+// (MUL-7286). Do not restart an active fetch or introduce a fetch per issue event.
+function patchInboxLists(
+  qc: QueryClient,
+  wsId: string,
+  patch: (items: InboxItem[]) => InboxItem[],
+) {
+  for (const queryKey of [inboxKeys.list(wsId), inboxKeys.archived(wsId)]) {
+    const invalidated = qc.getQueryState(queryKey)?.isInvalidated === true;
+    qc.setQueryData<InboxItem[]>(queryKey, (old) => {
+      if (!old) return undefined;
+      const next = patch(old);
+      return next === old ? undefined : next;
+    });
+    if (invalidated) {
+      void qc.invalidateQueries({ queryKey, exact: true, refetchType: "none" });
+    }
+  }
+}
+
 export function patchInboxIssueProjection(
   qc: QueryClient,
   wsId: string,
   issueId: string,
   patch: { status?: IssueStatus; priority?: IssuePriority },
 ) {
-  const project = (old: InboxItem[] | undefined) => {
-    if (!old) return old;
+  const project = (old: InboxItem[]) => {
     let changed = false;
     const next = old.map((item) => {
       if (item.issue_id !== issueId) return item;
@@ -71,9 +92,8 @@ export function patchInboxIssueProjection(
     });
     return changed ? next : old;
   };
-  qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), project);
   // Archived rows expose the same issue fields and filter controls.
-  qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), project);
+  patchInboxLists(qc, wsId, project);
 }
 
 export function patchInboxIssueStatus(
@@ -110,10 +130,9 @@ export async function onInboxIssueDeleted(
   wsId: string,
   issueId: string,
 ) {
-  const drop = (old: InboxItem[] | undefined) =>
-    old?.filter((i) => i.issue_id !== issueId);
-  qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), drop);
-  qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), drop);
+  patchInboxLists(qc, wsId, (items) =>
+    items.filter((i) => i.issue_id !== issueId),
+  );
   await onInboxSummaryInvalidate(qc);
 }
 

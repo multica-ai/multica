@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import {
@@ -259,6 +260,54 @@ describe("patchInboxIssueProjection", () => {
       qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0],
     ).not.toHaveProperty("issue_priority");
   });
+});
+
+// The hook-level reproduction lives in use-realtime-sync-inbox.test.tsx.
+// These cases cover the partial writers and both list keys, including an
+// update to an issue absent from the cached list (setQueryData's no-op trap).
+describe.each([
+  ["main", inboxKeys.list(wsId)],
+  ["archived", inboxKeys.archived(wsId)],
+] as const)("partial updates to an invalidated %s inbox", (view, queryKey) => {
+  it.each([
+    ["status", (qc: QueryClient) => onInboxIssueStatusChanged(qc, wsId, "issue-a", "done")],
+    ["priority", (qc: QueryClient) => patchInboxIssueProjection(qc, wsId, "issue-a", { priority: "high" })],
+    ["unrelated issue", (qc: QueryClient) => onInboxIssueStatusChanged(qc, wsId, "other-issue", "done")],
+    ["deletion", (qc: QueryClient) => onInboxIssueDeleted(qc, wsId, "issue-a")],
+  ] as const)("preserves the pending refresh after %s", async (_label, update) => {
+    const qc = new QueryClient();
+    qc.setQueryData(queryKey, [
+      makeItem("i1", "issue-a", {
+        issue_priority: "low",
+        archived: view === "archived",
+      }),
+    ]);
+    try {
+      await onInboxInvalidate(qc, wsId);
+      await update(qc);
+      expect(qc.getQueryState(queryKey)?.isInvalidated).toBe(true);
+    } finally {
+      qc.clear();
+    }
+  });
+});
+
+it("does not refetch fresh lists for issue projection changes", async () => {
+  const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+  const queryFn = vi.fn(async () => [makeItem("i1", "issue-a")]);
+  const options = { queryKey: inboxKeys.list(wsId), queryFn };
+  await qc.fetchQuery(options);
+  const observer = new QueryObserver(qc, options);
+  const unsubscribe = observer.subscribe(() => {});
+  try {
+    onInboxIssueStatusChanged(qc, wsId, "issue-a", "done");
+    expect(observer.getCurrentResult().data?.[0]?.issue_status).toBe("done");
+    expect(queryFn).toHaveBeenCalledTimes(1);
+    expect(qc.getQueryState(options.queryKey)?.isInvalidated).toBe(false);
+  } finally {
+    unsubscribe();
+    qc.clear();
+  }
 });
 
 // MUL-6967 regression: the inbox list must pick up a change that happens while
