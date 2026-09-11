@@ -7032,10 +7032,11 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 // chat session, for autopilot tasks from the autopilot via its run, and for
 // quick-create tasks from the context JSONB (they carry no link at all).
 //
-// A failed lookup is reported even when a later link resolves: the returned
-// workspace is still trustworthy, so the error is only surfaced when nothing
-// resolved. That keeps a task carrying several links working during a partial
-// outage while still refusing to call an unknown state "not found".
+// A failed lookup does not stop the walk. If a later link resolves, its
+// workspace is returned and the earlier error is dropped, because that answer
+// is still trustworthy; the error is surfaced only when nothing resolved. That
+// keeps a task carrying several links working during a partial outage while
+// still refusing to call an unknown state "not found".
 func (s *TaskService) ResolveTaskWorkspaceIDChecked(ctx context.Context, task db.AgentTaskQueue) (string, error) {
 	// isNotFound is the "genuinely absent" signal; every other error means the
 	// lookup itself did not complete. pgx.ErrNoRows is the only error the

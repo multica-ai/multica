@@ -71,9 +71,11 @@ func TestGetTaskStatus_WorkspaceLookupFailure_Returns500(t *testing.T) {
 			if !fault.called {
 				t.Fatal("fault was never exercised — the resolver did not reach the injected query")
 			}
-			// The status code alone is not the contract: isTaskNotFoundError
-			// matches on the body, so a 5xx that still says "task not found"
-			// would keep the kill signal alive.
+			// isTaskNotFoundError requires BOTH a 404 and this body, so the
+			// 500 above is already enough to keep the daemon from
+			// interrupting. The body is asserted too so the response never
+			// carries the cancel-triggering string at all, should either half
+			// of that check ever be relaxed.
 			if strings.Contains(w.Body.String(), "task not found") {
 				t.Fatalf("5xx body must not carry the daemon's cancel-triggering string: %s", w.Body.String())
 			}
