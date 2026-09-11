@@ -1945,6 +1945,64 @@ func (q *Queries) LockCommentForDelete(ctx context.Context, arg LockCommentForDe
 	return i, err
 }
 
+const lockLiveComment = `-- name: LockLiveComment :one
+WITH locked_issue AS MATERIALIZED (
+    SELECT issue.id
+    FROM issue
+    JOIN comment ON comment.issue_id = issue.id
+                AND comment.workspace_id = issue.workspace_id
+    WHERE comment.id = $1 AND comment.workspace_id = $2
+    FOR NO KEY UPDATE OF issue
+), issue_fence AS MATERIALIZED (
+    SELECT count(*) AS locked_count FROM locked_issue
+)
+SELECT comment.id, comment.issue_id, comment.author_type, comment.author_id, comment.content, comment.type, comment.created_at, comment.updated_at, comment.parent_id, comment.workspace_id, comment.resolved_at, comment.resolved_by_type, comment.resolved_by_id, comment.source_task_id, comment.quick_action_id, comment.via_plugin_id, comment.revision, comment.recovery_settled_at, comment.deleted_at
+FROM comment
+CROSS JOIN issue_fence
+WHERE comment.id = $1 AND comment.workspace_id = $2
+  AND comment.deleted_at IS NULL
+  AND issue_fence.locked_count >= 0
+FOR NO KEY UPDATE OF comment
+`
+
+type LockLiveCommentParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Locks a live comment ahead of a write to one of its children — reactions and
+// attachments — in the order every comment mutation shares: issue, then
+// comment, then child. A comment deleted before or while this waits reads as
+// absent (the row lock re-checks deleted_at), so no child can land on its
+// tombstone. FOR NO KEY UPDATE conflicts with the delete transaction's FOR
+// UPDATE but not with a reply's FOR KEY SHARE, so it never blocks replies.
+func (q *Queries) LockLiveComment(ctx context.Context, arg LockLiveCommentParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, lockLiveComment, arg.ID, arg.WorkspaceID)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+		&i.QuickActionID,
+		&i.ViaPluginID,
+		&i.Revision,
+		&i.RecoverySettledAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const resolveComment = `-- name: ResolveComment :one
 UPDATE comment SET
     resolved_at = COALESCE(resolved_at, now()),

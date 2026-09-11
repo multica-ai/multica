@@ -610,6 +610,31 @@ WHERE comment.id = @id AND comment.workspace_id = @workspace_id
   AND issue_fence.locked_count >= 0
 FOR UPDATE OF comment;
 
+-- name: LockLiveComment :one
+-- Locks a live comment ahead of a write to one of its children — reactions and
+-- attachments — in the order every comment mutation shares: issue, then
+-- comment, then child. A comment deleted before or while this waits reads as
+-- absent (the row lock re-checks deleted_at), so no child can land on its
+-- tombstone. FOR NO KEY UPDATE conflicts with the delete transaction's FOR
+-- UPDATE but not with a reply's FOR KEY SHARE, so it never blocks replies.
+WITH locked_issue AS MATERIALIZED (
+    SELECT issue.id
+    FROM issue
+    JOIN comment ON comment.issue_id = issue.id
+                AND comment.workspace_id = issue.workspace_id
+    WHERE comment.id = @id AND comment.workspace_id = @workspace_id
+    FOR NO KEY UPDATE OF issue
+), issue_fence AS MATERIALIZED (
+    SELECT count(*) AS locked_count FROM locked_issue
+)
+SELECT comment.*
+FROM comment
+CROSS JOIN issue_fence
+WHERE comment.id = @id AND comment.workspace_id = @workspace_id
+  AND comment.deleted_at IS NULL
+  AND issue_fence.locked_count >= 0
+FOR NO KEY UPDATE OF comment;
+
 -- name: CommentHasReplies :one
 SELECT EXISTS (
     SELECT 1 FROM comment

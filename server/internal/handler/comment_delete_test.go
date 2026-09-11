@@ -1,9 +1,13 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -347,4 +351,125 @@ func TestPublicPluginCommentExposesTombstone(t *testing.T) {
 	if tombstone.DeletedAt == "" || tombstone.Content != "" {
 		t.Fatalf("tombstone = %+v, want deleted_at set and empty content", tombstone)
 	}
+}
+
+// recordingStorage records which stored objects a handler cleaned up.
+type recordingStorage struct {
+	mockStorage
+	mu      sync.Mutex
+	deleted []string
+}
+
+func (s *recordingStorage) DeleteKeys(_ context.Context, keys []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleted = append(s.deleted, keys...)
+}
+
+// A write to a comment's children that waited on the comment while a delete
+// tombstoned it must not land on the tombstone. The holder transaction stands
+// in for a delete that already holds the comment lock: the write blocks on
+// LockLiveComment, the tombstone commits, and the write must be refused.
+func TestCommentChildWritesWaitingOnDeleteDoNotLandOnTombstone(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	storage := &recordingStorage{}
+	h := *testHandler
+	h.Storage = storage
+
+	tests := []struct {
+		name      string
+		run       func(commentID, issueID string) *httptest.ResponseRecorder
+		wantCode  int
+		leftovers string
+	}{
+		{
+			name: "reaction",
+			run: func(commentID, _ string) *httptest.ResponseRecorder {
+				w := httptest.NewRecorder()
+				h.AddReaction(w, withURLParam(newRequest(http.MethodPost, "/api/comments/"+commentID+"/reactions", map[string]any{
+					"emoji": "👍",
+				}), "commentId", commentID))
+				return w
+			},
+			wantCode:  http.StatusNotFound,
+			leftovers: `SELECT count(*) FROM comment_reaction WHERE comment_id = $1`,
+		},
+		{
+			name: "attachment upload",
+			run: func(commentID, issueID string) *httptest.ResponseRecorder {
+				var body bytes.Buffer
+				writer := multipart.NewWriter(&body)
+				part, _ := writer.CreateFormFile("file", "late.txt")
+				part.Write([]byte("late"))
+				writer.WriteField("issue_id", issueID)
+				writer.WriteField("comment_id", commentID)
+				writer.Close()
+				req := httptest.NewRequest(http.MethodPost, "/api/upload-file", &body)
+				req.Header.Set("Content-Type", writer.FormDataContentType())
+				req.Header.Set("X-User-ID", testUserID)
+				req.Header.Set("X-Workspace-ID", testWorkspaceID)
+				w := httptest.NewRecorder()
+				h.UploadFile(w, req)
+				return w
+			},
+			wantCode:  http.StatusForbidden,
+			leftovers: `SELECT count(*) FROM attachment WHERE comment_id = $1`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			issueID := dbfx.Issue(t, "child write races delete "+tt.name)
+			target := dbfx.Comment(t, issueID, "about to be deleted")
+			dbfx.Comment(t, issueID, "reply keeps it as a tombstone", testutil.Cols{"parent_id": target})
+
+			holder, err := testPool.Begin(ctx)
+			if err != nil {
+				t.Fatalf("begin holder: %v", err)
+			}
+			defer holder.Rollback(ctx)
+			if _, err := holder.Exec(ctx, `SELECT id FROM comment WHERE id = $1 FOR UPDATE`, target); err != nil {
+				t.Fatalf("lock comment: %v", err)
+			}
+
+			var got *httptest.ResponseRecorder
+			done := make(chan error, 1)
+			go func() {
+				got = tt.run(target, issueID)
+				done <- nil
+			}()
+			waitForCommentMutationLock(t, "LockLiveComment", done)
+
+			if _, err := holder.Exec(ctx, `UPDATE comment SET content = '', deleted_at = now() WHERE id = $1`, target); err != nil {
+				t.Fatalf("tombstone comment: %v", err)
+			}
+			if err := holder.Commit(ctx); err != nil {
+				t.Fatalf("commit holder: %v", err)
+			}
+			<-done
+
+			if got.Code != tt.wantCode {
+				t.Fatalf("%s after delete = %d, want %d: %s", tt.name, got.Code, tt.wantCode, got.Body.String())
+			}
+			if n := dbfx.Count(t, tt.leftovers, target); n != 0 {
+				t.Fatalf("%s landed on the tombstone (%d rows)", tt.name, n)
+			}
+		})
+	}
+	if len(storage.deleted) != 1 {
+		t.Fatalf("refused upload cleaned up %v, want its one stored object", storage.deleted)
+	}
+}
+
+func TestRemoveReactionOnTombstoneIsNotFound(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	issueID := dbfx.Issue(t, "remove reaction on tombstone")
+	target := dbfx.Comment(t, issueID, "deleted", testutil.Cols{"deleted_at": testutil.Raw("now()"), "content": ""})
+	testutil.Call(t, testHandler.RemoveReaction, withURLParam(newRequest(http.MethodDelete, "/api/comments/"+target+"/reactions", map[string]any{
+		"emoji": "👍",
+	}), "commentId", target)).Want(http.StatusNotFound)
 }
