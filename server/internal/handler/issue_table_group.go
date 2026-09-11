@@ -181,7 +181,7 @@ func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request,
 		}
 		return resolvedIssueTableGroup{kind: "none"}, true
 	case "status":
-		entries, err := h.Queries.ListIssueStatusEntries(r.Context(), db.ListIssueStatusEntriesParams{
+		entries, err := h.issueStatusCatalog().ListIssueStatusEntries(r.Context(), db.ListIssueStatusEntriesParams{
 			WorkspaceID: workspaceID, IncludeArchived: true,
 		})
 		if err != nil {
