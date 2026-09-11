@@ -183,7 +183,7 @@ func primeHomeDir(env []string) (string, error) {
 	return home, nil
 }
 
-// primeAgentDirFor resolves the directory the SPAWNED prime-agent would read
+// primeAgentDirsFor resolves the directories the SPAWNED prime-agent could read
 // its global settings from, mirroring getAgentDir
 // (packages/coding-agent/src/config.ts).
 //
@@ -199,42 +199,63 @@ func primeHomeDir(env []string) (string, error) {
 //     a relative directory.
 //   - a relative value resolves against the child's working directory, which
 //     is opts.Cwd, not wherever the daemon happens to be running.
+//   - on Windows, a `~\` prefix names different directories to different
+//     prime-agent versions. From v0.9.4 getAgentDir hands the value to
+//     expandTildePath, which on win32 expands `~\` as well as `~/`; earlier
+//     versions expand only `~` and `~/`, so `~\x` stays a relative path under
+//     the child's cwd. The MinVersions floor admits both and ACP exposes no
+//     runtime version, so both readings are returned and the caller checks
+//     each. A bare `~` and `~/` name the same directory at every version,
+//     and POSIX never expands `~\`.
+//
+// Every other value yields exactly one directory.
 //
 // Returns errPrimeHomeUnresolved when the directory depends on a home the
 // resolver cannot prove. That is a refusal, not a skipped check: see
 // primeHomeDir. A proven-empty home is not an error — it makes getAgentDir
 // relative, which this resolves against cwd exactly as the child would.
-func primeAgentDirFor(env []string, cwd string) (string, error) {
+func primeAgentDirsFor(env []string, cwd string) ([]string, error) {
 	dir, _ := primeLookupEnv(env, "PRIME_AGENT_CODING_AGENT_DIR")
+	dirs := []string{dir}
 	if dir == "" {
 		home, err := primeHomeDir(env)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		// filepath.Join drops an empty first element, so a proven-empty home
 		// yields the relative ".prime/agent" that join("", CONFIG_DIR_NAME)
 		// produces on the Node side.
-		dir = filepath.Join(home, ".prime", "agent")
+		dirs[0] = filepath.Join(home, ".prime", "agent")
 	} else {
 		switch {
 		case dir == "~":
 			home, err := primeHomeDir(env)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
-			dir = home
+			dirs[0] = home
 		case strings.HasPrefix(dir, "~/"):
 			home, err := primeHomeDir(env)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
-			dir = filepath.Join(home, dir[2:])
+			dirs[0] = filepath.Join(home, dir[2:])
+		case primeGOOS == "windows" && strings.HasPrefix(dir, `~\`):
+			home, err := primeHomeDir(env)
+			if err != nil {
+				return nil, err
+			}
+			// v0.9.4 and later first; the unexpanded value is every earlier
+			// version's reading and resolves against cwd below.
+			dirs = []string{filepath.Join(home, dir[2:]), dir}
 		}
 	}
-	if !filepath.IsAbs(dir) && cwd != "" {
-		return filepath.Join(cwd, dir), nil
+	for i, d := range dirs {
+		if !filepath.IsAbs(d) && cwd != "" {
+			dirs[i] = filepath.Join(cwd, d)
+		}
 	}
-	return dir, nil
+	return dirs, nil
 }
 
 // primeGlobalRlmMaxDepth reports the rlmMaxDepth the spawned prime-agent would
@@ -248,18 +269,28 @@ func primeAgentDirFor(env []string, cwd string) (string, error) {
 // Number.MAX_SAFE_INTEGER all make Prime fall through to RLM_MAX_DEPTH, so they
 // report false here too: this must not refuse a run Prime itself would have run
 // with subagents disabled.
+//
+// When the directory depends on the prime-agent version (see
+// primeAgentDirsFor), every reading is checked and the largest effective depth
+// is reported, so the answer errs towards the reading that would refuse.
 func primeGlobalRlmMaxDepth(env []string, cwd string) (int64, bool, error) {
-	dir, err := primeAgentDirFor(env, cwd)
+	dirs, err := primeAgentDirsFor(env, cwd)
 	if err != nil {
 		return 0, false, err
 	}
-	depth, ok := primeGlobalRlmMaxDepthIn(dir)
-	return depth, ok, nil
+	var depth int64
+	configured := false
+	for _, dir := range dirs {
+		if d, ok := primeGlobalRlmMaxDepthIn(dir); ok && (!configured || d > depth) {
+			depth, configured = d, true
+		}
+	}
+	return depth, configured, nil
 }
 
-// primeGlobalRlmMaxDepthIn is primeGlobalRlmMaxDepth once the agent directory
-// is known, so Execute can resolve that directory once and name the same file
-// in the refusal it raises.
+// primeGlobalRlmMaxDepthIn is primeGlobalRlmMaxDepth for one agent directory,
+// so Execute can resolve the directories once and name the file it found in
+// the refusal it raises.
 func primeGlobalRlmMaxDepthIn(dir string) (int64, bool) {
 	raw, err := os.ReadFile(filepath.Join(dir, "settings.json"))
 	if err != nil {
@@ -330,11 +361,13 @@ func primeTeardownGrace() time.Duration {
 // https://github.com/PrimeIntellect-ai/prime-agent/tree/v0.7.1 — links below
 // point at specific files/lines on that tag).
 //
-// Re-checked against v0.9.1, upstream's newest release: loadSession, the
-// single-session-per-connection model, getAgentDir, ENV_AGENT_DIR,
-// CONFIG_DIR_NAME and _resolveRlmMaxDepth are all unchanged, so everything
-// this backend and the fail-closed rlmMaxDepth gate rely on holds across the
-// whole 0.7.1-0.9.1 range. Only the mcpServers handling noted below differs:
+// Re-checked through v0.9.4: loadSession, the single-session-per-connection
+// model, ENV_AGENT_DIR, CONFIG_DIR_NAME and _resolveRlmMaxDepth are all
+// unchanged, so everything this backend and the fail-closed rlmMaxDepth gate
+// rely on holds across the whole 0.7.1-0.9.4 range. getAgentDir changed once:
+// v0.9.4 also expands a Windows `~\` value that earlier versions leave
+// relative, which primeAgentDirsFor covers by checking both readings. Beyond
+// that, only the mcpServers handling noted below differs:
 //   - `initialize` reports `agentCapabilities.loadSession: false` and there
 //     is no `session/resume`/`session/load` method on the wire at all — Prime
 //     hosts exactly one session per ACP connection. Execute therefore never
@@ -406,7 +439,11 @@ func (b *primeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	// inspects the same settings.json the child would read rather than an
 	// approximation built from b.cfg.Env alone.
 	childEnv := append(buildEnv(b.cfg.Env), "RLM_MAX_DEPTH=0")
-	agentDir, err := primeAgentDirFor(childEnv, opts.Cwd)
+	// More than one directory comes back only when the path depends on the
+	// prime-agent version (primeAgentDirsFor). The adapter cannot tell which
+	// one the child opens, so the run is refused if any of them would re-enable
+	// subagents.
+	agentDirs, err := primeAgentDirsFor(childEnv, opts.Cwd)
 	if err != nil {
 		// Fail closed. Skipping the check here would put the run back in the
 		// state this gate exists to prevent, except silently: the child would
@@ -418,12 +455,14 @@ func (b *primeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				"Set %s or PRIME_AGENT_CODING_AGENT_DIR in the agent's custom_env to run Prime tasks from Multica",
 			err, primeHomeEnvKey())
 	}
-	if depth, ok := primeGlobalRlmMaxDepthIn(agentDir); ok && depth > 0 {
-		return nil, fmt.Errorf(
-			"prime-agent has a global rlmMaxDepth of %d in %s, which re-enables RLM subagents and outranks the RLM_MAX_DEPTH=0 Multica sets; "+
-				"subagents can outlive the task and Multica would report it complete while they are still running. "+
-				"Set it to 0 (`/rlm-max-depth 0 --global` in prime-agent) or remove the key to run Prime tasks from Multica",
-			depth, filepath.Join(agentDir, "settings.json"))
+	for _, agentDir := range agentDirs {
+		if depth, ok := primeGlobalRlmMaxDepthIn(agentDir); ok && depth > 0 {
+			return nil, fmt.Errorf(
+				"prime-agent has a global rlmMaxDepth of %d in %s, which re-enables RLM subagents and outranks the RLM_MAX_DEPTH=0 Multica sets; "+
+					"subagents can outlive the task and Multica would report it complete while they are still running. "+
+					"Set it to 0 (`/rlm-max-depth 0 --global` in prime-agent) or remove the key to run Prime tasks from Multica",
+				depth, filepath.Join(agentDir, "settings.json"))
+		}
 	}
 
 	execPath := b.cfg.ExecutablePath

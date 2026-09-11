@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -884,12 +885,105 @@ func TestPrimeAgentDirForMatchesTheChildProcess(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := primeAgentDirFor(tc.env, tc.cwd)
+			got, err := primeAgentDirsFor(tc.env, tc.cwd)
 			if err != nil {
-				t.Fatalf("primeAgentDirFor: %v", err)
+				t.Fatalf("primeAgentDirsFor: %v", err)
 			}
-			if got != tc.want {
-				t.Fatalf("primeAgentDirFor = %q, want %q", got, tc.want)
+			if len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("primeAgentDirsFor = %q, want [%q]", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPrimeAgentDirsForReadsAWindowsBackslashTildeBothWays pins the one value
+// whose directory depends on the prime-agent version. v0.9.4's expandTildePath
+// expands `~\` on win32; every earlier version leaves it relative to the
+// child's cwd. The MinVersions floor admits both, so both readings come back,
+// v0.9.4's first. POSIX expands only `~/`, so there the same value is a single
+// relative path.
+//
+// Temp directories keep every path absolute on whichever host runs this, so
+// the simulated platform is the only thing that varies.
+func TestPrimeAgentDirsForReadsAWindowsBackslashTildeBothWays(t *testing.T) {
+	t.Run("windows", func(t *testing.T) {
+		withPrimeGOOS(t, "windows")
+		home, cwd := t.TempDir(), t.TempDir()
+		got, err := primeAgentDirsFor([]string{`PRIME_AGENT_CODING_AGENT_DIR=~\prime`, "USERPROFILE=" + home}, cwd)
+		if err != nil {
+			t.Fatalf("primeAgentDirsFor: %v", err)
+		}
+		want := []string{filepath.Join(home, "prime"), filepath.Join(cwd, `~\prime`)}
+		if !slices.Equal(got, want) {
+			t.Fatalf("primeAgentDirsFor = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("posix", func(t *testing.T) {
+		withPrimeGOOS(t, "linux")
+		cwd := t.TempDir()
+		got, err := primeAgentDirsFor([]string{`PRIME_AGENT_CODING_AGENT_DIR=~\prime`}, cwd)
+		if err != nil {
+			t.Fatalf("primeAgentDirsFor: %v", err)
+		}
+		if want := []string{filepath.Join(cwd, `~\prime`)}; !slices.Equal(got, want) {
+			t.Fatalf("primeAgentDirsFor = %q, want %q", got, want)
+		}
+	})
+
+	// v0.9.4's reading needs the home, so an unprovable one refuses the value
+	// even though the earlier reading would not have consulted it.
+	t.Run("windows refuses when the home cannot be proven", func(t *testing.T) {
+		withPrimeGOOS(t, "windows")
+		withPrimeAccountHome(t, "", errors.New("no account database"))
+		if _, err := primeAgentDirsFor([]string{`PRIME_AGENT_CODING_AGENT_DIR=~\prime`}, t.TempDir()); !errors.Is(err, errPrimeHomeUnresolved) {
+			t.Fatalf("primeAgentDirsFor error = %v, want errPrimeHomeUnresolved", err)
+		}
+	})
+}
+
+// TestPrimeFailsClosedOnEitherReadingOfAWindowsBackslashTilde drives both
+// readings through Execute. Whichever directory the installed prime-agent
+// opens, a global rlmMaxDepth there must refuse the run and name that file —
+// a gate following only one reading would pass silently on the other.
+func TestPrimeFailsClosedOnEitherReadingOfAWindowsBackslashTilde(t *testing.T) {
+	withPrimeGOOS(t, "windows")
+
+	for _, tc := range []struct {
+		name     string
+		agentDir func(home, cwd string) string
+	}{
+		{"v0.9.4 expands it under the home", func(home, _ string) string { return filepath.Join(home, "prime-config") }},
+		{"earlier versions leave it under the cwd", func(_, cwd string) string { return filepath.Join(cwd, `~\prime-config`) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home, cwd := t.TempDir(), t.TempDir()
+			agentDir := tc.agentDir(home, cwd)
+			if err := os.MkdirAll(agentDir, 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(agentDir, "settings.json"), []byte(`{"rlmMaxDepth": 1}`), 0o600); err != nil {
+				t.Fatalf("write settings.json: %v", err)
+			}
+
+			backend, err := New("prime", Config{
+				ExecutablePath: filepath.Join(t.TempDir(), "prime-agent-does-not-exist"),
+				Logger:         testLogger(),
+				Env: map[string]string{
+					"PRIME_AGENT_CODING_AGENT_DIR": `~\prime-config`,
+					"USERPROFILE":                  home,
+				},
+			})
+			if err != nil {
+				t.Fatalf("new prime backend: %v", err)
+			}
+
+			_, err = backend.Execute(context.Background(), "prompt", ExecOptions{Cwd: cwd})
+			if err == nil || !strings.Contains(err.Error(), "rlmMaxDepth") {
+				t.Fatalf("a global rlmMaxDepth under either reading must refuse the run, got: %v", err)
+			}
+			if want := filepath.Join(agentDir, "settings.json"); !strings.Contains(err.Error(), want) {
+				t.Fatalf("the refusal must name %s: %v", want, err)
 			}
 		})
 	}
@@ -1115,12 +1209,12 @@ func TestPrimeAgentDirForFollowsAnEmptyHomeToTheChildCwd(t *testing.T) {
 	withPrimeGOOS(t, "linux")
 	withPrimeAccountHome(t, "/account/home", nil)
 
-	got, err := primeAgentDirFor([]string{"HOME="}, "/work")
+	got, err := primeAgentDirsFor([]string{"HOME="}, "/work")
 	if err != nil {
-		t.Fatalf("primeAgentDirFor: %v", err)
+		t.Fatalf("primeAgentDirsFor: %v", err)
 	}
-	if want := filepath.Join("/work", ".prime", "agent"); got != want {
-		t.Fatalf("primeAgentDirFor = %q, want %q", got, want)
+	if want := filepath.Join("/work", ".prime", "agent"); len(got) != 1 || got[0] != want {
+		t.Fatalf("primeAgentDirsFor = %q, want [%q]", got, want)
 	}
 }
 

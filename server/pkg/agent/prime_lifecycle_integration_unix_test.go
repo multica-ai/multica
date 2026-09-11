@@ -211,10 +211,12 @@ func TestPrimeRealACPHeartbeatDoesNotRunAfterCancel(t *testing.T) {
 	if err != nil {
 		t.Skip("prime-agent not on PATH; skipping real-binary smoke test")
 	}
-	agentDir, err := primeAgentDirFor(os.Environ(), "")
-	if err != nil || agentDir == "" {
+	// POSIX never has more than one reading; see primeAgentDirsFor.
+	agentDirs, err := primeAgentDirsFor(os.Environ(), "")
+	if err != nil || len(agentDirs) != 1 || agentDirs[0] == "" {
 		t.Skipf("cannot resolve prime-agent's agent dir: %v", err)
 	}
+	agentDir := agentDirs[0]
 
 	// Baseline guard: this test attributes supervisor-log lines and live
 	// processes to itself, which is only sound when nothing else is running
