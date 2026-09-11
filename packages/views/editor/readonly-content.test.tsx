@@ -88,6 +88,7 @@ Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
 
 import mermaid from "mermaid";
 import { ReadonlyContent } from "./readonly-content";
+import { composeAnnotatedReply } from "@multica/core/drafts/reply-annotation";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -133,6 +134,24 @@ describe("ReadonlyContent line breaks", () => {
   it("renders a blank-line gap as separate paragraphs", () => {
     const { container } = render(<ReadonlyContent content={"para one\n\npara two"} />);
     expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("ReadonlyContent annotated replies", () => {
+  it("renders quote snapshots and notes without generated links or numbered lists", () => {
+    const content = composeAnnotatedReply("", [{
+      id: "annotation", sourceCommentId: "source", sourceActorName: "Agent",
+      quote: "First <check>\nSecond line", note: "Please revise this.",
+      start: 0, prefix: "", suffix: "",
+    }]);
+    const { container } = render(<ReadonlyContent content={content} />);
+    const quote = container.querySelector("blockquote");
+    expect(quote?.textContent).toContain("First <check>");
+    expect(quote?.querySelector("br")).not.toBeNull();
+    expect(container.textContent).toContain("Please revise this.");
+    expect(quote?.textContent).not.toContain("Please revise this.");
+    expect(container.querySelector("a, ol, check")).toBeNull();
+    expect(container.textContent).not.toContain("Agent");
   });
 });
 
