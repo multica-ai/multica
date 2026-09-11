@@ -404,6 +404,9 @@ export function ProviderLogo({
       return <PiLogo className={className} />;
     case "omp":
       return <PiLogo className={className} />;
+    case "prime":
+      // Prime Agent is a hard fork of pi — reuse the Pi wordmark, like omp.
+      return <PiLogo className={className} />;
     case "copilot":
       return <CopilotLogo className={className} />;
     case "cursor":

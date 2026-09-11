@@ -116,6 +116,13 @@ describe("runtimeDisplayLabel", () => {
     ).toBe("box (MiniMax Code)");
     expect(
       runtimeDisplayLabel({
+        name: "Prime Agent (host)",
+        custom_name: "box",
+        provider: "prime",
+      }),
+    ).toBe("box (Prime Agent)");
+    expect(
+      runtimeDisplayLabel({
         name: "ZeroClaw (host)",
         custom_name: "box",
         provider: "zeroclaw",
