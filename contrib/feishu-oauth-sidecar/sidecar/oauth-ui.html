@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>飞书扫码授权 | Multica</title>
+<style>
+/* ====== 基础变量 ====== */
+:root { --bg:#0a0a0a; --bg2:#111; --card:#141414; --elev:#1b1b1b; --text:#f5f5f5; --sub:#b3b3b3; --muted:#8a8a8a; --blue:#3370ff; --blue-soft:rgba(51,112,255,.2); --danger:#ff5f57; --border:rgba(255,255,255,.12); --border2:rgba(255,255,255,.2); }
+/* ====== Reset ====== */
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:radial-gradient(circle at 15% 10%,rgba(51,112,255,.18),transparent 40%),radial-gradient(circle at 85% 85%,rgba(51,112,255,.08),transparent 45%),linear-gradient(180deg,#090909 0%,#0f0f0f 100%);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif}
+body{display:flex;justify-content:center;align-items:center;padding:24px 16px 40px}
+/* ====== 布局 ====== */
+.shell{width:100%;max-width:480px}
+.title-wrap{text-align:center;margin-bottom:14px}
+.title{margin:0;font-size:28px;font-weight:700}
+.subtitle{margin:8px 0 0;color:var(--sub);font-size:15px;line-height:1.45}
+.card{border-radius:18px;padding:1px;background:linear-gradient(140deg,rgba(255,255,255,.28),rgba(255,255,255,.04));box-shadow:0 18px 44px rgba(0,0,0,.45)}
+.card-inner{background:linear-gradient(180deg,rgba(18,18,18,.96),rgba(14,14,14,.96));border-radius:17px;min-height:530px;padding:24px}
+/* ====== 状态切换 ====== */
+.state{display:none}
+.state.active{display:block}
+/* ====== 表单 ====== */
+.field-label{display:block;margin-bottom:8px;color:var(--sub);font-size:14px}
+.id-input{width:100%;border:1px solid var(--border);background:var(--elev);color:var(--text);border-radius:12px;padding:13px 14px;font-size:15px;outline:none}
+.id-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}
+.hint{margin-top:8px;color:var(--muted);font-size:13px;line-height:1.5}
+.primary-btn,.ghost-btn{border:none;border-radius:12px;padding:12px 16px;font-size:15px;font-weight:600;cursor:pointer}
+.primary-btn{width:100%;background:linear-gradient(180deg,#4d7dff,#3370ff);color:#fff;margin-top:16px}
+.primary-btn:disabled{opacity:.55;cursor:not-allowed}
+.ghost-btn{background:rgba(255,255,255,.08);color:var(--text);border:1px solid var(--border)}
+/* ====== Loading ====== */
+.loading{min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+.spinner{width:44px;height:44px;border:3px solid rgba(255,255,255,.15);border-top-color:var(--blue);border-radius:999px;animation:spin .85s linear infinite}
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+.loading-text{margin:0;font-size:16px;font-weight:600}
+/* ====== 错误面板 ====== */
+.error-panel{margin-top:12px;border:1px solid rgba(255,95,87,.4);background:rgba(255,95,87,.12);border-radius:12px;padding:12px;display:none}
+.error-panel.visible{display:block}
+.error-msg{margin:0;color:#ffd4d2;font-size:14px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+.error-action{margin-top:10px}
+/* ====== 二维码区 ====== */
+.qr-wrap{text-align:center}
+.qr-box{width:300px;height:300px;margin:0 auto;border-radius:16px;background:#fff;display:flex;align-items:center;justify-content:center;padding:6px;overflow:hidden}
+.qr-box canvas,.qr-box img{max-width:100%;max-height:100%}
+.qr-box pre.qr-ascii{margin:0;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:13px;line-height:11px;letter-spacing:-0.5px;color:#111;background:#fff;white-space:pre;font-weight:700;text-align:center}
+.qr-fallback{display:none;color:#222;font-size:14px;line-height:1.4;text-align:center}
+.qr-fallback.visible{display:block}
+.verify-link{margin:16px 0 0;font-size:14px;color:var(--sub);line-height:1.5}
+.verify-link a{color:#8ab0ff;word-break:break-all}
+.user-code{margin-top:12px;color:var(--sub);font-size:14px;font-variant-numeric:tabular-nums}
+.countdown{margin-top:14px}
+.countdown-label{margin:0;color:var(--muted);font-size:13px}
+.countdown-time{margin:6px 0 0;font-size:30px;font-weight:700;color:#dbe6ff;letter-spacing:1px;font-variant-numeric:tabular-nums}
+.status-tip{margin-top:14px;color:var(--muted);font-size:13px}
+/* ====== 成功 / 过期 ====== */
+.success-wrap,.expired-wrap{min-height:360px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px}
+.success-icon{width:76px;height:76px;border-radius:999px;background:rgba(43,195,107,.18);border:1px solid rgba(43,195,107,.45);display:grid;place-items:center;color:#7ff0a8;font-size:42px;font-weight:700}
+.success-title{margin:0;font-size:28px}
+.profile{width:100%;border:1px solid var(--border);background:rgba(255,255,255,.04);border-radius:14px;padding:14px;text-align:left}
+.profile-item{margin:0 0 10px;color:var(--sub);font-size:14px;line-height:1.45;word-break:break-all}
+.profile-item:last-child{margin-bottom:0}
+.profile strong{color:#f6f8ff;margin-right:6px}
+.copy-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.expired-icon{font-size:40px;color:var(--danger)}
+.expired-title{margin:0;font-size:24px}
+.expired-subtitle{margin:0;color:var(--sub);font-size:15px;line-height:1.5}
+/* ====== Toast ====== */
+.toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);border-radius:10px;border:1px solid var(--border2);background:rgba(17,17,17,.96);color:var(--text);padding:10px 14px;font-size:13px;box-shadow:0 10px 28px rgba(0,0,0,.35);display:none;max-width:calc(100vw - 32px);text-align:center}
+.toast.visible{display:block}
+/* ====== 手机适配 ====== */
+@media (max-width:560px){body{align-items:flex-start;padding-top:16px}.title{font-size:24px}.card-inner{min-height:auto;padding:20px 16px}.qr-box{width:min(300px,calc(100vw - 76px));height:min(300px,calc(100vw - 76px))}.countdown-time{font-size:27px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="title-wrap">
+    <h1 class="title">飞书扫码授权</h1>
+    <p class="subtitle">用于将当前 Multica 用户绑定到飞书账号，仅需一次授权。</p>
+  </div>
+  <div class="card"><div class="card-inner">
+    <section id="state-input" class="state active">
+      <label for="userIdInput" class="field-label">Multica 用户 ID</label>
+      <input id="userIdInput" class="id-input" type="text" placeholder="例如: user-123-abc" autocomplete="off" spellcheck="false">
+      <div class="hint">如未自动检测到，请先在另一标签页登录 <a href="https://multica.example.com" target="_blank" rel="noopener" style="color:#8ab0ff">multica</a> 后刷新本页。或直接在 multica CLI 跑 <code style="background:#1a1a1a;padding:2px 6px;border-radius:4px">multica user profile get</code> 拿 <code style="background:#1a1a1a;padding:2px 6px;border-radius:4px">id</code> 字段。</div>
+      <button id="startBtn" class="primary-btn">开始飞书授权</button>
+
+      <details style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
+        <summary style="color:var(--sub);font-size:13px;cursor:pointer;user-select:none">遇到问题？ 诊断 / 强制重置 ▾</summary>
+        <div style="margin-top:12px;color:var(--muted);font-size:13px;line-height:1.55">
+          <p style="margin:0 0 8px"><strong style="color:var(--text)">什么时候用强制重置？</strong></p>
+          <ul style="margin:0 0 12px;padding-left:18px">
+            <li>授权扫码后页面卡住、长时间不切到"成功"</li>
+            <li>已绑定但 multica 操作仍报"飞书授权失效"</li>
+            <li>想换飞书账号（清旧绑定后重新扫码）</li>
+            <li>在另一台机器扫码了，本机没同步</li>
+          </ul>
+          <p style="margin:0 0 8px"><strong style="color:var(--text)">强制重置会做什么？</strong></p>
+          <ul style="margin:0 0 12px;padding-left:18px">
+            <li>清除当前 multica 用户的飞书 token 凭据</li>
+            <li>清除 mapping (本机数据库的飞书身份记录)</li>
+            <li>保留你的其他用户数据 (只删 .lark-cli / .hermes/auth.json / .config/lark)</li>
+            <li>之后请点上方"开始飞书授权"重走扫码流程</li>
+          </ul>
+          <button id="forceRestartBtn" class="ghost-btn" style="width:100%;border-color:rgba(255,95,87,.4);color:#ffd4d2">强制重置当前 multica 用户的飞书绑定</button>
+          <p id="forceRestartResult" style="margin:10px 0 0;color:var(--muted);font-size:12px;line-height:1.5"></p>
+        </div>
+      </details>
+    </section>
+
+    <section id="state-loading" class="state">
+      <div class="loading">
+        <div class="spinner" aria-hidden="true"></div>
+        <p id="loadingText" class="loading-text">正在生成授权链接...</p>
+      </div>
+      <div id="startErrorPanel" class="error-panel" role="alert">
+        <p id="startErrorMsg" class="error-msg"></p>
+        <div class="error-action"><button id="retryStartBtn" class="ghost-btn">重试</button></div>
+      </div>
+    </section>
+
+    <section id="state-authorize" class="state">
+      <div class="qr-wrap">
+        <div id="qrBox" class="qr-box" aria-label="授权二维码"><div id="qrFallback" class="qr-fallback">二维码加载失败，请使用下方链接继续授权。</div></div>
+        <p class="verify-link">授权完成，点这里手动完成：<a id="verifyLink" href="#" target="_blank" rel="noopener noreferrer">打开飞书授权页</a></p>
+        <p id="userCodeLine" class="user-code"></p>
+        <div class="countdown"><p class="countdown-label">二维码剩余有效时间</p><p id="countdownText" class="countdown-time">10:00</p></div>
+        <p id="statusTip" class="status-tip">等待你扫码并确认授权，页面会自动刷新状态。</p>
+      </div>
+    </section>
+
+    <section id="state-success" class="state">
+      <div class="success-wrap">
+        <div class="success-icon" aria-hidden="true">✓</div>
+        <h2 class="success-title">授权成功</h2>
+        <div class="profile">
+          <p class="profile-item"><strong>飞书用户名:</strong><span id="successName">-</span></p>
+          <p class="profile-item"><strong>Open ID:</strong><span id="successOpenID">-</span></p>
+        </div>
+        <div class="copy-row">
+          <button id="copyOpenIdBtn" class="ghost-btn">复制 Open ID</button>
+          <button id="closeBtn" class="primary-btn">完成，关闭此页面</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="state-expired" class="state">
+      <div class="expired-wrap">
+        <div class="expired-icon">⚠</div>
+        <h2 class="expired-title">授权链接已过期</h2>
+        <p class="expired-subtitle">10 分钟内未完成扫码，请重新开始授权流程。</p>
+        <button id="restartBtn" class="primary-btn">重新开始</button>
+      </div>
+    </section>
+  </div></div>
+</div>
+<div id="toast" class="toast" role="status"></div>
+
+<script>
+(function(){
+  /*
+   * 使用说明:
+   * 1. 正常访问 /oauth-ui 会显示输入框。
+   * 2. 访问 /oauth-ui?multica_user_id=xxx 会自动开始授权。
+   * 3. /start 返回 verification_url 后，页面绘制二维码并启动倒计时。
+   * 4. 页面每 3 秒调用 /status，直到 token 可用。
+   * 5. valid / needs_refresh 都视为授权成功。
+   * 6. 倒计时结束后切换过期页面并允许重新开始。
+   *
+   * 约束:
+   * - 无第三方框架，仅原生 HTML/CSS/JS。
+   * - 唯一外部 CDN 为 qrcode.min.js。
+   * - 所有错误都以页面提示呈现，不依赖控制台日志。
+   * - 轮询网络抖动不终止流程，只展示状态提示。
+   * - 复制 Open ID 使用 navigator.clipboard，失败时提示手动复制。
+   * - 页面可在手机上操作，二维码区域自适应宽度。
+   */
+
+  /*
+   * 页面状态机:
+   * 1) input     输入 multica_user_id
+   * 2) loading   调 /start 生成二维码
+   * 3) authorize 展示二维码 + 倒计时 + 轮询 /status
+   * 4) success   授权成功显示飞书身份
+   * 5) expired   超时过期，可重试
+   *
+   * 错误策略:
+   * - /start 失败: 显示错误面板 + 重试按钮
+   * - /status 轮询失败: 不中断流程，提示网络波动并继续轮询
+   * - 二维码 CDN 异常: 显示文本链接作为 fallback
+   */
+
+  // DOM 缓存
+  var els={
+    inputState:document.getElementById("state-input"),
+    loadingState:document.getElementById("state-loading"),
+    authorizeState:document.getElementById("state-authorize"),
+    successState:document.getElementById("state-success"),
+    expiredState:document.getElementById("state-expired"),
+    userIdInput:document.getElementById("userIdInput"),
+    startBtn:document.getElementById("startBtn"),
+    retryStartBtn:document.getElementById("retryStartBtn"),
+    startErrorPanel:document.getElementById("startErrorPanel"),
+    startErrorMsg:document.getElementById("startErrorMsg"),
+    loadingText:document.getElementById("loadingText"),
+    verifyLink:document.getElementById("verifyLink"),
+    qrBox:document.getElementById("qrBox"),
+    qrFallback:document.getElementById("qrFallback"),
+    userCodeLine:document.getElementById("userCodeLine"),
+    countdownText:document.getElementById("countdownText"),
+    statusTip:document.getElementById("statusTip"),
+    successName:document.getElementById("successName"),
+    successOpenID:document.getElementById("successOpenID"),
+    copyOpenIdBtn:document.getElementById("copyOpenIdBtn"),
+    closeBtn:document.getElementById("closeBtn"),
+    restartBtn:document.getElementById("restartBtn"),
+    toast:document.getElementById("toast"),
+    forceRestartBtn:document.getElementById("forceRestartBtn"),
+    forceRestartResult:document.getElementById("forceRestartResult")
+  };
+  // 状态节点映射
+  var states={input:els.inputState,loading:els.loadingState,authorize:els.authorizeState,success:els.successState,expired:els.expiredState};
+  // 运行态变量
+  var pollTimer=null,countdownTimer=null,remainingSeconds=0,currentUserID="",currentOpenID="",pollingInFlight=false,toastTimer=null;
+
+  // ====== UI 基础方法 ======
+  function setState(name){Object.keys(states).forEach(function(k){states[k].classList.toggle("active",k===name);});}
+  function showToast(msg){if(!msg)return;els.toast.textContent=msg;els.toast.classList.add("visible");if(toastTimer)clearTimeout(toastTimer);toastTimer=setTimeout(function(){els.toast.classList.remove("visible");},2600);}
+  function clearStartError(){els.startErrorPanel.classList.remove("visible");els.startErrorMsg.textContent="";}
+  function showStartError(msg){els.startErrorMsg.textContent=msg||"授权启动失败，请稍后重试。";els.startErrorPanel.classList.add("visible");}
+  function stopTimers(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}if(countdownTimer){clearInterval(countdownTimer);countdownTimer=null;}}
+  function sanitizeUserID(raw){return(raw||"").trim();}
+  function formatTime(total){var safe=Math.max(0,total),mm=String(Math.floor(safe/60)).padStart(2,"0"),ss=String(safe%60).padStart(2,"0");return mm+":"+ss;}
+
+  // ====== 倒计时 ======
+  function beginCountdown(seconds){
+    remainingSeconds=Number.isFinite(seconds)&&seconds>0?Math.floor(seconds):600;
+    els.countdownText.textContent=formatTime(remainingSeconds);
+    if(countdownTimer)clearInterval(countdownTimer);
+    countdownTimer=setInterval(function(){
+      remainingSeconds-=1;
+      if(remainingSeconds<=0){remainingSeconds=0;els.countdownText.textContent="00:00";stopTimers();setState("expired");return;}
+      els.countdownText.textContent=formatTime(remainingSeconds);
+    },1000);
+  }
+
+  // ====== 网络请求 ======
+  async function postJSON(url,payload){
+    var res=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    var data=null;try{data=await res.json();}catch(_){data=null;}
+    if(!res.ok)throw new Error(data&&(data.error||data.message)?(data.error||data.message):"请求失败");
+    return data;
+  }
+
+  async function getJSON(url){var res=await fetch(url,{method:"GET"});if(!res.ok)throw new Error("请求失败");return res.json();}
+
+  // ====== QR 渲染（用 sidecar 返回的 ASCII，零外部 CDN 依赖）======
+  function renderQRCode(qrAsciiBase64){
+    els.qrFallback.classList.remove("visible");
+    els.qrBox.innerHTML="";
+    els.qrBox.appendChild(els.qrFallback);
+    if(!qrAsciiBase64){els.qrFallback.classList.add("visible");return;}
+    try{
+      // sidecar 返回的 qr_ascii 是 base64-encoded UTF-8 (含 ▀▄█ 块字符)
+      var decoded=decodeURIComponent(escape(atob(qrAsciiBase64)));
+      var pre=document.createElement("pre");
+      pre.className="qr-ascii";
+      pre.textContent=decoded;
+      els.qrBox.appendChild(pre);
+    }catch(e){els.qrFallback.classList.add("visible");}
+  }
+
+  // ====== 授权状态判断 ======
+  function shouldTreatAsSuccess(statusData){
+    if(!statusData||statusData.bound!==true)return false;
+    var token=String(statusData.token_status||"").toLowerCase();
+    return token==="valid"||token==="needs_refresh";
+  }
+
+  // ====== 成功态渲染 ======
+  function enterSuccess(statusData){
+    stopTimers();
+    els.successName.textContent=statusData.lark_user_name||"未返回";
+    currentOpenID=statusData.lark_user_open_id||"";
+    els.successOpenID.textContent=currentOpenID||"未返回";
+    setState("success");
+  }
+
+  // ====== 轮询 /status ======
+  async function pollStatus(){
+    if(!currentUserID||pollingInFlight)return;
+    pollingInFlight=true;
+    try{
+      var data=await getJSON("/api/feishu/device/status?multica_user_id="+encodeURIComponent(currentUserID));
+      if(data&&data.ok&&shouldTreatAsSuccess(data)){enterSuccess(data);return;}
+      if(data&&data.ok&&data.bound===false&&String(data.token_status||"")==="not_authorized"){els.statusTip.textContent="已生成二维码，等待扫码确认...";}
+    }catch(_){els.statusTip.textContent="网络轻微波动，正在自动重试...";}
+    finally{pollingInFlight=false;}
+  }
+
+  function startPolling(){if(pollTimer)clearInterval(pollTimer);pollTimer=setInterval(pollStatus,3000);}
+
+  // ====== 授权页面渲染 ======
+  function fillAuthorizeUI(data){
+    var verificationURL=data.verification_url||"";
+    els.verifyLink.href=verificationURL||"#";
+    els.verifyLink.textContent=verificationURL||"打开飞书授权页";
+    els.userCodeLine.textContent=data.user_code?("用户验证码："+data.user_code):"";
+    els.statusTip.textContent="等待你扫码并确认授权，页面会自动刷新状态。";
+    renderQRCode(data.qr_ascii||"");
+  }
+
+  // ====== 开始授权流程 ======
+  async function beginFlow(multicaUserID){
+    currentUserID=multicaUserID;
+    stopTimers();
+    clearStartError();
+    setState("loading");
+    els.loadingText.textContent="正在生成授权链接...";
+    try{
+      var data=await postJSON("/api/feishu/device/start",{multica_user_id:multicaUserID});
+      if(!data||data.ok!==true)throw new Error((data&&(data.error||data.message))||"授权启动失败");
+      fillAuthorizeUI(data);
+      setState("authorize");
+      beginCountdown(Number(data.expires_in));
+      startPolling();
+      pollStatus();
+    }catch(err){
+      setState("loading");
+      els.loadingText.textContent="生成授权链接失败";
+      showStartError(err&&err.message?err.message:"网络异常，请稍后重试");
+    }
+  }
+
+  // ====== 输入态动作 ======
+  function handleStart(){
+    var id=sanitizeUserID(els.userIdInput.value);
+    if(!id){showToast("请先输入 multica_user_id");els.userIdInput.focus();return;}
+    beginFlow(id);
+  }
+
+  // ====== 重置到输入态 ======
+  function resetToInput(){stopTimers();pollingInFlight=false;currentOpenID="";clearStartError();els.userIdInput.value="";setState("input");els.userIdInput.focus();}
+
+  // ====== 复制 open_id ======
+  async function copyOpenID(){
+    if(!currentOpenID){showToast("当前没有可复制的 Open ID");return;}
+    try{await navigator.clipboard.writeText(currentOpenID);showToast("Open ID 已复制");}
+    catch(_){showToast("复制失败，请手动复制");}
+  }
+
+  // ====== Query 参数自动发起 (优先级 1) ======
+  // ====== /api/me 自动检测 multica 当前登录用户 (优先级 2, 同域 cookie 自动带过去) ======
+  async function autoDetectFromMulticaSession(){
+    try{
+      var res=await fetch("/api/me",{method:"GET",credentials:"include",headers:{"Accept":"application/json"}});
+      if(!res.ok)return null;
+      var data=await res.json();
+      var id=sanitizeUserID(data&&data.id);
+      return id||null;
+    }catch(_){return null;}
+  }
+
+  async function initFromQuery(){
+    var params=new URLSearchParams(window.location.search);
+    var queryID=sanitizeUserID(params.get("multica_user_id"));
+    if(queryID){els.userIdInput.value=queryID;beginFlow(queryID);return;}
+
+    // 自动检测 multica 当前登录用户
+    setState("input");
+    els.userIdInput.value="";
+    els.userIdInput.placeholder="正在自动检测 multica 当前登录用户...";
+    els.userIdInput.disabled=true;
+    els.startBtn.disabled=true;
+    var detectedID=await autoDetectFromMulticaSession();
+    els.userIdInput.disabled=false;
+    els.startBtn.disabled=false;
+    if(detectedID){
+      els.userIdInput.value=detectedID;
+      els.userIdInput.placeholder="例如: user-123-abc";
+      beginFlow(detectedID);
+      return;
+    }
+    // 自动检测失败 → fallback 手动输入
+    els.userIdInput.placeholder="例如: 00000000-0000-0000-0000-000000000000";
+    els.userIdInput.focus();
+  }
+
+  // ====== V4 强制重置: 调 /api/feishu/device/force-restart ======
+  // 适用场景: 卡死 / 跨机器扫码 / 换账号 / token 文件损坏
+  // 服务端会清 mapping entry + .lark-cli / .hermes/auth.json / .config/lark (保留用户其他数据)
+  async function handleForceRestart(){
+    var raw=sanitizeUserID(els.userIdInput.value);
+    if(!raw){showToast("请先填入 Multica 用户 ID");els.userIdInput.focus();return;}
+    if(!els.forceRestartBtn||!els.forceRestartResult)return;
+    if(!window.confirm("强制重置当前 user 的飞书绑定?\n这会清掉旧的 token + mapping,然后你需要重新扫码授权。\n确定继续吗?"))return;
+    els.forceRestartBtn.disabled=true;
+    els.forceRestartBtn.textContent="正在重置...";
+    els.forceRestartResult.textContent="";
+    try{
+      var data=await postJSON("/api/feishu/device/force-restart",{multica_user_id:raw});
+      var removed=data&&typeof data.mapping_removed==="number"?data.mapping_removed:0;
+      var cleaned=Array.isArray(data&&data.paths_cleaned)?data.paths_cleaned.length:0;
+      els.forceRestartResult.textContent="✓ 已清理: mapping "+removed+" 条, token 文件 "+cleaned+" 个. 请点上方「开始飞书授权」重走扫码。";
+      els.forceRestartResult.style.color="#7ff0a8";
+      showToast("重置成功,请重新授权");
+    }catch(err){
+      els.forceRestartResult.textContent="✗ 重置失败: "+(err&&err.message?err.message:"未知错误");
+      els.forceRestartResult.style.color="#ffd4d2";
+    }finally{
+      els.forceRestartBtn.disabled=false;
+      els.forceRestartBtn.textContent="强制重置当前 multica 用户的飞书绑定";
+    }
+  }
+
+  // ====== 事件绑定 ======
+  // 触发点:
+  // - 点击开始按钮
+  // - 输入框回车
+  // - 重试 / 重新开始
+  // - 强制重置 (V4)
+  // - 页面卸载时清理定时器
+  els.startBtn.addEventListener("click",handleStart);
+  els.retryStartBtn.addEventListener("click",function(){if(currentUserID)beginFlow(currentUserID);else handleStart();});
+  els.userIdInput.addEventListener("keydown",function(evt){if(evt.key==="Enter"){evt.preventDefault();handleStart();}});
+  els.copyOpenIdBtn.addEventListener("click",copyOpenID);
+  els.closeBtn.addEventListener("click",function(){window.close();showToast("可直接关闭此页面");});
+  els.restartBtn.addEventListener("click",resetToInput);
+  if(els.forceRestartBtn){els.forceRestartBtn.addEventListener("click",handleForceRestart);}
+  window.addEventListener("beforeunload",stopTimers);
+  // 启动
+  initFromQuery();
+})();
+</script>
+</body>
+</html>
