@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // A backend that never reports a session id used to lose its workdir too.
@@ -23,44 +24,79 @@ import (
 // backend, it branches on whether a session id was recorded. These fixtures
 // write the rows a sessionless backend produces, which is the condition that
 // actually drives the code.
+//
+// The sessionless fallback is offered only to a daemon advertising
+// DaemonCapabilityCheckoutKeepsWorkV1, so every case that exercises it claims
+// as one — without the capability the fallback never runs, and the cases that
+// expect no directory would pass for the wrong reason.
 
 // TestClaimTask_IssueKeepsWorkDirWithoutSession is the reported case: terminal
 // row with a workdir and no session at all.
+//
+// Nothing resumes from that directory, so the agent checks its repositories
+// out again. An older daemon's checkout resets an existing checkout and would
+// delete exactly the work being carried forward, so that daemon keeps getting
+// a fresh directory — the terms an automatic fresh-session retry gets too
+// (TestClaimTask_AutoRetryFreshSessionReusesParentWorkdir).
 func TestClaimTask_IssueKeepsWorkDirWithoutSession(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
-	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
-	issueID := dbfx.Issue(t, "sessionless workdir fixture", testutil.Cols{
-		"status": "in_progress",
-		"number": 86641,
-	})
+	for _, tc := range []struct {
+		name         string
+		capabilities string
+		issueNumber  int
+		wantWorkDir  string
+	}{
+		{
+			name:         "daemon_checkout_keeps_work",
+			capabilities: protocol.DaemonCapabilityCheckoutKeepsWorkV1,
+			issueNumber:  86641,
+			wantWorkDir:  "/tmp/sessionless-workdir",
+		},
+		{
+			name:         "older_daemon_gets_fresh_directory",
+			capabilities: protocol.DaemonCapabilityCoalescedCommentsV1,
+			issueNumber:  86647,
+			wantWorkDir:  "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+			issueID := dbfx.Issue(t, "sessionless workdir fixture", testutil.Cols{
+				"status": "in_progress",
+				"number": tc.issueNumber,
+			})
 
-	dbfx.Exec(t, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id,
-			status, priority, started_at, completed_at, session_id, work_dir
-		)
-		VALUES ($1, $2, $3, 'completed', 0, now(), now(), NULL, '/tmp/sessionless-workdir')
-	`, agentID, runtimeID, issueID)
-	dbfx.Exec(t, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
-		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, issueID)
+			dbfx.Exec(t, `
+				INSERT INTO agent_task_queue (
+					agent_id, runtime_id, issue_id,
+					status, priority, started_at, completed_at, session_id, work_dir
+				)
+				VALUES ($1, $2, $3, 'completed', 0, now(), now(), NULL, '/tmp/sessionless-workdir')
+			`, agentID, runtimeID, issueID)
+			dbfx.Exec(t, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+				VALUES ($1, $2, $3, 'queued', 0)
+			`, agentID, runtimeID, issueID)
 
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-	if task.PriorWorkDir != "/tmp/sessionless-workdir" {
-		t.Fatalf("PriorWorkDir = %q, want /tmp/sessionless-workdir (a turn with no session still has a directory to carry forward)", task.PriorWorkDir)
-	}
-	if task.PriorSessionID != "" {
-		t.Fatalf("PriorSessionID = %q, want empty — there is no session to resume and claiming one would be a lie", task.PriorSessionID)
+			task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, tc.capabilities)
+			if task.PriorWorkDir != tc.wantWorkDir {
+				t.Fatalf("PriorWorkDir = %q, want %q", task.PriorWorkDir, tc.wantWorkDir)
+			}
+			if task.PriorSessionID != "" {
+				t.Fatalf("PriorSessionID = %q, want empty — there is no session to resume and claiming one would be a lie", task.PriorSessionID)
+			}
+		})
 	}
 }
 
 // TestClaimTask_IssueKeepsBothWhenSessionExists pins that the split changes
-// nothing for the 15 backends that do report a session.
+// nothing for the 15 backends that do report a session. It claims without
+// advertising any capability: only the sessionless fallback is gated, so a
+// resumable session's own directory still comes back to every daemon.
 func TestClaimTask_IssueKeepsBothWhenSessionExists(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -121,7 +157,7 @@ func TestClaimTask_IssueOffersNoWorkDirWhenNoneRecorded(t *testing.T) {
 		VALUES ($1, $2, $3, 'queued', 0)
 	`, agentID, runtimeID, issueID)
 
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, protocol.DaemonCapabilityCheckoutKeepsWorkV1)
 	if task.PriorWorkDir != "" {
 		t.Fatalf("PriorWorkDir = %q, want empty — no prior turn recorded a directory", task.PriorWorkDir)
 	}
@@ -167,7 +203,7 @@ func TestClaimTask_IssueSessionWorkDirOutranksNewerSessionlessRow(t *testing.T) 
 		VALUES ($1, $2, $3, 'queued', 0)
 	`, agentID, runtimeID, issueID)
 
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, protocol.DaemonCapabilityCheckoutKeepsWorkV1)
 	if task.PriorSessionID != "resumable-session" {
 		t.Fatalf("PriorSessionID = %q, want resumable-session", task.PriorSessionID)
 	}
@@ -220,7 +256,7 @@ func TestClaimTask_IssueFallbackStaysScopedToItsOwnIssue(t *testing.T) {
 		VALUES ($1, $2, $3, 'queued', 0)
 	`, agentID, runtimeID, targetIssueID)
 
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, protocol.DaemonCapabilityCheckoutKeepsWorkV1)
 	if task.PriorWorkDir != "" {
 		t.Fatalf("PriorWorkDir = %q, want empty — the fallback reached another issue's directory", task.PriorWorkDir)
 	}

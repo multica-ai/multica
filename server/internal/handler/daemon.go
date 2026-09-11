@@ -2813,7 +2813,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// session keeps taking the workdir from that session's own row:
 			// the fallback can only widen the no-workdir case, never override
 			// a resumable session's directory with an unrelated one.
-			if resp.PriorWorkDir == "" {
+			//
+			// Offered on the same terms as applyFreshSessionRetryWorkdir: only
+			// to a daemon whose `multica repo checkout` keeps an existing
+			// checkout's work (DaemonCapabilityCheckoutKeepsWorkV1). The runs
+			// this fallback exists for resume no session, so the agent has no
+			// memory of the work in that directory and its brief checks the
+			// repositories out again. An older daemon's checkout resets the
+			// checkout and would delete exactly the work being carried forward
+			// — worse than the fresh directory it got before, which at least
+			// left that work on disk.
+			if resp.PriorWorkDir == "" && requestHasClientCapability(r, protocol.DaemonCapabilityCheckoutKeepsWorkV1) {
 				if workDir, err := h.Queries.GetLastTaskWorkDirForIssueAndAgent(r.Context(), db.GetLastTaskWorkDirForIssueAndAgentParams{
 					AgentID: task.AgentID,
 					IssueID: task.IssueID,
