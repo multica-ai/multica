@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 
 	"github.com/multica-ai/multica/server/internal/marketplace"
@@ -25,10 +24,6 @@ func (h *Handler) PreviewClaudeMarketplace(w http.ResponseWriter, r *http.Reques
 	}
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Manifest) == 0 {
 		writeError(w, http.StatusBadRequest, "manifest is required and must be valid JSON")
-		return
-	}
-	if _, err := io.ReadAll(r.Body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid marketplace manifest")
 		return
 	}
 	manifest, err := marketplace.ParseMarketplace(request.Manifest)
