@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import {
+  cancelInboxLists,
   onInboxInvalidate,
   onInboxIssueDeleted,
   onInboxNew,
@@ -308,6 +309,38 @@ it("does not refetch fresh lists for issue projection changes", async () => {
     unsubscribe();
     qc.clear();
   }
+});
+
+// The mutation-level regression (the write re-reads what it interrupted) lives
+// in issues/mutations.test.tsx.
+describe.each([
+  ["main", inboxKeys.list(wsId)],
+  ["archived", inboxKeys.archived(wsId)],
+] as const)("cancelInboxLists on the %s inbox", (_view, queryKey) => {
+  it("reports and cancels only a request that is in flight", async () => {
+    const qc = new QueryClient();
+    const loaded = [makeItem("i1", "issue-a")];
+    let release!: (items: InboxItem[]) => void;
+    const queryFn = vi
+      .fn<() => Promise<InboxItem[]>>()
+      .mockResolvedValueOnce(loaded)
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (release = resolve)),
+      );
+    try {
+      await qc.fetchQuery({ queryKey, queryFn });
+      expect(cancelInboxLists(qc, wsId)).toBe(false);
+
+      const refetch = qc.fetchQuery({ queryKey, queryFn });
+      expect(cancelInboxLists(qc, wsId)).toBe(true);
+      expect(qc.getQueryState(queryKey)?.fetchStatus).toBe("idle");
+      release([makeItem("i2", "issue-b"), ...loaded]);
+      await expect(refetch).resolves.toEqual(loaded);
+      expect(qc.getQueryData(queryKey)).toEqual(loaded);
+    } finally {
+      qc.clear();
+    }
+  });
 });
 
 // MUL-6967 regression: the inbox list must pick up a change that happens while

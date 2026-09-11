@@ -136,16 +136,38 @@ export async function onInboxIssueDeleted(
   await onInboxSummaryInvalidate(qc);
 }
 
+// An optimistic issue write patches the status / priority on inbox rows, so it
+// first cancels the lists' in-flight requests: a response read before the write
+// would land on top of the patch. Returns whether a request was interrupted.
+//
+// The interrupted request may be the only one carrying a server change (an
+// `inbox:new`, a reconnect), and nothing asks again. The cancel can also drop
+// the invalidation mark: TanStack reverts to its pre-fetch snapshot, and a
+// `setQueryData` during the fetch overwrites that snapshot with a
+// non-invalidated state. So a write that interrupted a request must call
+// `onInboxInvalidate` once it settles (MUL-7286). Writes that interrupt
+// nothing stay request-free.
+export function cancelInboxLists(qc: QueryClient, wsId: string): boolean {
+  const queryKey = inboxKeys.all(wsId);
+  const interrupted = qc
+    .getQueryCache()
+    .findAll({ queryKey })
+    .some((query) => query.state.fetchStatus !== "idle");
+  void qc.cancelQueries({ queryKey });
+  return interrupted;
+}
+
 // THE entry point for refreshing the workspace's inbox lists — main and
 // archived. Every inbox event can move an item across that boundary (archive,
 // unarchive, or a new notification reviving an archived issue), and the split
 // is decided server-side, so the two are always refreshed together.
 //
-// Cancels first, like the summary refresh below, and for the same reason. The
-// list's first load is where the hole bites hardest: nothing outside the Inbox
-// page observes the list, so on web it is collected once the user has been
-// away, and every return is a first load again — with notifications arriving
-// while a large, unbounded list is still downloading.
+// Cancels first, like the summary refresh below, and for the same reason: the
+// Inbox page is the only observer that fetches the list, so its first visit
+// downloads a large, unbounded list while notifications keep arriving. After
+// that the cache outlives the page — tab titles hold disabled observers on it
+// (`useTabPresentation`) — so a return reuses it and refetches only while it
+// is still marked invalidated.
 export async function onInboxInvalidate(qc: QueryClient, wsId: string) {
   await refreshInboxQuery(qc, inboxKeys.all(wsId));
 }
