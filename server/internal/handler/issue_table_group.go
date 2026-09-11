@@ -112,8 +112,10 @@ func statusValueCategoryExpr(
 	return b.String()
 }
 
+// statusOrderExpression ranks a category in board order. Triage, which has no
+// board column, sorts ahead of Backlog: it is work nobody has taken on yet.
 func statusOrderExpression(categoryExpr string) string {
-	return "CASE " + categoryExpr + " WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'blocked' THEN 4 WHEN 'done' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+	return "CASE " + categoryExpr + " WHEN 'triage' THEN -1 WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'blocked' THEN 4 WHEN 'done' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
 }
 
 // resolveStatusCategoryMaps derives BOTH shapes a category grouping needs from

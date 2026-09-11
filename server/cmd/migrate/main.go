@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/attributionbackfill"
 	"github.com/multica-ai/multica/server/internal/chatoriginbackfill"
@@ -751,7 +752,13 @@ func main() {
 	}
 
 	startupSettings := dbstartup.SettingsFromEnv()
-	pool, err := dbstartup.NewPool(context.Background(), dbURL, startupSettings.ConnectTimeout)
+	poolConfig, err := dbstartup.ParsePoolConfig(dbURL, startupSettings.ConnectTimeout)
+	if err != nil {
+		slog.Error("unable to connect to database", "error", err)
+		os.Exit(1)
+	}
+	poolConfig.ConnConfig.OnNotice = logMigrationNotice
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
 	if err != nil {
 		slog.Error("unable to connect to database", "error", err)
 		os.Exit(1)
@@ -812,6 +819,21 @@ func main() {
 	}
 
 	fmt.Println("Done.")
+}
+
+// logMigrationNotice forwards what migration SQL deliberately RAISEs to the
+// migration log. pgx drops server notices unless a handler is set, which made
+// the per-row reports that data-repair migrations print (e.g. 056, 467)
+// invisible to whoever ran the deploy.
+//
+// Only SQLSTATE 00000 is forwarded: that is what a plain RAISE carries, while
+// the "already exists, skipping" chatter of IF [NOT] EXISTS DDL — including the
+// tracking-table create on every run — has a condition code of its own.
+func logMigrationNotice(_ *pgconn.PgConn, notice *pgconn.Notice) {
+	if notice.Code != "00000" {
+		return
+	}
+	slog.Info("migration notice", "severity", notice.Severity, "message", notice.Message)
 }
 
 // runMigrations applies (direction="up") or rolls back (direction="down")

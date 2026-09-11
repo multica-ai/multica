@@ -163,6 +163,10 @@ func (h *Handler) resolveIssueStatusKey(w http.ResponseWriter, r *http.Request, 
 func (h *Handler) resolveIssueStatusKeyKind(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, status string) (string, bool, bool) {
 	entry, err := issuestatus.Resolve(r.Context(), h.Queries, workspaceID, status)
 	if err != nil {
+		if errors.Is(err, issuestatus.ErrReservedStatus) {
+			writeStatusReservedForTriage(w)
+			return "", false, false
+		}
 		if errors.Is(err, issuestatus.ErrUnknownStatus) {
 			// Labels, not bare keys: a derived key says nothing about what the
 			// status means, so listing `in_review_2` alone leaves the caller no
@@ -3162,6 +3166,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			"the target status was archived while this request was in flight; reload the status list and retry")
 		return
 	}
+	if errors.Is(err, service.ErrStatusReservedForTriage) {
+		writeStatusReservedForTriage(w)
+		return
+	}
 	if writeIssueLimitReached(w, err) {
 		return
 	}
@@ -3434,6 +3442,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Track which fields were explicitly present in JSON (even if null)
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
+
+	if prevIssue.Status == issuestatus.Triage {
+		if field := triageLockedField(req.Status != nil, rawFields); field != "" {
+			writeIssueInTriage(w, field)
+			return
+		}
+	}
 
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
@@ -4180,6 +4195,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
+	}
+	if !h.validateBatchTriageLocks(w, r, wsUUID, req.IssueIDs, req.Updates.Status != nil, rawUpdates) {
+		return
 	}
 	// The batch shares one project_id, so it is checked once here rather than
 	// per issue, and rejected instead of skipped like the per-item guards in
