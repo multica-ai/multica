@@ -100,3 +100,36 @@ func TestRegisterAfterDshProfileInstall_KicksWhenAWorkspaceIsTracked(t *testing.
 		t.Fatal("no discovery round was requested after the install finished")
 	}
 }
+
+// A converge round may condemn dsh and nothing else.
+//
+// On main only refreshAgentVersions acts on demotable verdicts, on its own
+// ten-minute cadence, and that is the schedule every provider's verdict was
+// tuned against. dsh needs a round it can be forced into, because its
+// precondition — the runtime profile — can change without any version changing;
+// letting that round condemn Claude Code or Codex too would move them onto a
+// different schedule as a side effect of a DSH fix.
+func TestDshOnlyVerdicts(t *testing.T) {
+	demotable := map[string]runtimeVerdict{
+		"claude": {reason: "version too old"},
+		"codex":  {reason: "agent CLI is not executable"},
+		"dsh":    {reason: dshMissingProfileReason},
+	}
+
+	got := dshOnlyVerdicts(demotable)
+	if len(got) != 1 {
+		t.Fatalf("verdicts = %v, want only dsh", got)
+	}
+	if got["dsh"].reason != dshMissingProfileReason {
+		t.Errorf("dsh verdict = %q, want it carried through unchanged", got["dsh"].reason)
+	}
+
+	// Nothing to do is nil, so the caller's length check reads the same either
+	// way.
+	if got := dshOnlyVerdicts(map[string]runtimeVerdict{"claude": {reason: "x"}}); got != nil {
+		t.Errorf("verdicts = %v, want nil when dsh is not condemned", got)
+	}
+	if got := dshOnlyVerdicts(nil); got != nil {
+		t.Errorf("verdicts = %v, want nil for an empty round", got)
+	}
+}

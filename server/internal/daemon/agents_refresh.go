@@ -145,6 +145,18 @@ func (d *Daemon) convergeAgentRuntimes(
 	*nextRetry = now.Add(*backoff)
 }
 
+// dshOnlyVerdicts narrows a round's demotable verdicts to dsh.
+//
+// Returns nil rather than an empty map when there is nothing, so the caller's
+// length check reads the same either way.
+func dshOnlyVerdicts(demotable map[string]runtimeVerdict) map[string]runtimeVerdict {
+	verdict, ok := demotable["dsh"]
+	if !ok {
+		return nil
+	}
+	return map[string]runtimeVerdict{"dsh": verdict}
+}
+
 // dshProfileMismatch names a disagreement between the two states the daemon has
 // to keep aligned: whether the Multica runtime profile is installed, and whether
 // a dsh runtime is registered.
@@ -823,14 +835,21 @@ func (d *Daemon) convergeRuntimeRegistrations(ctx context.Context) {
 	// gets a visible reason even though registration is skipped.
 	builtins, demotable, _ := d.detectBuiltinRuntimes(ctx)
 	// Condemned providers drop out of builtins entirely, so acting on them
-	// before the early return is what keeps a provider that goes bad mid-flight
-	// from staying online: the DSH profile removed while dsh is registered
-	// leaves nothing missing a runtime, and a round reached only for that has
-	// no registration left to do. demoteUnusableRuntimes owns the claim barrier
-	// and the seq-stamped hold, so running it here is safe — the version
-	// refresh is simply no longer the only tick that reaches it.
-	if len(demotable) > 0 {
-		d.demoteUnusableRuntimes(ctx, demotable)
+	// before the early return is what keeps a dsh that goes bad mid-flight from
+	// staying online: the profile removed while dsh is registered leaves nothing
+	// missing a runtime, and a round reached only for that has no registration
+	// left to do. demoteUnusableRuntimes owns the claim barrier and the
+	// seq-stamped hold, so running it here is safe.
+	//
+	// Restricted to dsh on purpose. Every other provider is demoted from
+	// refreshAgentVersions alone, on its own ten-minute cadence, and that is the
+	// schedule their verdicts were tuned against; letting a converge round
+	// condemn them too would move Claude Code, Codex and the rest onto a
+	// different one as a side effect of a DSH fix. dsh is the only provider with
+	// a precondition that can change without any version changing, which is why
+	// it is the only one that needs a round it can be forced into.
+	if dshDemotable := dshOnlyVerdicts(demotable); len(dshDemotable) > 0 {
+		d.demoteUnusableRuntimes(ctx, dshDemotable)
 	}
 	if len(builtins) == 0 {
 		return
