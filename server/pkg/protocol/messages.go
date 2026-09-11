@@ -49,6 +49,19 @@ const (
 	// nothing extra, so the stub retires itself as daemons update.
 	DaemonCapabilityPlatformSkillV1 = "platform-skill-v1"
 
+	// DaemonCapabilityReusedWorkdirNoticeV1 advertises that the daemon warns a
+	// fresh provider session when it lands in a workdir an earlier run left
+	// behind (MUL-7034).
+	//
+	// The server hands an automatic retry that must start a fresh session its
+	// parent's workdir only when this is present. That session has no memory of
+	// the work in the directory, and the brief tells it to fetch repositories
+	// with `multica repo checkout`, which resets an existing checkout and deletes
+	// uncommitted changes. Without the warning, reusing the directory would
+	// destroy the work it was meant to keep, so an older daemon keeps getting a
+	// fresh directory and the parent's stays untouched on disk.
+	DaemonCapabilityReusedWorkdirNoticeV1 = "reused-workdir-notice-v1"
+
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:
 	// chat:cancel_finalized as an invalidation hint plus the draft-restores

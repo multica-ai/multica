@@ -35,6 +35,7 @@ func (r *sliceRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (r *sliceRows) Values() ([]any, error)                       { return nil, nil }
 func (r *sliceRows) RawValues() [][]byte                          { return nil }
 func (r *sliceRows) Conn() *pgx.Conn                              { return nil }
+func (r *sliceRows) TypeMap() *pgtype.Map                         { return nil }
 
 func (r *sliceRows) Next() bool {
 	if r.i >= len(r.rows) {

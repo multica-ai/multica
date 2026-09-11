@@ -1,8 +1,10 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import {
   onInboxInvalidate,
   onInboxIssueDeleted,
+  onInboxNew,
   onInboxIssueStatusChanged,
   onInboxSummaryInvalidate,
   patchInboxIssueProjection,
@@ -76,21 +78,38 @@ describe("onInboxIssueDeleted", () => {
     expect(() => onInboxIssueDeleted(qc, wsId, "issue-a")).not.toThrow();
     expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))).toBeUndefined();
   });
+
+  it("refreshes the unread summary, which the dropped rows can change", async () => {
+    // The badge reads the server summary, not these lists (MUL-6967). Deletion
+    // arrives as an `issue:*` event, so no `inbox:*` handler runs to refresh
+    // it, and the summary query is staleTime: Infinity with no refetch on
+    // focus — without this the badge stays lit over an empty inbox.
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [
+      makeItem("i1", "issue-a", { read: false }),
+    ]);
+
+    await onInboxIssueDeleted(qc, wsId, "issue-a");
+
+    expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))).toEqual([]);
+    expect(spy).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() });
+  });
 });
 
 describe("onInboxInvalidate", () => {
-  it("invalidates the workspace prefix, covering both the main and archived lists", () => {
+  it("invalidates the workspace prefix, covering both the main and archived lists", async () => {
     // Every inbox event can move an item across the two lists, so they are
     // always refreshed together (MUL-3736).
     const qc = new QueryClient();
     const spy = vi.spyOn(qc, "invalidateQueries");
 
-    onInboxInvalidate(qc, wsId);
+    await onInboxInvalidate(qc, wsId);
 
     expect(spy).toHaveBeenCalledWith({ queryKey: inboxKeys.all(wsId) });
   });
 
-  it("does not reach the account-level summary key", () => {
+  it("does not reach the account-level summary key", async () => {
     // The summary is keyed ["inbox", "unread-summary"], NOT under the
     // workspace prefix — its own updater owns it.
     const qc = new QueryClient();
@@ -99,28 +118,73 @@ describe("onInboxInvalidate", () => {
       .getQueryCache()
       .find({ queryKey: inboxKeys.unreadSummary() });
 
-    onInboxInvalidate(qc, wsId);
+    await onInboxInvalidate(qc, wsId);
 
     expect(summaryQuery?.state.isInvalidated).toBe(false);
   });
 });
 
+describe("onInboxInvalidate ordering", () => {
+  it("cancels the in-flight list request BEFORE invalidating", async () => {
+    // Same reason as the summary: a change during the list's first load must
+    // not be answered by the request already on the wire. See the MUL-6967
+    // regression at the bottom of this file for the end-to-end sequence.
+    const qc = new QueryClient();
+    const calls: string[] = [];
+    vi.spyOn(qc, "cancelQueries").mockImplementation(async () => {
+      calls.push("cancel");
+    });
+    vi.spyOn(qc, "invalidateQueries").mockImplementation(async () => {
+      calls.push("invalidate");
+    });
+
+    await onInboxInvalidate(qc, wsId);
+
+    expect(calls).toEqual(["cancel", "invalidate"]);
+  });
+});
+
 describe("onInboxSummaryInvalidate", () => {
-  it("invalidates the account-level summary key regardless of active workspace", () => {
+  it("invalidates the account-level summary key regardless of active workspace", async () => {
     const qc = new QueryClient();
     const spy = vi.spyOn(qc, "invalidateQueries");
 
-    onInboxSummaryInvalidate(qc);
+    await onInboxSummaryInvalidate(qc);
 
     expect(spy).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() });
   });
 
-  it("does not disturb a workspace-scoped inbox list cache", () => {
+  it("cancels an in-flight summary request BEFORE invalidating", async () => {
+    // Order is the whole point. TanStack skips its own cancel on a first fetch
+    // (`Query.fetch` guards it on `state.data !== undefined`) and hands back
+    // the request already on the wire, whose success then clears
+    // `isInvalidated` — so invalidating without cancelling first can be
+    // answered by a pre-change response and never asked again (MUL-6967).
     const qc = new QueryClient();
+    const calls: string[] = [];
+    vi.spyOn(qc, "cancelQueries").mockImplementation(async () => {
+      calls.push("cancel");
+    });
+    vi.spyOn(qc, "invalidateQueries").mockImplementation(async () => {
+      calls.push("invalidate");
+    });
+
+    await onInboxSummaryInvalidate(qc);
+
+    expect(calls).toEqual(["cancel", "invalidate"]);
+  });
+
+  it("cancels only the summary key, never a workspace inbox list", async () => {
+    // A list request in flight for the active workspace must survive: the
+    // cancel is aimed at the account-level summary alone.
+    const qc = new QueryClient();
+    const cancel = vi.spyOn(qc, "cancelQueries");
     qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [makeItem("i1", "issue-a")]);
 
-    onInboxSummaryInvalidate(qc);
+    await onInboxSummaryInvalidate(qc);
 
+    expect(cancel).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() });
+    expect(cancel).not.toHaveBeenCalledWith({ queryKey: inboxKeys.list(wsId) });
     // The list cache entry is untouched (different key); only the summary
     // query is marked stale.
     expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0]?.id).toBe("i1");
@@ -195,5 +259,104 @@ describe("patchInboxIssueProjection", () => {
     expect(
       qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0],
     ).not.toHaveProperty("issue_priority");
+  });
+});
+
+// The hook-level reproduction lives in use-realtime-sync-inbox.test.tsx.
+// These cases cover the partial writers and both list keys, including an
+// update to an issue absent from the cached list (setQueryData's no-op trap).
+describe.each([
+  ["main", inboxKeys.list(wsId)],
+  ["archived", inboxKeys.archived(wsId)],
+] as const)("partial updates to an invalidated %s inbox", (view, queryKey) => {
+  it.each([
+    ["status", (qc: QueryClient) => onInboxIssueStatusChanged(qc, wsId, "issue-a", "done")],
+    ["priority", (qc: QueryClient) => patchInboxIssueProjection(qc, wsId, "issue-a", { priority: "high" })],
+    ["unrelated issue", (qc: QueryClient) => onInboxIssueStatusChanged(qc, wsId, "other-issue", "done")],
+    ["deletion", (qc: QueryClient) => onInboxIssueDeleted(qc, wsId, "issue-a")],
+  ] as const)("preserves the pending refresh after %s", async (_label, update) => {
+    const qc = new QueryClient();
+    qc.setQueryData(queryKey, [
+      makeItem("i1", "issue-a", {
+        issue_priority: "low",
+        archived: view === "archived",
+      }),
+    ]);
+    try {
+      await onInboxInvalidate(qc, wsId);
+      await update(qc);
+      expect(qc.getQueryState(queryKey)?.isInvalidated).toBe(true);
+    } finally {
+      qc.clear();
+    }
+  });
+});
+
+it("does not refetch fresh lists for issue projection changes", async () => {
+  const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+  const queryFn = vi.fn(async () => [makeItem("i1", "issue-a")]);
+  const options = { queryKey: inboxKeys.list(wsId), queryFn };
+  await qc.fetchQuery(options);
+  const observer = new QueryObserver(qc, options);
+  const unsubscribe = observer.subscribe(() => {});
+  try {
+    onInboxIssueStatusChanged(qc, wsId, "issue-a", "done");
+    expect(observer.getCurrentResult().data?.[0]?.issue_status).toBe("done");
+    expect(queryFn).toHaveBeenCalledTimes(1);
+    expect(qc.getQueryState(options.queryKey)?.isInvalidated).toBe(false);
+  } finally {
+    unsubscribe();
+    qc.clear();
+  }
+});
+
+// MUL-6967 regression: the inbox list must pick up a change that happens while
+// its FIRST load is still in flight. Plain invalidation cannot do that —
+// TanStack only cancels an in-flight request on invalidation once the query
+// holds data, and otherwise answers the refetch with the request already on
+// the wire. That pre-change response then clears `isInvalidated`, and with
+// `staleTime: Infinity` nothing asks again, so the list stays behind while the
+// badge (whose refresh already cancels first) moves on — "2 unread" over a list
+// with nothing unread. The first load is not rare: nothing outside the Inbox
+// page observes the list, so on web every visit after the cache is collected
+// is a first load again.
+describe("inbox list refresh during the first load", () => {
+  it.each([
+    ["new notification", (qc: QueryClient) => onInboxNew(qc, wsId, makeItem("n2", "issue-b"))],
+    ["read / archive event", (qc: QueryClient) => onInboxInvalidate(qc, wsId)],
+  ])("re-reads the list after a %s arrives mid-load", async (_label, signal) => {
+    const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+    let releaseFirst!: (rows: InboxItem[]) => void;
+    const firstResponse = new Promise<InboxItem[]>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let server: InboxItem[] = [makeItem("n1", "issue-a", { read: true })];
+    const queryFn = vi
+      .fn<() => Promise<InboxItem[]>>()
+      .mockImplementationOnce(() => firstResponse)
+      .mockImplementation(async () => server);
+    const observer = new QueryObserver(qc, { queryKey: inboxKeys.list(wsId), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      // The server changes while the first read is still on the wire...
+      server = [makeItem("n2", "issue-b", { read: false }), ...server];
+      await signal(qc);
+      // ...and only then does the pre-change response land.
+      releaseFirst([makeItem("n1", "issue-a", { read: true })]);
+
+      await vi.waitFor(() =>
+        expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.map((i) => i.id)).toEqual([
+          "n2",
+          "n1",
+        ]),
+      );
+      expect(queryFn.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      releaseFirst([]);
+      unsubscribe();
+      qc.clear();
+    }
   });
 });

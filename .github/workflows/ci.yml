@@ -99,6 +99,8 @@ jobs:
               - 'scripts/worktree-db.test.sh'
               - 'scripts/dev-env.sh'
               - 'scripts/dev-env.test.sh'
+              - 'scripts/perf-compare.mjs'
+              - 'scripts/perf-compare.test.sh'
               - 'scripts/selfhost-wait.sh'
               # selfhost-config.test.sh asserts on the installers' side of
               # the port contract, so a change to either must run it.
@@ -111,7 +113,7 @@ jobs:
               - 'docker-compose.selfhost.yml'
               - 'docker-compose.selfhost.build.yml'
               - 'Makefile'
-            # Everything the backend jobs (backend-tests,
+            # Everything the backend jobs (backend-tests, backend-agent-tests,
             # go-vulnerability-scan, windows-execenv) read, which is NOT the
             # same thing as server/**: four Go tests reach out of the module
             # to pin a contract against a file the other side owns, across
@@ -294,6 +296,13 @@ jobs:
       - name: Test development environment registry
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/dev-env.test.sh
+
+      # The browser comparison runs only on demand, but its verdict and its
+      # cleanup are cheap to prove on every change: a fake pnpm, no build and
+      # no browser, a few seconds.
+      - name: Test UI performance comparison runner
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: bash scripts/perf-compare.test.sh
 
       - name: Verify reserved-slugs.ts is up to date
         if: ${{ needs.changes.outputs.frontend == 'true' }}
@@ -486,6 +495,41 @@ jobs:
             exit 1
           fi
 
+  # The Go caches are handled explicitly here rather than through setup-go's
+  # `cache: true`. setup-go keys its entry on go.sum alone and shares that key
+  # with every Linux job in this workflow, so whichever job finished first,
+  # go-vulnerability-scan in under a minute, saved a ~95 MB entry holding
+  # little beyond module downloads; this job then "hit" that key on every run
+  # and never saved its own. The result was a from-scratch race-instrumented
+  # compile of the whole module on every backend run, measured at roughly
+  # half of the job's ~8 minutes (MUL-7280).
+  #
+  # Two entries now. The module cache is keyed by go.sum: immutable, saved on
+  # a miss, never grows. The build cache is keyed by commit SHA with a prefix
+  # fallback, so each run starts from the newest entry and recompiles only
+  # what its change touched. Only pushes to main publish a build-cache entry;
+  # PR runs restore and leave, which keeps storage churn at one entry per
+  # merge, the same shape as the turbo caches above. The key carries the
+  # resolved Go version because `check-latest` floats across patch releases,
+  # and the runner image (ImageOS) because cached cgo and race objects are
+  # linked against that image's glibc: when ubuntu-latest moves to a new
+  # release, an entry built on the old one must not be restored. setup-go
+  # keys on ImageOS for the same reason (actions/setup-go#368).
+  #
+  # This job is the only writer of either entry. backend-agent-tests restores
+  # both, but it downloads just pkg/agent's slice of the module graph and
+  # finishes first, so letting it save would repeat the first-writer-wins
+  # problem above: an immutable go.sum key pinned to a partial module cache.
+  #
+  # Every compile below runs in race mode so build, vet and test share one set
+  # of objects. A plain `go build` fed nothing to the -race test binaries and
+  # was pure duplicate work; nothing in server/ carries a `race` build tag, so
+  # both modes accept exactly the same code.
+  #
+  # `GOFLAGS=-count=1` because a rolling cache would otherwise let `go test`
+  # replay cached results. Migrations are read from disk at run time rather
+  # than embedded, so a schema change is invisible to a test binary's hash and
+  # a cached "ok" from an untouched package could mask a real failure.
   backend-tests:
     needs: changes
     runs-on: ubuntu-latest
@@ -525,12 +569,14 @@ jobs:
       # realtime relay + request stores); the tests talk to this Redis
       # directly so they run alongside the Postgres-backed suite.
       REDIS_TEST_URL: redis://localhost:6379/1
+      GOFLAGS: -count=1
     steps:
       - name: Checkout
         if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/checkout@v6
 
       - name: Setup Go
+        id: go
         if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/setup-go@v5
         with:
@@ -538,7 +584,29 @@ jobs:
           # CI follows the newest 1.26 patch available to setup-go.
           go-version: "1.26.x"
           check-latest: true
-          cache-dependency-path: server/go.sum
+          cache: false
+
+      - name: Restore Go module cache
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        uses: actions/cache@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('server/go.sum') }}
+
+      # ImageOS is a runner environment variable, not a context value, so a
+      # shell step spells the build-cache key prefix once for restore and save.
+      - name: Resolve Go build cache key
+        id: gocache
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: echo "prefix=go-build-race-${{ runner.os }}-${{ runner.arch }}-$ImageOS-${{ steps.go.outputs.go-version }}-" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go build cache
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.gocache.outputs.prefix }}${{ github.sha }}
+          restore-keys: ${{ steps.gocache.outputs.prefix }}
 
       - name: Setup Helm
         if: ${{ needs.changes.outputs.backend == 'true' }}
@@ -558,7 +626,7 @@ jobs:
 
       - name: Build
         if: ${{ needs.changes.outputs.backend == 'true' }}
-        run: cd server && go build ./...
+        run: cd server && go build -race ./...
 
       # The `agentintegration` files execute real agent CLIs, so no CI job runs
       # them. Nothing compiled them either, which let them rot silently: a
@@ -568,7 +636,7 @@ jobs:
       # cheapest gate that keeps them honest without needing an agent CLI.
       - name: Vet tag-gated agent integration tests
         if: ${{ needs.changes.outputs.backend == 'true' }}
-        run: cd server && go vet -tags agentintegration ./...
+        run: cd server && go vet -race -tags agentintegration ./...
 
       - name: Run migrations
         if: ${{ needs.changes.outputs.backend == 'true' }}
@@ -580,7 +648,74 @@ jobs:
 
       - name: Test
         if: ${{ needs.changes.outputs.backend == 'true' }}
-        run: bash scripts/test-go.sh --race
+        # pkg/agent runs on its own runner: backend-agent-tests below.
+        run: bash scripts/test-go.sh --race --only regular
+
+      # Publishes from main only; see the job comment. `!cancelled()` so a red
+      # main still refreshes the objects for the next run, and the key step's
+      # outcome so a run that never reached Go does not save an empty entry
+      # under a half-formed key.
+      - name: Save Go build cache
+        if: ${{ !cancelled() && github.event_name == 'push' && steps.gocache.outcome == 'success' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.gocache.outputs.prefix }}${{ github.sha }}
+
+  # pkg/agent used to run as the tail of backend-tests: ~2m20s for a single
+  # package, throttled to -parallel 2 because its subprocess-backed tests carry
+  # hard deadlines and starve when a race build competes for the runner (see
+  # scripts/test-go.sh). Those tests are timer-bound rather than CPU-bound, so
+  # the throttle stays and the package simply gets its own runner; it reads no
+  # database, so no service containers either. Same trade as the frontend
+  # split: more runner-minutes, less wall clock. Both Go caches are restored
+  # but never saved here: backend-tests owns publishing (see its comment), and
+  # this job's only unique output is the pkg/agent test binary, which is cheap
+  # to relink.
+  backend-agent-tests:
+    needs: changes
+    runs-on: ubuntu-latest
+    env:
+      # Same policy as backend-tests: CI always executes the tests it reports.
+      GOFLAGS: -count=1
+    steps:
+      - name: Checkout
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        id: go
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+          cache: false
+
+      - name: Restore Go module cache
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('server/go.sum') }}
+
+      # Must match backend-tests' key step exactly.
+      - name: Resolve Go build cache key
+        id: gocache
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: echo "prefix=go-build-race-${{ runner.os }}-${{ runner.arch }}-$ImageOS-${{ steps.go.outputs.go-version }}-" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go build cache
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.gocache.outputs.prefix }}${{ github.sha }}
+          restore-keys: ${{ steps.gocache.outputs.prefix }}
+
+      - name: Test agent package
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: bash scripts/test-go.sh --race --only agent
 
   # Keep the live vulnerability database from hiding build and test results.
   # The aggregate backend job below still treats both jobs as one merge gate.
@@ -610,20 +745,22 @@ jobs:
   # Preserve the existing required-check name while allowing tests, generated
   # SQL verification, and the vulnerability scan to run independently.
   backend:
-    needs: [backend-tests, sqlc-check, go-vulnerability-scan]
+    needs: [backend-tests, backend-agent-tests, sqlc-check, go-vulnerability-scan]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Check backend job results
         env:
           TEST_RESULT: ${{ needs.backend-tests.result }}
+          AGENT_TEST_RESULT: ${{ needs.backend-agent-tests.result }}
           SQLC_RESULT: ${{ needs.sqlc-check.result }}
           VULNERABILITY_RESULT: ${{ needs.go-vulnerability-scan.result }}
         run: |
-          echo "backend-tests:        $TEST_RESULT"
-          echo "sqlc-check:           $SQLC_RESULT"
+          echo "backend-tests:         $TEST_RESULT"
+          echo "backend-agent-tests:   $AGENT_TEST_RESULT"
+          echo "sqlc-check:            $SQLC_RESULT"
           echo "go-vulnerability-scan: $VULNERABILITY_RESULT"
-          if [ "$TEST_RESULT" != "success" ] || [ "$SQLC_RESULT" != "success" ] || [ "$VULNERABILITY_RESULT" != "success" ]; then
+          if [ "$TEST_RESULT" != "success" ] || [ "$AGENT_TEST_RESULT" != "success" ] || [ "$SQLC_RESULT" != "success" ] || [ "$VULNERABILITY_RESULT" != "success" ]; then
             echo "::error::backend validation failed"
             exit 1
           fi
