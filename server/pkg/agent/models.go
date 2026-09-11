@@ -506,13 +506,9 @@ func modelHasKnownPrefix(model string) bool {
 // protocol family never share one memo entry when they enumerate different
 // binaries.
 func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
-	modelCacheMu.Lock()
-	if entry, ok := modelCache[key]; ok && time.Now().Before(entry.expiresAt) {
-		out, unavailable := entry.models, entry.unavailable
-		modelCacheMu.Unlock()
-		return Catalog{Models: out, Unavailable: unavailable}, nil
+	if catalog, ok := cachedDiscoveryOnly(key); ok {
+		return catalog, nil
 	}
-	modelCacheMu.Unlock()
 
 	catalog, err := fn()
 	if err != nil {
@@ -542,6 +538,20 @@ func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 	}
 	modelCacheMu.Unlock()
 	return catalog, nil
+}
+
+// cachedDiscoveryOnly returns a live discovery-cache entry without invoking a
+// provider CLI on a miss. Execution paths use this when a provider probe would
+// interfere with the task process they are about to launch; UI catalog reads
+// continue through cachedDiscovery and refresh normally.
+func cachedDiscoveryOnly(key string) (Catalog, bool) {
+	modelCacheMu.Lock()
+	defer modelCacheMu.Unlock()
+	entry, ok := modelCache[key]
+	if !ok || !time.Now().Before(entry.expiresAt) {
+		return Catalog{}, false
+	}
+	return Catalog{Models: entry.models, Unavailable: entry.unavailable}, true
 }
 
 // discoveryCacheKey scopes a discovery memo to the binary it enumerated.
