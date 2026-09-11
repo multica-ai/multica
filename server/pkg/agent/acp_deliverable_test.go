@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -160,6 +161,13 @@ type acpDeliverableCase struct {
 	// "AgentMessageChunk"`) kiro and qoder emit, instead of the snake_case
 	// `update.sessionUpdate` form hermes/kimi/traecli/grok emit.
 	camelUpdates bool
+	// isolateHome points the child's home env var at a per-test temp dir.
+	// Prime's fail-closed rlmMaxDepth gate opens ~/.prime/agent/settings.json
+	// resolved from the CHILD environment before it spawns anything, so
+	// without this the turn's outcome would depend on whether the developer
+	// running the suite happens to have set a global rlmMaxDepth. No other
+	// backend in this table reads the home directory during Execute.
+	isolateHome bool
 }
 
 // acpDeliverableCases covers every backend sharing acpDeliverableTracker.
@@ -175,6 +183,11 @@ var acpDeliverableCases = []acpDeliverableCase{
 	{backend: "kiro", binary: "kiro-cli", notification: "session/notification", camelUpdates: true},
 	{backend: "qoder", binary: "qodercli", notification: "session/notification", camelUpdates: true},
 	{backend: "qoderclicn", binary: "qoderclicn", notification: "session/notification", camelUpdates: true},
+	// prime speaks the snake_case session/update dialect: verified against
+	// prime-agent v0.7.1's own ACP tests (packages/coding-agent/test/
+	// acp-events.test.ts asserts sessionUpdate: "agent_message_chunk" /
+	// "agent_thought_chunk" / "tool_call" / "tool_call_update").
+	{backend: "prime", binary: "prime-agent", notification: "session/update", isolateHome: true},
 }
 
 const (
@@ -272,6 +285,15 @@ func runACPDeliverableTurn(t *testing.T, c acpDeliverableCase, env map[string]st
 
 	fakePath := filepath.Join(t.TempDir(), c.binary)
 	writeTestExecutable(t, fakePath, []byte(fakeACPDeliverableScript(c)))
+
+	if c.isolateHome {
+		if env == nil {
+			env = map[string]string{}
+		} else {
+			env = maps.Clone(env)
+		}
+		env[primeHomeEnvKey()] = t.TempDir()
+	}
 
 	backend, err := New(c.backend, Config{ExecutablePath: fakePath, Logger: slog.Default(), Env: env})
 	if err != nil {

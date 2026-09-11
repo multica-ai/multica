@@ -444,6 +444,78 @@ func TestFilterLaunchPrefixKeepsPositionalCollidingWithSubcommand(t *testing.T) 
 	}
 }
 
+// TestFilterLaunchPrefixProtectsPrimeProtocolFlags covers the family that was
+// missing from launchPrefixBlockedArgs entirely.
+//
+// prime.go pins the transport with `--mode acp` and sets the working directory
+// out-of-band via cmd.Dir, deliberately never passing `--cwd`. That second half
+// is what makes an unfiltered prefix dangerous here: a fixed_args `--cwd` is the
+// ONLY occurrence in the argv, so prefix-first ordering gives it nothing to lose
+// to, and prime-agent calls process.chdir() on it — moving the agent's real
+// working directory out of the task workdir the daemon prepared.
+func TestFilterLaunchPrefixProtectsPrimeProtocolFlags(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		prefix []string
+		want   []string
+	}{
+		{"cwd escapes the task workdir", []string{"--cwd", "/etc"}, nil},
+		{"cwd inline spelling", []string{"--cwd=/etc"}, nil},
+		{"mode would fight the acp transport", []string{"--mode", "text"}, nil},
+		{"command identity survives", []string{"wrapper-sub", "--cwd", "/"}, []string{"wrapper-sub"}},
+		{"unrelated flags pass through", []string{"--model", "x"}, []string{"--model", "x"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := filterLaunchPrefix(tc.prefix, "prime", slog.Default())
+			if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+				t.Fatalf("filterLaunchPrefix(%v, prime) = %v, want %v", tc.prefix, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPrimeLaunchPrefixCannotSwallowTheTransportFlag is the straddling-value
+// case, and the reason registering the family matters more than the blocklist
+// contents. A bare `--mode` in fixed_args takes the NEXT token as its value —
+// and the next token is the daemon's own `--mode`. prime-agent's parser then
+// discards the pair as an invalid mode and reads the orphaned `acp` as a
+// positional, leaving the process in its default interactive mode with no ACP
+// channel at all. Same shape as the hermes `-p` case that spans the region
+// boundary; here the filter removes the flag before it can reach across.
+func TestPrimeLaunchPrefixCannotSwallowTheTransportFlag(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{LaunchPrefix: filterLaunchPrefix([]string{"--mode"}, "prime", slog.Default()), Logger: slog.Default()}
+	argv := cfg.commandAt("prime-agent").Argv("--mode", "acp")
+
+	if want := []string{"--mode", "acp"}; strings.Join(argv, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv = %v, want %v — the transport flag must reach prime-agent intact", argv, want)
+	}
+}
+
+// TestNewFiltersPrimeLaunchPrefix proves the registration is wired at the one
+// point that knows the family, so the backend never sees an unfiltered prefix.
+func TestNewFiltersPrimeLaunchPrefix(t *testing.T) {
+	t.Parallel()
+
+	backend, err := New("prime", Config{
+		ExecutablePath: "wrapper",
+		LaunchPrefix:   []string{"start", "--cwd", "/etc", "--mode", "text"},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("New(prime): %v", err)
+	}
+	got := backend.(*primeBackend).cfg.LaunchPrefix
+	if strings.Join(got, "\x00") != "start" {
+		t.Fatalf("New did not filter the prime launch prefix: got %v, want [start]", got)
+	}
+}
+
 // TestFilterLaunchPrefixConsumesBlockedFlagValue: dropping a blocked flag must
 // take its value with it, or the leftover value token would be read as a
 // subcommand — precisely the kind of token this filter otherwise preserves.

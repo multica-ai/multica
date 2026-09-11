@@ -334,6 +334,12 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			wantPath: "~/.grok/skills/review-helper",
 			wantName: "Grok Review",
 		},
+		{
+			provider: "prime",
+			root:     filepath.Join(".prime", "agent", "skills"),
+			wantPath: "~/.prime/agent/skills/review-helper",
+			wantName: "Prime Review",
+		},
 	}
 
 	for _, tc := range tests {
@@ -351,6 +357,9 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			}
 			if tc.provider == "dsh" {
 				t.Setenv("DSH_HOME", "")
+			}
+			if tc.provider == "prime" {
+				t.Setenv("PRIME_AGENT_CODING_AGENT_DIR", "")
 			}
 
 			writeTestLocalSkill(t, filepath.Join(home, tc.root), "review-helper", map[string]string{
@@ -467,6 +476,41 @@ func TestListRuntimeLocalSkills_QwenUsesQWENHOME(t *testing.T) {
 		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
 	}
 	if !supported || bundle == nil || bundle.Name != "Qwen Home Review" {
+		t.Fatalf("unexpected bundle: supported=%v bundle=%+v", supported, bundle)
+	}
+}
+
+func TestListRuntimeLocalSkills_PrimeUsesPRIMEAGENTCODINGAGENTDIR(t *testing.T) {
+	home := t.TempDir()
+	primeHome := filepath.Join(t.TempDir(), "custom-prime-home")
+	t.Setenv("HOME", home)
+	t.Setenv("PRIME_AGENT_CODING_AGENT_DIR", primeHome)
+	writeTestLocalSkill(t, filepath.Join(primeHome, "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Prime Home Review\ndescription: Review code\n---\n# Review\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".prime", "agent", "skills"), "wrong-home", map[string]string{
+		"SKILL.md": "---\nname: Wrong Home\n---\n# Wrong\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("prime")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("prime should be supported")
+	}
+	if len(skills) != 1 || skills[0].Key != "review-helper" {
+		t.Fatalf("expected only PRIME_AGENT_CODING_AGENT_DIR skill, got %+v", skills)
+	}
+	if skills[0].SourcePath != filepath.ToSlash(filepath.Join(primeHome, "skills", "review-helper")) {
+		t.Fatalf("source_path = %q, want custom PRIME_AGENT_CODING_AGENT_DIR path", skills[0].SourcePath)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("prime", "review-helper")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported || bundle == nil || bundle.Name != "Prime Home Review" {
 		t.Fatalf("unexpected bundle: supported=%v bundle=%+v", supported, bundle)
 	}
 }

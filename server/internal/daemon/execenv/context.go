@@ -148,6 +148,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // QwenPaw:      skills → {workDir}/.qwenpaw/skills/{name}/SKILL.md  (native project-level discovery)
 // MiniMax Code: skills → {workDir}/.minimax/skills/{name}/SKILL.md  (native project-level discovery)
 // Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
+// Prime:       skills → {workDir}/.prime/agent/skills/{name}/SKILL.md  (native project-level discovery, enabled by default; see package-manager.ts)
 // Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 //
 // manifest, when non-nil, is populated with every file we created and every
@@ -428,6 +429,21 @@ func skillsDirPath(workDir, provider string) string {
 		// (and also scans .agents/skills/). Prefer the native .grok tree.
 		// See Grok user-guide skills.md.
 		return filepath.Join(workDir, ".grok", "skills")
+	case "prime":
+		// Prime Agent discovers project-level skills from
+		// <workDir>/.prime/agent/skills/ — verified in source, not assumed:
+		// packages/coding-agent/src/core/package-manager.ts's
+		// resolveDefaultRoots (projectDirs.skills = join(projectBaseDir,
+		// "skills") where projectBaseDir = join(cwd, CONFIG_DIR_NAME) and
+		// CONFIG_DIR_NAME is ".prime/agent") feeds collectAutoSkillEntries,
+		// which scans that directory for SKILL.md files enabled by default
+		// (isEnabledByOverrides defaults to true with no settings.json
+		// overrides). This is the project-scoped counterpart to Prime's
+		// global ~/.prime/agent/skills/ — using the workDir-scoped path here
+		// keeps skill binding isolated per task, matching every other case in
+		// this function, rather than writing into the user's shared global
+		// skills directory.
+		return filepath.Join(workDir, ".prime", "agent", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		return filepath.Join(workDir, ".agent_context", "skills")
