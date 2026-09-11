@@ -167,23 +167,43 @@ install_cli_binary() {
 
   tar -xzf "$tmp_dir/multica.tar.gz" -C "$tmp_dir" multica
 
-  # Try /usr/local/bin first, fall back to ~/.local/bin. Tests and scripted
-  # installs can override the first choice with MULTICA_BIN_DIR.
-  local bin_dir="${MULTICA_BIN_DIR:-/usr/local/bin}"
-  if [ -w "$bin_dir" ]; then
-    mv "$tmp_dir/multica" "$bin_dir/multica"
-  elif command_exists sudo; then
-    sudo mv "$tmp_dir/multica" "$bin_dir/multica"
+  # New installs default to a user-writable location and never require sudo.
+  # Explicit targets (MULTICA_BIN_DIR / --bin-dir / --system) may use sudo if
+  # needed. Upgrades keep using the directory of an existing multica binary so
+  # previous system-wide installations remain upgradeable.
+  local bin_dir
+  local allow_sudo=false
+  if [ -n "${MULTICA_BIN_DIR:-}" ]; then
+    bin_dir="$MULTICA_BIN_DIR"
+    allow_sudo=true
+  elif command_exists multica; then
+    bin_dir="$(dirname "$(command -v multica)")"
+    allow_sudo=true
   else
     bin_dir="$HOME/.local/bin"
-    mkdir -p "$bin_dir"
+    info "Using user install directory $bin_dir (use --system for /usr/local/bin)"
+  fi
+
+  if mkdir -p "$bin_dir" 2>/dev/null && [ -w "$bin_dir" ]; then
     mv "$tmp_dir/multica" "$bin_dir/multica"
-    chmod +x "$bin_dir/multica"
-    # Add to PATH if not already there
-    if ! echo "$PATH" | tr ':' '\n' | grep -q "^$bin_dir$"; then
-      export PATH="$bin_dir:$PATH"
-      add_to_path "$bin_dir"
+  elif [ "$allow_sudo" = true ] && command_exists sudo; then
+    info "Installing to $bin_dir requires elevated privileges..."
+    if ! sudo mkdir -p "$bin_dir" || ! sudo mv "$tmp_dir/multica" "$bin_dir/multica"; then
+      rm -rf "$tmp_dir"
+      fail "Could not install to $bin_dir. Choose a writable directory with --bin-dir PATH, or omit the option for a user-local install."
     fi
+  else
+    rm -rf "$tmp_dir"
+    fail "Could not write to $bin_dir. Choose a writable directory with --bin-dir PATH, or use --system for a system-wide install."
+  fi
+
+  chmod +x "$bin_dir/multica" 2>/dev/null || true
+
+  # Add user/custom install directories to PATH if not already there. System
+  # locations such as /usr/local/bin are normally already on PATH.
+  if ! echo "$PATH" | tr ':' '\n' | grep -q "^$bin_dir$"; then
+    export PATH="$bin_dir:$PATH"
+    add_to_path "$bin_dir"
   fi
 
   rm -rf "$tmp_dir"
@@ -519,19 +539,40 @@ main() {
       --with-server) mode="with-server" ;;
       --local)       mode="with-server" ;;  # backwards compat alias
       --stop)        mode="stop" ;;
+      --system)
+        MULTICA_BIN_DIR="/usr/local/bin"
+        export MULTICA_BIN_DIR
+        ;;
+      --bin-dir)
+        shift
+        [ $# -gt 0 ] || fail "--bin-dir requires a path"
+        MULTICA_BIN_DIR="$1"
+        export MULTICA_BIN_DIR
+        ;;
+      --bin-dir=*)
+        MULTICA_BIN_DIR="${1#*=}"
+        [ -n "$MULTICA_BIN_DIR" ] || fail "--bin-dir requires a path"
+        export MULTICA_BIN_DIR
+        ;;
       --help|-h)
-        echo "Usage: install.sh [--with-server | --stop]"
+        echo "Usage: install.sh [--with-server | --stop] [--system | --bin-dir PATH]"
         echo ""
         echo "  (default)       Install / upgrade the Multica CLI"
         echo "  --with-server   Install CLI + provision a self-host server (Docker)"
         echo "  --stop          Stop a self-hosted installation"
+        echo "  --system        Install the CLI system-wide to /usr/local/bin"
+        echo "                  (may request sudo if the directory is not writable)"
+        echo "  --bin-dir PATH  Install the CLI to an explicit directory"
+        echo ""
+        echo "Installation location:"
+        echo "  New installs default to \$HOME/.local/bin and do not require sudo."
+        echo "  Use --system to make the CLI available system-wide to all users."
         echo ""
         echo "Environment variables:"
         echo "  MULTICA_INSTALL_DIR   Self-host server install directory"
         echo "                        (default: \$HOME/.multica/server)"
-        echo "  MULTICA_BIN_DIR       Target directory for the CLI binary when"
-        echo "                        installing from GitHub Releases"
-        echo "                        (default: /usr/local/bin, then \$HOME/.local/bin)"
+        echo "  MULTICA_BIN_DIR       Explicit target directory for the CLI binary"
+        echo "                        (default for new installs: \$HOME/.local/bin)"
         echo "  MULTICA_SELFHOST_REF  Git ref to check out for self-host assets"
         echo "                        (default: latest release tag, falling back to main)"
         echo ""
