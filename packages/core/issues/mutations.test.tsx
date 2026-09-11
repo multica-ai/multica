@@ -33,6 +33,7 @@ import type {
   Issue,
   ListIssuesCache,
   TimelineEntry,
+  UpdateIssueRequest,
 } from "../types";
 
 vi.mock("../hooks", () => ({
@@ -955,6 +956,165 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
       expect(listInbox).not.toHaveBeenCalled();
     },
   );
+
+  // Writes that overlap each other or a list request: the re-read must come
+  // after the last save, or it reads a pending write's old value and lands on
+  // top of its patch.
+  describe("overlapping writes", () => {
+    const rowA = makeInboxItem("n-a", "issue-1", { read: true, issue_priority: "none" });
+    const rowB = makeInboxItem("n-b", "issue-2", { read: true, issue_priority: "none" });
+    const newRow = makeInboxItem("n-c", "issue-3", {
+      issue_priority: "none",
+      created_at: "2025-01-02T00:00:00Z",
+    });
+    type Kind = "useUpdateIssue" | "useBatchUpdateIssues";
+
+    // List reads and saves complete only when the test says so. A read answers
+    // with the rows as they were when it reached the server.
+    function controlledServer(initial: InboxItem[]) {
+      let rows = initial;
+      const reads: Array<() => void> = [];
+      const saves = new Map<string, () => void>();
+      const listInbox = vi.fn(() => {
+        const snapshot = rows;
+        return new Promise<InboxItem[]>((resolve) =>
+          reads.push(() => resolve(snapshot)),
+        );
+      });
+      const save = (id: string, priority: UpdateIssueRequest["priority"]) =>
+        new Promise<void>((resolve) =>
+          saves.set(id, () => {
+            rows = rows.map((row) =>
+              row.issue_id === id ? { ...row, issue_priority: priority } : row,
+            );
+            resolve();
+          }),
+        );
+      setApiInstance({
+        listInbox,
+        updateIssue: (id: string, data: UpdateIssueRequest) =>
+          save(id, data.priority).then(() => ({ ...makeIssue(1), ...data, id })),
+        batchUpdateIssues: (ids: string[], updates: UpdateIssueRequest) =>
+          save(ids[0]!, updates.priority).then(() => ({ updated: ids.length })),
+      } as unknown as ApiClient);
+      return {
+        listInbox,
+        setRows: (next: InboxItem[]) => {
+          rows = next;
+        },
+        answerReads: () => reads.splice(0).forEach((answer) => answer()),
+        saving: (id: string) => saves.has(id),
+        commit: (id: string) => saves.get(id)!(),
+      };
+    }
+
+    function write(hooks: WriteHooks, kind: Kind, id: string) {
+      return kind === "useUpdateIssue"
+        ? hooks.single.mutateAsync({ id, priority: "high" })
+        : hooks.batch.mutateAsync({ ids: [id], updates: { priority: "high" } });
+    }
+
+    async function loadInbox(server: ReturnType<typeof controlledServer>) {
+      const inbox = mountInbox();
+      await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(1));
+      server.answerReads();
+      await waitFor(() => expect(inbox.current.data).toBeDefined());
+      return () => inbox.current.data?.map((row) => [row.id, row.issue_priority]);
+    }
+
+    it.each([
+      ["useUpdateIssue", "useUpdateIssue"],
+      ["useBatchUpdateIssues", "useBatchUpdateIssues"],
+      ["useUpdateIssue", "useBatchUpdateIssues"],
+      ["useBatchUpdateIssues", "useUpdateIssue"],
+    ] as const)(
+      "re-reads once, after the last of them saves (%s, then %s)",
+      async (first: Kind, second: Kind) => {
+        const server = controlledServer([rowA, rowB]);
+        const hooks = renderWriteHooks();
+        const rendered = await loadInbox(server);
+
+        // `inbox:new` while the Inbox is open; its re-read is still out.
+        server.setRows([newRow, rowA, rowB]);
+        act(() => {
+          void onInboxInvalidate(qc, WS_ID);
+        });
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(2));
+
+        // A's write interrupts that re-read; B's starts before A is saved and
+        // finds nothing to interrupt.
+        let writeA!: Promise<unknown>;
+        let writeB!: Promise<unknown>;
+        act(() => {
+          writeA = write(hooks.current, first, "issue-1");
+        });
+        await waitFor(() => expect(server.saving("issue-1")).toBe(true));
+        act(() => {
+          writeB = write(hooks.current, second, "issue-2");
+        });
+        await waitFor(() => expect(server.saving("issue-2")).toBe(true));
+        expect(qc.getQueryState(inboxKeys.list(WS_ID))?.fetchStatus).toBe("idle");
+
+        await act(async () => {
+          server.commit("issue-1");
+          await writeA;
+        });
+        await act(async () => {});
+        // A owes the re-read, but reading while B is unsaved would miss B.
+        expect(server.listInbox).toHaveBeenCalledTimes(2);
+
+        await act(async () => {
+          server.commit("issue-2");
+          await writeB;
+        });
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
+        server.answerReads();
+
+        await waitFor(() =>
+          expect(rendered()).toEqual([
+            ["n-c", "none"],
+            ["n-a", "high"],
+            ["n-b", "high"],
+          ]),
+        );
+      },
+    );
+
+    it.each(["useUpdateIssue", "useBatchUpdateIssues"] as const)(
+      "%s re-reads a list request that started while it was saving",
+      async (kind: Kind) => {
+        const server = controlledServer([rowA]);
+        const hooks = renderWriteHooks();
+        const rendered = await loadInbox(server);
+
+        let writeA!: Promise<unknown>;
+        act(() => {
+          writeA = write(hooks.current, kind, "issue-1");
+        });
+        await waitFor(() => expect(server.saving("issue-1")).toBe(true));
+        // `inbox:new` mid-save: this read reaches the server before A is saved.
+        server.setRows([newRow, rowA]);
+        act(() => {
+          void onInboxInvalidate(qc, WS_ID);
+        });
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(2));
+
+        await act(async () => {
+          server.commit("issue-1");
+          await writeA;
+        });
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
+        server.answerReads();
+
+        await waitFor(() =>
+          expect(rendered()).toEqual([
+            ["n-c", "none"],
+            ["n-a", "high"],
+          ]),
+        );
+      },
+    );
+  });
 });
 
 describe("comment mutations — owner revision and last activity", () => {

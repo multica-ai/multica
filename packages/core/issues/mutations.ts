@@ -10,7 +10,11 @@ import { api } from "../api";
 import { issueKeys } from "./queries";
 import { projectKeys } from "../projects/queries";
 import { inboxKeys } from "../inbox/queries";
-import { cancelInboxLists, onInboxInvalidate } from "../inbox/ws-updaters";
+import {
+  cancelInboxLists,
+  isInboxListRequestInFlight,
+  onInboxInvalidate,
+} from "../inbox/ws-updaters";
 import {
   applyIssueChange,
   invalidateIssueDerivatives,
@@ -83,18 +87,44 @@ export type UpdateIssueMutationInput = {
 // Issue CRUD
 // ---------------------------------------------------------------------------
 
-// A status / priority write patches the inbox rows optimistically, so the
-// lists need a re-read only when the write left them behind the server: onMutate
-// interrupted one of their requests (see `cancelInboxLists`), or a failure
-// restored their rollback snapshot, which drops a pending refresh and can
-// predate a notification that arrived meanwhile. Otherwise the patch was the
-// whole change, and the write stays request-free (MUL-7286).
-function refreshInboxAfterIssueWrite(
+// Shared by the single and batch update hooks, so a settling write can tell
+// whether another is still in flight.
+const issueWriteMutationKey = (wsId: string) => ["issue-write", wsId] as const;
+
+// Workspaces whose inbox lists owe a re-read, per client.
+const inboxRereadsOwed = new WeakMap<QueryClient, Set<string>>();
+
+// Inbox side of settling an issue write. A status / priority write patches the
+// inbox rows optimistically, so the lists owe a re-read only when the write left
+// them behind the server: onMutate interrupted one of their requests (see
+// `cancelInboxLists`), a failure restored their rollback snapshot, or a list
+// request is still out and may have read the server before this write
+// committed. Otherwise the patch was the whole change, and no request is added.
+//
+// The re-read waits for the last in-flight issue write, which inherits the
+// obligation. Issued while another write is pending, it would read that write's
+// old value and land after its patch, reverting a saved change (MUL-7286).
+function settleInboxAfterIssueWrite(
   qc: QueryClient,
   wsId: string,
-  { interrupted, rolledBack }: { interrupted: boolean; rolledBack: boolean },
+  // Set by onMutate for status / priority writes only.
+  inboxWrite: { interrupted: boolean } | undefined,
+  failed: boolean,
 ) {
-  if (interrupted || rolledBack) void onInboxInvalidate(qc, wsId);
+  let owed = inboxRereadsOwed.get(qc);
+  if (!owed) {
+    owed = new Set();
+    inboxRereadsOwed.set(qc, owed);
+  }
+  if (
+    inboxWrite &&
+    (inboxWrite.interrupted || failed || isInboxListRequestInFlight(qc, wsId))
+  ) {
+    owed.add(wsId);
+  }
+  // The settling write itself still counts as in flight.
+  if (qc.isMutating({ mutationKey: issueWriteMutationKey(wsId) }) > 1) return;
+  if (owed.delete(wsId)) void onInboxInvalidate(qc, wsId);
 }
 
 function useIssueCreateMutation<TVariables>(
@@ -147,6 +177,7 @@ export function useUpdateIssue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
+    mutationKey: issueWriteMutationKey(wsId),
     mutationFn: ({ id, move_intent: moveIntent, ...data }: UpdateIssueMutationInput) => {
       if (!moveIntent) return api.updateIssue(id, data);
       const { position: _optimisticPosition, ...target } = data;
@@ -175,9 +206,10 @@ export function useUpdateIssue() {
       qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
       qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) });
       qc.cancelQueries({ queryKey: issueKeys.tableAll(wsId) });
-      const inboxInterrupted =
-        (patch.status !== undefined || patch.priority !== undefined) &&
-        cancelInboxLists(qc, wsId);
+      const inboxWrite =
+        patch.status !== undefined || patch.priority !== undefined
+          ? { interrupted: cancelInboxLists(qc, wsId) }
+          : undefined;
       const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
       // The coordinator owns the cross-cache rules: surgical patch/rebucket
       // where the card is loaded and still belongs, surgical REMOVE where the
@@ -233,7 +265,7 @@ export function useUpdateIssue() {
               : old?.map((c) => (c.id === id ? { ...c, ...normalizeStatusPatch(patch) } : c)),
         );
       }
-      return { change, prevChildren, parentId, id, inboxInterrupted };
+      return { change, prevChildren, parentId, id, inboxWrite };
     },
     onError: (_err, vars, ctx) => {
       if (ctx) {
@@ -304,6 +336,8 @@ export function useUpdateIssue() {
       invalidateStaleListKeys(qc, reconcile.staleKeys);
     },
     onSettled: (_data, err, vars, ctx) => {
+      // Runs even without ctx: the last write settles what earlier ones owe.
+      settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
       // The issue's own list + detail caches are reconciled surgically in
       // onSuccess / onError, so they are deliberately NOT invalidated here — a
       // full-list refetch on settle is what made drags flicker. Only aggregate
@@ -322,13 +356,6 @@ export function useUpdateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
       if (ctx) {
         invalidateStaleListKeys(qc, ctx.change.staleKeys);
-        refreshInboxAfterIssueWrite(qc, wsId, {
-          interrupted: ctx.inboxInterrupted,
-          rolledBack:
-            err !== null &&
-            (ctx.change.prevInboxList !== undefined ||
-              ctx.change.prevArchivedInboxList !== undefined),
-        });
       }
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
@@ -457,6 +484,7 @@ export function useBatchUpdateIssues() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
+    mutationKey: issueWriteMutationKey(wsId),
     mutationFn: ({
       ids,
       updates,
@@ -479,9 +507,10 @@ export function useBatchUpdateIssues() {
       await qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
       await qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) });
       await qc.cancelQueries({ queryKey: issueKeys.tableAll(wsId) });
-      const inboxInterrupted =
-        (patch.status !== undefined || patch.priority !== undefined) &&
-        cancelInboxLists(qc, wsId);
+      const inboxWrite =
+        patch.status !== undefined || patch.priority !== undefined
+          ? { interrupted: cancelInboxLists(qc, wsId) }
+          : undefined;
 
       // Run every issue through the coordinator — the same rules table the
       // single-issue update uses, so a batch edit patches/removes across the
@@ -560,7 +589,7 @@ export function useBatchUpdateIssues() {
         prevDetailById,
         prevInboxList,
         prevArchivedInboxList,
-        inboxInterrupted,
+        inboxWrite,
         staleKeys,
         prevChildren,
         affectedParentIds,
@@ -603,6 +632,8 @@ export function useBatchUpdateIssues() {
       }
     },
     onSettled: (_data, err, _vars, ctx) => {
+      // Runs even without ctx: the last write settles what earlier ones owe.
+      settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
       // Deliberately NOT invalidating issueKeys.list / myAll here: the onMutate
       // pass above is a complete surgical reconcile for the loaded bucketed
       // boards, so a full-board refetch on settle would only re-introduce the
@@ -619,13 +650,6 @@ export function useBatchUpdateIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
       if (ctx) {
         invalidateStaleListKeys(qc, ctx.staleKeys);
-        refreshInboxAfterIssueWrite(qc, wsId, {
-          interrupted: ctx.inboxInterrupted,
-          rolledBack:
-            err !== null &&
-            (ctx.prevInboxList !== undefined ||
-              ctx.prevArchivedInboxList !== undefined),
-        });
       }
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {

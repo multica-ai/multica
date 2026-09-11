@@ -136,6 +136,17 @@ export async function onInboxIssueDeleted(
   await onInboxSummaryInvalidate(qc);
 }
 
+// Whether a request for either inbox list is out (paused ones included).
+export function isInboxListRequestInFlight(
+  qc: QueryClient,
+  wsId: string,
+): boolean {
+  return qc
+    .getQueryCache()
+    .findAll({ queryKey: inboxKeys.all(wsId) })
+    .some((query) => query.state.fetchStatus !== "idle");
+}
+
 // An optimistic issue write patches the status / priority on inbox rows, so it
 // first cancels the lists' in-flight requests: a response read before the write
 // would land on top of the patch. Returns whether a request was interrupted.
@@ -144,16 +155,12 @@ export async function onInboxIssueDeleted(
 // `inbox:new`, a reconnect), and nothing asks again. The cancel can also drop
 // the invalidation mark: TanStack reverts to its pre-fetch snapshot, and a
 // `setQueryData` during the fetch overwrites that snapshot with a
-// non-invalidated state. So a write that interrupted a request must call
-// `onInboxInvalidate` once it settles (MUL-7286). Writes that interrupt
-// nothing stay request-free.
+// non-invalidated state. So a write that interrupted a request owes the lists
+// a re-read once the writes settle (MUL-7286). Writes that interrupt nothing
+// stay request-free.
 export function cancelInboxLists(qc: QueryClient, wsId: string): boolean {
-  const queryKey = inboxKeys.all(wsId);
-  const interrupted = qc
-    .getQueryCache()
-    .findAll({ queryKey })
-    .some((query) => query.state.fetchStatus !== "idle");
-  void qc.cancelQueries({ queryKey });
+  const interrupted = isInboxListRequestInFlight(qc, wsId);
+  void qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
   return interrupted;
 }
 
