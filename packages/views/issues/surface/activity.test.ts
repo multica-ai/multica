@@ -1,6 +1,13 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
-import type { AgentTask } from "@multica/core/types";
-import { deriveIssueSurfaceActivity, selectIssueTasks } from "./activity";
+import type { AgentTask, IssueStatusCategory } from "@multica/core/types";
+import {
+  deriveIssueExecutionState,
+  deriveIssueSurfaceActivity,
+  selectIssueTasks,
+  type IssueTaskGroups,
+} from "./activity";
 
 function task(overrides: Partial<AgentTask>): AgentTask {
   return {
@@ -80,5 +87,67 @@ describe("selectIssueTasks", () => {
     expect(groups.queued.map((t) => t.id)).not.toContain("done-1");
     const noMatch = selectIssueTasks(snapshot, "does-not-exist");
     expect(noMatch).toEqual({ running: [], queued: [] });
+  });
+});
+
+describe("deriveIssueExecutionState", () => {
+  const noTasks: IssueTaskGroups = { running: [], queued: [] };
+
+  it.each([
+    {
+      name: "running takes precedence over queued tasks and unfinished children",
+      groups: {
+        running: [task({ status: "running" })],
+        queued: [task({ id: "queued", status: "queued" })],
+      },
+      statusCategory: "in_progress",
+      childProgress: { done: 0, total: 2 },
+      expected: "working",
+    },
+    {
+      name: "queued takes precedence over unfinished children",
+      groups: { running: [], queued: [task({ status: "queued" })] },
+      statusCategory: "in_progress",
+      childProgress: { done: 0, total: 2 },
+      expected: "queued",
+    },
+    {
+      name: "an idle in-progress parent with unfinished children is waiting",
+      groups: noTasks,
+      statusCategory: "in_progress",
+      childProgress: { done: 1, total: 2 },
+      expected: "waiting",
+    },
+    {
+      name: "a parent whose children are all terminal is idle",
+      groups: noTasks,
+      statusCategory: "in_progress",
+      childProgress: { done: 2, total: 2 },
+      expected: null,
+    },
+    {
+      name: "an in-progress issue without children is idle",
+      groups: noTasks,
+      statusCategory: "in_progress",
+      childProgress: undefined,
+      expected: null,
+    },
+    {
+      name: "a non-in-progress parent is idle",
+      groups: noTasks,
+      statusCategory: "todo",
+      childProgress: { done: 0, total: 2 },
+      expected: null,
+    },
+  ] satisfies Array<{
+    name: string;
+    groups: IssueTaskGroups;
+    statusCategory: IssueStatusCategory;
+    childProgress?: { done: number; total: number };
+    expected: "working" | "queued" | "waiting" | null;
+  }>)("$name", ({ groups, statusCategory, childProgress, expected }) => {
+    expect(
+      deriveIssueExecutionState(groups, statusCategory, childProgress),
+    ).toBe(expected);
   });
 });

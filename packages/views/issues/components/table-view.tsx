@@ -149,6 +149,7 @@ import {
 import type { ChildProgress } from "./list-row";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { issueStatusCategory } from "@multica/core/issues";
 
 // Enough placeholder rows to cover a typical viewport; the virtualizer only
 // mounts what fits, so overshooting costs nothing.
@@ -633,6 +634,7 @@ export function InlineTitle({
   toggleLabel,
   renameLabel,
   createSubIssueLabel,
+  childProgress,
 }: {
   row: Extract<IssueTableDisplayRow, { kind: "issue" }>;
   /** Rename state is owned by the table (one editor at a time) so it also
@@ -647,6 +649,7 @@ export function InlineTitle({
   toggleLabel: string;
   renameLabel: string;
   createSubIssueLabel: string;
+  childProgress?: ChildProgress | null;
 }) {
   const [draft, setDraft] = useState(row.issue.title);
   const editingRef = useRef(editing);
@@ -718,7 +721,11 @@ export function InlineTitle({
       <span className="min-w-16 shrink-0 text-caption text-muted-foreground">
         {row.issue.identifier}
       </span>
-      <IssueAgentActivityIndicator issueId={row.issue.id} />
+      <IssueAgentActivityIndicator
+        issueId={row.issue.id}
+        childProgress={childProgress}
+        statusCategory={issueStatusCategory(row.issue)}
+      />
       {editing ? (
         <Input
           autoFocus
@@ -1146,6 +1153,7 @@ function IssueTableBodyCell({
           toggleLabel={t(($) => $.table.toggle_sub_issues)}
           renameLabel={t(($) => $.table.rename_title)}
           createSubIssueLabel={t(($) => $.actions.create_sub_issue)}
+          childProgress={meta.childProgressMap.get(issue.id)}
         />
       );
     case "identifier":

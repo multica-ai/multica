@@ -27,7 +27,22 @@ vi.mock("../../agents/components/agent-activity-hover-content", () => ({
 }));
 
 vi.mock("../../i18n", () => ({
-  useT: () => ({ t: () => "Working" }),
+  useT: () => ({
+    t: (
+      selector: (value: Record<string, unknown>) => unknown,
+      variables?: Record<string, number>,
+    ) => {
+      const translations = {
+        agent_activity: {
+          status_running: "Working",
+          status_queued: "Queued",
+          status_waiting: "Waiting on sub-issues",
+          waiting_detail: `${variables?.done ?? 0}/${variables?.total ?? 1} complete`,
+        },
+      };
+      return selector(translations) as string;
+    },
+  }),
 }));
 
 // The hover card only portals its content once open, so absence of the body
@@ -140,5 +155,22 @@ describe("IssueAgentActivityIndicator", () => {
     );
 
     expect(container.firstChild).toBeNull();
+  });
+
+  it("renders an accessible waiting badge and progress detail", () => {
+    mockState.snapshot = [];
+    render(
+      <IssueAgentActivityIndicator
+        issueId="issue-1"
+        statusCategory="in_progress"
+        childProgress={{ done: 0, total: 1 }}
+      />,
+    );
+
+    expect(screen.getByTestId("hover-card")).not.toBeNull();
+    expect(
+      screen.getByLabelText("Waiting on sub-issues, 0/1 complete"),
+    ).not.toBeNull();
+    expect(screen.getByText("0/1 complete")).not.toBeNull();
   });
 });
