@@ -26,6 +26,7 @@
 | D7 | runtime fleet | **self-host 自建**（不依赖私有 multica-cloud） |
 | D8 | 订阅产品线 | **新建** Aurora 个人订阅（不是 workspace 席位制） |
 | D9 | 积分账本 | **复用 Cloud 钱包的数据契约**（micro-credit / 1 USD=1000 credit / 交易类型），在本地 Go 端自建账本 |
+| D10 | 视频生成 | **HyperFrames**（[heygen-com/hyperframes](https://github.com/heygen-com/hyperframes)，Apache 2.0）确定性 HTML→MP4 渲染，self-host 跑在 fleet 节点 |
 
 D7/D8/D9 的一致含义：**Aurora 是完全 self-host 的部署**，`multica-cloud` 的 fleet/订阅/钱包在本地都不可用（`cloudruntime/baseURL` 为空即 `ErrDisabled`）。「复用 Cloud 钱包」落地为**复用其 schema/API 契约**（见 `packages/core/types/billing.ts`：`micro-credit BIGINT`、`1 USD = 1000 credit`、交易类型 `topup/deduction/refund/expire/adjustment`、批次 `purchase/bonus/adjustment`），前端 `packages/core/billing` 的类型与查询几乎可直接沿用。
 
@@ -63,6 +64,7 @@ apps/aurora (Next.js) ──► packages/core (query/api/hooks) ──► Go ser
 | daemon 执行器 | `server/internal/daemon` | 复用（部署到沙箱节点） |
 | 用量计量 | `TaskUsage` / `TaskUsageHourly` / `metrics/pricing.go` | 复用 |
 | runtime fleet | 新建 fleet controller + 沙箱节点编排 | **新建** |
+| 确定性视频渲染 | HyperFrames CLI（Node 22 + FFmpeg + headless Chrome，fleet 节点内置） | 新建（Apache 2.0，无按次渲染费） |
 | 计费账本 | `credit_balance` / `credit_ledger` | **新建**（复用 cloud 钱包契约） |
 | 支付 | Stripe 集成 | **新建**（本地，不经 cloud） |
 
@@ -85,15 +87,25 @@ Multica 的 agent 运行时是**在用户机器上跑 coding CLI（claude/codex 
 
 ### 4.3 媒体生成 MCP
 
-16 个 Skill 需要的能力（图片/视频生成、转写、PPT/Excel 渲染）通过 **MCP server** 暴露给 agent（复用 `server/pkg/agent/mcp_config.go`）：
+16 个 Skill 需要的能力（图片生成、转写、PPT/Excel 渲染）通过 **MCP server** 暴露给 agent（复用 `server/pkg/agent/mcp_config.go`）；**视频生成走 HyperFrames**（见 §4.4），不走生成式模型。
 
 - 每个 Skill = 一个 Multica `Agent`（系统行，`system_key` 如 `aurora:xhs-image`），`instructions` 为系统提示 + 挂一个 `Skill`（SKILL.md 工作流）+ `mcp_config` 指向对应媒体生成 MCP。
-- MCP server 分两类：**模型供应商适配器**（OpenAI/Google/Anthropic/Ideogram/Runway/HeyGen 的 image/video/transcribe 封装）与**确定性渲染器**（ffmpeg 剪辑字幕、PPT 渲染、代码解释器算 Excel）。
+- MCP server 分两类：**模型供应商适配器**（OpenAI/Google/Anthropic/Ideogram 的 image 封装、OpenAI/Google 的 transcribe 封装）与**确定性渲染器**（PPT 渲染、代码解释器算 Excel）。第二阶段再加生成式视频适配器（Veo/Runway、HeyGen Avatar）。视频的确定性渲染由 HyperFrames 承担，不在 MCP 内。
 - 供应商密钥只在服务端（fleet 或 MCP 侧）读取，任何值不得以 `NEXT_PUBLIC_` 或 API 响应暴露（沿用 aurora 红线）。
 
-### 4.4 设计张力（记录为技术债，非阻断）
+### 4.4 视频：HyperFrames 确定性渲染（self-host）
 
-部分 Skill 是**纯确定性**的（证件照裁切、视频字幕、Excel 计算），本不需要 LLM agent。方案 B 下它们仍走 agent 编排确定性 MCP 工具，成本偏高。后续可加「确定性 Skill 快速通道」绕过 agent 直接跑流水线。MVP 先统一走 agent 以保证架构一致。
+MVP 的视频 Skill 用 [HyperFrames](https://github.com/heygen-com/hyperframes)（Apache 2.0，无按次渲染费）做确定性渲染，不用生成式模型（Veo/Runway 留到第二阶段）。
+
+- **作者模型**：视频 = 一个 HTML 文件 + `data-*` 时序属性 + seekable 动画适配器（GSAP/Lottie/Three.js/Anime.js/CSS/WAAPI）。无 React、无打包步骤，agent 直接写 HTML——与方案 B（coding agent）天然契合。
+- **渲染**：headless Chrome 逐帧 seek + FFmpeg 编码（`@hyperframes/engine`/`@hyperframes/producer`），同输入同输出，确定性，适合 CI/回归测试。
+- **落地方式**：fleet 沙箱节点内置 Node 22 + FFmpeg + headless Chrome + `hyperframes` CLI；agent 挂 HyperFrames skills（20 个，含 `/faceless-explainer`、`/embedded-captions`、`/motion-graphics`、`/slideshow`、`/music-to-video` 等）后，按 SKILL.md 工作流写 HTML 并 `npx hyperframes render` 产出 MP4。
+- **MVP 映射**：文生视频 → HTML 动态排版/动画短片（`/faceless-explainer`/`/general-video`）；图生视频 → 图片 Ken Burns/幻灯 + 转场 + 字幕 + 音乐（`/slideshow`/`/music-to-video`）；剪辑字幕 → 给已有口播视频嵌字幕（`/embedded-captions`）。
+- **为何 HyperFrames 而非 Remotion**：HTML-native（agent 易写、无打包）优于 React+bundler；Apache 2.0 优于 Remotion 的 source-available 商用限制；两者都基于 headless Chrome + FFmpeg。
+
+### 4.5 设计张力（记录为技术债，非阻断）
+
+部分 Skill 是**纯确定性**的（证件照裁切、视频字幕、Excel 计算），本不需要 LLM agent。方案 B 下它们仍走 agent 编排确定性 MCP 工具/HyperFrames CLI，成本偏高。后续可加「确定性 Skill 快速通道」绕过 agent 直接跑流水线。MVP 先统一走 agent 以保证架构一致。
 
 ## 5. 数据模型（新领域，migrations）
 
@@ -154,7 +166,7 @@ Multica 的 agent 运行时是**在用户机器上跑 coding CLI（claude/codex 
 |---|------|------|
 | 1 | 认证 + 注册自动开个人空间 | 邮箱验证码 + Google OAuth |
 | 2 | Skill 目录（中英双语） | 16 功能目录，服务端单一事实来源 |
-| 3 | 确定性优先的两类 Skill | 文字类（小红书文案/简历/文件总结/录音转写）+ 图片类（海报/小红书图片/商品图/文字生图/图片修改/证件照） |
+| 3 | 确定性优先的三类 Skill | 文字类（小红书文案/简历/文件总结/录音转写）+ 图片类（海报/小红书图片/商品图/文字生图/图片修改/证件照）+ 视频类（文生视频/图生视频/剪辑字幕，HyperFrames 确定性渲染） |
 | 4 | 异步任务 + 进度 + 产物下载 | 入队 → 沙箱执行 → 实时进度 → `aurora_asset` 下载 |
 | 5 | 计费闭环 | 订阅档位 + 积分额度 + 充值（Stripe）+ 扣费 + 账单/用量明细 |
 | 6 | 作品库 | asset 列表/下载/删除 |
@@ -163,7 +175,7 @@ Multica 的 agent 运行时是**在用户机器上跑 coding CLI（claude/codex 
 
 ### 9.2 第二阶段（稳定后）
 
-视频类（图生视频/文生视频/剪辑字幕/数字人口播）、PPT/Excel、社交平台一键发布、多语言扩展。
+生成式视频（Veo/Runway 真人/真景生成）+ 数字人口播（HeyGen Avatar）、PPT/Excel、社交平台一键发布、多语言扩展。
 
 ### 9.3 第三阶段（增长）
 
@@ -195,11 +207,13 @@ Multica 的 agent 运行时是**在用户机器上跑 coding CLI（claude/codex 
 | coding agent 每任务成本高、非确定 | 利润率/体验 | `max_turns` + 确定性 MCP 工具 + 计量护栏 |
 | 积分扣费从零建（本地无账本） | 后端工作量 | 复用 cloud 钱包契约，前端类型沿用 |
 | Stripe 本地集成 + 订阅产品线新建 | 计费复杂度 | MVP 先单一订阅档位 + 积分 topup，再扩展 |
+| 视频渲染基建（headless Chrome + FFmpeg 入沙箱） | 节点镜像增大、冷启动变慢 | 预烘焙含 HyperFrames 的节点镜像；`@hyperframes/aws-lambda` 渲染路径作水平扩展备选 |
 
 ## 13. 非目标（MVP 明确不做）
 
 - 桌面端（Electron）与移动端（Expo）—— 仅 Web。
 - 团队协作 / workspace 多人成员 —— 个人账户为主。
 - dsh skill-worker 复用 —— 方案 B 已弃用。
+- 生成式真人生成（Veo/Runway）与数字人口播（HeyGen Avatar）—— 第二阶段，MVP 视频全部走 HyperFrames 确定性渲染。
 - 社交平台 API 自动发布 —— 第二阶段。
 - 模板市场 / 公开 API —— 第三阶段。
