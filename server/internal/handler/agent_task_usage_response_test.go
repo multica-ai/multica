@@ -193,11 +193,30 @@ func TestListAgentTasksReturnsErrorWhenUsageLoadFails(t *testing.T) {
 		}
 	}
 
+	// One pinned connection whose lock_timeout turns the wait on the locked
+	// table into an error. It covers every read the handler makes, so it stays
+	// long enough that a sibling package's brief lock cannot fail an earlier
+	// read; only the read that reaches the locked table waits it out. A request
+	// deadline did the same job but had to cover every earlier read's run time
+	// as well, and was then waited out in full.
+	conn, err := testPool.Acquire(context.Background())
+	if err != nil {
+		t.Fatalf("acquire usage connection: %v", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(context.Background(), `SET lock_timeout = '200ms'`); err != nil {
+		t.Fatalf("set lock_timeout: %v", err)
+	}
+	defer conn.Exec(context.Background(), `RESET lock_timeout`)
+	h := *testHandler
+	h.Queries = db.New(conn)
+
 	req := newRequest(http.MethodGet, "/api/agents/"+agentID+"/tasks?include_usage=true", nil)
 	req = withURLParam(req, "id", agentID)
-	errorCtx, cancel := context.WithTimeout(req.Context(), 250*time.Millisecond)
+	// Only a backstop: the usage read fails on its lock_timeout long before.
+	errorCtx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
 	req = req.WithContext(errorCtx)
-	w := testutil.Call(t, testHandler.ListAgentTasks, req)
+	w := testutil.Call(t, h.ListAgentTasks, req)
 	cancel()
 	if err := lockTx.Rollback(context.Background()); err != nil {
 		t.Fatalf("release controlled task usage lock: %v", err)

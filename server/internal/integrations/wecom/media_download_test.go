@@ -257,11 +257,15 @@ func TestDownloadMediaRefusesAnOversizeBody(t *testing.T) {
 		}
 	})
 
+	// Under a 1 MiB ceiling rather than the real one: the refusal is the same
+	// code at any size, and at maxMediaBytes it cost buffering 100 MB under
+	// the race detector. The case above holds the real ceiling to account.
 	t.Run("only discovered while reading", func(t *testing.T) {
-		chunk := make([]byte, 1<<20)
+		const limit = 1 << 20
+		chunk := make([]byte, 64<<10)
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// No Content-Length: the body streams until we stop it.
-			for i := 0; i < 200; i++ {
+			for i := 0; i < 4*limit/len(chunk); i++ {
 				if _, err := w.Write(chunk); err != nil {
 					return
 				}
@@ -271,7 +275,7 @@ func TestDownloadMediaRefusesAnOversizeBody(t *testing.T) {
 			}
 		}))
 		defer srv.Close()
-		_, err := downloadMedia(context.Background(), srv.Client(), srv.URL)
+		_, err := downloadMediaCapped(context.Background(), srv.Client(), srv.URL, limit)
 		if !errors.Is(err, errMediaTooLarge) {
 			t.Fatalf("err = %v, want errMediaTooLarge", err)
 		}

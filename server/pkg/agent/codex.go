@@ -101,6 +101,12 @@ var activeCodexLaunches atomic.Int64
 var maxActiveCodexLaunchesObserved atomic.Int64
 var codexCleanupConfirmationOverride atomic.Int32
 
+// codexCatalogRetryBackoff is the floor of the delay before retrying a model
+// catalog refresh failure. Jitter below twice the floor is added on top, in
+// steps of floor/500 (1ms at the production value). Package tests shorten it;
+// production never reassigns it.
+var codexCatalogRetryBackoff = 500 * time.Millisecond
+
 func sanitizeCodexDiagnostic(value string) string {
 	return sanitizeAgentDiagnostic(value)
 }
@@ -985,7 +991,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			// ctx.Done() below keeps the retry from extending it.
 			backoff := 75*time.Millisecond + time.Duration(time.Now().UnixNano()%50)*time.Millisecond
 			if retryReason == "model_catalog_refresh" {
-				backoff = 500*time.Millisecond + time.Duration(time.Now().UnixNano()%1000)*time.Millisecond
+				backoff = codexCatalogRetryBackoff + time.Duration(time.Now().UnixNano()%1000)*(2*codexCatalogRetryBackoff/1000)
 				// The stalled attempt already reached turn/started, so the prior
 				// thread may hold the submitted input or an unfinished turn.
 				// Resuming it again could duplicate that input; start a fresh

@@ -284,6 +284,7 @@ func TestSendMedia_ReportsALostAckWithoutSendingAgain(t *testing.T) {
 	conn := newMediaConn()
 	conn.dropAcks[cmdSendMsg] = 5 // no verdict ever comes back for the push
 	sender := conn.newSender()
+	sender.ackTimeout = lostAckTimeout
 
 	err := sender.sendMedia(context.Background(), "CHAT_1", chatTypeSingleInt, mediaSend{
 		Kind: mediaTypeFile, MediaID: "MEDIA_1",
@@ -382,6 +383,11 @@ func TestUploadMediaChunks_HoldsToTheParallelismForTheFileSize(t *testing.T) {
 	conn := newMediaConn()
 	arrived, release := conn.holdChunks()
 	sender := conn.newSender()
+	// The verdicts are held on purpose, and on a loaded run the package's
+	// shortened ack wait can run out while they are: a chunk that timed out is
+	// offered again, and would arrive as the "third chunk" below. The
+	// production wait keeps a held chunk held.
+	sender.ackTimeout = ackTimeout
 
 	// 10 full chunks and one byte: eleven, the first size past the ladder's
 	// last step.

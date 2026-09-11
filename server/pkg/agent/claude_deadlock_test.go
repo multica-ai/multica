@@ -46,6 +46,15 @@ func TestMain(m *testing.M) {
 		collectDrainGrace = 750 * time.Millisecond
 		collectSettleGrace = 100 * time.Millisecond
 		probeWaitDelay = 500 * time.Millisecond
+		// Shortened outright rather than in proportion: no test compares these
+		// with another delay. The catalog retry floor now sits below the 75ms
+		// initialize retry backoff, the reverse of production.
+		openclawResultIdleGrace = 300 * time.Millisecond
+		codexCatalogRetryBackoff = 25 * time.Millisecond
+		// Fixtures that re-execute this binary inherit this environment. Under
+		// -race the runtime sleeps atexit_sleep_ms (1s by default) before every
+		// exit, which each of those fake CLIs would otherwise add to its test.
+		os.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 		os.Exit(m.Run())
 	case "startup_stdout_burst":
 		runFakeClaudeStartupStdoutBurst()

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
 )
 
@@ -376,12 +378,43 @@ func TestEventDispatchRespectsTheFeatureFlagEndToEnd(t *testing.T) {
 	// Flag off: nothing leaves, even though the same installation is still
 	// enabled and still declares the hook.
 	withPluginsV1Flag(t, testHandler, false)
-	testHandler.PluginService.FeatureFlags = testHandler.FeatureFlags
+	looked := make(chan struct{}, 1)
+	testHandler.PluginService.FeatureFlags = featureflag.NewService(flagLookupSignal{
+		Provider: testHandler.FeatureFlags.Provider(), key: featureflags.PluginsV1, looked: looked,
+	})
 	dispatcher = dispatch()
 	defer dispatcher.Close()
 	select {
+	case <-looked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("with the flag off, no dispatcher worker ever evaluated the flag")
+	}
+	// Close waits for the worker that read the flag to finish its job, so any
+	// call it made has already reached the endpoint. No window to wait out.
+	dispatcher.Close()
+	select {
 	case <-received:
 		t.Fatal("with the flag off, an event hook still called out — the flag does not gate the outbound path")
-	case <-time.After(300 * time.Millisecond):
+	default:
 	}
+}
+
+// flagLookupSignal reports each evaluation of one flag, so a test can tell a
+// worker has reached its flag check instead of waiting out a window for a call
+// that should never come.
+type flagLookupSignal struct {
+	featureflag.Provider
+	key    string
+	looked chan<- struct{}
+}
+
+func (p flagLookupSignal) Lookup(ctx context.Context, key string) (featureflag.Decision, bool) {
+	decision, found := p.Provider.Lookup(ctx, key)
+	if key == p.key {
+		select {
+		case p.looked <- struct{}{}:
+		default:
+		}
+	}
+	return decision, found
 }

@@ -284,6 +284,17 @@ func TestDeleteWorkspace_CollectsTasksThroughEveryOwnershipPath(t *testing.T) {
 	}
 }
 
+// shrinkWorkspaceDeletePagesForTest makes the paging tests cross their page
+// boundaries at dozens of rows instead of thousands. The paging logic does not
+// depend on the page size. The batch test seeds two and a half task pages (25
+// rows), which still fills both 10-row keyset probes it runs first.
+func shrinkWorkspaceDeletePagesForTest(t *testing.T) {
+	t.Helper()
+	tasks, owners := workspaceDeleteTaskPageSize, workspaceDeleteOwnerPageSize
+	workspaceDeleteTaskPageSize, workspaceDeleteOwnerPageSize = 10, 5
+	t.Cleanup(func() { workspaceDeleteTaskPageSize, workspaceDeleteOwnerPageSize = tasks, owners })
+}
+
 // TestDeleteWorkspaceTasks_PagesPastTheBatchSize covers the bound itself: a
 // single owner with more tasks than one batch must be swept by several
 // iterations, and the loop must terminate. Nothing here may depend on the whole
@@ -294,10 +305,11 @@ func TestDeleteWorkspaceTasks_PagesPastTheBatchSize(t *testing.T) {
 	}
 	ctx := context.Background()
 	f := newWorkspaceDeletePathFixture(t, "batched")
+	shrinkWorkspaceDeletePagesForTest(t)
 
 	// Two and a half batches on one agent, so the loop has to page and then
 	// see an empty page.
-	const extraTasks = workspaceDeleteTaskPageSize*2 + workspaceDeleteTaskPageSize/2
+	extraTasks := workspaceDeleteTaskPageSize*2 + workspaceDeleteTaskPageSize/2
 	if _, err := testPool.Exec(ctx, `
 INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, completed_at)
 SELECT $1, $2, $3, 'completed', now() FROM generate_series(1, $4::int)
@@ -383,6 +395,7 @@ func TestDeleteWorkspaceTasks_PagesOwnersBeyondOnePage(t *testing.T) {
 	}
 	ctx := context.Background()
 	f := newWorkspaceDeletePathFixture(t, "ownerpages")
+	shrinkWorkspaceDeletePagesForTest(t)
 
 	// One more agent than a single owner page, each with a task, so the sweep has
 	// to fetch a second owner page and then see an empty one.
@@ -421,7 +434,7 @@ SELECT id, $5, $2, 'completed', now() FROM new_agents
 	if err != nil {
 		t.Fatalf("first owner page: %v", err)
 	}
-	if len(firstOwners) != workspaceDeleteOwnerPageSize {
+	if len(firstOwners) != int(workspaceDeleteOwnerPageSize) {
 		t.Fatalf("first owner page returned %d ids, want %d", len(firstOwners), workspaceDeleteOwnerPageSize)
 	}
 	nextOwners, err := qtx.ListWorkspaceAgentIDPage(ctx, db.ListWorkspaceAgentIDPageParams{
@@ -560,7 +573,9 @@ func TestDeleteWorkspaceTasks_FencesConcurrentEnqueueAndReassignment(t *testing.
 	}
 
 	// A second transaction standing in for a concurrent writer. Its own short
-	// lock_timeout turns "blocked forever" into an assertable error.
+	// lock_timeout turns "blocked forever" into an assertable error; it only
+	// elapses while the writer is actually blocked, and every blocked writer
+	// pays all of it, so it is kept small.
 	blocked := func(name, sql string, args ...any) {
 		t.Helper()
 		other, err := testPool.Begin(ctx)
@@ -568,7 +583,7 @@ func TestDeleteWorkspaceTasks_FencesConcurrentEnqueueAndReassignment(t *testing.
 			t.Fatalf("%s: begin: %v", name, err)
 		}
 		defer other.Rollback(ctx)
-		if _, err := other.Exec(ctx, "SET LOCAL lock_timeout = 200"); err != nil {
+		if _, err := other.Exec(ctx, "SET LOCAL lock_timeout = 50"); err != nil {
 			t.Fatalf("%s: set lock_timeout: %v", name, err)
 		}
 		_, err = other.Exec(ctx, sql, args...)

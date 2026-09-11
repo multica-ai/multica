@@ -2467,27 +2467,24 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
 
-	// Every startup RPC shares one handshake bound, so the *successful*
-	// preamble RPCs (e.g. initialize) must also round-trip within it. The fake
-	// app-server is a forked /bin/sh script; under parallel test load its
-	// startup + first read/echo can spike well past a few hundred ms, which
-	// used to make initialize spuriously time out before the subtest reached
-	// the RPC it targets. Keep this comfortably above sh startup jitter yet
-	// below the 5s semantic timeout and the 10s executeFakeCodex ceiling.
+	// The successful preamble RPCs (e.g. initialize) must round-trip within
+	// the base handshake bound. The fake app-server is a forked /bin/sh
+	// script; under parallel test load its startup + first read/echo can
+	// spike well past a few hundred ms, which used to make initialize
+	// spuriously time out before the subtest reached the RPC it targets. Keep
+	// this comfortably above sh startup jitter yet below the 5s semantic
+	// timeout and the 10s executeFakeCodex ceiling. Thread setup RPCs have
+	// their own bound, which only starts once initialize has answered, so it
+	// can be short. The initialize timeout itself is covered, with its retry,
+	// by TestCodexExecuteInitializeRetrySafetyGates.
 	const handshakeTimeout = time.Second
+	const threadHandshakeTimeout = 300 * time.Millisecond
 	tests := []struct {
 		name   string
 		method string
 		body   string
 		opts   ExecOptions
 	}{
-		{
-			name:   "initialize",
-			method: "initialize",
-			body: "" +
-				`read line` + "\n" +
-				`read line` + "\n",
-		},
 		{
 			name:   "thread start",
 			method: "thread/start",
@@ -2528,7 +2525,12 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fakePath := writeFakeCodexAppServer(t, tc.body)
 			tc.opts.HandshakeTimeout = handshakeTimeout
+			tc.opts.ThreadHandshakeTimeout = threadHandshakeTimeout
 			tc.opts.SemanticInactivityTimeout = 5 * time.Second
+			wantTimeout := handshakeTimeout
+			if isCodexThreadSetupRPC(tc.method) {
+				wantTimeout = threadHandshakeTimeout
+			}
 
 			started := time.Now()
 			result := executeFakeCodex(t, fakePath, tc.opts)
@@ -2537,13 +2539,13 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 			if result.Status != "failed" {
 				t.Fatalf("expected failed, got status=%q error=%q", result.Status, result.Error)
 			}
-			for _, want := range []string{CodexHandshakeTimeoutMarker, tc.method, handshakeTimeout.String()} {
+			for _, want := range []string{CodexHandshakeTimeoutMarker, tc.method, wantTimeout.String()} {
 				if !strings.Contains(result.Error, want) {
 					t.Fatalf("expected error to contain %q, got %q", want, result.Error)
 				}
 			}
 			// Proves the RPC was bounded rather than hanging to the 10s
-			// executeFakeCodex ceiling; the handshake fires at ~1s and
+			// executeFakeCodex ceiling; the handshake fires within ~1s and
 			// shutdown is fast (closing stdin EOFs the fake).
 			if elapsed > 4*time.Second {
 				t.Fatalf("handshake timeout took %s, expected < 4s", elapsed)
@@ -2620,15 +2622,21 @@ func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
 	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
 
+	const envSecret = "opaque-env-sentinel-9382"
+	const systemSecret = "opaque-system-sentinel-4721"
 	fakePath := writeFakeCodexAppServer(t, ""+
 		`DIR="$(dirname "$0")"`+"\n"+
 		`echo 1 > "$DIR/attempts"`+"\n"+
 		`read line`+"\n"+
+		// Startup stderr lands before initialize answers, so it is captured
+		// however soon the thread/start bound fires.
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`echo 'ERROR mcp_manager_init: transport error: channel closed' >&2`+"\n"+
+		`echo "$OPAQUE_AUTH_VALUE" >&2`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
 		`read line`+"\n"+
 		`read line`+"\n"+
-		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
-		`echo 'ERROR mcp_manager_init: transport error: channel closed' >&2`+"\n"+
+		`echo "$line" >&2`+"\n"+
 		`sleep 2`+"\n"+
 		// This response is deliberately later than the host timeout. Killing
 		// the process tree must prevent it from reaching turn/start.
@@ -2642,6 +2650,7 @@ func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 		Logger:         logger,
 		TaskID:         "task-thread-start-timeout",
 		RuntimeID:      "runtime-thread-start-timeout",
+		Env:            map[string]string{"OPAQUE_AUTH_VALUE": envSecret},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2649,7 +2658,9 @@ func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 	session, err := backend.Execute(context.Background(), "secret prompt must not be logged", ExecOptions{
 		Timeout:                   3 * time.Second,
 		HandshakeTimeout:          time.Second,
+		ThreadHandshakeTimeout:    300 * time.Millisecond,
 		SemanticInactivityTimeout: time.Second,
+		SystemPrompt:              systemSecret,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2699,6 +2710,12 @@ func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 	if strings.Contains(logs.String(), "secret prompt must not be logged") {
 		t.Fatalf("prompt leaked into lifecycle logs: %s", logs.String())
 	}
+	combined := result.Error + "\n" + logs.String()
+	for _, secret := range []string{envSecret, systemSecret} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("sensitive input persisted in timeout diagnostics")
+		}
+	}
 }
 
 func TestCodexExecuteThreadResumeTimeoutUsesThreadBudgetAndLifecycle(t *testing.T) {
@@ -2730,7 +2747,7 @@ func TestCodexExecuteThreadResumeTimeoutUsesThreadBudgetAndLifecycle(t *testing.
 	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
 		Timeout:                   5 * time.Second,
 		HandshakeTimeout:          3 * time.Second,
-		ThreadHandshakeTimeout:    500 * time.Millisecond,
+		ThreadHandshakeTimeout:    300 * time.Millisecond,
 		SemanticInactivityTimeout: time.Second,
 		ResumeSessionID:           "thr-prior",
 	})
@@ -2742,7 +2759,7 @@ func TestCodexExecuteThreadResumeTimeoutUsesThreadBudgetAndLifecycle(t *testing.
 		}
 	}()
 	result := <-session.Result
-	if result.Status != "failed" || !strings.Contains(result.Error, "thread/resume did not respond after 500ms") {
+	if result.Status != "failed" || !strings.Contains(result.Error, "thread/resume did not respond after 300ms") {
 		t.Fatalf("expected thread/resume timeout failure, got %+v", result)
 	}
 	assertCodexAttemptCount(t, fakePath, "1")
@@ -2812,51 +2829,6 @@ func TestCodexExecuteThreadStartResponseRequiresThreadID(t *testing.T) {
 	}
 }
 
-func TestCodexThreadStartTimeoutDoesNotPersistSensitiveInputs(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-	const envSecret = "opaque-env-sentinel-9382"
-	const systemSecret = "opaque-system-sentinel-4721"
-	fakePath := writeFakeCodexAppServer(t, ""+
-		`read line`+"\n"+
-		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
-		`read line`+"\n"+
-		`read line`+"\n"+
-		`echo "$OPAQUE_AUTH_VALUE" >&2`+"\n"+
-		`echo "$line" >&2`+"\n"+
-		`sleep 5`+"\n")
-
-	var logs bytes.Buffer
-	backend, err := New("codex", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.New(slog.NewJSONHandler(&logs, nil)),
-		Env:            map[string]string{"OPAQUE_AUTH_VALUE": envSecret},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
-		Timeout:          5 * time.Second,
-		HandshakeTimeout: time.Second,
-		SystemPrompt:     systemSecret,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() {
-		for range session.Messages {
-		}
-	}()
-	result := <-session.Result
-	combined := result.Error + "\n" + logs.String()
-	for _, secret := range []string{envSecret, systemSecret} {
-		if strings.Contains(combined, secret) {
-			t.Fatalf("sensitive input persisted in timeout diagnostics")
-		}
-	}
-}
-
 func TestCodexExecuteConcurrentThreadStartTimeoutsRemainUnserialized(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
@@ -2877,6 +2849,8 @@ func TestCodexExecuteConcurrentThreadStartTimeoutsRemainUnserialized(t *testing.
 				results <- Result{Status: "failed", Error: err.Error()}
 				return
 			}
+			// No ThreadHandshakeTimeout on purpose: the one end-to-end check that
+			// the legacy HandshakeTimeout alone still bounds thread/start.
 			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
 				Timeout:          3 * time.Second,
 				HandshakeTimeout: time.Second,
@@ -2894,7 +2868,7 @@ func TestCodexExecuteConcurrentThreadStartTimeoutsRemainUnserialized(t *testing.
 	}
 	for i := 0; i < 2; i++ {
 		result := <-results
-		if result.Status != "failed" || !strings.Contains(result.Error, "thread/start") {
+		if result.Status != "failed" || !strings.Contains(result.Error, "thread/start did not respond after 1s") {
 			t.Fatalf("concurrent timeout result=%+v", result)
 		}
 	}
@@ -2953,8 +2927,10 @@ func TestCodexExecuteRetriesInitializeTimeoutOnceAfterCleanup(t *testing.T) {
 		Timeout: 10 * time.Second,
 		// Forked shell startup regularly exceeds 100ms on loaded CI runners.
 		// Keep the first attempt's 5s hang above this bound while giving the
-		// successful second initialize enough scheduling headroom.
-		HandshakeTimeout:          2 * time.Second,
+		// successful second initialize enough scheduling headroom — the same
+		// headroom TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout
+		// gives its successful initialize.
+		HandshakeTimeout:          time.Second,
 		SemanticInactivityTimeout: time.Second,
 	})
 	if result.Status != "completed" {
@@ -2969,10 +2945,18 @@ func TestCodexExecuteRetriesInitializeTimeoutOnceAfterCleanup(t *testing.T) {
 	}
 }
 
+// TestCodexExecuteInitializeRetrySafetyGates covers the gates that need no
+// package-level override, so it can run in parallel; the unconfirmed-cleanup
+// gate is TestCodexExecuteInitializeRetryRequiresConfirmedCleanup.
 func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
+	// initialize never answers in these fixtures, but each fake must record its
+	// launch (or emit activity) before the kill, and forked sh startup under
+	// load can take well past a few hundred ms.
+	const handshakeTimeout = time.Second
 
 	t.Run("both attempts time out", func(t *testing.T) {
 		countPath := filepath.Join(t.TempDir(), "launch-count")
@@ -2981,9 +2965,14 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 			`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
 			`read line`+"\n"+
 			`sleep 1.2`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 4 * time.Second, HandshakeTimeout: time.Second})
-		if result.Status != "failed" || !strings.Contains(result.Error, CodexHandshakeTimeoutMarker) {
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 4 * time.Second, HandshakeTimeout: handshakeTimeout})
+		if result.Status != "failed" {
 			t.Fatalf("expected final initialize timeout, got status=%q error=%q", result.Status, result.Error)
+		}
+		for _, want := range []string{CodexHandshakeTimeoutMarker, "initialize", handshakeTimeout.String()} {
+			if !strings.Contains(result.Error, want) {
+				t.Fatalf("expected error to contain %q, got %q", want, result.Error)
+			}
 		}
 		data, _ := os.ReadFile(countPath)
 		if got := strings.TrimSpace(string(data)); got != "2" {
@@ -2998,7 +2987,7 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 			`read line`+"\n"+
 			`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"unexpected","item":{"type":"commandExecution","id":"cmd-1","command":"true"}}}'`+"\n"+
 			`sleep 1.2`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 4 * time.Second, HandshakeTimeout: time.Second})
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 4 * time.Second, HandshakeTimeout: handshakeTimeout})
 		if result.Status != "failed" {
 			t.Fatalf("expected failed, got %q", result.Status)
 		}
@@ -3007,24 +2996,28 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 			t.Fatalf("launch count = %d, want 1", got)
 		}
 	})
+}
 
-	t.Run("unconfirmed cleanup suppresses retry", func(t *testing.T) {
-		codexCleanupConfirmationOverride.Store(-1)
-		defer codexCleanupConfirmationOverride.Store(0)
-		countPath := filepath.Join(t.TempDir(), "launch-count")
-		fakePath := writeFakeCodexAppServer(t, ""+
-			`echo x >> `+countPath+"\n"+
-			`read line`+"\n"+
-			`sleep 1.2`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 4 * time.Second, HandshakeTimeout: time.Second})
-		if !strings.Contains(result.Error, "retry suppressed: process cleanup/reap not confirmed") {
-			t.Fatalf("expected cleanup reason, got %q", result.Error)
-		}
-		data, _ := os.ReadFile(countPath)
-		if got := strings.Count(string(data), "x"); got != 1 {
-			t.Fatalf("launch count = %d, want 1", got)
-		}
-	})
+func TestCodexExecuteInitializeRetryRequiresConfirmedCleanup(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexCleanupConfirmationOverride.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexCleanupConfirmationOverride.Store(-1)
+	defer codexCleanupConfirmationOverride.Store(0)
+	countPath := filepath.Join(t.TempDir(), "launch-count")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`echo x >> `+countPath+"\n"+
+		`read line`+"\n"+
+		`sleep 1.2`+"\n")
+	result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 4 * time.Second, HandshakeTimeout: time.Second})
+	if !strings.Contains(result.Error, "retry suppressed: process cleanup/reap not confirmed") {
+		t.Fatalf("expected cleanup reason, got %q", result.Error)
+	}
+	data, _ := os.ReadFile(countPath)
+	if got := strings.Count(string(data), "x"); got != 1 {
+		t.Fatalf("launch count = %d, want 1", got)
+	}
 }
 
 func TestCodexExecuteDoesNotSerializeConcurrentLaunches(t *testing.T) {
@@ -3548,7 +3541,7 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 	// failed Result reaches the caller within a small bound and carries an
 	// empty SessionID so the outer daemon's PriorSessionID-with-empty-
 	// SessionID fallback can retry a fresh session.
-	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
 	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
 
 	fakePath := writeFakeCodexAppServer(t, ""+
@@ -3603,11 +3596,19 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 		t.Fatalf("expected ResumeRejected=true so the daemon retries on a fresh session; error=%q",
 			result.Error)
 	}
-	// With the shrunken 500 ms grace, two bounded phases plus the SIGKILL
-	// round-trip should complete in ~1-2 s. Pre-fix this test would block
-	// until the executeFakeCodex 10 s outer timeout and fail with "timeout
-	// waiting for result". We assert a much tighter bound so a future
-	// regression cannot quietly slip back up to 10 s.
+	// MUL-5722 layer 3: in-process the backend detects the overflow from the
+	// typed bufio.ErrTooLong, but the daemon classifies it at report time from
+	// the error STRING alone. If the wording produced by startOrResumeThread
+	// ever drifts from what the predicate matches, the resume pointer silently
+	// stops being retired and the permanent-stall bug returns.
+	if !CodexResumeOverflowError(result.Error) {
+		t.Fatalf("predicate missed the error the backend actually produced: %q", result.Error)
+	}
+	// With the shrunken 100 ms grace, pushing the oversized line plus two
+	// bounded phases and the SIGKILL round-trip should complete in ~1 s.
+	// Pre-fix this test would block until the executeFakeCodex 10 s outer
+	// timeout and fail with "timeout waiting for result". We assert a much
+	// tighter bound so a future regression cannot quietly slip back up to 10 s.
 	if elapsed > 5*time.Second {
 		t.Fatalf("cleanup took %s, expected < 5s with shrunken grace (bug regressed?)",
 			elapsed)
@@ -3627,7 +3628,7 @@ func TestCodexExecuteDoesNotClaimResumeRejectedWhenOverflowIsNotAResume(t *testi
 	// rejection would send the daemon looking for a cure that does not apply
 	// — and ResumeRejected is documented as positive evidence, not a generic
 	// "something went wrong" flag.
-	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
 	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
 
 	fakePath := writeFakeCodexAppServer(t, ""+
@@ -3655,6 +3656,9 @@ func TestCodexExecuteDoesNotClaimResumeRejectedWhenOverflowIsNotAResume(t *testi
 	}
 	if result.ResumeRejected {
 		t.Fatalf("expected ResumeRejected=false without a prior session, error=%q", result.Error)
+	}
+	if CodexResumeOverflowError(result.Error) {
+		t.Fatalf("predicate claimed a resume overflow for a thread/start overflow: %q", result.Error)
 	}
 }
 
@@ -4103,10 +4107,12 @@ func TestCodexExecuteFirstTurnRetryErrorDoesNotSatisfyProgress(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thr-retry","error":{"message":"temporary reconnect"},"willRetry":true}}'`+"\n"+
 		`sleep 0.7`+"\n")
 
+	// The watchdog has to fire before the fake exits at 0.7s; 300ms leaves that
+	// race a wide margin.
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                    5 * time.Second,
 		SemanticInactivityTimeout:  2 * time.Second,
-		FirstTurnNoProgressTimeout: 500 * time.Millisecond,
+		FirstTurnNoProgressTimeout: 300 * time.Millisecond,
 	})
 	if result.Status != "timeout" {
 		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
@@ -6217,41 +6223,5 @@ func TestCodexResumeOverflowError(t *testing.T) {
 				t.Fatalf("CodexResumeOverflowError(%q) = %v, want %v", tc.errText, got, tc.want)
 			}
 		})
-	}
-}
-
-// TestCodexResumeOverflowErrorMatchesLiveFailureText guards the seam between
-// the two halves of MUL-5722's layer 3: in-process the backend detects the
-// overflow from the typed bufio.ErrTooLong, but the daemon classifies it at
-// report time from the error STRING alone. If the wording produced by
-// startOrResumeThread ever drifts from what the predicate matches, the resume
-// pointer silently stops being retired and the permanent-stall bug returns
-// with every test above still green.
-func TestCodexResumeOverflowErrorMatchesLiveFailureText(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-
-	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
-	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
-
-	fakePath := writeFakeCodexAppServer(t, ""+
-		`read line`+"\n"+
-		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
-		`read line`+"\n"+
-		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
-		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
-		`printf '"}}\n'`+"\n"+
-		`sleep 30`+"\n")
-
-	result := executeFakeCodex(t, fakePath, ExecOptions{
-		Cwd:                       t.TempDir(),
-		ResumeSessionID:           "thr_prior",
-		Timeout:                   30 * time.Second,
-		SemanticInactivityTimeout: 5 * time.Second,
-	})
-
-	if !CodexResumeOverflowError(result.Error) {
-		t.Fatalf("predicate missed the error the backend actually produced: %q", result.Error)
 	}
 }

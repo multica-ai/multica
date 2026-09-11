@@ -289,7 +289,9 @@ func TestCancelTask_PointerAdvanceIsAtomicWithStatusFlip(t *testing.T) {
 	// While the pointer write is blocked, the cancellation must not be visible.
 	// Read on the holding transaction: it is READ COMMITTED, so it still sees
 	// whatever the cancel has committed, and it needs no new lock to do so.
-	time.Sleep(300 * time.Millisecond)
+	if !waitForWaiterBlockedBy(t, holderBackendPID(t, ctx, blockTx), 10*time.Second) {
+		t.Fatal("cancel never blocked on the held chat_session row")
+	}
 	var statusDuringBlock string
 	if err := blockTx.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&statusDuringBlock); err != nil {
 		t.Fatalf("read task status: %v", err)
@@ -470,7 +472,9 @@ func TestPinTaskSession_PointerAdvanceIsAtomicWithPin(t *testing.T) {
 	// Blocked on the chat row: the task row must not be carrying the new
 	// session yet, or a follow-up could claim the gap and resume turn1. Read on
 	// the holding transaction so this needs no new table lock.
-	time.Sleep(300 * time.Millisecond)
+	if !waitForWaiterBlockedBy(t, holderBackendPID(t, ctx, blockTx), 10*time.Second) {
+		t.Fatal("pin never blocked on the held chat_session row")
+	}
 	var pinnedSoFar *string
 	if err := blockTx.QueryRow(ctx, `SELECT session_id FROM agent_task_queue WHERE id = $1`, taskID).Scan(&pinnedSoFar); err != nil {
 		t.Fatalf("read task session: %v", err)
@@ -544,7 +548,9 @@ func TestCancelTask_TakesChatSessionLockBeforeTask(t *testing.T) {
 			service.CancelTaskOptions{ClientSupportsDraftRestore: true})
 		cancelDone <- err
 	}()
-	time.Sleep(300 * time.Millisecond)
+	if !waitForWaiterBlockedBy(t, holderBackendPID(t, ctx, deleterTx), 10*time.Second) {
+		t.Fatal("cancel never blocked on the chat_session row held by the deleter")
+	}
 
 	// The deleter's next step would be cancelling the session's tasks. If the
 	// cancel already holds that row, the two are in a cycle.
@@ -685,7 +691,9 @@ func TestTerminalReports_TakeChatSessionLockBeforeTask(t *testing.T) {
 
 			reportDone := make(chan error, 1)
 			go func() { reportDone <- run(taskID) }()
-			time.Sleep(300 * time.Millisecond)
+			if !waitForWaiterBlockedBy(t, holderBackendPID(t, ctx, holderTx), 10*time.Second) {
+				t.Fatalf("%s never blocked on the held chat_session row", name)
+			}
 
 			var probed string
 			if err := probeTx.QueryRow(ctx,

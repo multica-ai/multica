@@ -87,9 +87,7 @@ func pathWithout(t *testing.T) {
 func writeFakeInterpreter(t *testing.T, dir, name string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)
-	if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write fake interpreter: %v", err)
-	}
+	writeTestExecutable(t, p, []byte("#!/bin/sh\nexit 0\n"))
 	return p
 }
 
@@ -281,9 +279,7 @@ func writeShim(t *testing.T, dir, unixBody, windowsBody string) string {
 	if runtime.GOOS == "windows" {
 		body = windowsBody
 	}
-	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
-		t.Fatalf("write shim: %v", err)
-	}
+	writeTestExecutable(t, shim, []byte(body))
 	return shim
 }
 

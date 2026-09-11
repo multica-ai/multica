@@ -95,8 +95,10 @@ func TestDetectCLIVersionWaitsForAWrapperDescendant(t *testing.T) {
 // The contract: when the bound expires and no *recognised* version arrived, the
 // original error stands. There is no answer to salvage.
 func TestDetectCLIVersionDoesNotSalvageABannerAsTheVersion(t *testing.T) {
+	t.Parallel()
+
 	// Banner on stdout, leader exits 0, and the real version arrives from a
-	// descendant holding the pipe well past the 2s WaitDelay this probe sets.
+	// descendant holding the pipe well past the probeWaitDelay this probe sets.
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "fake-cli")
 	body := "#!/bin/sh\n" +

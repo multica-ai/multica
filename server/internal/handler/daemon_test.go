@@ -992,7 +992,8 @@ func TestDaemonHeartbeat_SlowProbeDoesNotWedge(t *testing.T) {
 
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
 	origProbeTimeout := heartbeatHasPendingTimeout
-	heartbeatHasPendingTimeout = 50 * time.Millisecond
+	// Both stub probes wait this budget out in full.
+	heartbeatHasPendingTimeout = 10 * time.Millisecond
 	t.Cleanup(func() { heartbeatHasPendingTimeout = origProbeTimeout })
 
 	origList := testHandler.LocalSkillListStore

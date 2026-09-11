@@ -44,9 +44,7 @@ while [ ! -s "` + pidFile + `" ]; do sleep 0.01; done
 echo '{}'
 exit 0
 `
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake openclaw: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 	return bin
 }
 
@@ -133,9 +131,7 @@ func TestExecOpenclawCLIDoesNotSalvagePartialJSON(t *testing.T) {
 	bin := filepath.Join(dir, "openclaw")
 	body := "#!/bin/sh\nprintf '{\"agents\":['\n" +
 		"while :; do printf '{\"id\":\"a\"},'; sleep 0.12; done\n"
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake openclaw: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
@@ -229,9 +225,7 @@ func TestExecOpenclawCLIToleratesNonExitingCLI(t *testing.T) {
 	body := "#!/bin/sh\n" +
 		"printf '{\"mcp\":{}}\\n'\n" +
 		"sleep 300\n"
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake openclaw: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -276,9 +270,7 @@ func writeOpenclawConfigStub(t *testing.T, validateOut string, validateExit int,
 		"  exit 0\n" +
 		"fi\n" +
 		"exit 9\n"
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake openclaw: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 	return bin
 }
 

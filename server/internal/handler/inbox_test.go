@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -66,25 +65,17 @@ func TestListArchivedInboxLimitsIssueGroupsNotRows(t *testing.T) {
 	olderIssueID := dbfx.Issue(t, "Older archived issue", testutil.Cols{"workspace_id": workspaceID})
 
 	base := time.Now().UTC().Add(-time.Minute)
-	for i := 0; i < 200; i++ {
-		cols := testutil.Cols{
-			"workspace_id":   workspaceID,
-			"recipient_type": "member",
-			"recipient_id":   testUserID,
-			"type":           "status_changed",
-			"severity":       "info",
-			"issue_id":       noisyIssueID,
-			"title":          fmt.Sprintf("noisy-%03d", i),
-			"archived":       true,
-			"created_at":     base.Add(-time.Duration(i) * time.Millisecond),
-		}
-		if i == 199 {
-			// The bounded response keeps this row as the group's comment anchor,
-			// even though the newest status row is the one the UI renders.
-			cols["details"] = testutil.Raw(`'{"comment_id":"comment-1"}'::jsonb`)
-		}
-		dbfx.Insert(t, "inbox_item", cols)
-	}
+	// 200 rows in one statement. The oldest (i = 199) carries the comment
+	// anchor: the bounded response keeps it as the group's comment anchor, even
+	// though the newest status row is the one the UI renders.
+	dbfx.Exec(t, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, archived, created_at, details)
+		SELECT $1, 'member', $2, 'status_changed', 'info', $3, 'noisy-' || lpad(i::text, 3, '0'), true,
+		       $4::timestamptz - i * interval '1 millisecond',
+		       CASE WHEN i = 199 THEN '{"comment_id":"comment-1"}'::jsonb ELSE '{}'::jsonb END
+		FROM generate_series(0, 199) AS i
+	`, workspaceID, testUserID, noisyIssueID, base)
+	dbfx.Cleanup(t, `DELETE FROM inbox_item WHERE workspace_id = $1`, workspaceID)
 	dbfx.Insert(t, "inbox_item", testutil.Cols{
 		"workspace_id":   workspaceID,
 		"recipient_type": "member",

@@ -1372,7 +1372,9 @@ func TestCatalogWritesAnnounceThemselves(t *testing.T) {
 		select {
 		case e := <-changes:
 			t.Fatalf("unexpected issue_status:changed event: %v", e.Payload)
-		case <-time.After(300 * time.Millisecond):
+		default:
+			// Bus.Publish is synchronous and the handler publishes before it
+			// returns, so an event from the no-op would already be buffered.
 		}
 	}
 
@@ -1643,6 +1645,10 @@ func TestExplicitKeyCreateAlsoTakesTheCatalogLock(t *testing.T) {
 		parseUUID(testWorkspaceID)); err != nil {
 		t.Fatalf("take exclusive lock: %v", err)
 	}
+	var holderPID int32
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatalf("read lock-holder pid: %v", err)
+	}
 
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -1653,12 +1659,13 @@ func TestExplicitKeyCreateAlsoTakesTheCatalogLock(t *testing.T) {
 		done <- rec
 	}()
 
+	// Parked on the lock, which is the point.
+	waitForCatalogLockWaiter(t, ctx, holderPID)
 	select {
 	case rec := <-done:
 		t.Fatalf("an explicit-key create completed (%d) while the catalog lock was held; "+
 			"it can still insert between a derived create's catalog read and its insert", rec.Code)
-	case <-time.After(400 * time.Millisecond):
-		// Parked on the lock, which is the point.
+	default:
 	}
 
 	if err := tx.Commit(ctx); err != nil {

@@ -449,14 +449,16 @@ func TestEnqueueChatTaskLocksOutAConcurrentArchiveButNotInboundMessages(t *testi
 // probeUnderLock runs one statement on its own connection with a short
 // lock_timeout, so a row lock held by the caller's transaction surfaces as
 // SQLSTATE 55P03 instead of hanging the test. The probe always rolls back: it
-// is asking whether it *could* proceed, not changing anything.
+// is asking whether it *could* proceed, not changing anything. The timeout
+// only elapses while the probe is actually blocked, and a blocked probe waits
+// all of it out, so it stays short.
 func probeUnderLock(ctx context.Context, pool *pgxpool.Pool, sql, chatSessionID string) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '500ms'`); err != nil {
+	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '50ms'`); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, sql, chatSessionID)

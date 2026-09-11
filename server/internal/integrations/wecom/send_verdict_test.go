@@ -49,6 +49,7 @@ func TestSendTextSucceedsOnAZeroErrcode(t *testing.T) {
 func TestSendTextDistinguishesALostAckFromARefusal(t *testing.T) {
 	conn := &recordingConn{} // no autoAck: nothing ever answers
 	sender := newWSSender(conn, nil)
+	sender.ackTimeout = lostAckTimeout
 
 	err := sender.sendText("CHAT", chatTypeSingleInt, "hello")
 	if !errors.Is(err, errAckTimeout) {

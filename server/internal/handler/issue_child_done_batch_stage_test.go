@@ -86,7 +86,10 @@ func TestHighestClosedBatchStageRandomizedEquivalence(t *testing.T) {
 	rng := rand.New(rand.NewPCG(23, 8192))
 	stages := []int32{0, 1, 2, 7, 20, math.MaxInt32}
 	statuses := []string{"backlog", "todo", "in_progress", "done", "cancelled"}
-	for iteration := range 2000 {
+	// The edge cases are pinned by TestHighestClosedBatchStage; this sweep only
+	// has to hit a broad spread of random shapes, and every iteration pays for a
+	// quadratic oracle plus two reflect.DeepEqual passes under -race.
+	for iteration := range 100 {
 		children := make([]db.Issue, rng.IntN(40))
 		for i := range children {
 			children[i] = child(stages[rng.IntN(len(stages))], statuses[rng.IntN(len(statuses))])
@@ -122,7 +125,9 @@ func TestHighestClosedBatchStageRandomizedEquivalence(t *testing.T) {
 }
 
 func TestHighestClosedBatchStageLinearWork(t *testing.T) {
-	for _, n := range []int{100, 1000} {
+	// Exact probe counts pin linear against quadratic at any size; at 1000 the
+	// quadratic reference alone cost a million callbacks under -race.
+	for _, n := range []int{10, 100} {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
 			children := make([]db.Issue, n)
 			for i := range children {

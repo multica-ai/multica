@@ -310,7 +310,8 @@ func TestEnsureTaskSkillBundles_RejectsPluginHashDrift(t *testing.T) {
 // (b) preserve the transport cause, and (c) carry a sentinel that
 // taskRunFailureReason maps to the retryable platform-side reason.
 func TestEnsureTaskSkillBundles_DeadlineIsLabelledStructurally(t *testing.T) {
-	defer noSleepRetry(t)()
+	// No retry sleep to stub: the expired deadline itself ends the retries.
+	t.Parallel()
 
 	block := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
@@ -599,8 +600,10 @@ func TestTransferStatsKeepsHighWaterMark(t *testing.T) {
 // reported as a partial transfer, not as "no response" — that is exactly the
 // distinction that decides whether raising the deadline would have helped.
 func TestEnsureTaskSkillBundles_SlowLinkReportsPartialTransfer(t *testing.T) {
-	defer noSleepRetry(t)()
-	clearProxyEnv(t)
+	// No retry sleep to stub: the expired deadline itself ends the retries.
+	// The proxy environment only changes the summary clause, which the
+	// assertions below do not read.
+	t.Parallel()
 
 	block := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -622,7 +625,10 @@ func TestEnsureTaskSkillBundles_SlowLinkReportsPartialTransfer(t *testing.T) {
 		Agent: &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{ref}},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	// The deadline has to outlast the prefix's trip to the client, or the
+	// failure reads as "no response" instead; a second leaves room for a
+	// loaded -race box to schedule it.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	err := d.ensureTaskSkillBundles(ctx, task)

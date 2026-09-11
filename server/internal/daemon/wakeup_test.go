@@ -155,9 +155,31 @@ func TestWSHeartbeatFreshnessSuppressesHTTP(t *testing.T) {
 	}
 }
 
-func TestReadTaskWakeupMessagesTimesOutWithoutPeerTraffic(t *testing.T) {
-	overrideTaskWakeupTimings(t, 60*time.Millisecond, 20*time.Millisecond, taskWakeupBackoffResetAfter)
+// TestReadTaskWakeupMessagesReadDeadline pins the control socket's read
+// liveness: with no peer traffic the read deadline fires, while any frame the
+// server sends — a ping, a pong, or an application message — pushes it out.
+// The cases share one set of package-level timings, so they run as parallel
+// subtests under a single override instead of one after another.
+func TestReadTaskWakeupMessagesReadDeadline(t *testing.T) {
+	overrideTaskWakeupTimings(t, 120*time.Millisecond, 50*time.Millisecond, taskWakeupBackoffResetAfter)
 
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{"times out without peer traffic", readTaskWakeupMessagesTimesOutWithoutPeerTraffic},
+		{"server ping extends the deadline", readTaskWakeupMessagesExtendsDeadlineOnServerPing},
+		{"application message extends the deadline", readTaskWakeupMessagesExtendsDeadlineOnApplicationMessage},
+		{"pong extends the deadline", readTaskWakeupMessagesExtendsDeadlineOnPong},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.run(t)
+		})
+	}
+}
+
+func readTaskWakeupMessagesTimesOutWithoutPeerTraffic(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -165,7 +187,10 @@ func TestReadTaskWakeupMessagesTimesOutWithoutPeerTraffic(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		time.Sleep(300 * time.Millisecond)
+		// Stay silent well past the read deadline: closing first would end
+		// the read with a close error instead of the timeout under test. The
+		// handler is hijacked, so srv.Close does not wait for this.
+		time.Sleep(time.Second)
 	}))
 	defer srv.Close()
 
@@ -192,9 +217,7 @@ func TestReadTaskWakeupMessagesTimesOutWithoutPeerTraffic(t *testing.T) {
 	}
 }
 
-func TestReadTaskWakeupMessagesExtendsDeadlineOnServerPing(t *testing.T) {
-	overrideTaskWakeupTimings(t, 120*time.Millisecond, 50*time.Millisecond, taskWakeupBackoffResetAfter)
-
+func readTaskWakeupMessagesExtendsDeadlineOnServerPing(t *testing.T) {
 	clientReceived := make(chan struct{})
 	taskFrame := mustProtocolFrame(t, protocol.Message{
 		Type: protocol.EventDaemonTaskAvailable,
@@ -253,9 +276,7 @@ func TestReadTaskWakeupMessagesExtendsDeadlineOnServerPing(t *testing.T) {
 	}
 }
 
-func TestReadTaskWakeupMessagesExtendsDeadlineOnApplicationMessage(t *testing.T) {
-	overrideTaskWakeupTimings(t, 120*time.Millisecond, 50*time.Millisecond, taskWakeupBackoffResetAfter)
-
+func readTaskWakeupMessagesExtendsDeadlineOnApplicationMessage(t *testing.T) {
 	clientReceived := make(chan struct{})
 	ackFrame := mustProtocolFrame(t, protocol.Message{
 		Type: protocol.EventDaemonHeartbeatAck,
@@ -476,9 +497,7 @@ func TestReadTaskWakeupMessagesAcceptsLargeRPCResponse(t *testing.T) {
 	}
 }
 
-func TestReadTaskWakeupMessagesExtendsDeadlineOnPong(t *testing.T) {
-	overrideTaskWakeupTimings(t, 120*time.Millisecond, 50*time.Millisecond, taskWakeupBackoffResetAfter)
-
+func readTaskWakeupMessagesExtendsDeadlineOnPong(t *testing.T) {
 	clientReceived := make(chan struct{})
 	taskFrame := mustProtocolFrame(t, protocol.Message{
 		Type: protocol.EventDaemonTaskAvailable,
@@ -555,6 +574,8 @@ func TestShouldResetTaskWakeupBackoffRequiresStableConnection(t *testing.T) {
 }
 
 func TestRuntimeHeartbeatClosesIdleConnectionsAfterRepeatedTransientFailures(t *testing.T) {
+	t.Parallel()
+
 	transport := &closeCountingTransport{}
 	client := NewClient("http://daemon.test")
 	client.client = &http.Client{

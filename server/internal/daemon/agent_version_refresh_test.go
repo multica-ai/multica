@@ -1470,18 +1470,30 @@ func TestDemoteBelowMinimumRuntimes_CleanupCannotOutliveANewerRecovery(t *testin
 	// The user upgrades again while that Deregister is still in flight, and
 	// converge tries to bring the provider back.
 	fx.setProbeVersion("10.0.0")
+	probesBefore := fx.probeCount("/fake/codex")
 	convergeDone := make(chan struct{})
 	go func() {
 		defer close(convergeDone)
 		d.convergeRuntimeRegistrations(context.Background())
 	}()
 
+	// Open the window only once converge has probed: from there, only the
+	// workspace's register lock stands between the recovery and the server, so
+	// a register that is not ordered behind the cleanup gets there at once.
+	probeDeadline := time.Now().Add(2 * time.Second)
+	for fx.probeCount("/fake/codex") == probesBefore {
+		if time.Now().After(probeDeadline) {
+			t.Error("converge never probed the upgraded CLI")
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
 	select {
 	case <-recovered:
 		t.Error("a recovery register for ws-1 reached the server while an older Deregister for the same " +
 			"workspace was still in flight; the cleanup is outside the registration order, so it can land " +
 			"after the recovery and knock the restored runtime offline")
-	case <-time.After(250 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond):
 		// Expected: the recovery is queued behind the cleanup.
 	}
 

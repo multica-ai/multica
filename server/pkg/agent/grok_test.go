@@ -665,6 +665,8 @@ func TestGrokAttributesUsageOnResumeWithoutConfiguredModel(t *testing.T) {
 }
 
 func TestGrokTimeoutAndCancellation(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name       string
 		timeout    time.Duration

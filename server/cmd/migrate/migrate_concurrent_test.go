@@ -57,6 +57,19 @@ import (
 // schema_migrations table and never blocks behind a real production
 // migration runner sharing the same database. The schema is dropped
 // during cleanup.
+//
+// The same isolation is what lets the other database tests in this package
+// run in parallel. What they still share is the database itself: a CREATE
+// INDEX CONCURRENTLY waits out every older snapshot in it, so one test's
+// build can wait on another test's open transaction — briefly, since none
+// of them holds one for long, and never in a cycle, since a build only
+// waits for snapshots older than its own. Extensions are the one
+// database-wide object they create; createTestExtension serializes that.
+//
+// The four race tests below stay serial. Each fills a pool of one
+// connection per CPU with its sixteen runners, and four of those beside
+// the package's parallel tests would take a many-core machine to the
+// server's connection limit.
 
 const (
 	defaultTestDatabaseURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
@@ -506,6 +519,7 @@ func equalStrings(a, b []string) bool {
 // The check runs ahead of any pool/conn use, so passing nil is safe
 // and lets this case execute without a live Postgres.
 func TestRunMigrationsRejectsInvalidDirection(t *testing.T) {
+	t.Parallel()
 	bad := []string{"", "UP", "DOWN", "rollback", "x", " up "}
 	for _, dir := range bad {
 		err := runMigrations(context.Background(), nil, runOptions{Direction: dir})

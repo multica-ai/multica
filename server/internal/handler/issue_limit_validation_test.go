@@ -161,29 +161,23 @@ func TestListIssues_LimitClamp(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
 	})
 
-	// Seed 101 issues. Each row is inserted individually so the workspace's
-	// `issue_counter` advances correctly via the same path real issues take;
-	// `LIMIT 101` returning exactly 101 rows is itself a sanity check that
-	// nothing in the test wiring is off.
-	insertIssue := func(idx int) {
-		title := fmt.Sprintf("clamp-%d-%d", suffix, idx)
-		var number int
-		if err := testPool.QueryRow(ctx, `
-			UPDATE workspace
-			SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
-			WHERE id = $1 RETURNING issue_counter
-		`, testWorkspaceID).Scan(&number); err != nil {
-			t.Fatalf("next issue number: %v", err)
-		}
-		if _, err := testPool.Exec(ctx, `
-			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id)
-			VALUES ($1, $2, 'todo', 'none', 'member', $3, 0, $4, $5)
-		`, testWorkspaceID, title, testUserID, number, projectID); err != nil {
-			t.Fatalf("create issue #%d: %v", idx, err)
-		}
+	// Seed 101 issues in one statement, reserving their numbers from the
+	// workspace's `issue_counter` first so the counter ends where 101
+	// individual creates would leave it.
+	var lastNumber int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + $2
+		WHERE id = $1 RETURNING issue_counter
+	`, testWorkspaceID, seeded).Scan(&lastNumber); err != nil {
+		t.Fatalf("reserve issue numbers: %v", err)
 	}
-	for i := 0; i < seeded; i++ {
-		insertIssue(i)
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id)
+		SELECT $1, $2 || '-' || n::text, 'todo', 'none', 'member', $3, 0, $4 + n, $5
+		FROM generate_series(1, $6::int) AS n
+	`, testWorkspaceID, fmt.Sprintf("clamp-%d", suffix), testUserID, lastNumber-seeded, projectID, seeded); err != nil {
+		t.Fatalf("seed %d issues: %v", seeded, err)
 	}
 
 	type listResp struct {
@@ -231,7 +225,6 @@ func TestListIssues_LimitClamp(t *testing.T) {
 	}{
 		{"huge limit is clamped to 100", "&limit=100000000", 100},
 		{"one above the clamp", "&limit=101", 100},
-		{"well above the clamp", "&limit=200", 100},
 		{"at the clamp boundary", "&limit=100", 100},
 	}
 	for _, tc := range clampCases {

@@ -181,10 +181,24 @@ func TestGitRootLockPathIsRepoWide(t *testing.T) {
 func TestGitRootLockTimeoutDoesNotAdviseDeletingTheLock(t *testing.T) {
 	repo := newTestRepo(t)
 	original := gitRootLockWait
-	gitRootLockWait = 200 * time.Millisecond
+	gitRootLockWait = 50 * time.Millisecond
 	t.Cleanup(func() { gitRootLockWait = original })
 
-	startLockHolder(t, repo)
+	// Who holds the lock does not matter to the message, so it is held from
+	// here: a second open file description is excluded exactly like another
+	// process. TestLockGitRootExcludesOtherProcesses covers the process boundary.
+	path, err := gitRootLockPath(repo)
+	if err != nil {
+		t.Fatalf("gitRootLockPath: %v", err)
+	}
+	holder, err := openLockFile(path)
+	if err != nil {
+		t.Fatalf("open lock file: %v", err)
+	}
+	defer holder.Close()
+	if ok, err := lockFileExclusiveNonBlocking(holder); !ok || err != nil {
+		t.Fatalf("hold the repository lock: ok=%v err=%v", ok, err)
+	}
 
 	unlock, err := lockGitRoot(repo, worktreeTestLogger())
 	if unlock != nil {

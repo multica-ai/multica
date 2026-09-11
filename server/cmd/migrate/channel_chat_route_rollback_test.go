@@ -12,6 +12,7 @@ import (
 )
 
 func TestChannelChatRouteRollbackGuardRunsBeforeConcurrentIndexDrop(t *testing.T) {
+	t.Parallel()
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		t.Skip("integration test requires Postgres at DATABASE_URL")
@@ -22,7 +23,10 @@ func TestChannelChatRouteRollbackGuardRunsBeforeConcurrentIndexDrop(t *testing.T
 	if err != nil {
 		t.Fatalf("connect to Postgres: %v", err)
 	}
-	defer pool.Close()
+	// A cleanup rather than a defer, so the pool outlives the schema drop
+	// registered below: a deferred Close ran first and the drop failed
+	// silently, leaving one schema behind per run.
+	t.Cleanup(pool.Close)
 
 	schema := "channel_route_rollback_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	quotedSchema := pgx.Identifier{schema}.Sanitize()
