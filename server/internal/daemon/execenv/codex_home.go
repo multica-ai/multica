@@ -1027,9 +1027,10 @@ func materialiseInCodexHome(codexHome, relPath, src, key string) error {
 	mode := os.FileMode(0o644)
 	if info, err := root.Lstat(relPath); err == nil {
 		// A reference may alias a private native instruction or role copy.
-		// Refresh regular files without broadening their existing permissions.
+		// Preserve restrictions for group/other, but restore owner read/write
+		// access if a previous task left an unreadable copy.
 		if info.Mode().IsRegular() {
-			mode &= info.Mode().Perm()
+			mode = (mode & info.Mode().Perm()) | 0o600
 		}
 		if err := root.Remove(relPath); err != nil {
 			return fmt.Errorf("remove stale %s copy %s: %w", key, relPath, err)

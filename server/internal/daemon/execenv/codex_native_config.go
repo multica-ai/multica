@@ -115,17 +115,19 @@ func syncCodexNativeConfig(codexHome, sharedHome string) error {
 			return fmt.Errorf("create native agents directory: %w", err)
 		}
 	}
-	for _, name := range current {
-		path := filepath.Join("agents", name)
-		if err := replaceCodexNativeFile(root, path, sources[path]); err != nil {
-			return err
-		}
-	}
+	// Remove stale names before publishing roles: on case-insensitive volumes,
+	// a case-only rename makes the old and new names refer to the same file.
 	for _, name := range previous {
 		if !slices.Contains(current, name) {
 			if err := root.Remove(filepath.Join("agents", name)); err != nil && !os.IsNotExist(err) {
 				return fmt.Errorf("remove stale native agent %s: %w", name, err)
 			}
+		}
+	}
+	for _, name := range current {
+		path := filepath.Join("agents", name)
+		if err := replaceCodexNativeFile(root, path, sources[path]); err != nil {
+			return err
 		}
 	}
 	if len(tracked) > 0 {

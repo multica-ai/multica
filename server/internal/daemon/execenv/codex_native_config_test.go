@@ -38,6 +38,46 @@ func TestSyncCodexNativeConfigRestrictsPermissions(t *testing.T) {
 	}
 }
 
+func TestPrepareCodexHomeRefreshesUnreadableInstructions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not supported on Windows")
+	}
+	for _, tc := range []struct {
+		name string
+		mode os.FileMode
+	}{
+		{name: "no permissions", mode: 0o000},
+		{name: "execute only", mode: 0o111},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			shared, task := t.TempDir(), t.TempDir()
+			t.Setenv("CODEX_HOME", shared)
+			writeFile(t, filepath.Join(shared, "config.toml"), `model_instructions_file = "custom-instructions.md"`)
+			source := filepath.Join(shared, "custom-instructions.md")
+			destination := filepath.Join(task, "custom-instructions.md")
+			writeFile(t, source, "original")
+			if err := prepareCodexHome(task, testLogger()); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(destination, tc.mode); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, source, "refreshed")
+			if err := prepareCodexHome(task, testLogger()); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(destination)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := info.Mode().Perm(); got != 0o600 {
+				t.Errorf("instructions permissions = %04o, want 0600", got)
+			}
+			assertNativeConfigContent(t, destination, "refreshed")
+		})
+	}
+}
+
 func TestPrepareCodexHomeNativeConfig(t *testing.T) {
 	shared, task := t.TempDir(), t.TempDir()
 	t.Setenv("CODEX_HOME", shared)
