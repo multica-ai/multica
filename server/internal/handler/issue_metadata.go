@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,12 +18,12 @@ import (
 )
 
 // Per-issue metadata is a small JSONB KV map agents use to record pipeline
-// state (PR number, pipeline_status, waiting_on, ...). Three rules govern
-// the V1 surface — they're enforced both in the handler and at the DB:
+// state (PR number, pipeline_status, waiting_on, ...). These rules govern
+// the surface — they're enforced both in the handler and at the DB:
 //
 //   - keys match `^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$` (handler)
 //   - at most 50 keys per issue (handler)
-//   - values are primitive: string / number / bool (handler)
+//   - values are any valid, non-null JSON value (handler)
 //   - JSONB column is an object and ≤ 8KB (DB CHECK; defense in depth)
 //
 // All mutations are single-key atomic. UpdateIssue does NOT touch metadata —
@@ -52,25 +53,21 @@ func validateIssueMetadataKey(key string) error {
 	return nil
 }
 
-// validateIssueMetadataValue rejects anything other than a primitive JSON
-// scalar. Null, arrays, and objects are not allowed — the V1 surface is
-// flat KV. Removing a key uses DELETE, not a null value.
+// validateIssueMetadataValue accepts any valid JSON value except null. It uses
+// json.Valid rather than decoding through float64 so numeric spelling and
+// precision survive unchanged on the way to PostgreSQL. Removing a key uses
+// DELETE, not a null value.
 func validateIssueMetadataValue(raw json.RawMessage) error {
 	if len(raw) == 0 {
 		return errors.New("value is required")
 	}
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return fmt.Errorf("value must be valid JSON: %w", err)
+	if !json.Valid(raw) {
+		return errors.New("value must be valid JSON")
 	}
-	switch v.(type) {
-	case string, bool, float64:
-		return nil
-	case nil:
+	if string(bytes.TrimSpace(raw)) == "null" {
 		return errors.New("value cannot be null (use DELETE to remove a key)")
-	default:
-		return errors.New("value must be a primitive: string, number, or bool")
 	}
+	return nil
 }
 
 // parseIssueMetadata decodes the JSONB bytes from db.Issue.Metadata into a
@@ -88,15 +85,18 @@ func parseIssueMetadata(raw []byte) map[string]any {
 // CountIssues / ListOpenIssues. Empty input means "no filter" and returns
 // a nil []byte, which the SQL layer interprets as "skip the @> check".
 //
-// Validates that the filter is itself a flat object of primitives, mirroring
-// the constraints we apply at write time — querying for `{key: {nested}}`
-// would never match since written values are primitive by construction.
+// Validates that the filter is itself an object whose keys and values mirror
+// the constraints applied at write time.
 func parseMetadataFilterParam(w http.ResponseWriter, raw string) ([]byte, bool) {
 	if raw == "" {
 		return nil, true
 	}
-	var parsed map[string]any
+	var parsed map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		writeError(w, http.StatusBadRequest, "metadata filter must be a JSON object")
+		return nil, false
+	}
+	if parsed == nil {
 		writeError(w, http.StatusBadRequest, "metadata filter must be a JSON object")
 		return nil, false
 	}
@@ -105,11 +105,8 @@ func parseMetadataFilterParam(w http.ResponseWriter, raw string) ([]byte, bool) 
 			writeError(w, http.StatusBadRequest, "metadata filter "+err.Error())
 			return nil, false
 		}
-		switch v.(type) {
-		case string, bool, float64:
-			// ok
-		default:
-			writeError(w, http.StatusBadRequest, "metadata filter values must be primitives (string, number, bool)")
+		if err := validateIssueMetadataValue(v); err != nil {
+			writeError(w, http.StatusBadRequest, "metadata filter "+err.Error())
 			return nil, false
 		}
 	}
