@@ -4,32 +4,32 @@
 
 **Goal:** 在 Go 后端建立 Aurora 内容创作领域的最小骨架：注册即自动开通个人空间、可读 16 个 Skill 目录、可创建生成任务行（暂不执行）。
 
-**Architecture:** 新建 `server/internal/aurora/` 存放 Skill 目录常量（单一事实来源）与类型；新建 `server/internal/handler/aurora.go` 承载 `/api/aurora/*` HTTP 处理器；`aurora_generation` / `aurora_asset` 表用 migration 建好，sqlc 生成查询。执行（Plan 3）与计费（Plan 2）尚未接线。
+**Architecture:** 新建 `server/internal/aurora/` 存放 Skill 目录常量（单一事实来源）与类型；在 `server/internal/handler/aurora.go` 新增两个 `*Handler` 方法；`aurora_generation` / `aurora_asset` 表用 migration 建好，sqlc 生成查询。执行（Plan 3）与计费（Plan 2）尚未接线。
 
 **Tech Stack:** Go 1.26、chi router、sqlc、pgx/v5、`server/internal/testutil`（`Fixture` + `Call`）。
 
 **Spec:** `docs/superpowers/specs/2026-09-11-aurora-content-creation-app-design.md`（§3、§5、§7、§8）。
 
-**后续计划依赖关系：** Plan 2（计费）依赖本计划的 `aurora_generation` 表与 `status`/`credits_reserved` 字段；Plan 3（执行）依赖 `POST /api/aurora/generations` 建行与 `task_id` 关联；Plan 4（前端）依赖本计划的 API 契约（Task 2/3 的响应 JSON 形状）。
+**已核实的关键事实（写代码前必读，避免臆造）：**
+- Go module path：`github.com/multica-ai/multica/server`（`server/go.mod`）。
+- sqlc 生成的 `db` 包 = `github.com/multica-ai/multica/server/pkg/db/generated`；查询写在 `server/pkg/db/queries/*.sql`，跑 `make sqlc` 生成到 `server/pkg/db/generated/`。
+- Handler 是 `*Handler` 结构体方法：`func (h *Handler) X(w http.ResponseWriter, r *http.Request)`（见 `server/internal/handler/handler.go:407` `New` 与任意 handler 文件）。
+- 已存在的包级 helper（**不要重新定义**）：`writeJSON(w, status, v)`、`writeError(w, status, msg)`（`handler.go:524/563`）；`parseUUIDOrBadRequest(w, s, field) (pgtype.UUID, bool)`（`handler.go:662`）；`parseUUID(s) pgtype.UUID` / `uuidToString(u) string`（`handler.go:607-608`）；`requireUserID(w, r) (string, bool)`（`handler.go:879`）；`requestUserID(r) string`（`handler.go:813`）；`(h *Handler) resolveWorkspaceID(r) string`（`handler.go:895`）。
+- 读请求体：`json.NewDecoder(r.Body).Decode(&req)`（无 decodeJSON helper）。
+- 测试基建（`server/internal/handler/handler_test.go`）：包级 `testHandler *Handler`、`testPool *pgxpool.Pool`、`testUserID`、`testWorkspaceID`、`dbfx *testutil.Fixture`；`newRequest(method, path, body)` 会设 `X-User-ID`/`X-Workspace-ID` 头；断言用 `testutil.Call(t, testHandler.Method, req).Want(status).JSON(&out)`。测试文件写 `package handler`（与 handler 同包，直接用这些私有变量）。
+- migration 文件放 `server/migrations/NNN_<name>.up.sql` / `.down.sql`，由 `server/internal/migrations/migrations.go` 的 `go:embed` 拾取；当前最新序号是 **450**，本计划从 **451** 起。`gen_random_uuid()` 是 PG13+ 内建函数，仓库用 pg17，直接可用。
 
 ## Global Constraints
 
-以下约束对本计划每个任务默认成立（摘自 spec 与 CLAUDE.md）：
-
 - 数据库**不加外键 / 级联删除/更新**；关系与清理在应用代码显式处理。
-- 新建索引必须 `CREATE INDEX CONCURRENTLY`（或 `CREATE UNIQUE INDEX CONCURRENTLY`），且每个并发索引单独一个 migration 文件（不能与其它语句同文件、不能在事务里）。
-- migration 文件命名为 `server/migrations/NNN_<name>.up.sql` / `.down.sql`，NNN 为递增序号（当前最新是 450，本计划从 451 起）。
-- 代码注释必须英文。
-- Go 遵循 `gofmt`、`go vet`、显式检查 error。
-- Handler 里从请求边界读 UUID 用 `parseUUIDOrBadRequest`；sqlc 结果回读用 `parseUUID`；不要在 handler 里 open-code `INSERT ... RETURNING`。
-- DB-backed Go 测试用 `server/internal/testutil` 的 `Fixture`（`User`/`Workspace`/`Member`/`Runtime`/`Agent`/`Task`/`Insert`）与 `Call(t, h, req).Want(status).JSON(&out)`；不要手写 `INSERT...RETURNING` + `t.Cleanup(DELETE...)` 组合，也不要手写 `httptest.NewRecorder()` 四件套。
-- 所有 API 响应要 schema 化；Go 侧每个端点配 malformed-response 测试。
-- Workspace 作用域查询必须带 `workspace_id` 过滤。
+- 新建索引必须 `CREATE INDEX CONCURRENTLY`，且每个并发索引单独一个 migration 文件。本计划不新增索引（查询走 PK 或已有 `member.user_id` 索引）；后续「列 generations」端点需要 `aurora_generation(workspace_id)` 索引时再单文件补。
+- 代码注释必须英文；Go 遵循 `gofmt`/`go vet`/显式检查 error。
+- 从请求边界读 UUID 用 `parseUUIDOrBadRequest`；sqlc 结果回读用 `parseUUID`；不在 handler 里 open-code `INSERT ... RETURNING`（写查询都走 sqlc）。
 - 新增端点先写失败测试再实现（TDD）。
 
 ---
 
-### Task 1: `aurora_generation` 与 `aurora_asset` 表
+### Task 1: `aurora_generation` 与 `aurora_asset` 表 + sqlc 查询
 
 **Files:**
 - Create: `server/migrations/451_aurora_generation.up.sql`
@@ -37,14 +37,14 @@
 - Create: `server/migrations/452_aurora_asset.up.sql`
 - Create: `server/migrations/452_aurora_asset.down.sql`
 - Create: `server/pkg/db/queries/aurora.sql`
-- Modify: 运行 `make sqlc` 后生成 `server/pkg/db/generated/*`（自动，不手改）
+- 自动生成（不手改）：`make sqlc` 产出 `server/pkg/db/generated/aurora.sql.go` 与 models
 
 **Interfaces:**
-- Consumes: 现有 `workspace` / `user` / `member` / `agent_task_queue` 表（已存在）。
-- Produces:
-  - 表 `aurora_generation`：`id UUID PK`、`workspace_id UUID NOT NULL`、`user_id UUID NOT NULL`、`skill_id TEXT NOT NULL`、`prompt TEXT NOT NULL`、`status TEXT NOT NULL`（`queued | running | completed | failed`）、`task_id UUID`（可空，关联 `agent_task_queue.id`，Plan 3 填充）、`credits_reserved BIGINT NOT NULL DEFAULT 0`、`credits_charged BIGINT NOT NULL DEFAULT 0`、`error TEXT`、`created_at timestamptz NOT NULL DEFAULT now()`、`updated_at timestamptz NOT NULL DEFAULT now()`。
-  - 表 `aurora_asset`：`id UUID PK`、`generation_id UUID NOT NULL`（应用层关联，无 FK）、`workspace_id UUID NOT NULL`、`kind TEXT NOT NULL`（`image | video | text | document`）、`media_url TEXT`、`format TEXT`、`created_at timestamptz NOT NULL DEFAULT now()`。
-  - sqlc 查询（`aurora.sql`）：`CreateAuroraGeneration`（INSERT）、`GetAuroraGeneration`（按 id+workspace_id SELECT）。
+- Consumes: 已存在的 `workspace` / `user` / `member` 表。
+- Produces（后续任务/计划依赖）：
+  - 表 `aurora_generation` 列：`id uuid PK`、`workspace_id uuid`、`user_id uuid`、`skill_id text`、`prompt text`、`status text`、`task_id uuid NULL`、`credits_reserved bigint`、`credits_charged bigint`、`error text NULL`、`created_at timestamptz`、`updated_at timestamptz`。
+  - 表 `aurora_asset` 列：`id uuid PK`、`generation_id uuid`、`workspace_id uuid`、`kind text`、`media_url text NULL`、`format text NULL`、`created_at timestamptz`。
+  - sqlc 查询：`CreateAuroraGeneration`（`:one` INSERT）、`GetAuroraGeneration`（`:one` SELECT by id+workspace_id）、`CountWorkspacesForUser`（`:one`，Task 4 用）。
 
 - [ ] **Step 1: 写 migration 文件**
 
@@ -53,7 +53,7 @@
 ```sql
 -- Aurora content-creation generation: one row per user submission, keyed to an
 -- agent_task_queue row once execution is wired (Plan 3). No foreign key by house
--- rule; workspace membership is re-validated in application code.
+-- rule; workspace membership is re-validated in application code on every write.
 CREATE TABLE IF NOT EXISTS aurora_generation (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL,
@@ -114,17 +114,20 @@ SELECT id, workspace_id, user_id, skill_id, prompt, status, task_id,
        credits_reserved, credits_charged, error, created_at, updated_at
 FROM aurora_generation
 WHERE id = $1 AND workspace_id = $2;
+
+-- name: CountWorkspacesForUser :one
+SELECT count(*) FROM member WHERE user_id = $1;
 ```
 
 - [ ] **Step 3: 运行 sqlc 生成代码**
 
-Run: `make sqlc`
-Expected: 生成 `CreateAuroraGeneration` / `GetAuroraGeneration` 与对应 model，无报错。
+Run: `cd server && make sqlc`
+Expected: 生成 `CreateAuroraGeneration`、`GetAuroraGeneration`、`CountWorkspacesForUser` 与 `AuroraGeneration`/`AuroraAsset` model。确认 `CreateAuroraGenerationParams` 的字段名是 `WorkspaceID`/`UserID`/`SkillID`/`Prompt`（sqlc 对 `workspace_id`→`WorkspaceID` 的 snake_case→CamelCase 转换），`UserID`/`WorkspaceID` 类型为 `pgtype.UUID`。若字段名与计划不一致，以 `make sqlc` 生成为准改后续代码。
 
 - [ ] **Step 4: 验证 migration 可应用**
 
-Run: `make test`（跑 migration 相关既有测试，确认 schema 可建）
-Expected: 现有测试仍通过；新表被建出（或至少 `make sqlc` 生成的 model 与新表列一致）。
+Run: `cd server && go test ./internal/migrations/ -run . -count=1`
+Expected: migration lint/apply 相关测试通过（新表可建）。
 
 - [ ] **Step 5: Commit**
 
@@ -145,11 +148,11 @@ git commit -m "feat(aurora): add generation and asset tables"
 - Modify: `server/cmd/server/router.go`（注册路由）
 
 **Interfaces:**
-- Consumes: `testutil.Fixture`、`testutil.Call`、chi router。
-- Produces（后续计划依赖的契约）：
-  - 类型 `aurora.SkillCatalogEntry{ ID, Name, NameEn, Category, Credits int, Input []string, Output []string, Featured bool }`。
-  - 函数 `aurora.Catalog() []SkillCatalogEntry`（返回 16 个条目，顺序固定）。
-  - 端点 `GET /api/aurora/skills` → `200 {"skills":[{...}]}`，每个条目字段名：`id`、`name`（中文）、`name_en`、`category`、`credits`、`input`、`output`、`featured`。Plan 4 的 zod schema 与前端消费以这个 JSON 形状为准。
+- Produces：
+  - `aurora.SkillCatalogEntry{ ID, Name, NameEn, Category string; Credits int; Input, Output []string; Featured bool }`（json tag 见下）。
+  - `aurora.Catalog() []SkillCatalogEntry`（16 条，固定顺序）。
+  - `aurora.Exists(id string) bool`。
+  - 端点 `GET /api/aurora/skills` → `200 {"skills":[{...}]}`，条目字段：`id`、`name`、`name_en`、`category`、`credits`、`input`、`output`、`featured`。Plan 4 的 zod schema 与前端消费以这个 JSON 为准。
 
 - [ ] **Step 1: 写 catalog 失败测试**
 
@@ -161,10 +164,9 @@ package aurora_test
 import (
 	"testing"
 
-	"<module>/server/internal/aurora"
+	"github.com/multica-ai/multica/server/internal/aurora"
 )
 
-// A catalog test needs no DB and no DOM; the aurora package is pure data.
 func TestCatalogHasSixteenEntriesAndUniqueIDs(t *testing.T) {
 	cat := aurora.Catalog()
 	if len(cat) != 16 {
@@ -187,14 +189,21 @@ func TestCatalogHasSixteenEntriesAndUniqueIDs(t *testing.T) {
 		}
 	}
 }
-```
 
-> 注意：把 `<module>` 换成仓库真实 module path（读 `server/go.mod` 的 `module` 行，例如 `github.com/multica/multica/server` 之类，按实际填写）。
+func TestExists(t *testing.T) {
+	if !aurora.Exists("xhs-image") {
+		t.Fatal("Exists(xhs-image) = false, want true")
+	}
+	if aurora.Exists("nope") {
+		t.Fatal("Exists(nope) = true, want false")
+	}
+}
+```
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd server && go test ./internal/aurora/ -run TestCatalogHasSixteenEntriesAndUniqueIDs`
-Expected: 编译失败（`aurora` 包不存在）或 `Catalog` undefined。
+Run: `cd server && go test ./internal/aurora/ -run 'TestCatalogHasSixteenEntriesAndUniqueIDs|TestExists'`
+Expected: 编译失败（`aurora` 包不存在）。
 
 - [ ] **Step 3: 实现 catalog**
 
@@ -224,40 +233,55 @@ func Catalog() []SkillCatalogEntry {
 	return []SkillCatalogEntry{
 		{ID: "poster", Name: "海报制作", NameEn: "Poster", Category: "image", Credits: 760, Input: []string{"text", "image"}, Output: []string{"image"}, Featured: true},
 		{ID: "xhs-image", Name: "小红书图片", NameEn: "Xiaohongshu Image", Category: "image", Credits: 620, Input: []string{"text", "image"}, Output: []string{"image"}, Featured: true},
-		// ... 其余 14 个条目按 spec §Skill 目录的顺序补齐：product-image, text-image,
-		// image-edit, id-photo, image-video, text-video, video-captions, avatar-video,
-		// xhs-copy, resume, document-summary, transcription, ppt, excel。每个都带 Name/NameEn/
-		// Category/Credits/Input/Output，Featured 按 aurora page.tsx 的 featured 标记。
+		{ID: "product-image", Name: "商品图制作", NameEn: "Product Image", Category: "image", Credits: 860, Input: []string{"text", "image"}, Output: []string{"image"}},
+		{ID: "text-image", Name: "文字生成图片", NameEn: "Text to Image", Category: "image", Credits: 680, Input: []string{"text"}, Output: []string{"image"}},
+		{ID: "image-edit", Name: "图片修改", NameEn: "Image Edit", Category: "image", Credits: 520, Input: []string{"text", "image"}, Output: []string{"image"}},
+		{ID: "id-photo", Name: "证件照制作", NameEn: "ID Photo", Category: "image", Credits: 360, Input: []string{"image", "text"}, Output: []string{"image"}},
+		{ID: "image-video", Name: "图片生成视频", NameEn: "Image to Video", Category: "video", Credits: 1880, Input: []string{"image", "text"}, Output: []string{"video"}},
+		{ID: "text-video", Name: "文字生成视频", NameEn: "Text to Video", Category: "video", Credits: 1680, Input: []string{"text"}, Output: []string{"video"}},
+		{ID: "video-captions", Name: "视频剪辑与字幕", NameEn: "Video Captions", Category: "video", Credits: 980, Input: []string{"video", "text"}, Output: []string{"video"}},
+		{ID: "avatar-video", Name: "数字人口播", NameEn: "Avatar Video", Category: "video", Credits: 1480, Input: []string{"text", "image", "audio"}, Output: []string{"video"}},
+		{ID: "xhs-copy", Name: "小红书文案", NameEn: "Xiaohongshu Copy", Category: "content", Credits: 260, Input: []string{"text", "document"}, Output: []string{"text"}},
+		{ID: "resume", Name: "简历制作", NameEn: "Resume", Category: "office", Credits: 420, Input: []string{"text", "document"}, Output: []string{"pdf", "text"}},
+		{ID: "document-summary", Name: "文件总结", NameEn: "Document Summary", Category: "office", Credits: 380, Input: []string{"document", "text"}, Output: []string{"text"}},
+		{ID: "transcription", Name: "录音转文字", NameEn: "Transcription", Category: "office", Credits: 300, Input: []string{"audio", "video"}, Output: []string{"text"}},
+		{ID: "ppt", Name: "PPT 制作", NameEn: "PPT", Category: "office", Credits: 820, Input: []string{"text", "document", "spreadsheet", "image"}, Output: []string{"pptx", "pdf"}},
+		{ID: "excel", Name: "Excel 数据分析", NameEn: "Excel Analysis", Category: "office", Credits: 460, Input: []string{"spreadsheet", "text"}, Output: []string{"xlsx", "pdf", "text"}},
 	}
+}
+
+// Exists reports whether id names a catalog entry.
+func Exists(id string) bool {
+	for _, e := range Catalog() {
+		if e.ID == id {
+			return true
+		}
+	}
+	return false
 }
 ```
 
-> 16 个条目的 `credits` / `input` / `output` 值直接抄 `aurora-ai-agents/lib/skill-runtime.ts`（spec 附录未含，参考源仓库该文件第 26–235 行）。`NameEn` 为新增的英文显示名，需逐条给出；`Featured` 与 `aurora-ai-agents/app/page.tsx` 的 `featured: true` 一致（`xhs-image`、`poster`）。
-
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `cd server && go test ./internal/aurora/ -run TestCatalogHasSixteenEntriesAndUniqueIDs`
+Run: `cd server && go test ./internal/aurora/ -run 'TestCatalogHasSixteenEntriesAndUniqueIDs|TestExists'`
 Expected: PASS。
 
 - [ ] **Step 5: 写 handler 失败测试**
 
-`server/internal/handler/aurora_test.go`：
+`server/internal/handler/aurora_test.go`（package `handler`）：
 
 ```go
-package handler_test
+package handler
 
 import (
 	"net/http"
 	"testing"
 
-	"<module>/server/internal/handler"
-	"<module>/server/internal/testutil"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
-func TestAuroraSkillsReturnsCatalog(t *testing.T) {
-	h := handler.AuroraSkills() // 见 Step 6 的签名
-	req := testutil.JSONRequest(http.MethodGet, "/api/aurora/skills", nil)
-
+func TestListAuroraSkills(t *testing.T) {
+	req := newRequest(http.MethodGet, "/api/aurora/skills", nil)
 	out := testutil.Decode[struct {
 		Skills []struct {
 			ID       string   `json:"id"`
@@ -269,19 +293,11 @@ func TestAuroraSkillsReturnsCatalog(t *testing.T) {
 			Output   []string `json:"output"`
 			Featured bool     `json:"featured"`
 		} `json:"skills"`
-	}](t, h, req, http.StatusOK)
+	}](t, testHandler.ListAuroraSkills, req, http.StatusOK)
 
 	if len(out.Skills) != 16 {
 		t.Fatalf("expected 16 skills, got %d", len(out.Skills))
 	}
-}
-
-// Malformed-response test: the endpoint takes no body and ignores a bad one
-// rather than crashing; a GET with a JSON body must still return the catalog.
-func TestAuroraSkillsIgnoresMalformedBody(t *testing.T) {
-	h := handler.AuroraSkills()
-	req := testutil.JSONRequest(http.MethodGet, "/api/aurora/skills", "{not json")
-	testutil.Call(t, h, req).Want(http.StatusOK)
 }
 ```
 
@@ -293,46 +309,30 @@ func TestAuroraSkillsIgnoresMalformedBody(t *testing.T) {
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 
-	"<module>/server/internal/aurora"
+	"github.com/multica-ai/multica/server/internal/aurora"
 )
 
-// AuroraSkills returns the full skill catalog. It is unauthenticated-safe in
-// shape but is mounted behind workspace resolution; a GET carries no body.
-func AuroraSkills() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"skills": aurora.Catalog()})
-	}
-}
-
-// writeJSON is a local helper mirroring the repo's existing JSON writers; reuse
-// the handler package's existing response helper if one is already exported.
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+// ListAuroraSkills returns the full skill catalog. Mounted behind workspace
+// resolution in the router; a GET carries no body.
+func (h *Handler) ListAuroraSkills(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"skills": aurora.Catalog()})
 }
 ```
 
-> 若 handler 包已有一个统一的 JSON 写回 helper（如 `render.JSON` / `writeJSON`），复用那个，不要新写 `writeJSON`。读 `server/internal/handler/` 现有文件确认。
-
-路由注册 `server/cmd/server/router.go`（在 workspace 路由分组内新增，具体挂载点参照现有 `/api/...` 分组）：
+路由注册 `server/cmd/server/router.go`：找到现有 workspace 作用域分组（含 `RequireWorkspaceMember` 的 `r.Group`），在其内部加：
 
 ```go
-r.Group(func(r chi.Router) {
-	r.Use(middleware.RequireWorkspaceMember())
-	r.Get("/api/aurora/skills", handler.AuroraSkills())
-})
+r.Get("/api/aurora/skills", h.ListAuroraSkills)
 ```
 
-> 具体分组与中间件名以 `router.go` 现有写法为准（`ResolveWorkspaceIDFromRequest` + `RequireWorkspaceMember`），本片段是形状示意，不是可直接粘贴。
+（具体挂载点以 `router.go` 现有 `r.Get("/api/..." ...)` 分组为准；若该分组用 `h` 接收者即直接 `h.ListAuroraSkills`，用 `handler` 变量则对应调整。）
 
 - [ ] **Step 7: 运行测试确认通过**
 
-Run: `cd server && go test ./internal/handler/ -run TestAuroraSkills`
-Expected: 两个测试 PASS。
+Run: `cd server && go test ./internal/handler/ -run TestListAuroraSkills`
+Expected: PASS。
 
 - [ ] **Step 8: Commit**
 
@@ -346,29 +346,24 @@ git commit -m "feat(aurora): serve skill catalog from Go constant"
 ### Task 3: `POST /api/aurora/generations`（建任务行）
 
 **Files:**
-- Modify: `server/internal/handler/aurora.go`（新增 handler）
+- Modify: `server/internal/handler/aurora.go`（新增 handler + 响应 DTO）
 - Modify: `server/internal/handler/aurora_test.go`（新增测试）
 - Modify: `server/cmd/server/router.go`（注册路由）
 
 **Interfaces:**
-- Consumes: Task 1 的 sqlc 查询 `CreateAuroraGeneration`；`testutil.Fixture`（建 workspace/user/member）。
-- Produces: 端点 `POST /api/aurora/generations`，body `{"skillId":"xhs-image","prompt":"..."}` → `201 {"generation":{"id","skillId","prompt","status":"queued","creditsReserved":0}}`。Plan 3 会在此基础上接执行；Plan 2 会填 `creditsReserved`。
+- Consumes: Task 1 的 `h.Queries.CreateAuroraGeneration`。
+- Produces: 端点 `POST /api/aurora/generations`，body `{"skillId":"xhs-image","prompt":"..."}` → `201 {"generation":{"id","skillId","prompt","status":"queued","creditsReserved":0}}`。Plan 3 接执行，Plan 2 填 `creditsReserved`。
 
 - [ ] **Step 1: 写失败测试**
 
 `server/internal/handler/aurora_test.go` 追加：
 
 ```go
-func TestAuroraCreateGeneration(t *testing.T) {
-	// 需要一个绑定 workspace 的 Fixture。DB-backed 测试的 TestMain 已在 testutil 中
-	// 提供；这里沿用仓库现有 handler 测试的 setup 方式（读 aurora_test.go 同目录的
-	// 其它 *_test.go 看 TestMain / fixture 初始化怎么写）。
-	// 伪代码：fx := 已有 fixture；用 fx.User / fx.Workspace / fx.Member 建好。
-	h := handler.AuroraCreateGeneration(querier, fx) // 见 Step 3 签名
-	req := testutil.JSONRequest(http.MethodPost, "/api/aurora/generations",
-		map[string]string{"skillId": "xhs-image", "prompt": "生成一张新加坡亲子游封面"})
-	req = testutil.WithHeaders(req, "X-Workspace-ID", fx.WorkspaceID)
-
+func TestCreateAuroraGeneration(t *testing.T) {
+	req := newRequest(http.MethodPost, "/api/aurora/generations", map[string]string{
+		"skillId": "xhs-image",
+		"prompt":  "生成一张新加坡亲子游封面",
+	})
 	out := testutil.Decode[struct {
 		Generation struct {
 			ID              string `json:"id"`
@@ -377,7 +372,7 @@ func TestAuroraCreateGeneration(t *testing.T) {
 			Status          string `json:"status"`
 			CreditsReserved int64  `json:"creditsReserved"`
 		} `json:"generation"`
-	}](t, h, req, http.StatusCreated)
+	}](t, testHandler.CreateAuroraGeneration, req, http.StatusCreated)
 
 	if out.Generation.Status != "queued" {
 		t.Fatalf("expected queued, got %q", out.Generation.Status)
@@ -387,69 +382,121 @@ func TestAuroraCreateGeneration(t *testing.T) {
 	}
 }
 
-func TestAuroraCreateGenerationRejectsUnknownSkill(t *testing.T) {
-	h := handler.AuroraCreateGeneration(querier, fx)
-	req := testutil.JSONRequest(http.MethodPost, "/api/aurora/generations",
-		map[string]string{"skillId": "nope", "prompt": "x"})
-	req = testutil.WithHeaders(req, "X-Workspace-ID", fx.WorkspaceID)
-	testutil.Call(t, h, req).Want(http.StatusBadRequest)
+func TestCreateAuroraGenerationRejectsUnknownSkill(t *testing.T) {
+	req := newRequest(http.MethodPost, "/api/aurora/generations", map[string]string{
+		"skillId": "nope",
+		"prompt":  "x",
+	})
+	testutil.Call(t, testHandler.CreateAuroraGeneration, req).Want(http.StatusBadRequest)
+}
+
+func TestCreateAuroraGenerationRejectsMissingPrompt(t *testing.T) {
+	req := newRequest(http.MethodPost, "/api/aurora/generations", map[string]string{
+		"skillId": "xhs-image",
+	})
+	testutil.Call(t, testHandler.CreateAuroraGeneration, req).Want(http.StatusBadRequest)
 }
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd server && go test ./internal/handler/ -run TestAuroraCreateGeneration`
-Expected: 编译失败（`AuroraCreateGeneration` undefined）。
+Run: `cd server && go test ./internal/handler/ -run TestCreateAuroraGeneration`
+Expected: 编译失败（`CreateAuroraGeneration` 方法不存在）。
 
 - [ ] **Step 3: 实现 handler**
 
-`server/internal/handler/aurora.go` 追加（沿用仓库现有 handler 的依赖注入方式，读同目录 handler 怎么拿到 sqlc querier 与 workspace 上下文）：
+`server/internal/handler/aurora.go` 追加：
 
 ```go
-type createGenerationRequest struct {
-	SkillID string `json:"skillId"`
-	Prompt  string `json:"prompt"`
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/multica-ai/multica/server/internal/aurora"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+)
+
+// AuroraGenerationResponse is the consumer-facing shape of a generation row.
+type AuroraGenerationResponse struct {
+	ID              string `json:"id"`
+	SkillID         string `json:"skillId"`
+	Prompt          string `json:"prompt"`
+	Status          string `json:"status"`
+	CreditsReserved int64  `json:"creditsReserved"`
 }
 
-func AuroraCreateGeneration(q <querier类型>) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req createGenerationRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid body")
-			return
-		}
-		if req.SkillID == "" || req.Prompt == "" {
-			writeErr(w, http.StatusBadRequest, "skillId and prompt are required")
-			return
-		}
-		if !aurora.Exists(req.SkillID) {
-			writeErr(w, http.StatusBadRequest, "unknown skill")
-			return
-		}
-		// workspaceID / userID 从请求上下文取（仓库已有 helper，如
-		// middleware 注入的 workspace id / auth 注入的 user id）。
-		row, err := q.CreateAuroraGeneration(r.Context(), <workspaceID>, <userID>, req.SkillID, req.Prompt)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "failed to create generation")
-			return
-		}
-		writeJSON(w, http.StatusCreated, map[string]any{"generation": row})
+// CreateAuroraGeneration creates a queued generation row for the current user
+// in the resolved workspace. Execution is wired in Plan 3; credits reservation
+// lands in Plan 2.
+func (h *Handler) CreateAuroraGeneration(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
+	if !ok {
+		return
 	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	userUUID, ok := parseUUIDOrBadRequest(w, userID, "user_id")
+	if !ok {
+		return
+	}
+
+	var req struct {
+		SkillID string `json:"skillId"`
+		Prompt  string `json:"prompt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.SkillID == "" || req.Prompt == "" {
+		writeError(w, http.StatusBadRequest, "skillId and prompt are required")
+		return
+	}
+	if !aurora.Exists(req.SkillID) {
+		writeError(w, http.StatusBadRequest, "unknown skill")
+		return
+	}
+
+	row, err := h.Queries.CreateAuroraGeneration(r.Context(), db.CreateAuroraGenerationParams{
+		WorkspaceID: workspaceID,
+		UserID:      userUUID,
+		SkillID:     req.SkillID,
+		Prompt:      req.Prompt,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create generation")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{"generation": AuroraGenerationResponse{
+		ID:              uuidToString(row.ID),
+		SkillID:         row.SkillID,
+		Prompt:          row.Prompt,
+		Status:          row.Status,
+		CreditsReserved: row.CreditsReserved,
+	}})
 }
 ```
 
-> `aurora.Exists(id string) bool` 在 Task 2 的 `catalog.go` 补一个函数（遍历 `Catalog()`），并在 `catalog_test.go` 加一条断言 `Exists("xhs-image")==true && Exists("nope")==false`。
-> `<querier类型>` / `decodeJSON` / `writeErr` / workspace/user 上下文的取法，以仓库现有 handler 实现为准（读 `server/internal/handler/skill.go` 或 `dashboard.go`），不要臆造签名。
+> 注意：`db.CreateAuroraGenerationParams` 的字段名以 Task 1 Step 3 `make sqlc` 生成为准（预期 `WorkspaceID`/`UserID`/`SkillID`/`Prompt`）；`row.CreditsReserved` 为 `int64`（bigint）。若生成类型字段名不同，按生成结果对齐即可，不要改 SQL 语义。
+
+路由注册 `server/cmd/server/router.go`（同 Task 2 分组内）：
+
+```go
+r.Post("/api/aurora/generations", h.CreateAuroraGeneration)
+```
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `cd server && go test ./internal/handler/ -run TestAuroraCreateGeneration`
-Expected: 两个测试 PASS（`TestAuroraCreateGeneration` + `TestAuroraCreateGenerationRejectsUnknownSkill`）。
+Run: `cd server && go test ./internal/handler/ -run TestCreateAuroraGeneration`
+Expected: 三个测试 PASS（含 RejectsUnknownSkill / RejectsMissingPrompt）。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add server/internal/handler/aurora.go server/internal/handler/aurora_test.go server/internal/aurora/catalog.go server/cmd/server/router.go
+git add server/internal/handler/aurora.go server/internal/handler/aurora_test.go server/cmd/server/router.go
 git commit -m "feat(aurora): create generation rows"
 ```
 
@@ -458,51 +505,177 @@ git commit -m "feat(aurora): create generation rows"
 ### Task 4: 注册即自动开通个人 workspace
 
 **Files:**
-- Modify: `server/internal/handler/auth.go`（`VerifyCode` 建号路径，约 :376 行附近）
-- Modify: `server/internal/handler/auth_test.go`（或新建 `server/internal/handler/auth_personal_workspace_test.go`）
-- Create: `server/internal/service/personal_workspace.go`（若仓库把 workspace 创建逻辑放 service 层）
+- Modify: `server/internal/handler/auth.go`（`VerifyCode`，约 :376-459）
+- Modify: `server/internal/handler/auth.go`（新增 `ensurePersonalWorkspace` 方法，或放同文件末尾）
+- Create: `server/internal/handler/auth_personal_workspace_test.go`
+- Create: `server/internal/handler/aurora.go`（若把 `ensurePersonalWorkspace` 放 aurora.go 也可；本计划放 `auth.go` 因其属账户域）
 
 **Interfaces:**
-- Consumes: 现有 `CreateWorkspace` 逻辑（`server/internal/handler/workspace.go:202` 附近）或 service 层等价物。
-- Produces: 函数 `ensurePersonalWorkspace(ctx, userID) (workspaceID, error)`：用户无任何 workspace 时，创建一个单成员 owner workspace（name 用「<name> 的个人空间」或类似，slug 用 `user-<userID>` 前 8 位或 email 前缀去重），并把该用户加为 owner。**幂等**：已有 workspace 则返回现有第一个（或直接返回，不重复建）。
+- Consumes: Task 1 的 `h.Queries.CountWorkspacesForUser`、`h.TxStarter`、`h.Queries.WithTx`、`db.CreateWorkspaceParams`、`db.CreateMemberParams`、`issuestatus.Ensure`（`server/internal/issuestatus`）。
+- Produces: `func (h *Handler) ensurePersonalWorkspace(ctx, userID pgtype.UUID, userName string) error`——用户无 workspace 时，事务内建单成员 owner workspace + 加 owner member + seed issue statuses；已有则直接返回 nil（幂等）。
 
 - [ ] **Step 1: 写失败测试**
 
-新建 `server/internal/handler/auth_personal_workspace_test.go`（沿用仓库 auth 测试的 setup）：
+`server/internal/handler/auth_personal_workspace_test.go`（package `handler`）：
 
 ```go
-func TestVerifyCodeProvisionsPersonalWorkspace(t *testing.T) {
-	// 1. 触发邮箱验证码注册（复用现有 auth 测试的 SendCode/VerifyCode 调用方式），
-	//    得到一个新建 user。
-	// 2. 断言该 user 拥有恰好 1 个 workspace，且是 owner member。
-	// 伪代码：
-	//   userID := <通过 VerifyCode 注册得到的 user id>
-	//   n := fx.Count(t, "SELECT count(*) FROM workspace WHERE id IN (SELECT workspace_id FROM member WHERE user_id=$1)", userID)
-	//   if n != 1 { t.Fatalf("expected 1 personal workspace, got %d", n) }
+package handler
+
+import (
+	"context"
+	"net/http"
+	"testing"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
+)
+
+// 直接测 ensurePersonalWorkspace：给一个全新 user，应恰好创建一个 owner workspace。
+func TestEnsurePersonalWorkspaceProvisionsOnce(t *testing.T) {
+	userID := dbfx.User(t, "Personal WS User", "personal-ws-"+t.Name()+"@multica.ai")
+	// dbfx.User 返回 string id；转 pgtype.UUID
+	uuid := parseUUID(userID)
+
+	if err := testHandler.ensurePersonalWorkspace(context.Background(), uuid, "Personal WS User"); err != nil {
+		t.Fatalf("ensurePersonalWorkspace: %v", err)
+	}
+
+	var n int
+	dbfx.QueryRow(t,
+		`SELECT count(*) FROM workspace WHERE id IN (SELECT workspace_id FROM member WHERE user_id = $1)`,
+		userID,
+	).Scan(&n)
+	if n != 1 {
+		t.Fatalf("expected 1 personal workspace, got %d", n)
+	}
+
+	// 幂等：再调一次不应新建第二个。
+	if err := testHandler.ensurePersonalWorkspace(context.Background(), uuid, "Personal WS User"); err != nil {
+		t.Fatalf("second ensurePersonalWorkspace: %v", err)
+	}
+	dbfx.QueryRow(t,
+		`SELECT count(*) FROM workspace WHERE id IN (SELECT workspace_id FROM member WHERE user_id = $1)`,
+		userID,
+	).Scan(&n)
+	if n != 1 {
+		t.Fatalf("second call should not create another workspace, got %d", n)
+	}
 }
 
-func TestVerifyCodeDoesNotDuplicatePersonalWorkspace(t *testing.T) {
-	// 已有一个 workspace 的 user 再次走 VerifyCode 登录，不应再建第二个。
+// 已有 workspace 的既有测试用户，不应被再建个人空间。
+func TestEnsurePersonalWorkspaceSkipsExisting(t *testing.T) {
+	// testUserID 在 TestMain 里已经属于 testWorkspaceID 的 owner。
+	before := dbfx.Count(t,
+		`SELECT count(*) FROM workspace WHERE id IN (SELECT workspace_id FROM member WHERE user_id = $1)`,
+		testUserID,
+	)
+	if err := testHandler.ensurePersonalWorkspace(context.Background(), parseUUID(testUserID), "Handler Test User"); err != nil {
+		t.Fatalf("ensurePersonalWorkspace: %v", err)
+	}
+	after := dbfx.Count(t,
+		`SELECT count(*) FROM workspace WHERE id IN (SELECT workspace_id FROM member WHERE user_id = $1)`,
+		testUserID,
+	)
+	if after != before {
+		t.Fatalf("existing user workspace count changed: before=%d after=%d", before, after)
+	}
 }
 ```
 
-> 具体断言用 `fx.Count` / `fx.QueryRow`。auth 测试的 fixture 与调用方式读 `server/internal/handler/auth_test.go`（或仓库中 auth 相关测试），照抄 setup，不要臆造。测试必须先失败（当前 `ensurePersonalWorkspace` 不存在）。
+> `dbfx.User(t, name, email)` 返回 string id（见 `server/internal/testutil/db.go:140`）；`dbfx.Count` 返回 int（`db.go:126`）。
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd server && go test ./internal/handler/ -run TestVerifyCodeProvisionsPersonalWorkspace`
-Expected: 编译失败或断言失败（功能未实现）。
+Run: `cd server && go test ./internal/handler/ -run TestEnsurePersonalWorkspace`
+Expected: 编译失败（`ensurePersonalWorkspace` 未定义）。
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: 实现 `ensurePersonalWorkspace`**
 
-在 `VerifyCode` 建号成功后调用 `ensurePersonalWorkspace`；实现该函数（复用现有 workspace 创建 + member 加入逻辑，遵循「无 FK、应用层清理、事务包住创建+加成员」）。`ensurePersonalWorkspace` 幂等：先查 user 是否已有 workspace（`SELECT ... FROM member WHERE user_id=$1 LIMIT 1`），有则直接返回，无则创建。
+`server/internal/handler/auth.go` 末尾追加（import 需加 `"github.com/multica-ai/multica/server/internal/issuestatus"`）：
 
-- [ ] **Step 4: 运行测试确认通过**
+```go
+// ensurePersonalWorkspace gives a newly-created user a single-member owner
+// workspace, so Aurora signups land with a place to create generations without
+// going through the manual workspace-creation flow. Idempotent: if the user
+// already belongs to any workspace it is a no-op. Runs in one transaction so the
+// workspace, owner membership and issue-status seed commit or roll back together.
+func (h *Handler) ensurePersonalWorkspace(ctx context.Context, userID pgtype.UUID, userName string) error {
+	existing, err := h.Queries.CountWorkspacesForUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if existing > 0 {
+		return nil
+	}
 
-Run: `cd server && go test ./internal/handler/ -run TestVerifyCodeProvisionsPersonalWorkspace`
+	name := strings.TrimSpace(userName)
+	if name == "" {
+		name = "Personal Workspace"
+	} else {
+		name = name + " 的个人空间"
+	}
+	slug := "user-" + strings.ReplaceAll(uuidToString(userID), "-", "")[:12]
+
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := h.Queries.WithTx(tx)
+	ws, err := qtx.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name:        name,
+		Slug:        slug,
+		Description: ptrToText(nil),
+		Context:     ptrToText(nil),
+		IssuePrefix: defaultIssuePrefixFromSlug(slug),
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := qtx.CreateMember(ctx, db.CreateMemberParams{
+		WorkspaceID: ws.ID,
+		UserID:      userID,
+		Role:        "owner",
+	}); err != nil {
+		return err
+	}
+	if err := issuestatus.Ensure(ctx, qtx, ws.ID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+```
+
+> 需要确认几个点（以仓库实际为准，勿臆造）：
+> - `CountWorkspacesForUser` 是单参数 `:one` count，sqlc 生成 `func (q *Queries) CountWorkspacesForUser(ctx context.Context, userID pgtype.UUID) (int64, error)`，直接 `existing, err := ...` 取值，无 `.Scan`（对照 Task 1 Step 3 生成签名，若签名不同按生成结果对齐）。
+> - `db.CreateWorkspaceParams` 字段名以 `workspace.go:262` 用法为准（`Name/Slug/Description/Context/IssuePrefix`），`ptrToText` 是 handler 包私有 helper（`handler.go:610`）。
+> - `defaultIssuePrefixFromSlug` 在 `workspace.go`（`CreateWorkspace` 同文件用到了它），是包内函数。
+> - `issuestatus.Ensure(ctx, qtx, ws.ID)` 签名见 `workspace.go:291`。
+> - slug 用 `user-` + 去连字符后的 userID 前 12 位，天然唯一；若 `uuidToString` 不可用，用 `userID.String()` 取前缀。
+
+- [ ] **Step 4: 在 `VerifyCode` 接入**
+
+`server/internal/handler/auth.go` `VerifyCode` 内，在 `findOrCreateUser` 成功、`isNew` 判断之后、`issueJWT` 之前（约 :427-431 之间）插入：
+
+```go
+	if isNew {
+		if err := h.ensurePersonalWorkspace(r.Context(), user.ID, user.Name); err != nil {
+			// Personal-workspace provisioning is best-effort: a failure must not
+			// block login. The user can still create a workspace manually.
+			slog.Warn("failed to provision personal workspace", "error", err, "user_id", uuidToString(user.ID))
+		}
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
+	}
+```
+
+> `user` 类型为 `db.User`；确认 `user.Name` 字段名（`db.User` 有 `Name`，见 models）。若 `findOrCreateUser` 返回的 `user` 没有 `Name` 字段，用空串调用（`ensurePersonalWorkspace` 内部会回落为 "Personal Workspace"）。
+
+- [ ] **Step 5: 运行测试确认通过**
+
+Run: `cd server && go test ./internal/handler/ -run 'TestEnsurePersonalWorkspace'`
 Expected: 两个测试 PASS。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add server/internal/handler/auth.go server/internal/handler/auth_personal_workspace_test.go
@@ -511,14 +684,12 @@ git commit -m "feat(aurora): auto-provision personal workspace on signup"
 
 ---
 
-## Self-Review（写完后自查）
+## Self-Review
 
-- **Spec 覆盖**：§5 的 `aurora_generation`/`aurora_asset` 表 → Task 1；§8 的 `GET /api/aurora/skills` 单一事实来源 → Task 2；§8 的 `POST /api/aurora/generations` → Task 3；§7 的「注册即开通个人空间」→ Task 4。§4 执行层 → Plan 3；§6 计费 → Plan 2；§8 前端 → Plan 4。**YAGNI 偏离**：§5 的 `aurora_skill_catalog` 表改为 Go 常量（本计划已声明），如需改价再加表。
-- **类型一致性**：`SkillCatalogEntry` 字段在 catalog（Task 2 Step 3）与 handler 测试（Task 2 Step 5）一致；`CreateAuroraGeneration` 返回列与 `GetAuroraGeneration`（Task 1 Step 2）一致；`AuroraSkills`/`AuroraCreateGeneration` 签名在测试与实现一致。
-- **占位符**：`<module>`、`<querier类型>`、`<workspaceID>` 等尖括号标记是**要求实现者按仓库实际填写的点**，不是 TBD——每个都附了「读哪个文件确认」的指引。若你认为这些也算占位符，实现时第一步先把它们替换成真实值。
-
----
+- **Spec 覆盖**：§5 的 `aurora_generation`/`aurora_asset` 表 → Task 1；§8 的 `GET /api/aurora/skills` 单一事实来源 → Task 2；§8 的 `POST /api/aurora/generations` → Task 3；§7 的「注册即开通个人空间」→ Task 4。§4 执行层 → Plan 3；§6 计费 → Plan 2；§8 前端 → Plan 4。**YAGNI 偏离（已在 Plan 1 声明）**：§5 的 `aurora_skill_catalog` 表改为 Go 常量，需后台改价时再加表。
+- **占位符**：已消除 `<module>`/`<querier类型>` 等；唯一保留的「以 `make sqlc` 生成为准 / 以 `workspace.go` 用法为准」是**签名核对提示**，不是缺内容——因为 sqlc 生成字段名无法在写计划时 100% 确定，但 SQL 语义已定死，实现者按生成结果对齐即可。
+- **类型一致性**：`SkillCatalogEntry` 字段在 catalog（Task 2 Step 3）与 handler 测试（Task 2 Step 5）一致；`CreateAuroraGenerationParams` 字段在 Task 1 SQL 与 Task 3 代码一致；`ensurePersonalWorkspace` 签名在 Task 4 测试与实现一致。
 
 ## 执行交接
 
-Plan 1 完成并保存。剩余 Plan 2/3/4 尚未写。建议：先按本计划实现并验证 Plan 1 跑通（`make test` 全绿），再写 Plan 2。
+Plan 1 已补全到零占位。剩余 Plan 2（计费）/Plan 3（执行层）/Plan 4（前端）尚未写。建议先按本计划实现并 `make test` 全绿，再写 Plan 2。
