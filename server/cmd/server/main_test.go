@@ -32,35 +32,26 @@ func TestRedisClientName(t *testing.T) {
 	}
 }
 
-func TestChannelLeaseRedisURLFromEnvPrefersDedicatedInstance(t *testing.T) {
-	t.Setenv("REDIS_URL", "redis://shared:6379/0")
-	t.Setenv("CHANNEL_WS_LEASE_REDIS_URL", "redis://leases:6379/0")
-	if got := channelLeaseRedisURLFromEnv(); got != "redis://leases:6379/0" {
-		t.Fatalf("channel lease Redis URL = %q", got)
+func TestValidateRealtimeRelayMode(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        string
+		clusterMode bool
+		wantErr     bool
+	}{
+		{name: "standalone legacy", mode: "legacy"},
+		{name: "standalone dual", mode: "dual"},
+		{name: "cluster sharded", mode: "sharded", clusterMode: true},
+		{name: "cluster legacy", mode: "legacy", clusterMode: true, wantErr: true},
+		{name: "cluster dual", mode: "dual", clusterMode: true, wantErr: true},
 	}
-}
-
-func TestChannelLeaseRedisURLFromEnvFallsBackToSharedRedis(t *testing.T) {
-	t.Setenv("REDIS_URL", "redis://shared:6379/0")
-	t.Setenv("CHANNEL_WS_LEASE_REDIS_URL", "")
-	if got := channelLeaseRedisURLFromEnv(); got != "redis://shared:6379/0" {
-		t.Fatalf("channel lease Redis URL = %q", got)
-	}
-}
-
-func TestRealtimeRelayRedisURLFromEnvPrefersDedicatedInstance(t *testing.T) {
-	t.Setenv("REDIS_URL", "redis://shared:6379/0")
-	t.Setenv("REALTIME_RELAY_REDIS_URL", " redis://relay:6379/0 ")
-	if got := realtimeRelayRedisURLFromEnv(); got != "redis://relay:6379/0" {
-		t.Fatalf("realtime relay Redis URL = %q", got)
-	}
-}
-
-func TestRealtimeRelayRedisURLFromEnvFallsBackToSharedRedis(t *testing.T) {
-	t.Setenv("REDIS_URL", " redis://shared:6379/0 ")
-	t.Setenv("REALTIME_RELAY_REDIS_URL", "")
-	if got := realtimeRelayRedisURLFromEnv(); got != "redis://shared:6379/0" {
-		t.Fatalf("realtime relay Redis URL = %q", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRealtimeRelayMode(tt.mode, tt.clusterMode)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateRealtimeRelayMode(%q, %t) error = %v, wantErr %t", tt.mode, tt.clusterMode, err, tt.wantErr)
+			}
+		})
 	}
 }
 

@@ -279,7 +279,7 @@ func buildChannelSupervisor(
 		leases = postgresLeases
 	case "redis":
 		if opts.ChannelLeaseRedis == nil {
-			slog.Error("channel engine: Redis lease backend selected but CHANNEL_WS_LEASE_REDIS_URL/REDIS_URL is missing or invalid; supervisor disabled")
+			slog.Error("channel engine: Redis lease backend selected but REDIS_URL is missing or invalid; supervisor disabled")
 			return nil
 		}
 		namespace := strings.TrimSpace(os.Getenv("CHANNEL_WS_LEASE_NAMESPACE"))

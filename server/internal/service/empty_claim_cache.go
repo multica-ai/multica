@@ -31,7 +31,10 @@ import (
 // the just-queued task would sit idle until the empty key's TTL
 // expired. With it, the only window left is one extra DB SELECT per
 // runtime per concurrent enqueue, never a stalled task.
-const emptyClaimKeyPrefix = "mul:claim:runtime:"
+const (
+	emptyClaimCachePrefix   = "mul:claim:runtime:empty:"
+	emptyClaimVersionPrefix = "mul:claim:runtime:version:"
+)
 
 // EmptyClaimCacheTTL bounds how long a cached "no queued task" verdict
 // stays believable. Enqueue invalidates the verdict by bumping the
@@ -79,17 +82,8 @@ func NewEmptyClaimCache(rdb redis.UniversalClient) *EmptyClaimCache {
 	return &EmptyClaimCache{rdb: rdb}
 }
 
-// Keep a runtime's verdict and version in the same Redis Cluster hash slot so
-// the atomic MGET in IsEmpty remains valid in both standalone and cluster mode.
-// Untagged keys from older binaries are safe to ignore: this cache fails open
-// to PostgreSQL and both old keys expire within emptyClaimVersionTTL.
-func emptyClaimKey(runtimeID string) string {
-	return emptyClaimKeyPrefix + "{" + runtimeID + "}:empty"
-}
-
-func emptyClaimVersion(runtimeID string) string {
-	return emptyClaimKeyPrefix + "{" + runtimeID + "}:version"
-}
+func emptyClaimKey(runtimeID string) string     { return emptyClaimCachePrefix + runtimeID }
+func emptyClaimVersion(runtimeID string) string { return emptyClaimVersionPrefix + runtimeID }
 
 func (c *EmptyClaimCache) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, emptyClaimRedisTimeout)
@@ -133,17 +127,24 @@ func (c *EmptyClaimCache) IsEmpty(ctx context.Context, runtimeID string) bool {
 	}
 	bctx, cancel := c.bounded(ctx)
 	defer cancel()
-	// MGET returns []interface{} of either the value (string) or nil.
-	vals, err := c.rdb.MGet(bctx, emptyClaimKey(runtimeID), emptyClaimVersion(runtimeID)).Result()
+	// Keep the established key names so old and new replicas exchange the same
+	// invalidation signal during rolling deploys. They land in different Redis
+	// Cluster slots, so issue two GETs in one pipeline instead of using MGET.
+	// An atomic snapshot is unnecessary: versions only increase, and enqueue
+	// completes Bump before waking the daemon. A claim triggered by that wakeup
+	// therefore observes the new version regardless of GET execution order.
+	pipe := c.rdb.Pipeline()
+	emptyCmd := pipe.Get(bctx, emptyClaimKey(runtimeID))
+	versionCmd := pipe.Get(bctx, emptyClaimVersion(runtimeID))
+	if _, err := pipe.Exec(bctx); err != nil && !errors.Is(err, redis.Nil) {
+		slog.Warn("empty_claim_cache: pipelined get failed; falling back to DB", "error", err)
+		return false
+	}
+	emptyVer, err := emptyCmd.Result()
 	if err != nil {
-		slog.Warn("empty_claim_cache: mget failed; falling back to DB", "error", err)
-		return false
-	}
-	if len(vals) != 2 || vals[0] == nil {
-		return false
-	}
-	emptyVer, ok := vals[0].(string)
-	if !ok {
+		if !errors.Is(err, redis.Nil) {
+			slog.Warn("empty_claim_cache: empty verdict get failed; falling back to DB", "error", err)
+		}
 		return false
 	}
 	// A missing version key means "no enqueue has ever bumped this
@@ -152,10 +153,11 @@ func (c *EmptyClaimCache) IsEmpty(ctx context.Context, runtimeID string) bool {
 	// must match here, otherwise the fast path would never trigger
 	// for fresh runtimes.
 	curVer := "0"
-	if vals[1] != nil {
-		if s, ok := vals[1].(string); ok {
-			curVer = s
-		}
+	if version, err := versionCmd.Result(); err == nil {
+		curVer = version
+	} else if !errors.Is(err, redis.Nil) {
+		slog.Warn("empty_claim_cache: version get failed; falling back to DB", "error", err)
+		return false
 	}
 	return emptyVer == curVer
 }

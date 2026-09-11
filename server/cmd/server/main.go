@@ -80,20 +80,6 @@ func redisClientName(existing, suffix string) string {
 	return "multica-api:" + suffix
 }
 
-func channelLeaseRedisURLFromEnv() string {
-	if dedicated := strings.TrimSpace(os.Getenv("CHANNEL_WS_LEASE_REDIS_URL")); dedicated != "" {
-		return dedicated
-	}
-	return strings.TrimSpace(os.Getenv("REDIS_URL"))
-}
-
-func realtimeRelayRedisURLFromEnv() string {
-	if dedicated := strings.TrimSpace(os.Getenv("REALTIME_RELAY_REDIS_URL")); dedicated != "" {
-		return dedicated
-	}
-	return strings.TrimSpace(os.Getenv("REDIS_URL"))
-}
-
 func closeRedisClient(label string, client redis.UniversalClient) {
 	if client == nil {
 		return
@@ -134,6 +120,13 @@ func realtimeRelayModeFromEnv() string {
 		slog.Warn("invalid env var, using default", "name", "REALTIME_RELAY_MODE", "value", raw, "default", defaultMode)
 		return defaultMode
 	}
+}
+
+func validateRealtimeRelayMode(mode string, clusterMode bool) error {
+	if clusterMode && mode != "sharded" {
+		return fmt.Errorf("REALTIME_RELAY_MODE=%s is incompatible with REDIS_CLUSTER_MODE=true; use sharded mode", mode)
+	}
+	return nil
 }
 
 func envPositiveInt(name string, def int) int {
@@ -431,8 +424,8 @@ func main() {
 	// is the sole broadcaster and the server stays single-node (legacy).
 	// Runtime local-skill stores and realtime relay traffic use separate Redis
 	// clients so blocking stream consumers cannot starve request-path Redis
-	// operations. Channel leases are initialized separately below so production
-	// can point them at a dedicated no-eviction Redis instance.
+	// operations. Channel leases are initialized separately below from the same
+	// global Redis configuration.
 	relayCtx, relayCancel := context.WithCancel(context.Background())
 	var broadcaster realtime.Broadcaster = hub
 	var storeRedis redis.UniversalClient
@@ -478,13 +471,12 @@ func main() {
 		closeRedisClient("store", storeRedis)
 	}()
 	sharedRedisURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
-	relayRedisURL := realtimeRelayRedisURLFromEnv()
 	redisClusterMode := envBool("REDIS_CLUSTER_MODE", false)
 	// Main parses shared options instead of using database.NewRedisClient so it
 	// can create separate role-specific pools. Request-path clients must also
 	// survive a transient startup outage; relay and lease components own their
 	// existing bounded readiness probes and failure policies.
-	if (sharedRedisURL != "" || relayRedisURL != "") && envBool("REDIS_DISABLE_CLIENT_NAME", false) {
+	if sharedRedisURL != "" && envBool("REDIS_DISABLE_CLIENT_NAME", false) {
 		slog.Info("redis: CLIENT SETNAME disabled (REDIS_DISABLE_CLIENT_NAME=true) for managed Redis compatibility")
 	}
 	if sharedRedisURL != "" {
@@ -495,14 +487,18 @@ func main() {
 			storeRedisPoolSize = opts.PoolSize
 		}
 	}
-	if relayRedisURL != "" {
-		opts, err := database.NewRedisOptions(database.RedisConfig{URL: relayRedisURL, ClusterMode: redisClusterMode})
+	if sharedRedisURL != "" {
+		opts, err := database.NewRedisOptions(database.RedisConfig{URL: sharedRedisURL, ClusterMode: redisClusterMode})
 		if err != nil {
-			slog.Error("invalid realtime relay Redis URL — falling back to in-memory hub", "error", err)
+			slog.Error("invalid REDIS_URL — realtime relay falling back to in-memory hub", "error", err)
 		} else {
+			relayMode := realtimeRelayModeFromEnv()
+			if err := validateRealtimeRelayMode(relayMode, redisClusterMode); err != nil {
+				slog.Error("invalid realtime relay configuration", "error", err)
+				os.Exit(1)
+			}
 			relayWriteRedis = newNamedRedisClient(opts, "realtime-write")
 
-			relayMode := realtimeRelayModeFromEnv()
 			relayConfig := shardedRelayConfigFromEnv()
 			switch relayMode {
 			case "legacy":
@@ -556,7 +552,6 @@ func main() {
 				"realtime: Redis relay enabled",
 				"node_id", relay.NodeID(),
 				"mode", relayMode,
-				"dedicated_instance", strings.TrimSpace(os.Getenv("REALTIME_RELAY_REDIS_URL")) != "",
 				"shards", relayConfig.Shards,
 				"stream_max_len", relayConfig.StreamMaxLen,
 				"replay_grace", relayConfig.ReplayGrace.String(),
@@ -571,13 +566,12 @@ func main() {
 			)
 		}
 	} else {
-		slog.Info("realtime: REDIS_URL and REALTIME_RELAY_REDIS_URL are unset — using in-memory hub (single-node mode)")
+		slog.Info("realtime: REDIS_URL is unset — using in-memory hub (single-node mode)")
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("CHANNEL_WS_LEASE_BACKEND")), "redis") {
-		leaseRedisURL := channelLeaseRedisURLFromEnv()
-		if leaseRedisURL == "" {
-			slog.Error("channel leases: CHANNEL_WS_LEASE_REDIS_URL and REDIS_URL are unset")
-		} else if opts, err := database.NewRedisOptions(database.RedisConfig{URL: leaseRedisURL, ClusterMode: redisClusterMode}); err != nil {
+		if sharedRedisURL == "" {
+			slog.Error("channel leases: REDIS_URL is unset")
+		} else if opts, err := database.NewRedisOptions(database.RedisConfig{URL: sharedRedisURL, ClusterMode: redisClusterMode}); err != nil {
 			slog.Error("channel leases: invalid Redis URL; supervisor will fail closed", "error", err)
 		} else {
 			channelLeaseRedis = newNamedRedisClient(opts, "channel-lease")
