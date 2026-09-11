@@ -23,6 +23,11 @@ import type { useT } from "../i18n";
 // sends the user to reconnect something that is already connected. The fix is a
 // reinstall on that machine, and the system comment the server leaves on the
 // issue carries the exact command.
+//
+// `runtime_access_denied` is the fourth member of that family (PUCK-89): the
+// target is permitted but its agent owner cannot execute it on the selected
+// private runtime. No retry helps — the fix is making the runtime public or
+// rebinding/copying the agent to a runtime its owner can use.
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
 // Full sentence — for tooltips and other surfaces with room to explain.
@@ -38,6 +43,8 @@ export function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
       return t(($) => $.comment.trigger_blocked_runtime_unusable);
     case "agent_runtime_required":
       return t(($) => $.comment.trigger_blocked_agent_runtime_required);
+    case "runtime_access_denied":
+      return t(($) => $.comment.trigger_blocked_runtime_access_denied);
     default:
       return t(($) => $.comment.trigger_blocked_generic);
   }
@@ -57,6 +64,8 @@ export function blockedShortReasonLabel(reasonCode: string, t: IssuesT): string 
       return t(($) => $.comment.trigger_blocked_short_runtime_unusable);
     case "agent_runtime_required":
       return t(($) => $.comment.trigger_blocked_short_agent_runtime_required);
+    case "runtime_access_denied":
+      return t(($) => $.comment.trigger_blocked_short_runtime_access_denied);
     default:
       return t(($) => $.comment.trigger_blocked_short_generic);
   }

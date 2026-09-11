@@ -1,3 +1,5 @@
+import { RUNTIME_ACCESS_DENIED_RECOVERY_COPY } from "./runtime-access-copy";
+
 /**
  * Mirror of `packages/views/agents/components/tabs/task-failure.ts:REASON_LABEL`.
  *
@@ -29,6 +31,7 @@ const LABELS: Record<string, string> = {
   skill_bundle_unavailable: "Couldn't download the agent's skills",
   runtime_cli_timeout: "Local runtime CLI timed out",
   environment_prepare_failed: "Couldn't prepare the execution environment",
+  runtime_access_denied: RUNTIME_ACCESS_DENIED_RECOVERY_COPY,
 
   // Agent process side — provider.
   "agent_error.provider_auth_or_access": "Provider auth failed",

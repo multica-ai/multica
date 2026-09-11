@@ -16,6 +16,9 @@ describe("runFailureBadgeLabel", () => {
     expect(runFailureBadgeLabel("environment_prepare_failed")).toBe(
       "Environment setup failed",
     );
+    expect(runFailureBadgeLabel("runtime_access_denied")).toBe(
+      "No runtime access",
+    );
   });
 
   it("keeps the pre-MUL-1949 coarse values readable", () => {

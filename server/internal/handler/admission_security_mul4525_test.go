@@ -59,6 +59,10 @@ func TestSendChatMessage_InvokeRevokedAfterSessionCreate(t *testing.T) {
 	}
 	ctx := context.Background()
 	ownerID := seedSecurityTestOwner(t, "chat-agent-owner")
+	runtimeID := createCascadeFixtureRuntime(t, ctx, "Chat revoke runtime")
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET visibility = 'public' WHERE id = $1`, runtimeID); err != nil {
+		t.Fatalf("make runtime public: %v", err)
+	}
 
 	// public_to agent owned by someone else, with testUserID on its member
 	// allow-list — so testUserID may invoke it while it is public_to.
@@ -69,7 +73,7 @@ func TestSendChatMessage_InvokeRevokedAfterSessionCreate(t *testing.T) {
 			instructions, custom_env, custom_args)
 		VALUES ($1, 'chat-revoke-agent', '', 'cloud', '{}'::jsonb, $2, 'private', 'public_to', 1, $3,
 			'', '{}'::jsonb, '[]'::jsonb)
-		RETURNING id`, testWorkspaceID, handlerTestRuntimeID(t), ownerID).Scan(&agentID); err != nil {
+		RETURNING id`, testWorkspaceID, runtimeID, ownerID).Scan(&agentID); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID) })

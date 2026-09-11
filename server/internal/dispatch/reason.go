@@ -39,6 +39,11 @@ const (
 	// machine is already on, and the fix is a command the user runs on it, which
 	// the daemon reports with this verdict so clients can show it.
 	ReasonRuntimeUnusable ReasonCode = "runtime_unusable"
+	// ReasonRuntimeAccessDenied: the target is permitted, but its agent owner
+	// cannot execute it on the private runtime selected for the task. This is
+	// distinct from invocation_not_allowed: the caller may invoke the agent,
+	// while the runtime/agent ownership binding still prevents execution.
+	ReasonRuntimeAccessDenied ReasonCode = "runtime_access_denied"
 	// ReasonAgentRuntimeRequired: the target is permitted but bound to no
 	// runtime at all (agent.runtime_id IS NULL), which is where an agent lands
 	// when its runtime is deleted (MUL-5559). Distinct from runtime_offline on

@@ -1,3 +1,5 @@
+import { RUNTIME_ACCESS_DENIED_BADGE } from "./runtime-access-copy";
+
 /**
  * Short badge copy for a run's `failure_reason`, shown inline on the agent-runs
  * row next to the status word and a timestamp.
@@ -28,6 +30,7 @@ const FAILURE_REASON_BADGE: Record<string, string> = {
   skill_bundle_unavailable: "Skill download failed",
   runtime_cli_timeout: "Runtime CLI timeout",
   environment_prepare_failed: "Environment setup failed",
+  runtime_access_denied: RUNTIME_ACCESS_DENIED_BADGE,
 
   "agent_error.provider_auth_or_access": "Auth failed",
   "agent_error.provider_quota_limit": "Quota exhausted",
