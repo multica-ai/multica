@@ -67,6 +67,20 @@ var patterns = []secretPattern{
 	// Connection strings with embedded passwords
 	{regexp.MustCompile(`(?i)(?:postgres|mysql|mongodb|redis|amqp)(?:ql)?://[^:\s]+:[^@\s]+@`), "[REDACTED CONNECTION STRING]@"},
 
+	// Any other URL carrying credentials in its userinfo, which the database
+	// schemes above do not cover. Package managers are the case in the field:
+	// an npm/pnpm registry spec can be https://user:token@registry/..., and
+	// both the tool and the registry echo the request URL back in their error
+	// output, so it reaches a log line by way of captured stdout rather than by
+	// anyone logging the spec itself.
+	//
+	// The scheme survives and the host does not: "https://[REDACTED]" would
+	// hide which registry failed, which is the one part of the URL an operator
+	// needs. Userinfo requires BOTH a colon and an @ before the next path
+	// separator, so "https://host:8080/p" and "ssh://git@host/p" are left
+	// alone.
+	{regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.\-]*)://[^/?#\s:@]+:[^/?#\s@]+@`), "$1://[REDACTED URL CREDENTIALS]@"},
+
 	// Generic key=value patterns for common secret env var names
 	{regexp.MustCompile(`(?i)(?:API_KEY|API_SECRET|SECRET_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD|DB_URL|REDIS_URL|PASSWORD|TOKEN)\s*[=:]\s*\S+`), "[REDACTED CREDENTIAL]"},
 }

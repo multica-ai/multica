@@ -240,6 +240,51 @@ func TestRedactConnectionString(t *testing.T) {
 	}
 }
 
+// A registry URL with credentials in its userinfo. The database schemes the
+// connection-string rule covers are not the only place this shape appears:
+// npm/pnpm accept https://user:token@registry/... as a package spec, and both
+// the package manager and the registry echo the request URL back in their error
+// output, which is how it reaches a log line.
+func TestRedactURLUserInfo(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		"npm ERR! 404 https://deploy:hunter2@registry.example.com/@acme/dsh-runtime",
+		"ERR_PNPM_FETCH_401 GET http://ci-bot:s3cr3t-token@npm.internal/@corp%2fdsh",
+		"fatal: could not read from git+https://someone:ghs_pat_value@example.com/repo.git",
+	} {
+		got := Text(input)
+		for _, secret := range []string{"hunter2", "s3cr3t-token", "ghs_pat_value"} {
+			if strings.Contains(got, secret) {
+				t.Errorf("credential survived in %q", got)
+			}
+		}
+		if !strings.Contains(got, "[REDACTED URL CREDENTIALS]") {
+			t.Errorf("expected the URL-credential placeholder, got: %s", got)
+		}
+	}
+
+	// The host has to survive: which registry refused the request is the part
+	// an operator reads, and it is not the secret.
+	if got := Text("npm ERR! 404 https://deploy:hunter2@registry.example.com/pkg"); !strings.Contains(got, "registry.example.com") {
+		t.Errorf("host was redacted along with the credential: %s", got)
+	}
+}
+
+// Userinfo needs both a colon and an @ before the next path separator. A port,
+// a scp-style git remote, and a bare timestamp must not trip the rule.
+func TestRedactURLUserInfoLeavesOrdinaryURLsIntact(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		"GET https://registry.example.com:8443/@acme/pkg failed",
+		"cloning ssh://git@github.com/multica-ai/multica.git",
+		"see https://example.com/a:b for details",
+	} {
+		if got := Text(input); got != input {
+			t.Errorf("Text(%q) = %q, want it unchanged", input, got)
+		}
+	}
+}
+
 func TestRedactPasswordEnvVar(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
