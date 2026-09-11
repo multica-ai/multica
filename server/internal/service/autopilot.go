@@ -986,11 +986,11 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	// rule version publisher (rule_owner, audit-only) when it has none, then to
 	// unattributed. An edit of the trigger does NOT move this: published_by
 	// transfers, created_by does not. Since MUL-6951 that human is the originator
-	// too, so an armed autopilot runs with its creator's authorization instead of
-	// borrowing narrowly-scoped capabilities per surface; the source label is what
-	// keeps "fired on a schedule" distinguishable from "a human clicked run". Either
-	// way evidence points at the autopilot run and the row is never a NULL-source
-	// bypass.
+	// too, so an armed autopilot runs with its created_by principal's authorization
+	// instead of borrowing narrowly-scoped capabilities per surface; the source
+	// label is what keeps "fired on a schedule" distinguishable from "a human
+	// clicked run". Either way evidence points at the autopilot run and the row is
+	// never a NULL-source bypass.
 	var autopilotAttr attribution.Result
 	if actorUserID.Valid {
 		autopilotAttr = attribution.DirectHumanRun(actorUserID, attribution.EvidenceAutopilotRun, run.ID)
