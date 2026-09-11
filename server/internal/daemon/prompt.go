@@ -131,13 +131,12 @@ func buildSharedLocalDirectoryBlock(shared bool) string {
 }
 
 // buildReusedWorkdirBlock tells a fresh session that its working directory
-// already holds an earlier run's files. Nothing else says so: the brief points
-// at `multica repo checkout` for fetching code, and on an existing checkout
-// that command runs `git reset --hard` and `git clean -fd` before branching
-// from the default branch, so following the brief would delete the
-// uncommitted work the reuse exists to keep. Per-turn, not in the brief: it is
-// true of this run only, and the brief must stay byte-stable across runs
-// (MUL-5377).
+// already holds an earlier run's files. Nothing else says so, and the brief
+// points at `multica repo checkout` for fetching code. That command keeps an
+// existing checkout holding work (MUL-7284), but a session that does not know
+// the work is there neither continues from it nor knows to leave `--fresh`
+// alone. Per-turn, not in the brief: it is true of this run only, and the brief
+// must stay byte-stable across runs (MUL-5377).
 func buildReusedWorkdirBlock(reused bool) string {
 	if !reused {
 		return ""
@@ -145,7 +144,7 @@ func buildReusedWorkdirBlock(reused bool) string {
 	var b strings.Builder
 	b.WriteString("## Files from an earlier run\n\n")
 	b.WriteString("Your working directory was kept from an earlier run, but this run does not continue that run's conversation, so you have no memory of what it did here. Repository checkouts in it may hold that work, including uncommitted changes.\n\n")
-	b.WriteString("Look before you fetch anything: list the working directory, and in each existing checkout run `git status` and `git log` to see what was changed. Continue from that work where it serves this task. Do not run `multica repo checkout` for a repository that is already checked out here unless you have confirmed nothing in it needs keeping — on an existing checkout it discards uncommitted changes, untracked files included, and starts a new branch from the default branch.\n\n")
+	b.WriteString("Look before you fetch anything: list the working directory, and in each existing checkout run `git status` and `git log` to see what was changed. Continue from that work where it serves this task. Running `multica repo checkout` for a repository that is already checked out here keeps that checkout as it is when it holds uncommitted changes, untracked files, or unpushed commits, and only fetches; pass `--fresh` only once you have confirmed nothing in it needs keeping, because it discards that work and starts a new branch from the default branch.\n\n")
 	return b.String()
 }
 

@@ -2073,9 +2073,10 @@ func TestWorktreeReplayConflictBlock(t *testing.T) {
 }
 
 // TestReusedWorkdirBlock covers the warning a fresh session gets when it lands
-// in an earlier run's workdir (MUL-7034): it must say the files are there and
-// that `multica repo checkout` would reset an existing checkout, and it is
-// appended per turn after the prompt body, never ahead of it. That it reaches
+// in an earlier run's workdir (MUL-7034): it must say the files are there, that
+// `multica repo checkout` keeps an existing checkout holding work, and that
+// `--fresh` discards it (MUL-7284). It is appended per turn after the prompt
+// body, never ahead of it. That it reaches
 // the backend's prompt and not the brief is pinned end to end by
 // TestRunTaskWarnsFreshSessionInReusedWorkdir.
 func TestReusedWorkdirBlock(t *testing.T) {
@@ -2101,8 +2102,8 @@ func TestReusedWorkdirBlock(t *testing.T) {
 				"## Files from an earlier run",
 				"no memory of what it did here",
 				"`git status`",
-				"Do not run `multica repo checkout` for a repository that is already checked out here",
-				"discards uncommitted changes",
+				"Running `multica repo checkout` for a repository that is already checked out here keeps that checkout as it is",
+				"pass `--fresh` only once you have confirmed nothing in it needs keeping",
 			} {
 				if !strings.Contains(block, want) {
 					t.Fatalf("warning missing %q:\n%s", want, block)
