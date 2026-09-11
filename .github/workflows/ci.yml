@@ -510,7 +510,16 @@ jobs:
   # what its change touched. Only pushes to main publish a build-cache entry;
   # PR runs restore and leave, which keeps storage churn at one entry per
   # merge, the same shape as the turbo caches above. The key carries the
-  # resolved Go version because `check-latest` floats across patch releases.
+  # resolved Go version because `check-latest` floats across patch releases,
+  # and the runner image (ImageOS) because cached cgo and race objects are
+  # linked against that image's glibc: when ubuntu-latest moves to a new
+  # release, an entry built on the old one must not be restored. setup-go
+  # keys on ImageOS for the same reason (actions/setup-go#368).
+  #
+  # This job is the only writer of either entry. backend-agent-tests restores
+  # both, but it downloads just pkg/agent's slice of the module graph and
+  # finishes first, so letting it save would repeat the first-writer-wins
+  # problem above: an immutable go.sum key pinned to a partial module cache.
   #
   # Every compile below runs in race mode so build, vet and test share one set
   # of objects. A plain `go build` fed nothing to the -race test binaries and
@@ -584,14 +593,20 @@ jobs:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('server/go.sum') }}
 
+      # ImageOS is a runner environment variable, not a context value, so a
+      # shell step spells the build-cache key prefix once for restore and save.
+      - name: Resolve Go build cache key
+        id: gocache
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: echo "prefix=go-build-race-${{ runner.os }}-${{ runner.arch }}-$ImageOS-${{ steps.go.outputs.go-version }}-" >> "$GITHUB_OUTPUT"
+
       - name: Restore Go build cache
         if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
-          key: go-build-race-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
-          restore-keys: |
-            go-build-race-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+          key: ${{ steps.gocache.outputs.prefix }}${{ github.sha }}
+          restore-keys: ${{ steps.gocache.outputs.prefix }}
 
       - name: Setup Helm
         if: ${{ needs.changes.outputs.backend == 'true' }}
@@ -637,15 +652,15 @@ jobs:
         run: bash scripts/test-go.sh --race --only regular
 
       # Publishes from main only; see the job comment. `!cancelled()` so a red
-      # main still refreshes the objects for the next run, and the Setup Go
+      # main still refreshes the objects for the next run, and the key step's
       # outcome so a run that never reached Go does not save an empty entry
       # under a half-formed key.
       - name: Save Go build cache
-        if: ${{ !cancelled() && github.event_name == 'push' && steps.go.outcome == 'success' }}
+        if: ${{ !cancelled() && github.event_name == 'push' && steps.gocache.outcome == 'success' }}
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/go-build
-          key: go-build-race-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
+          key: ${{ steps.gocache.outputs.prefix }}${{ github.sha }}
 
   # pkg/agent used to run as the tail of backend-tests: ~2m20s for a single
   # package, throttled to -parallel 2 because its subprocess-backed tests carry
@@ -653,9 +668,10 @@ jobs:
   # scripts/test-go.sh). Those tests are timer-bound rather than CPU-bound, so
   # the throttle stays and the package simply gets its own runner; it reads no
   # database, so no service containers either. Same trade as the frontend
-  # split: more runner-minutes, less wall clock. The build cache is restored
-  # but never saved here: backend-tests owns publishing, and this job's only
-  # unique output is the pkg/agent test binary, which is cheap to relink.
+  # split: more runner-minutes, less wall clock. Both Go caches are restored
+  # but never saved here: backend-tests owns publishing (see its comment), and
+  # this job's only unique output is the pkg/agent test binary, which is cheap
+  # to relink.
   backend-agent-tests:
     needs: changes
     runs-on: ubuntu-latest
@@ -678,19 +694,24 @@ jobs:
 
       - name: Restore Go module cache
         if: ${{ needs.changes.outputs.backend == 'true' }}
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('server/go.sum') }}
+
+      # Must match backend-tests' key step exactly.
+      - name: Resolve Go build cache key
+        id: gocache
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: echo "prefix=go-build-race-${{ runner.os }}-${{ runner.arch }}-$ImageOS-${{ steps.go.outputs.go-version }}-" >> "$GITHUB_OUTPUT"
 
       - name: Restore Go build cache
         if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build
-          key: go-build-race-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
-          restore-keys: |
-            go-build-race-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+          key: ${{ steps.gocache.outputs.prefix }}${{ github.sha }}
+          restore-keys: ${{ steps.gocache.outputs.prefix }}
 
       - name: Test agent package
         if: ${{ needs.changes.outputs.backend == 'true' }}
