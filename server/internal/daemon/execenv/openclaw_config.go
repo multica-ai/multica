@@ -581,6 +581,8 @@ func buildPerTaskOpenclawConfig(activePath string, exists bool, resetPath string
 		if rewritten := rewriteAgentsListWorkspaces(resolvedList, workDir); rewritten != nil {
 			agents["list"] = rewritten
 		}
+	} else if rewritten := rewriteAgentsEntriesWorkspaces(resolvedList, workDir); rewritten != nil {
+		agents["entries"] = rewritten
 	}
 	cfg := map[string]any{
 		"agents": agents,
@@ -650,6 +652,32 @@ func buildGatewayOverride(p OpenclawGatewayPin) map[string]any {
 		return nil
 	}
 	return out
+}
+
+func rewriteAgentsEntriesWorkspaces(list []any, workDir string) map[string]any {
+	entries := make(map[string]any)
+	for _, item := range list {
+		entry, ok := item.(map[string]any)
+		if !ok || entry["__multica_entries_source"] != true {
+			return nil
+		}
+		id, ok := entry["__multica_entries_key"].(string)
+		if !ok || id == "" {
+			return nil
+		}
+		copyEntry := make(map[string]any, len(entry))
+		for key, value := range entry {
+			if key != "__multica_entries_key" && key != "__multica_entries_source" {
+				copyEntry[key] = value
+			}
+		}
+		copyEntry["workspace"] = workDir
+		entries[id] = copyEntry
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	return entries
 }
 
 // rewriteAgentsListWorkspaces copies every entry of the resolved agents.list
@@ -1132,8 +1160,9 @@ func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, bool,
 	out, err := openclawExec(ctx, bin, "config", "get", "agents.list", "--json")
 	if err != nil {
 		if isOpenclawKeyMissingResult(out, err, "agents.list") {
-			// New schema: the config path is gone; the agents live in the
-			// sqlite registry. Resolve them via the subcommand instead.
+			if openclawUnknownConfigPath(out, err, "agents.list") {
+				return openclawResolvedAgentsEntriesOrRegistry(bin, timeout)
+			}
 			list, rerr := openclawRegistryAgentsList(bin, timeout)
 			return list, true, rerr
 		}
@@ -1148,7 +1177,10 @@ func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, bool,
 	// key here is what selects the registry, so letting the envelope through
 	// as data would turn a graceful fallback into a failed preparation.
 	if message, isEnvelope := openclawJSONErrorMessage(trimmed); isEnvelope {
-		if strings.Contains(strings.ToLower(message), "agents.list") && isOpenclawKeyMissingMessage(message) {
+		if openclawKeyMissingMessageForPath(message, "agents.list") {
+			if openclawUnknownConfigPathMessage(message, "agents.list") {
+				return openclawResolvedAgentsEntriesOrRegistry(bin, timeout)
+			}
 			list, rerr := openclawRegistryAgentsList(bin, timeout)
 			return list, true, rerr
 		}
@@ -1159,6 +1191,49 @@ func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, bool,
 		return nil, false, fmt.Errorf("parse `openclaw config get agents.list --json` output: %w", err)
 	}
 	return list, false, nil
+}
+
+func openclawResolvedAgentsEntriesOrRegistry(bin string, timeout time.Duration) ([]any, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	out, err := openclawExec(ctx, bin, "config", "get", "agents.entries", "--json")
+	if err != nil {
+		if isOpenclawKeyMissingResult(out, err, "agents.entries") {
+			list, rerr := openclawRegistryAgentsList(bin, timeout)
+			return list, true, rerr
+		}
+		return nil, false, annotateOpenclawJSONError(err, out)
+	}
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" || trimmed == "null" {
+		return nil, false, nil
+	}
+	if message, isEnvelope := openclawJSONErrorMessage(trimmed); isEnvelope {
+		if openclawKeyMissingMessageForPath(message, "agents.entries") {
+			list, rerr := openclawRegistryAgentsList(bin, timeout)
+			return list, true, rerr
+		}
+		return nil, false, openclawStdoutEnvelopeError("config get agents.entries --json", message)
+	}
+	var entries map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &entries); err != nil {
+		return nil, false, fmt.Errorf("parse `openclaw config get agents.entries --json` output: %w", err)
+	}
+	list := make([]any, 0, len(entries))
+	for id, raw := range entries {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			return nil, false, fmt.Errorf("parse `openclaw config get agents.entries --json` output: entry %q is not an object", id)
+		}
+		copyEntry := make(map[string]any, len(entry)+2)
+		for key, value := range entry {
+			copyEntry[key] = value
+		}
+		copyEntry["__multica_entries_key"] = id
+		copyEntry["__multica_entries_source"] = true
+		list = append(list, copyEntry)
+	}
+	return list, true, nil
 }
 
 // openclawRegistryAgentsList resolves agents from the sqlite-backed registry
@@ -1524,6 +1599,19 @@ func isOpenclawKeyMissingResult(stdout string, err error, keyPath string) bool {
 		return false
 	}
 	return openclawKeyMissingMessageForPath(message, keyPath)
+}
+
+func openclawUnknownConfigPath(stdout string, err error, keyPath string) bool {
+	if message, ok := openclawJSONErrorMessage(stdout); ok {
+		return openclawUnknownConfigPathMessage(message, keyPath)
+	}
+	return err != nil && openclawUnknownConfigPathMessage(err.Error(), keyPath)
+}
+
+func openclawUnknownConfigPathMessage(message, keyPath string) bool {
+	message = strings.ToLower(strings.Join(strings.Fields(message), " "))
+	keyPath = strings.ToLower(strings.TrimSpace(keyPath))
+	return keyPath != "" && openclawMessageNamesPathAfter(message, "unknown config path: ", keyPath)
 }
 
 func openclawKeyMissingMessageForPath(message, keyPath string) bool {
