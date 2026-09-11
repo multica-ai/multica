@@ -64,6 +64,7 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
     resolved_by_type: c.resolved_by_type,
     resolved_by_id: c.resolved_by_id,
     source_task_id: c.source_task_id,
+    deleted_at: c.deleted_at,
   };
 }
 
@@ -204,8 +205,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         if (issue_id !== issueId) return;
         qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
           if (!old) return old;
-          // Cascade through replies (full timeline now lives in this single
-          // cache, so a flat sweep is sufficient).
+          // A comment with replies is tombstoned (comment:updated), never
+          // removed, so any cached reply of a removed comment is stale: older
+          // servers cascaded the delete to every descendant. Sweep them too
+          // (the full timeline lives in this single cache).
           const idsToRemove = new Set<string>([comment_id]);
           let changed = true;
           while (changed) {

@@ -2,6 +2,7 @@ import { CheckCircle2, ChevronRight } from "lucide-react";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Card } from "@multica/ui/components/ui/card";
 import type { TimelineEntry } from "@multica/core/types";
+import { isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { useT } from "../../i18n";
 
 interface ResolvedThreadBarProps {
@@ -21,6 +22,7 @@ const MAX_NAMED_AUTHORS = 2;
 
 // Distinct authors across `entries`, first-seen order, collapsed to a label
 // ("Alice", "Alice, Bob", "Alice, Bob and 2 others"). Shared by both bars.
+// Deleted comments name no author.
 function useAuthorsLabel(entries: TimelineEntry[]): string {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
@@ -28,6 +30,7 @@ function useAuthorsLabel(entries: TimelineEntry[]): string {
   const seen = new Set<string>();
   const authors: Array<{ type: string; id: string; name?: string }> = [];
   for (const e of entries) {
+    if (isDeletedComment(e)) continue;
     const key = `${e.actor_type}:${e.actor_id}`;
     if (seen.has(key)) continue;
     seen.add(key);
