@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { MessageSquarePlus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { MAX_ANNOTATION_QUOTE_LENGTH, MAX_REPLY_ANNOTATIONS } from "@multica/core/drafts/reply-annotation";
@@ -39,6 +40,10 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
   const annotations = useCommentDraftStore((s) => s.getAnnotations(draftKey));
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
+  const sourcesRef = useRef(sources);
+  sourcesRef.current = sources;
+  const onAddedRef = useRef(onAdded);
+  onAddedRef.current = onAdded;
   const anchorKey = annotations.map((a) => a.id).join(",");
   const editing = annotations.find((a) => a.id === editingId);
   const highlightName = `reply-annotation-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`;
@@ -50,11 +55,11 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
     }
     setSelection(null); setEditingId(null); setError(false);
   };
-  const readSelection = () => {
+  const readSelection = useCallback(() => {
     if (!enabled || !cardRef.current) return null;
     const captured = captureCommentSelection(cardRef.current, window.getSelection(), editable);
-    return captured && sources.some((source) => source.id === captured.sourceCommentId) ? captured : null;
-  };
+    return captured && sourcesRef.current.some((source) => source.id === captured.sourceCommentId) ? captured : null;
+  }, [enabled, editable]);
   const capture = () => {
     const captured = readSelection();
     if (captured) { setSelection(captured); setEditingId(null); setError(false); }
@@ -95,6 +100,10 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
   }, [editingId]);
 
   useEffect(() => {
+    if (!anchorKey) {
+      setAnchors((current) => current.length ? [] : current);
+      return;
+    }
     if (!enabled || !cardRef.current) return;
     const card = cardRef.current;
     const canHighlight = typeof Highlight !== "undefined" && typeof CSS !== "undefined" && !!CSS.highlights;
@@ -104,7 +113,7 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
         const range = root && annotationRange(root, a, editable);
         return root && range ? [{ id: a.id, range, root }] : [];
       });
-      setAnchors(next);
+      setAnchors((current) => !current.length && !next.length ? current : next);
       // Expanding a resolved thread may remount the selected comment's body.
       // Keep the note editor attached to its saved quote, never a detached Range.
       setSelection((current) => {
@@ -147,27 +156,38 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
     return true;
   };
 
-  const add = (captured = selection) => {
-    if (!captured) return;
-    const source = sources.find((e) => e.id === captured.sourceCommentId);
-    if (!source) { close(); return; }
+  const add = useCallback((captured: CapturedSelection | null) => {
+    const source = captured && sourcesRef.current.find((e) => e.id === captured.sourceCommentId);
+    if (!captured || !source) {
+      toast.error(t(($) => $.reply.annotations.selection_failed));
+      return false;
+    }
     const { quote, start, prefix, suffix, sourceCommentId } = captured;
-    setSelection(captured);
     const id = useCommentDraftStore.getState().addAnnotation(draftKey, {
       id: crypto.randomUUID(), sourceCommentId,
       sourceActorName: source.name,
       sourceRevision: source.revision, quote, start, prefix, suffix, note: "",
     });
-    if (!id) { setError(true); return; }
+    if (!id) {
+      setError(true);
+      toast.error(captured.quote.length > MAX_ANNOTATION_QUOTE_LENGTH
+        ? t(($) => $.reply.annotations.quote_limit, { count: MAX_ANNOTATION_QUOTE_LENGTH })
+        : t(($) => $.reply.annotations.count_limit, { count: MAX_REPLY_ANNOTATIONS }));
+      return false;
+    }
+    setSelection(captured);
     setEditingId(id);
+    setError(false);
     window.getSelection()?.removeAllRanges();
-    onAdded?.();
-  };
+    onAddedRef.current?.();
+    return true;
+  }, [draftKey, t]);
+  const addSelection = useCallback(() => add(readSelection()), [add, readSelection]);
 
   return {
     cardRef,
     editAnnotation,
-    addSelection: () => add(readSelection()),
+    addSelection,
     captureProps: {
       "data-annotation-thread": draftKey,
       onPointerUp: (event: React.PointerEvent) => {
@@ -216,7 +236,7 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
                 close(true);
               }}><Trash2 /></Button>
             </> : <Button ref={actionRef} variant="ghost" size="sm"
-              onMouseDown={(event) => event.preventDefault()} onClick={() => add()}>
+              onMouseDown={(event) => event.preventDefault()} onClick={() => add(selection)}>
               <MessageSquarePlus />{t(($) => editable ? $.reply.annotations.add_comment : $.reply.annotations.add)}
             </Button>}
         </div>

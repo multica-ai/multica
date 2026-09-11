@@ -1378,6 +1378,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     enabled: !!user && !!issue,
     editable: true,
   });
+  const canAnnotateDescription = !!user;
+  const descriptionSelectionAction = useMemo(() => canAnnotateDescription ? {
+    label: t(($) => $.reply.annotations.add_comment),
+    onSelect: descriptionAnnotations.addSelection,
+  } : undefined, [canAnnotateDescription, t, descriptionAnnotations.addSelection]);
   const openCommentSubIssue = useCallback((commentId: string) => {
     if (!issue) return;
     openModal("quick-create-issue", {
@@ -3034,7 +3039,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             }}
           >
             {descriptionAnnotations.popup}
-            <div data-comment-content={descriptionSourceId} tabIndex={0}>
+            <div data-comment-content={descriptionSourceId}>
               <ContentEditor
                 ref={descEditorRef}
                 key={id}
@@ -3074,10 +3079,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 // the image markdown and its attachment_ids bind (MUL-3254).
                 flushPendingOnUnmount
                 currentIssueId={id}
-                selectionAction={user ? {
-                  label: t(($) => $.reply.annotations.add_comment),
-                  onSelect: descriptionAnnotations.addSelection,
-                } : undefined}
+                selectionAction={descriptionSelectionAction}
                 attachments={descEditorAttachments}
               />
             </div>

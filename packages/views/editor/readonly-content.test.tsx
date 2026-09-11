@@ -138,6 +138,20 @@ describe("ReadonlyContent line breaks", () => {
 });
 
 describe("ReadonlyContent annotated replies", () => {
+  it.each([
+    "steps:\n  - name: build\n    run: make\n  - name: test\n    run: make test",
+    "Summary\n---\nDetails\n===",
+    "5. alpha\n6) beta\n+ added\n- removed\n    indented code",
+  ])("preserves literal block markers and indentation in a selected quote: %s", (text) => {
+    const { container } = render(<ReadonlyContent content={composeAnnotatedReply("", [{
+      id: "literal", sourceCommentId: "source", sourceActorName: "Agent",
+      quote: text, note: "Keep the source intact", start: 0, prefix: "", suffix: "",
+    }])} />);
+    const quote = container.querySelector("blockquote")!;
+    expect(quote.querySelector("ul, ol, li, h1, h2, hr, pre")).toBeNull();
+    expect(quote.textContent?.replace(/\u00a0/g, " ").trim()).toBe(text);
+  });
+
   it.each(["A note", ""])("keeps a visible blank paragraph between annotations (note: %s)", (note) => {
     const first = {
       id: "first", sourceCommentId: "source", sourceActorName: "Agent",

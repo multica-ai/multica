@@ -4,6 +4,10 @@ import { useCommentDraftStore } from "@multica/core/issues/stores";
 import type { TimelineEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { useCommentAnnotations } from "./use-comment-annotations";
+import { Profiler } from "react";
+import { toast } from "sonner";
+
+vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 const entry: TimelineEntry = { type: "comment", id: "root", actor_type: "agent", actor_id: "emacs", content: "Selected text", created_at: "2026-09-10T00:00:00Z" };
 const key = "reply:issue:root" as const;
@@ -67,6 +71,27 @@ beforeEach(() => {
 });
 
 describe("selection to reply", () => {
+  it.each([false, true])("does not rerender the host when unannotated source text changes (description: %s)", async (description) => {
+    const onRender = vi.fn();
+    const { container } = renderWithI18n(<Profiler id="host" onRender={onRender}>
+      {description ? <DescriptionFixture /> : <Fixture />}
+    </Profiler>);
+    const count = onRender.mock.calls.length;
+    const source = container.querySelector(description ? "[contenteditable]" : "[data-comment-content]")!;
+    for (let i = 0; i < 10; i++) {
+      await act(async () => { source.firstChild!.textContent += "x"; });
+    }
+    expect(onRender).toHaveBeenCalledTimes(count);
+  });
+
+  it("reports an uncapturable description selection without adding a draft", () => {
+    renderWithI18n(<DescriptionFixture />);
+    window.getSelection()?.removeAllRanges();
+    fireEvent.click(screen.getByRole("button", { name: "Add to comment" }));
+    expect(toast.error).toHaveBeenCalledWith("Could not capture the selection. Select text within one comment or description and try again.");
+    expect(useCommentDraftStore.getState().getAnnotations("new:issue")).toHaveLength(0);
+  });
+
   it.each([false, true])("removes a saved annotation at its source and preserves the rest of the draft (description: %s)", async (description) => {
     const draftKey = description ? "new:issue" as const : key;
     const sourceId = description ? "description:issue" : "root";

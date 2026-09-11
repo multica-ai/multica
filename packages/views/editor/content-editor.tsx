@@ -172,7 +172,7 @@ interface ContentEditorBaseProps {
   /** Show the floating formatting toolbar on text selection. Defaults true. */
   showBubbleMenu?: boolean;
   /** Additional non-editing action for the current text selection. */
-  selectionAction?: { label: string; onSelect: () => void };
+  selectionAction?: { label: string; onSelect: () => boolean | void };
   /**
    * ID of the issue this editor belongs to. When set, the bubble menu exposes
    * a "Create sub-issue from selection" action that parents the new issue

@@ -382,6 +382,9 @@ describe("comment thread — selection reply", () => {
     const child: TimelineEntry = { ...entry, id: "agent-child", parent_id: entry.id, actor_type: actorType, actor_id: actorId, comment_type: commentType, content: "Selected agent text" };
     const { container } = renderCard(undefined, { replies: [child], onReply });
     const source = container.querySelector<HTMLElement>('[data-comment-content="agent-child"]')!;
+    expect(source).toHaveAttribute("role", "group");
+    expect(source.getAttribute("aria-label")).toMatch(/^Comment by .+/);
+    expect(source).toHaveAttribute("tabindex", "0");
     fireEvent.pointerDown(source);
     fireEvent.mouseDown(source);
     const range = document.createRange();

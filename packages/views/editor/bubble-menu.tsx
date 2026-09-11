@@ -499,12 +499,13 @@ function EditorBubbleMenu({
 }: {
   editor: Editor;
   currentIssueId?: string;
-  selectionAction?: { label: string; onSelect: () => void };
+  selectionAction?: { label: string; onSelect: () => boolean | void };
 }) {
   const { t } = useT("editor");
   const [visible, setVisible] = useState(false);
   const [mode, setMode] = useState<"toolbar" | "link-edit">("toolbar");
   const floatingRef = useRef<HTMLDivElement>(null);
+  const hasSelectionAction = !!selectionAction;
 
   // Precise subscription to formatting state — only re-renders when these
   // values actually change, not on every transaction.
@@ -550,11 +551,11 @@ function EditorBubbleMenu({
   useEffect(() => {
     const onTransaction = () => {
       if (!editor.isInitialized) return;
-      setVisible(shouldShowBubbleMenu(editor, !!selectionAction));
+      setVisible(shouldShowBubbleMenu(editor, hasSelectionAction));
     };
     editor.on("transaction", onTransaction);
     return () => { editor.off("transaction", onTransaction); };
-  }, [editor, selectionAction]);
+  }, [editor, hasSelectionAction]);
 
   // Hide on blur — debounced to allow focus to settle (e.g. clicking menu)
   useEffect(() => {
@@ -644,7 +645,7 @@ function EditorBubbleMenu({
                   <button type="button" className={toggleVariants({ size: "sm" })}
                     aria-label={selectionAction.label}
                     onClick={() => {
-                      selectionAction.onSelect();
+                      if (selectionAction.onSelect() === false) return;
                       // Keep later editor transactions from reopening the formatting
                       // toolbar over the annotation's note field. The text is untouched.
                       editor.commands.setTextSelection(editor.state.selection.to);

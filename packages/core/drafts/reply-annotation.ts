@@ -42,8 +42,15 @@ export function hasReplyIntent(content: string, annotations: readonly ReplyAnnot
  * rendered text. Escape ampersands first so source entities remain literal.
  */
 function quoteText(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/[<>\\`*_[\]{}()#!|~:$]/g,
-    (char) => `&#${char.charCodeAt(0)};`);
+  return text.replace(/&/g, "&amp;").replace(/[<>\\`*_[\]{}()#!|~:$+.=\-]/g,
+    (char) => `&#${char.charCodeAt(0)};`)
+    // Leading spaces must survive HTML whitespace collapsing and must not
+    // become Markdown list nesting or an indented code block. Tabs use 4 stops.
+    .replace(/^[ \t]+/, (indent) => {
+      let columns = 0;
+      for (const char of indent) columns += char === "\t" ? 4 - columns % 4 : 1;
+      return "&nbsp;".repeat(columns);
+    });
 }
 
 export function composeAnnotatedReply(content: string, annotations: readonly ReplyAnnotation[]): string {

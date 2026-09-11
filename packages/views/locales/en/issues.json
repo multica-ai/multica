@@ -574,7 +574,6 @@
       "add_comment": "Add to comment",
       "add": "Add to reply",
       "note_label": "Comment (optional)",
-      "count": "{{count}} annotations",
       "count_one": "{{count}} annotation",
       "count_other": "{{count}} annotations",
       "quote_limit": "Select up to {{count}} characters at a time.",
@@ -582,7 +581,9 @@
       "remove": "Remove annotation {{number}}",
       "source_changed": "The source changed or is unavailable. Your saved quote is kept.",
       "intent_hint": "Add a note to an annotation or write a message before sending.",
-      "target_deleted": "The reply target was deleted. Remove these annotations and select a new reply target.",
+      "target_deleted": "The reply target was deleted. Remove all annotations in this draft, then annotate a remaining comment to start a new reply.",
+      "selection_failed": "Could not capture the selection. Select text within one comment or description and try again.",
+      "source_label": "Comment by {{name}}",
       "edit": "Edit annotation {{number}}",
       "note_placeholder": "Add an optional comment…"
     }
