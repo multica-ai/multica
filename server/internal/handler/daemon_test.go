@@ -3210,10 +3210,10 @@ func createAutoRetryForTest(t *testing.T, ctx context.Context, parentID string) 
 // failure: a fresh session, the parent's workdir, and a disclosed continuity
 // gap. The retry row comes from the real CreateRetryTask so the query and the
 // claim are pinned together; the workdir reaches the daemon only when both
-// carry it (GH #7998). The workdir is offered only to a daemon that warns the
-// fresh session about the files it will find there; an older daemon keeps
-// getting a fresh directory, because unwarned its agent would re-run
-// `multica repo checkout` and reset the very checkout being kept. Contrast a
+// carry it (GH #7998). The workdir is offered only to a daemon whose
+// `multica repo checkout` keeps an existing checkout's work; an older daemon
+// keeps getting a fresh directory, because its checkout would reset the very
+// checkout being kept. Contrast a
 // force_fresh task with no retry lineage, which resumes nothing
 // (TestClaimTask_IssuePriorSessionRuntimeGuard).
 func TestClaimTask_AutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
@@ -3227,8 +3227,8 @@ func TestClaimTask_AutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
 		wantWorkDir  string
 	}{
 		{
-			name:         "daemon_warns_of_reused_workdir",
-			capabilities: protocol.DaemonCapabilityReusedWorkdirNoticeV1,
+			name:         "daemon_checkout_keeps_work",
+			capabilities: protocol.DaemonCapabilityCheckoutKeepsWorkV1,
 			wantWorkDir:  "/tmp/codex-stuck-workdir",
 		},
 		{
@@ -3315,7 +3315,7 @@ func TestClaimTask_ChatAutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
 	})
 	createAutoRetryForTest(t, ctx, parentID)
 
-	task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, protocol.DaemonCapabilityReusedWorkdirNoticeV1)
+	task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, protocol.DaemonCapabilityCheckoutKeepsWorkV1)
 	if task.PriorWorkDir != "/tmp/codex-stuck-chat-workdir" {
 		t.Fatalf("PriorWorkDir = %q, want the failed parent's /tmp/codex-stuck-chat-workdir", task.PriorWorkDir)
 	}

@@ -8027,13 +8027,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.LocalWorktree != nil && len(env.LocalWorktree.ReplayConflicts) > 0 {
 		promptOptions = append(promptOptions, WithWorktreeReplayConflicts(env.LocalWorktree.ReplayConflicts))
 	}
-	// A fresh session in a reused workdir starts among files it has no memory
-	// of producing (MUL-7034). envReused is what this daemon actually did, not
-	// what the server offered: a GC'd directory falls back to Prepare and is
-	// not warned about.
-	if envReused && task.PriorSessionID == "" {
-		promptOptions = append(promptOptions, WithReusedWorkdir())
-	}
 	prompt := BuildPrompt(task, provider, promptOptions...)
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
@@ -8404,11 +8397,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			if providerNeedsInlineSystemPrompt(provider) {
 				execOpts.SystemPrompt = runtimeBrief
 			}
-		}
-		// The first attempt was resuming, so it was not warned about the reused
-		// workdir; this one is in the same directory without that memory.
-		if envReused {
-			promptOptions = append(promptOptions, WithReusedWorkdir())
 		}
 		freshPrompt := BuildPrompt(task, provider, promptOptions...)
 

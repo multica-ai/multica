@@ -163,69 +163,34 @@ func TestShouldReusePriorWorkdirDeclinesRemovedDirectory(t *testing.T) {
 	}
 }
 
-// TestRunTaskWarnsFreshSessionInReusedWorkdir drives real runTask calls to pin
-// where the reused-workdir warning lands (MUL-7034). A run that reuses an
-// earlier run's directory without resuming its session is warned in the prompt
-// the backend receives, and the warning stays out of the brief written into the
-// workdir, which must be byte-stable across runs (MUL-5377). A run that resumes
-// the session remembers the work and is not warned; a run whose offered
-// directory is gone gets a fresh one and nothing to be warned about.
-func TestRunTaskWarnsFreshSessionInReusedWorkdir(t *testing.T) {
+// TestRunTaskReusesPriorWorkdirForFreshSession drives real runTask calls
+// through what the server hands an automatic retry after a
+// conversation-poisoning failure: the parent's workdir and no session
+// (MUL-7034). The run continues in that directory; once the directory has been
+// GC'd, it prepares a fresh one instead.
+func TestRunTaskReusesPriorWorkdirForFreshSession(t *testing.T) {
 	t.Parallel()
 
-	d, _, promptsFile, cleanup := newPromptCapturingReuseTestDaemon(t)
+	d, _, cleanup := newLeaderReuseTestDaemon(t)
 	defer cleanup()
 
-	const warning = "Files from an earlier run"
-	run := func(task Task) (TaskResult, string) {
+	run := func(task Task) TaskResult {
 		t.Helper()
 		task.IsLeaderTask = false
 		result, err := d.runTask(context.Background(), task, "claude", 0, d.logger)
 		if err != nil {
 			t.Fatalf("runTask %s: %v", task.ID, err)
 		}
-		prompts, err := os.ReadFile(promptsFile)
-		if err != nil {
-			t.Fatalf("read prompts: %v", err)
-		}
-		lines := strings.Split(strings.TrimRight(string(prompts), "\n"), "\n")
-		return result, lines[len(lines)-1]
+		return result
 	}
 
-	firstResult, firstPrompt := run(leaderReuseTestTask("task-first"))
-	if strings.Contains(firstPrompt, warning) {
-		t.Fatalf("a fresh environment was warned about an earlier run: %s", firstPrompt)
-	}
+	firstResult := run(leaderReuseTestTask("task-first"))
 
-	// What the server hands an automatic retry after a conversation-poisoning
-	// failure: the parent's workdir, no session.
 	retry := leaderReuseTestTask("task-retry")
 	retry.PriorWorkDir = firstResult.WorkDir
 	retry.PriorSessionResumeUnavailable = true
-	retryResult, retryPrompt := run(retry)
-	if !sameDir(t, retryResult.WorkDir, firstResult.WorkDir) {
+	if retryResult := run(retry); !sameDir(t, retryResult.WorkDir, firstResult.WorkDir) {
 		t.Fatalf("retry WorkDir = %q, want the reused %q", retryResult.WorkDir, firstResult.WorkDir)
-	}
-	if !strings.Contains(retryPrompt, warning) {
-		t.Fatalf("fresh session in a reused workdir was not warned; prompt: %s", retryPrompt)
-	}
-	brief, err := os.ReadFile(filepath.Join(retryResult.WorkDir, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("read brief: %v", err)
-	}
-	if strings.Contains(string(brief), warning) {
-		t.Fatal("reused-workdir warning leaked into the byte-stable brief")
-	}
-
-	followUp := leaderReuseTestTask("task-follow-up")
-	followUp.PriorWorkDir = retryResult.WorkDir
-	followUp.PriorSessionID = retryResult.SessionID
-	followUpResult, followUpPrompt := run(followUp)
-	if !sameDir(t, followUpResult.WorkDir, retryResult.WorkDir) {
-		t.Fatalf("follow-up WorkDir = %q, want the reused %q", followUpResult.WorkDir, retryResult.WorkDir)
-	}
-	if strings.Contains(followUpPrompt, warning) {
-		t.Fatalf("a resumed session was warned about work it remembers: %s", followUpPrompt)
 	}
 
 	if err := os.RemoveAll(firstResult.EnvRoot); err != nil {
@@ -233,77 +198,8 @@ func TestRunTaskWarnsFreshSessionInReusedWorkdir(t *testing.T) {
 	}
 	afterGC := leaderReuseTestTask("task-after-gc")
 	afterGC.PriorWorkDir = firstResult.WorkDir
-	afterGCResult, afterGCPrompt := run(afterGC)
-	if afterGCResult.WorkDir == firstResult.WorkDir {
+	if afterGCResult := run(afterGC); afterGCResult.WorkDir == firstResult.WorkDir {
 		t.Fatalf("run reused a workdir that no longer exists: %q", afterGCResult.WorkDir)
-	}
-	if strings.Contains(afterGCPrompt, warning) {
-		t.Fatalf("a fresh environment was warned about an earlier run: %s", afterGCPrompt)
-	}
-}
-
-// TestRunTaskWarnsFreshRetryAfterRejectedResume covers the in-turn path to the
-// same state: a run that reused a workdir to resume its session, had the resume
-// rejected, and retried with a fresh session in that directory. The resuming
-// attempt remembers the work and is not warned; the fresh retry is (MUL-7034).
-func TestRunTaskWarnsFreshRetryAfterRejectedResume(t *testing.T) {
-	t.Parallel()
-
-	d, _, promptsFile, cleanup := newPromptCapturingReuseTestDaemon(t)
-	defer cleanup()
-
-	first := leaderReuseTestTask("task-first")
-	first.IsLeaderTask = false
-	firstResult, err := d.runTask(context.Background(), first, "claude", 0, d.logger)
-	if err != nil {
-		t.Fatalf("first runTask: %v", err)
-	}
-
-	// From here on the provider refuses every --resume the way Claude does
-	// when the transcript is gone, and accepts a fresh session.
-	rejectingScript := `#!/bin/sh
-IFS= read -r prompt
-printf '%s\n' "$prompt" >> "` + promptsFile + `"
-for arg in "$@"; do
-  if [ "$arg" = "--resume" ]; then
-    echo "No conversation found with session ID: session-leader-reuse" >&2
-    printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"No conversation found"}'
-    exit 1
-  fi
-done
-printf '%s\n' '{"type":"system","session_id":"session-fresh"}'
-printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"session-fresh","result":"done"}'
-`
-	if err := os.WriteFile(d.cfg.Agents["claude"].Path, []byte(rejectingScript), 0o755); err != nil {
-		t.Fatalf("rewrite fake agent: %v", err)
-	}
-
-	second := leaderReuseTestTask("task-second")
-	second.IsLeaderTask = false
-	second.PriorWorkDir = firstResult.WorkDir
-	second.PriorSessionID = firstResult.SessionID
-	secondResult, err := d.runTask(context.Background(), second, "claude", 0, d.logger)
-	if err != nil {
-		t.Fatalf("second runTask: %v", err)
-	}
-	if secondResult.SessionID != "session-fresh" {
-		t.Fatalf("second run did not end on the fresh session: %+v", secondResult)
-	}
-
-	prompts, err := os.ReadFile(promptsFile)
-	if err != nil {
-		t.Fatalf("read prompts: %v", err)
-	}
-	lines := strings.Split(strings.TrimRight(string(prompts), "\n"), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("got %d invocations, want first run + rejected resume + fresh retry:\n%s", len(lines), prompts)
-	}
-	const warning = "Files from an earlier run"
-	if strings.Contains(lines[1], warning) {
-		t.Fatalf("the resuming attempt was warned about work it remembers: %s", lines[1])
-	}
-	if !strings.Contains(lines[2], warning) {
-		t.Fatalf("fresh retry in the reused workdir was not warned: %s", lines[2])
 	}
 }
 
@@ -457,25 +353,14 @@ func TestShouldReusePriorWorkdirSquadLeaderRejectsSymlinkEscape(t *testing.T) {
 
 func newLeaderReuseTestDaemon(t *testing.T) (*Daemon, string, func()) {
 	t.Helper()
-	d, argsFile, _, cleanup := newPromptCapturingReuseTestDaemon(t)
-	return d, argsFile, cleanup
-}
-
-// newPromptCapturingReuseTestDaemon is newLeaderReuseTestDaemon that also
-// returns a file holding each invocation's prompt, one stream-json frame per
-// line in invocation order.
-func newPromptCapturingReuseTestDaemon(t *testing.T) (*Daemon, string, string, func()) {
-	t.Helper()
 
 	testDir := t.TempDir()
 	fakeBin := filepath.Join(testDir, "claude")
 	argsFile := filepath.Join(testDir, "claude-args.txt")
-	promptsFile := filepath.Join(testDir, "claude-prompts.txt")
 	script := `#!/bin/sh
 printf '%s\n' "$@" >> "` + argsFile + `"
 printf '%s\n' '--invocation-end--' >> "` + argsFile + `"
-IFS= read -r prompt
-printf '%s\n' "$prompt" >> "` + promptsFile + `"
+IFS= read -r _
 printf '%s\n' '{"type":"system","session_id":"session-leader-reuse"}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"session-leader-reuse","result":"done"}'
 `
@@ -503,7 +388,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 			},
 		},
 	}
-	return d, argsFile, promptsFile, srv.Close
+	return d, argsFile, srv.Close
 }
 
 func writeLeaderTaskMarker(t *testing.T, workDir, agentID, issueID string) {
