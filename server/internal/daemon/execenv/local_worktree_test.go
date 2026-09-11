@@ -105,6 +105,7 @@ func prepareForTest(t *testing.T, localPath string) *LocalWorktree {
 // This is the property that makes worktree mode usable rather than confusing:
 // otherwise the agent silently reviews code the user hasn't got open.
 func TestPrepareLocalWorktreeReplaysUncommittedWork(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "edited by user\n")
 	writeFile(t, filepath.Join(repo, "brand-new.txt"), "untracked\n")
@@ -130,6 +131,7 @@ func TestPrepareLocalWorktreeReplaysUncommittedWork(t *testing.T) {
 // they may have a build running against it. `git stash create` writes a commit
 // object but must leave the index, the files, and the stash list alone.
 func TestPrepareLocalWorktreeLeavesUserTreeUntouched(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "edited by user\n")
 	writeFile(t, filepath.Join(repo, "brand-new.txt"), "untracked\n")
@@ -152,6 +154,7 @@ func TestPrepareLocalWorktreeLeavesUserTreeUntouched(t *testing.T) {
 // committed onto it before the worktree is removed, or `git worktree remove
 // --force` would delete the work with no way back.
 func TestFinalizeCommitsLeftoversAndKeepsBranch(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	wt := prepareForTest(t, repo)
 
@@ -185,6 +188,7 @@ func TestFinalizeCommitsLeftoversAndKeepsBranch(t *testing.T) {
 // such run would turn `git branch` into noise, so the branch is dropped and the
 // result reports no branch at all.
 func TestFinalizeDropsBranchWhenNothingChanged(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	wt := prepareForTest(t, repo)
 
@@ -206,6 +210,7 @@ func TestFinalizeDropsBranchWhenNothingChanged(t *testing.T) {
 // still counts as a no-op and leaves no branch — the user's WIP is already safe
 // in their own working tree, and a branch duplicating it is pure noise.
 func TestFinalizeDropsBranchWhenOnlyBaseWasDirty(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "edited by user\n")
 	writeFile(t, filepath.Join(repo, "scratch.txt"), "untracked scratch\n")
@@ -233,6 +238,7 @@ func TestFinalizeDropsBranchWhenOnlyBaseWasDirty(t *testing.T) {
 // user's WIP is the baseline commit, the agent's work sits on top. That is what
 // makes `git diff <baseline>..<branch>` a readable review of the agent alone.
 func TestFinalizeSeparatesUserBaselineFromAgentWork(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "edited by user\n")
 	wt := prepareForTest(t, repo)
@@ -257,6 +263,7 @@ func TestFinalizeSeparatesUserBaselineFromAgentWork(t *testing.T) {
 // A resource may point at a subdirectory of a repo. The worktree covers the
 // whole repo, but the agent has to land at the same depth the user chose.
 func TestPrepareLocalWorktreeSubdirectory(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "services/api/main.go"), "package main\n")
 	gitRun(t, repo, "add", ".")
@@ -282,6 +289,7 @@ func TestPrepareLocalWorktreeSubdirectory(t *testing.T) {
 // than silently running in-place, which would leave them wondering why their
 // tasks still queue one at a time.
 func TestPrepareLocalWorktreeRejectsNonGitDirectory(t *testing.T) {
+	t.Parallel()
 	_, err := PrepareLocalWorktree(LocalWorktreeParams{
 		LocalPath: t.TempDir(),
 		EnvRoot:   t.TempDir(),
@@ -299,6 +307,7 @@ func TestPrepareLocalWorktreeRejectsNonGitDirectory(t *testing.T) {
 // because "git worktree add failed" alone sends the user hunting in the wrong
 // place.
 func TestPrepareLocalWorktreeRejectsRepoWithoutCommits(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	gitRun(t, dir, "init", "-b", "main")
 
@@ -319,6 +328,7 @@ func TestPrepareLocalWorktreeRejectsRepoWithoutCommits(t *testing.T) {
 // both get a working checkout, with distinct branches, without corrupting git's
 // admin files.
 func TestPrepareLocalWorktreeConcurrentTasks(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	const tasks = 4
@@ -379,6 +389,7 @@ func TestPrepareLocalWorktreeConcurrentTasks(t *testing.T) {
 // sidecar-free branch is the user-visible contract — a diff full of
 // .agent_context/ scaffolding would make the mode unusable for review.
 func TestWorktreeModeDeliversBranchWithoutSidecars(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	// Start dirty, so the branch gets a baseline commit as well as the agent's
 	// own — a sidecar could otherwise hide in either one.
@@ -449,6 +460,7 @@ func TestWorktreeModeDeliversBranchWithoutSidecars(t *testing.T) {
 // deletes. The next task on the same repo must clean that up rather than
 // accumulating dead entries in the user's `git worktree list` forever.
 func TestPrepareLocalWorktreePrunesStaleRegistrations(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	orphanEnv := t.TempDir()
 	orphan, err := PrepareLocalWorktree(LocalWorktreeParams{
@@ -494,6 +506,7 @@ func finalizeOK(t *testing.T, wt *LocalWorktree) LocalWorktreeOutcome {
 // commit.gpgSign with no usable key is the realistic trigger: --no-verify does
 // not disable signing.
 func TestFinalizeKeepsWorktreeWhenCommitFails(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	wt := prepareForTest(t, repo)
 
@@ -530,6 +543,7 @@ func TestFinalizeKeepsWorktreeWhenCommitFails(t *testing.T) {
 // untracked files; copying them would hand this task another issue's brief and
 // commit it to the branch.
 func TestPrepareLocalWorktreeSkipsMulticaSidecars(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, ".agent_context", "issue_context.md"), "OTHER issue's brief\n")
 	writeFile(t, filepath.Join(repo, ".multica", "project", "resources.json"), "{}\n")
@@ -567,6 +581,7 @@ func TestPrepareLocalWorktreeSkipsMulticaSidecars(t *testing.T) {
 // replayed would have the agent review code the user never wrote and report on
 // it confidently. Refusing to start is the recoverable outcome.
 func TestPrepareLocalWorktreeFailsWhenUntrackedReplayIsTruncated(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	// One file over the copy budget is enough to prove the bound fails closed
 	// rather than under-copying; writing 2001 files would only be slower.
@@ -658,6 +673,7 @@ func TestPrepareWorktreeModeUsesPerIssueCodexSessionStore(t *testing.T) {
 // must therefore stop the commit AND keep the worktree, since the agent's work
 // is still in it.
 func TestFinalizeAbortRefusesToCommitAndKeepsWorktree(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	wt := prepareForTest(t, repo)
 
@@ -696,6 +712,7 @@ func TestFinalizeAbortRefusesToCommitAndKeepsWorktree(t *testing.T) {
 // The first reason is the one closest to the root cause, so later aborts must
 // not overwrite it.
 func TestAbortWithReasonKeepsFirstReason(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	wt := prepareForTest(t, repo)
 	t.Cleanup(func() { removeLocalWorktreeDir(repo, wt.Path, worktreeTestLogger()) })
@@ -717,6 +734,7 @@ func TestAbortWithReasonKeepsFirstReason(t *testing.T) {
 // ambiguous (link vs target, targets outside the repo), so the snapshot must
 // fail rather than hand the agent a tree with a file quietly missing.
 func TestPrepareLocalWorktreeFailsOnUntrackedSymlink(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	if err := os.Symlink(filepath.Join(repo, "tracked.txt"), filepath.Join(repo, "shortcut.txt")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
@@ -744,6 +762,7 @@ func TestPrepareLocalWorktreeFailsOnUntrackedSymlink(t *testing.T) {
 // exists. Without it every such failure leaves a registration in the user's
 // repo and a branch no task ever ran in.
 func TestDiscardRemovesWorktreeAndBranch(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	wt := prepareForTest(t, repo)
 
@@ -805,6 +824,7 @@ const (
 // from HEAD, so the second turn stood in a tree that did not contain the first
 // turn's work and nothing said so (MUL-6881).
 func TestPrepareLocalWorktreeContinuesTheConversationBranch(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	first := prepareTurn(t, repo, "MUL-6881", turnOneTask)
@@ -859,6 +879,7 @@ func TestPrepareLocalWorktreeContinuesTheConversationBranch(t *testing.T) {
 // when the agent did what it was asked to do — so only what they changed since
 // is replayed.
 func TestPrepareLocalWorktreeReplaysOnlyTheUserEditsSinceTheLastTurn(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work in progress\n")
 
@@ -895,6 +916,7 @@ func TestPrepareLocalWorktreeReplaysOnlyTheUserEditsSinceTheLastTurn(t *testing.
 // both versions in it, because the only alternative that does not lose the
 // user's newer edit is having something read both sides and decide.
 func TestPrepareLocalWorktreeHandsConflictingUserEditsToTheAgent(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work in progress\n")
 
@@ -930,6 +952,7 @@ func TestPrepareLocalWorktreeHandsConflictingUserEditsToTheAgent(t *testing.T) {
 // conflict markers into the branch's content, and recording the snapshot would
 // tell every later turn the user's edit had landed.
 func TestFinalizeRefusesToDeliverAnUnresolvedMerge(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work in progress\n")
 
@@ -969,6 +992,7 @@ func TestFinalizeRefusesToDeliverAnUnresolvedMerge(t *testing.T) {
 // The A/B/C round trip: the user's conflicting edit survives until the agent
 // resolves it, and is not replayed again afterwards.
 func TestConflictResolvedByTheAgentIsDeliveredAndNotReplayedAgain(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "A\n")
 
@@ -1007,6 +1031,7 @@ func TestConflictResolvedByTheAgentIsDeliveredAndNotReplayedAgain(t *testing.T) 
 // A conflict the agent never resolved must stay pending: the user's edit is
 // still missing from the branch, so the next turn has to offer it again.
 func TestUnresolvedConflictIsReplayedOnTheNextTurn(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "A\n")
 
@@ -1048,6 +1073,7 @@ func finalizeAndDiscardForTest(t *testing.T, wt *LocalWorktree) {
 // to their own copy still have to reach the next turn — the snapshot has to
 // cover untracked content for that question to be answerable at all.
 func TestPrepareLocalWorktreeCarriesLaterUserEditsToOnceUntrackedFiles(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "scratch.txt"), "v1\n")
 	writeFile(t, filepath.Join(repo, "notes.txt"), "notes v1\n")
@@ -1078,6 +1104,7 @@ func TestPrepareLocalWorktreeCarriesLaterUserEditsToOnceUntrackedFiles(t *testin
 // Copying the user's older copy over it on the next turn would revert whatever
 // the agent did to it — silently, every turn.
 func TestPrepareLocalWorktreeKeepsAgentEditsToOnceUntrackedFiles(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "scratch.txt"), "user scratch\n")
 
@@ -1094,6 +1121,7 @@ func TestPrepareLocalWorktreeKeepsAgentEditsToOnceUntrackedFiles(t *testing.T) {
 // A turn that only reads must leave the conversation's branch alone: it holds
 // every turn before it, and the read-only cleanup would take those with it.
 func TestFinalizeKeepsTheConversationBranchAfterAReadOnlyTurn(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	first := prepareTurn(t, repo, "MUL-6881", turnOneTask)
@@ -1116,6 +1144,7 @@ func TestFinalizeKeepsTheConversationBranchAfterAReadOnlyTurn(t *testing.T) {
 // Discard runs when preparation fails after the worktree exists. It may only
 // drop a branch this prepare created.
 func TestDiscardKeepsTheContinuedBranch(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	first := prepareTurn(t, repo, "MUL-6881", turnOneTask)
@@ -1141,6 +1170,7 @@ func TestDiscardKeepsTheContinuedBranch(t *testing.T) {
 // baseline commit of its own, so there is a checkpoint to record before the
 // first turn has finished — see commitBaseline.
 func TestPrepareLocalWorktreeForksWhenTheConversationBranchIsBusy(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	first := prepareTurn(t, repo, "MUL-6881", turnOneTask)
@@ -1171,6 +1201,7 @@ func TestPrepareLocalWorktreeForksWhenTheConversationBranchIsBusy(t *testing.T) 
 // Once the user merges the branch, its tip carries nothing HEAD does not.
 // Continuing from it would leave the next turn behind the user's own commits.
 func TestPrepareLocalWorktreeRestartsAMergedConversationBranch(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	first := prepareTurn(t, repo, "MUL-6881", turnOneTask)
@@ -1203,6 +1234,7 @@ func TestPrepareLocalWorktreeRestartsAMergedConversationBranch(t *testing.T) {
 // A task with no conversation behind it — no issue, no chat session — has
 // nothing to continue and keeps the task-scoped branch.
 func TestPrepareLocalWorktreeKeepsTaskScopedBranchWithoutAConversation(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	wt := prepareForTest(t, repo)
 	if want := "agent/j/" + taskKey("11112222-3333-4444-5555-666677778888"); wt.Branch != want {
@@ -1214,6 +1246,7 @@ func TestPrepareLocalWorktreeKeepsTaskScopedBranchWithoutAConversation(t *testin
 }
 
 func TestLocalWorktreeConversation(t *testing.T) {
+	t.Parallel()
 	issueID := "01a056ac-0eda-797d-8ac2-b7d7a3935ae7"
 	chatID := "01a056ad-5b37-762a-a15f-390717f4dae1"
 	tests := []struct {
@@ -1242,6 +1275,7 @@ func TestLocalWorktreeConversation(t *testing.T) {
 // themselves, and appending to their branch — or reading their work as the
 // previous turn's — is the failure this guards.
 func TestPrepareLocalWorktreeRefusesToAdoptABranchItDoesNotOwn(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	// The user made this branch themselves, with content of their own.
@@ -1298,6 +1332,7 @@ func TestPrepareLocalWorktreeRefusesToAdoptABranchItDoesNotOwn(t *testing.T) {
 // Two workspaces can mint the same issue identifier, and two agents can share a
 // display name. Neither may end up on one branch.
 func TestPrepareLocalWorktreeSeparatesIdenticallyNamedConversations(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	mine := prepareTurn(t, repo, "MUL-6881", turnOneTask)
@@ -1326,6 +1361,7 @@ func TestPrepareLocalWorktreeSeparatesIdenticallyNamedConversations(t *testing.T
 // pins their whole working tree as of some past turn against `git gc`, and
 // nothing else would ever come back for it.
 func TestPrepareLocalWorktreePrunesSnapshotsOfDeletedBranches(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work\n")
 
@@ -1372,6 +1408,7 @@ func TestPrepareLocalWorktreePrunesSnapshotsOfDeletedBranches(t *testing.T) {
 // The snapshot is the user's directory, not the daemon's view of it: a sidecar
 // left in their tree by a concurrent in_place task must never reach the branch.
 func TestCaptureUserSnapshotExcludesMulticaSidecars(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, ".agent_context", "brief.md"), "another task's brief\n")
 	writeFile(t, filepath.Join(repo, "sub", ".multica", "state.json"), "{}\n")
@@ -1396,6 +1433,7 @@ func TestCaptureUserSnapshotExcludesMulticaSidecars(t *testing.T) {
 // The record is what proves a branch is this conversation's: an owner AND the
 // tip it was written at.
 func TestBranchRecordRoundTrips(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	head := gitRun(t, repo, "rev-parse", "HEAD")
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work\n")
@@ -1439,6 +1477,7 @@ func TestBranchRecordRoundTrips(t *testing.T) {
 // the recorded owner — and there is no prepare in between for the orphan sweep
 // to notice the gap. Only the recorded checkpoint distinguishes them.
 func TestPrepareLocalWorktreeRefusesABranchDeletedAndRecreatedUnderTheSameName(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	first := prepareTurn(t, repo, "MUL-6881", turnOneTask)
@@ -1479,6 +1518,7 @@ func TestPrepareLocalWorktreeRefusesABranchDeletedAndRecreatedUnderTheSameName(t
 // Same proof, other shape: the branch still exists but was force-moved onto
 // history that never carried this conversation's work.
 func TestPrepareLocalWorktreeRefusesABranchForceMovedOffItsRecord(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	first := prepareTurn(t, repo, "MUL-6881", turnOneTask)
@@ -1510,6 +1550,7 @@ func TestPrepareLocalWorktreeRefusesABranchForceMovedOffItsRecord(t *testing.T) 
 // — the checkpoint is still in the history, so the conversation continues and
 // picks their commit up.
 func TestPrepareLocalWorktreeContinuesAfterTheUserCommitsOnTheBranch(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	first := prepareTurn(t, repo, "MUL-6881", turnOneTask)
@@ -1540,6 +1581,7 @@ func TestPrepareLocalWorktreeContinuesAfterTheUserCommitsOnTheBranch(t *testing.
 // the task fails and the worktree is kept, rather than reporting success and
 // leaving a stale record behind to authorise the next turn.
 func TestFinalizeFailsWhenTheBranchRecordCannotBeWritten(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	wt := prepareTurn(t, repo, "MUL-6881", turnOneTask)
@@ -1601,6 +1643,7 @@ func TestFinalizeFailsWhenTheBranchRecordCannotBeWritten(t *testing.T) {
 // says afterwards. A branch moved between the delivery and any later read is
 // therefore refused rather than silently continued.
 func TestBranchRecordPinsTheDeliveredCommitNotTheLiveRef(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	first := prepareTurn(t, repo, "MUL-6881", turnOneTask)
@@ -1648,6 +1691,7 @@ func TestBranchRecordPinsTheDeliveredCommitNotTheLiveRef(t *testing.T) {
 // there look like this conversation's, so the turn refuses to record it and
 // keeps the worktree instead.
 func TestFinalizeRefusesToRecordADeliveryThatResetPastItsBaseline(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work in progress\n")
 	head := gitRun(t, repo, "rev-parse", "HEAD")
@@ -1704,6 +1748,7 @@ func TestFinalizeRefusesToRecordADeliveryThatResetPastItsBaseline(t *testing.T) 
 // different branch — delivered a commit this record has no business describing,
 // and the branch it names would not carry it.
 func TestFinalizeRefusesToRecordADeliveryFromOffTheBranch(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	head := gitRun(t, repo, "rev-parse", "HEAD")
 
@@ -1748,6 +1793,7 @@ func TestFinalizeRefusesToRecordADeliveryFromOffTheBranch(t *testing.T) {
 // the branch would sit exactly where the user's HEAD does, and nothing would
 // tell it apart from a branch they create there themselves.
 func TestPrepareLocalWorktreeAlwaysGivesANewBranchACommitOfItsOwn(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	head := gitRun(t, repo, "rev-parse", "HEAD")
 
@@ -1778,6 +1824,7 @@ func TestPrepareLocalWorktreeAlwaysGivesANewBranchACommitOfItsOwn(t *testing.T) 
 // edits, and recording them as delivered is how they disappear from every later
 // turn without anyone seeing it.
 func TestFinalizeRefusesWhenAFollowUpResetsPastTheUserEditsItReplayed(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 
 	first := prepareTurn(t, repo, "MUL-6881", turnOneTask)
@@ -1820,6 +1867,7 @@ func TestFinalizeRefusesWhenAFollowUpResetsPastTheUserEditsItReplayed(t *testing
 // that leaves no commit is indistinguishable from throwing the merge away, so
 // the record stays where it was and the edits come back next turn.
 func TestConflictResolvedWithoutACommitDoesNotAdvanceTheRecord(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work in progress\n")
 
@@ -1857,6 +1905,7 @@ func TestConflictResolvedWithoutACommitDoesNotAdvanceTheRecord(t *testing.T) {
 // nothing count as delivered, and the user's local edit then went missing from
 // the turn after.
 func TestConflictAfterAUserCommitOnTheBranchStillOffersTheEditAgain(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work in progress\n")
 
@@ -1915,6 +1964,7 @@ func TestConflictAfterAUserCommitOnTheBranchStillOffersTheEditAgain(t *testing.T
 // plumbing between them is covered too: which claim fields become the branch
 // name, and which become the identity the branch is recorded under.
 func TestPrepareTwoTurnsOfOneIssueThroughPrepare(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work in progress\n")
 	workspacesRoot := t.TempDir()
@@ -1979,6 +2029,7 @@ func TestPrepareTwoTurnsOfOneIssueThroughPrepare(t *testing.T) {
 // worktree it believed it owned nothing of. This test runs two turns across
 // that boundary, which is where the in-process tests above cannot look.
 func TestIsolatedPrepareCarriesTheStateFinalizeNeeds(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work in progress\n")
 	workspacesRoot := t.TempDir()
@@ -2052,6 +2103,7 @@ func TestIsolatedPrepareCarriesTheStateFinalizeNeeds(t *testing.T) {
 // A read-only turn drops its branch — which the daemon could not do either
 // while createdBranch was being lost on the way back from the helper.
 func TestIsolatedPrepareKeepsTheReadOnlyBranchDrop(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	workspacesRoot := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)

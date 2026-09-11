@@ -356,31 +356,32 @@ func TestEventDispatchRespectsTheFeatureFlagEndToEnd(t *testing.T) {
 		t.Fatalf("install: status=%d body=%s", install.Code, install.Body.String())
 	}
 
-	dispatch := func() {
+	dispatch := func() *service.PluginEventDispatcher {
 		dispatcher := service.NewPluginEventDispatcher(testHandler.PluginService)
-		defer dispatcher.Close()
 		dispatcher.Dispatch(plugincontract.EventIssueCreated, testWorkspaceID, map[string]any{})
-		// Long enough for a worker to pick the job up and complete the call.
-		time.Sleep(2 * time.Second)
+		return dispatcher
 	}
 
 	// Flag on: the endpoint is called.
 	testHandler.PluginService.FeatureFlags = testHandler.FeatureFlags
-	dispatch()
+	dispatcher := dispatch()
 	select {
 	case <-received:
-	default:
+	case <-time.After(2 * time.Second):
+		dispatcher.Close()
 		t.Fatal("with the flag on, an installed event hook was never called")
 	}
+	dispatcher.Close()
 
 	// Flag off: nothing leaves, even though the same installation is still
 	// enabled and still declares the hook.
 	withPluginsV1Flag(t, testHandler, false)
 	testHandler.PluginService.FeatureFlags = testHandler.FeatureFlags
-	dispatch()
+	dispatcher = dispatch()
+	defer dispatcher.Close()
 	select {
 	case <-received:
 		t.Fatal("with the flag off, an event hook still called out — the flag does not gate the outbound path")
-	default:
+	case <-time.After(300 * time.Millisecond):
 	}
 }

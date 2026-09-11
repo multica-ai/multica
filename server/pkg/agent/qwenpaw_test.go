@@ -268,7 +268,7 @@ func TestQwenpawUsesSessionLoad(t *testing.T) {
 // TestQwenpawTimeout tests that a context timeout during session/new
 // is reported as status=timeout. The fake script responds to
 // initialize immediately, then sleeps 30s on session/new so the
-// 5s context deadline expires during the session/new RPC.
+// 1s context deadline expires during the session/new RPC.
 func TestQwenpawTimeout(t *testing.T) {
 	t.Parallel()
 
@@ -300,9 +300,9 @@ done`
 		t.Fatalf("New(qwenpaw) error: %v", err)
 	}
 
-	// Use a generous timeout so initialize always completes;
-	// the 30s sleep on session/new will trigger the timeout.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Initialization is immediate; the 30s sleep on session/new crosses this
+	// bounded test deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	session, err := b.Execute(ctx, "test prompt", ExecOptions{

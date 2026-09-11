@@ -2474,7 +2474,7 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 	// used to make initialize spuriously time out before the subtest reached
 	// the RPC it targets. Keep this comfortably above sh startup jitter yet
 	// below the 5s semantic timeout and the 10s executeFakeCodex ceiling.
-	const handshakeTimeout = 3 * time.Second
+	const handshakeTimeout = time.Second
 	tests := []struct {
 		name   string
 		method string
@@ -2543,10 +2543,10 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 				}
 			}
 			// Proves the RPC was bounded rather than hanging to the 10s
-			// executeFakeCodex ceiling; the handshake fires at ~3s and
+			// executeFakeCodex ceiling; the handshake fires at ~1s and
 			// shutdown is fast (closing stdin EOFs the fake).
-			if elapsed > 8*time.Second {
-				t.Fatalf("handshake timeout took %s, expected < 8s", elapsed)
+			if elapsed > 4*time.Second {
+				t.Fatalf("handshake timeout took %s, expected < 4s", elapsed)
 			}
 		})
 	}
@@ -2629,7 +2629,7 @@ func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 		`read line`+"\n"+
 		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
 		`echo 'ERROR mcp_manager_init: transport error: channel closed' >&2`+"\n"+
-		`sleep 5`+"\n"+
+		`sleep 2`+"\n"+
 		// This response is deliberately later than the host timeout. Killing
 		// the process tree must prevent it from reaching turn/start.
 		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-late"}}}'`+"\n"+
@@ -2647,8 +2647,8 @@ func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	session, err := backend.Execute(context.Background(), "secret prompt must not be logged", ExecOptions{
-		Timeout:                   5 * time.Second,
-		HandshakeTimeout:          3 * time.Second,
+		Timeout:                   3 * time.Second,
+		HandshakeTimeout:          time.Second,
 		SemanticInactivityTimeout: time.Second,
 	})
 	if err != nil {
@@ -2715,7 +2715,7 @@ func TestCodexExecuteThreadResumeTimeoutUsesThreadBudgetAndLifecycle(t *testing.
 		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
 		`read line`+"\n"+
 		`read line`+"\n"+
-		`sleep 5`+"\n")
+		`sleep 2`+"\n")
 
 	var logs bytes.Buffer
 	backend, err := New("codex", Config{
@@ -2866,7 +2866,7 @@ func TestCodexExecuteConcurrentThreadStartTimeoutsRemainUnserialized(t *testing.
 		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
 		`read line`+"\n"+
 		`read line`+"\n"+
-		`sleep 5`+"\n")
+		`sleep 2`+"\n")
 
 	maxActiveCodexLaunchesObserved.Store(0)
 	results := make(chan Result, 2)
@@ -2878,8 +2878,8 @@ func TestCodexExecuteConcurrentThreadStartTimeoutsRemainUnserialized(t *testing.
 				return
 			}
 			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
-				Timeout:          5 * time.Second,
-				HandshakeTimeout: 3 * time.Second,
+				Timeout:          3 * time.Second,
+				HandshakeTimeout: time.Second,
 			})
 			if err != nil {
 				results <- Result{Status: "failed", Error: err.Error()}
@@ -2980,8 +2980,8 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 			`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
 			`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
 			`read line`+"\n"+
-			`sleep 3.2`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second})
+			`sleep 1.2`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 4 * time.Second, HandshakeTimeout: time.Second})
 		if result.Status != "failed" || !strings.Contains(result.Error, CodexHandshakeTimeoutMarker) {
 			t.Fatalf("expected final initialize timeout, got status=%q error=%q", result.Status, result.Error)
 		}
@@ -2997,8 +2997,8 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 			`echo x >> `+countPath+"\n"+
 			`read line`+"\n"+
 			`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"unexpected","item":{"type":"commandExecution","id":"cmd-1","command":"true"}}}'`+"\n"+
-			`sleep 3.2`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second})
+			`sleep 1.2`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 4 * time.Second, HandshakeTimeout: time.Second})
 		if result.Status != "failed" {
 			t.Fatalf("expected failed, got %q", result.Status)
 		}
@@ -3015,8 +3015,8 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 		fakePath := writeFakeCodexAppServer(t, ""+
 			`echo x >> `+countPath+"\n"+
 			`read line`+"\n"+
-			`sleep 3.2`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second})
+			`sleep 1.2`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 4 * time.Second, HandshakeTimeout: time.Second})
 		if !strings.Contains(result.Error, "retry suppressed: process cleanup/reap not confirmed") {
 			t.Fatalf("expected cleanup reason, got %q", result.Error)
 		}
@@ -3240,10 +3240,10 @@ func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-stale","turn":{"id":"turn-stale"}}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-stale","item":{"type":"commandExecution","id":"cmd-1","command":"git status"}}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-stale","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"clean"}}}'`+"\n"+
-		`sleep 5`+"\n")
+		`sleep 0.3`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
-		Timeout:                   5 * time.Second,
+		Timeout:                   time.Second,
 		SemanticInactivityTimeout: 100 * time.Millisecond,
 	})
 	if result.Status != "timeout" {
@@ -4071,7 +4071,7 @@ func TestCodexExecuteTimeoutWinsOverProcessExitDuringActiveTurn(t *testing.T) {
 		`read line`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
-		Timeout:                   5 * time.Second,
+		Timeout:                   time.Second,
 		SemanticInactivityTimeout: 30 * time.Second,
 	})
 	if result.Status != "timeout" {
@@ -4101,11 +4101,12 @@ func TestCodexExecuteFirstTurnRetryErrorDoesNotSatisfyProgress(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-retry","turn":{"id":"turn-retry"}}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thr-retry","error":{"message":"temporary reconnect"},"willRetry":true}}'`+"\n"+
-		`sleep 5`+"\n")
+		`sleep 0.7`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
-		Timeout:                   5 * time.Second,
-		SemanticInactivityTimeout: 200 * time.Millisecond,
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  2 * time.Second,
+		FirstTurnNoProgressTimeout: 500 * time.Millisecond,
 	})
 	if result.Status != "timeout" {
 		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)

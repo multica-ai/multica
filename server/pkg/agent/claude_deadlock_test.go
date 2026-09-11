@@ -35,6 +35,17 @@ func TestMain(m *testing.M) {
 	}
 	switch mode := os.Getenv("CLAUDE_FAKE_MODE"); mode {
 	case "":
+		// Preserve the production relationships while avoiding hundreds of
+		// milliseconds of intentional silence in every ACP fixture.
+		acpNotificationQuietTime = 100 * time.Millisecond
+		hermesNotificationQuietTime = 100 * time.Millisecond
+		grokNotificationQuietTime = 100 * time.Millisecond
+		zeroclawNotificationQuietTime = 100 * time.Millisecond
+		dimNotificationQuietTime = 100 * time.Millisecond
+		dimSessionLoadRetryDelay = 200 * time.Millisecond
+		collectDrainGrace = 750 * time.Millisecond
+		collectSettleGrace = 100 * time.Millisecond
+		probeWaitDelay = 500 * time.Millisecond
 		os.Exit(m.Run())
 	case "startup_stdout_burst":
 		runFakeClaudeStartupStdoutBurst()

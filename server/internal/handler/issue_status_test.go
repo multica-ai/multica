@@ -575,7 +575,7 @@ func archiveStatusVia(t *testing.T, entry db.IssueStatus) int {
 
 // holdExclusiveCatalogLock takes the archive side of the catalog lock and holds
 // it until the returned release func runs, so a test can pin one ordering.
-func holdExclusiveCatalogLock(t *testing.T) (release func()) {
+func holdExclusiveCatalogLock(t *testing.T) (holderPID int32, release func()) {
 	t.Helper()
 	ctx := context.Background()
 	tx, err := testPool.Begin(ctx)
@@ -587,14 +587,51 @@ func holdExclusiveCatalogLock(t *testing.T) (release func()) {
 		parseUUID(testWorkspaceID)); err != nil {
 		t.Fatalf("take exclusive lock: %v", err)
 	}
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatalf("read lock-holder pid: %v", err)
+	}
 	released := false
-	return func() {
+	return holderPID, func() {
 		if released {
 			return
 		}
 		released = true
 		tx.Rollback(ctx)
 	}
+}
+
+// waitForCatalogLockWaiter observes a contender waiting on the exact advisory
+// lock held by holderPID. It replaces fixed sleeps in race tests with the state
+// transition those sleeps were trying to approximate.
+func waitForCatalogLockWaiter(t *testing.T, ctx context.Context, holderPID int32) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting bool
+		if err := testPool.QueryRow(ctx, `
+SELECT EXISTS (
+    SELECT 1
+    FROM pg_locks AS held
+    JOIN pg_locks AS waiter
+      ON waiter.locktype = held.locktype
+     AND waiter.database IS NOT DISTINCT FROM held.database
+     AND waiter.classid IS NOT DISTINCT FROM held.classid
+     AND waiter.objid IS NOT DISTINCT FROM held.objid
+     AND waiter.objsubid IS NOT DISTINCT FROM held.objsubid
+    WHERE held.pid = $1
+      AND held.locktype = 'advisory'
+      AND held.granted
+      AND NOT waiter.granted
+)
+`, holderPID).Scan(&waiting); err != nil {
+			t.Fatalf("observe issue-status catalog-lock waiter: %v", err)
+		}
+		if waiting {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("writer never reached the held issue-status catalog lock")
 }
 
 // TestWritesRejectAnArchivedStatus covers the SEQUENTIAL case: the status is
@@ -724,7 +761,7 @@ func TestArchiveSucceedsAfterACommittedWrite(t *testing.T) {
 	// closed by luck.
 	t.Run("writer blocks while archive holds the exclusive lock", func(t *testing.T) {
 		createTestCustomStatus(t, "race_block", issuestatus.InProgress)
-		release := holdExclusiveCatalogLock(t)
+		holderPID, release := holdExclusiveCatalogLock(t)
 		defer release()
 
 		done := make(chan int, 1)
@@ -736,11 +773,11 @@ func TestArchiveSucceedsAfterACommittedWrite(t *testing.T) {
 			done <- rec.Code
 		}()
 
+		waitForCatalogLockWaiter(t, ctx, holderPID)
 		select {
 		case code := <-done:
 			t.Fatalf("write completed (%d) while the archive lock was held", code)
-		case <-time.After(400 * time.Millisecond):
-			// Blocked as required.
+		default:
 		}
 
 		release()
@@ -872,15 +909,19 @@ func TestArchiveCommitsInsideTheWriteRaceWindow(t *testing.T) {
 				parseUUID(testWorkspaceID)); err != nil {
 				t.Fatalf("take exclusive lock: %v", err)
 			}
+			var holderPID int32
+			if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID); err != nil {
+				t.Fatalf("read lock-holder pid: %v", err)
+			}
 
 			done := make(chan int, 1)
 			go func() { done <- tc.write(t, tc.key, seedID) }()
 
+			waitForCatalogLockWaiter(t, ctx, holderPID)
 			select {
 			case code := <-done:
 				t.Fatalf("write completed (%d) before the archive released the lock", code)
-			case <-time.After(400 * time.Millisecond):
-				// Parked on the lock, as required.
+			default:
 			}
 
 			// Archive inside the held lock and commit: from the writer's point

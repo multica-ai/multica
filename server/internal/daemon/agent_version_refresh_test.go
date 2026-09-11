@@ -940,6 +940,7 @@ func TestRefreshAgentVersions_ObligationSurvivesAnIncompletePayload(t *testing.T
 // round's payload actually carries disagrees" would turn that into one
 // register call per workspace every few minutes for the life of the daemon.
 func TestRefreshAgentVersions_UnreachableProviderDoesNotStormTheServer(t *testing.T) {
+	stubProbeRetry(t, time.Millisecond, time.Second)
 	fx := newBatchFixture(t)
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{
@@ -995,6 +996,7 @@ func TestRefreshAgentVersions_UnreachableProviderDoesNotStormTheServer(t *testin
 // upgrade. Yielding to that would let one stuck CLI silently disable version
 // refresh for every healthy provider on the machine, forever.
 func TestRefreshAgentVersions_NotStarvedByAStuckProvider(t *testing.T) {
+	stubProbeRetry(t, time.Millisecond, time.Second)
 	fx := newVersionRefreshFixture(t)
 	d := fx.daemon
 

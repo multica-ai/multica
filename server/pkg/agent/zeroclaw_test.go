@@ -725,7 +725,7 @@ func TestZeroclawSessionNewMissingAliasErrorIsActionable(t *testing.T) {
 
 // TestZeroclawTimeout tests that a context timeout during session/new is
 // reported as status=timeout. The fake script responds to initialize
-// immediately, then sleeps 30s on session/new so the 5s context deadline
+// immediately, then sleeps 30s on session/new so the 1s context deadline
 // expires during the session/new RPC.
 func TestZeroclawTimeout(t *testing.T) {
 	t.Parallel()
@@ -758,7 +758,7 @@ done`
 		t.Fatalf("New(zeroclaw) error: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	session, err := b.Execute(ctx, "test prompt", ExecOptions{

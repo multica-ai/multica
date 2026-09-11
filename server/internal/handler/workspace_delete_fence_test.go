@@ -89,7 +89,7 @@ func TestTaskWriteFence_BlocksOnWorkspaceLockAlone(t *testing.T) {
 			t.Fatalf("%s: begin: %v", name, err)
 		}
 		defer writer.Rollback(ctx)
-		if _, err := writer.Exec(ctx, "SET LOCAL lock_timeout = 750"); err != nil {
+		if _, err := writer.Exec(ctx, "SET LOCAL lock_timeout = 200"); err != nil {
 			t.Fatalf("%s: set lock_timeout: %v", name, err)
 		}
 		err = enqueueViaRealQuery(ctx, testHandler.Queries.WithTx(writer), agentID, runtimeID, issueID)
@@ -113,7 +113,7 @@ func TestTaskWriteFence_BlocksOnWorkspaceLockAlone(t *testing.T) {
 		t.Fatalf("begin reassign: %v", err)
 	}
 	defer reassign.Rollback(ctx)
-	if _, err := reassign.Exec(ctx, "SET LOCAL lock_timeout = 750"); err != nil {
+	if _, err := reassign.Exec(ctx, "SET LOCAL lock_timeout = 200"); err != nil {
 		t.Fatalf("reassign: set lock_timeout: %v", err)
 	}
 	_, err = testHandler.Queries.WithTx(reassign).ReassignTasksToRuntime(ctx, db.ReassignTasksToRuntimeParams{
@@ -131,7 +131,7 @@ func TestTaskWriteFence_BlocksOnWorkspaceLockAlone(t *testing.T) {
 		t.Fatalf("begin unrelated: %v", err)
 	}
 	defer unrelated.Rollback(ctx)
-	if _, err := unrelated.Exec(ctx, "SET LOCAL lock_timeout = 750"); err != nil {
+	if _, err := unrelated.Exec(ctx, "SET LOCAL lock_timeout = 200"); err != nil {
 		t.Fatalf("unrelated: set lock_timeout: %v", err)
 	}
 	if err := enqueueViaRealQuery(ctx, testHandler.Queries.WithTx(unrelated),
@@ -145,7 +145,7 @@ func TestTaskWriteFence_BlocksOnWorkspaceLockAlone(t *testing.T) {
 		t.Fatalf("begin status update: %v", err)
 	}
 	defer statusUpdate.Rollback(ctx)
-	if _, err := statusUpdate.Exec(ctx, "SET LOCAL lock_timeout = 750"); err != nil {
+	if _, err := statusUpdate.Exec(ctx, "SET LOCAL lock_timeout = 200"); err != nil {
 		t.Fatalf("status update: set lock_timeout: %v", err)
 	}
 	if _, err := statusUpdate.Exec(ctx,

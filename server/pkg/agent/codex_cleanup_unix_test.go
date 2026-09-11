@@ -23,7 +23,7 @@ func TestCodexThreadStartTimeoutReapsDetachedStdioDescendant(t *testing.T) {
 		`read line`+"\n"+
 		`read line`+"\n"+
 		`sleep 30 >/dev/null 2>&1 & echo $! > "`+pidFile+`"`+"\n"+
-		`sleep 3.2`+"\n"+
+		`sleep 1.2`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-late"}}}'`+"\n"+
 		`read line`+"\n")
 
@@ -32,7 +32,7 @@ func TestCodexThreadStartTimeoutReapsDetachedStdioDescendant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second})
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 4 * time.Second, HandshakeTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestCodexInitializeTimeoutReapsDetachedStdioDescendant(t *testing.T) {
 	fakePath := writeFakeCodexAppServer(t, ""+
 		`read line`+"\n"+
 		`sleep 30 >/dev/null 2>&1 & echo $! > "`+pidFile+`"`+"\n"+
-		`sleep 3.2`+"\n"+
+		`sleep 1.2`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
 		`read line`+"\n")
 
@@ -75,7 +75,7 @@ func TestCodexInitializeTimeoutReapsDetachedStdioDescendant(t *testing.T) {
 		t.Fatal(err)
 	}
 	backend := backendRaw.(*codexBackend)
-	session, err := backend.executeOnce(context.Background(), "prompt", ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second}, 1)
+	session, err := backend.executeOnce(context.Background(), "prompt", ExecOptions{Timeout: 4 * time.Second, HandshakeTimeout: time.Second}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestCodexInitializeTimeoutDoesNotPersistOpaqueEnv(t *testing.T) {
 	fakePath := writeFakeCodexAppServer(t, ""+
 		`read line`+"\n"+
 		`echo "$OPAQUE_AUTH_VALUE" >&2`+"\n"+
-		`sleep 3.2`+"\n"+
+		`sleep 1.2`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n")
 
 	var logs strings.Builder
@@ -120,7 +120,7 @@ func TestCodexInitializeTimeoutDoesNotPersistOpaqueEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	backend := backendRaw.(*codexBackend)
-	session, err := backend.executeOnce(context.Background(), "prompt", ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second}, 1)
+	session, err := backend.executeOnce(context.Background(), "prompt", ExecOptions{Timeout: 4 * time.Second, HandshakeTimeout: time.Second}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

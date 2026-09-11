@@ -568,7 +568,7 @@ func TestDeleteWorkspaceTasks_FencesConcurrentEnqueueAndReassignment(t *testing.
 			t.Fatalf("%s: begin: %v", name, err)
 		}
 		defer other.Rollback(ctx)
-		if _, err := other.Exec(ctx, "SET LOCAL lock_timeout = 750"); err != nil {
+		if _, err := other.Exec(ctx, "SET LOCAL lock_timeout = 200"); err != nil {
 			t.Fatalf("%s: set lock_timeout: %v", name, err)
 		}
 		_, err = other.Exec(ctx, sql, args...)
@@ -603,7 +603,7 @@ UPDATE agent_task_queue SET runtime_id = $1 WHERE id = $2
 		t.Fatalf("begin unrelated tx: %v", err)
 	}
 	defer unrelated.Rollback(ctx)
-	if _, err := unrelated.Exec(ctx, "SET LOCAL lock_timeout = 750"); err != nil {
+	if _, err := unrelated.Exec(ctx, "SET LOCAL lock_timeout = 200"); err != nil {
 		t.Fatalf("unrelated: set lock_timeout: %v", err)
 	}
 	if _, err := unrelated.Exec(ctx, `

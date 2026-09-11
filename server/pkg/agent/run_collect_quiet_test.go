@@ -165,10 +165,10 @@ func TestRunCollectQuietWaitsForTheAnswerAfterAPrompt(t *testing.T) {
 // TestRunCollectQuietReportsLateNonZeroExit is the third regression the review
 // asked for. A CLI that prints a complete answer and then fails must be reported
 // as the failure it is, as long as it fails within the idle grace — which is
-// exactly what the grace is for. The stub exits at 150ms against a 400ms grace.
+// exactly what the grace is for. The stub exits at 50ms before the test grace.
 func TestRunCollectQuietReportsLateNonZeroExit(t *testing.T) {
 	cli := writeCLI(t, "#!/bin/sh\nprintf '%s\\n' '"+quietTestJSON+"'\n"+
-		"echo 'openclaw doctor found a problem' >&2\nsleep 0.15\nexit 5\n")
+		"echo 'openclaw doctor found a problem' >&2\nsleep 0.05\nexit 5\n")
 
 	out, stderr, quiet, err := RunCollectQuiet(context.Background(), nil, 0, JSONOutputComplete, cli)
 	if err == nil {

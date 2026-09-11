@@ -52,7 +52,7 @@ func writeWrapperExitingBeforeChild(t *testing.T, delay, answer string) string {
 // this function, and a caller cannot tell that answer from a CLI that legitimately
 // prints nothing.
 func TestDetectCLIVersionWaitsForAWrapperDescendant(t *testing.T) {
-	bin := writeWrapperExitingBeforeChild(t, "0.5", "fake-cli 1.2.3")
+	bin := writeWrapperExitingBeforeChild(t, "0.2", "fake-cli 1.2.3")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -133,7 +133,7 @@ func TestDetectCLIVersionDoesNotSalvageABannerAsTheVersion(t *testing.T) {
 // With a rule that is not yet satisfied at leader exit, it has to keep waiting —
 // bounded by collectDrainGrace — or it kills the process that owes the answer.
 func TestRunCollectQuietWaitsForAWrapperDescendant(t *testing.T) {
-	bin := writeWrapperExitingBeforeChild(t, "0.5", `{"ok":true}`)
+	bin := writeWrapperExitingBeforeChild(t, "0.2", `{"ok":true}`)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

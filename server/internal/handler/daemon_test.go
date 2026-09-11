@@ -991,6 +991,9 @@ func TestDaemonHeartbeat_SlowProbeDoesNotWedge(t *testing.T) {
 	}
 
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	origProbeTimeout := heartbeatHasPendingTimeout
+	heartbeatHasPendingTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { heartbeatHasPendingTimeout = origProbeTimeout })
 
 	origList := testHandler.LocalSkillListStore
 	origImport := testHandler.LocalSkillImportStore
@@ -1013,8 +1016,8 @@ func TestDaemonHeartbeat_SlowProbeDoesNotWedge(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("DaemonHeartbeat with slow probes: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	// Two bounded probes at 1s each + a small fixed slack.
-	if elapsed > 3*time.Second {
+	// Two bounded probes plus a small fixed slack.
+	if elapsed > time.Second {
 		t.Fatalf("DaemonHeartbeat took %s; expected fast return despite slow probes", elapsed)
 	}
 }

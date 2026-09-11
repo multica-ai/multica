@@ -762,7 +762,7 @@ func TestHandleRuntimeGone_RecoveryContextStopsOnDaemonShutdown(t *testing.T) {
 			}
 			select {
 			case <-r.Context().Done():
-			case <-time.After(2 * time.Second):
+			case <-time.After(250 * time.Millisecond):
 			}
 			return
 		}

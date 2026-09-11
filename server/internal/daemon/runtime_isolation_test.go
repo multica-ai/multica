@@ -252,12 +252,12 @@ func TestRunBatchPollerWakesAfterTaskExit(t *testing.T) {
 }
 
 // The max-concurrency=1 shape takes a different sleep branch: after the
-// two-second slot wait expires, the poller parks on the five-second capacity
+// slot wait expires, the poller parks on the five-second capacity
 // backoff. A returned semaphore slot alone does not wake that sleep, so the
 // explicit completion signal is required there too.
 func TestRunBatchPollerWakesFromCapacityBackoffAfterTaskExit(t *testing.T) {
 	t.Parallel()
-	testRunBatchPollerTaskExitWakeup(t, 1, taskSlotWaitTimeout+250*time.Millisecond)
+	testRunBatchPollerTaskExitWakeup(t, 1, 200*time.Millisecond)
 }
 
 func testRunBatchPollerTaskExitWakeup(t *testing.T, maxConcurrent int, releaseDelay time.Duration) {
@@ -301,6 +301,7 @@ func testRunBatchPollerTaskExitWakeup(t *testing.T, maxConcurrent int, releaseDe
 	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1"}}
 	d.runtimeIndex["rt-1"] = Runtime{ID: "rt-1"}
 	d.cancelPollInterval = time.Hour
+	d.taskSlotWait = 50 * time.Millisecond
 	d.runner = taskRunnerFunc(func(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error) {
 		switch task.ID {
 		case "t1":

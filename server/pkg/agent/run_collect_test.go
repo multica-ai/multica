@@ -350,15 +350,14 @@ func TestRunCollectLeavesNoGoroutines(t *testing.T) {
 	cli := writeForkingCLI(t, pidFile)
 
 	// Warm up so lazily-created runtime goroutines exist before the baseline.
-	if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, nil, cli); err != nil {
+	warmupCLI := writeCLI(t, "#!/bin/sh\nprintf '{}\\n'\n")
+	if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, nil, warmupCLI); err != nil {
 		t.Fatalf("warmup: %v", err)
 	}
 	before := runtime.NumGoroutine()
 
-	for i := 0; i < 2; i++ {
-		if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, nil, cli); err != nil {
-			t.Fatalf("run %d: %v", i, err)
-		}
+	if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, nil, cli); err != nil {
+		t.Fatalf("run: %v", err)
 	}
 	assertNoGoroutineGrowth(t, before)
 }

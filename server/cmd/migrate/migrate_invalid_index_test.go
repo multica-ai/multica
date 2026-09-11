@@ -299,7 +299,7 @@ func TestRunMigrationsRepairsInvalidConcurrentIndexDuringRollback(t *testing.T) 
 		blocker.Release()
 		t.Fatalf("acquire builder conn: %v", err)
 	}
-	if _, err := builder.Exec(ctx, "SET statement_timeout = '2s'"); err != nil {
+	if _, err := builder.Exec(ctx, "SET statement_timeout = '250ms'"); err != nil {
 		builder.Release()
 		blocker.Release()
 		t.Fatalf("set statement_timeout: %v", err)
@@ -436,14 +436,14 @@ func TestRunMigrationsRepairsInvalidTerminalCompletedAtIndex(t *testing.T) {
 	// SET must ride the same connection as the build, and must be its own
 	// protocol message — a multi-command string would put CREATE INDEX
 	// CONCURRENTLY in an implicit transaction, which PostgreSQL rejects.
-	if _, err := builder.Exec(ctx, "SET statement_timeout = '2s'"); err != nil {
+	if _, err := builder.Exec(ctx, "SET statement_timeout = '250ms'"); err != nil {
 		builder.Release()
 		blocker.Release()
 		t.Fatalf("set statement_timeout: %v", err)
 	}
 	_, buildErr := builder.Exec(ctx, createV2)
 	// Clear the timeout before the connection goes back to the pool; pgxpool
-	// does not reset session state, so leaving it set would arm a 2s fuse on
+	// does not reset session state, so leaving it set would arm a timeout on
 	// whichever later caller happens to draw this connection.
 	if _, err := builder.Exec(ctx, "SET statement_timeout = DEFAULT"); err != nil {
 		t.Logf("reset statement_timeout: %v", err)

@@ -3545,7 +3545,7 @@ func TestExecuteAndDrain_CodexInactivityReportsMCPToolResultTranscript(t *testin
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-drain","turn":{"id":"turn-drain"}}}'` + "\n" +
 		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-drain","item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news"},"status":"inProgress"}}}'` + "\n" +
 		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-drain","item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news"},"status":"completed","durationMs":1627,"result":{"content":[{"type":"text","text":"private provider payload"}]}}}}'` + "\n" +
-		`sleep 5` + "\n"
+		`sleep 0.3` + "\n"
 	if err := os.WriteFile(fakePath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake codex: %v", err)
 	}

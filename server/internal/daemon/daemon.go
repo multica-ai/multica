@@ -608,6 +608,9 @@ type Daemon struct {
 
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
+	// taskSlotWait is the brief semaphore wait before the capacity backoff.
+	// New sets the production default; tests shorten it to reach that branch.
+	taskSlotWait time.Duration
 	// envRootBusyWait is how long a task that is entitled to a prior env root
 	// waits for the previous run to let go of it before giving up and preparing
 	// a fresh one. New() sets it; the zero value means "do not wait", which is
@@ -665,6 +668,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
+		taskSlotWait:              taskSlotWaitTimeout,
 		envRootBusyWait:           15 * time.Second,
 		taskPrepareTimeout:        defaultTaskPrepareTimeout,
 		reconcile:                 newReconcileBroadcaster(),
@@ -5077,7 +5081,11 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 
 		// Acquire at least one slot (blocking briefly), then grab any other free
 		// slots so a single batch claim can fill them all.
-		slot, acquired, woke, err := waitForTaskSlot(pollerCtx, sem, wakeup, taskSlotWaitTimeout)
+		slotWait := d.taskSlotWait
+		if slotWait <= 0 {
+			slotWait = taskSlotWaitTimeout
+		}
+		slot, acquired, woke, err := waitForTaskSlot(pollerCtx, sem, wakeup, slotWait)
 		if err != nil {
 			return
 		}

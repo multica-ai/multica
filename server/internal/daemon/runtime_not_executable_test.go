@@ -154,6 +154,7 @@ func TestConfirmNotExecutable_WindowStartsAtFirstSighting(t *testing.T) {
 // repair, without a daemon restart.
 func TestRefreshAgentVersions_TakesNotExecutableRuntimeOfflineAndBack(t *testing.T) {
 	stubConfirmWindow(t, 0)
+	stubProbeRetry(t, time.Millisecond, time.Second)
 	fx := newVersionRefreshFixture(t)
 	d := fx.daemon
 
@@ -235,6 +236,7 @@ func TestDetectBuiltinRuntimes_HealthyProbeClearsPendingVerdict(t *testing.T) {
 // (MUL-6164).
 func TestDeregisterRevivedRuntimes_ReattachesTheUnusableReason(t *testing.T) {
 	stubConfirmWindow(t, 0)
+	stubProbeRetry(t, time.Millisecond, time.Second)
 	// Stable ids before the first registration: the interleave only exists when
 	// the stale response names the same row the demotion took offline.
 	fx := newVersionRefreshFixtureWith(t, func(fx *batchFixture) { fx.enableStableRuntimeIDs() })
