@@ -58,7 +58,11 @@ export function WebProviders({
   apiBaseUrl?: string;
   wsUrl?: string;
 }) {
-  const cookieAuth = !hasLegacyToken();
+  // Remote-API local development cannot use the remote HttpOnly session
+  // cookie from a localhost origin. Opt into the existing bearer-token mode
+  // explicitly for that setup; production keeps cookie auth by default.
+  const tokenAuth = process.env.NEXT_PUBLIC_AUTH_MODE === "token";
+  const cookieAuth = !tokenAuth && !hasLegacyToken();
   const syncUserLocale = useUserLocaleSyncEnabled();
   // Stable identity reference so downstream effects keyed on it don't see a
   // new object on every parent render.
