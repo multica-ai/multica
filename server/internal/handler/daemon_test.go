@@ -2730,10 +2730,20 @@ type claimRuntimeGuardTask struct {
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {
 	t.Helper()
+	return claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, "")
+}
+
+// claimTaskForRuntimeGuardWithCapabilities claims as a daemon advertising the
+// given X-Client-Capabilities value ("" for a daemon that advertises none).
+func claimTaskForRuntimeGuardWithCapabilities(t *testing.T, runtimeID, daemonID, capabilities string) *claimRuntimeGuardTask {
+	t.Helper()
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
 		testWorkspaceID, daemonID)
+	if capabilities != "" {
+		req.Header.Set("X-Client-Capabilities", capabilities)
+	}
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("runtimeId", runtimeID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -3200,52 +3210,75 @@ func createAutoRetryForTest(t *testing.T, ctx context.Context, parentID string) 
 // failure: a fresh session, the parent's workdir, and a disclosed continuity
 // gap. The retry row comes from the real CreateRetryTask so the query and the
 // claim are pinned together; the workdir reaches the daemon only when both
-// carry it (GH #7998). Contrast a force_fresh task with no retry lineage, which
-// resumes nothing (TestClaimTask_IssuePriorSessionRuntimeGuard).
+// carry it (GH #7998). The workdir is offered only to a daemon that warns the
+// fresh session about the files it will find there; an older daemon keeps
+// getting a fresh directory, because unwarned its agent would re-run
+// `multica repo checkout` and reset the very checkout being kept. Contrast a
+// force_fresh task with no retry lineage, which resumes nothing
+// (TestClaimTask_IssuePriorSessionRuntimeGuard).
 func TestClaimTask_AutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	ctx := context.Background()
 
-	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
-	issueID := dbfx.Issue(t, "auto-retry fresh-session fixture", testutil.Cols{"status": "in_progress"})
+	for _, tc := range []struct {
+		name         string
+		capabilities string
+		wantWorkDir  string
+	}{
+		{
+			name:         "daemon_warns_of_reused_workdir",
+			capabilities: protocol.DaemonCapabilityReusedWorkdirNoticeV1,
+			wantWorkDir:  "/tmp/codex-stuck-workdir",
+		},
+		{
+			name:         "older_daemon_gets_fresh_directory",
+			capabilities: protocol.DaemonCapabilityCoalescedCommentsV1,
+			wantWorkDir:  "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+			issueID := dbfx.Issue(t, "auto-retry fresh-session fixture", testutil.Cols{"status": "in_progress"})
 
-	// An earlier healthy turn is what the (agent, issue) resume lookup returns,
-	// since it skips the poisoned parent. Getting its session or workdir back
-	// would mean the retry fell through to that lookup.
-	dbfx.Task(t, agentID, testutil.Cols{
-		"runtime_id":   runtimeID,
-		"issue_id":     issueID,
-		"status":       "completed",
-		"started_at":   testutil.Raw("now() - interval '30 minutes'"),
-		"completed_at": testutil.Raw("now() - interval '25 minutes'"),
-		"session_id":   "earlier-healthy-session",
-		"work_dir":     "/tmp/earlier-healthy-workdir",
-	})
-	parentID := dbfx.Task(t, agentID, testutil.Cols{
-		"runtime_id":     runtimeID,
-		"issue_id":       issueID,
-		"status":         "failed",
-		"failure_reason": "codex_semantic_inactivity",
-		"started_at":     testutil.Raw("now() - interval '20 minutes'"),
-		"completed_at":   testutil.Raw("now() - interval '1 minute'"),
-		"session_id":     "codex-stuck-session",
-		"work_dir":       "/tmp/codex-stuck-workdir",
-		"attempt":        1,
-		"max_attempts":   2,
-	})
-	createAutoRetryForTest(t, ctx, parentID)
+			// An earlier healthy turn is what the (agent, issue) resume lookup
+			// returns, since it skips the poisoned parent. Getting its session or
+			// workdir back would mean the retry fell through to that lookup.
+			dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id":   runtimeID,
+				"issue_id":     issueID,
+				"status":       "completed",
+				"started_at":   testutil.Raw("now() - interval '30 minutes'"),
+				"completed_at": testutil.Raw("now() - interval '25 minutes'"),
+				"session_id":   "earlier-healthy-session",
+				"work_dir":     "/tmp/earlier-healthy-workdir",
+			})
+			parentID := dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id":     runtimeID,
+				"issue_id":       issueID,
+				"status":         "failed",
+				"failure_reason": "codex_semantic_inactivity",
+				"started_at":     testutil.Raw("now() - interval '20 minutes'"),
+				"completed_at":   testutil.Raw("now() - interval '1 minute'"),
+				"session_id":     "codex-stuck-session",
+				"work_dir":       "/tmp/codex-stuck-workdir",
+				"attempt":        1,
+				"max_attempts":   2,
+			})
+			createAutoRetryForTest(t, ctx, parentID)
 
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-	if task.PriorWorkDir != "/tmp/codex-stuck-workdir" {
-		t.Fatalf("PriorWorkDir = %q, want the failed parent's /tmp/codex-stuck-workdir", task.PriorWorkDir)
-	}
-	if task.PriorSessionID != "" {
-		t.Fatalf("PriorSessionID = %q, want empty (the poisoned session must not resume)", task.PriorSessionID)
-	}
-	if !task.PriorSessionResumeUnavailable {
-		t.Fatal("auto-retry must disclose that the failed attempt's context did not come back")
+			task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, tc.capabilities)
+			if task.PriorWorkDir != tc.wantWorkDir {
+				t.Fatalf("PriorWorkDir = %q, want %q", task.PriorWorkDir, tc.wantWorkDir)
+			}
+			if task.PriorSessionID != "" {
+				t.Fatalf("PriorSessionID = %q, want empty (the poisoned session must not resume)", task.PriorSessionID)
+			}
+			if !task.PriorSessionResumeUnavailable {
+				t.Fatal("auto-retry must disclose that the failed attempt's context did not come back")
+			}
+		})
 	}
 }
 
@@ -3282,7 +3315,7 @@ func TestClaimTask_ChatAutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
 	})
 	createAutoRetryForTest(t, ctx, parentID)
 
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, protocol.DaemonCapabilityReusedWorkdirNoticeV1)
 	if task.PriorWorkDir != "/tmp/codex-stuck-chat-workdir" {
 		t.Fatalf("PriorWorkDir = %q, want the failed parent's /tmp/codex-stuck-chat-workdir", task.PriorWorkDir)
 	}

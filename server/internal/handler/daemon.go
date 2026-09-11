@@ -2152,13 +2152,18 @@ func rerunSourceMatchesTaskScope(task, source db.AgentTaskQueue) bool {
 // the parent's failure poisoned the conversation (currently
 // codex_semantic_inactivity), and still copies the parent's work_dir onto the
 // child: a poisoned conversation says nothing about the files it left behind,
-// the same contract the manual-retry branch applies (MUL-4869, MUL-7034). The
-// daemon validates the directory before reusing it and falls back to a fresh
-// Prepare when it is gone. The failed attempt's working memory does not come
-// back, so the continuity gap is disclosed rather than presenting the reused
-// workdir as a clean start.
-func applyFreshSessionRetryWorkdir(task db.AgentTaskQueue, resp *AgentTaskResponse) {
-	if task.WorkDir.Valid {
+// the same contract the manual-retry branch applies (MUL-4869, MUL-7034).
+//
+// The workdir is offered only to a daemon that warns the fresh session about
+// the files it will find (DaemonCapabilityReusedWorkdirNoticeV1). Unwarned, the
+// session follows the brief and re-runs `multica repo checkout`, which resets
+// an existing checkout and deletes the work being kept, so an older daemon gets
+// a fresh directory as before. The daemon validates the directory before
+// reusing it and falls back to a fresh Prepare when it is gone. Either way the
+// failed attempt's working memory does not come back, so the continuity gap is
+// disclosed.
+func applyFreshSessionRetryWorkdir(task db.AgentTaskQueue, resp *AgentTaskResponse, daemonWarnsOfReusedWorkdir bool) {
+	if daemonWarnsOfReusedWorkdir && task.WorkDir.Valid {
 		resp.PriorWorkDir = task.WorkDir.String
 	}
 	resp.PriorSessionResumeUnavailable = true
@@ -2802,7 +2807,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// Automatic retry that must start a fresh session: continue in the
 			// parent's workdir, never its session. A force_fresh task with no
 			// retry lineage still resumes nothing.
-			applyFreshSessionRetryWorkdir(*task, &resp)
+			applyFreshSessionRetryWorkdir(*task, &resp, requestHasClientCapability(r, protocol.DaemonCapabilityReusedWorkdirNoticeV1))
 		}
 	}
 
@@ -2981,7 +2986,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// Same as the issue branch. The retry lineage is what separates this
 			// from a user-requested fresh start (the Lark fresh-session command),
 			// which still inherits nothing.
-			applyFreshSessionRetryWorkdir(*task, &resp)
+			applyFreshSessionRetryWorkdir(*task, &resp, requestHasClientCapability(r, protocol.DaemonCapabilityReusedWorkdirNoticeV1))
 		}
 
 		parts := make([]string, 0, len(unanswered))
