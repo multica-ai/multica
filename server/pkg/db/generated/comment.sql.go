@@ -1911,11 +1911,11 @@ type LockCommentForDeleteParams struct {
 //
 // It takes the aggregate owner's lock before the comment's, so deleting cannot
 // deadlock with issue teardown (which takes the same issue -> comment order).
-// The comment lock is FOR UPDATE, not FOR NO KEY UPDATE, on purpose: a reply
-// insert takes FOR KEY SHARE on its parent through the parent_id foreign key,
-// so while this lock is held no reply can attach to the comment. The caller's
-// later statements start from a fresh snapshot taken after both locks, which
-// is what makes their reply check exact.
+// The issue lock is also what freezes the thread: every comment insert goes
+// through CreateComment, whose first step updates this issue row, so no reply
+// can be added to the issue until the delete transaction ends. The caller's
+// later statements start from a fresh snapshot taken after the locks, which is
+// what makes their reply check exact.
 //
 // A tombstone is excluded: deleting an already-deleted comment finds nothing.
 func (q *Queries) LockCommentForDelete(ctx context.Context, arg LockCommentForDeleteParams) (Comment, error) {

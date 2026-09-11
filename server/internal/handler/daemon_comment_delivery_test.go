@@ -332,16 +332,35 @@ func TestClaimTaskByRuntime_CoalescedDeliveryMatrix(t *testing.T) {
 	})
 }
 
+// deletedTriggerStates are the two shapes a deleted trigger leaves behind: a
+// removed row (trigger_comment_id cleared by ON DELETE SET NULL), or a
+// tombstone for a trigger that still had replies (#8296), which keeps the id.
+var deletedTriggerStates = []struct {
+	name string
+	sql  string
+}{
+	{name: "removed", sql: `DELETE FROM comment WHERE id = $1`},
+	{name: "tombstoned", sql: `UPDATE comment SET content = '', deleted_at = now() WHERE id = $1`},
+}
+
 func TestClaimTaskByRuntime_CoalescedOnlyStaleTaskDoesNotReuseDeletedTriggerCapabilities(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
+	for _, state := range deletedTriggerStates {
+		t.Run(state.name, func(t *testing.T) {
+			testClaimRepairsDeletedTrigger(t, state.sql)
+		})
+	}
+}
+
+func testClaimRepairsDeletedTrigger(t *testing.T, deleteTriggerSQL string) {
 	fixture := createCommentDeliveryFixture(t, "Deleted trigger stale claim")
 	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign stale-claim issue: %v", err)
 	}
-	if _, err := testPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, fixture.commentID[2]); err != nil {
+	if _, err := testPool.Exec(context.Background(), deleteTriggerSQL, fixture.commentID[2]); err != nil {
 		t.Fatalf("delete trigger directly: %v", err)
 	}
 
@@ -777,6 +796,14 @@ func TestRerunIssue_PromotesNewestSurvivorAfterSourceTriggerDeleted(t *testing.T
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
+	for _, state := range deletedTriggerStates {
+		t.Run(state.name, func(t *testing.T) {
+			testRerunPromotesSurvivorAfterTriggerDeleted(t, state.sql)
+		})
+	}
+}
+
+func testRerunPromotesSurvivorAfterTriggerDeleted(t *testing.T, deleteTriggerSQL string) {
 	ctx := context.Background()
 	fixture := createCommentDeliveryFixture(t, "Deleted trigger manual rerun")
 	if _, err := testPool.Exec(ctx, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
@@ -789,7 +816,7 @@ func TestRerunIssue_PromotesNewestSurvivorAfterSourceTriggerDeleted(t *testing.T
 	`, fixture.taskID); err != nil {
 		t.Fatalf("complete deleted-trigger rerun source: %v", err)
 	}
-	if _, err := testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, fixture.commentID[2]); err != nil {
+	if _, err := testPool.Exec(ctx, deleteTriggerSQL, fixture.commentID[2]); err != nil {
 		t.Fatalf("delete rerun source trigger: %v", err)
 	}
 

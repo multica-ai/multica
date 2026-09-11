@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -265,5 +266,85 @@ func TestCommentTombstoneIsNotTriggerInput(t *testing.T) {
 		if comment.ID == parseUUID(root) {
 			t.Fatal("completion reconciliation would replay the tombstone")
 		}
+	}
+}
+
+// A reply under a deleted agent comment continues the thread: it wakes neither
+// the deleted comment's author nor, as a fallback, the issue assignee. The web
+// reply box posts under the thread root, so this is every later reply once an
+// agent-authored root with replies is deleted.
+func TestReplyUnderDeletedAgentCommentWakesNoOne(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	authorID := createHandlerTestAgent(t, "Deleted Comment Author", nil)
+	assigneeID := createHandlerTestAgent(t, "Issue Assignee", nil)
+	issueID := dbfx.Issue(t, "reply under deleted agent comment", testutil.Cols{
+		"assignee_type": "agent", "assignee_id": assigneeID,
+	})
+	root := dbfx.Comment(t, issueID, "I am handling this", testutil.Cols{"author_type": "agent", "author_id": authorID})
+	dbfx.Comment(t, issueID, "earlier reply", testutil.Cols{"parent_id": root})
+	if _, err := testHandler.deleteComment(ctx, parseUUID(root), parseUUID(testWorkspaceID)); err != nil {
+		t.Fatalf("deleteComment: %v", err)
+	}
+
+	body := map[string]any{"content": "please follow up", "parent_id": root}
+	requirePreviewAgents(t, previewCommentTriggersForTest(t, issueID, body))
+	postCommentForTriggerPreviewTest(t, issueID, body)
+	tasks, err := testHandler.Queries.ListTasksByIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("reply under a deleted comment started %d runs, want none: %+v", len(tasks), tasks)
+	}
+}
+
+// A comment deleted after capture reads as removed, not as emptied; one that
+// was already a tombstone when captured is not a change at all.
+func TestSourceContextThreadChangesTreatTombstonesAsAbsent(t *testing.T) {
+	root := "00000000-0000-0000-0000-00000000000a"
+	node := func(id string, deleted bool) service.SourceContextCommentSnapshot {
+		parent := root
+		comment := service.SourceContextCommentSnapshot{ID: id, ParentID: &parent, Type: "comment", Content: "body " + id, Deleted: deleted}
+		if deleted {
+			comment.Content = ""
+		}
+		if id == root {
+			comment.ParentID = nil
+		}
+		return comment
+	}
+	snapshot := func(nodes ...service.SourceContextCommentSnapshot) service.SourceContextSnapshot {
+		return service.SourceContextSnapshot{AnchorCommentID: root, CommentThread: nodes}
+	}
+
+	deletedAfterCapture := sourceContextThreadChangeDetails(
+		snapshot(node(root, false), node("b", false), node("c", false)),
+		snapshot(node(root, false), node("b", true), node("c", false)),
+	)
+	if len(deletedAfterCapture.RemovedCommentIDs) != 1 || deletedAfterCapture.RemovedCommentIDs[0] != "b" || len(deletedAfterCapture.ChangedCommentIDs) != 0 {
+		t.Fatalf("changes = %+v, want b removed and nothing edited", deletedAfterCapture)
+	}
+
+	alreadyDeleted := sourceContextThreadChangeDetails(
+		snapshot(node(root, false), node("b", true), node("c", false)),
+		snapshot(node(root, false), node("b", true), node("c", false)),
+	)
+	if len(alreadyDeleted.Reasons) != 0 {
+		t.Fatalf("changes = %+v, want an unchanged thread", alreadyDeleted)
+	}
+}
+
+func TestPublicPluginCommentExposesTombstone(t *testing.T) {
+	live := publicPluginComment(db.Comment{Content: "hello"})
+	if live.DeletedAt != "" {
+		t.Fatalf("live comment deleted_at = %q, want empty", live.DeletedAt)
+	}
+	deletedAt := time.Date(2026, time.September, 11, 8, 0, 0, 0, time.UTC)
+	tombstone := publicPluginComment(db.Comment{DeletedAt: pgtype.Timestamptz{Time: deletedAt, Valid: true}})
+	if tombstone.DeletedAt == "" || tombstone.Content != "" {
+		t.Fatalf("tombstone = %+v, want deleted_at set and empty content", tombstone)
 	}
 }
