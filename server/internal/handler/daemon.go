@@ -2575,7 +2575,16 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if task.TriggerCommentID.Valid {
 			plannedCommentIDs = append(plannedCommentIDs, task.TriggerCommentID)
 		}
-		loadedComments := h.buildCoalescedCommentData(r.Context(), runtime.WorkspaceID, plannedCommentIDs)
+		loadedComments, commentErr := h.buildCoalescedCommentData(r.Context(), runtime.WorkspaceID, plannedCommentIDs)
+		if commentErr != nil {
+			slog.Error("task claim: comment input load failed; preserving task for redelivery",
+				"task_id", uuidToString(task.ID), "error", commentErr)
+			return resp, nil, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_comment_load",
+				status:  http.StatusInternalServerError,
+				message: "failed to load task comment input",
+			}
+		}
 		triggerCommentID := uuidToString(task.TriggerCommentID)
 		var deliveredComments []CoalescedCommentData
 		triggerLoaded := false
@@ -4293,14 +4302,17 @@ func keepReplayableAgentTriggers(triggers []commentAgentTrigger, planned bool) [
 // buildCoalescedCommentData loads the full detail of each comment that was
 // folded into a not-yet-started run (MUL-4195) so the claim response can embed
 // them and the prompt can address each without assuming they share the
-// triggering thread (review should-fix #3). Thread id follows the same rule as
-// the triggering comment (parent id when the comment is a reply, else the
-// comment's own id). Missing comments (deleted / wrong workspace) are skipped
-// rather than failing the claim. The set is bounded by how many comments a user
-// fires before a run starts, so the per-comment lookups stay cheap.
-func (h *Handler) buildCoalescedCommentData(ctx context.Context, workspaceID pgtype.UUID, ids []pgtype.UUID) []CoalescedCommentData {
+// triggering thread (review should-fix #3). Thread id is the thread root for
+// replies and the comment's own id for top-level comments.
+// Missing comments (deleted / wrong workspace) are skipped
+// rather than failing the claim. Other comment/thread read errors reject the
+// whole batch so the agent never starts with a partial handoff after a transient
+// database failure. Author display names remain optional enrichment.
+// The set is bounded by how many comments a user fires before a run starts,
+// so the per-comment lookups stay cheap.
+func (h *Handler) buildCoalescedCommentData(ctx context.Context, workspaceID pgtype.UUID, ids []pgtype.UUID) ([]CoalescedCommentData, error) {
 	if len(ids) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]CoalescedCommentData, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))
@@ -4321,7 +4333,10 @@ func (h *Handler) buildCoalescedCommentData(ctx context.Context, workspaceID pgt
 			WorkspaceID: workspaceID,
 		})
 		if err != nil {
-			continue
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			return nil, fmt.Errorf("load planned comment %s: %w", idString, err)
 		}
 		data := CoalescedCommentData{
 			ID:         uuidToString(comment.ID),
@@ -4333,7 +4348,10 @@ func (h *Handler) buildCoalescedCommentData(ctx context.Context, workspaceID pgt
 		if comment.ParentID.Valid {
 			root, err := h.Queries.GetCommentThreadRootID(ctx, comment.ID)
 			if err != nil {
-				continue
+				if errors.Is(err, pgx.ErrNoRows) {
+					continue
+				}
+				return nil, fmt.Errorf("load planned comment %s thread: %w", idString, err)
 			}
 			data.ThreadID = uuidToString(root)
 		}
@@ -4352,7 +4370,7 @@ func (h *Handler) buildCoalescedCommentData(ctx context.Context, workspaceID pgt
 		out = append(out, data)
 	}
 	if len(out) == 0 {
-		return nil
+		return nil, nil
 	}
 	sort.Slice(out, func(i, j int) bool {
 		left, leftErr := time.Parse(time.RFC3339Nano, out[i].CreatedAt)
@@ -4365,7 +4383,7 @@ func (h *Handler) buildCoalescedCommentData(ctx context.Context, workspaceID pgt
 		}
 		return out[i].ID < out[j].ID
 	})
-	return out
+	return out, nil
 }
 
 func commentDataIDs(comments []CoalescedCommentData) []pgtype.UUID {

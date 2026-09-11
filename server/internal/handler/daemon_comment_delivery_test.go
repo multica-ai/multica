@@ -598,7 +598,10 @@ func TestBuildCoalescedCommentData_SortsEqualTimestampsByID(t *testing.T) {
 		util.MustParseUUID(fixture.commentID[1]),
 		util.MustParseUUID(fixture.commentID[0]),
 	}
-	comments := testHandler.buildCoalescedCommentData(context.Background(), util.MustParseUUID(testWorkspaceID), ids)
+	comments, err := testHandler.buildCoalescedCommentData(context.Background(), util.MustParseUUID(testWorkspaceID), ids)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := append([]string{}, fixture.commentID[:2]...)
 	slices.Sort(want)
 	got := []string{comments[0].ID, comments[1].ID}
