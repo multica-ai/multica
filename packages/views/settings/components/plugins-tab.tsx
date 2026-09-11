@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { AlertCircle, CalendarClock, Loader2, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useCurrentMember } from "@multica/core/permissions";
@@ -481,29 +481,38 @@ function PublishAndInstall({ wsId, canManage }: { wsId: string; canManage: boole
 }
 
 function MarketplaceCatalog({ wsId }: { wsId: string }) {
+  const { t } = useT("settings");
   const [manifestText, setManifestText] = useState("");
-  const preview = useMutation({
-    mutationFn: async () => {
-      let manifest: unknown;
-      try { manifest = JSON.parse(manifestText); } catch { throw new Error("marketplace.json must be valid JSON"); }
-      return api.previewClaudeMarketplace(wsId, manifest);
-    },
-  });
+  const [preview, setPreview] = useState<{
+    status: "idle" | "pending" | "success" | "error";
+    data?: Awaited<ReturnType<typeof api.previewClaudeMarketplace>>;
+    error?: unknown;
+  }>({ status: "idle" });
+  const previewMarketplace = async () => {
+    setPreview({ status: "pending" });
+    try {
+      const manifest = JSON.parse(manifestText) as unknown;
+      const data = await api.previewClaudeMarketplace(wsId, manifest);
+      setPreview({ status: "success", data });
+    } catch (error) {
+      setPreview({ status: "error", error });
+    }
+  };
   return (
-    <SettingsSection title="Claude marketplace" description="Preview a marketplace.json safely before publishing native Multica plugins.">
+    <SettingsSection title={t(($) => $.plugins.marketplace.title)} description={t(($) => $.plugins.marketplace.description)}>
       <SettingsCard>
         <div className="space-y-3 px-4 py-4">
-          <Textarea value={manifestText} onChange={(event) => setManifestText(event.target.value)} placeholder='{"name":"My catalog","owner":{"name":"Team"},"plugins":[]}' rows={6} />
+          <Textarea value={manifestText} onChange={(event) => setManifestText(event.target.value)} placeholder={t(($) => $.plugins.marketplace.placeholder)} rows={6} />
           <div className="flex justify-end">
-            <Button disabled={!manifestText.trim() || preview.isPending} onClick={() => preview.mutate()}>
-              {preview.isPending ? <Loader2 className="animate-spin" /> : null} Preview marketplace
+            <Button disabled={!manifestText.trim() || preview.status === "pending"} onClick={() => void previewMarketplace()}>
+              {preview.status === "pending" ? <Loader2 className="animate-spin" /> : null} {t(($) => $.plugins.marketplace.preview)}
             </Button>
           </div>
-          {preview.error ? <p className="text-caption text-destructive">{preview.error instanceof Error ? preview.error.message : "Preview failed"}</p> : null}
-          {preview.data ? (
+          {preview.status === "error" ? <p className="text-caption text-destructive">{preview.error instanceof Error ? preview.error.message : t(($) => $.plugins.marketplace.failed)}</p> : null}
+          {preview.status === "success" && preview.data ? (
             <div className="space-y-2 border-t border-surface-border pt-3">
               <div className="text-body font-medium">{preview.data.name}</div>
-              <p className="text-caption text-muted-foreground">{preview.data.plugins.length} plugin(s) discovered. Sources are shown for review; nothing was installed.</p>
+              <p className="text-caption text-muted-foreground">{t(($) => $.plugins.marketplace.discovered, { count: preview.data.plugins.length })}</p>
               <ul className="space-y-1 text-caption">{preview.data.plugins.map((plugin) => <li key={plugin.name}><code>{plugin.name}</code> — {plugin.source.kind}{plugin.source.repository ? `:${plugin.source.repository}` : plugin.source.url ? `:${plugin.source.url}` : ""}</li>)}</ul>
             </div>
           ) : null}

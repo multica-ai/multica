@@ -357,6 +357,7 @@
   },
   "plugins": {
     "title": "Plugins",
+    "marketplace": { "title": "Claude marketplace", "description": "Preview a marketplace.json safely before publishing native Multica plugins.", "placeholder": "{\"name\":\"My catalog\",\"owner\":{\"name\":\"Team\"},\"plugins\":[]}", "preview": "Preview marketplace", "failed": "Preview failed", "discovered": "{{count}} plugin(s) discovered. Sources are shown for review; nothing was installed." },
     "description": "在这个工作区里发布插件，然后安装某个具体版本，并逐条确认它能访问什么。",
     "loading": "正在加载 Plugins",
     "load_failed": "无法加载 Plugins",
