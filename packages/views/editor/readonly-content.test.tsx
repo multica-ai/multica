@@ -138,6 +138,22 @@ describe("ReadonlyContent line breaks", () => {
 });
 
 describe("ReadonlyContent annotated replies", () => {
+  it.each(["A note", ""])("keeps a visible blank paragraph between annotations (note: %s)", (note) => {
+    const first = {
+      id: "first", sourceCommentId: "source", sourceActorName: "Agent",
+      quote: "First quote", note, start: 0, prefix: "", suffix: "",
+    };
+    const { container } = render(<ReadonlyContent content={composeAnnotatedReply("Overall reply", [
+      first, { ...first, id: "second", quote: "Second quote" },
+    ])} />);
+    const quotes = container.querySelectorAll("blockquote");
+    expect(quotes).toHaveLength(2);
+    expect(quotes[1]?.previousElementSibling?.tagName).toBe("P");
+    expect(quotes[1]?.previousElementSibling?.textContent).toBe("\u00a0");
+    expect(container.querySelectorAll("p").length).toBeGreaterThan(2);
+    expect(container.querySelector("a, ol, hr")).toBeNull();
+  });
+
   it("renders quote snapshots and notes without generated links or numbered lists", () => {
     const content = composeAnnotatedReply("", [{
       id: "annotation", sourceCommentId: "source", sourceActorName: "Agent",

@@ -49,10 +49,13 @@ export function composeAnnotatedReply(content: string, annotations: readonly Rep
   const body = content.trim();
   if (!annotations.length) return body;
   // Keep the user's leading /note command (and explicit mentions) in place.
-  return [body, ...annotations.map((a) =>
+  const quotes = annotations.map((a) =>
     a.quote.split(/\r?\n/).map((line) => `> ${quoteText(line)}`).join("\n") +
       (a.note.trim() ? `\n\n${a.note.trim()}` : ""),
-  )].filter(Boolean).join("\n\n");
+  );
+  // Markdown collapses extra newlines. A blank paragraph keeps one visible
+  // empty line between annotations and separates adjacent quote-only blocks.
+  return [body, quotes.join("\n\n&nbsp;\n\n")].filter(Boolean).join("\n\n");
 }
 
 /** Relocate only an unambiguous quote with matching context after source edits. */

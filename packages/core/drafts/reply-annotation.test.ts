@@ -10,7 +10,7 @@ const annotation: ReplyAnnotation = {
 describe("annotated reply serialization", () => {
   it("publishes only the user body, quotes and notes, without source links or labels", () => {
     expect(composeAnnotatedReply("Overall reply", [annotation, { ...annotation, id: "b", quote: "other", note: "" }]))
-      .toBe("Overall reply\n\n> first\n> second\n\nPlease revise.\n\n> other");
+      .toBe("Overall reply\n\n> first\n> second\n\nPlease revise.\n\n&nbsp;\n\n> other");
   });
 
   it("preserves user-authored note Markdown and links without list indentation", () => {
