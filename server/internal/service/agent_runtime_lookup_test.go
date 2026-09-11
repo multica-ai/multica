@@ -233,6 +233,7 @@ func (r *runtimeRows) FieldDescriptions() []pgconn.FieldDescription { return nil
 func (r *runtimeRows) Values() ([]any, error)                       { return nil, nil }
 func (r *runtimeRows) RawValues() [][]byte                          { return nil }
 func (r *runtimeRows) Conn() *pgx.Conn                              { return nil }
+func (r *runtimeRows) TypeMap() *pgtype.Map                         { return nil }
 
 func (r *runtimeRows) Next() bool {
 	if r.i >= len(r.rows) {
