@@ -357,6 +357,7 @@
   },
   "plugins": {
     "title": "Plugins",
+    "marketplace": { "title": "Claude marketplace", "description": "Preview a marketplace.json safely before publishing native Multica plugins.", "placeholder": "{\"name\":\"My catalog\",\"owner\":{\"name\":\"Team\"},\"plugins\":[]}", "preview": "Preview marketplace", "failed": "Preview failed", "discovered": "{{count}} plugin(s) discovered. Sources are shown for review; nothing was installed." },
     "description": "Publish plugins into this workspace, then install a specific version and review exactly what it is allowed to reach.",
     "loading": "Loading Plugins",
     "load_failed": "Plugins couldn't be loaded",

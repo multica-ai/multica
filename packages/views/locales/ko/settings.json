@@ -357,6 +357,7 @@
   },
   "plugins": {
     "title": "Plugins",
+    "marketplace": { "title": "Claude marketplace", "description": "Preview a marketplace.json safely before publishing native Multica plugins.", "placeholder": "{\"name\":\"My catalog\",\"owner\":{\"name\":\"Team\"},\"plugins\":[]}", "preview": "Preview marketplace", "failed": "Preview failed", "discovered": "{{count}} plugin(s) discovered. Sources are shown for review; nothing was installed." },
     "description": "이 워크스페이스에 플러그인을 게시하고 특정 버전을 설치하며, 무엇에 접근할 수 있는지 확인합니다.",
     "loading": "Plugins 불러오는 중",
     "load_failed": "Plugins를 불러올 수 없습니다",

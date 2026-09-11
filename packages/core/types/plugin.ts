@@ -158,6 +158,31 @@ export interface PluginPackageListResponse {
   packages: PluginPackage[];
 }
 
+export interface ClaudeMarketplacePluginSource {
+  kind: string;
+  repository?: string;
+  url?: string;
+  ref?: string;
+  subdir?: string;
+  package?: string;
+  version?: string;
+}
+
+export interface ClaudeMarketplacePluginPreview {
+  name: string;
+  description?: string;
+  version?: string;
+  source: ClaudeMarketplacePluginSource;
+}
+
+export interface ClaudeMarketplacePreview {
+  name: string;
+  owner: { name: string; email?: string };
+  description?: string;
+  version?: string;
+  plugins: ClaudeMarketplacePluginPreview[];
+}
+
 /** One short-lived, installation-bound launch of a hosted surface. */
 export interface PluginSurfaceLaunch {
   /** Multica's cookie-free content URL, never the plugin author's server. */

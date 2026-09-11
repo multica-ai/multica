@@ -158,6 +158,7 @@ import type {
   PluginInvocation,
   PluginMCPTool,
   PluginPreview,
+  ClaudeMarketplacePreview,
   PluginTokenIssue,
   PluginPreviewRequest,
   PluginInstallRequest,
@@ -438,6 +439,8 @@ import {
   PluginTokenIssueSchema,
   PluginInstallationSchema,
   PluginPreviewSchema,
+  ClaudeMarketplacePreviewSchema,
+  EMPTY_CLAUDE_MARKETPLACE_PREVIEW,
   WorkspaceMcpServerListSchema,
   WorkspaceMcpServerSchema,
   ShareLinkSchema,
@@ -2772,6 +2775,15 @@ export class ApiClient {
     });
     return parseWithFallback(raw, PluginPreviewSchema, EMPTY_PLUGIN_PREVIEW, {
       endpoint: "POST /api/workspaces/{id}/plugins/preview",
+    });
+  }
+
+  async previewClaudeMarketplace(workspaceId: string, manifest: unknown): Promise<ClaudeMarketplacePreview> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/marketplace/preview`, {
+      method: "POST", body: JSON.stringify({ manifest }),
+    });
+    return parseWithFallback(raw, ClaudeMarketplacePreviewSchema, EMPTY_CLAUDE_MARKETPLACE_PREVIEW, {
+      endpoint: "POST /api/workspaces/{id}/plugins/marketplace/preview",
     });
   }
 
