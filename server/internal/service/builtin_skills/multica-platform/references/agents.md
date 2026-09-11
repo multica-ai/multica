@@ -72,6 +72,13 @@ empty strings. `--max-concurrent-tasks` is validated as 1–50 before the
 request is sent. `--conversation-starters` is a JSON array of `{label, prompt}`
 objects (at most 3); pass `'[]'` on update to clear.
 
+Set `--avatar-emoji '🦊'` on `agent create` or `agent update <id>` to choose
+an emoji avatar. The CLI prefixes the glyph with the internal `emoji:` marker
+before sending `avatar_url`, only when the flag is supplied, and rejects an
+empty or whitespace-only value before making a request: omission preserves
+the random default on create and the current avatar on update. Local image
+uploads remain available through `multica agent avatar <id> --file <image>`.
+
 The HTTP body accepts: `name`, `description`, `instructions`,
 `conversation_starters`, `avatar_url`, `runtime_id`, `runtime_config`,
 `custom_env`, `custom_args`, `model`, `thinking_level`, `service_tier`,
