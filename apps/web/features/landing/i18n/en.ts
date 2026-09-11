@@ -296,9 +296,11 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.43",
         date: "2026-09-11",
-        title: "Desktop history menus, new Issue board defaults, and performance improvements",
+        title: "Comment and description annotations, desktop history menus, new Issue board defaults, and performance improvements",
         changes: [],
         features: [
+          "Select text in a comment, add a note, and your reply carries that quote.",
+          "Select text in an Issue description to start a new thread from it.",
           "Back and Forward on the desktop app list the pages you visited, so you can jump straight to one.",
           "A new Issue view opens on your latest work, and keeps the sorting you saved.",
           "The transcript now says when a tool's output was not kept in full.",

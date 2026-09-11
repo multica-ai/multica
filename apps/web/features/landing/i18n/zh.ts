@@ -296,9 +296,11 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.43",
         date: "2026-09-11",
-        title: "桌面端历史菜单、Issue 看板新默认视图、性能优化",
+        title: "评论与描述批注、桌面端历史菜单、Issue 看板新默认视图、性能优化",
         changes: [],
         features: [
+          "选中评论里的文字加上批注，回复时会带上这段引用。",
+          "在 Issue 描述里选中文字，可以直接开一条新线程。",
           "桌面端的前进/后退可以列出最近访问过的页面，直接跳回去。",
           "新的 Issue 视图默认聚焦最新的工作，也沿用你保存的排序。",
           "运行记录会明确标出工具输出没有完整保留。",
