@@ -556,9 +556,11 @@
   "reply": {
     "placeholder": "返信を残す...",
     "annotations": {
+      "confirm_add": "注釈を追加",
+      "save": "注釈を保存",
       "add_comment": "コメントに追加",
       "add": "返信に追加",
-      "note_label": "コメント（任意）",
+      "note_label": "コメント",
       "count_other": "{{count}} 件の注釈",
       "quote_limit": "一度に選択できるのは {{count}} 文字までです。",
       "count_limit": "コメントに追加できる注釈は {{count}} 件までです。",
@@ -569,7 +571,7 @@
       "selection_failed": "選択範囲を取得できませんでした。同じコメントまたは説明の中で文字を選び直してください。",
       "source_label": "{{name}} のコメント",
       "edit": "注釈 {{number}} を編集",
-      "note_placeholder": "コメントを追加（任意）…"
+      "note_placeholder": "コメントを追加…"
     }
   },
   "agent_activity": {

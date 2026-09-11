@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { parseMentions } from "../issues/comment-trigger-outcomes";
 import { composeAnnotatedReply, hasReplyIntent, locateReplyAnnotation, normalizeReplyAnnotations, type ReplyAnnotation } from "./reply-annotation";
@@ -8,9 +9,21 @@ const annotation: ReplyAnnotation = {
 };
 
 describe("annotated reply serialization", () => {
-  it("publishes only the user body, quotes and notes, without source links or labels", () => {
+  it("puts annotations before the overall reply with a section divider", () => {
     expect(composeAnnotatedReply("Overall reply", [annotation, { ...annotation, id: "b", quote: "other", note: "" }]))
-      .toBe("Overall reply\n\n> first\n> second\n\nPlease revise.\n\n&nbsp;\n\n> other");
+      .toBe("> first\n> second\n\nPlease revise.\n\n---\n\nOverall reply");
+  });
+
+  it("only adds a divider when both sections have content", () => {
+    expect(composeAnnotatedReply("Overall reply", [])).toBe("Overall reply");
+    expect(composeAnnotatedReply("Overall reply", [{ ...annotation, note: " " }])).toBe("Overall reply");
+    expect(composeAnnotatedReply("  ", [annotation])).toBe("> first\n> second\n\nPlease revise.");
+  });
+
+  it("keeps /note as a command while placing the remaining body below annotations", () => {
+    expect(composeAnnotatedReply(" /NOTE\nPrivate", [annotation])).toBe("/NOTE\n\n> first\n> second\n\nPlease revise.\n\n---\n\nPrivate");
+    expect(composeAnnotatedReply("/note", [annotation])).toBe("/note\n\n> first\n> second\n\nPlease revise.");
+    expect(composeAnnotatedReply("/notes are ordinary text", [annotation])).toBe("> first\n> second\n\nPlease revise.\n\n---\n\n/notes are ordinary text");
   });
 
   it("preserves user-authored note Markdown and links without list indentation", () => {
@@ -29,7 +42,7 @@ describe("annotated reply serialization", () => {
   });
 
   it("retains /note behavior and does not send quotes alone", () => {
-    expect(composeAnnotatedReply("/note Private", [annotation])).toMatch(/^\/note Private/);
+    expect(composeAnnotatedReply("/note Private", [annotation])).toBe("/note\n\n> first\n> second\n\nPlease revise.\n\n---\n\nPrivate");
     expect(hasReplyIntent("  ", [{ ...annotation, note: " " }])).toBe(false);
     expect(hasReplyIntent("", [annotation])).toBe(true);
     expect(hasReplyIntent("Overall", [{ ...annotation, note: "" }])).toBe(true);
@@ -37,7 +50,7 @@ describe("annotated reply serialization", () => {
 
   it("normalizes old and corrupt drafts without inventing annotations", () => {
     expect(normalizeReplyAnnotations(undefined)).toEqual([]);
-    expect(normalizeReplyAnnotations([null, {}, { ...annotation, quote: "x".repeat(4001) }, annotation])).toEqual([annotation]);
+    expect(normalizeReplyAnnotations([null, {}, { ...annotation, note: " " }, { ...annotation, quote: "x".repeat(4001) }, annotation])).toEqual([annotation]);
   });
 });
 

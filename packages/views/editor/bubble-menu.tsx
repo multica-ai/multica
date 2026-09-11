@@ -639,25 +639,6 @@ function EditorBubbleMenu({
       ) : (
         <TooltipProvider delay={300}>
           <div className="bubble-menu">
-            {selectionAction && <>
-              <Tooltip>
-                <TooltipTrigger render={
-                  <button type="button" className={toggleVariants({ size: "sm" })}
-                    aria-label={selectionAction.label}
-                    onClick={() => {
-                      if (selectionAction.onSelect() === false) return;
-                      // Keep later editor transactions from reopening the formatting
-                      // toolbar over the annotation's note field. The text is untouched.
-                      editor.commands.setTextSelection(editor.state.selection.to);
-                      setVisible(false);
-                    }} />
-                }>
-                  <MessageSquarePlus className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipContent side="top" sideOffset={8}>{selectionAction.label}</TooltipContent>
-              </Tooltip>
-              {!fmt.codeBlock && <Separator orientation="vertical" className="mx-0.5 h-5" />}
-            </>}
             {!fmt.codeBlock && <>
             <MarkButton editor={editor} mark="bold" icon={Bold} label={t(($) => $.bubble_menu.bold)} shortcut={createShortcutChord("B", { primary: true })} isActive={fmt.bold} />
             <MarkButton editor={editor} mark="italic" icon={Italic} label={t(($) => $.bubble_menu.italic)} shortcut={createShortcutChord("I", { primary: true })} isActive={fmt.italic} />
@@ -721,6 +702,25 @@ function EditorBubbleMenu({
                 <CreateSubIssueButton editor={editor} parentIssueId={currentIssueId} />
               </>
             )}
+            </>}
+            {selectionAction && <>
+              {!fmt.codeBlock && <Separator orientation="vertical" className="mx-0.5 h-5" />}
+              <Tooltip>
+                <TooltipTrigger render={
+                  <button type="button" className={toggleVariants({ size: "sm" })}
+                    aria-label={selectionAction.label}
+                    onClick={() => {
+                      if (selectionAction.onSelect() === false) return;
+                      // Keep later editor transactions from reopening the formatting
+                      // toolbar over the annotation's note field. The text is untouched.
+                      editor.commands.setTextSelection(editor.state.selection.to);
+                      setVisible(false);
+                    }} />
+                }>
+                  <MessageSquarePlus className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}>{selectionAction.label}</TooltipContent>
+              </Tooltip>
             </>}
           </div>
         </TooltipProvider>

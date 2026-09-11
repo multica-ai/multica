@@ -556,9 +556,11 @@
   "reply": {
     "placeholder": "回复...",
     "annotations": {
+      "confirm_add": "添加批注",
+      "save": "保存批注",
       "add_comment": "加入评论",
       "add": "加入回复",
-      "note_label": "批注（可选）",
+      "note_label": "批注",
       "count_other": "{{count}} 条批注",
       "quote_limit": "每次最多选择 {{count}} 个字符。",
       "count_limit": "一条评论最多包含 {{count}} 条批注。",
@@ -569,7 +571,7 @@
       "selection_failed": "未能获取选中文字。请在同一条评论或任务描述内重新选择后再试。",
       "source_label": "{{name}} 的评论",
       "edit": "编辑批注 {{number}}",
-      "note_placeholder": "添加意见（可选）…"
+      "note_placeholder": "添加意见..."
     }
   },
   "agent_activity": {

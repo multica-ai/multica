@@ -1138,14 +1138,23 @@ describe.each(["reply", "description"])("annotations in %s drafts", (source) => 
     await waitFor(() => expect(useCommentDraftStore.getState().getAnnotations(draftKey)).toHaveLength(0));
   });
 
-  it("keeps annotations on failure and blocks quote-only drafts until a note is entered", async () => {
+  it("sends annotations above the composer body with a divider", async () => {
+    useCommentDraftStore.getState().setDraft(draftKey, "Overall reply");
+    useCommentDraftStore.getState().addAnnotation(draftKey, annotation);
+    const onSubmit = vi.fn().mockResolvedValue("reply-new");
+    renderAnnotatedComposer(onSubmit);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).toBe("> Selected text\n\nPlease revise\n\n---\n\nOverall reply");
+  });
+
+  it("ignores empty selections and keeps saved annotations on send failure", async () => {
     useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "" });
     const onSubmit = vi.fn().mockResolvedValue(false);
     renderAnnotatedComposer(onSubmit);
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: /1 annotation/ }));
-    expect(screen.queryByRole("textbox", { name: "Comment (optional)" })).not.toBeInTheDocument();
-    act(() => useCommentDraftStore.getState().updateAnnotation(draftKey, annotation.id, "New note"));
+    expect(screen.queryByRole("button", { name: /1 annotation/ })).not.toBeInTheDocument();
+    act(() => { useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "New note" }); });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(useCommentDraftStore.getState().getAnnotations(draftKey)[0]?.note).toBe("New note");

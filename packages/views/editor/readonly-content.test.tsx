@@ -152,7 +152,7 @@ describe("ReadonlyContent annotated replies", () => {
     expect(quote.textContent?.replace(/\u00a0/g, " ").trim()).toBe(text);
   });
 
-  it.each(["A note", ""])("keeps a visible blank paragraph between annotations (note: %s)", (note) => {
+  it.each(["A note", "A note\n\nWith another paragraph"])("keeps a visible blank paragraph between annotations (note: %s)", (note) => {
     const first = {
       id: "first", sourceCommentId: "source", sourceActorName: "Agent",
       quote: "First quote", note, start: 0, prefix: "", suffix: "",
@@ -165,7 +165,10 @@ describe("ReadonlyContent annotated replies", () => {
     expect(quotes[1]?.previousElementSibling?.tagName).toBe("P");
     expect(quotes[1]?.previousElementSibling?.textContent).toBe("\u00a0");
     expect(container.querySelectorAll("p").length).toBeGreaterThan(2);
-    expect(container.querySelector("a, ol, hr")).toBeNull();
+    expect(container.querySelector("a, ol")).toBeNull();
+    expect(container.querySelectorAll("hr")).toHaveLength(1);
+    expect(container.querySelector("hr")?.previousElementSibling?.textContent).toBe(note.split("\n\n").at(-1));
+    expect(container.querySelector("hr")?.nextElementSibling?.textContent).toBe("Overall reply");
   });
 
   it("renders quote snapshots and notes without generated links or numbered lists", () => {

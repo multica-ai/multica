@@ -36,6 +36,7 @@ export function ReplyAnnotations({ draftKey, annotations, disabled, onEditAnnota
         onClick={(event) => event.stopPropagation()}>
         <div className="flex max-h-64 flex-col gap-2 overflow-y-auto">
           {annotations.map((annotation, index) => <div key={annotation.id} className="flex items-start gap-1">
+            <span aria-hidden="true" className="mt-1 flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-caption tabular-nums">{index + 1}</span>
             <div className="min-w-0 flex-1">
               <button type="button" disabled={disabled}
                 aria-label={t(($) => $.reply.annotations.edit, { number: index + 1 })}

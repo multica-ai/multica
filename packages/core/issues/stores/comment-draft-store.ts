@@ -243,7 +243,7 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
         }),
       getAnnotations: (key) => get().drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS,
       addAnnotation: (key, annotation) => {
-        if ((!key.startsWith("reply:") && !key.startsWith("new:")) || !annotation.quote.trim() || annotation.quote.length > MAX_ANNOTATION_QUOTE_LENGTH) return undefined;
+        if ((!key.startsWith("reply:") && !key.startsWith("new:")) || !annotation.note.trim() || !annotation.quote.trim() || annotation.quote.length > MAX_ANNOTATION_QUOTE_LENGTH) return undefined;
         const current = get().getAnnotations(key);
         const duplicate = current.find((a) => a.sourceCommentId === annotation.sourceCommentId &&
           a.start === annotation.start && a.quote === annotation.quote && a.prefix === annotation.prefix && a.suffix === annotation.suffix);
@@ -260,7 +260,10 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
       updateAnnotation: (key, id, note) => set((s) => {
         const current = s.drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS;
         if (!current.some((a) => a.id === id && a.note !== note)) return s;
-        return { drafts: writeDraft(s.drafts, key, s.drafts[key]?.content ?? "", uploadsOf(s.drafts, key), current.map((a) => a.id === id ? { ...a, note } : a)) };
+        const annotations = note.trim()
+          ? current.map((a) => a.id === id ? { ...a, note } : a)
+          : current.filter((a) => a.id !== id);
+        return { drafts: writeDraft(s.drafts, key, s.drafts[key]?.content ?? "", uploadsOf(s.drafts, key), annotations) };
       }),
       removeAnnotation: (key, id) => set((s) => {
         const current = s.drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS;

@@ -571,9 +571,11 @@
   "reply": {
     "placeholder": "Leave a reply...",
     "annotations": {
+      "confirm_add": "Add annotation",
+      "save": "Save annotation",
       "add_comment": "Add to comment",
       "add": "Add to reply",
-      "note_label": "Comment (optional)",
+      "note_label": "Comment",
       "count_one": "{{count}} annotation",
       "count_other": "{{count}} annotations",
       "quote_limit": "Select up to {{count}} characters at a time.",
@@ -585,7 +587,7 @@
       "selection_failed": "Could not capture the selection. Select text within one comment or description and try again.",
       "source_label": "Comment by {{name}}",
       "edit": "Edit annotation {{number}}",
-      "note_placeholder": "Add an optional comment…"
+      "note_placeholder": "Add a comment…"
     }
   },
   "agent_activity": {

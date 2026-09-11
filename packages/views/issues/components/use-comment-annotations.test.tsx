@@ -84,6 +84,28 @@ describe("selection to reply", () => {
     expect(onRender).toHaveBeenCalledTimes(count);
   });
 
+  it.each([false, true])("focuses the note only after its popup is visible (description: %s)", async (description) => {
+    vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
+    const visibilityAtFocus: string[] = [];
+    vi.spyOn(HTMLTextAreaElement.prototype, "focus").mockImplementation(function (this: HTMLTextAreaElement, options) {
+      visibilityAtFocus.push((this.closest("[data-reply-annotation-overlay]") as HTMLElement).style.visibility);
+      HTMLElement.prototype.focus.call(this, options);
+    });
+    const { container } = renderWithI18n(description ? <DescriptionFixture /> : <Fixture />);
+    selectText(container);
+    fireEvent.click(await screen.findByRole("button", { name: description ? "Add to comment" : "Add to reply" }));
+    const input = await screen.findByRole("textbox", { name: "Comment" });
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(visibilityAtFocus).toEqual(["visible"]);
+    fireEvent.change(input, { target: { value: "A note" } });
+    const confirm = await screen.findByRole("button", { name: "Add annotation" });
+    confirm.focus();
+    await act(async () => {});
+    expect(confirm).toHaveFocus();
+    expect(visibilityAtFocus).toEqual(["visible"]);
+    vi.restoreAllMocks();
+  });
+
   it("reports an uncapturable description selection without adding a draft", () => {
     renderWithI18n(<DescriptionFixture />);
     window.getSelection()?.removeAllRanges();
@@ -104,7 +126,7 @@ describe("selection to reply", () => {
     const { container } = renderWithI18n(description ? <DescriptionFixture /> : <Fixture />);
     const source = container.querySelector<HTMLElement>(description ? "[contenteditable]" : "[data-comment-content]")!;
     fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
-    expect(await screen.findByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Note first");
+    expect(await screen.findByRole("textbox", { name: "Comment" })).toHaveValue("Note first");
     const remove = screen.getByRole("button", { name: "Remove annotation 1" });
     fireEvent.pointerDown(remove);
     fireEvent.click(remove);
@@ -116,7 +138,7 @@ describe("selection to reply", () => {
     expect(screen.queryByRole("button", { name: "Edit annotation 2" })).not.toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
-    expect(await screen.findByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Note second");
+    expect(await screen.findByRole("textbox", { name: "Comment" })).toHaveValue("Note second");
     fireEvent.click(screen.getByRole("button", { name: "Remove annotation 1" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Edit annotation 1" })).not.toBeInTheDocument());
     expect(store.getAnnotations(draftKey)).toHaveLength(0);
@@ -131,19 +153,20 @@ describe("selection to reply", () => {
     const { rerender } = renderWithI18n(<DescriptionFixture loaded={false} />);
     rerender(<DescriptionFixture />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
-    expect(await screen.findByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Saved note");
+    expect(await screen.findByRole("textbox", { name: "Comment" })).toHaveValue("Saved note");
   });
   it("captures editable descriptions into a new thread draft and clears the popup on issue switch", async () => {
     const { container, rerender } = renderWithI18n(<DescriptionFixture />);
     selectText(container);
     expect(screen.queryByRole("button", { name: "Add to reply" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add to comment" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Question about description" } });
+    fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), { target: { value: "Question about description" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
     expect(useCommentDraftStore.getState().getAnnotations("new:issue")[0]).toMatchObject({ quote: "Selected text", note: "Question about description" });
     expect(useCommentDraftStore.getState().drafts["new:issue"]?.replyTarget).toBeUndefined();
     expect(container.querySelector("[contenteditable]")).toHaveTextContent("Selected text");
     rerender(<DescriptionFixture issueId="other" />);
-    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Comment (optional)" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Comment" })).not.toBeInTheDocument());
     expect(useCommentDraftStore.getState().getAnnotations("new:other")).toHaveLength(0);
     expect(useCommentDraftStore.getState().getAnnotations("new:issue")).toHaveLength(1);
   });
@@ -151,30 +174,105 @@ describe("selection to reply", () => {
     const view = renderWithI18n(<Fixture />);
     selectText(view.container);
     fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Keep this note" } });
-    view.rerender(<Fixture sourceKey="expanded" />);
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toBeVisible());
-    expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Keep this note");
+    fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), { target: { value: "Keep this note" } });
+    await act(async () => { view.rerender(<Fixture sourceKey="expanded" />); });
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Comment" })).toBeVisible());
+    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Keep this note");
   });
-  it("saves before typing, autosaves the note, and reopens duplicates without erasing it", async () => {
+  it("waits for explicit confirmation and reopens duplicates without erasing the saved note", async () => {
     const { container } = renderWithI18n(<Fixture />);
     selectText(container);
     fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
-    const note = await screen.findByRole("textbox", { name: "Comment (optional)" });
-    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(1);
+    const note = await screen.findByRole("textbox", { name: "Comment" });
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(0);
     fireEvent.change(note, { target: { value: "Please explain" } });
-    expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
     fireEvent.pointerDown(document.body);
     await waitFor(() => expect(screen.queryByRole("textbox")).not.toBeInTheDocument());
     selectText(container);
     fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
-    expect(await screen.findByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Please explain");
+    expect(await screen.findByRole("textbox", { name: "Comment" })).toHaveValue("Please explain");
     expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(1);
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("textbox")).not.toBeInTheDocument());
     expect(useCommentDraftStore.getState().getAnnotations(key)[0]?.note).toBe("Please explain");
     fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
-    expect(await screen.findByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Please explain");
+    expect(await screen.findByRole("textbox", { name: "Comment" })).toHaveValue("Please explain");
+  });
+
+  it.each([false, true])("confirms changes and cancels unsaved edits (description: %s)", async (description) => {
+    const draftKey = description ? "new:issue" as const : key;
+    const { container } = renderWithI18n(description ? <DescriptionFixture /> : <Fixture />);
+    selectText(container);
+    fireEvent.click(await screen.findByRole("button", { name: description ? "Add to comment" : "Add to reply" }));
+    const input = await screen.findByRole("textbox", { name: "Comment" });
+    const confirm = screen.getByRole("button", { name: "Add annotation" });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(input, { target: { value: "   " } });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(input, { target: { value: "Unsaved note" } });
+    fireEvent.pointerDown(document.body);
+    expect(useCommentDraftStore.getState().drafts[draftKey]).toBeUndefined();
+
+    selectText(container);
+    fireEvent.click(await screen.findByRole("button", { name: description ? "Add to comment" : "Add to reply" }));
+    const reopened = await screen.findByRole("textbox", { name: "Comment" });
+    expect(reopened).toHaveValue("");
+    fireEvent.change(reopened, { target: { value: "A real note" } });
+    expect(useCommentDraftStore.getState().getAnnotations(draftKey)).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Edit annotation 1" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+    expect(screen.queryByRole("textbox", { name: "Comment" })).not.toBeInTheDocument();
+    expect(useCommentDraftStore.getState().getAnnotations(draftKey)[0]?.note).toBe("A real note");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
+    const edit = await screen.findByRole("textbox", { name: "Comment" });
+    fireEvent.change(edit, { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "Save annotation" })).toBeDisabled();
+    fireEvent.change(edit, { target: { value: "Unconfirmed change" } });
+    fireEvent.keyDown(edit, { key: "Escape" });
+    expect(useCommentDraftStore.getState().getAnnotations(draftKey)[0]?.note).toBe("A real note");
+    fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
+    expect(await screen.findByRole("textbox", { name: "Comment" })).toHaveValue("A real note");
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Replacement" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save annotation" }));
+    expect(useCommentDraftStore.getState().getAnnotations(draftKey)[0]?.note).toBe("Replacement");
+    expect(useCommentDraftStore.getState().getAnnotations(draftKey)).toHaveLength(1);
+  });
+
+  it.each([false, true])("uses Enter to confirm and Shift + Enter for newlines (description: %s)", async (description) => {
+    const draftKey = description ? "new:issue" as const : key;
+    const { container } = renderWithI18n(description ? <DescriptionFixture /> : <Fixture />);
+    selectText(container);
+    fireEvent.click(await screen.findByRole("button", { name: description ? "Add to comment" : "Add to reply" }));
+    const input = await screen.findByRole("textbox", { name: "Comment" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "First line" } });
+    expect(fireEvent.keyDown(input, { key: "Enter", shiftKey: true })).toBe(true);
+    expect(input).toBeInTheDocument();
+    expect(useCommentDraftStore.getState().getAnnotations(draftKey)).toHaveLength(0);
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    // Safari's composition commit can clear isComposing before keydown.
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(input).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "First line\nSecond line" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.queryByRole("textbox", { name: "Comment" })).not.toBeInTheDocument();
+    expect(useCommentDraftStore.getState().getAnnotations(draftKey)[0]?.note).toBe("First line\nSecond line");
+  });
+
+  it("reattaches the open editor when only the source text node is replaced", async () => {
+    const { container } = renderWithI18n(<Fixture />);
+    const source = selectText(container);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), { target: { value: "Keep note" } });
+    await act(async () => { source.replaceChildren(document.createTextNode("Selected text")); });
+    expect(await screen.findByRole("textbox", { name: "Comment" })).toHaveValue("Keep note");
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+    expect(await screen.findByRole("button", { name: "Edit annotation 1" })).toBeVisible();
   });
 
   it("offers annotations on member comments", async () => {

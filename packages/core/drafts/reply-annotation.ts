@@ -24,7 +24,7 @@ export function normalizeReplyAnnotations(value: unknown): ReplyAnnotation[] {
     typeof a.id === "string" && typeof a.sourceCommentId === "string" &&
     typeof a.sourceActorName === "string" && typeof a.quote === "string" &&
     a.quote.trim().length > 0 && a.quote.length <= MAX_ANNOTATION_QUOTE_LENGTH &&
-    typeof a.note === "string" && Number.isInteger(a.start) && a.start >= 0 &&
+    typeof a.note === "string" && a.note.trim().length > 0 && Number.isInteger(a.start) && a.start >= 0 &&
     typeof a.prefix === "string" && typeof a.suffix === "string" &&
     (a.sourceRevision === undefined || Number.isInteger(a.sourceRevision)),
   ).slice(0, MAX_REPLY_ANNOTATIONS);
@@ -55,15 +55,19 @@ function quoteText(text: string): string {
 
 export function composeAnnotatedReply(content: string, annotations: readonly ReplyAnnotation[]): string {
   const body = content.trim();
-  if (!annotations.length) return body;
-  // Keep the user's leading /note command (and explicit mentions) in place.
-  const quotes = annotations.map((a) =>
+  const saved = annotations.filter((a) => a.note.trim());
+  if (!saved.length) return body;
+  // /note must remain the first token so annotations cannot change triggering.
+  const command = body.match(/^\/note(?=\s|$)/i)?.[0];
+  const reply = command ? body.slice(command.length).trim() : body;
+  const quotes = saved.map((a) =>
     a.quote.split(/\r?\n/).map((line) => `> ${quoteText(line)}`).join("\n") +
-      (a.note.trim() ? `\n\n${a.note.trim()}` : ""),
+      `\n\n${a.note.trim()}`,
   );
   // Markdown collapses extra newlines. A blank paragraph keeps one visible
-  // empty line between annotations and separates adjacent quote-only blocks.
-  return [body, quotes.join("\n\n&nbsp;\n\n")].filter(Boolean).join("\n\n");
+  // empty line between annotations.
+  const sections = [quotes.join("\n\n&nbsp;\n\n"), reply].filter(Boolean).join("\n\n---\n\n");
+  return command ? `${command}\n\n${sections}` : sections;
 }
 
 /** Relocate only an unambiguous quote with matching context after source edits. */

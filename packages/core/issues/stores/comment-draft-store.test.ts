@@ -331,7 +331,7 @@ describe("comment draft store — upload lifecycle", () => {
 
 describe("reply annotations", () => {
   const key = "reply:issue-1:root" as const;
-  const annotation = { id: "a", sourceCommentId: "nested-agent", sourceActorName: "Emacs", quote: "Selected text", note: "", start: 0, prefix: "", suffix: "" };
+  const annotation = { id: "a", sourceCommentId: "nested-agent", sourceActorName: "Emacs", quote: "Selected text", note: "A note", start: 0, prefix: "", suffix: "" };
   beforeEach(async () => {
     setCurrentWorkspace("annotation-tests", "ws_annotations");
     await flush();
@@ -355,6 +355,33 @@ describe("reply annotations", () => {
     expect(store.getDraft(key)).toBeUndefined();
   });
 
+  it("rejects blank notes and removes cleared notes without losing the reply body", () => {
+    const store = useCommentDraftStore.getState();
+    expect(store.addAnnotation(key, { ...annotation, note: "  " })).toBeUndefined();
+    expect(useCommentDraftStore.getState().drafts[key]).toBeUndefined();
+    store.setDraft(key, "Keep reply");
+    store.addAnnotation(key, annotation);
+    store.updateAnnotation(key, annotation.id, " ");
+    expect(store.getAnnotations(key)).toHaveLength(0);
+    expect(store.getDraft(key)).toBe("Keep reply");
+    expect(useCommentDraftStore.getState().drafts[key]?.replyTarget).toBeUndefined();
+  });
+
+  it("drops legacy empty annotations and their target when restoring a draft", async () => {
+    const store = useCommentDraftStore.getState();
+    store.setDraft(key, "Keep reply");
+    store.addAnnotation(key, annotation);
+    await flush();
+    const saved = JSON.parse(localStorage.getItem("multica_comment_drafts:annotation-tests")!);
+    saved.state.drafts[key].annotations[0].note = " ";
+    localStorage.setItem("multica_comment_drafts:annotation-tests", JSON.stringify(saved));
+    useCommentDraftStore.getState().drafts = {};
+    await useCommentDraftStore.persist.rehydrate();
+    expect(store.getAnnotations(key)).toHaveLength(0);
+    expect(store.getDraft(key)).toBe("Keep reply");
+    expect(useCommentDraftStore.getState().drafts[key]?.replyTarget).toBeUndefined();
+  });
+
   it("persists description annotations with the new comment draft without a reply target", async () => {
     const store = useCommentDraftStore.getState();
     store.setDraft("new:issue", "Existing draft");
@@ -374,7 +401,7 @@ describe("reply annotations", () => {
     expect(store.addAnnotation(key, annotation)).toBe("a");
     const snapshot = useCommentDraftStore.getState().drafts[key];
     expect(store.addAnnotation(key, { ...annotation, id: "duplicate" })).toBe("a");
-    store.updateAnnotation(key, "a", "");
+    store.updateAnnotation(key, "a", "A note");
     store.setDraft(key, "");
     expect(useCommentDraftStore.getState().drafts[key]).toBe(snapshot);
     store.updateAnnotation(key, "a", "New intent");
