@@ -1,0 +1,1 @@
+ALTER TABLE comment DROP COLUMN IF EXISTS deleted_at;

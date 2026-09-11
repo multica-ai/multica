@@ -481,7 +481,8 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			comment, err := h.Queries.GetComment(r.Context(), commentUUID)
-			if err != nil || uuidToString(comment.WorkspaceID) != workspaceID {
+			// A deleted comment's tombstone takes no attachments.
+			if err != nil || uuidToString(comment.WorkspaceID) != workspaceID || comment.DeletedAt.Valid {
 				writeError(w, http.StatusForbidden, "invalid comment_id")
 				return
 			}
