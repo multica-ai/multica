@@ -3922,7 +3922,7 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 	// refusal that needs human repair leaves the explanation on the issue
 	// (MUL-6164). An unbound agent keeps its silent skip: the agent list
 	// already shows it has no runtime, and nothing about it is new here.
-	if verdict.Reason == ReasonRuntimeUnusable {
+	if service.RuntimeBlockedNeedsNotice(verdict.Reason) {
 		h.noteRuntimeUnusable(ctx, issue, agent, verdict)
 	}
 	return false

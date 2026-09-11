@@ -3038,7 +3038,7 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 	// mention has nobody watching a response at all.
 	blockUnusableTarget := func(targetType, targetID string, agent db.Agent, verdict service.AgentVerdict) {
 		notice := &blockedRuntimeNotice{agent: agent, verdict: verdict}
-		if verdict.Reason != ReasonRuntimeUnusable {
+		if !service.RuntimeBlockedNeedsNotice(verdict.Reason) {
 			notice = nil
 		}
 		addTarget(commentMentionTarget{

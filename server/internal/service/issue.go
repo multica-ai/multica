@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
@@ -735,7 +734,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 		return pgtype.UUID{}
 	}
 	verdict, admitted := agentAssigneeVerdict(ctx, s.runtimeLookup(s.Queries), issue)
-	if !admitted && verdict.Reason == dispatch.ReasonRuntimeUnusable {
+	if !admitted && RuntimeBlockedNeedsNotice(verdict.Reason) {
 		// Assignment has no response the assigner reads for this outcome, so the
 		// refusal explains itself on the issue instead of vanishing (MUL-6164).
 		// Only here, not in the create-with-assignee path above: that one runs

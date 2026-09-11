@@ -74,6 +74,50 @@ func TestAgentReadinessVerdict(t *testing.T) {
 	if unusable.Repair == nil || unusable.Repair.Command != "cd '/pkg' && node install.cjs" {
 		t.Errorf("unusable runtime lost the repair command: got %+v", unusable.Repair)
 	}
+	// Offline because the DSH runtime profile is missing is blocked for the same
+	// reason — the machine is reachable, its CLI cannot serve work, and no
+	// amount of waiting installs a bundle nobody configured — but under its OWN
+	// code. Collapsing it into runtime_unusable is what made every client tell
+	// the user to reinstall a CLI that runs perfectly.
+	profile := runtimeVerdict(db.AgentRuntime{
+		Status:   "offline",
+		Metadata: []byte(`{"offline_reason":{"code":"dsh_profile","detail":"the Multica runtime profile is not installed","repair":{"package":"DeepSeek Harness runtime profile"}}}`),
+	})
+	if !profile.Blocked() || profile.Reason != dispatch.ReasonRuntimeProfileMissing {
+		t.Fatalf("missing DSH profile: got %+v, want blocked/runtime_profile_missing", profile)
+	}
+	if !RuntimeBlockedNeedsNotice(profile.Reason) {
+		t.Error("missing DSH profile would leave no durable trace on the issue")
+	}
+	// The notice must describe the profile, not a broken CLI, and must not hand
+	// the user a command with a placeholder in it to paste.
+	notice := RuntimeUnusableNotice("Kit", profile)
+	if !strings.Contains(notice, "runtime profile") {
+		t.Errorf("notice does not name the missing profile: %q", notice)
+	}
+	for _, wrong := range []string{"cannot be executed", "postinstall", "<bundle>", "```"} {
+		if strings.Contains(notice, wrong) {
+			t.Errorf("notice contains %q, which belongs to the unrunnable-CLI repair: %q", wrong, notice)
+		}
+	}
+	// The one exception is an install the daemon is running right now: that wait
+	// DOES end by itself, so the work queues instead of being refused. This is
+	// why the daemon states it explicitly rather than leaving the server to infer
+	// it from the code.
+	installing := runtimeVerdict(db.AgentRuntime{
+		Status:   "offline",
+		Metadata: []byte(`{"offline_reason":{"code":"dsh_profile","installing":true,"detail":"installing the configured bundle now"}}`),
+	})
+	if installing.Blocked() {
+		t.Errorf("in-flight DSH install: got %+v, want the waitable verdict", installing)
+	}
+	if installing.Reason != dispatch.ReasonRuntimeOffline {
+		t.Errorf("in-flight DSH install: reason = %q, want %q", installing.Reason, dispatch.ReasonRuntimeOffline)
+	}
+	// The unrunnable-CLI notice keeps its own text and its fenced command.
+	if unusableNotice := RuntimeUnusableNotice("Kit", unusable); !strings.Contains(unusableNotice, "node install.cjs") {
+		t.Errorf("unusable-CLI notice lost its repair command: %q", unusableNotice)
+	}
 	// An unrecognised or malformed reason must not invent a verdict: unknown
 	// causes stay in the waitable bucket they are in today.
 	for name, metadata := range map[string]string{

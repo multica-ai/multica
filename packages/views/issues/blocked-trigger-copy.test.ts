@@ -57,6 +57,21 @@ describe("blocked trigger copy", () => {
     );
   });
 
+  // A missing runtime profile is not a broken CLI: the CLI runs, and the
+  // reinstall the unusable copy asks for fixes nothing. Sharing one label was
+  // what told DSH users to reinstall a CLI that was never the problem.
+  it("distinguishes a missing runtime profile from an unusable CLI", () => {
+    const missingProfile = blockedReasonLabel("runtime_profile_missing", t);
+
+    expect(missingProfile).toBe(en.comment.trigger_blocked_runtime_profile_missing);
+    expect(missingProfile).not.toBe(blockedReasonLabel("runtime_unusable", t));
+    expect(missingProfile).not.toBe(en.comment.trigger_blocked_generic);
+    expect(missingProfile.toLowerCase()).not.toContain("reinstall");
+    expect(blockedShortReasonLabel("runtime_profile_missing", t)).toBe(
+      en.comment.trigger_blocked_short_runtime_profile_missing,
+    );
+  });
+
   it("degrades an unknown code to the generic label", () => {
     expect(blockedReasonLabel("some_future_code", t)).toBe(en.comment.trigger_blocked_generic);
     expect(blockedShortReasonLabel("some_future_code", t)).toBe(
