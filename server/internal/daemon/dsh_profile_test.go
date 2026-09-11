@@ -489,17 +489,42 @@ func TestDshProvisionOutput(t *testing.T) {
 	})
 
 	// Both shapes a package manager leaks a credential in: the .npmrc-style
-	// token line, and the request URL itself — which is the one the bundle spec
-	// turns into when it is an authenticated npm URL, and the reason bounding
-	// the output is not on its own enough.
+	// token line, which the shared redactor knows, and the request URL itself —
+	// which is the one the bundle spec turns into when it is an authenticated
+	// npm URL, and which is scrubbed here rather than in pkg/redact, because a
+	// rule added there changes output for every provider.
 	t.Run("redacts credentials a registry echoed back", func(t *testing.T) {
 		for _, tc := range []struct{ raw, secret string }{
 			{"npm ERR! 401 //registry.example/:_authToken=supersecret123", "supersecret123"},
 			{"npm ERR! 404 https://deploy:hunter2@registry.example.com/@acme/dsh-runtime", "hunter2"},
+			{"ERR_PNPM_FETCH_401 GET http://ci-bot:s3cr3t@npm.internal/@corp%2fdsh", "s3cr3t"},
 		} {
 			got := dshProvisionOutput([]byte(tc.raw))
 			if strings.Contains(got, tc.secret) {
 				t.Errorf("output = %q, want %q redacted", got, tc.secret)
+			}
+		}
+	})
+
+	// The host has to survive: which registry refused the request is what an
+	// operator reads, and it is not the secret.
+	t.Run("keeps the host", func(t *testing.T) {
+		got := dshProvisionOutput([]byte("npm ERR! 404 https://deploy:hunter2@registry.example.com/pkg"))
+		if !strings.Contains(got, "registry.example.com") {
+			t.Errorf("output = %q, want the host kept", got)
+		}
+	})
+
+	// Userinfo needs both a colon and an @ before the next path separator. A
+	// port, an scp-style git remote and a bare timestamp must not trip it.
+	t.Run("leaves ordinary URLs intact", func(t *testing.T) {
+		for _, raw := range []string{
+			"GET https://registry.example.com:8443/@acme/pkg failed",
+			"cloning ssh://git@github.com/multica-ai/multica.git",
+			"see https://example.com/a:b for details",
+		} {
+			if got := dshProvisionOutput([]byte(raw)); got != raw {
+				t.Errorf("dshProvisionOutput(%q) = %q, want it unchanged", raw, got)
 			}
 		}
 	})

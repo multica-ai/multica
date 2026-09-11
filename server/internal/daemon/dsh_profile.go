@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -183,12 +184,27 @@ func mergeDshPluginPath(env, dirs []string) []string {
 // is what survives.
 const dshProvisionOutputBytes = 2048
 
+// dshProvisionURLCredentials matches a URL carrying credentials in its
+// userinfo. The scheme and host survive — which registry refused the request is
+// what an operator reads, and is not the secret — and userinfo requires BOTH a
+// colon and an @ before the next path separator, so "https://host:8443/p" and
+// "ssh://git@host/p" are left alone.
+//
+// Local to provisioning rather than added to pkg/redact's shared pattern list.
+// redact.Text runs over every agent's task messages, comments and error text, so
+// a rule added there changes output for every provider; the case that needs it
+// here is one package manager's error text, and widening a shared filter is its
+// own change with its own blast radius.
+var dshProvisionURLCredentials = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.\-]*)://[^/?#\s:@]+:[^/?#\s@]+@`)
+
 // dshProvisionOutput renders captured output for a log line. Registry errors
-// routinely echo the request URL, so the text is redacted before it is bounded:
-// a bundle spec can carry credentials, and an operator's spec is in their own
-// environment where they can read it.
+// routinely echo the request URL back, so URL credentials are scrubbed and the
+// shared redactor still runs for the token shapes it knows, before the text is
+// bounded.
 func dshProvisionOutput(raw []byte) string {
-	text := redact.Text(strings.TrimSpace(string(raw)))
+	text := dshProvisionURLCredentials.ReplaceAllString(
+		strings.TrimSpace(string(raw)), "$1://[REDACTED URL CREDENTIALS]@")
+	text = redact.Text(text)
 	if len(text) <= dshProvisionOutputBytes {
 		return text
 	}
