@@ -11,10 +11,22 @@
 
 Done is not an intermediate step toward Closed. In Review and Awaiting Response
 belong to Started. A status's label does not grant behavior. Built-ins remain
-locked, including name, color, order, category, archival and deletion. Custom
+locked, including name, color, category, archival and deletion. Custom
 keys and categories remain immutable; their labels, descriptions and colors may
-be edited, and they can be reordered or archived. Existing issues retain an
-archived status; new assignments to it are rejected.
+be edited, and all active statuses can be reordered within their category.
+Custom statuses can only be archived after every referencing issue has been
+moved elsewhere, including completed/canceled issues. The archive endpoint
+checks the count under the same catalog lock used by status writers and returns
+409 with `code: issue_status_in_use` and `issue_count` when occupied. Older
+clients display the accompanying error message; no new request field is required.
+During mixed-server rollout, an old server can still accept the previous
+archive behavior until it is replaced. Deploy the backend before relying on
+the restriction; no schema migration or automatic issue migration is involved.
+
+Archived statuses no longer create default board/list/swimlane columns. Old
+archives with historical issues remain resolvable and can be inspected/moved
+out via Settings > Show archived > View issues (explicit exact-status filter).
+The archive itself neither moves issues nor emits issue transition events.
 
 The server's `Effective`/SQL `issue_effective_status` functions preserve built-in
 identity, map custom Done/Closed to terminal behavior, and leave other custom

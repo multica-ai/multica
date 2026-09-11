@@ -404,7 +404,7 @@ export function useIssueStatusBranches({
 
   const pagination = useMemo<IssueStatusPagination>(() => {
     return Object.fromEntries(
-      statusColumnKeys(catalog).map((status) => {
+      statusColumnKeys(catalog, true).map((status) => {
         const branch = branchData.get(status);
         const loaded = branch?.rows.length ?? 0;
         const total = counts.get(status) ?? loaded;

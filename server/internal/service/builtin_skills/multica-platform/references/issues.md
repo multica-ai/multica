@@ -246,6 +246,15 @@ category in Settings. Display order is shared by boards, lists and status
 menus; it never changes automation or a status's category. Built-in definitions
 still cannot be edited or archived.
 
+Archive a custom status only after moving every issue off it, including
+completed/canceled issues. An occupied status returns HTTP 409 with code
+`issue_status_in_use` and `issue_count`; it remains active. Use Settings >
+View issues to inspect and move its issues, then retry. For terminal-status
+replacement, preserve the lifecycle meaning (`done` to `done`, `closed` to
+`closed`); do not reopen or cancel completed work just to retire a status.
+Archival does not move issues automatically. Historical issues on previously
+archived statuses remain readable via an explicit status filter.
+
 Custom statuses can have an independently chosen icon shape and color. These
 are presentation only: never infer lifecycle, completion, or agent behavior
 from an icon. Use the status key and lifecycle category instead.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -381,10 +382,7 @@ func validIssueStatusIcon(icon string) bool {
 	}
 }
 
-// ArchiveIssueStatus retires a custom status from FUTURE assignment. Issues
-// already on it are deliberately left alone — see the note on the transaction
-// below, which is also what makes "no new issue can be assigned an archived
-// status" exact rather than approximate.
+// ArchiveIssueStatus retires an empty custom status from future assignment.
 func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 	entry, wsUUID, member, ok := h.loadIssueStatusForAdmin(w, r)
 	if !ok {
@@ -400,17 +398,9 @@ func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Archiving retires a status from FUTURE use and deliberately leaves issues
-	// already on it untouched: they keep their status, keep rendering, and keep
-	// resolving to their category's behavior (issuestatus.Effective ignores
-	// archived_at on purpose). Forcing a migration first would mean rewriting
-	// history to retire a label.
-	//
-	// The EXCLUSIVE catalog lock is still taken, and it is what makes "no NEW
-	// issue can be assigned an archived status" exact rather than approximate:
-	// an issue write targeting a custom status re-resolves it under the SHARED
-	// side of this lock (assertIssueStatusStillActive), so a write can never
-	// interleave between this archive and its own status check. (MUL-6243)
+	// Count and archive under the EXCLUSIVE catalog lock. Custom-status writers
+	// re-resolve under its SHARED side, so no assignment can enter between the
+	// empty check and the archive commit. Migration is a separate user action.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		slog.Warn("ArchiveIssueStatus begin failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -423,6 +413,23 @@ func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 	if err := qtx.LockIssueStatusCatalog(r.Context(), wsUUID); err != nil {
 		slog.Warn("ArchiveIssueStatus lock failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to archive issue status")
+		return
+	}
+	count, err := qtx.CountIssuesUsingStatusKey(r.Context(), db.CountIssuesUsingStatusKeyParams{
+		WorkspaceID: wsUUID,
+		Key:         entry.Key,
+	})
+	if err != nil {
+		slog.Warn("ArchiveIssueStatus count failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to check issues using status")
+		return
+	}
+	if count > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":       fmt.Sprintf("cannot archive status: %d issues still use it; move them to another status first", count),
+			"code":        "issue_status_in_use",
+			"issue_count": count,
+		})
 		return
 	}
 

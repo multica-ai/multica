@@ -21,11 +21,16 @@ describe("concrete status columns", () => {
       "backlog", "todo", "in_review", "qa", "blocked", "in_progress", "done", "cancelled",
     ]);
   });
-  it("keeps every built-in and custom key independent, including archived work", () => {
+  it("keeps active keys independent and removes archived columns", () => {
     expect(statusColumnKeys(catalog)).toEqual([
       "backlog", "todo", "in_progress", "in_review", "blocked",
-      "awaiting_response", "old_review", "done", "cancelled",
+      "awaiting_response", "done", "cancelled",
     ]);
+  });
+  it("allows explicitly inspecting historical archived work without restoring the column by default", () => {
+    expect(visibleStatusKeys(["old_review"], [], catalog)).toEqual(["old_review"]);
+    expect(visibleStatusKeys([], [], catalog)).not.toContain("old_review");
+    expect(catalog.entryOf("old_review")?.name).toBe("Old Review");
   });
   it("hiding or selecting one status does not affect category siblings", () => {
     expect(visibleStatusKeys([], ["backlog", "in_review"], catalog)).toContain("todo");

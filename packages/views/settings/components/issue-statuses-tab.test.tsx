@@ -5,12 +5,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { IssueStatusEntry } from "@multica/core/types";
+import { ISSUE_STATUS_ICONS } from "@multica/core/types/issue-status";
 import en from "../../locales/en/settings.json";
 import { IssueStatusesTab } from "./issue-statuses-tab";
+import { ApiError } from "@multica/core/api/client";
 
 const reorderMutate = vi.hoisted(() => vi.fn());
 const createMutate = vi.hoisted(() => vi.fn());
 const updateMutate = vi.hoisted(() => vi.fn());
+const archiveMutate = vi.hoisted(() => vi.fn());
+const navigatePush = vi.hoisted(() => vi.fn());
+const prepareList = vi.hoisted(() => vi.fn());
+vi.mock("@multica/core/paths", () => ({ useWorkspacePaths: () => ({ issues: () => "/dev/issues" }) }));
+vi.mock("../../navigation", () => ({ useNavigation: () => ({ push: navigatePush }) }));
+vi.mock("@multica/core/issue-statuses", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/issue-statuses")>()),
+  prepareIssueStatusList: prepareList,
+}));
 let catalog: IssueStatusEntry[] = [];
 let role: string = "owner";
 
@@ -36,7 +47,7 @@ vi.mock("@multica/core/issue-statuses/queries", async (importOriginal) => ({
 vi.mock("@multica/core/issue-statuses/mutations", () => ({
   useCreateIssueStatus: () => ({ mutate: createMutate, isPending: false }),
   useUpdateIssueStatus: () => ({ mutate: updateMutate, isPending: false }),
-  useArchiveIssueStatus: () => ({ mutate: vi.fn() }),
+  useArchiveIssueStatus: () => ({ mutate: archiveMutate, isPending: false }),
   useReorderIssueStatuses: () => ({ mutate: reorderMutate }),
 }));
 vi.mock("../../issues/utils/status-label", () => ({
@@ -87,11 +98,91 @@ afterEach(() => {
   reorderMutate.mockClear();
   createMutate.mockClear();
   updateMutate.mockClear();
+  archiveMutate.mockReset();
+  navigatePush.mockClear();
+  prepareList.mockClear();
   catalog = [];
   role = "owner";
 });
 
 describe("IssueStatusesTab", () => {
+  it("aligns category and row actions with equal end padding and pointer target sizes", () => {
+    catalog = [BUILT_IN_IN_REVIEW, entry({ key: "qa", name: "QA" })];
+    render(<IssueStatusesTab />);
+    const add = screen.getByLabelText(`${en.issue_statuses.add}: ${en.issue_statuses.category_labels.started}`);
+    expect(add.parentElement).toHaveClass("px-4");
+    expect(add).toHaveClass("size-7", "shrink-0", "[@media(pointer:coarse)]:size-11");
+    for (const name of ["in_review", "QA"]) {
+      const action = screen.getByLabelText(en.issue_statuses.actions.open.replace("{{name}}", name));
+      expect(action.closest(".group\\/row")).toHaveClass("pr-4");
+      expect(action).toHaveClass("size-7", "shrink-0", "[@media(pointer:coarse)]:size-11");
+    }
+  });
+
+  it.each(["unstarted", "started", "done", "closed"] as const)(
+    "offers seven unique shapes and a text-only default in %s",
+    async (category) => {
+      render(<IssueStatusesTab />);
+      fireEvent.click(screen.getByLabelText(`${en.issue_statuses.add}: ${en.issue_statuses.category_labels[category]}`));
+      const dialog = await screen.findByRole("dialog");
+      const picker = within(dialog).getByRole("group", { name: en.issue_statuses.editor.icon });
+      const defaultChoice = within(picker).getByRole("button", { name: en.issue_statuses.editor.icon_shapes.default });
+      expect(defaultChoice).toHaveTextContent(en.issue_statuses.editor.icon_shapes.default);
+      expect(defaultChoice.querySelector("svg")).toBeNull();
+      expect(defaultChoice).toHaveAttribute("aria-pressed", "true");
+      const shapes = ISSUE_STATUS_ICONS.map((icon) => {
+        const button = within(picker).getByRole("button", { name: en.issue_statuses.editor.icon_shapes[icon] });
+        expect(button).toHaveAttribute("aria-pressed", "false");
+        return button.querySelector("svg")!.innerHTML;
+      });
+      expect(picker.querySelectorAll("svg")).toHaveLength(7);
+      expect(new Set(shapes).size).toBe(7);
+    },
+  );
+
+  it("can reset a saved shape to the existing category default", async () => {
+    catalog = [entry({ key: "qa", name: "QA", icon: "slash" })];
+    render(<IssueStatusesTab />);
+    fireEvent.click(screen.getByLabelText(en.issue_statuses.actions.open.replace("{{name}}", "QA")));
+    fireEvent.click(await screen.findByRole("menuitem", { name: en.issue_statuses.actions.edit }));
+    const dialog = await screen.findByRole("dialog");
+    const defaultChoice = within(dialog).getByRole("button", { name: en.issue_statuses.editor.icon_shapes.default });
+    fireEvent.click(defaultChoice);
+    expect(defaultChoice).toHaveAttribute("aria-pressed", "true");
+    expect(within(dialog).getByRole("button", { name: en.issue_statuses.editor.icon_shapes.slash })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(within(dialog).getByRole("button", { name: en.issue_statuses.editor.save }));
+    expect(updateMutate).toHaveBeenCalledWith(expect.objectContaining({ id: "qa", icon: "" }), expect.any(Object));
+  });
+
+  it("keeps an in-use status active and opens its exact issue list after the archive conflict", async () => {
+    catalog = [entry({ key: "shipped", name: "Shipped", category: "done" })];
+    archiveMutate.mockImplementation((_id, options) => options.onError(new ApiError("in use", 409, "Conflict", {
+      code: "issue_status_in_use", issue_count: 120,
+    })));
+    render(<IssueStatusesTab />);
+    await userEvent.click(screen.getByLabelText(en.issue_statuses.actions.open.replace("{{name}}", "Shipped")));
+    await userEvent.click(await screen.findByRole("menuitem", { name: en.issue_statuses.actions.archive }));
+    await userEvent.click(screen.getByRole("button", { name: en.issue_statuses.archive_dialog.confirm }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText(en.issue_statuses.archive_dialog.in_use_title)).toBeInTheDocument();
+    expect(within(dialog).getByText(/120/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: en.issue_statuses.archive_dialog.confirm })).toBeNull();
+    await userEvent.click(within(dialog).getByRole("button", { name: en.issue_statuses.archive_dialog.view_issues }));
+    expect(prepareList).toHaveBeenCalledWith("ws-1", "shipped");
+    expect(navigatePush).toHaveBeenCalledWith("/dev/issues");
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("closes the confirmation only after an empty status is successfully archived", async () => {
+    catalog = [entry({ key: "empty", name: "Empty" })];
+    render(<IssueStatusesTab />);
+    await userEvent.click(screen.getByLabelText(en.issue_statuses.actions.open.replace("{{name}}", "Empty")));
+    await userEvent.click(await screen.findByRole("menuitem", { name: en.issue_statuses.actions.archive }));
+    await userEvent.click(screen.getByRole("button", { name: en.issue_statuses.archive_dialog.confirm }));
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    act(() => archiveMutate.mock.calls[0]![1].onSuccess());
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
   it("creates a status with independent shape and color", async () => {
     catalog = [BUILT_IN_IN_REVIEW];
     render(<IssueStatusesTab />);

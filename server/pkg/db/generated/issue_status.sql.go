@@ -65,9 +65,8 @@ type CountIssuesUsingStatusKeyParams struct {
 	Key         string      `json:"key"`
 }
 
-// Reported alongside a status so the UI can say how many issues still carry an
-// archived one. NOT an archive precondition: archiving never requires migrating
-// issues off the status.
+// Archive precondition, including terminal issues. Call under the catalog lock
+// so a concurrent status assignment cannot invalidate the empty check.
 func (q *Queries) CountIssuesUsingStatusKey(ctx context.Context, arg CountIssuesUsingStatusKeyParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countIssuesUsingStatusKey, arg.WorkspaceID, arg.Key)
 	var column_1 int64

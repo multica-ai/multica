@@ -104,9 +104,8 @@ WHERE id = sqlc.arg('id')::uuid
 RETURNING *;
 
 -- name: CountIssuesUsingStatusKey :one
--- Reported alongside a status so the UI can say how many issues still carry an
--- archived one. NOT an archive precondition: archiving never requires migrating
--- issues off the status.
+-- Archive precondition, including terminal issues. Call under the catalog lock
+-- so a concurrent status assignment cannot invalidate the empty check.
 SELECT COUNT(*)::bigint FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND status = sqlc.arg('key')::text;

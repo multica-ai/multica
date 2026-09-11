@@ -338,17 +338,43 @@ func TestBuiltInStatusesAreImmutable(t *testing.T) {
 	})
 }
 
-// TestArchiveRetiresStatusWithoutTouchingExistingIssues pins the archive rule:
-// archiving retires a status from FUTURE use only. Issues already on it keep it
-// and keep behaving as their category prescribes — retiring a label must not
-// rewrite history.
-func TestArchiveRetiresStatusWithoutTouchingExistingIssues(t *testing.T) {
+// In-use statuses cannot be archived, including successful and canceled work.
+func TestArchiveRequiresMovingExistingIssues(t *testing.T) {
+	for _, category := range issuestatus.Categories() {
+		t.Run(category, func(t *testing.T) {
+			entry := createTestCustomStatus(t, "archive_used_"+category, category)
+			issueID := dbfx.Issue(t, "archive occupied", testutil.Cols{"status": entry.Key})
+			req := withURLParam(newRequest(http.MethodDelete, "/api/issue-statuses/"+uuidToString(entry.ID), nil), "id", uuidToString(entry.ID))
+			var conflict struct {
+				Code  string `json:"code"`
+				Count int64  `json:"issue_count"`
+			}
+			testutil.Call(t, testHandler.ArchiveIssueStatus, req).Want(http.StatusConflict).JSON(&conflict)
+			if conflict.Code != "issue_status_in_use" || conflict.Count != 1 {
+				t.Fatalf("unexpected conflict: %+v", conflict)
+			}
+			var archived bool
+			if err := testPool.QueryRow(context.Background(), "SELECT archived_at IS NOT NULL FROM issue_status WHERE id = $1", entry.ID).Scan(&archived); err != nil || archived {
+				t.Fatalf("in-use status archived: %v, %v", archived, err)
+			}
+			// Move through the public update path, preserving the lifecycle category.
+			target := map[string]string{"unstarted": "todo", "started": "in_progress", "done": "done", "closed": "cancelled"}[category]
+			move := withURLParam(newRequest(http.MethodPatch, "/api/issues/"+issueID, map[string]any{"status": target}), "id", issueID)
+			testutil.Call(t, testHandler.UpdateIssue, move).Want(http.StatusOK)
+			testutil.Call(t, testHandler.ArchiveIssueStatus, req).Want(http.StatusOK)
+			testutil.Call(t, testHandler.ArchiveIssueStatus, req).Want(http.StatusOK)
+		})
+	}
+}
+
+// Historical archived entries remain resolvable even under the new empty-only rule.
+func TestPreviouslyArchivedStatusRemainsReadable(t *testing.T) {
 	ctx := context.Background()
 	entry := createTestCustomStatus(t, "in_use_a", issuestatus.InProgress)
 	issueID := mustCreateIssue(t, "occupies the status", "in_use_a")
 
-	if code := archiveStatusVia(t, entry); code != http.StatusOK {
-		t.Fatalf("archiving an in-use status should succeed, got %d", code)
+	if _, err := testHandler.Queries.ArchiveIssueStatusEntry(ctx, db.ArchiveIssueStatusEntryParams{ID: entry.ID, WorkspaceID: entry.WorkspaceID}); err != nil {
+		t.Fatal(err)
 	}
 
 	// The existing issue keeps the archived status verbatim.
@@ -735,12 +761,10 @@ func TestWritesRejectAnArchivedStatus(t *testing.T) {
 
 }
 
-// TestArchiveSucceedsAfterACommittedWrite is the other ordering: an issue
-// committed on the status does not block archiving it, because archiving only
-// retires it from future use.
-func TestArchiveSucceedsAfterACommittedWrite(t *testing.T) {
+// A committed writer must be counted by the archive's locked precondition.
+func TestArchiveRejectsAfterACommittedWrite(t *testing.T) {
 	ctx := context.Background()
-	t.Run("writer wins: archive still succeeds and leaves the issue alone", func(t *testing.T) {
+	t.Run("writer wins: archive is rejected and leaves the issue alone", func(t *testing.T) {
 		entry := createTestCustomStatus(t, "race_b_writer", issuestatus.InProgress)
 
 		rec := httptest.NewRecorder()
@@ -756,8 +780,8 @@ func TestArchiveSucceedsAfterACommittedWrite(t *testing.T) {
 		json.Unmarshal(rec.Body.Bytes(), &created)
 		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parseUUID(created.ID)) })
 
-		if code := archiveStatusVia(t, entry); code != http.StatusOK {
-			t.Fatalf("archive after a committed write = %d, want 200", code)
+		if code := archiveStatusVia(t, entry); code != http.StatusConflict {
+			t.Fatalf("archive after a committed write = %d, want 409", code)
 		}
 		var status string
 		if err := testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`,

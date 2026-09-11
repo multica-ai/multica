@@ -31,6 +31,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
+import { issueStatusArchiveConflictCount, prepareIssueStatusList } from "@multica/core/issue-statuses";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
   issueStatusColor,
@@ -98,6 +100,7 @@ import { StatusIcon } from "../../issues/components/status-icon";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
+import { useNavigation } from "../../navigation";
 
 /**
  * Workspace issue status catalog management (MUL-6243).
@@ -224,7 +227,7 @@ export function IssueStatusesTab() {
         }
         status={editing}
       />
-      <ArchiveStatusDialog status={pendingArchive} onClose={() => setPendingArchive(null)} />
+      <ArchiveStatusDialog key={pendingArchive?.id ?? "closed"} status={pendingArchive} onClose={() => setPendingArchive(null)} />
       <AlertDialog open={showBuiltInNotice} onOpenChange={setShowBuiltInNotice}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -330,6 +333,7 @@ function CategorySection({
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  className="shrink-0 [@media(pointer:coarse)]:size-11"
                   aria-label={`${t(($) => $.issue_statuses.add)}: ${t(($) => $.issue_statuses.category_labels[category])}`}
                   onClick={onCreate}
                 >
@@ -412,14 +416,14 @@ function StatusRow({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`group/row relative flex min-h-12 items-center gap-2 bg-card px-2 py-2 motion-reduce:transition-none! ${isDragging ? "z-10 shadow-[var(--surface-shadow)]" : ""} ${archived ? "opacity-60" : ""}`}
+      className={`group/row relative flex min-h-12 items-center gap-2 bg-card py-2 pl-2 pr-4 motion-reduce:transition-none! ${isDragging ? "z-10 shadow-[var(--surface-shadow)]" : ""} ${archived ? "opacity-60" : ""}`}
     >
       {canReorder ? (
         <button
           type="button"
           disabled={isReordering}
           aria-label={t(($) => $.issue_statuses.actions.reorder, { name: label })}
-          className="flex size-6 shrink-0 touch-none items-center justify-center rounded cursor-grab text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring active:cursor-grabbing [@media(pointer:coarse)]:size-11"
+          className="flex size-6 shrink-0 touch-none items-center justify-center rounded-md cursor-grab text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring active:cursor-grabbing [@media(pointer:coarse)]:size-11"
           {...attributes}
           {...listeners}
         >
@@ -456,6 +460,7 @@ function StatusRow({
           <p className="truncate text-caption text-muted-foreground">{description}</p>
         )}
       </div>
+      {archived && <StatusIssuesButton statusKey={entry.key} />}
       {canManage && !archived && (
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -711,8 +716,8 @@ function StatusEditorDialog({
                     key={icon}
                     type="button"
                     variant={draft.icon === icon ? "secondary" : "outline"}
-                    size="icon"
-                    className="size-11 aria-pressed:ring-2 aria-pressed:ring-ring"
+                    size={icon ? "icon" : "default"}
+                    className={`${icon ? "size-11" : "h-11"} aria-pressed:ring-2 aria-pressed:ring-ring`}
                     aria-label={t(($) => $.issue_statuses.editor.icon_shapes[icon || "default"])}
                     aria-pressed={draft.icon === icon}
                     title={t(($) => $.issue_statuses.editor.icon_shapes[icon || "default"])}
@@ -721,7 +726,9 @@ function StatusEditorDialog({
                       setDraft((current) => ({ ...current, icon }));
                     }}
                   >
-                    <StatusIcon status="" category={draft.category} color={draft.color} icon={icon} className="size-5" />
+                    {icon
+                      ? <StatusIcon status="" category={draft.category} color={draft.color} icon={icon} className="size-5" />
+                      : t(($) => $.issue_statuses.editor.icon_shapes.default)}
                   </Button>
                 ))}
               </div>
@@ -746,6 +753,18 @@ function StatusEditorDialog({
   );
 }
 
+function StatusIssuesButton({ statusKey, onOpen }: { statusKey: string; onOpen?: () => void }) {
+  const { t } = useT("settings");
+  const wsId = useWorkspaceId();
+  const paths = useWorkspacePaths();
+  const navigation = useNavigation();
+  return <Button variant="outline" onClick={() => {
+    prepareIssueStatusList(wsId, statusKey);
+    onOpen?.();
+    navigation.push(paths.issues());
+  }}>{t(($) => $.issue_statuses.archive_dialog.view_issues)}</Button>;
+}
+
 function ArchiveStatusDialog({
   status,
   onClose,
@@ -755,40 +774,47 @@ function ArchiveStatusDialog({
 }) {
   const { t } = useT("settings");
   const archive = useArchiveIssueStatus();
+  const [issueCount, setIssueCount] = useState<number | null>(null);
   return (
-    <AlertDialog open={Boolean(status)} onOpenChange={(open) => !open && onClose()}>
+    <AlertDialog open={Boolean(status)} onOpenChange={(open) => !open && !archive.isPending && onClose()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t(($) => $.issue_statuses.archive_dialog.title)}</AlertDialogTitle>
-          {/* Archiving retires a status from FUTURE assignment. Issues already
-              on it keep it and keep behaving as their category prescribes —
-              say so, or this reads like a delete. */}
+          <AlertDialogTitle>{issueCount !== null
+            ? t(($) => $.issue_statuses.archive_dialog.in_use_title)
+            : t(($) => $.issue_statuses.archive_dialog.title)}</AlertDialogTitle>
           <AlertDialogDescription>
-            {t(($) => $.issue_statuses.archive_dialog.description, {
+            {issueCount !== null ? t(($) => $.issue_statuses.archive_dialog.in_use, { count: issueCount }) : t(($) => $.issue_statuses.archive_dialog.description, {
               name: status?.name ?? "",
             })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>
+          <AlertDialogCancel disabled={archive.isPending}>
             {t(($) => $.issue_statuses.archive_dialog.cancel)}
           </AlertDialogCancel>
-          <AlertDialogAction
+          {issueCount !== null && status ? <StatusIssuesButton statusKey={status.key} onOpen={onClose} /> : <AlertDialogAction
+            disabled={archive.isPending}
             onClick={() => {
               if (!status) return;
               archive.mutate(status.id, {
                 onSuccess: onClose,
-                onError: (error) =>
+                onError: (error) => {
+                  const count = issueStatusArchiveConflictCount(error);
+                  if (count !== null) {
+                    setIssueCount(count);
+                    return;
+                  }
                   toast.error(
                     error instanceof Error
                       ? error.message
                       : t(($) => $.issue_statuses.archive_dialog.failed),
-                  ),
+                  );
+                },
               });
             }}
           >
-            {t(($) => $.issue_statuses.archive_dialog.confirm)}
-          </AlertDialogAction>
+            {archive.isPending ? t(($) => $.issue_statuses.archive_dialog.archiving) : t(($) => $.issue_statuses.archive_dialog.confirm)}
+          </AlertDialogAction>}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

@@ -52,7 +52,11 @@
     },
     "archive_dialog": {
       "title": "Archive this status?",
-      "description": "\"{{name}}\" stops being available for new issues. Issues already on it keep it and keep behaving exactly as they do now.",
+      "description": "Move all issues out of \"{{name}}\" before archiving it. Once empty, it will be removed from boards and status pickers.",
+      "in_use_title": "Move issues before archiving",
+      "in_use": "Issues still using this status: {{count}}. Move them to another status, including completed and canceled issues, then try again.",
+      "view_issues": "View issues",
+      "archiving": "Archiving...",
       "cancel": "Cancel",
       "confirm": "Archive",
       "failed": "Could not archive the status."

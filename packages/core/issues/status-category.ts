@@ -126,9 +126,10 @@ export function statusFilterColumns(
   return { state: "resolved", columns };
 }
 
-/** Ordered concrete columns. Archived statuses remain readable for existing work. */
+/** Active columns by default; explicit historical inspection can include archived keys. */
 export function statusColumnKeys(
   catalog: Pick<IssueStatusCatalog, "statuses">,
+  includeArchived = false,
 ): IssueStatus[] {
   const entries = [...catalog.statuses].sort(compareIssueStatusEntries);
   const knownKeys = new Set(entries.map((entry) => entry.key));
@@ -138,7 +139,7 @@ export function statusColumnKeys(
       BUILT_IN_STATUS_CATEGORY[key] === category && !knownKeys.has(key),
     ),
     ...entries.filter((entry) =>
-      normalizeIssueStatusCategory(entry.category) === category,
+      normalizeIssueStatusCategory(entry.category) === category && (includeArchived || !entry.archived_at),
     ).map((entry) => entry.key),
   ]);
 }
@@ -151,7 +152,9 @@ export function visibleStatusKeys(
 ): IssueStatus[] {
   const resolved = statusFilters.length > 0 ? statusFilterColumns(statusFilters, catalog) : null;
   const selected = resolved?.state === "resolved" ? resolved.columns : null;
-  return statusColumnKeys(catalog).filter((key) =>
+  // Old archives may still carry issues. An explicit exact-key filter remains
+  // a read/move-out path without restoring those columns to everyday boards.
+  return statusColumnKeys(catalog, selected !== null).filter((key) =>
     selected !== null ? selected.has(key) : !hiddenStatuses.includes(key),
   );
 }
