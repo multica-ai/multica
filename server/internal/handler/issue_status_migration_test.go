@@ -51,7 +51,7 @@ func TestIssueStatusLifecycleMigrationPreservesIdentity(t *testing.T) {
 	if _, err := tx.Exec(ctx, "CREATE TEMP TABLE catalog_before AS SELECT * FROM issue_status"); err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile("../../migrations/467_issue_status_lifecycle_categories.up.sql")
+	migration, err := os.ReadFile("../../migrations/468_issue_status_lifecycle_categories.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestIssueStatusLifecycleMigrationPreservesIdentity(t *testing.T) {
 	if _, err := tx.Exec(ctx, "CREATE TEMP TABLE catalog_before_icon AS SELECT * FROM issue_status"); err != nil {
 		t.Fatal(err)
 	}
-	iconMigration, err := os.ReadFile("../../migrations/468_issue_status_icon.up.sql")
+	iconMigration, err := os.ReadFile("../../migrations/469_issue_status_icon.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
