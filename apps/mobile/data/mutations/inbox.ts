@@ -30,18 +30,21 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { InboxItem } from "@multica/core/types";
 import { api } from "@/data/api";
 import { inboxKeys } from "@/data/queries/inbox";
-import { refreshInboxUnreadSummary } from "@/data/realtime/inbox-ws-updaters";
+import {
+  refreshInboxList,
+  refreshInboxUnreadSummary,
+} from "@/data/realtime/inbox-ws-updaters";
 import { useWorkspaceStore } from "@/data/workspace-store";
 
 /**
- * Refresh the cross-workspace unread summary that backs the tab badge after a
- * write. It lives under its own account-level key, so invalidating the
- * workspace list does not reach it — every mutation here can change the number
- * it holds.
+ * Re-read both inbox caches a write can change: the workspace list and the
+ * cross-workspace unread summary that backs the tab badge. The summary lives
+ * under its own account-level key, so refreshing the list does not reach it —
+ * every mutation here can change the number it holds.
  *
- * Deliberately the shared entry point rather than a second local copy: a
- * mutation racing the first summary load hits exactly the same in-flight hole
- * a WS event does, and `refreshInboxUnreadSummary` is where that is handled.
+ * Deliberately the shared entry points rather than local copies: a mutation
+ * racing a first load hits exactly the same in-flight hole a WS event does,
+ * and a plain invalidate of the list would let it fall behind the badge.
  * Not awaited by `onSettled` — the mutation is done once the server answers.
  *
  * Rows are optimistic, the badge is not: it follows the server's confirmation.
@@ -50,7 +53,8 @@ import { useWorkspaceStore } from "@/data/workspace-store";
  * writing it back cannot be made correct once the list is paginated, and races
  * an in-flight summary response that no `cancelQueries` here covers.
  */
-function invalidateUnreadSummary(qc: QueryClient) {
+function refreshInboxAfterWrite(qc: QueryClient, wsId: string | null) {
+  if (wsId) void refreshInboxList(qc, wsId);
   void refreshInboxUnreadSummary(qc);
 }
 
@@ -75,8 +79,7 @@ export function useMarkInboxRead() {
       if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
-      invalidateUnreadSummary(qc);
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -111,8 +114,7 @@ export function useArchiveInbox() {
       if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
-      invalidateUnreadSummary(qc);
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -138,8 +140,7 @@ export function useMarkAllInboxRead() {
       if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
-      invalidateUnreadSummary(qc);
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -155,8 +156,7 @@ export function useArchiveAllInbox() {
   return useMutation({
     mutationFn: () => api.archiveAllInbox(),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
-      invalidateUnreadSummary(qc);
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -167,8 +167,7 @@ export function useArchiveAllReadInbox() {
   return useMutation({
     mutationFn: () => api.archiveAllReadInbox(),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
-      invalidateUnreadSummary(qc);
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }
@@ -179,8 +178,7 @@ export function useArchiveCompletedInbox() {
   return useMutation({
     mutationFn: () => api.archiveCompletedInbox(),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
-      invalidateUnreadSummary(qc);
+      refreshInboxAfterWrite(qc, wsId);
     },
   });
 }

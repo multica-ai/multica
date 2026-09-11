@@ -25,11 +25,11 @@
  * no replay buffer in v1).
  */
 import { useQueryClient } from "@tanstack/react-query";
-import { inboxKeys } from "@/data/queries/inbox";
 import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
 import {
   dropInboxItemsByIssue,
   patchInboxIssueStatus,
+  refreshInboxList,
   refreshInboxUnreadSummary,
 } from "./inbox-ws-updaters";
 
@@ -39,9 +39,10 @@ export function useInboxRealtime() {
   useWSSubscriptions(
     (ws, wsId) => {
       const invalidate = () => {
-        qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
-        // Shared entry point: it cancels an in-flight summary request before
+        // Shared entry points: each cancels an in-flight request before
         // invalidating, which a plain invalidate cannot do on a first load.
+        // Both caches, because the badge is rendered over the list it counts.
+        void refreshInboxList(qc, wsId);
         void refreshInboxUnreadSummary(qc);
       };
 

@@ -1,20 +1,47 @@
-import type { QueryClient } from "@tanstack/react-query";
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { inboxKeys } from "./queries";
 import type { InboxItem, IssuePriority, IssueStatus } from "../types";
 
-export function onInboxNew(
+// Re-read a query because the server changed — in a way that is never answered
+// by a request that was already on the wire before the change.
+//
+// Plain invalidation does not give that guarantee. TanStack only cancels an
+// in-flight request on invalidation once the query already holds data —
+// `Query.fetch` guards that branch on `state.data !== undefined` and otherwise
+// hands back the request already in flight:
+//
+//     if (this.state.data !== undefined && fetchOptions?.cancelRefetch) {
+//       this.cancel({ silent: true })
+//     } else if (this.#retryer) {
+//       return this.#retryer.promise      // ← the pre-change request
+//     }
+//
+// That branch exists to dedupe concurrent mounts, not to carry freshness. So a
+// change that lands during a query's FIRST load is answered by the pre-change
+// response, which resolves successfully and clears `isInvalidated`; with
+// `staleTime: Infinity` and no refetch on focus, nothing asks again. Cancelling
+// first makes a refresh behave the same whether or not the query has loaded.
+//
+// Every inbox cache is refreshed through here — both lists and the unread
+// summary. They are rendered side by side (the badge next to the rows it
+// counts), so a hole in either one shows up as the two disagreeing (MUL-6967).
+async function refreshInboxQuery(qc: QueryClient, queryKey: QueryKey) {
+  await qc.cancelQueries({ queryKey });
+  await qc.invalidateQueries({ queryKey });
+}
+
+export async function onInboxNew(
   qc: QueryClient,
   wsId: string,
   _item: InboxItem,
 ) {
-  // Use invalidateQueries instead of setQueryData — triggers a refetch that
-  // reliably notifies all observers. The inbox list is small so this is cheap.
+  // Refetch instead of setQueryData, so every observer is notified.
   //
   // Both lists: a new notification on an ARCHIVED issue puts that issue back in
   // the main inbox, which means it must also leave the archived list. The
   // server owns that split (ListArchivedInboxItems excludes issues with an
   // active row), so refetching both is what keeps them mutually exclusive.
-  qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+  await onInboxInvalidate(qc, wsId);
 }
 
 export function patchInboxIssueProjection(
@@ -90,12 +117,18 @@ export async function onInboxIssueDeleted(
   await onInboxSummaryInvalidate(qc);
 }
 
-// Refresh both the main and archived lists. Every inbox event can move an item
-// across that boundary (archive, unarchive, or a new notification reviving an
-// archived issue), and the split is decided server-side, so the two are always
-// invalidated together.
-export function onInboxInvalidate(qc: QueryClient, wsId: string) {
-  qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+// THE entry point for refreshing the workspace's inbox lists — main and
+// archived. Every inbox event can move an item across that boundary (archive,
+// unarchive, or a new notification reviving an archived issue), and the split
+// is decided server-side, so the two are always refreshed together.
+//
+// Cancels first, like the summary refresh below, and for the same reason. The
+// list's first load is where the hole bites hardest: nothing outside the Inbox
+// page observes the list, so on web it is collected once the user has been
+// away, and every return is a first load again — with notifications arriving
+// while a large, unbounded list is still downloading.
+export async function onInboxInvalidate(qc: QueryClient, wsId: string) {
+  await refreshInboxQuery(qc, inboxKeys.all(wsId));
 }
 
 // THE entry point for refreshing the cross-workspace unread summary — the
@@ -104,27 +137,7 @@ export function onInboxInvalidate(qc: QueryClient, wsId: string) {
 // summary spans every workspace, so it is refreshed on ANY inbox event
 // regardless of which workspace the event came from — including read/archive
 // events from a workspace other than the active one, which the workspace-
-// scoped list invalidation cannot reach.
-//
-// Cancelling before invalidating is load-bearing, not defensive. TanStack only
-// cancels an in-flight request on invalidation once the query already holds
-// data — `Query.fetch` guards that branch on `state.data !== undefined` and
-// otherwise hands back the in-flight promise:
-//
-//     if (this.state.data !== undefined && fetchOptions?.cancelRefetch) {
-//       this.cancel({ silent: true })
-//     } else if (this.#retryer) {
-//       return this.#retryer.promise      // ← the pre-change request
-//     }
-//
-// So an invalidation that races the FIRST summary load is answered by the
-// response that was already on the wire, which then resolves successfully and
-// clears `isInvalidated`. With `staleTime: Infinity` and no refetch on focus,
-// nothing would ever ask again: the badge would sit on a count the user's own
-// action had already invalidated, until some unrelated event happened to
-// refresh it. Cancelling first makes a refresh behave identically whether or
-// not the summary has loaded yet (MUL-6967).
+// scoped list refresh cannot reach. Cancels first; see `refreshInboxQuery`.
 export async function onInboxSummaryInvalidate(qc: QueryClient) {
-  await qc.cancelQueries({ queryKey: inboxKeys.unreadSummary() });
-  await qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+  await refreshInboxQuery(qc, inboxKeys.unreadSummary());
 }

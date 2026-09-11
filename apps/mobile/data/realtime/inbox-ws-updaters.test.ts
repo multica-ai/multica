@@ -7,6 +7,7 @@ import { inboxKeys } from "@/data/queries/inbox";
 import {
   dropInboxItemsByIssue,
   patchInboxIssueStatus,
+  refreshInboxList,
   refreshInboxUnreadSummary,
 } from "./inbox-ws-updaters";
 
@@ -119,5 +120,38 @@ describe("patchInboxIssueStatus", () => {
       qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0]?.issue_status,
     ).toBe("done");
     expect(invalidate).not.toHaveBeenCalled();
+  });
+});
+
+describe("refreshInboxList", () => {
+  it("cancels the in-flight list request BEFORE invalidating", async () => {
+    // Parity with web. Without the cancel, a change during the list's first
+    // load is answered by the pre-change request and never re-read — the tab
+    // badge (already cancel-first) then counts rows the list does not show
+    // (MUL-6967).
+    const qc = new QueryClient();
+    const calls: string[] = [];
+    vi.spyOn(qc, "cancelQueries").mockImplementation(async () => {
+      calls.push("cancel");
+    });
+    vi.spyOn(qc, "invalidateQueries").mockImplementation(async () => {
+      calls.push("invalidate");
+    });
+
+    await refreshInboxList(qc, wsId);
+
+    expect(calls).toEqual(["cancel", "invalidate"]);
+  });
+
+  it("targets this workspace's list, never the account-level summary", async () => {
+    const qc = new QueryClient();
+    const cancel = vi.spyOn(qc, "cancelQueries");
+
+    await refreshInboxList(qc, wsId);
+
+    expect(cancel).toHaveBeenCalledWith({ queryKey: inboxKeys.list(wsId) });
+    expect(cancel).not.toHaveBeenCalledWith({
+      queryKey: inboxKeys.unreadSummary(),
+    });
   });
 });
