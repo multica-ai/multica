@@ -2103,7 +2103,8 @@ func TestReusedWorkdirBlock(t *testing.T) {
 				"no memory of what it did here",
 				"`git status`",
 				"Running `multica repo checkout` for a repository that is already checked out here keeps that checkout as it is",
-				"pass `--fresh` only once you have confirmed nothing in it needs keeping",
+				"Pass `--fresh` only once you have confirmed nothing in it needs keeping",
+				"leaving commits on the old branch",
 			} {
 				if !strings.Contains(block, want) {
 					t.Fatalf("warning missing %q:\n%s", want, block)

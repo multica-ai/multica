@@ -71,9 +71,17 @@ work:
 When a checkout is kept, the command says so and reports its branch and how
 many uncommitted files and unpushed commits it holds. `--fresh` discards the
 existing checkout's uncommitted changes and untracked files and starts over on
-a new branch from the latest default branch (or `--ref`); earlier branches with
-unpushed commits are still kept. This needs a daemon that includes the change;
-older daemons always start over.
+a new branch from the latest default branch (or `--ref`). It deletes no branch
+holding unpushed commits, so those commits stay on the old branch:
+
+- with task-local Git metadata, the old branch stays in the checkout, including
+  when `--fresh` replaces a linked worktree left by an older daemon;
+- with a linked worktree, the old branch lives in the daemon's shared
+  repository cache, whose periodic cleanup drops `agent/*` branches that no
+  checkout has checked out.
+
+Push any commits you still need before using `--fresh`. This needs a daemon
+that includes the change; older daemons always start over.
 
 `repo checkout` requires both `MULTICA_DAEMON_PORT` and the injected task-scoped
 `MULTICA_TOKEN`; it is intended to run inside the active daemon task and from

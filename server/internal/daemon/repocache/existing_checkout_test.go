@@ -349,6 +349,68 @@ func TestIsolatedCheckoutKeepsLinkedWorktreeHoldingWork(t *testing.T) {
 	}
 }
 
+// Fresh discards a migrated linked worktree's working tree, not its commits:
+// a branch holding unpushed commits comes along into the isolated checkout.
+// Left in the shared cache it would be out of the agent's reach and dropped by
+// the next GC. No other cache branch comes along.
+func TestFreshMigrationCarriesUnpushedBranch(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		taskID string
+	}{
+		{name: "another task", taskID: secondTaskID},
+		{name: "same task", taskID: firstTaskID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newExistingCheckoutFixture(t, false)
+			const foreignTaskID = "33333333-3333-3333-3333-333333333333"
+			if _, err := f.cache.CreateWorktree(WorktreeParams{
+				WorkspaceID: "ws-1",
+				RepoURL:     f.source,
+				WorkDir:     t.TempDir(),
+				AgentName:   "Agent",
+				TaskID:      foreignTaskID,
+			}); err != nil {
+				t.Fatalf("foreign CreateWorktree failed: %v", err)
+			}
+			linked := f.checkout(t, firstTaskID, false)
+			if err := os.WriteFile(filepath.Join(linked.Path, "committed.txt"), []byte("committed\n"), 0o644); err != nil {
+				t.Fatalf("write committed file: %v", err)
+			}
+			runGitAuthored(t, linked.Path, "add", "committed.txt")
+			runGitAuthored(t, linked.Path, "commit", "-m", "unpushed work")
+			unpushed := gitHead(t, linked.Path)
+			upstream := f.advanceUpstream(t)
+
+			f.isolated = true
+			migrated := f.checkout(t, tc.taskID, true)
+
+			if migrated.Kept != "" || !isIsolatedCheckout(migrated.Path) {
+				t.Fatalf("result = %+v, want --fresh to migrate to isolated metadata", migrated)
+			}
+			if got := gitHead(t, migrated.Path); got != upstream {
+				t.Fatalf("HEAD = %s, want the latest default branch %s", got, upstream)
+			}
+			if got := gitRefCommit(t, migrated.Path, "refs/heads/"+linked.BranchName); got != unpushed {
+				t.Fatalf("carried branch %s = %s, want its unpushed commit %s", linked.BranchName, got, unpushed)
+			}
+			if migrated.BranchName == linked.BranchName || !isTaskBranch(migrated.BranchName, taskBranchName(tc.taskID)) {
+				t.Fatalf("branch = %q, want a new branch for task %s beside the carried %s", migrated.BranchName, tc.taskID, linked.BranchName)
+			}
+			// Sorted by refname, as for-each-ref lists them.
+			heads := []string{"refs/heads/" + linked.BranchName, "refs/heads/" + migrated.BranchName}
+			if heads[1] < heads[0] {
+				heads[0], heads[1] = heads[1], heads[0]
+			}
+			if got, want := localAgentBranches(t, migrated.Path), strings.Join(heads, "\n"); got != want {
+				t.Fatalf("agent branches = %q, want only %q (no other task's cache branch)", got, want)
+			}
+		})
+	}
+}
+
 func TestIsTaskBranch(t *testing.T) {
 	t.Parallel()
 	const branch = "agent/agent/111111111111"

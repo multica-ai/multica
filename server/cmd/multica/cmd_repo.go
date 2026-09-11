@@ -53,7 +53,8 @@ var repoCheckoutCmd = &cobra.Command{
 	Long: "Creates a git worktree from the daemon's bare clone cache. Used by agents to check out repos on demand.\n\n" +
 		"Running it again where the repository is already checked out never silently discards work: a checkout " +
 		"that has uncommitted changes, untracked files, or unpushed commits, or is already on this task's branch, " +
-		"is kept as it is and only its remote refs are fetched. Pass --fresh to discard it and start over.",
+		"is kept as it is and only its remote refs are fetched. Pass --fresh to discard its uncommitted changes and " +
+		"untracked files and start over on a new branch; commits stay on the old branch, but push any you still need first.",
 	Args: exactArgs(1),
 	RunE: runRepoCheckout,
 }
@@ -74,7 +75,7 @@ func init() {
 	repoRemoveCmd.Flags().String("output", "json", "Output format: table or json")
 
 	repoCheckoutCmd.Flags().StringVar(&repoCheckoutRef, "ref", "", "branch, tag, or commit to check out instead of the remote default branch")
-	repoCheckoutCmd.Flags().BoolVar(&repoCheckoutFresh, "fresh", false, "discard an existing checkout's uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref)")
+	repoCheckoutCmd.Flags().BoolVar(&repoCheckoutFresh, "fresh", false, "discard an existing checkout's uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref); commits stay on the old branch")
 
 	repoCmd.AddCommand(repoListCmd)
 	repoCmd.AddCommand(repoAddCmd)
@@ -460,7 +461,8 @@ func repoCheckoutSummary(repoURL string, result repoCheckoutResult) string {
 	}
 	return fmt.Sprintf("Kept the existing checkout of %s at %s (branch: %s; %d uncommitted file%s, %d unpushed commit%s): "+
 		"nothing was reset, cleaned, or switched; only remote refs were fetched.\n"+
-		"To discard it and start over on a new branch from the latest default branch (or --ref), re-run with --fresh.",
+		"To discard its uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref), "+
+		"re-run with --fresh; commits stay on the old branch, but push any you still need first.",
 		repoURL, result.Path, branch,
 		result.UncommittedFiles, pluralS(result.UncommittedFiles),
 		result.UnpushedCommits, pluralS(result.UnpushedCommits))

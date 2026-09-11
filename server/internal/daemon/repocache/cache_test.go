@@ -890,6 +890,7 @@ func TestCreateIsolatedCheckoutImportsFetchedTipFromShallowCache(t *testing.T) {
 		taskBranch,
 		baseRef,
 		newTip,
+		"",
 	)
 	if err != nil {
 		t.Fatalf("create isolated checkout from shallow cache: %v", err)
@@ -1031,6 +1032,14 @@ func TestCreateWorktreeMigratesLinkedWorktreeToIsolatedMetadata(t *testing.T) {
 	}
 	if !isIsolatedCheckout(isolated.Path) {
 		t.Fatal("linked worktree was not migrated to isolated metadata")
+	}
+	// The linked branch held nothing unpushed, so nothing is carried over.
+	heads, err := runGitOutput("-C", isolated.Path, "for-each-ref", "--format=%(refname)", "refs/heads/")
+	if err != nil {
+		t.Fatalf("list local heads: %v", err)
+	}
+	if got := strings.TrimSpace(string(heads)); got != "refs/heads/"+isolated.BranchName {
+		t.Fatalf("migrated checkout local heads = %q, want only %s", got, isolated.BranchName)
 	}
 
 	barePath := cache.Lookup("ws-1", sourceRepo)

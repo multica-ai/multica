@@ -144,7 +144,7 @@ func buildReusedWorkdirBlock(reused bool) string {
 	var b strings.Builder
 	b.WriteString("## Files from an earlier run\n\n")
 	b.WriteString("Your working directory was kept from an earlier run, but this run does not continue that run's conversation, so you have no memory of what it did here. Repository checkouts in it may hold that work, including uncommitted changes.\n\n")
-	b.WriteString("Look before you fetch anything: list the working directory, and in each existing checkout run `git status` and `git log` to see what was changed. Continue from that work where it serves this task. Running `multica repo checkout` for a repository that is already checked out here keeps that checkout as it is when it holds uncommitted changes, untracked files, or unpushed commits, and only fetches; pass `--fresh` only once you have confirmed nothing in it needs keeping, because it discards that work and starts a new branch from the default branch.\n\n")
+	b.WriteString("Look before you fetch anything: list the working directory, and in each existing checkout run `git status` and `git log` to see what was changed. Continue from that work where it serves this task. Running `multica repo checkout` for a repository that is already checked out here keeps that checkout as it is when it holds uncommitted changes, untracked files, or unpushed commits, and only fetches. Pass `--fresh` only once you have confirmed nothing in it needs keeping: it discards uncommitted changes and untracked files and starts a new branch from the default branch, leaving commits on the old branch — push any you still need first.\n\n")
 	return b.String()
 }
 
