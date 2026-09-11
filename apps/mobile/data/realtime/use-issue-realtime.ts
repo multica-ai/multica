@@ -5,7 +5,8 @@
  * Handles:
  *   - issue:updated / issue:deleted / issue_labels:changed → detail cache
  *   - issue_attachments:changed → attachment cache
- *   - comment:created / comment:updated / comment:deleted → timeline
+ *   - comment:created / comment:updated / comment:deleted → timeline +
+ *     owner issue revision (detail / list projections)
  *   - activity:created → timeline
  *   - reaction:added / reaction:removed → comment reactions on timeline
  *   - issue_reaction:added / issue_reaction:removed → issue-level reactions on detail
@@ -43,6 +44,7 @@ import {
   clearIssueDetail,
   commentToTimelineEntry,
   invalidateIssueAfterReconnect,
+  invalidateIssueOwnerProjections,
   patchIssueDetail,
   patchIssueLabels,
   patchIssuesList,
@@ -141,6 +143,14 @@ export function useIssueRealtime(
           if (payload.comment.issue_id !== issueId) return;
           const entry = commentToTimelineEntry(payload.comment);
           replaceCommentTimelineEntry(qc, wsId, issueId, entry);
+          // Edits and tombstoning deletes can advance the owner issue
+          // (revision, last_activity_at). Mirrors web's comment handlers: apply
+          // issue_revision when present, otherwise refetch the owner projections.
+          if (payload.issue_revision) {
+            onIssueAuxiliaryRevision(qc, wsId, issueId, payload.issue_revision);
+          } else {
+            invalidateIssueOwnerProjections(qc, wsId, issueId);
+          }
         }),
         // Resolve / unresolve broadcast from any client. Payload carries the
         // full Comment with the new resolved_at/resolved_by_* fields, so we
@@ -165,6 +175,11 @@ export function useIssueRealtime(
           // servers cascaded the delete). Sweep them so buildTimelineRows
           // does not promote them to ghost top-level rows.
           removeCommentCascade(qc, wsId, issueId, payload.comment_id);
+          if (payload.issue_revision) {
+            onIssueAuxiliaryRevision(qc, wsId, issueId, payload.issue_revision);
+          } else {
+            invalidateIssueOwnerProjections(qc, wsId, issueId);
+          }
         }),
         ws.on("activity:created", (payload) => {
           if (payload.issue_id !== issueId) return;

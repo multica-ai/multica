@@ -154,32 +154,62 @@ export function onIssueAuxiliaryRevision(
   invalidateStaleIssueOwnerProjections(qc, wsId, issueId, revision);
 }
 
+function invalidateIssueOwnerProjectionsWhere(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  shouldInvalidate: (issue: Issue | undefined) => boolean,
+) {
+  const detailKey = issueKeys.detail(wsId, issueId);
+  if (shouldInvalidate(qc.getQueryData<Issue>(detailKey))) {
+    qc.invalidateQueries({ queryKey: detailKey, exact: true });
+  }
+  for (const [key, data] of qc.getQueriesData<Issue[]>({
+    queryKey: issueKeys.myAll(wsId),
+  })) {
+    if (data?.some((issue) => issue.id === issueId && shouldInvalidate(issue))) {
+      qc.invalidateQueries({ queryKey: key, exact: true });
+    }
+  }
+  const listKey = issueKeys.list(wsId);
+  if (qc.getQueryData<Issue[]>(listKey)?.some(
+    (issue) => issue.id === issueId && shouldInvalidate(issue),
+  )) {
+    qc.invalidateQueries({ queryKey: listKey, exact: true });
+  }
+}
+
 function invalidateStaleIssueOwnerProjections(
   qc: QueryClient,
   wsId: string,
   issueId: string,
   revision: number,
 ) {
-  const isStale = (issue: Issue | undefined) =>
-    issue !== undefined &&
-    (issue.revision === undefined || issue.revision < revision);
-  const detailKey = issueKeys.detail(wsId, issueId);
-  if (isStale(qc.getQueryData<Issue>(detailKey))) {
-    qc.invalidateQueries({ queryKey: detailKey, exact: true });
-  }
-  for (const [key, data] of qc.getQueriesData<Issue[]>({
-    queryKey: issueKeys.myAll(wsId),
-  })) {
-    if (data?.some((issue) => issue.id === issueId && isStale(issue))) {
-      qc.invalidateQueries({ queryKey: key, exact: true });
-    }
-  }
-  const listKey = issueKeys.list(wsId);
-  if (qc.getQueryData<Issue[]>(listKey)?.some(
-    (issue) => issue.id === issueId && isStale(issue),
-  )) {
-    qc.invalidateQueries({ queryKey: listKey, exact: true });
-  }
+  invalidateIssueOwnerProjectionsWhere(
+    qc,
+    wsId,
+    issueId,
+    (issue) =>
+      issue !== undefined &&
+      (issue.revision === undefined || issue.revision < revision),
+  );
+}
+
+/** Fallback when an owner change arrives without its revision (the 204
+ * comment delete response, or an older server's comment event). Mirrors
+ * web's `invalidateIssueOwnerProjections`: only loaded projections that
+ * contain the issue are refetched. */
+export function invalidateIssueOwnerProjections(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+) {
+  invalidateIssueOwnerProjectionsWhere(
+    qc,
+    wsId,
+    issueId,
+    (issue) => issue !== undefined,
+  );
 }
 
 export function clearIssueDetail(

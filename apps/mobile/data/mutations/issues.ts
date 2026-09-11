@@ -25,9 +25,14 @@ import type {
   TimelineEntry,
   UpdateIssueRequest,
 } from "@multica/core/types";
-import { applyCommentDeletion } from "@multica/core/issues/comment-deletion";
+import type { AppConfigResponse } from "@multica/core/api/schemas";
+import {
+  applyCommentDeletion,
+  removeCommentSubtree,
+} from "@multica/core/issues/comment-deletion";
 import { api } from "@/data/api";
 import { isIssueStatusCategory } from "@/lib/issue-status";
+import { appConfigOptions } from "@/data/queries/billing";
 import { issueKeys } from "@/data/queries/issues";
 import { inboxKeys } from "@/data/queries/inbox";
 import { useAuthStore } from "@/data/auth-store";
@@ -39,6 +44,7 @@ import {
 } from "@/data/revision";
 import {
   advanceCommentRevision,
+  invalidateIssueOwnerProjections,
   onIssueAuxiliaryRevision,
   reconcileIssueFullSnapshotRevision,
   commentToTimelineEntry,
@@ -314,23 +320,52 @@ export function useEditComment(issueId: string) {
 }
 
 /**
- * Delete a comment. Deleting removes only that comment (#8296): one with
- * replies stays as a tombstone so they keep their parent. Not optimistic —
- * which outcome applies depends on replies only the server sees for certain.
- * Once it confirms, mirror its outcome with the same pure helper web uses
- * (`useDeleteComment` in packages/core/issues/mutations.ts); realtime events
- * and the settle refetch reconcile the rest.
+ * Whether the server keeps a deleted comment's replies (#8296). Older servers
+ * omit `comment_delete_keep_replies_supported` and delete the replies too, so
+ * anything but an explicit `true` — including a config that has not loaded —
+ * fails closed. Shared by the confirm copy and `useDeleteComment`.
+ */
+export function commentDeleteKeepsReplies(
+  config: AppConfigResponse | undefined,
+): boolean {
+  return config?.comment_delete_keep_replies_supported === true;
+}
+
+/**
+ * Delete a comment. On a server that declares
+ * `comment_delete_keep_replies_supported`, only that comment goes (#8296): one
+ * with replies stays as a tombstone so they keep their parent. Older servers
+ * delete the replies too. Not optimistic — which outcome applies depends on
+ * replies only the server sees for certain. Once it confirms, mirror its
+ * outcome with the same pure helpers web uses (`useDeleteComment` in
+ * packages/core/issues/mutations.ts); realtime events and the settle refetch
+ * reconcile the rest.
  */
 export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
   return useMutation({
-    mutationFn: (commentId: string) => api.deleteComment(commentId),
-    onSuccess: (_data, commentId) => {
-      qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(wsId, issueId), (old) =>
-        old ? applyCommentDeletion(old, commentId, new Date().toISOString()) : old,
+    // The capability is read when the delete runs, from the same config cache
+    // the confirm copy reads, so the route matches what the user was told.
+    mutationFn: async (commentId: string) => {
+      const keepReplies = commentDeleteKeepsReplies(
+        qc.getQueryData(appConfigOptions().queryKey),
       );
+      await api.deleteComment(commentId, { keepReplies });
+      return keepReplies;
+    },
+    onSuccess: (keptReplies, commentId) => {
+      qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(wsId, issueId), (old) => {
+        if (!old) return old;
+        return keptReplies
+          ? applyCommentDeletion(old, commentId, new Date().toISOString())
+          : removeCommentSubtree(old, commentId);
+      });
+      // The endpoint remains 204 for compatibility, so the local caller has
+      // no body carrying issue_revision. The realtime event narrows this
+      // with its revision when connected; this is the no-WS safety net.
+      if (wsId) invalidateIssueOwnerProjections(qc, wsId, issueId);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });

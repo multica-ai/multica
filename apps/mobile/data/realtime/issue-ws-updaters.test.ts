@@ -9,6 +9,7 @@ import {
   commentToTimelineEntry,
   onIssueAuxiliaryRevision,
   invalidateIssueAfterReconnect,
+  invalidateIssueOwnerProjections,
   patchIssueDetail,
   patchIssueLabels,
   removeIssueReaction,
@@ -31,6 +32,31 @@ describe("invalidateIssueAfterReconnect", () => {
       issueKeys.activeTasks(wsId, issueId),
       issueKeys.tasks(wsId, issueId),
     ]);
+  });
+});
+
+describe("invalidateIssueOwnerProjections", () => {
+  it("refetches every loaded projection holding the issue, whatever its revision", () => {
+    const qc = new QueryClient();
+    const wsId = "workspace-1";
+    const issueId = "issue-1";
+    const owner = { id: issueId, revision: 9 } as Issue;
+    const other = { id: "issue-2", revision: 1 } as Issue;
+    const withOwner = issueKeys.myList(wsId, "assigned", { assignee_id: "user-1" });
+    const withoutOwner = issueKeys.myList(wsId, "created", { creator_id: "user-1" });
+    qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), owner);
+    qc.setQueryData<Issue[]>(withOwner, [owner]);
+    qc.setQueryData<Issue[]>(withoutOwner, [other]);
+    qc.setQueryData<Issue[]>(issueKeys.list(wsId), [other, owner]);
+
+    invalidateIssueOwnerProjections(qc, wsId, issueId);
+
+    const isInvalidated = (key: readonly unknown[]) =>
+      qc.getQueryState(key)?.isInvalidated;
+    expect(isInvalidated(issueKeys.detail(wsId, issueId))).toBe(true);
+    expect(isInvalidated(withOwner)).toBe(true);
+    expect(isInvalidated(issueKeys.list(wsId))).toBe(true);
+    expect(isInvalidated(withoutOwner)).toBe(false);
   });
 });
 
