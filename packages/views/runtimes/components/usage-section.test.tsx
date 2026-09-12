@@ -259,3 +259,36 @@ describe("UsageSection — custom-pricing entry point", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("UsageSection — KPI row layout", () => {
+  // Regression (#7836): the KPI row was a hard `grid-cols-3`. At a 390px
+  // viewport each column is ~110px, and `KpiCard`'s p-5 leaves ~70px for a
+  // 36px `text-display` value. A compact token total ("960.1M") is a single
+  // unbreakable token, so it painted past the card's right edge rather than
+  // wrapping. The Analytics Usage/Errors tabs already stack their identical
+  // KPI rows below `sm`; this row is the one that never got it.
+  it("stacks below sm instead of forcing three columns", () => {
+    const { container } = render(<UsageSection runtime={RUNTIME} />, {
+      wrapper: Wrapper,
+    });
+
+    // Walk up from a KPI value to the row that lays the three cards out.
+    const row = container
+      .querySelector("number-flow-react")
+      ?.closest("div.grid");
+    expect(row).not.toBeNull();
+
+    const classes = row!.className;
+    expect(classes).toContain("grid-cols-1");
+    expect(classes).toContain("sm:grid-cols-3");
+    // The unprefixed `grid-cols-3` is the defect itself: it applies at every
+    // width. `sm:grid-cols-3` must not be mistaken for it.
+    expect(classes.split(/\s+/)).not.toContain("grid-cols-3");
+    // The separator has to follow the orientation, or the stacked cards run
+    // together with a vertical rule floating between columns that no longer
+    // exist.
+    expect(classes).toContain("divide-y");
+    expect(classes).toContain("sm:divide-x");
+    expect(classes).toContain("sm:divide-y-0");
+  });
+});
