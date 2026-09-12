@@ -1488,7 +1488,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// the requester's workspace since the task started — more robust than
 	// parsing the agent's stdout for an identifier.
 	if qc, ok := s.parseQuickCreateContext(task); ok {
-		s.notifyQuickCreateCompleted(ctx, task, qc)
+		s.notifyQuickCreateCompleted(ctx, task, qc, result)
 	}
 
 	// For chat tasks, save assistant reply and broadcast chat:done. The
@@ -2566,7 +2566,7 @@ func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCrea
 // deterministic — robust against the same agent creating other issues in
 // parallel (e.g. assignment task running while max_concurrent_tasks > 1
 // permits another quick-create alongside it).
-func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateContext) {
+func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateContext, result []byte) {
 	requesterID, err := util.ParseUUID(qc.RequesterID)
 	if err != nil {
 		slog.Warn("quick-create completion: invalid requester id", "task_id", util.UUIDToString(task.ID), "error", err)
@@ -2583,14 +2583,27 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		OriginID:    task.ID,
 	})
 	if err != nil {
-		// No issue created — agent ran to completion but the CLI call must
-		// have failed. Surface as a failure inbox so the user sees something.
-		slog.Warn("quick-create completion: no issue found, writing failure inbox",
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Error("quick-create completion: issue lookup failed, writing failure inbox",
+				"task_id", util.UUIDToString(task.ID),
+				"agent_id", util.UUIDToString(task.AgentID),
+				"workspace_id", qc.WorkspaceID,
+				"error", err,
+			)
+			s.notifyQuickCreateFailed(ctx, task, qc, "Quick create outcome could not be confirmed")
+			return
+		}
+		// No issue was created, but the agent run itself completed. That can be
+		// an intentional preview/draft-only answer, so report a terminal success
+		// with the returned output instead of reclassifying execution success as
+		// a create failure. Real daemon/task failures still reach
+		// notifyQuickCreateFailed through FailTask.
+		slog.Info("quick-create completion: no issue found, writing no-issue success inbox",
 			"task_id", util.UUIDToString(task.ID),
 			"agent_id", util.UUIDToString(task.AgentID),
 			"workspace_id", qc.WorkspaceID,
 		)
-		s.notifyQuickCreateFailed(ctx, task, qc, "agent finished without creating an issue")
+		s.notifyQuickCreateCompletedWithoutIssue(ctx, task, qc, result)
 		return
 	}
 
@@ -2669,6 +2682,56 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		return
 	}
 	s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), issue.Status)
+}
+
+func quickCreateResultOutput(result []byte) string {
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(util.UnescapeBackslashEscapes(payload.Output))
+}
+
+func (s *TaskService) notifyQuickCreateCompletedWithoutIssue(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateContext, result []byte) {
+	requesterID, err := util.ParseUUID(qc.RequesterID)
+	if err != nil {
+		slog.Warn("quick-create no-issue completion: invalid requester id", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	workspaceID, err := util.ParseUUID(qc.WorkspaceID)
+	if err != nil {
+		slog.Warn("quick-create no-issue completion: invalid workspace id", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	output := redact.Text(quickCreateResultOutput(result))
+	details, _ := json.Marshal(map[string]any{
+		"task_id":         util.UUIDToString(task.ID),
+		"agent_id":        util.UUIDToString(task.AgentID),
+		"original_prompt": qc.Prompt,
+		"output":          output,
+	})
+	body := pgtype.Text{}
+	if output != "" {
+		body = pgtype.Text{String: output, Valid: true}
+	}
+	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		WorkspaceID:   workspaceID,
+		RecipientType: "member",
+		RecipientID:   requesterID,
+		Type:          "quick_create_done",
+		Severity:      "info",
+		IssueID:       pgtype.UUID{},
+		Title:         "Quick create completed",
+		Body:          body,
+		ActorType:     pgtype.Text{String: "agent", Valid: true},
+		ActorID:       task.AgentID,
+		Details:       details,
+	})
+	if err != nil {
+		slog.Error("quick-create no-issue completion: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), "")
 }
 
 // notifyQuickCreateFailed writes a failure inbox notification carrying the

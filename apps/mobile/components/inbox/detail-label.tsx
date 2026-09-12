@@ -138,9 +138,8 @@ export function InboxDetailLabel({
           ? `Reacted with ${details.emoji}`
           : TYPE_LABEL[item.type];
       case "quick_create_done":
-        return details.identifier
-          ? `Created with agent: ${details.identifier}`
-          : TYPE_LABEL[item.type];
+        if (details.identifier) return `Created with agent: ${details.identifier}`;
+        return singleLine(item.body) || TYPE_LABEL[item.type];
       case "quick_create_failed": {
         const detail = singleLine(details.error) || singleLine(item.body);
         return detail ? `Failed: ${detail}` : TYPE_LABEL[item.type];

@@ -104,6 +104,7 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     case "quick_create_done": {
       const identifier = details.identifier;
       if (identifier) return <span>{t(($) => $.labels.created_with_agent, { identifier })}</span>;
+      if (item.body) return <span>{item.body}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
     case "quick_create_failed": {
