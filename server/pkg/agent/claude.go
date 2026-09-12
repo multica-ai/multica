@@ -277,9 +277,16 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
 		close(procDone)
-		// The leader is reaped; drop ownership. On Windows that closes the Job
-		// Object, which kills anything still inside it — precisely what should
-		// happen to a descendant that outlived the CLI (GH #7522).
+		// The leader is reaped. Kill its process group before dropping ownership
+		// so a descendant that outlived the CLI on a NORMAL exit dies with it,
+		// not just on cancellation. claude neuters cmd.Cancel (above) to drive its
+		// own SIGTERM→SIGKILL, so the group is never signalled on the normal path;
+		// releaseProcessGroup is a Unix no-op, so before this an orphaned headless
+		// Chrome the agent opened over CDP kept running after the task completed
+		// (#8153). Mirrors runOwned in launch.go. On Windows releaseProcessGroup
+		// then closes the Job Object, which kills anything still inside it — the
+		// same outcome the reap gives on Unix (GH #7522).
+		reapProcessTree(cmd)
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 		// writeDone is buffered (cap 1) and the writer always sends — by the
