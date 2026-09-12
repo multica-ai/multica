@@ -988,6 +988,17 @@ SET status = 'completed', completed_at = now(), result = $2,
     retired_session_id = COALESCE(sqlc.narg('retired_session_id'), retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status = 'running'
+  -- Terminal callbacks from the live daemon carry the claim's
+  -- server-authoritative dispatched_at. Keep the legacy callers unfenced
+  -- when the nullable value is omitted, but make the new path an atomic CAS
+  -- at the same UPDATE boundary as the status transition. The claim payload
+  -- is second precision while the status payload is RFC3339Nano, so compare
+  -- at seconds (the reclaim window is far larger than one second).
+  AND (
+    sqlc.narg('expected_dispatched_at')::timestamptz IS NULL
+    OR date_trunc('second', dispatched_at) =
+       date_trunc('second', sqlc.narg('expected_dispatched_at')::timestamptz)
+  )
 RETURNING *;
 
 -- name: GetLastTaskSession :one
@@ -1226,6 +1237,12 @@ SET status = 'failed',
     retired_session_id = COALESCE(sqlc.narg('retired_session_id'), retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
+  -- See CompleteAgentTask for the precision-normalized generation CAS.
+  AND (
+    sqlc.narg('expected_dispatched_at')::timestamptz IS NULL
+    OR date_trunc('second', dispatched_at) =
+       date_trunc('second', sqlc.narg('expected_dispatched_at')::timestamptz)
+  )
 RETURNING *;
 
 -- name: UpdateAgentTaskSession :exec

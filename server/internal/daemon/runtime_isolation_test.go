@@ -277,9 +277,9 @@ func testRunBatchPollerTaskExitWakeup(t *testing.T, maxConcurrent int, releaseDe
 			claimCalls.Add(1)
 			switch {
 			case !firstCompleted.Load():
-				w.Write([]byte(`{"tasks":[{"id":"t1","runtime_id":"rt-1","issue_id":"i1","agent":{"name":"a"}}]}`))
+				w.Write([]byte(`{"tasks":[{"id":"t1","runtime_id":"rt-1","issue_id":"i1","dispatched_at":"2026-09-08T12:00:00Z","agent":{"name":"a"}}]}`))
 			case secondServed.CompareAndSwap(false, true):
-				w.Write([]byte(`{"tasks":[{"id":"t2","runtime_id":"rt-1","issue_id":"i1","agent":{"name":"a"}}]}`))
+				w.Write([]byte(`{"tasks":[{"id":"t2","runtime_id":"rt-1","issue_id":"i1","dispatched_at":"2026-09-08T12:00:00Z","agent":{"name":"a"}}]}`))
 			default:
 				w.Write([]byte(`{"tasks":[]}`))
 			}

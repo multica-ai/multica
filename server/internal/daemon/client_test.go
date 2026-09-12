@@ -534,6 +534,40 @@ func TestTerminalReportsOmitEmptyRetiredSessionID(t *testing.T) {
 	}
 }
 
+func TestTerminalReportsCarryExpectedDispatchedAt(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	expected := time.Date(2026, 9, 8, 12, 0, 0, 123456000, time.UTC)
+	if err := NewClient(srv.URL).CompleteTask(context.Background(), "task-1", "done", "", "", "", false, "", "", expected); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+	if got, _ := body["expected_dispatched_at"].(string); got != expected.Format(time.RFC3339Nano) {
+		t.Fatalf("expected_dispatched_at = %q, want %q", got, expected.Format(time.RFC3339Nano))
+	}
+}
+
+func TestTerminalReportsRejectUnknownExpectedDispatchedAt(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	err := NewClient(srv.URL).FailTask(context.Background(), "task-1", "boom", "", "", "", "agent_error", false, "", "", time.Time{})
+	if !errors.Is(err, errClaimGenerationUnavailable) {
+		t.Fatalf("FailTask error = %v, want claim generation unavailable", err)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("requests with unknown generation = %d, want 0", got)
+	}
+}
+
 func TestTerminalReportsCarryDurableWorkDir(t *testing.T) {
 	const durableWorkDir = "/Users/dev/project"
 	for _, tc := range []struct {

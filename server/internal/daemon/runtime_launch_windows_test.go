@@ -68,6 +68,7 @@ func TestHandleTaskReportsWindowsCodexProcessStartFailure(t *testing.T) {
 		IssueID:     "issue-windows-launch-failure",
 		AgentID:     "agent-windows-launch-failure",
 		AuthToken:   "mat_windows_launch_failure",
+		DispatchedAt: &testClaimDispatchedAtString,
 		Agent: &AgentData{
 			ID:   "agent-windows-launch-failure",
 			Name: "Windows launch failure agent",

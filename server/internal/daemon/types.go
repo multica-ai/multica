@@ -173,6 +173,16 @@ type Task struct {
 	// Empty or non-task-scoped values are fatal for writable agent tasks; the
 	// daemon must not fall back to its own token. See MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+	// DispatchedAt is the server-authoritative claim timestamp the server
+	// returns on every claim response (RFC3339, second precision). The
+	// server refreshes it on every stale-dispatch reclaim of the same task
+	// ID and already uses it as the SQL CAS discriminator against late
+	// handlers, so it doubles as this claim's delivery generation fence for
+	// live-daemon terminal recovery (#8157 r4): a pending report replays
+	// only while the server's current dispatched_at still matches the
+	// claim that produced it. Nil on old servers — recovery holds the report
+	// until ownership can be proven rather than issuing an unfenced callback.
+	DispatchedAt *string `json:"dispatched_at,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

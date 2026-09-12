@@ -240,6 +240,15 @@ type terminalTaskReport struct {
 	// run on the issue or chat can select it again, however many clean rows
 	// still reference it.
 	retiredSessionID string
+	// claimDispatchedAt is the server-authoritative dispatched_at this
+	// claim received in its claim response — the delivery generation fence
+	// (#8157 r4). The report replays only while the server's current
+	// dispatched_at still matches this value, so a stale pre-execution
+	// failure from an earlier delivery can never fail a later reclaim of
+	// the same task ID. Zero when the claim carried no value (old server):
+	// recovery holds the report and never sends an unfenced callback. Never
+	// stamped from time.Now — always the claim response.
+	claimDispatchedAt time.Time
 }
 
 type executionEnvironmentCommand func() ([]string, error)
@@ -571,6 +580,21 @@ type Daemon struct {
 	pendingWorkInflight map[string]struct{}  // runtime_id -> hint-driven heartbeat in flight
 	pendingWorkLastRun  map[string]time.Time // runtime_id -> when the last hint-driven heartbeat started
 
+	// pendingTerminalReports holds terminal callback reports (complete/fail)
+	// whose bounded transient-retry schedule was exhausted while the server
+	// row was still running (GitHub #8157). The single recovery loop replays
+	// them until the server settles them authoritatively; the state machine
+	// lives in terminal_recovery.go. In-memory only by design: a daemon
+	// restart drops them, because durable replay would cross the server's
+	// parent-failure / retry-child authority boundary (#4579) and stays out
+	// of scope. Guarded by terminalReportsMu; keyed by taskID with one
+	// pending report per task (latest enqueue wins). Reports are plain
+	// values: settlement never retains a task goroutine, provider slot, or
+	// local-directory lock.
+	terminalReportsMu      sync.Mutex
+	pendingTerminalReports map[string]terminalTaskReport
+	terminalReportsWake    chan struct{} // capacity 1; non-blocking send coalesces wakes
+
 	cancelFunc context.CancelFunc // set by Run(); called by triggerRestart
 	rootCtx    context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
 	// restartMu guards restartBinary. Two goroutines can reach triggerRestart —
@@ -710,6 +734,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		pendingWorkLastRun:        make(map[string]time.Time),
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
+		pendingTerminalReports:    make(map[string]terminalTaskReport),
+		terminalReportsWake:       make(chan struct{}, 1),
 		cancelPollInterval:        5 * time.Second,
 		envRootBusyWait:           15 * time.Second,
 		taskPrepareTimeout:        defaultTaskPrepareTimeout,
@@ -2137,6 +2163,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
+	go d.terminalRecoveryLoop(ctx)
 
 	// Preflight succeeded and the background loops are up: the daemon has
 	// registered its runtimes and can now claim and run tasks. Flip /health
@@ -2144,7 +2171,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// readiness wait blocks on, so success is reported only after startup
 	// actually completed, not merely because the health port came up.
 	d.ready.Store(true)
-	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal); health now reporting ready")
+	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal, terminal-recovery); health now reporting ready")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
 	return err
@@ -5698,6 +5725,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			taskID:        task.ID,
 			errorMessage:  "runtime went offline before the run started",
 			failureReason: taskfailure.ReasonRuntimeOffline.String(),
+			// Fence this pre-execution failure to the claim that produced
+			// it (#8157 r4): a stale dispatch of the same task ID that is
+			// re-claimed later must not be failed by this report.
+			claimDispatchedAt: parseClaimDispatchedAt(task.DispatchedAt),
 		}); err != nil {
 			d.logger.Error("fail task callback failed", "task", task.ID, "error", err)
 		}
@@ -5854,13 +5885,14 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// shape of the failure (provider 5xx, network, process crash,
 		// …) rather than the coarse legacy "agent_error" bucket.
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:           terminalTaskReportFail,
-			taskID:         task.ID,
-			errorMessage:   err.Error(),
-			branchName:     result.BranchName,
-			workDir:        result.WorkDir,
-			durableWorkDir: result.DurableWorkDir,
-			failureReason:  taskRunFailureReason(err),
+			kind:              terminalTaskReportFail,
+			taskID:            task.ID,
+			errorMessage:      err.Error(),
+			branchName:        result.BranchName,
+			workDir:           result.WorkDir,
+			durableWorkDir:    result.DurableWorkDir,
+			failureReason:     taskRunFailureReason(err),
+			claimDispatchedAt: parseClaimDispatchedAt(task.DispatchedAt),
 		}); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
@@ -5892,7 +5924,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 
-	d.reportTaskResult(ctx, task.ID, result, taskLog)
+	d.reportTaskResult(ctx, task.ID, result, taskLog, parseClaimDispatchedAt(task.DispatchedAt))
 
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the parent record (issue / chat session / autopilot run /
@@ -6024,10 +6056,11 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	if err != nil {
 		taskLog.Error("local_directory: resolve resource failed", "error", err)
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:          terminalTaskReportFail,
-			taskID:        task.ID,
-			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			kind:              terminalTaskReportFail,
+			taskID:            task.ID,
+			errorMessage:      err.Error(),
+			failureReason:     "local_directory_error",
+			claimDispatchedAt: parseClaimDispatchedAt(task.DispatchedAt),
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory resolve error", "error", failErr)
 		}
@@ -6043,10 +6076,11 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	if err := assignment.ValidateExecutionMode(); err != nil {
 		taskLog.Error("local_directory: unsupported execution mode", "error", err)
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:          terminalTaskReportFail,
-			taskID:        task.ID,
-			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			kind:              terminalTaskReportFail,
+			taskID:            task.ID,
+			errorMessage:      err.Error(),
+			failureReason:     "local_directory_error",
+			claimDispatchedAt: parseClaimDispatchedAt(task.DispatchedAt),
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory mode check", "error", failErr)
 		}
@@ -6055,10 +6089,11 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	if err := validateLocalPath(assignment.AbsPath); err != nil {
 		taskLog.Error("local_directory: path validation failed", "error", err)
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:          terminalTaskReportFail,
-			taskID:        task.ID,
-			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			kind:              terminalTaskReportFail,
+			taskID:            task.ID,
+			errorMessage:      err.Error(),
+			failureReason:     "local_directory_error",
+			claimDispatchedAt: parseClaimDispatchedAt(task.DispatchedAt),
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
@@ -6185,10 +6220,11 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			failureReason = "cancelled"
 		}
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:          terminalTaskReportFail,
-			taskID:        task.ID,
-			errorMessage:  fmt.Sprintf("local_directory wait cancelled: %s", err.Error()),
-			failureReason: failureReason,
+			kind:              terminalTaskReportFail,
+			taskID:            task.ID,
+			errorMessage:      fmt.Sprintf("local_directory wait cancelled: %s", err.Error()),
+			failureReason:     failureReason,
+			claimDispatchedAt: parseClaimDispatchedAt(task.DispatchedAt),
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory lock cancel", "error", failErr)
 		}
@@ -6208,7 +6244,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 // the agent may have built a real session before getting stuck, and we want
 // the next chat turn to resume there rather than start over and "forget"
 // the conversation.
-func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
+func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger, claimDispatchedAt time.Time) {
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
@@ -6222,6 +6258,10 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			durableWorkDir:        result.DurableWorkDir,
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
+			// Fence this terminal result to the claim that produced it
+			// (#8157 r4); a stale delivery of the same task ID must not
+			// settle a later reclaim.
+			claimDispatchedAt: claimDispatchedAt,
 		})
 		if err == nil {
 			return
@@ -6237,8 +6277,11 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		// warrant the legacy fallback, because at that point the server
 		// has already refused this task and the only useful UI signal
 		// left is a concrete failure.
-		if isTransientError(err) {
-			taskLog.Error("complete task failed after retries; leaving task in running rather than falling back to fail", "error", err)
+		if isTransientError(err) || errors.Is(err, errClaimGenerationUnavailable) {
+			// #8157: reportTerminalTask has already queued the complete report
+			// for live-daemon recovery — the terminal result is no longer
+			// ownerless, and it must not be downgraded to a failure here (a
+			// control-plane outage is not an agent failure).
 			return
 		}
 		taskLog.Error("complete task rejected by server, falling back to fail", "error", err)
@@ -6251,10 +6294,11 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		// which is the canonical replacement for the legacy
 		// "agent_error" coarse bucket.
 		fallbackErrMsg := fmt.Sprintf("complete task failed: %s", err.Error())
-		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:         terminalTaskReportFail,
-			taskID:       taskID,
-			errorMessage: fallbackErrMsg,
+		fallbackReport := terminalTaskReport{
+			kind:              terminalTaskReportFail,
+			taskID:            taskID,
+			errorMessage:      fallbackErrMsg,
+			claimDispatchedAt: claimDispatchedAt,
 			// The agent succeeded here — only the server's complete callback was
 			// rejected. Its branch is real and already committed, so it must
 			// survive the downgrade to a failure report.
@@ -6265,7 +6309,13 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			failureReason:         taskfailure.Classify(fallbackErrMsg).String(),
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
-		}); failErr != nil {
+		}
+		if failErr := d.reportTerminalTask(ctx, fallbackReport); failErr != nil {
+			if isTransientError(failErr) || errors.Is(failErr, errClaimGenerationUnavailable) {
+				// Same ownership rule as the primary paths — queued for
+				// live-daemon recovery by reportTerminalTask.
+				return
+			}
 			taskLog.Error("fail task fallback also failed", "error", failErr)
 		}
 	default:
@@ -6288,13 +6338,14 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			}
 		}
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
-		if err := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:           terminalTaskReportFail,
-			taskID:         taskID,
-			errorMessage:   result.Comment,
-			sessionID:      result.SessionID,
-			workDir:        result.WorkDir,
-			durableWorkDir: result.DurableWorkDir,
+		failReport := terminalTaskReport{
+			kind:              terminalTaskReportFail,
+			taskID:            taskID,
+			errorMessage:      result.Comment,
+			sessionID:         result.SessionID,
+			workDir:           result.WorkDir,
+			durableWorkDir:    result.DurableWorkDir,
+			claimDispatchedAt: claimDispatchedAt,
 			// Worktree mode commits the agent's leftovers before tearing the
 			// worktree down, so a failed run routinely still has a branch. This
 			// is the case where the user most needs it: the task went wrong and
@@ -6303,29 +6354,73 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			failureReason:         failureReason,
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
-		}); err != nil {
+		}
+		if err := d.reportTerminalTask(ctx, failReport); err != nil {
+			// #8157: the ownership rule covers both terminal callback types —
+			// reportTerminalTask queued the fail report for live-daemon
+			// recovery on transient exhaustion.
+			if isTransientError(err) || errors.Is(err, errClaimGenerationUnavailable) {
+				return
+			}
 			taskLog.Error("report failed task failed", "error", err)
 		}
 	}
 }
 
-// reportTerminalTask is the only path that sends complete/fail callbacks.
+// reportTerminalTask is the only path that sends complete/fail callbacks, and
+// the single ownership-transfer point for live-daemon terminal recovery
+// (#8157). Every normal terminal callback funnels through here —
+// reportTaskResult's completed/fail/fallback-fail paths plus the direct fail
+// reports from handleTask (runtime untracked, runTask error) and
+// acquireLocalDirectoryLockIfNeeded (resolve/mode/validation/lock failures) —
+// so a transient exhaustion of the bounded retry schedule enqueues the report
+// for the recovery loop instead of leaving the already-produced terminal
+// result ownerless. A report without a server-issued claim generation is
+// retained without sending because an unfenced callback could mutate a later
+// reclaim. Permanent server rejections are NOT queued: the server
+// already refused this callback for good, and replaying it cannot succeed.
+// An unsupported report kind fails fast without queueing.
+//
 // It deliberately preserves context values while discarding cancellation and
 // parent deadlines: daemon shutdown cancels the root context before pollLoop's
 // 30-second drain, but terminal callbacks must still use that remaining window.
 // The explicit timeout keeps this detached work bounded during normal runs.
 func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTaskReport) error {
+	if report.kind != terminalTaskReportComplete && report.kind != terminalTaskReportFail {
+		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
+	}
+	if report.claimDispatchedAt.IsZero() {
+		// Safety first for old/malformed claim responses: keep ownership in the
+		// live-daemon store, but never issue a callback that cannot be fenced at
+		// the server mutation boundary.
+		d.enqueuePendingTerminalReport(report)
+		if d.logger != nil {
+			d.logger.Warn("terminal task callback deferred; claim generation unavailable",
+				"task_id", report.taskID, "terminal_kind", report.kind.String(), "outcome", "kept_generation_unknown")
+		}
+		return errClaimGenerationUnavailable
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), terminalTaskReportTimeout)
 	defer cancel()
 
+	var err error
 	switch report.kind {
 	case terminalTaskReportComplete:
-		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir)
+		err = d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.claimDispatchedAt)
 	case terminalTaskReportFail:
-		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir)
+		err = d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.claimDispatchedAt)
 	default:
 		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}
+	if err != nil && isTransientError(err) {
+		// #8157: the bounded schedule was exhausted on a transient error while
+		// the server row may still be running — transfer settlement ownership
+		// to the live-daemon recovery loop instead of dropping the result.
+		d.logger.Error("terminal task callback failed after retries; queued terminal report for live-daemon recovery",
+			"task_id", report.taskID, "terminal_kind", report.kind.String(), "error", err)
+		d.enqueuePendingTerminalReport(report)
+	}
+	return err
 }
 
 // gcMetaForTask classifies a finished task and produces a GCMeta of the right

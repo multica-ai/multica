@@ -69,6 +69,7 @@ func TestHandleTask_DoesNotCallStartTaskItself(t *testing.T) {
 		WorkspaceID: "ws-no-start",
 		RuntimeID:   "rt-1",
 		IssueID:     "issue-no-start",
+		DispatchedAt: &testClaimDispatchedAtString,
 		Agent:       &AgentData{Name: "test-agent"},
 	}
 
@@ -855,6 +856,7 @@ func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 		WorkspaceID: workspaceID,
 		RuntimeID:   "rt-1",
 		IssueID:     "issue-active-during-complete",
+		DispatchedAt: &testClaimDispatchedAtString,
 		Agent:       &AgentData{Name: "test-agent"},
 	}
 

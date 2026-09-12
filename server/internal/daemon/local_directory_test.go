@@ -684,7 +684,8 @@ func TestAcquireLocalDirectoryLock_ParentCancellationReportsWaitFailure(t *testi
 		t.Fatalf("marshal ref: %v", err)
 	}
 	task := Task{
-		ID: "task-waiter",
+		ID:           "task-waiter",
+		DispatchedAt: &testClaimDispatchedAtString,
 		ProjectResources: []ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: ref},
 		},
@@ -770,7 +771,8 @@ func TestAcquireLocalDirectoryLock_EarlyFailureReportsWithCancelledParent(t *tes
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			task := Task{
-				ID: "task-invalid-local-directory",
+				ID:           "task-invalid-local-directory",
+				DispatchedAt: &testClaimDispatchedAtString,
 				ProjectResources: []ProjectResourceData{
 					{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: tc.ref},
 				},
@@ -812,7 +814,7 @@ func TestAcquireLocalDirectoryLockSkipsWorktreeMode(t *testing.T) {
 		{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
 	}
 
-	assignment, err := localDirectoryAssignmentForTask(Task{ID: "t1", ProjectResources: resources}, daemonID)
+	assignment, err := localDirectoryAssignmentForTask(Task{ID: "t1", DispatchedAt: &testClaimDispatchedAtString, ProjectResources: resources}, daemonID)
 	if err != nil {
 		t.Fatalf("assignment: %v", err)
 	}
@@ -932,7 +934,7 @@ func TestAcquireLocalDirectoryLockRejectsUnknownExecutionMode(t *testing.T) {
 	}
 	release, abort := d.acquireLocalDirectoryLockIfNeeded(
 		context.Background(),
-		Task{ID: "t1", ProjectResources: resources},
+		Task{ID: "t1", DispatchedAt: &testClaimDispatchedAtString, ProjectResources: resources},
 		slog.Default(),
 	)
 	if !abort {
