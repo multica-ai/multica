@@ -294,7 +294,54 @@ func (s *wsSender) sendText(chatID string, chatTypeInt int, content string) erro
 // Safe to block here only because inbound callbacks no longer run on the read
 // loop (wecom_channel.go): the read loop is the sole deliverer of acks, so a
 // send that waited for one from inside a callback would have waited on itself.
+// It is also where a long answer is cut into pieces the server will accept.
+// That belongs here rather than at any one call site because a body past the
+// cap is refused WHOLE: every caller that pushes plain text — the agent's
+// reply, an inbox card, a relayed frame — would otherwise have to remember the
+// rule, and the one that forgot would lose its message silently.
+//
+// A piece that fails stops the rest: the pieces after it are the tail of an
+// answer whose head did not arrive, and sending them alone would read as the
+// bot replying to nothing.
+//
+// A failure past the FIRST piece is wrapped in errPartiallySent, because the
+// caller's question — may this send be tried again? — has a different answer
+// once part of the answer is in the chat.
 func (s *wsSender) sendTextCtx(ctx context.Context, chatID string, chatTypeInt int, content string) error {
+	pieces := splitForWire(content)
+	if len(pieces) == 1 {
+		return s.sendOneTextCtx(ctx, chatID, chatTypeInt, pieces[0])
+	}
+	for i, piece := range pieces {
+		if err := s.sendOneTextCtx(ctx, chatID, chatTypeInt, piece); err != nil {
+			if i > 0 {
+				return fmt.Errorf("%w: %w", errPartiallySent, err)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// errPartiallySent marks a long answer whose LATER piece failed after an
+// earlier one was accepted by the server.
+//
+// It exists for one caller decision. Everything else on this path asks "did
+// this frame reach the peer", and for the failing piece the honest answer may
+// still be no — but the SEND is not the frame. splitForWire cuts one answer
+// into several aibot_send_msg frames, and by the time piece two fails, piece
+// one is already in the user's chat. A caller that reads the failure as "this
+// send put nothing on the wire" and retries the whole content prints the first
+// piece a second time, which is the one outcome a retry exists to avoid.
+//
+// So this is deliberately NOT a claim about the failing frame — provablyNotSent
+// asks about the send as a whole, and this answers that question.
+var errPartiallySent = errors.New("wecom: an earlier piece of this answer was already accepted")
+
+// sendOneTextCtx writes exactly one aibot_send_msg frame and reads its ack.
+// Nothing here may exceed the cap: splitForWire is the only thing standing
+// between an agent's answer and a 45002 refusal.
+func (s *wsSender) sendOneTextCtx(ctx context.Context, chatID string, chatTypeInt int, content string) error {
 	body, err := sendMsgTextBody(chatID, chatTypeInt, content)
 	if err != nil {
 		return err
