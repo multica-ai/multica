@@ -1,0 +1,896 @@
+<!doctype html>
+<!--
+  Render from the repository root at 1600x1120, then encode as WebP:
+  pnpm exec playwright screenshot --viewport-size="1600,1120" "file://$(pwd)/apps/docs/diagrams/authorization-architecture.html?lang=en&export=1" /tmp/authorization-architecture.png
+  node --input-type=module -e "import sharp from 'sharp'; await sharp('/tmp/authorization-architecture.png').webp({quality: 92}).toFile('apps/docs/public/images/docs/authorization-architecture.webp')"
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Multica authorization architecture</title>
+    <style>
+      :root {
+        --ink: #18212f;
+        --muted: #667085;
+        --line: #cbd3df;
+        --paper: #f7f8fb;
+        --white: #ffffff;
+        --blue: #2563eb;
+        --blue-soft: #e9f1ff;
+        --green: #16835f;
+        --green-soft: #e8f6f0;
+        --amber: #a35b08;
+        --amber-soft: #fff3df;
+        --red: #b43a4c;
+        --red-soft: #fdecef;
+        --violet: #7357bd;
+        --violet-soft: #f0ecfb;
+      }
+
+      * { box-sizing: border-box; }
+
+      html,
+      body {
+        width: 100%;
+        min-width: 0;
+        min-height: 100%;
+        margin: 0;
+        overflow-x: hidden;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body { padding: 46px 54px 42px; }
+
+      .page {
+        width: 100%;
+        max-width: 1492px;
+        min-height: calc(100vh - 88px);
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+      }
+
+      header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 48px;
+        margin-bottom: 28px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 38px;
+        line-height: 1.05;
+        letter-spacing: 0;
+        font-weight: 720;
+      }
+
+      .subtitle {
+        margin: 0;
+        max-width: 950px;
+        color: var(--muted);
+        font-size: 18px;
+        line-height: 1.45;
+      }
+
+      .legend {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .header-tools {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding-bottom: 4px;
+      }
+
+      .language-toggle {
+        display: inline-grid;
+        grid-template-columns: repeat(2, minmax(52px, auto));
+        gap: 2px;
+        border: 1px solid #cdd5e0;
+        border-radius: 6px;
+        background: #e9edf3;
+        padding: 2px;
+      }
+
+      .language-toggle button {
+        min-height: 27px;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        padding: 4px 11px;
+        color: #58687a;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 680;
+        cursor: pointer;
+      }
+
+      .language-toggle button:hover { color: var(--ink); }
+
+      .language-toggle button[aria-pressed="true"] {
+        background: var(--white);
+        color: var(--blue);
+        box-shadow: 0 1px 3px rgba(24, 33, 47, 0.13);
+      }
+
+      .language-toggle button:focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 2px;
+      }
+
+      .legend span { display: inline-flex; align-items: center; gap: 7px; }
+      .dot { width: 9px; height: 9px; border-radius: 50%; }
+      .dot.identity { background: var(--blue); }
+      .dot.policy { background: var(--amber); }
+      .dot.enforce { background: var(--green); }
+
+      .band {
+        position: relative;
+        border: 1px solid #d9dee8;
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 8px;
+        padding: 22px 24px 20px;
+        box-shadow: 0 10px 28px rgba(24, 33, 47, 0.045);
+      }
+
+      .band-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 15px;
+      }
+
+      .step {
+        display: grid;
+        place-items: center;
+        width: 25px;
+        height: 25px;
+        border-radius: 50%;
+        color: white;
+        font-size: 13px;
+        font-weight: 750;
+      }
+
+      .identity-band .step { background: var(--blue); }
+      .policy-band .step { background: var(--amber); }
+      .enforcement-band .step { background: var(--green); }
+
+      .band-title h2 {
+        margin: 0;
+        font-size: 18px;
+        line-height: 1;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+
+      .band-title p {
+        margin: 1px 0 0 auto;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .identity-grid {
+        display: grid;
+        grid-template-columns: 0.94fr 1.06fr 1.06fr 1.38fr;
+        gap: 13px;
+      }
+
+      .identity-card,
+      .policy-card,
+      .enforcement-card {
+        min-width: 0;
+        border-radius: 6px;
+        padding: 14px 15px;
+      }
+
+      .identity-card {
+        border: 1px solid #bfd1f6;
+        background: var(--blue-soft);
+      }
+
+      .eyebrow {
+        margin-bottom: 6px;
+        color: var(--blue);
+        font-size: 11px;
+        font-weight: 780;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .identity-card strong,
+      .policy-card strong,
+      .enforcement-card strong {
+        display: block;
+        margin-bottom: 5px;
+        font-size: 15px;
+        line-height: 1.2;
+      }
+
+      .identity-card p,
+      .policy-card p,
+      .enforcement-card p {
+        margin: 0;
+        color: #526173;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .identity-summary {
+        margin-top: 13px;
+        display: grid;
+        grid-template-columns: 1.08fr 1fr 1.2fr;
+        gap: 10px;
+      }
+
+      .identity-chip {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        border-left: 3px solid var(--blue);
+        background: #f8fbff;
+        padding: 8px 11px;
+        color: #40516a;
+        font-size: 12px;
+        line-height: 1.25;
+      }
+
+      .identity-chip b { color: var(--ink); }
+
+      .connector {
+        position: relative;
+        height: 28px;
+      }
+
+      .connector::before {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 0;
+        width: 1px;
+        height: 19px;
+        background: #9eabba;
+      }
+
+      .connector::after {
+        content: "";
+        position: absolute;
+        left: calc(50% - 4px);
+        bottom: 3px;
+        width: 7px;
+        height: 7px;
+        border-right: 1.5px solid #7a899b;
+        border-bottom: 1.5px solid #7a899b;
+        transform: rotate(45deg);
+      }
+
+      .policy-band { padding-bottom: 22px; }
+
+      .policy-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 11px;
+      }
+
+      .policy-card {
+        position: relative;
+        min-height: 113px;
+        border: 1px solid #ecd2a7;
+        border-top: 4px solid var(--amber);
+        background: var(--amber-soft);
+        padding-top: 13px;
+      }
+
+      .policy-card:nth-child(2) {
+        border-color: #c9d8ef;
+        border-top-color: var(--blue);
+        background: #eef4fd;
+      }
+
+      .policy-card:nth-child(3) {
+        border-color: #d5caed;
+        border-top-color: var(--violet);
+        background: var(--violet-soft);
+      }
+
+      .policy-card:nth-child(4) {
+        border-color: #b9decf;
+        border-top-color: var(--green);
+        background: var(--green-soft);
+      }
+
+      .policy-card:nth-child(5) {
+        border-color: #efc7ce;
+        border-top-color: var(--red);
+        background: var(--red-soft);
+      }
+
+      .policy-card:nth-child(6) {
+        border-color: #ccd4df;
+        border-top-color: #53677f;
+        background: #f1f4f8;
+      }
+
+      .policy-card .number {
+        position: absolute;
+        right: 10px;
+        top: 8px;
+        color: rgba(24, 33, 47, 0.28);
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .composition {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 15px;
+        color: #59687a;
+        font-size: 12px;
+        font-weight: 620;
+      }
+
+      .composition .plus { color: #9a6b28; font-size: 17px; }
+      .composition .result {
+        margin-left: 4px;
+        border: 1px solid #d7c098;
+        border-radius: 999px;
+        background: #fffaf0;
+        padding: 5px 12px;
+        color: #74480e;
+      }
+
+      .run-notes {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 14px;
+        color: #526173;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .run-notes p { margin: 0; }
+      .run-notes b { color: var(--ink); }
+
+      .enforcement-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+      }
+
+      .enforcement-card {
+        border: 1px solid #b9decf;
+        background: var(--green-soft);
+        min-height: 88px;
+      }
+
+      .path {
+        display: inline-block;
+        margin-top: 7px;
+        color: var(--green);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 10px;
+      }
+
+      .outcomes {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 9px;
+        margin-top: 12px;
+      }
+
+      .outcome {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 31px;
+        border-radius: 5px;
+        font-size: 12px;
+        font-weight: 720;
+      }
+
+      .allow { background: #dff3e9; color: #116f50; }
+      .redact { background: #e9eef6; color: #475d78; }
+      .deny { background: #fbe4e8; color: #9f2d40; }
+      .not-found { background: #fff0d7; color: #8a500b; }
+
+      footer {
+        display: grid;
+        grid-template-columns: auto repeat(4, 1fr);
+        align-items: center;
+        gap: 9px;
+        margin-top: 16px;
+        border-top: 1px solid #d8dee8;
+        padding-top: 14px;
+      }
+
+      footer strong {
+        margin-right: 8px;
+        color: #465568;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      footer span {
+        display: flex;
+        align-items: center;
+        min-height: 31px;
+        border-radius: 5px;
+        background: #e9edf3;
+        padding: 7px 10px;
+        color: #48596d;
+        font-size: 11px;
+        line-height: 1.25;
+        font-weight: 620;
+      }
+
+      body[data-lang="zh"] {
+        font-family: Inter, "PingFang SC", "Microsoft YaHei", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body[data-lang="zh"] .eyebrow { letter-spacing: 0.04em; }
+
+      body[data-export="true"] {
+        width: 1600px;
+        height: 1120px;
+        overflow: hidden;
+        padding: 46px 54px 42px;
+      }
+
+      body[data-export="true"] .page {
+        max-width: none;
+        min-height: 0;
+        height: 100%;
+      }
+
+      body[data-export="true"] .language-toggle { display: none; }
+
+      @media (max-width: 1320px) {
+        body { padding: 30px; }
+
+        .page { min-height: calc(100vh - 60px); }
+
+        header {
+          align-items: flex-start;
+          gap: 28px;
+          margin-bottom: 22px;
+        }
+
+        h1 { font-size: 34px; }
+
+        .subtitle {
+          max-width: 820px;
+          font-size: 16px;
+        }
+
+        .header-tools {
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 11px;
+          padding-bottom: 0;
+        }
+
+        .identity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .policy-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .enforcement-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+        .policy-card { min-height: 104px; }
+
+        footer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+        footer strong {
+          grid-column: 1 / -1;
+          margin-bottom: 1px;
+        }
+      }
+
+      @media (max-width: 880px) {
+        body { padding: 24px 20px 28px; }
+
+        .page { min-height: calc(100vh - 52px); }
+
+        header {
+          flex-direction: column;
+          gap: 18px;
+        }
+
+        .header-tools {
+          width: 100%;
+          flex-direction: row;
+          align-items: center;
+          justify-content: space-between;
+        }
+
+        .band { padding: 19px; }
+
+        .band-title {
+          align-items: flex-start;
+          flex-wrap: wrap;
+        }
+
+        .band-title p {
+          width: 100%;
+          margin: 0 0 0 35px;
+          line-height: 1.4;
+        }
+
+        .identity-summary { grid-template-columns: 1fr; }
+        .run-notes { grid-template-columns: 1fr; gap: 10px; }
+        .policy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+        .composition {
+          flex-wrap: wrap;
+          row-gap: 3px;
+        }
+      }
+
+      @media (max-width: 580px) {
+        body { padding: 18px 14px 24px; }
+
+        h1 { font-size: 30px; }
+
+        .subtitle {
+          font-size: 15px;
+          line-height: 1.5;
+        }
+
+        .header-tools {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .legend { gap: 13px; }
+
+        .identity-grid,
+        .policy-grid,
+        .enforcement-grid,
+        .outcomes,
+        footer {
+          grid-template-columns: 1fr;
+        }
+
+        footer strong { grid-column: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <div>
+          <h1 data-i18n="title">Multica authorization architecture</h1>
+          <p class="subtitle" data-i18n="subtitle">A request is admitted by composing identity, workspace membership, resource relationships, explicit grants, consent, and actor kind. No single role is a universal bypass.</p>
+        </div>
+        <div class="header-tools">
+          <div class="language-toggle" role="group" aria-label="Diagram language" data-i18n-aria-label="languageLabel">
+            <button type="button" data-lang-value="en" aria-pressed="true">EN</button>
+            <button type="button" data-lang-value="zh" aria-pressed="false">中文</button>
+          </div>
+          <div class="legend" aria-label="Diagram legend" data-i18n-aria-label="legendLabel">
+            <span><i class="dot identity"></i><span data-i18n="legendIdentity">Identity</span></span>
+            <span><i class="dot policy"></i><span data-i18n="legendPolicy">Policy</span></span>
+            <span><i class="dot enforce"></i><span data-i18n="legendEnforcement">Enforcement</span></span>
+          </div>
+        </div>
+      </header>
+
+      <section class="band identity-band">
+        <div class="band-title">
+          <span class="step">1</span>
+          <h2 data-i18n="identityTitle">Resolve identity and tenant scope</h2>
+          <p data-i18n="identitySubtitle">Authentication answers who; workspace resolution answers where.</p>
+        </div>
+        <div class="identity-grid">
+          <article class="identity-card">
+            <div class="eyebrow" data-i18n="humanEyebrow">Human</div>
+            <strong data-i18n="humanTitle">Session JWT / personal token</strong>
+            <p data-i18n="humanDescription">Interactive user identity with CSRF protection on cookie writes.</p>
+          </article>
+          <article class="identity-card">
+            <div class="eyebrow" data-i18n="agentEyebrow">Agent process</div>
+            <strong data-i18n="agentTitle">Task-scoped token</strong>
+            <p data-i18n="agentDescription">Bound to one user, agent, task, and workspace at claim time.</p>
+          </article>
+          <article class="identity-card">
+            <div class="eyebrow" data-i18n="machineEyebrow">Machine</div>
+            <strong data-i18n="machineTitle">Daemon / cloud node credential</strong>
+            <p data-i18n="machineDescription">Machine identity with server-established owner or workspace scope.</p>
+          </article>
+          <article class="identity-card">
+            <div class="eyebrow" data-i18n="integrationEyebrow">Integration</div>
+            <strong data-i18n="integrationTitle">Plugin, webhook, or system trigger</strong>
+            <p data-i18n="integrationDescription">Installation, signed endpoint, or internal principal resolved by its own boundary.</p>
+          </article>
+        </div>
+        <div class="identity-summary">
+          <div class="identity-chip" data-i18n-html="actorContext"><b>Actor context</b> member / agent / system / machine source</div>
+          <div class="identity-chip" data-i18n-html="workspaceContext"><b>Workspace</b> task-token binding takes precedence</div>
+          <div class="identity-chip" data-i18n-html="effectiveHuman"><b>Effective human</b> top-of-chain originator when required</div>
+        </div>
+      </section>
+
+      <div class="connector"></div>
+
+      <section class="band policy-band">
+        <div class="band-title">
+          <span class="step">2</span>
+          <h2 data-i18n="policyTitle">Compose the policy planes</h2>
+          <p data-i18n="policySubtitle">Each endpoint chooses the narrow set of gates its action needs.</p>
+        </div>
+        <div class="policy-grid">
+          <article class="policy-card">
+            <span class="number">01</span>
+            <strong data-i18n="workspaceRoleTitle">Workspace role</strong>
+            <p data-i18n-html="workspaceRoleDescription"><code>owner</code>, <code>admin</code>, or <code>member</code>; membership is the baseline tenant gate.</p>
+          </article>
+          <article class="policy-card">
+            <span class="number">02</span>
+            <strong data-i18n="resourceRelationTitle">Resource relation</strong>
+            <p data-i18n="resourceRelationDescription">Owner, creator, author, or collaborator adds rights on one resource.</p>
+          </article>
+          <article class="policy-card">
+            <span class="number">03</span>
+            <strong data-i18n="grantTitle">Explicit grant</strong>
+            <p data-i18n="grantDescription">Agent invocation targets and Autopilot collaborators narrow access.</p>
+          </article>
+          <article class="policy-card">
+            <span class="number">04</span>
+            <strong data-i18n="consentTitle">Consent and visibility</strong>
+            <p data-i18n="consentDescription">Private runtimes, discoverability, and secret redaction use distinct rules.</p>
+          </article>
+          <article class="policy-card">
+            <span class="number">05</span>
+            <strong data-i18n="actorBoundaryTitle">Actor boundary</strong>
+            <p data-i18n="actorBoundaryDescription">Sensitive endpoints apply explicit actor-source guards.</p>
+          </article>
+          <article class="policy-card">
+            <span class="number">06</span>
+            <strong data-i18n="resourceScopeTitle">Resource scope</strong>
+            <p data-i18n="resourceScopeDescription">Workspace, user, task, and chat identifiers must match the resolved principal.</p>
+          </article>
+        </div>
+        <div class="composition">
+          <span data-i18n="compositionRole">role</span><span class="plus">+</span><span data-i18n="compositionRelationship">relationship</span><span class="plus">+</span><span data-i18n="compositionGrant">grant</span><span class="plus">+</span><span data-i18n="compositionAction">action</span><span class="plus">+</span><span data-i18n="compositionScope">scope</span><span class="result" data-i18n="compositionDecision">decision</span>
+        </div>
+        <div class="run-notes">
+          <p data-i18n-html="generalInvocation"><b>General invocation:</b> an explicit workspace grant can admit agent/system without a human originator. Private and member-target access remain denied.</p>
+          <p data-i18n-html="autopilotInvocation"><b>Autopilot:</b> manual runs use the clicker; automatic runs require the trigger's valid creator. Write access does not grant target-agent invocation.</p>
+        </div>
+      </section>
+
+      <div class="connector"></div>
+
+      <section class="band enforcement-band">
+        <div class="band-title">
+          <span class="step">3</span>
+          <h2 data-i18n="enforcementTitle">Enforce at every delivery boundary</h2>
+          <p data-i18n="enforcementSubtitle">The client mirrors selected rules for UX; the server remains authoritative.</p>
+        </div>
+        <div class="enforcement-grid">
+          <article class="enforcement-card">
+            <strong data-i18n="routerTitle">Router and middleware</strong>
+            <p data-i18n="routerDescription">Credential, workspace membership, and coarse role gates.</p>
+            <span class="path">middleware/auth.go + workspace.go</span>
+          </article>
+          <article class="enforcement-card">
+            <strong data-i18n="handlerTitle">Handlers and services</strong>
+            <p data-i18n="handlerDescription">Ownership, grants, invocation, consent, redaction, and audit.</p>
+            <span class="path">internal/handler + service</span>
+          </article>
+          <article class="enforcement-card">
+            <strong data-i18n="dataTitle">Scoped data access</strong>
+            <p data-i18n-html="dataDescription">Resource reads and writes carry <code>workspace_id</code> and invariants.</p>
+            <span class="path">pkg/db/queries</span>
+          </article>
+          <article class="enforcement-card">
+            <strong data-i18n="realtimeTitle">Realtime subscriptions</strong>
+            <p data-i18n="realtimeDescription">Workspace, user, task, and creator-private chat scopes are rechecked.</p>
+            <span class="path">scope_authorizer.go</span>
+          </article>
+        </div>
+        <div class="outcomes">
+          <div class="outcome allow" data-i18n="outcomeAllow">Allow</div>
+          <div class="outcome redact" data-i18n="outcomeRedact">Allow with redaction</div>
+          <div class="outcome deny" data-i18n="outcomeDeny">Deny with 403</div>
+          <div class="outcome not-found" data-i18n="outcomeNotFound">Hide existence with 404</div>
+        </div>
+      </section>
+
+      <footer>
+        <strong data-i18n="invariantsTitle">Invariants</strong>
+        <span data-i18n="invariantServer">Server authority; client checks are affordances</span>
+        <span data-i18n="invariantWorkspace">Workspace isolation on every resource lookup</span>
+        <span data-i18n="invariantGovernance">Governance authority is not direct use authority</span>
+        <span data-i18n="invariantAuthority">Audit attribution never supplies missing authority</span>
+      </footer>
+    </main>
+    <script>
+      const translations = {
+        en: {
+          pageTitle: "Multica authorization architecture",
+          languageLabel: "Diagram language",
+          legendLabel: "Diagram legend",
+          title: "Multica authorization architecture",
+          subtitle: "A request is admitted by composing identity, workspace membership, resource relationships, explicit grants, consent, and actor kind. No single role is a universal bypass.",
+          legendIdentity: "Identity",
+          legendPolicy: "Policy",
+          legendEnforcement: "Enforcement",
+          identityTitle: "Resolve identity and tenant scope",
+          identitySubtitle: "Authentication answers who; workspace resolution answers where.",
+          humanEyebrow: "Human",
+          humanTitle: "Session JWT / personal token",
+          humanDescription: "Interactive user identity with CSRF protection on cookie writes.",
+          agentEyebrow: "Agent process",
+          agentTitle: "Task-scoped token",
+          agentDescription: "Bound to one user, agent, task, and workspace at claim time.",
+          machineEyebrow: "Machine",
+          machineTitle: "Daemon / cloud node credential",
+          machineDescription: "Machine identity with server-established owner or workspace scope.",
+          integrationEyebrow: "Integration",
+          integrationTitle: "Plugin, webhook, or system trigger",
+          integrationDescription: "Installation, signed endpoint, or internal principal resolved by its own boundary.",
+          actorContext: "<b>Actor context</b> member / agent / system / machine source",
+          workspaceContext: "<b>Workspace</b> task-token binding takes precedence",
+          effectiveHuman: "<b>Effective human</b> top-of-chain originator when required",
+          policyTitle: "Compose the policy planes",
+          policySubtitle: "Each endpoint chooses the narrow set of gates its action needs.",
+          workspaceRoleTitle: "Workspace role",
+          workspaceRoleDescription: "<code>owner</code>, <code>admin</code>, or <code>member</code>; membership is the baseline tenant gate.",
+          resourceRelationTitle: "Resource relation",
+          resourceRelationDescription: "Owner, creator, author, or collaborator adds rights on one resource.",
+          grantTitle: "Explicit grant",
+          grantDescription: "Agent invocation targets and Autopilot collaborators narrow access.",
+          consentTitle: "Consent and visibility",
+          consentDescription: "Private runtimes, discoverability, and secret redaction use distinct rules.",
+          actorBoundaryTitle: "Actor boundary",
+          actorBoundaryDescription: "Sensitive endpoints apply explicit actor-source guards.",
+          resourceScopeTitle: "Resource scope",
+          resourceScopeDescription: "Workspace, user, task, and chat identifiers must match the resolved principal.",
+          compositionRole: "role",
+          compositionRelationship: "relationship",
+          compositionGrant: "grant",
+          compositionAction: "action",
+          compositionScope: "scope",
+          compositionDecision: "decision",
+          generalInvocation: "<b>General invocation:</b> an explicit workspace grant can admit agent/system without a human originator. Private and member-target access remain denied.",
+          autopilotInvocation: "<b>Autopilot:</b> manual runs use the clicker; automatic runs require the trigger's valid creator. Write access does not grant target-agent invocation.",
+          enforcementTitle: "Enforce at every delivery boundary",
+          enforcementSubtitle: "The client mirrors selected rules for UX; the server remains authoritative.",
+          routerTitle: "Router and middleware",
+          routerDescription: "Credential, workspace membership, and coarse role gates.",
+          handlerTitle: "Handlers and services",
+          handlerDescription: "Ownership, grants, invocation, consent, redaction, and audit.",
+          dataTitle: "Scoped data access",
+          dataDescription: "Resource reads and writes carry <code>workspace_id</code> and invariants.",
+          realtimeTitle: "Realtime subscriptions",
+          realtimeDescription: "Workspace, user, task, and creator-private chat scopes are rechecked.",
+          outcomeAllow: "Allow",
+          outcomeRedact: "Allow with redaction",
+          outcomeDeny: "Deny with 403",
+          outcomeNotFound: "Hide existence with 404",
+          invariantsTitle: "Invariants",
+          invariantServer: "Server authority; client checks are affordances",
+          invariantWorkspace: "Workspace isolation on every resource lookup",
+          invariantGovernance: "Governance authority is not direct use authority",
+          invariantAuthority: "Audit attribution never supplies missing authority",
+        },
+        zh: {
+          pageTitle: "Multica 权限架构",
+          languageLabel: "图表语言",
+          legendLabel: "图例",
+          title: "Multica 权限架构",
+          subtitle: "一次请求是否被允许，由身份、工作区成员关系、资源关系、显式授权、使用同意和行为主体类型共同决定。任何单一角色都不是通用的权限绕过方式。",
+          legendIdentity: "身份",
+          legendPolicy: "策略",
+          legendEnforcement: "执行",
+          identityTitle: "解析身份与租户范围",
+          identitySubtitle: "身份认证回答“谁在行动”，工作区解析回答“在哪个范围内”。",
+          humanEyebrow: "人类用户",
+          humanTitle: "会话 JWT / 个人访问令牌",
+          humanDescription: "交互式用户身份；通过 Cookie 写入时同时执行 CSRF 防护。",
+          agentEyebrow: "智能体进程",
+          agentTitle: "task 范围令牌",
+          agentDescription: "领取 task 时绑定唯一的用户、智能体、task 和工作区。",
+          machineEyebrow: "机器",
+          machineTitle: "守护进程 / 云节点凭据",
+          machineDescription: "机器身份；所有者或工作区范围由服务端确定。",
+          integrationEyebrow: "集成",
+          integrationTitle: "插件、Webhook 或系统触发器",
+          integrationDescription: "安装实例、签名端点或内部主体分别在各自边界内解析。",
+          actorContext: "<b>行为主体上下文</b> member / agent / system / 机器凭据来源",
+          workspaceContext: "<b>工作区</b> task 令牌绑定优先于请求参数",
+          effectiveHuman: "<b>有效人类身份</b> 需要时采用调用链最上游的人类发起者",
+          policyTitle: "组合权限策略面",
+          policySubtitle: "每个端点只选择当前操作所需的最小权限检查集合。",
+          workspaceRoleTitle: "工作区角色",
+          workspaceRoleDescription: "<code>owner</code>、<code>admin</code> 或 <code>member</code>；成员关系是租户访问的基础门槛。",
+          resourceRelationTitle: "资源关系",
+          resourceRelationDescription: "所有者、创建者、作者或协作者只获得对应资源上的权限。",
+          grantTitle: "显式授权",
+          grantDescription: "智能体调用目标和自动化协作者进一步限定访问范围。",
+          consentTitle: "使用同意与可见性",
+          consentDescription: "私有运行时、资源可发现性和密钥脱敏分别采用不同规则。",
+          actorBoundaryTitle: "行为主体边界",
+          actorBoundaryDescription: "敏感接口会显式检查行为主体来源。",
+          resourceScopeTitle: "资源范围",
+          resourceScopeDescription: "工作区、用户、task 和聊天标识必须与已解析的主体一致。",
+          compositionRole: "角色",
+          compositionRelationship: "资源关系",
+          compositionGrant: "授权",
+          compositionAction: "操作",
+          compositionScope: "范围",
+          compositionDecision: "权限决策",
+          generalInvocation: "<b>通用调用：</b>显式的工作区授权可允许没有人类发起者的 agent/system 调用；私有和指定成员授权仍拒绝此类调用。",
+          autopilotInvocation: "<b>自动化：</b>手动运行按点击者授权；自动运行必须验证触发器创建者。编辑权限不等于目标智能体调用权。",
+          enforcementTitle: "在每个数据交付边界执行权限检查",
+          enforcementSubtitle: "客户端为体验镜像部分规则，服务端始终是最终权威。",
+          routerTitle: "路由与中间件",
+          routerDescription: "检查凭据、工作区成员关系和粗粒度角色。",
+          handlerTitle: "处理器与服务",
+          handlerDescription: "检查所有权、显式授权、调用权、使用同意、脱敏与审计。",
+          dataTitle: "限定范围的数据访问",
+          dataDescription: "资源读写携带 <code>workspace_id</code> 并维护业务不变量。",
+          realtimeTitle: "实时订阅",
+          realtimeDescription: "重新校验工作区、用户、task 和仅创建者可见的聊天范围。",
+          outcomeAllow: "允许",
+          outcomeRedact: "允许，但脱敏返回",
+          outcomeDeny: "拒绝并返回 403",
+          outcomeNotFound: "以 404 隐藏资源存在性",
+          invariantsTitle: "核心不变量",
+          invariantServer: "服务端拥有最终权限；客户端检查只改善体验",
+          invariantWorkspace: "每次资源查询都必须保持工作区隔离",
+          invariantGovernance: "治理权限不等于直接使用权限",
+          invariantAuthority: "审计归因不能补足缺失的授权身份",
+        },
+      };
+
+      function setLanguage(language, updateUrl = true) {
+        const lang = language === "zh" ? "zh" : "en";
+        const values = translations[lang];
+        document.documentElement.lang = lang === "zh" ? "zh-Hans" : "en";
+        document.body.dataset.lang = lang;
+        document.title = values.pageTitle;
+
+        document.querySelectorAll("[data-i18n]").forEach((element) => {
+          element.textContent = values[element.dataset.i18n];
+        });
+        document.querySelectorAll("[data-i18n-html]").forEach((element) => {
+          element.innerHTML = values[element.dataset.i18nHtml];
+        });
+        document.querySelectorAll("[data-i18n-aria-label]").forEach((element) => {
+          element.setAttribute("aria-label", values[element.dataset.i18nAriaLabel]);
+        });
+        document.querySelectorAll("[data-lang-value]").forEach((button) => {
+          button.setAttribute("aria-pressed", String(button.dataset.langValue === lang));
+        });
+
+        if (updateUrl) {
+          const url = new URL(window.location.href);
+          url.searchParams.set("lang", lang);
+          window.history.replaceState({}, "", url);
+        }
+      }
+
+      document.querySelectorAll("[data-lang-value]").forEach((button) => {
+        button.addEventListener("click", () => setLanguage(button.dataset.langValue));
+      });
+
+      const initialLanguage = new URLSearchParams(window.location.search).get("lang");
+      document.body.dataset.export = String(new URLSearchParams(window.location.search).get("export") === "1");
+      setLanguage(initialLanguage === "zh" ? "zh" : "en", false);
+    </script>
+  </body>
+</html>
