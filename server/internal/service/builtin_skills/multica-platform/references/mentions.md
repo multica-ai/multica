@@ -202,6 +202,14 @@ re-evaluates surviving inputs. These cancelled runs expose
 replies remain in execution history but do not create cancelled comment blocks;
 manual cancellations and runs that already executed remain visible.
 
+Deleting removes only that comment, never its replies. A deleted comment that
+still has replies stays in `comment list` output as a placeholder — `deleted_at`
+set, `content` empty, no attachments — so the replies keep their `parent_id`.
+It carries no input: it never triggers a run, and there is nothing in it to
+answer. It can still be the `--parent` of a reply that continues its thread.
+Against a server that predates this, `comment delete` refuses instead of
+deleting the replies too.
+
 An edit is treated as a fresh action — it re-derives the comment's lineage from
 the editing action. Only the agent author editing its OWN comment re-stamps the
 lineage to the editing task; any other editor — including a workspace owner/admin

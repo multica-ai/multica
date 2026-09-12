@@ -81,6 +81,13 @@ type AppConfig struct {
 	// must fail closed when this declaration is absent.
 	AgentConversationStartersSupported bool `json:"agent_conversation_starters_supported"`
 
+	// CommentDeleteKeepRepliesSupported tells clients that deleting a comment
+	// removes only that comment and keeps its replies (#8296), and that
+	// DELETE /api/comments/{id}/keep-replies exists. Older servers deleted the
+	// replies too and omit this, so clients must promise nothing about
+	// replies unless it is declared.
+	CommentDeleteKeepRepliesSupported bool `json:"comment_delete_keep_replies_supported"`
+
 	// ServerVersion is the running API build version, so self-hosted
 	// operators can confirm what's deployed and include it in bug reports.
 	// Only emitted on self-hosted deployments — omitted on the managed cloud,
@@ -99,6 +106,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		// running, the save gate is running with it.
 		LocalWorktreeSupported:             true,
 		AgentConversationStartersSupported: true,
+		CommentDeleteKeepRepliesSupported:  true,
 		AllowSignup:                        os.Getenv("ALLOW_SIGNUP") != "false",
 		GoogleClientID:                     os.Getenv("GOOGLE_CLIENT_ID"),
 		WorkspaceCreationDisabled:          os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",

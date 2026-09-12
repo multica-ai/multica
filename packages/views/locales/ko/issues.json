@@ -489,6 +489,8 @@
     "delete_title": "댓글 삭제",
     "delete_desc": "이 댓글이 영구 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
     "delete_desc_with_replies": "이 댓글과 모든 답글이 영구 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
+    "delete_desc_replies_kept": "이 댓글이 영구 삭제됩니다. 답글은 스레드에 남습니다. 이 작업은 되돌릴 수 없습니다.",
+    "deleted_placeholder": "삭제된 댓글입니다",
     "delete_action": "삭제",
     "cancel_action": "취소",
     "edit_placeholder": "댓글 수정...",

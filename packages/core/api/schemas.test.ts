@@ -577,6 +577,39 @@ describe("TimelineEntriesSchema", () => {
       "https://profiles.example.com/former.png",
     );
   });
+
+  it("preserves the deleted-comment tombstone marker", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        created_at: "2026-01-01T00:00:00Z",
+        content: "",
+        deleted_at: "2026-01-02T00:00:00Z",
+      },
+    ]);
+
+    expect(parsed[0]?.deleted_at).toBe("2026-01-02T00:00:00Z");
+  });
+
+  it("reads a malformed tombstone marker as a live comment instead of failing the timeline", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        created_at: "2026-01-01T00:00:00Z",
+        content: "still here",
+        deleted_at: 42,
+      },
+    ]);
+
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.deleted_at).toBeUndefined();
+  });
 });
 
 describe("AgentTaskListSchema", () => {
@@ -1187,6 +1220,23 @@ describe("dashboard + runtime usage schema drift", () => {
 // it does not reject the mode either — it drops execution_mode and answers 201,
 // leaving the task to run in the user's working copy (#7113). So the absent
 // case has to parse as false, not as "unknown, probably fine".
+// An older server deletes a comment's replies with it and omits this field,
+// so absent or malformed must parse as false: the client then promises nothing
+// about replies and keeps the legacy delete route (#8296).
+describe("AppConfigSchema comment_delete_keep_replies_supported drift", () => {
+  it.each([
+    [undefined, false],
+    ["yes", false],
+    [true, true],
+  ])("%j parses as %s", (value, expected) => {
+    const parsed = AppConfigSchema.parse({
+      cdn_domain: "cdn.example.com",
+      comment_delete_keep_replies_supported: value,
+    });
+    expect(parsed.comment_delete_keep_replies_supported).toBe(expected);
+  });
+});
+
 describe("AppConfigSchema local_worktree_supported drift", () => {
   it("defaults to false when the server predates the signal", () => {
     const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });

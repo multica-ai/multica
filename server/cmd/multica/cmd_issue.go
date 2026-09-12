@@ -270,8 +270,10 @@ var issueCommentAddCmd = &cobra.Command{
 var issueCommentDeleteCmd = &cobra.Command{
 	Use:   "delete <comment-id>",
 	Short: "Delete a comment",
-	Args:  exactArgs(1),
-	RunE:  runIssueCommentDelete,
+	Long: "Delete a single comment. Its replies are kept: a comment that has replies stays in the thread " +
+		"as an empty placeholder (deleted_at set) so they keep their place.",
+	Args: exactArgs(1),
+	RunE: runIssueCommentDelete,
 }
 
 var issueCommentResolveCmd = &cobra.Command{
@@ -2157,6 +2159,10 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	rows := make([][]string, 0, len(comments))
 	for _, c := range comments {
 		content := strVal(c, "content")
+		if strVal(c, "deleted_at") != "" {
+			// A deleted comment kept only so its replies stay attached.
+			content = "(deleted)"
+		}
 		if utf8.RuneCountInString(content) > 80 {
 			runes := []rune(content)
 			content = string(runes[:77]) + "..."
@@ -2265,7 +2271,16 @@ func runIssueCommentDelete(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	if err := client.DeleteJSON(ctx, "/api/comments/"+args[0]); err != nil {
+	// The keep-replies route exists only on servers that keep a deleted
+	// comment's replies. An older server does not route it — a plain-text 404,
+	// unlike the JSON "comment not found" — and would delete the replies too,
+	// so refuse there rather than fall back.
+	err = client.DeleteJSON(ctx, "/api/comments/"+args[0]+"/keep-replies")
+	var httpErr *cli.HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound && !strings.HasPrefix(httpErr.Body, "{") {
+		return fmt.Errorf("delete comment: this server would delete the comment's replies too; upgrade the server first")
+	}
+	if err != nil {
 		return fmt.Errorf("delete comment: %w", err)
 	}
 

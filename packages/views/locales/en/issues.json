@@ -498,6 +498,8 @@
     "delete_title": "Delete comment",
     "delete_desc": "This comment will be permanently deleted. This cannot be undone.",
     "delete_desc_with_replies": "This comment and all its replies will be permanently deleted. This cannot be undone.",
+    "delete_desc_replies_kept": "This comment will be permanently deleted. Its replies stay in the thread. This cannot be undone.",
+    "deleted_placeholder": "This comment was deleted",
     "delete_action": "Delete",
     "cancel_action": "Cancel",
     "edit_placeholder": "Edit comment...",

@@ -82,7 +82,11 @@ export function SourceContextCommentList({
                 {changeLabel && <span className="sr-only">{changeLabel}</span>}
               </div>
               <div className="mt-1.5 break-words">
-                <ReadonlyContent content={comment.content} />
+                {comment.deleted === true ? (
+                  <p className="italic text-muted-foreground">{t(($) => $.comment.deleted_placeholder)}</p>
+                ) : (
+                  <ReadonlyContent content={comment.content} />
+                )}
               </div>
             </div>
           </li>

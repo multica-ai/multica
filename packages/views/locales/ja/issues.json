@@ -489,6 +489,8 @@
     "delete_title": "コメントを削除",
     "delete_desc": "このコメントは完全に削除されます。この操作は元に戻せません。",
     "delete_desc_with_replies": "このコメントとすべての返信が完全に削除されます。この操作は元に戻せません。",
+    "delete_desc_replies_kept": "このコメントは完全に削除されます。返信はスレッドに残ります。この操作は元に戻せません。",
+    "deleted_placeholder": "このコメントは削除されました",
     "delete_action": "削除",
     "cancel_action": "キャンセル",
     "edit_placeholder": "コメントを編集...",
