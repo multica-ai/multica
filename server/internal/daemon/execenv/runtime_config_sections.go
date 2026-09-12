@@ -244,7 +244,7 @@ func sanitizeBriefCodeToken(s string) string {
 
 // writeAvailableCommands emits the slim Available Commands section
 // (~3.0k chars vs legacy ~4.4k). Every test-asserted substring is
-// preserved: each `multica issue …` command name, all three `comment add`
+// preserved: each `multica issue …` command name, all three comment body
 // input modes, `--description-file <path>`, `--parent ""`, the
 // `Next reply cursor` / `Next thread cursor` stderr labels, the "core
 // agent loop and common issue create/update tasks" intro phrase, and
@@ -275,6 +275,7 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	writeIssueStatusCommand(b, ctx)
 	b.WriteString("- `multica issue children <id> [--output json]` — list a parent's sub-issues grouped by stage.\n")
 	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — post a comment. Agent-authored bodies MUST use `--content-file`; see `## Comment Formatting` for why. `multica issue comment add --help` for full flags.\n")
+	b.WriteString("- `multica issue comment update <comment-id> --expected-revision <n> [--content \"...\" | --content-file <path> | --content-stdin]` — edit a comment you authored without overwriting a concurrent edit (workspace admins may edit any comment). Read `revision` with `issue comment list --output json`. Agent-authored bodies MUST use `--content-file`; `multica issue comment update --help` for full flags.\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>] [--fresh]` — repository checkout on a dedicated branch. Re-running it keeps an existing checkout that has uncommitted or unpushed work, or is already on this task's branch, and only fetches. `--fresh` discards uncommitted and untracked files and starts a new branch; commits stay on the old branch, but push any you still need first.\n\n")
 	// Squad maintenance is squad-leader surface: an agent that leads no squad
 	// has no squad to change roles in, so this shipped to every run as dead
