@@ -96,10 +96,15 @@ const sendRetryBackoff = 2 * time.Second
 //
 // The single door for that command: the two producers of one — a piece of an
 // agent's answer (ws_sender.go) and a media push (media_upload.go) — spend the
-// same per-recipient allowance, so a gate on either alone would be a gate on
-// neither. Stream frames are NOT here on purpose: they ride aibot_respond_msg,
-// which is a different command with its own backpressure (errStreamBusy) and
-// its own 1.5s throttle at the source (progress_render.go).
+// same per-conversation allowance, so a gate on either alone would be a gate
+// on neither.
+//
+// aibot_send_msg is also the only command this tree sends into a conversation
+// with, so gating it gates everything there is. That is a fact about the tree
+// and not a property of the quota: the sentence quoted above puts
+// aibot_respond_msg on the same allowance, so a reply path that writes frames
+// has to reserve here as well, and cannot be excused by carrying a throttle of
+// its own.
 //
 // A refusal is retried once, and only for a throttle. Retrying a stated
 // refusal is safe in a way retrying a timeout is not: a non-zero errcode is
