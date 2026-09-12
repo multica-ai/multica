@@ -180,9 +180,11 @@ function HistoryMenuItem({
 }
 
 export function WindowToolbar() {
-  const { state: sidebarState, isCompact } = useSidebar();
-  const sidebarHidden = sidebarState === "collapsed" || isCompact;
-  const toolbarWidth: React.CSSProperties["width"] = sidebarHidden
+  const { isCompact } = useSidebar();
+  // Collapsing the desktop sidebar changes the content layout, not the window
+  // chrome anchor. Keep the controls at the committed sidebar edge through a
+  // toggle; SidebarRail temporarily overrides that edge while it is dragged.
+  const toolbarWidth: React.CSSProperties["width"] = isCompact
     ? WINDOW_TOOLBAR_CLEARANCE
     : `max(var(--sidebar-live-width, var(--sidebar-width)), ${WINDOW_TOOLBAR_CLEARANCE}px)`;
   const {
