@@ -174,7 +174,7 @@ func TestSessionBinder_AppendCarriesTheMediaBudget(t *testing.T) {
 
 func TestNewResolverSet_WiresAllResolvers(t *testing.T) {
 	t.Parallel()
-	set := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil, nil)
+	set := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil, nil, nil)
 	if set.Installation == nil || set.Identity == nil || set.Dedup == nil || set.Session == nil || set.Audit == nil {
 		t.Error("NewResolverSet left a required resolver nil")
 	}
@@ -190,7 +190,7 @@ func TestNewResolverSet_WiresAllResolvers(t *testing.T) {
 	// whole wiring, and a resolver built at boot and dropped here would look
 	// exactly like media ingestion never having been written.
 	media := NewMediaResolver(&fakeMediaStorage{}, newFakeMediaLedger(nil), nil, testLogger())
-	withMedia := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil, media)
+	withMedia := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil, media, nil)
 	if withMedia.Media == nil {
 		t.Fatal("a media resolver was passed and dropped")
 	}

@@ -16,6 +16,7 @@ package wecom
 // without threading the Channel through the engine.
 
 import (
+	"context"
 	"sync"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -79,4 +80,37 @@ func (r *sendersRegistry) get(id pgtype.UUID) *wsSender {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.byKey[util.UUIDToString(id)]
+}
+
+// streamHandle names one streaming message: the callback req_id every frame
+// of it must echo, the stream id we chose for it, and the installation whose
+// socket carries it.
+type streamHandle struct {
+	ReqID          string
+	StreamID       string
+	InstallationID pgtype.UUID
+}
+
+// stream writes one frame of a streaming reply to the message h describes.
+//
+// The sender is resolved HERE, per frame, rather than captured when the stream
+// opened, and that is load-bearing rather than redundant: a callback's req_id
+// belongs to the TURN on WeCom's side, not to the connection it arrived on. A
+// stream opened before a reconnect is therefore finished after it, over
+// whatever socket the installation holds by then. Binding a connection at
+// open time reads like the obvious tightening and would strand the stream on
+// every reconnect — a failure that shows up only when the connection flaps.
+//
+// Measured 2026-08-09 and again 2026-08-31 against a live tenant, with our own
+// backend stopped so nothing competed for the bot's socket: one connection
+// took a real aibot_msg_callback and opened a stream on it; a second
+// connection, dialled and subscribed fresh, refreshed that stream in place
+// and finished it — errcode 0, and confirmed by reading the chat rather than
+// by the errcode.
+func (r *sendersRegistry) stream(ctx context.Context, h streamHandle, content string, finish bool) error {
+	sender := r.get(h.InstallationID)
+	if sender == nil {
+		return errNoLiveConnection
+	}
+	return sender.respondStream(ctx, h.ReqID, h.StreamID, content, finish)
 }
