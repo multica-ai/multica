@@ -471,3 +471,29 @@ func TestWorseUnconfirmedReason_IsARuleNotALoopOrder(t *testing.T) {
 		}
 	}
 }
+
+// Another channel's turn must not pay for the origin gate. This subscriber is
+// on the bus every channel publishes to, so the common exit — a delivery row
+// that exists and says slack or lark — has to stay at the one query it costs
+// today. The gate is asked only where its answer changes what is recorded:
+// inside the no-row branch, where it separates a channel turn nobody can
+// address from a question typed in a browser.
+//
+// REVERSE VERIFICATION: hoist the gate ahead of GetChannelTaskDelivery and
+// this fails with one task lookup for a turn that was never WeCom's.
+func TestAnotherPlatformsTurnDoesNotPayForTheOriginGate(t *testing.T) {
+	t.Parallel()
+	q := deliverableTurn(t)
+	q.deliveryChannelType = "slack"
+	r := newOutcomeRig(t, q, true)
+
+	r.o.handleEvent(outcomeEvent())
+
+	if q.taskGets != 0 {
+		t.Fatalf("the origin gate ran %d task lookup(s) for another platform's turn; every channel's "+
+			"chat:done passes through here, so that cost is paid on all of them", q.taskGets)
+	}
+	if got := r.mx.get("outbound_skipped:" + string(skipNotWecomTurn)); got != 1 {
+		t.Fatalf("outbound_skipped:%s = %d, want 1", skipNotWecomTurn, got)
+	}
+}
