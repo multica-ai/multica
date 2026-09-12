@@ -3757,6 +3757,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// fails best-effort.
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		h.notifyParentOfChildAttention(r.Context(), prevIssue, issue, actorType, actorID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -4214,6 +4215,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// the parent/stage notification is evaluated once against the final state
 	// after the loop (MUL-4155) rather than per-child mid-batch.
 	var childDoneCompleted []db.Issue
+	var childAttentionNeeded []childAttentionEvent
+	batchActorType, batchActorID := h.resolveActor(r, userID, workspaceID)
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -4397,7 +4400,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		actorType, actorID := batchActorType, batchActorID
 
 		fillBatch(&resp)
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
@@ -4449,12 +4452,18 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// comparison here left childDoneCompleted empty and silently skipped
 		// notifyParentsOfBatchChildDone entirely. (MUL-6243)
 		if statusChanged && issue.ParentIssueID.Valid {
-			prevTerminal := isTerminalChildStatus(
-				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
-			nowTerminal := isTerminalChildStatus(
-				issuestatus.Effective(r.Context(), h.Queries, issue.WorkspaceID, issue.Status))
+			prevEffective := issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status)
+			nowEffective := issuestatus.Effective(r.Context(), h.Queries, issue.WorkspaceID, issue.Status)
+			prevTerminal := isTerminalChildStatus(prevEffective)
+			nowTerminal := isTerminalChildStatus(nowEffective)
 			if !prevTerminal && nowTerminal {
 				childDoneCompleted = append(childDoneCompleted, issue)
+			}
+			if childNeedsParentAttention(prevEffective, nowEffective) {
+				childAttentionNeeded = append(childAttentionNeeded, childAttentionEvent{
+					child:           issue,
+					effectiveStatus: nowEffective,
+				})
 			}
 		}
 
@@ -4466,6 +4475,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// of issue_ids order (MUL-4155). Best-effort; failure does not abort the
 	// batch. Single-issue UpdateIssue is unchanged and still notifies inline.
 	h.notifyParentsOfBatchChildDone(r.Context(), childDoneCompleted)
+	h.notifyParentsOfBatchChildAttention(r.Context(), childAttentionNeeded, batchActorType, batchActorID)
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
