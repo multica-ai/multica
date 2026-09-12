@@ -77,20 +77,23 @@ type mediaObjectStore interface {
 	GetReader(ctx context.Context, key string) (io.ReadCloser, error)
 }
 
-// What the user is told when a file does not arrive. Hardcoded Chinese, like
-// every other user-facing string this adapter sends.
+// What the user is told when a file does not arrive. English, matching every
+// other user-facing string this adapter sends (replier.go, outbound.go) — and
+// unlike the WeCom sibling, whose strings are hardcoded Chinese because WeCom
+// deployments are China-only, one Lark adapter serves both the mainland
+// Feishu cloud and the international Lark cloud (see channel.go).
 const (
 	// mediaSendFailedText — we know a file did not make it. Definite,
 	// because claiming a definite failure that later turns out to be a
 	// delivery is how a user learns to ignore the notice.
-	mediaSendFailedText = "⚠️ 有文件没能发出来，我这边保留着，需要的话我再试一次。"
+	mediaSendFailedText = "⚠️ A file didn't make it. I still have it — say the word and I'll resend."
 
 	// mediaLookupFailedText — the failure is on our side and before the
 	// question was even answered: we could not read what was attached to
 	// this reply, so we do not know whether there was a file. Saying
 	// nothing here is what leaves a user waiting for something that was
 	// never attempted.
-	mediaLookupFailedText = "⚠️ 我这边没查到这条回答带没带文件，所以要是有，这次没发出来。需要的话我再试一次。"
+	mediaLookupFailedText = "⚠️ I couldn't check whether this reply had a file attached. If it did, it wasn't sent — say the word and I'll resend."
 )
 
 // attachmentBudget bounds one answer's whole attachment delivery — reading
