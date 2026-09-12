@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/dbreader"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -25,6 +26,7 @@ func (*emptyRows) Scan(...any) error                            { return nil }
 func (*emptyRows) Values() ([]any, error)                       { return nil, nil }
 func (*emptyRows) RawValues() [][]byte                          { return nil }
 func (*emptyRows) Conn() *pgx.Conn                              { return nil }
+func (*emptyRows) TypeMap() *pgtype.Map                         { return nil }
 
 type queryCountingDB struct {
 	queries int

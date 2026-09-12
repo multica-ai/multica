@@ -249,8 +249,8 @@
 /* Sidebar resizing follows the same cursor contract as
  * react-resizable-panels: the resize cursor survives leaving the narrow rail
  * and wins over descendants with their own cursor declarations. Live width is
- * written directly to the two layout shells, so their toggle transitions must
- * stay disabled until the gesture finishes. */
+ * written directly to the layout shells and opt-in chrome consumers, so their
+ * toggle transitions must stay disabled until the gesture finishes. */
 html[data-sidebar-resizing="true"],
 html[data-sidebar-resizing="true"] * {
   cursor: ew-resize !important;
@@ -268,7 +268,8 @@ html[data-dnd-dragging="true"] * {
 }
 
 [data-sidebar-resizing="true"] [data-slot="sidebar-gap"],
-[data-sidebar-resizing="true"] [data-slot="sidebar-container"] {
+[data-sidebar-resizing="true"] [data-slot="sidebar-container"],
+[data-sidebar-resizing="true"] [data-sidebar-resize-consumer] {
   transition: none !important;
 }
 

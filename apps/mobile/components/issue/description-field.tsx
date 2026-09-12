@@ -1,7 +1,7 @@
 /**
  * Description input block shared by `new-issue.tsx` and `issue/[id]/edit.tsx`.
  *
- * Focus-tinted `rounded-2xl` container wrapping the `AutosizeTextArea` —
+ * Focus-tinted `rounded-xl` container wrapping the `AutosizeTextArea` —
  * matches the "write markdown body" treatment used by the comment composer
  * so all three surfaces feel like the same control.
  *
@@ -16,6 +16,7 @@ import { AutosizeTextArea } from "@/components/ui/autosize-textarea";
 import { MIN_BODY_INPUT_HEIGHT_PX } from "@/components/ui/input-tokens";
 import { cn } from "@/lib/utils";
 import type { UseMentionInputReturn } from "@/lib/use-mention-input";
+import { continuousCorners } from "@/lib/radius";
 
 export function DescriptionField({
   description,
@@ -30,11 +31,12 @@ export function DescriptionField({
   return (
     <View
       className={cn(
-        "rounded-2xl border px-3",
+        "rounded-xl border px-3",
         focused
           ? "border-primary/30 bg-secondary"
           : "border-transparent bg-secondary/40",
       )}
+      style={continuousCorners}
     >
       <AutosizeTextArea
         value={description.text}

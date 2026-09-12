@@ -195,8 +195,8 @@ function ProjectPinRow({
 function SkeletonRow() {
   return (
     <View className="px-4 py-3 flex-row items-center gap-3">
-      <View className="size-5 rounded bg-muted" />
-      <View className="flex-1 h-4 rounded bg-muted" />
+      <View className="size-5 rounded-xs bg-muted" />
+      <View className="flex-1 h-4 rounded-xs bg-muted" />
     </View>
   );
 }

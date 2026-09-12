@@ -195,6 +195,11 @@ it.
 If an issue is assigned to a squad, a new comment can wake the squad leader. This
 is leader routing, not member fan-out.
 
+A worker's reply also wakes the assigned leader without an explicit mention. If
+the leader's current run started before the reply arrived, the reply is
+delivered in a follow-up run after that run completes, so the worker does not
+need to mention the leader again.
+
 Squad mention format:
 
 ```md

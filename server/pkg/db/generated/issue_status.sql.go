@@ -263,8 +263,8 @@ ORDER BY
         WHEN 'todo' THEN 1
         WHEN 'in_progress' THEN 2
         WHEN 'in_review' THEN 3
-        WHEN 'done' THEN 4
-        WHEN 'blocked' THEN 5
+        WHEN 'blocked' THEN 4
+        WHEN 'done' THEN 5
         WHEN 'cancelled' THEN 6
         ELSE 7
     END,
@@ -277,9 +277,8 @@ type ListIssueStatusEntriesParams struct {
 	IncludeArchived bool        `json:"include_archived"`
 }
 
-// Ordered by category rank (the historical STATUS_ORDER, so the default board
-// and picker stay pixel-identical for a workspace with no custom statuses),
-// then intra-category position, then key as a stable tiebreak.
+// Ordered by the canonical board category rank, then intra-category position,
+// then key as a stable tiebreak.
 func (q *Queries) ListIssueStatusEntries(ctx context.Context, arg ListIssueStatusEntriesParams) ([]IssueStatus, error) {
 	rows, err := q.db.Query(ctx, listIssueStatusEntries, arg.WorkspaceID, arg.IncludeArchived)
 	if err != nil {

@@ -1766,7 +1766,7 @@ function SwimLaneCell({
     <div className={`flex min-h-[120px] flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
       <div
         ref={setNodeRef}
-        className={`flex-1 space-y-2 rounded-lg p-1 transition-colors ${
+        className={`flex-1 space-y-2 rounded-sm p-1 transition-colors ${
           isOver ? "bg-accent/60" : ""
         }`}
       >

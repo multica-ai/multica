@@ -494,6 +494,12 @@ func TestModelKnownIncompatibleWithProvider(t *testing.T) {
 			want:     false,
 		},
 		{
+			name:     "codex bundled gpt-6-astra is compatible",
+			provider: "codex",
+			model:    "gpt-6-astra",
+			want:     false,
+		},
+		{
 			name:     "codex model is incompatible with claude",
 			provider: "claude",
 			model:    "o3",

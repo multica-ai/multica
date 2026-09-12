@@ -290,8 +290,9 @@ type SetIssuePropertyValueParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Single-key atomic write (mirror of SetIssueMetadataKey): concurrent writers
-// on different property keys never clobber each other.
+// Single-key atomic write: concurrent writers on different property keys
+// never clobber each other. Unlike SetIssueMetadataKey, a no-op still updates
+// and returns the issue row.
 func (q *Queries) SetIssuePropertyValue(ctx context.Context, arg SetIssuePropertyValueParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, setIssuePropertyValue,
 		arg.Key,

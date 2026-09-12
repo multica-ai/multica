@@ -156,7 +156,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `REDIS_URL` | 空 | 用于共享限流、实时事件和 token cache；未设置时实时事件和邀请限流回退到进程内存，认证限流不生效 |
+| `REDIS_URL` | 空 | 所有 Redis 功能共用的唯一连接地址，包括共享限流、实时事件、频道 WebSocket 租约和 token cache |
+| `REDIS_CLUSTER_MODE` | `false` | 设为 `true` 后强制使用 Redis Cluster 客户端，单配置地址也适用；集群模式只能使用数据库 0，且要求 `REALTIME_RELAY_MODE=sharded` |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 托管 Redis 禁止 `CLIENT SETNAME` 时设为 `true` |
 | `RATE_LIMIT_AUTH` | `5` | 单 IP 每分钟发送验证码或发起 Google 登录的次数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 单 IP 每分钟验证验证码的次数 |

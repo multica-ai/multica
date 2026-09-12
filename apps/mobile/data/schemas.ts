@@ -20,6 +20,7 @@ import type {
   ChatSession,
   Comment,
   InboxItem,
+  InboxWorkspaceUnread,
   IssueLabelsResponse,
   Label,
   ListLabelsResponse,
@@ -349,6 +350,10 @@ export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z.object(
   content: z.string().optional(),
   input: z.record(z.string(), z.unknown()).optional(),
   output: z.string().optional(),
+  // Optional with no default: absent means no daemon measured this record's
+  // completeness, which is not the same as measured-and-complete. `.catch`
+  // keeps a malformed value from failing the row and emptying the transcript.
+  output_truncated: z.boolean().optional().catch(undefined),
   created_at: z.string().optional(),
 }).loose();
 
@@ -583,6 +588,24 @@ const InboxItemSchema: z.ZodType<InboxItem> = z.object({
 
 export const InboxListSchema = z.array(InboxItemSchema).default([]);
 export const EMPTY_INBOX_LIST: InboxItem[] = [];
+
+// Cross-workspace unread summary (`GET /api/inbox/unread-summary`): one entry
+// per workspace the user belongs to that has unread items, already
+// deduplicated per issue server-side. Backs the inbox tab badge. Mirrors
+// InboxUnreadSummarySchema in packages/core/api/schemas.ts. On malformed JSON
+// the fallback is an empty list, which reads as "nothing unread" — the badge
+// simply hides rather than showing a wrong number.
+const InboxWorkspaceUnreadSchema: z.ZodType<InboxWorkspaceUnread> = z
+  .object({
+    workspace_id: z.string(),
+    count: z.number().catch(0),
+  })
+  .loose();
+
+export const InboxUnreadSummarySchema = z
+  .array(InboxWorkspaceUnreadSchema)
+  .default([]);
+export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 
 export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
   id: z.string(),

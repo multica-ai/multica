@@ -223,12 +223,13 @@ const MODEL_PRICING: Record<
   // -- OpenAI: dotted-minor Codex catalog SKUs. Each generation is priced
   //    independently — no fallback to `gpt-5`. Entries track
   //    `server/pkg/agent/models.go` (Codex provider list).
-  //    gpt-5.6 (sol/terra/luna) uses OpenAI's official announcement rates.
+  //    gpt-6-astra and gpt-5.6 (sol/terra/luna) use OpenAI's official rates.
   //    5.6+ is the first OpenAI generation to bill cache writes separately:
   //    cacheRead = 0.1x input (90% cached-input discount), cacheWrite = 1.25x
   //    input (see the header note above). Codex usage doesn't yet report
   //    cache-write tokens, so cacheWrite isn't exercised today, but the rate
   //    is kept correct for when it is.
+  "gpt-6-astra":        { input: 10,   output: 50,   cacheRead: 1.00,  cacheWrite: 12.50 },
   "gpt-5.6-sol":        { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 6.25 },
   "gpt-5.6-terra":      { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 3.125 },
   "gpt-5.6-luna":       { input: 1,    output: 6,    cacheRead: 0.10,  cacheWrite: 1.25 },

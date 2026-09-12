@@ -96,15 +96,25 @@ func TestBuildSearchQuery_CandidateFirstParity(t *testing.T) {
 		"status":     "cancelled",
 		"updated_at": baseTime.Add(15 * time.Minute),
 	})
+	phraseDoubleMatch := token + " overlap phrase"
+	phraseDoubleMatchID := dbfx.Issue(t, "title "+phraseDoubleMatch, testutil.Cols{
+		"description": "description also contains " + phraseDoubleMatch,
+		"updated_at":  baseTime.Add(16 * time.Minute),
+	})
+	titleTermsDoubleMatch := token + " ordered phrase"
+	titleTermsDoubleMatchID := dbfx.Issue(t, token+" ordered gap phrase", testutil.Cols{
+		"description": "description contains the contiguous phrase " + titleTermsDoubleMatch,
+		"updated_at":  baseTime.Add(17 * time.Minute),
+	})
 
 	foreignWorkspaceID := dbfx.Workspace(t, "Search parity foreign", token+"-foreign")
 	foreignIssueID := dbfx.Issue(t, token+" foreign issue", testutil.Cols{
 		"workspace_id": foreignWorkspaceID,
-		"updated_at":   baseTime.Add(16 * time.Minute),
+		"updated_at":   baseTime.Add(18 * time.Minute),
 	})
 	dbfx.Comment(t, foreignIssueID, token+" foreign comment", testutil.Cols{
 		"workspace_id": foreignWorkspaceID,
-		"created_at":   baseTime.Add(16 * time.Minute),
+		"created_at":   baseTime.Add(18 * time.Minute),
 	})
 
 	var exactNumber int
@@ -124,6 +134,8 @@ func TestBuildSearchQuery_CandidateFirstParity(t *testing.T) {
 	}{
 		{name: "single term", phrase: token, terminalKeys: []string{"done", "cancelled", "custom_done"}, limit: 50},
 		{name: "two word phrase and all terms", phrase: token + " phrase", terminalKeys: []string{"done", "cancelled", "custom_done"}, limit: 50},
+		{name: "title and description both contain phrase", phrase: phraseDoubleMatch, includeClosed: true, limit: 50},
+		{name: "title contains all terms while description contains phrase", phrase: titleTermsDoubleMatch, includeClosed: true, limit: 50},
 		{name: "three terms across title description and comment", phrase: token + " cross-part fields-part", terminalKeys: []string{"done", "cancelled", "custom_done"}, limit: 50},
 		{name: "same comment versus split comments", phrase: token + " same all", terminalKeys: []string{"done", "cancelled", "custom_done"}, limit: 50},
 		{name: "latest matching comment", phrase: token + " snippet", terminalKeys: []string{"done", "cancelled", "custom_done"}, limit: 50},
@@ -168,14 +180,14 @@ func TestBuildSearchQuery_CandidateFirstParity(t *testing.T) {
 	// created_at. Candidate-first makes that case deterministic by choosing the
 	// greater UUID, matching the timeline's established (created_at, id) order.
 	tiedSnippetIssueID := dbfx.Issue(t, "tied snippet source", testutil.Cols{
-		"updated_at": baseTime.Add(17 * time.Minute),
+		"updated_at": baseTime.Add(19 * time.Minute),
 	})
 	firstCommentID, secondCommentID := uuid.NewString(), uuid.NewString()
 	lowCommentID, highCommentID := firstCommentID, secondCommentID
 	if lowCommentID > highCommentID {
 		lowCommentID, highCommentID = highCommentID, lowCommentID
 	}
-	tiedCommentTime := baseTime.Add(17 * time.Minute)
+	tiedCommentTime := baseTime.Add(20 * time.Minute)
 	dbfx.Comment(t, tiedSnippetIssueID, token+" tied snippet low", testutil.Cols{
 		"id":         lowCommentID,
 		"created_at": tiedCommentTime,
@@ -223,6 +235,20 @@ func TestBuildSearchQuery_CandidateFirstParity(t *testing.T) {
 		t.Fatal("description phrase match is missing")
 	} else if row.matchSource != "description" {
 		t.Fatalf("description match source = %q, want description", row.matchSource)
+	}
+
+	phraseDoubleMatchRows := runBuiltSearchForParity(t, phraseDoubleMatch, true, nil, 50, 0)
+	if row, ok := findSearchParityRow(phraseDoubleMatchRows, phraseDoubleMatchID); !ok {
+		t.Fatal("title/description phrase double match is missing")
+	} else if row.matchSource != "title" {
+		t.Fatalf("title/description phrase double match source = %q, want title", row.matchSource)
+	}
+
+	titleTermsDoubleMatchRows := runBuiltSearchForParity(t, titleTermsDoubleMatch, true, nil, 50, 0)
+	if row, ok := findSearchParityRow(titleTermsDoubleMatchRows, titleTermsDoubleMatchID); !ok {
+		t.Fatal("title-terms/description-phrase double match is missing")
+	} else if row.matchSource != "title" {
+		t.Fatalf("title-terms/description-phrase double match source = %q, want title", row.matchSource)
 	}
 }
 

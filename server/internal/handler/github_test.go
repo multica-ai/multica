@@ -986,9 +986,8 @@ func TestWebhook_MergedPR_OnlyClosesIdentifiersWithClosingKeyword(t *testing.T) 
 
 	// The closing-keyword issue (also a bare title prefix) is a genuine target,
 	// so it shows in the PR list. The follow-up / unblocks issues are matched
-	// only by a bare body mention — auto-link still records the row (generous),
-	// but the link is reference_only and excluded from the issue's PR list
-	// (MUL-3739).
+	// only by a bare body mention, which claims nothing and is therefore not
+	// linked at all (MUL-3739, MUL-7072).
 	listed, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(closes.ID))
 	if err != nil {
 		t.Fatalf("ListPullRequestsByIssue(%s): %v", closes.Identifier, err)
@@ -1002,16 +1001,16 @@ func TestWebhook_MergedPR_OnlyClosesIdentifiersWithClosingKeyword(t *testing.T) 
 			t.Fatalf("ListPullRequestsByIssue(%s): %v", issue.Identifier, err)
 		}
 		if len(listed) != 0 {
-			t.Errorf("expected %s (bare body mention) to be hidden from the PR list, got %d rows", issue.Identifier, len(listed))
+			t.Errorf("expected %s (bare body mention) to be absent from the PR list, got %d rows", issue.Identifier, len(listed))
 		}
-		// The link row still exists — flagged reference_only, not deleted — so
-		// close_intent stays trackable across later edits.
-		var refOnly bool
+		// And no row was written: a passing mention leaves nothing behind that a
+		// later read path or a schema change could surface.
+		var links int
 		dbfx.QueryRow(t,
-			`SELECT reference_only FROM issue_pull_request WHERE issue_id = $1`, issue.ID,
-		).Scan(&refOnly)
-		if !refOnly {
-			t.Errorf("expected %s link to be reference_only, got false", issue.Identifier)
+			`SELECT count(*) FROM issue_pull_request WHERE issue_id = $1`, issue.ID,
+		).Scan(&links)
+		if links != 0 {
+			t.Errorf("expected %s to have no link row, got %d", issue.Identifier, links)
 		}
 	}
 
@@ -1380,13 +1379,13 @@ func TestWebhook_LinkOnlySiblingMergeAfterCloseKeywordPR(t *testing.T) {
 	}
 }
 
-// TestWebhook_BareBodyMentionHiddenFromPRList is the regression guard for
-// MUL-3739: a PR that only mentions an issue identifier in its body (no closing
-// keyword, no title prefix, no branch reference) must not appear in that
-// issue's PR list. Editing the body to add/remove a closing keyword flips the
-// PR's visibility, because reference_only follows the live title/body parse
-// while the PR is still open.
-func TestWebhook_BareBodyMentionHiddenFromPRList(t *testing.T) {
+// TestWebhook_BareBodyMentionIsNotLinked is the regression guard for MUL-3739:
+// a PR that only mentions an issue identifier in its body (no closing keyword,
+// no title prefix, no branch reference) claims nothing, so it must not appear in
+// that issue's PR list. Editing the body to add or remove a closing keyword
+// flips the link itself — while the PR is still open the link follows the live
+// title/body parse (MUL-7072).
+func TestWebhook_BareBodyMentionIsNotLinked(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
@@ -1429,10 +1428,10 @@ func TestWebhook_BareBodyMentionHiddenFromPRList(t *testing.T) {
 		return len(rows)
 	}
 
-	// 1) Opened with only a bare body mention → hidden from the PR list.
+	// 1) Opened with only a bare body mention → no link, nothing in the list.
 	firePRWebhook(t, secret, installationID, 1, "Unrelated cleanup", "Context for reviewers: see "+created.Identifier, "feat/cleanup", "opened")
 	if n := listLen(); n != 0 {
-		t.Errorf("bare body mention should be hidden from PR list, got %d rows", n)
+		t.Errorf("bare body mention should not link, got %d rows", n)
 	}
 
 	// 2) Edited to declare closing intent → now a genuine target, shown.
@@ -1441,20 +1440,106 @@ func TestWebhook_BareBodyMentionHiddenFromPRList(t *testing.T) {
 		t.Errorf("after adding a closing keyword the PR should show, got %d rows", n)
 	}
 
-	// 3) Edited back to a bare mention → hidden again.
+	// 3) Edited back to a bare mention → the claim is withdrawn, link dropped.
 	firePRWebhook(t, secret, installationID, 1, "Unrelated cleanup", "Reverting: just referencing "+created.Identifier, "feat/cleanup", "edited")
 	if n := listLen(); n != 0 {
-		t.Errorf("after removing the closing keyword the PR should be hidden again, got %d rows", n)
+		t.Errorf("after removing the closing keyword the PR should be unlinked, got %d rows", n)
+	}
+
+	// 4) The same withdrawal must leave no row behind, not a hidden one.
+	var links int
+	dbfx.QueryRow(t,
+		`SELECT count(*) FROM issue_pull_request WHERE issue_id = $1`, created.ID,
+	).Scan(&links)
+	if links != 0 {
+		t.Errorf("withdrawn claim should leave no link row, got %d", links)
 	}
 }
 
-// TestWebhook_HiddenBodyMentionDoesNotBlockAutoAdvance guards the P1 the code
-// review flagged on PR #4611: a reference_only link (a PR that only mentions the
-// issue in its body) is hidden from the PR list, so it must not silently gate
-// auto-advance either. Here PR B stays open with a bare body mention while PR A
-// merges with a closing keyword — the issue must still reach `done`, because
-// the invisible PR B is excluded from the close aggregate's open_count.
-func TestWebhook_HiddenBodyMentionDoesNotBlockAutoAdvance(t *testing.T) {
+// TestWebhook_PostMergeClosingKeywordLinksThePR is the MUL-7072 regression
+// guard. A PR that only mentioned the issue in its body, merged, and then had
+// `Closes KEY` added to the body must show up on the issue: editing the body is
+// the one repair a user can make from GitHub, and the pre-MUL-7072 reference_only
+// row made it a no-op forever (the preserve gate kept the row hidden, and no
+// unlink surface existed to clear it).
+//
+// The close-intent decision still stays frozen at merge time: the PR appears,
+// but it does not retroactively advance the issue to done.
+func TestWebhook_PostMergeClosingKeywordLinksThePR(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "post-merge-closes-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "repaired after merge",
+		"status": "in_progress",
+	})
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 30264009
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "post-merge-closes-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	// Opened and merged with nothing but a passing body mention: no link.
+	firePRWebhook(t, secret, installationID, 1, "Dependency bump", "Context: see "+created.Identifier, "chore/bump", "opened")
+	firePRWebhook(t, secret, installationID, 1, "Dependency bump", "Context: see "+created.Identifier, "chore/bump", "merged")
+	listed, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue after merge: %v", err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("passing mention must not link, got %d rows", len(listed))
+	}
+
+	// The author edits the merged PR's body to declare the issue properly.
+	firePRWebhook(t, secret, installationID, 1, "Dependency bump", "Closes "+created.Identifier, "chore/bump", "edited_merged")
+	listed, err = testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue after post-merge edit: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("post-merge closing keyword should link the PR, got %d rows", len(listed))
+	}
+	if listed[0].State != "merged" {
+		t.Errorf("linked PR state = %q, want merged", listed[0].State)
+	}
+
+	// Close intent stays a merge-time decision: the issue must not advance.
+	got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue after post-merge edit: %v", err)
+	}
+	if got.Status != "in_progress" {
+		t.Errorf("post-merge closing keyword must not advance the issue: status = %q, want in_progress", got.Status)
+	}
+}
+
+// TestWebhook_UnlinkedBodyMentionDoesNotBlockAutoAdvance guards the P1 the code
+// review flagged on PR #4611: a PR that only mentions the issue in its body does
+// not show in the PR list, so it must not silently gate auto-advance either.
+// Here PR B stays open with a bare body mention while PR A merges with a closing
+// keyword — the issue must still reach `done`, because PR B was never linked and
+// so never reaches the close aggregate's open_count.
+func TestWebhook_UnlinkedBodyMentionDoesNotBlockAutoAdvance(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
@@ -1488,12 +1573,12 @@ func TestWebhook_HiddenBodyMentionDoesNotBlockAutoAdvance(t *testing.T) {
 		t.Fatalf("CreateGitHubInstallation: %v", err)
 	}
 
-	// PR B opens with only a bare body mention → reference_only, hidden, open.
+	// PR B opens with only a bare body mention → claims nothing, not linked.
 	firePRWebhook(t, secret, installationID, 1, "Unrelated cleanup", "Context: see "+created.Identifier, "feat/cleanup", "opened")
 	// PR A opens with a closing keyword → genuine closing PR.
 	firePRWebhook(t, secret, installationID, 2, "Primary work", "Closes "+created.Identifier, "feat/primary", "opened")
 
-	// Only PR A shows in the list; PR B is hidden.
+	// Only PR A shows in the list; PR B was never linked.
 	listed, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
 	if err != nil {
 		t.Fatalf("ListPullRequestsByIssue: %v", err)
@@ -1511,15 +1596,15 @@ func TestWebhook_HiddenBodyMentionDoesNotBlockAutoAdvance(t *testing.T) {
 		t.Fatalf("after both PRs opened: status = %q, want in_progress", got.Status)
 	}
 
-	// PR A merges. PR B is still open but reference_only, so it must NOT count
-	// toward open_count — the issue should advance to done.
+	// PR A merges. PR B is still open but unlinked, so it must NOT count toward
+	// open_count — the issue should advance to done.
 	firePRWebhook(t, secret, installationID, 2, "Primary work", "Closes "+created.Identifier, "feat/primary", "merged")
 	got, err = testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
 	if err != nil {
 		t.Fatalf("GetIssue after merge: %v", err)
 	}
 	if got.Status != "done" {
-		t.Errorf("closing PR merged while only a hidden body-only mention is open: status = %q, want done", got.Status)
+		t.Errorf("closing PR merged while only an unlinked body-only mention is open: status = %q, want done", got.Status)
 	}
 }
 

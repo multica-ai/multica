@@ -66,6 +66,10 @@ func TestPriceForModelAliasCodexGPT56(t *testing.T) {
 		want  ModelPrice
 	}{
 		{
+			model: "gpt-6-astra",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-6-astra", InputPerM: 10, CacheReadPerM: 1, CacheWritePerM: 12.5, OutputPerM: 50},
+		},
+		{
 			model: "gpt-5.6-sol",
 			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 6.25, OutputPerM: 30},
 		},
@@ -95,6 +99,9 @@ func TestPriceForModelAliasCodexGPT56(t *testing.T) {
 	// slug is always dotted and the frontend does not dash-normalize, so both
 	// sides surface these as unmapped instead of silently pricing them.
 	for _, model := range []string{
+		"gpt-6-astra-pro",
+		"gpt-6-astra/unknown",
+		"gpt-6-astra-high",
 		"gpt-5.6-luna-pro",
 		"gpt-5.6-luna/unknown",
 		"gpt-5.6-sol-high",

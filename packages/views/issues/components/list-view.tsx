@@ -46,6 +46,8 @@ import type {
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { useRestoredScrollRef } from "../../platform";
+import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
+import { toast } from "sonner";
 
 // List rows are a fixed 36px (h-9). Sharing the estimate between the seed's
 // trailing spacer and Virtuoso's defaultItemHeight keeps the shared
@@ -69,6 +71,7 @@ function buildListGroups(visibleStatuses: IssueStatusCategory[]): BoardColumnGro
 function ListViewImpl({
   issues,
   visibleStatuses,
+  hiddenStatuses = [],
   childProgressMap = EMPTY_PROGRESS_MAP,
   projectMap,
   statusPagination,
@@ -78,6 +81,7 @@ function ListViewImpl({
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatusCategory[];
+  hiddenStatuses?: IssueStatusCategory[];
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
   statusPagination: IssueStatusPagination;
@@ -257,6 +261,11 @@ function ListViewImpl({
         const currentIssue = map.get(activeId);
         if (!currentIssue || issueMatchesGroup(currentIssue, finalGroup)) {
           resetColumns();
+          if (activeId !== overId) {
+            toast.info(t(($) => $.board.manual_reorder_hint), {
+              id: "issue-manual-reorder-hint",
+            });
+          }
           return;
         }
         // Optimistically move the row into the target group *now*. Without this
@@ -310,7 +319,7 @@ function ListViewImpl({
         beginSettle(),
       );
     },
-    [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef],
+    [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef, t],
   );
 
   // dnd-kit fires onDragCancel — never onDragEnd — when an active drag is
@@ -347,42 +356,58 @@ function ListViewImpl({
   );
 
   const content = (
-    <Accordion.Root
-      multiple
-      className="space-y-1"
-      value={expandedStatuses}
-      onValueChange={(value: string[]) => {
-        if (isDraggingRef.current) return;
-        for (const status of visibleStatuses) {
-          const wasExpanded = expandedStatuses.includes(status);
-          const isExpanded = value.includes(status);
-          if (wasExpanded !== isExpanded) {
-            toggleListCollapsed(status as IssueStatusCategory);
+    <>
+      <Accordion.Root
+        multiple
+        className="space-y-1"
+        value={expandedStatuses}
+        onValueChange={(value: string[]) => {
+          if (isDraggingRef.current) return;
+          for (const status of visibleStatuses) {
+            const wasExpanded = expandedStatuses.includes(status);
+            const isExpanded = value.includes(status);
+            if (wasExpanded !== isExpanded) {
+              toggleListCollapsed(status as IssueStatusCategory);
+            }
           }
-        }
-      }}
-    >
-      {visibleStatuses.map((status) => {
-        const isExpanded = expandedStatuses.includes(status);
-        return (
-          <StatusAccordionItem
-            key={status}
-            status={status}
-            issueIds={columns[statusGroupId(status)] ?? EMPTY_IDS}
-            issueMap={issueMapRef.current}
-            childProgressMap={childProgressMap}
-            projectMap={projectMap}
-            page={statusPagination[status]}
-            projectId={projectId}
-            onCreateIssue={onCreateIssue}
-            dragEnabled={dragEnabled}
-            isExpanded={isExpanded}
-            sortLabel={sortLabel}
-            scrollParent={scrollEl}
+        }}
+      >
+        {visibleStatuses.map((status) => {
+          const isExpanded = expandedStatuses.includes(status);
+          return (
+            <StatusAccordionItem
+              key={status}
+              status={status}
+              issueIds={columns[statusGroupId(status)] ?? EMPTY_IDS}
+              issueMap={issueMapRef.current}
+              childProgressMap={childProgressMap}
+              projectMap={projectMap}
+              page={statusPagination[status]}
+              projectId={projectId}
+              onCreateIssue={onCreateIssue}
+              dragEnabled={dragEnabled}
+              isExpanded={isExpanded}
+              sortLabel={sortLabel}
+              scrollParent={scrollEl}
+            />
+          );
+        })}
+      </Accordion.Root>
+      {hiddenStatuses.length > 0 && (
+        <div className="mt-4 px-1 pb-4">
+          <HiddenColumnsPanel
+            hiddenStatuses={hiddenStatuses}
+            renderRow={(status) => (
+              <HiddenColumnRow
+                key={status}
+                status={status}
+                total={statusPagination[status]?.total}
+              />
+            )}
           />
-        );
-      })}
-    </Accordion.Root>
+        </div>
+      )}
+    </>
   );
 
   if (!dragEnabled) {

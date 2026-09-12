@@ -83,6 +83,12 @@ type ChatSessionBinding struct {
 	CreatedAt     pgtype.Timestamptz
 	LastMessageID pgtype.Text
 	LastThreadID  pgtype.Text
+	// LastSenderID is the channel-native id (open_id) of whoever sent the
+	// trigger LastMessageID refers to — the account an outbound reply
+	// @-mentions. Frozen per task via channel_task_delivery, never re-derived
+	// from the Multica member: one member can hold several open_ids on one
+	// installation, so a member-keyed lookup could name the wrong account.
+	LastSenderID pgtype.Text
 }
 
 // InboundMessageDedup is the flat view of a channel_inbound_message_dedup row.

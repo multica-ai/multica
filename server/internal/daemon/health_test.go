@@ -546,6 +546,33 @@ func TestRepoCheckoutForwardsIsolatedMode(t *testing.T) {
 	}
 }
 
+func TestRepoCheckoutForwardsFresh(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-checkout"
+	const repoURL = "https://github.com/org/repo.git"
+	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
+
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{body: `{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1"}`, want: false},
+		{body: `{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1","fresh":true}`, want: true},
+	} {
+		rec := httptest.NewRecorder()
+		d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(strings.NewReader(tc.body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if got := cache.lastCreateParams().Fresh; got != tc.want {
+			t.Fatalf("CreateWorktree Fresh = %v, want %v for %s", got, tc.want, tc.body)
+		}
+	}
+}
+
 func TestRepoCheckoutRejectsUnknownMode(t *testing.T) {
 	t.Parallel()
 

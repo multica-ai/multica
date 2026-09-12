@@ -47,6 +47,7 @@ import { deriveThreadResolution } from "./thread-utils";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { InlineCommentRun, useInlineCommentRunState, type InlineCommentRunState } from "./inline-comment-run";
 import { EMPTY_COMMENT_RUNS, showCommentRunInHeader, type CommentRun } from "./comment-runs";
+import { useCommentAnnotations } from "./use-comment-annotations";
 import { useRunCommentMotion } from "./use-run-comment-motion";
 
 const commentActionClassName =
@@ -844,7 +845,9 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
+          <div tabIndex={currentUserId ? 0 : undefined} role="group"
+            aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
+            data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
@@ -938,6 +941,16 @@ function CommentCardImpl({
   const locale = useLocale();
   const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
+  const replyTarget = useCommentDraftStore((s) => s.drafts[`reply:${issueId}:${entry.id}`]?.replyTarget);
+  const replyTargetId = replyTarget?.commentId ?? entry.id;
+  const replyTargetMissing = !!replyTarget && replyTargetId !== entry.id && !replies.some((r) => r.id === replyTargetId);
+  const annotation = useCommentAnnotations({
+    draftKey: `reply:${issueId}:${entry.id}`,
+    sources: [entry, ...replies].filter((e) => e.type === "comment")
+      .map((e) => ({ id: e.id, name: e.actor_name || getActorName(e.actor_type, e.actor_id), revision: e.revision })),
+    enabled: !!currentUserId,
+    onAdded: () => { if (replyFolded) onResolvedExpandChange?.(entry.id, true); },
+  });
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
   const open = !isCollapsed;
@@ -1009,7 +1022,8 @@ function CommentCardImpl({
     // overflow-clip (not -hidden) clips the rounded corners WITHOUT creating a
     // scroll container, so the sticky collapse affordances below resolve to the
     // timeline's scroll parent instead of this card. See PR #3623.
-    <Card className="!py-0 !gap-0 overflow-clip transition-colors duration-700">
+    <Card ref={annotation.cardRef} {...annotation.captureProps} className="!py-0 !gap-0 overflow-clip transition-colors duration-700">
+      {annotation.popup}
       {onCollapseResolved && (
         <button
           type="button"
@@ -1257,7 +1271,9 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
-                <div data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
+                <div tabIndex={currentUserId ? 0 : undefined} role="group"
+            aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
+            data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
@@ -1377,13 +1393,15 @@ function CommentCardImpl({
               <div className="border-t border-border/50 px-4 max-md:px-3 py-2.5">
                 <ReplyInput
                   issueId={issueId}
-                  parentId={entry.id}
+                  parentId={replyTargetId}
+                  targetMissing={replyTargetMissing}
                   placeholder={t(($) => $.reply.placeholder)}
                   size="sm"
                   avatarType="member"
                   avatarId={currentUserId ?? ""}
                   draftKey={`reply:${issueId}:${entry.id}`}
-                  onSubmit={(content, attachmentIds, suppressAgentIds) => onReply(entry.id, content, attachmentIds, suppressAgentIds)}
+                  onEditAnnotation={(id) => annotation.editAnnotation(id, true)}
+                  onSubmit={(content, attachmentIds, suppressAgentIds) => replyTargetMissing ? Promise.resolve(false) : onReply(replyTargetId, content, attachmentIds, suppressAgentIds)}
                   onAccepted={onReplyAccepted}
                 />
               </div>

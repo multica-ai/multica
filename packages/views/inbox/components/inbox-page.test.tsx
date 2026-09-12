@@ -139,8 +139,27 @@ vi.mock("@multica/ui/components/ui/resizable", () => ({
   ResizablePanelGroup: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
   ),
-  ResizablePanel: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
+  ResizablePanel: ({
+    children,
+    id,
+    defaultSize,
+    minSize,
+    maxSize,
+  }: {
+    children: React.ReactNode;
+    id: string;
+    defaultSize?: number;
+    minSize?: number | string;
+    maxSize?: number | string;
+  }) => (
+    <div
+      data-testid={`panel-${id}`}
+      data-default-size={defaultSize}
+      data-min-size={minSize}
+      data-max-size={maxSize}
+    >
+      {children}
+    </div>
   ),
   ResizableHandle: () => null,
 }));
@@ -257,6 +276,18 @@ function reset() {
 }
 
 describe("InboxPage", () => {
+  it("keeps the list subordinate to the detail pane on desktop", () => {
+    reset();
+    layout.width = DESKTOP;
+
+    render(<InboxPage />);
+
+    const listPanel = screen.getByTestId("panel-list");
+    expect(listPanel).toHaveAttribute("data-default-size", "260");
+    expect(listPanel).toHaveAttribute("data-min-size", "240");
+    expect(listPanel).toHaveAttribute("data-max-size", "400");
+  });
+
   it("keeps the title unread count static", () => {
     reset();
     const { container } = render(<InboxPage />);

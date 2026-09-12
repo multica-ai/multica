@@ -3,7 +3,8 @@
  * Concurrency).
  *
  * The defining choices:
- * - `rounded-md` (6px) — soft enough to feel like a button, not a tab.
+ * - `rounded-md` — the shared row/menu radius, soft enough to feel like a
+ *   button rather than a tab.
  * - `hover:bg-accent` — single hover layer carries the entire "this is a
  *   button" signal. We tried adding a hover-border on top, but layered hover
  *   states (border + bg) made the chip outline busier without adding info.

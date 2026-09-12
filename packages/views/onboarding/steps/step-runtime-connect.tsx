@@ -566,8 +566,8 @@ function SkeletonRuntimeCard() {
     >
       <div className="h-7 w-7 shrink-0 rounded-md bg-muted" />
       <div className="flex-1 space-y-2">
-        <div className="h-3 w-28 rounded bg-muted" />
-        <div className="h-2.5 w-16 rounded bg-muted/70" />
+        <div className="h-3 w-28 rounded-xs bg-muted" />
+        <div className="h-2.5 w-16 rounded-xs bg-muted/70" />
       </div>
       <div className="h-4 w-4 shrink-0 rounded-full border-[1.5px] border-muted" />
     </div>

@@ -460,7 +460,7 @@ function TransactionRow({ row }: { row: BillingTransaction }) {
       <div className="flex items-center justify-between gap-2">
         <span className="text-caption font-medium">
           {row.tx_type}
-          <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
+          <span className="ml-1.5 rounded-xs bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
             {row.source}
           </span>
         </span>
@@ -613,7 +613,7 @@ function TopupRow({ row }: { row: BillingTopup }) {
         <span className="text-caption font-medium">
           {row.tier_id || row.id.slice(0, 8)}
           <span
-            className={`ml-1.5 rounded px-1.5 py-0.5 font-mono text-micro ${
+            className={`ml-1.5 rounded-xs px-1.5 py-0.5 font-mono text-micro ${
               row.status === "credited"
                 ? "bg-green-500/10 text-green-700 dark:text-green-400"
                 : row.status === "failed" || row.status === "canceled"

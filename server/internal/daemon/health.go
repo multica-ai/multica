@@ -106,6 +106,11 @@ type repoCheckoutRequest struct {
 	// RetryBusy is sent by clients that understand 503 + Retry-After. Older
 	// clients omit it and retain their historical unbounded lock-wait behavior.
 	RetryBusy bool `json:"retry_busy,omitempty"`
+	// Fresh asks to discard an existing checkout's uncommitted changes and
+	// untracked files and start over on a new branch (`multica repo checkout
+	// --fresh`). Without it an existing checkout that holds work is kept; older
+	// daemons ignore the field and always start over.
+	Fresh bool `json:"fresh,omitempty"`
 }
 
 type activeRepoCheckoutTask struct {
@@ -481,6 +486,7 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			TaskID:              req.TaskID,
 			CoAuthoredByEnabled: d.workspaceCoAuthoredByEnabled(req.WorkspaceID),
 			IsolatedGitMetadata: req.CheckoutMode == repoCheckoutModeIsolated,
+			Fresh:               req.Fresh,
 		}
 		if req.RetryBusy {
 			params.LockWaitTimeout = repoCheckoutLockWaitTimeout

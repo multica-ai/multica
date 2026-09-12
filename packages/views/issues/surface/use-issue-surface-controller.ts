@@ -15,9 +15,8 @@ import type {
 } from "@multica/core/types";
 import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { ALL_STATUSES } from "@multica/core/issues/config";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { statusFilterColumns } from "@multica/core/issues";
+import { statusFilterColumns, visibleStatusCategories } from "@multica/core/issues";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import type { IssueSortParam } from "@multica/core/issues/queries";
 import { issueTableFacetsOptions } from "@multica/core/issues/queries";
@@ -361,14 +360,10 @@ export function useIssueSurfaceController({
   // keys land in. (MUL-6243)
   const serverStatuses = useMemo<IssueStatusCategory[]>(
     () => {
-      const selected =
-        statusFilters.length > 0 && statusColumnsForFilters.state === "resolved"
-          ? statusColumnsForFilters.columns
-          : null;
-      const visible = ALL_STATUSES.filter(
-        (category) =>
-          !hiddenStatusCategories.includes(category) &&
-          (selected === null || selected.has(category)),
+      const visible = visibleStatusCategories(
+        statusFilters,
+        hiddenStatusCategories,
+        catalog,
       );
       return effectiveViewMode === "list"
         ? visible.filter((status) => !listCollapsedStatuses.includes(status))
@@ -378,7 +373,7 @@ export function useIssueSurfaceController({
       effectiveViewMode,
       hiddenStatusCategories,
       listCollapsedStatuses,
-      statusColumnsForFilters,
+      catalog,
       statusFilters,
     ],
   );

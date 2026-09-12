@@ -12,6 +12,19 @@ function issueWith(id: string, value?: number | string, position = 0): Issue {
   } as unknown as Issue;
 }
 
+function staticIssue(id: string, overrides: Partial<Issue> = {}): Issue {
+  return {
+    id,
+    title: id,
+    status: "todo",
+    priority: "none",
+    position: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  } as Issue;
+}
+
 describe("sortIssues property sorts", () => {
   it("sorts number values numerically, missing values last", () => {
     const sorted = sortIssues(
@@ -47,5 +60,54 @@ describe("sortIssues property sorts", () => {
       "asc",
     );
     expect(sorted.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+
+  it("keeps manual position ascending even with a stale desc direction", () => {
+    const sorted = sortIssues(
+      [issueWith("b", undefined, 2), issueWith("a", undefined, 1)],
+      "position",
+      "desc",
+    );
+    expect(sorted.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+
+  it("sorts updated timestamps newest first", () => {
+    const sorted = sortIssues(
+      [
+        staticIssue("older", { updated_at: "2026-01-01T00:00:00Z" }),
+        staticIssue("newer", { updated_at: "2026-02-01T00:00:00Z" }),
+      ],
+      "updated_at",
+      "desc",
+    );
+    expect(sorted.map((i) => i.id)).toEqual(["newer", "older"]);
+  });
+
+  it("sorts custom statuses by their effective category", () => {
+    const sorted = sortIssues(
+      [
+        staticIssue("done", { status: "done" }),
+        staticIssue("blocked", {
+          status: "waiting_on_vendor",
+          status_category: "blocked",
+        }),
+      ],
+      "status",
+      "asc",
+    );
+    expect(sorted.map((i) => i.id)).toEqual(["blocked", "done"]);
+  });
+
+  it("keeps missing dates last in descending order", () => {
+    const sorted = sortIssues(
+      [
+        staticIssue("missing", { due_date: null }),
+        staticIssue("earlier", { due_date: "2026-01-01" }),
+        staticIssue("later", { due_date: "2026-02-01" }),
+      ],
+      "due_date",
+      "desc",
+    );
+    expect(sorted.map((i) => i.id)).toEqual(["later", "earlier", "missing"]);
   });
 });

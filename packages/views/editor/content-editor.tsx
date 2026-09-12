@@ -171,6 +171,8 @@ interface ContentEditorBaseProps {
   onUploadingChange?: (uploading: boolean) => void;
   /** Show the floating formatting toolbar on text selection. Defaults true. */
   showBubbleMenu?: boolean;
+  /** Additional non-editing action for the current text selection. */
+  selectionAction?: { label: string; onSelect: () => boolean | void };
   /**
    * ID of the issue this editor belongs to. When set, the bubble menu exposes
    * a "Create sub-issue from selection" action that parents the new issue
@@ -369,6 +371,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       pasteAsFileThreshold,
       onUploadingChange,
       showBubbleMenu = true,
+      selectionAction,
       currentIssueId,
       disableMentions = false,
       mentionMode = "default",
@@ -999,7 +1002,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         >
           <EditorContent className="flex flex-1 flex-col" editor={editor} />
           {showBubbleMenu && (
-            <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
+            <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} selectionAction={selectionAction} />
           )}
           <LinkHoverCard {...hover} />
         </div>

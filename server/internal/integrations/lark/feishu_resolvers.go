@@ -175,7 +175,8 @@ func (r *feishuSessionBinder) StartSession(ctx context.Context, p engine.StartSe
 		},
 		Initiator: p.Sender,
 		Body:      p.Message.Text, CommandText: p.Message.CommandText, MessageID: p.Message.MessageID, ThreadID: p.Message.Source.ThreadID,
-		ClaimToken: p.ClaimToken, MediaPendingSeconds: p.MediaPendingSeconds,
+		SenderChannelID: p.Message.Source.SenderID,
+		ClaimToken:      p.ClaimToken, MediaPendingSeconds: p.MediaPendingSeconds,
 		PersistMessage: p.PersistMessage, HistoryBoundaryPending: p.HistoryBoundaryPending,
 		BeforeCommit: p.BeforeCommit,
 	})
@@ -238,6 +239,7 @@ func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.Append
 		CommandText:         commandText,
 		MessageID:           p.Message.MessageID,
 		ThreadID:            p.Message.Source.ThreadID,
+		SenderChannelID:     p.Message.Source.SenderID,
 		ClaimToken:          p.ClaimToken,
 		MediaPendingSeconds: p.MediaPendingSeconds,
 		ForceFresh:          p.Message.ForceFresh,

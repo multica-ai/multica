@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -12,6 +12,9 @@ import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
+
+const mockToastInfo = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { info: mockToastInfo } }));
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -69,6 +72,7 @@ const mockViewState: {
   cardPropertyIds: string[];
   listCollapsedStatuses: IssueStatus[];
   toggleListCollapsed: (status: IssueStatus) => void;
+  showStatus: (status: IssueStatusCategory) => void;
 } = {
   sortBy: "position",
   sortDirection: "asc",
@@ -81,6 +85,7 @@ const mockViewState: {
         ? mockViewState.listCollapsedStatuses.filter((s) => s !== status)
         : [...mockViewState.listCollapsedStatuses, status];
   }),
+  showStatus: vi.fn(),
 };
 
 vi.mock("@multica/core/issues/stores/view-store-context", () => ({
@@ -100,16 +105,22 @@ vi.mock("@multica/core/modals", () => ({
   ),
 }));
 
+vi.mock("./priority-icon", () => ({
+  PriorityIcon: () => <span data-testid="priority-icon" />,
+}));
+
 // Capture the DndContext callbacks so a test can drive dnd-kit's real
 // lifecycle — including the cancel path, which never calls onDragEnd.
 let lastOnDragStart: any = null;
 let lastOnDragCancel: any = null;
+let lastOnDragEnd: any = null;
 const stableSetNodeRef = () => {};
 
 vi.mock("@dnd-kit/core", () => ({
-  DndContext: ({ children, onDragStart, onDragCancel }: any) => {
+  DndContext: ({ children, onDragStart, onDragCancel, onDragEnd }: any) => {
     lastOnDragStart = onDragStart;
     lastOnDragCancel = onDragCancel;
+    lastOnDragEnd = onDragEnd;
     return children;
   },
   DragOverlay: () => null,
@@ -188,11 +199,13 @@ const emptyPage = {
 const PAGINATION = {
   todo: { ...emptyPage, total: 2 },
   in_review: { ...emptyPage, total: 1 },
+  cancelled: { ...emptyPage, total: 1 },
 } as unknown as IssueStatusPagination;
 
 function renderListView(
   issues: Issue[] = ISSUES,
   visibleStatuses: IssueStatusCategory[] = ["todo"],
+  hiddenStatuses: IssueStatusCategory[] = [],
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -205,6 +218,7 @@ function renderListView(
             <ListView
               issues={issues}
               visibleStatuses={visibleStatuses}
+              hiddenStatuses={hiddenStatuses}
               statusPagination={PAGINATION}
               onMoveIssue={vi.fn()}
             />
@@ -217,9 +231,51 @@ function renderListView(
 
 describe("ListView status header collapse", () => {
   beforeEach(() => {
+    mockViewState.sortBy = "position";
+    mockViewState.sortDirection = "asc";
     mockViewState.listCollapsedStatuses = [];
+    mockViewState.cardProperties = { priority: true };
+    vi.mocked(mockViewState.showStatus).mockClear();
+    mockToastInfo.mockClear();
     lastOnDragStart = null;
     lastOnDragCancel = null;
+    lastOnDragEnd = null;
+  });
+
+  it("honors the priority card-property toggle", () => {
+    mockViewState.cardProperties = { priority: false };
+    renderListView();
+
+    expect(screen.queryByTestId("priority-icon")).not.toBeInTheDocument();
+  });
+
+  it("shows hidden statuses with a recovery action", async () => {
+    const user = userEvent.setup();
+    renderListView(ISSUES, ["todo"], ["cancelled"]);
+
+    expect(screen.getByText("Hidden columns")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show column" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Show column" }));
+
+    expect(mockViewState.showStatus).toHaveBeenCalledWith("cancelled");
+  });
+
+  it("explains why same-status reordering is ignored under an automatic sort", () => {
+    mockViewState.sortBy = "created_at";
+    renderListView();
+
+    act(() => {
+      lastOnDragStart({ active: { id: "issue-1" } });
+      lastOnDragEnd({
+        active: { id: "issue-1" },
+        over: { id: "issue-2" },
+      });
+    });
+
+    expect(mockToastInfo).toHaveBeenCalledWith(
+      "Switch to Manual ordering to rearrange issues within a column.",
+      { id: "issue-manual-reorder-hint" },
+    );
   });
 
   it("collapses a status group when its header is clicked", async () => {

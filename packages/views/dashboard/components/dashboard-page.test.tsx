@@ -23,6 +23,12 @@ const manyAgentsRef = vi.hoisted(() => ({ current: false }));
 // — what a plain member actually receives once the backend folds the agents
 // they may not view (MUL-5409).
 const restrictedBucketRef = vi.hoisted(() => ({ current: false }));
+// Simulates the real-time task_usage coverage field independently from the
+// delayed by-agent aggregate. Undefined keeps the default fixture on the old
+// server compatibility path.
+const runtimeMeteredCountRef = vi.hoisted(() => ({
+  current: undefined as number | undefined,
+}));
 
 // Kept out of the fixture ternary so the sentinel's shape reads at a glance.
 // Unlike the deleted-agents bucket this one carries real seconds / tasks: the
@@ -148,6 +154,7 @@ vi.mock("@tanstack/react-query", async () => {
                     agent_id: "agent-1",
                     total_seconds: 3 * 3_600 + 17 * 60,
                     task_count: 12,
+                    metered_task_count: runtimeMeteredCountRef.current,
                     failed_count: 1,
                   },
                 ]
@@ -379,6 +386,69 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
             .respectMotionPreference === true,
       ),
     ).toBe(true);
+  });
+});
+
+describe("DashboardPage — unreported usage", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    manyAgentsRef.current = false;
+    restrictedBucketRef.current = false;
+    runtimeMeteredCountRef.current = undefined;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+
+  it("keeps the run visible while replacing invented token and cost zeroes", () => {
+    runtimeMeteredCountRef.current = 0;
+    renderDashboard();
+
+    const list = within(screen.getByRole("list", { name: "Leaderboard" }));
+    const row = list.getAllByRole("listitem")[0] as HTMLElement;
+    expect(row).toHaveTextContent("Agent One");
+    expect(row).toHaveTextContent("12 runs did not report usage");
+    expect(within(row).getAllByText("—")).toHaveLength(2);
+    expect(row).toHaveTextContent("3h 17m");
+    expect(row).toHaveTextContent("12");
+  });
+
+  it("shows rollup lag as pending without inventing zero or an unreported run", () => {
+    runtimeMeteredCountRef.current = 12;
+    renderDashboard();
+
+    const list = within(screen.getByRole("list", { name: "Leaderboard" }));
+    const row = list.getAllByRole("listitem")[0] as HTMLElement;
+    expect(row).toHaveTextContent("Usage totals are still being processed");
+    expect(row).not.toHaveTextContent("did not report usage");
+    expect(within(row).getAllByText("—")).toHaveLength(2);
+  });
+
+  it("keeps old-server coverage unknown without claiming unreported usage", () => {
+    runtimeMeteredCountRef.current = undefined;
+    renderDashboard();
+
+    const list = within(screen.getByRole("list", { name: "Leaderboard" }));
+    const row = list.getAllByRole("listitem")[0] as HTMLElement;
+    expect(row).not.toHaveTextContent("did not report usage");
+    expect(row).not.toHaveTextContent("still being processed");
+    expect(within(row).getAllByText("—")).toHaveLength(2);
+  });
+
+  it("shows both missing coverage and delayed totals", () => {
+    runtimeMeteredCountRef.current = 6;
+    renderDashboard();
+
+    const list = within(screen.getByRole("list", { name: "Leaderboard" }));
+    const row = list.getAllByRole("listitem")[0] as HTMLElement;
+    const coverageText =
+      "6 runs did not report usage · totals are still being processed";
+    expect(row).toHaveTextContent(coverageText);
+    expect(within(row).getByText(coverageText)).toHaveAttribute(
+      "title",
+      coverageText,
+    );
+    expect(within(row).getAllByText("—")).toHaveLength(2);
   });
 });
 

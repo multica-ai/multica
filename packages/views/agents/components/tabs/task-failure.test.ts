@@ -10,6 +10,7 @@ import zhHansAgents from "../../../locales/zh-Hans/agents.json";
 
 import {
   FAILURE_REASON_I18N_KEYS,
+  cancellationActorLabel,
   cancelReasonLabel,
   failureReasonLabel,
 } from "./task-failure";
@@ -35,10 +36,37 @@ function fixedT(locale: SupportedLocale): TFunction<"agents"> {
 
 const enT = fixedT("en");
 
+describe("cancellationActorLabel", () => {
+  it("names the member that cancelled a run", () => {
+    expect(cancellationActorLabel({
+      status: "cancelled",
+      cancelled_by: { type: "member", name: "Jiayuan" },
+    }, enT)).toBe("Cancelled by Jiayuan");
+  });
+
+  it("localizes system cancellation and preserves the legacy fallback", () => {
+    expect(cancellationActorLabel({
+      status: "cancelled",
+      cancelled_by: { type: "system" },
+    }, fixedT("zh-Hans"))).toBe("已由系统取消");
+    expect(cancellationActorLabel({
+      status: "cancelled",
+      cancelled_by: { type: "member", name: "Jiayuan" },
+    }, fixedT("zh-Hans"))).toBe("已由 Jiayuan 取消");
+    expect(cancellationActorLabel({ status: "cancelled" }, enT)).toBeNull();
+  });
+
+  it("preserves the legacy fallback for an unknown actor type", () => {
+    expect(cancellationActorLabel({
+      status: "cancelled",
+      cancelled_by: { type: "future_actor", name: "Someone" },
+    }, enT)).toBeNull();
+  });
+});
+
 // cancelReasonLabel decides which cancelled rows explain themselves. The rule
 // it must hold: a SERVER-cancelled row (persisted reason) reads like a failed
-// row, a user's own cancel stays a plain "Cancelled" — labelling every cancel
-// would bury the rows that actually need the user to act.
+// row. Actor provenance is handled independently by cancellationActorLabel.
 describe("cancelReasonLabel", () => {
   it("returns null for a user-initiated cancel", () => {
     expect(
@@ -74,7 +102,7 @@ describe("cancelReasonLabel", () => {
   it("localizes a generic system cancellation in every supported locale", () => {
     const expected: Record<SupportedLocale, string> = {
       en: "Cancelled by the system",
-      "zh-Hans": "系统已取消",
+      "zh-Hans": "已由系统取消",
       ja: "システムによってキャンセルされました",
       ko: "시스템에서 취소함",
     };
@@ -92,6 +120,18 @@ describe("cancelReasonLabel", () => {
       ).toBe(expected[locale]);
     }
   });
+
+  it.each(["system", "member", "agent"])(
+    "does not add a generic system reason when %s actor provenance exists",
+    (type) => {
+      expect(cancelReasonLabel({
+        status: "cancelled",
+        error: "automatic cancellation",
+        failure_reason: null,
+        cancelled_by: { type },
+      }, enT)).toBeNull();
+    },
+  );
 });
 
 describe("failureReasonLabel", () => {

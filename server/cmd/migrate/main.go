@@ -299,6 +299,10 @@ var concurrentIndexCleanups = map[string]string{
 	"445_comment_delegated_failure_unsettled_index":             "idx_comment_delegated_failure_unsettled",
 	"446_issue_properties_bigm_index":                           "idx_issue_properties_bigm",
 	"452_agent_task_pending_thread_unique":                      "idx_one_pending_task_per_issue_agent_thread",
+	"459_chat_message_assistant_task_index":                     "idx_chat_message_assistant_task",
+	"460_agent_task_queue_autopilot_run_created_at_index":       "idx_agent_task_queue_autopilot_run_created_at",
+	"465_agent_task_queue_chat_with_session_index":              "idx_agent_task_queue_chat_with_session_created_at",
+	"466_activity_log_member_assignee_frequency_index":          "idx_activity_log_member_assignee_frequency",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -326,6 +330,8 @@ var concurrentDownIndexCleanups = map[string]string{
 	"453_drop_pending_issue_agent_unique":                   "idx_one_pending_task_per_issue_agent_v2",
 	"454_drop_comment_content_bigm_index":                   "idx_comment_content_bigm",
 	"455_drop_comment_content_trgm_index":                   "idx_comment_content_trgm",
+	"463_drop_issue_description_bigm_index":                 "idx_issue_description_bigm",
+	"464_drop_issue_description_trgm_index":                 "idx_issue_description_trgm",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {
@@ -399,6 +405,9 @@ func refuseChannelChatRouteHistoryRollbackWith(ctx context.Context, query rowQue
 }
 
 var upMigrationConditions = map[string]migrationCondition{
+	// Current search no longer consumes an issue-description GIN. Fresh installs
+	// should not build the historical fallback only to retire it at migration 464.
+	"139_issue_description_trgm_index": skipMigration("issue description search indexes are retired by migration 464"),
 	// Current search no longer consumes a comment-content GIN. Fresh installs
 	// should not build the historical fallback only to retire it at migration 455.
 	"140_comment_content_trgm_index": skipMigration("comment content search indexes are retired by migration 455"),
@@ -416,9 +425,12 @@ var upMigrationConditions = map[string]migrationCondition{
 // Migrations 454 and 455 restore the mutually exclusive comment search index
 // selected before its retirement: pg_bigm deployments get the preferred bigram
 // index, while pg_bigm-less self-hosted deployments get the trigram fallback.
+// Migration 463 independently restores the optional issue-description bigram;
+// migration 464's portable trigram rollback is unconditional.
 var downMigrationConditions = map[string]migrationCondition{
-	"454_drop_comment_content_bigm_index": whenOperatorClassAvailable(pgBigmOperatorClass),
-	"455_drop_comment_content_trgm_index": whenOperatorClassUnavailable(pgBigmOperatorClass),
+	"454_drop_comment_content_bigm_index":   whenOperatorClassAvailable(pgBigmOperatorClass),
+	"455_drop_comment_content_trgm_index":   whenOperatorClassUnavailable(pgBigmOperatorClass),
+	"463_drop_issue_description_bigm_index": whenOperatorClassAvailable(pgBigmOperatorClass),
 }
 
 func hooksForDirection(direction string) map[string]preMigrationHook {

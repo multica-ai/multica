@@ -368,11 +368,11 @@ export function EnvTab({
         <div className="space-y-1 text-caption text-muted-foreground">
           <p>
             {t(($) => $.tab_body.env.intro_prefix)}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro">
+            <code className="rounded-xs bg-muted px-1 py-0.5 font-mono text-micro">
               {"ANTHROPIC_API_KEY"}
             </code>
             {t(($) => $.tab_body.env.intro_separator)}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro">
+            <code className="rounded-xs bg-muted px-1 py-0.5 font-mono text-micro">
               {"ANTHROPIC_BASE_URL"}
             </code>
             {t(($) => $.tab_body.env.intro_suffix)}

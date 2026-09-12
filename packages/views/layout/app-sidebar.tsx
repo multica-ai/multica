@@ -67,7 +67,7 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { inboxKeys, deduplicateInboxItems, inboxUnreadSummaryOptions, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
+import { inboxUnreadSummaryOptions, useInboxUnreadCount, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useChatStore } from "@multica/core/chat";
@@ -104,7 +104,6 @@ function isNavActive(pathname: string, href: string): boolean {
 const EMPTY_PINS: PinnedItem[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
-const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
 const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>> = [];
 const PINNED_PREVIEW_LIMIT = 5;
 
@@ -412,7 +411,7 @@ function PinSkeleton() {
     <SidebarMenuItem>
       <div className="flex h-7 w-full items-center gap-2 px-2">
         <div className="size-3.5 shrink-0 rounded-sm bg-sidebar-accent/40" />
-        <div className="h-3 w-24 rounded bg-sidebar-accent/40" />
+        <div className="h-3 w-24 rounded-xs bg-sidebar-accent/40" />
       </div>
     </SidebarMenuItem>
   );
@@ -454,15 +453,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   }, [pathname, setOpenMobile]);
 
   const wsId = workspace?.id;
-  const { data: inboxItems = EMPTY_INBOX } = useQuery({
-    queryKey: wsId ? inboxKeys.list(wsId) : ["inbox", "disabled"],
-    queryFn: () => api.listInbox(),
-    enabled: !!wsId,
-  });
-  const unreadCount = React.useMemo(
-    () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
-    [inboxItems],
-  );
+  // Nav badge. Reads the cross-workspace unread summary fetched just below
+  // for the switcher dot, so the count costs no request of its own — it used
+  // to download the whole inbox list here just to count it (MUL-6967).
+  const unreadCount = useInboxUnreadCount(wsId);
   // Chat tab unread badge: IM-style total of unread *messages* across chat
   // threads (countUnreadChatMessages is the shared definition — mobile's tab
   // badge derives from the same function, keeping the platforms in agreement).
@@ -700,7 +694,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <span className="flex-1 truncate text-body">{inv.workspace_name ?? t(($) => $.sidebar.invitation_workspace_fallback)}</span>
                             <button
                               type="button"
-                              className="text-caption px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                              className="text-caption px-2 py-0.5 rounded-xs bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                               disabled={acceptInvitationMut.isPending}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -711,7 +705,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             </button>
                             <button
                               type="button"
-                              className="text-caption px-2 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+                              className="text-caption px-2 py-0.5 rounded-xs bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
                               disabled={declineInvitationMut.isPending}
                               onClick={(e) => {
                                 e.stopPropagation();

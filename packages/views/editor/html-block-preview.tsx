@@ -79,7 +79,7 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
         <button
           type="button"
           onClick={toggleView}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           title={
             view === "preview"
               ? t(($) => $.code_block.show_source)
@@ -101,7 +101,7 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
           <button
             type="button"
             onClick={() => setFullscreen(true)}
-            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             title={t(($) => $.code_block.fullscreen)}
             aria-label={t(($) => $.code_block.fullscreen)}
           >
@@ -111,7 +111,7 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
         <button
           type="button"
           onClick={handleCopy}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           title={t(($) => $.code_block.copy_code)}
           aria-label={t(($) => $.code_block.copy_code)}
         >

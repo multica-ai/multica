@@ -284,6 +284,7 @@ describe("estimateCost", () => {
     // can't hide behind an input-only assertion. `total` is 1M of each of the
     // four categories priced at its own rate.
     const cases = [
+      { model: "gpt-6-astra", input: 10, cacheRead: 1, cacheWrite: 12.5, output: 50, total: 73.5 },
       { model: "gpt-5.6-sol", input: 5, cacheRead: 0.5, cacheWrite: 6.25, output: 30, total: 41.75 },
       { model: "gpt-5.6-terra", input: 2.5, cacheRead: 0.25, cacheWrite: 3.125, output: 15, total: 20.875 },
       { model: "gpt-5.6-luna", input: 1, cacheRead: 0.1, cacheWrite: 1.25, output: 6, total: 8.35 },
@@ -340,6 +341,8 @@ describe("estimateCost", () => {
     // literal-dot alias in server/internal/metrics/pricing.go (MUL-4347).
     expect(isModelPriced("gpt-5-6-luna")).toBe(false);
     expect(isModelPriced("gpt-5-6-sol")).toBe(false);
+    expect(isModelPriced("gpt-6-astra")).toBe(true);
+    expect(isModelPriced("gpt-6-astra-pro")).toBe(false);
     expect(
       estimateCost({
         ...zeroUsage,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -8,6 +8,8 @@ import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
+import { composeAnnotatedReply, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
+import { ReplyAnnotations } from "./reply-annotations";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
@@ -23,9 +25,10 @@ interface CommentInputProps {
   onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<string | boolean>;
   /** Called after the server accepts the comment and the composer is cleared. */
   onAccepted?: (commentId: string) => void;
+  onEditAnnotation?: (id: string) => boolean;
 }
 
-function CommentInput({ issueId, onSubmit, onAccepted }: CommentInputProps) {
+function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: CommentInputProps) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
@@ -47,7 +50,10 @@ function CommentInput({ issueId, onSubmit, onAccepted }: CommentInputProps) {
   const [content, setContent] = useState(initialDraft ?? "");
   const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.trim());
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
-  const triggerPreview = useCommentTriggerPreview({ issueId, content });
+  const annotations = useCommentDraftStore((s) => s.getAnnotations(draftKey));
+  const composedContent = useMemo(() => composeAnnotatedReply(content, annotations), [content, annotations]);
+  const canSend = annotations.length ? hasReplyIntent(content, annotations) : !isEmpty;
+  const triggerPreview = useCommentTriggerPreview({ issueId, content: canSend ? composedContent : "" });
   // Uploads for this composer session (MUL-5181). Owned by the module-level
   // coordinator and persisted in the draft store, so closing/scrolling the
   // composer away no longer drops an in-flight upload — its result lands in the
@@ -142,6 +148,10 @@ function CommentInput({ issueId, onSubmit, onAccepted }: CommentInputProps) {
   const { submitting, submit } = useComposerSubmit({
     editorRef,
     uploadGate: gate,
+    normalize: (raw) => {
+      const current = useCommentDraftStore.getState().getAnnotations(draftKey);
+      return hasReplyIntent(raw, current) ? composeAnnotatedReply(raw, current) : "";
+    },
     // A top-level comment ends a turn: the caret is dropped rather than kept,
     // so the composer stops reading as "still writing" once the comment is
     // posted above it. Thread replies are the opposite — see ReplyInput.
@@ -199,6 +209,10 @@ function CommentInput({ issueId, onSubmit, onAccepted }: CommentInputProps) {
       {...dropZoneProps}
       className="relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border"
     >
+      {annotations.length > 0 && <div className="px-3 pt-2">
+        <ReplyAnnotations draftKey={draftKey} annotations={annotations} disabled={submitting}
+          onEditAnnotation={onEditAnnotation} />
+      </div>}
       {/* Lock the editor while the send is in flight. ContentEditor can't
           toggle Tiptap's `editable` post-mount (see its docstring), so the
           documented way to make it non-interactive is a pointer-events-none +
@@ -272,7 +286,7 @@ function CommentInput({ issueId, onSubmit, onAccepted }: CommentInputProps) {
         <CommentTriggerChips
           agents={triggerPreview.agents}
           blocked={triggerPreview.blocked}
-          draftContent={content}
+          draftContent={composedContent}
           suppressedAgentIds={suppressedAgentIds}
           onToggle={toggleSuppressedAgent}
         />
@@ -285,12 +299,14 @@ function CommentInput({ issueId, onSubmit, onAccepted }: CommentInputProps) {
         />
         <SubmitButton
           onClick={submit}
-          disabled={isEmpty}
+          disabled={!canSend}
           loading={submitting}
           busy={gate.uploading}
           tooltip={gate.uploading
             ? tEditor(($) => $.upload.in_progress)
-            : sendShortcut
+            : !canSend && annotations.length > 0
+              ? t(($) => $.reply.annotations.intent_hint)
+              : sendShortcut
               ? `${t(($) => $.comment.send_tooltip)} · ${formatShortcut(sendShortcut)}`
               : t(($) => $.comment.send_tooltip)}
           ariaLabel={gate.uploading

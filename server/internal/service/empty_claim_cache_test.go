@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	redismock "github.com/go-redis/redismock/v9"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -38,6 +39,31 @@ func newRedisTestClient(t *testing.T) *redis.Client {
 		rdb.Close()
 	})
 	return rdb
+}
+
+func TestEmptyClaimKeysRemainRollingDeploymentCompatible(t *testing.T) {
+	const runtimeID = "runtime-a"
+	if got, want := emptyClaimKey(runtimeID), "mul:claim:runtime:empty:runtime-a"; got != want {
+		t.Fatalf("empty claim key = %q, want %q", got, want)
+	}
+	if got, want := emptyClaimVersion(runtimeID), "mul:claim:runtime:version:runtime-a"; got != want {
+		t.Fatalf("empty claim version key = %q, want %q", got, want)
+	}
+}
+
+func TestEmptyClaimCache_IsEmptyUsesClusterSafePipelinedGets(t *testing.T) {
+	rdb, mock := redismock.NewClientMock()
+	t.Cleanup(func() { _ = rdb.Close() })
+	c := NewEmptyClaimCache(rdb)
+
+	mock.ExpectGet(emptyClaimKey("runtime-a")).SetVal("7")
+	mock.ExpectGet(emptyClaimVersion("runtime-a")).SetVal("7")
+	if !c.IsEmpty(context.Background(), "runtime-a") {
+		t.Fatal("expected matching pipelined GET results to hit the cache")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestEmptyClaimCache_NilSafe(t *testing.T) {

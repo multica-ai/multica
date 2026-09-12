@@ -79,7 +79,9 @@ type BusinessMetrics struct {
 	// the product-source attribution that neither query shape exposes on its
 	// own, including daemon heartbeats, browser polling, and readiness gates.
 	// See labels.go for the closed enum.
-	agentRuntimeLookup *prometheus.CounterVec
+	agentRuntimeLookup            *prometheus.CounterVec
+	issueMetadataMutation         *prometheus.CounterVec
+	issueMetadataMutationDuration *prometheus.HistogramVec
 
 	activeMu    sync.Mutex
 	activeTasks map[string]activeTaskLabels
@@ -287,6 +289,14 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Namespace: "multica", Subsystem: "agent_runtime", Name: "lookup_total",
 			Help: "Total logical agent_runtime lookups by product source and outcome (one per requested id, not per SQL query).",
 		}, metricLabels("multica_agent_runtime_lookup_total")),
+		issueMetadataMutation: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "issue_metadata", Name: "mutation_total",
+			Help: "Total issue metadata mutation attempts by operation and bounded result.",
+		}, metricLabels("multica_issue_metadata_mutation_total")),
+		issueMetadataMutationDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "multica", Subsystem: "issue_metadata", Name: "mutation_duration_seconds",
+			Help: "Duration of issue metadata database work by operation and bounded result, including fallback reads after conditional no-ops.", Buckets: chatClaimResumeQueryDurationBuckets,
+		}, metricLabels("multica_issue_metadata_mutation_duration_seconds")),
 		activeTasks: map[string]activeTaskLabels{},
 		events:      newBusinessEventMetrics(),
 	}
@@ -342,7 +352,31 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.entitlementVersionRegression,
 		m.autopilotQuotaDecision,
 		m.agentRuntimeLookup,
+		m.issueMetadataMutation,
+		m.issueMetadataMutationDuration,
 	}, m.events.collectors()...)
+}
+
+// RecordIssueMetadataMutation records the UPDATE and, for a no-row result, its
+// fallback read. HTTP latency and pool acquisition pressure are exposed by the
+// existing HTTP and DB pool collectors, while these labels distinguish useful
+// writes from no-op load.
+func (m *BusinessMetrics) RecordIssueMetadataMutation(op, result string, duration time.Duration) {
+	if m == nil {
+		return
+	}
+	switch op {
+	case "set", "delete":
+	default:
+		op = "other"
+	}
+	switch result {
+	case "changed", "noop", "not_found", "error":
+	default:
+		result = "error"
+	}
+	m.issueMetadataMutation.WithLabelValues(op, result).Inc()
+	m.issueMetadataMutationDuration.WithLabelValues(op, result).Observe(duration.Seconds())
 }
 
 func (m *BusinessMetrics) RecordEntitlementConfigError() {

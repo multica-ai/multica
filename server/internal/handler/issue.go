@@ -121,6 +121,26 @@ var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
 // workspaces that have no custom statuses.
 var validIssueStatuses = issuestatus.Canonical()
 
+// Status sort follows the board's category order and resolves custom keys to
+// their effective category with one catalog read plus a parameterized CASE.
+// Keeping the indexed column bare avoids the per-row issue_effective_status()
+// call that would otherwise turn a bounded page into a workspace scan.
+func (h *Handler) issueStatusSortExpression(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	addArg func(any) string,
+) (string, error) {
+	customKeys, err := issuestatus.CustomKeyCategories(
+		ctx,
+		h.issueStatusCatalog(),
+		workspaceID,
+	)
+	if err != nil {
+		return "", err
+	}
+	return statusOrderExpression(statusCategoryExpr(customKeys, addArg)), nil
+}
+
 // resolveIssueStatusKey checks a status against the workspace's catalog and
 // returns the CANONICAL key to store. This is the application-layer replacement
 // for the enum CHECK that migration 337 dropped, so every write path must route
@@ -665,22 +685,37 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	// flags and sort fields needed to choose a page. Do not force this CTE to be
 	// MATERIALIZED: production EXPLAIN showed 28-68% lower execution time after
 	// removing that fence. Full issue rows are hydrated after LIMIT/OFFSET below.
+	const (
+		loweredIssueTitle       = "lowered_issue_title.lowered"
+		loweredIssueDescription = "lowered_issue_description.lowered"
+	)
+	titlePhrasePredicate := fmt.Sprintf("%s LIKE %s", loweredIssueTitle, phraseContainsParam)
+	titleTermPredicates := make([]string, 0, len(termContainsParams))
+	for _, termParam := range termContainsParams {
+		titleTermPredicates = append(titleTermPredicates, fmt.Sprintf("%s LIKE %s", loweredIssueTitle, termParam))
+	}
+	titleMatchParts := []string{titlePhrasePredicate}
+	if len(termContainsParams) > 1 {
+		titleMatchParts = append(titleMatchParts, "("+strings.Join(titleTermPredicates, " AND ")+")")
+	}
+	titleMatchExpr := "(" + strings.Join(titleMatchParts, " OR ") + ")"
+
 	issueFlagColumns := []string{
 		"i.id AS issue_id",
 		"i.status",
 		"i.updated_at",
-		fmt.Sprintf("LOWER(i.title) = %s AS title_exact", phraseParam),
-		fmt.Sprintf("LOWER(i.title) LIKE %s AS title_starts_with", phraseStartsWithParam),
-		fmt.Sprintf("LOWER(i.title) LIKE %s AS title_phrase", phraseContainsParam),
-		fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE %s AS description_phrase", phraseContainsParam),
+		fmt.Sprintf("%s = %s AS title_exact", loweredIssueTitle, phraseParam),
+		fmt.Sprintf("%s LIKE %s AS title_starts_with", loweredIssueTitle, phraseStartsWithParam),
+		fmt.Sprintf("%s AS title_phrase", titlePhrasePredicate),
+		fmt.Sprintf("COALESCE(%s LIKE %s, FALSE) AS description_phrase", loweredIssueDescription, phraseContainsParam),
 	}
 	if hasNum {
 		issueFlagColumns = append(issueFlagColumns, fmt.Sprintf("i.number = %s AS number_exact", numParam))
 	}
 	for index, termParam := range termContainsParams {
 		issueFlagColumns = append(issueFlagColumns,
-			fmt.Sprintf("LOWER(i.title) LIKE %s AS title_term_%d", termParam, index),
-			fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE %s AS description_term_%d", termParam, index),
+			fmt.Sprintf("%s AS title_term_%d", titleTermPredicates[index], index),
+			fmt.Sprintf("COALESCE(%s LIKE %s, FALSE) AS description_term_%d", loweredIssueDescription, termParam, index),
 		)
 	}
 
@@ -688,11 +723,30 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	if terminalStatusesParam != "" {
 		issueWhere += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
 	}
+	// PostgreSQL otherwise inlines scalar LATERAL subqueries and recomputes the
+	// LOWER expressions for every flag. The OFFSET 0 fences cache the normalized
+	// title and description per issue row without materializing the whole CTE.
+	// Once the title contains the phrase or every search term, it has already
+	// satisfied eligibility and won both relevance-rank and match-source
+	// precedence, so the LEFT JOIN can skip normalizing the description and its
+	// flags safely fall back to FALSE. Correctness requires every title rank and
+	// match-source branch below to remain ahead of its description counterpart.
+	// Future indexable text predicates must stay outside these projection-only
+	// fences so expression indexes can still match them.
 	issueMatchesCTE := fmt.Sprintf(`issue_matches AS (
 		SELECT %s
 		FROM issue i
+		CROSS JOIN LATERAL (
+			SELECT LOWER(i.title) AS lowered
+			OFFSET 0
+		) lowered_issue_title
+		LEFT JOIN LATERAL (
+			SELECT LOWER(COALESCE(i.description, '')) AS lowered
+			WHERE NOT %s
+			OFFSET 0
+		) lowered_issue_description ON TRUE
 		WHERE %s
-	)`, strings.Join(issueFlagColumns, ",\n\t\t\t"), issueWhere)
+	)`, strings.Join(issueFlagColumns, ",\n\t\t\t"), titleMatchExpr, issueWhere)
 
 	// Comments are also scanned once, workspace-first. This intentionally avoids
 	// the legacy planner choice between global content GIN postings and repeated
@@ -1256,6 +1310,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	sortCol := "position"
 	sortIsExpr := false
 	sortIsProperty := false
+	sortByStatus := false
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
 		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
@@ -1263,8 +1318,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		case "last_activity":
 			sortCol = "last_activity_at"
 		case "status":
-			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+			sortCol = "status"
 			sortIsExpr = true
+			sortByStatus = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
 			sortIsExpr = true
@@ -1317,6 +1373,15 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	addArg := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
+	}
+	if sortByStatus {
+		var err error
+		sortCol, err = h.issueStatusSortExpression(r.Context(), wsUUID, addArg)
+		if err != nil {
+			slog.Warn("resolve status sort failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to resolve sort")
+			return
+		}
 	}
 
 	if len(statusCategoriesFilter) > 0 {
@@ -1570,7 +1635,9 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 	countArgs := args[:len(args)-2]
 	var total int64
 	if err := h.DB.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
-		total = int64(len(issues))
+		slog.Warn("ListIssues count failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to count issues")
+		return
 	}
 
 	prefix := h.getIssuePrefix(ctx, wsUUID)
@@ -2029,7 +2096,13 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		case "last_activity":
 			sortCol = "last_activity_at"
 		case "status":
-			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+			var err error
+			sortCol, err = h.issueStatusSortExpression(r.Context(), wsUUID, addArg)
+			if err != nil {
+				slog.Warn("resolve grouped status sort failed", append(logger.RequestAttrs(r), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to resolve sort")
+				return
+			}
 			sortIsExpr = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"

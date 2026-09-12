@@ -346,8 +346,18 @@ type TaskIssueStatusData struct {
 	Description string `json:"description,omitempty"`
 }
 
+// TaskCancellationActor is the point-in-time actor snapshot attached to a
+// cancelled run. Type stays open for forward compatibility; current producers
+// emit member, agent, or system.
+type TaskCancellationActor struct {
+	Type string `json:"type"`
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
 type AgentTaskResponse struct {
-	CancelledByCommentChange bool `json:"cancelled_by_comment_change,omitempty"`
+	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
+	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 
 	ID                   string                 `json:"id"`
 	AgentID              string                 `json:"agent_id"`
@@ -411,9 +421,11 @@ type AgentTaskResponse struct {
 	PriorWorkDir         string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
-	// any) is then an older fallback. The daemon surfaces the continuity gap in
-	// the brief even when that older session resumes cleanly. omitempty keeps it
-	// off the wire for the common (no-gap) case and for old daemons.
+	// any) is then an older fallback, and the daemon surfaces the continuity gap
+	// in the brief even when that older session resumes cleanly. It is also set
+	// when an automatic retry continues in its parent's workdir under a fresh
+	// session (MUL-7034). omitempty keeps it off the wire for the common
+	// (no-gap) case and for old daemons.
 	PriorSessionResumeUnavailable bool   `json:"prior_session_resume_unavailable,omitempty"`
 	WorkDir                       string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
 	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for
@@ -798,6 +810,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	return AgentTaskResponse{
 		// Task-scoped provenance must not transfer through copied retry context.
 		CancelledByCommentChange: t.Status == "cancelled" && cancellation.TaskID != "" && cancellation.TaskID == uuidToString(t.ID),
+		CancelledBy:              taskCancellationActorToResponse(t),
 
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),
@@ -836,6 +849,20 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		// hydrated separately on user-facing surfaces (MUL-4302 §9).
 		Attribution: taskAttributionBase(t),
 	}
+}
+
+func taskCancellationActorToResponse(t db.AgentTaskQueue) *TaskCancellationActor {
+	if t.Status != "cancelled" || !t.CancelledByType.Valid || t.CancelledByType.String == "" {
+		return nil
+	}
+	actor := &TaskCancellationActor{
+		Type: t.CancelledByType.String,
+		ID:   uuidToString(t.CancelledByID),
+	}
+	if t.CancelledByName.Valid {
+		actor.Name = t.CancelledByName.String
+	}
+	return actor
 }
 
 // relativeWorkDir produces a privacy-safe display form of the daemon-reported
